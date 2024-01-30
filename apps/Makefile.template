@@ -13,16 +13,11 @@
 # limitations under the License.
 #
 
-
-ifndef LG_RT_DIR
-$(error LG_RT_DIR variable is not defined, aborting build)
-endif
-
 # Flags for directing the runtime makefile what to include
 DEBUG           ?= 0		# Include debugging symbols
 MAX_DIM         ?= 3		# Maximum number of dimensions
 MAX_FIELDS	?= 256		# Maximum number of fields in a field space
-OUTPUT_LEVEL    ?= LEVEL_PRINT 	# Compile time logging level
+OUTPUT_LEVEL    ?= LEVEL_INFO 	# Compile time logging level
 USE_FORTRAN	?= 0		# Include Fortran support
 USE_CUDA        ?= 0		# Include CUDA support (requires CUDA)
 USE_HIP		?= 0		# Include HIP support (requires HIP)
@@ -79,6 +74,13 @@ LDFLAGS 	?=
 #   Don't change anything below here
 #
 ###########################################################################
-
+ifdef LG_INSTALL_DIR
+include $(LG_INSTALL_DIR)/share/legion/runtime.mk
+else
+ifdef LG_RT_DIR
 include $(LG_RT_DIR)/runtime.mk
+else
+$(error Neither LG_RT_DIR variable nor LG_INSTALL_DIR is defined, at least one must be set, aborting build)
+endif
+endif
 

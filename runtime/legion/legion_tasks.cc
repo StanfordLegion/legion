@@ -3728,34 +3728,6 @@ namespace Legion {
             get_task_name(), get_unique_id(), mapper->get_mapper_name())
         return false;
       }
-#if 0
-      if (!check_collective_regions.empty())
-      {
-        REPORT_LEGION_WARNING(LEGION_WARNING_UNSUPPORTED_REPLICATION,
-            "Unsupported request to replicate task %s (UID %lld) with "
-            "collective region requirements by mapper %s. Legion does not "
-            "currently support replication of tasks with collective region "
-            "requirements at the moment. You can request support for this "
-            "feature by emailing the the Legion developers list or opening a "
-            "github issue. The mapper call to replicate_task is being elided.",
-            get_task_name(), get_unique_id(), mapper->get_mapper_name())
-        return false;
-      }
-      for (unsigned idx = 0; idx < regions.size(); idx++)
-      {
-        if (!IS_COLLECTIVE(regions[idx]))
-          continue;
-        REPORT_LEGION_WARNING(LEGION_WARNING_UNSUPPORTED_REPLICATION,
-            "Unsupported request to replicate task %s (UID %lld) with "
-            "collective region requirements by mapper %s. Legion does not "
-            "currently support replication of tasks with collective region "
-            "requirements at the moment. You can request support for this "
-            "feature by emailing the the Legion developers list or opening a "
-            "github issue. The mapper call to replicate_task is being elided.",
-            get_task_name(), get_unique_id(), mapper->get_mapper_name())
-        return false;
-      }
-#endif
       Mapper::ReplicateTaskInput input;
       Mapper::ReplicateTaskOutput output;
       output.chosen_variant = 0;
@@ -3764,26 +3736,81 @@ namespace Legion {
       // actually going to replicate this task
       if (output.target_processors.size() <= 1)
         return false;
-      VariantImpl *var_impl = runtime->find_variant_impl(task_id,
-          output.chosen_variant, true/*can_fail*/);
-      if (var_impl == NULL)
-        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
-                      "Invalid mapper output from invocation of '%s' "
-                      "on mapper %s. Mapper selected an invalid task "
-                      "variant %d for task %s (UID %lld) that was chosen "
-                      "to be replicated.", "replicate_task",
-                      mapper->get_mapper_name(), output.chosen_variant,
-                      get_task_name(), get_unique_id())
-      // Check that the chosen variant is replicable
-      if (!var_impl->is_replicable())
-        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
-                      "Invalid mapper output from invocation of '%s' "
-                      "on mapper %s. Mapper failed to pick an valid task "
-                      "variant %d for task %s (UID %lld) that was chosen "
-                      "to be replicated. Task variants selected for "
-                      "replication must be marked as replicable variants.",
-                      "replicate_task", mapper->get_mapper_name(),
-                      output.chosen_variant, get_task_name(), get_unique_id())
+      VariantImpl *var_impl = NULL;
+      if (output.leaf_variants.empty())
+      {
+        var_impl = runtime->find_variant_impl(task_id,
+            output.chosen_variant, true/*can_fail*/);
+        if (var_impl == NULL)
+          REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                        "Invalid mapper output from invocation of '%s' "
+                        "on mapper %s. Mapper selected an invalid task "
+                        "variant %d for task %s (UID %lld) that was chosen "
+                        "to be replicated.", "replicate_task",
+                        mapper->get_mapper_name(), output.chosen_variant,
+                        get_task_name(), get_unique_id())
+        // Check that the chosen variant is replicable
+        if (!var_impl->is_replicable())
+          REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                        "Invalid mapper output from invocation of '%s' "
+                        "on mapper %s. Mapper failed to pick an valid task "
+                        "variant %d for task %s (UID %lld) that was chosen "
+                        "to be replicated. Task variants selected for "
+                        "replication must be marked as replicable variants.",
+                        "replicate_task", mapper->get_mapper_name(),
+                        output.chosen_variant, get_task_name(), get_unique_id())
+      }
+      else
+      {
+        output.chosen_variant = 0;
+        if (output.leaf_variants.size() != output.target_processors.size())
+          REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                        "Invalid mapper output from invocation of '%s' "
+                        "on mapper %s. Mapper provided %zd leaf variants "
+                        "for %zd target processors for task %s (UID %lld). "
+                        "The same number of leaf variants must be provided "
+                        "as target processors.", "replicate_task", 
+                        mapper->get_mapper_name(), output.leaf_variants.size(),
+                        output.target_processors.size(), get_task_name(), 
+                        get_unique_id())
+        for (unsigned idx = 0; idx < output.leaf_variants.size(); idx++)
+        {
+          VariantImpl *impl = runtime->find_variant_impl(task_id,
+            output.leaf_variants[idx], true/*can_fail*/);
+          if (impl == NULL)
+            REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                          "Invalid mapper output from invocation of '%s' "
+                          "on mapper %s. Mapper selected an invalid leaf task "
+                          "variant %d for task %s (UID %lld) that was chosen "
+                          "to be replicated.", "replicate_task",
+                          mapper->get_mapper_name(), output.leaf_variants[idx],
+                          get_task_name(), get_unique_id())
+          if (var_impl == NULL)
+            var_impl = impl;
+          // Check that the chosen variant is a leaf
+          if (!impl->is_leaf())
+            REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                          "Invalid mapper output from invocation of '%s' "
+                          "on mapper %s. Mapper failed to pick an valid task "
+                          "variant %d for task %s (UID %lld) that was chosen "
+                          "to be replicated. All variants provided in the "
+                          "leaf_variants must be leaf task variants.",
+                          "replicate_task", mapper->get_mapper_name(),
+                          output.leaf_variants[idx], get_task_name(), 
+                          get_unique_id())
+          // Check that the chosen variant is replicable
+          if (!impl->is_replicable())
+            REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                          "Invalid mapper output from invocation of '%s' "
+                          "on mapper %s. Mapper failed to pick an valid task "
+                          "variant %d for task %s (UID %lld) that was chosen "
+                          "to be replicated. Task variants selected for "
+                          "replication must be marked as replicable variants.",
+                          "replicate_task", mapper->get_mapper_name(),
+                          output.leaf_variants[idx], get_task_name(), 
+                          get_unique_id()) 
+        }
+      }
       if (!runtime->unsafe_mapper)
       {
         // Check that all the processors exist
@@ -3798,18 +3825,20 @@ namespace Legion {
                          mapper->get_mapper_name(),
                          get_task_name(), get_unique_id())
         // Check that the chosen variant works with all the targets processors
-        const ProcessorConstraint &constraint = 
-          var_impl->execution_constraints.processor_constraint; 
-        if (constraint.is_valid())
+        if (output.leaf_variants.empty())
         {
-          const char *proc_names[] = {
+          const ProcessorConstraint &constraint = 
+            var_impl->execution_constraints.processor_constraint; 
+          if (constraint.is_valid())
+          {
+            const char *proc_names[] = {
 #define PROC_NAMES(name, desc) desc,
-            REALM_PROCESSOR_KINDS(PROC_NAMES)
+              REALM_PROCESSOR_KINDS(PROC_NAMES)
 #undef PROC_NAMES
-          };
-          for (unsigned idx = 0; idx < output.target_processors.size(); idx++)
-            if (!constraint.can_use(output.target_processors[idx].kind()))
-              REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+            };
+            for (unsigned idx = 0; idx < output.target_processors.size(); idx++)
+              if (!constraint.can_use(output.target_processors[idx].kind()))
+                REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                         "Invalid mapper output from invocation of '%s' "
                         "on mapper %s. Mapper specified %s processor " IDFMT 
                         " which cannot be used with variant %d when "
@@ -3820,6 +3849,35 @@ namespace Legion {
                          output.target_processors[idx].id,
                          output.chosen_variant, 
                          get_task_name(), get_unique_id())
+          }
+        }
+        else
+        {
+          const char *proc_names[] = {
+#define PROC_NAMES(name, desc) desc,
+            REALM_PROCESSOR_KINDS(PROC_NAMES)
+#undef PROC_NAMES
+          };
+          for (unsigned idx = 0; idx < output.target_processors.size(); idx++)
+          {
+            VariantImpl *impl = runtime->find_variant_impl(task_id,
+                output.leaf_variants[idx], false/*can_fail*/);
+            const ProcessorConstraint &constraint = 
+              impl->execution_constraints.processor_constraint; 
+            if (constraint.is_valid() &&
+                !constraint.can_use(output.target_processors[idx].kind()))
+              REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                        "Invalid mapper output from invocation of '%s' "
+                        "on mapper %s. Mapper specified %s processor " IDFMT 
+                        " which cannot be used with variant %d when "
+                        "replicating task %s (UID %lld) as the variant does "
+                        "not support that kind of processor.", "replicate_task",
+                         mapper->get_mapper_name(), 
+                         proc_names[output.target_processors[idx].kind()],
+                         output.target_processors[idx].id,
+                         output.leaf_variants[idx], 
+                         get_task_name(), get_unique_id())
+          }
         }
         // If the chosen variant is not a leaf check that processors are unique
         // Note that if the chosen variant is a leaf then they don't need to be
@@ -4014,10 +4072,11 @@ namespace Legion {
       for (unsigned idx = 0; idx < local_shards.size(); idx++)
         shard_manager->create_shard(local_shards[idx], 
             output.target_processors[local_shards[idx]],
-            output.chosen_variant, parent_ctx, this);
+            output.leaf_variants.empty() ? output.chosen_variant :
+              output.leaf_variants[local_shards[idx]], parent_ctx, this);
       // Distribute the shard manager and launch the shards 
       shard_manager->distribute_explicit(this, output.chosen_variant,
-                                         output.target_processors);
+          output.target_processors, output.leaf_variants);
       return true;
     }
 
@@ -6012,7 +6071,7 @@ namespace Legion {
           req.parent = region;
           req.flags |= LEGION_CREATED_OUTPUT_REQUIREMENT_FLAG;
         }
-        req.privilege = WRITE_DISCARD;
+        req.privilege = LEGION_WRITE_DISCARD;
 
         // Store the output requirement in the task
         output_regions.push_back(req);
@@ -9347,7 +9406,7 @@ namespace Legion {
           req.flags |= LEGION_CREATED_OUTPUT_REQUIREMENT_FLAG;
         }
 
-        req.privilege = WRITE_DISCARD;
+        req.privilege = LEGION_WRITE_DISCARD;
 
         // Store the output requirement in the task
         output_regions.push_back(req);

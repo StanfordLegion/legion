@@ -43,10 +43,10 @@ public:
                 std::map<Memory, std::vector<Processor> >* sysmem_local_procs,
                 std::map<Processor, Memory>* proc_sysmems,
                 std::map<Processor, Memory>* proc_regmems);
-  virtual void map_task(const MapperContext      ctx,
+  void map_task(const MapperContext      ctx,
                         const Task&              task,
                         const MapTaskInput&      input,
-                              MapTaskOutput&     output);
+                              MapTaskOutput&     output) override;
 private:
   // std::vector<Processor>& procs_list;
   // std::vector<Memory>& sysmems_list;

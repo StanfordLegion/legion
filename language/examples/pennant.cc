@@ -984,28 +984,28 @@ public:
 #endif
                 std::map<Processor, Memory>* proc_sysmems,
                 std::map<Processor, Memory>* proc_regmems);
-  virtual void default_policy_rank_processor_kinds(
+  void default_policy_rank_processor_kinds(
                                     MapperContext ctx, const Task &task,
-                                    std::vector<Processor::Kind> &ranking);
-  virtual Processor default_policy_select_initial_processor(
-                                    MapperContext ctx, const Task &task);
-  virtual void default_policy_select_target_processors(
+                                    std::vector<Processor::Kind> &ranking) override;
+  Processor default_policy_select_initial_processor(
+                                    MapperContext ctx, const Task &task) override;
+  void default_policy_select_target_processors(
                                     MapperContext ctx,
                                     const Task &task,
-                                    std::vector<Processor> &target_procs);
-  virtual LogicalRegion default_policy_select_instance_region(
+                                    std::vector<Processor> &target_procs) override;
+  LogicalRegion default_policy_select_instance_region(
                                     MapperContext ctx, Memory target_memory,
                                     const RegionRequirement &req,
                                     const LayoutConstraintSet &constraints,
                                     bool force_new_instances,
-                                    bool meets_constraints);
-  virtual void map_copy(const MapperContext ctx,
+                                    bool meets_constraints) override;
+  void map_copy(const MapperContext ctx,
                         const Copy &copy,
                         const MapCopyInput &input,
-                        MapCopyOutput &output);
-  virtual void map_must_epoch(const MapperContext           ctx,
+                        MapCopyOutput &output) override;
+  void map_must_epoch(const MapperContext           ctx,
                               const MapMustEpochInput&      input,
-                                    MapMustEpochOutput&     output);
+                                    MapMustEpochOutput&     output) override;
   template<bool IS_SRC>
   void pennant_create_copy_instance(MapperContext ctx, const Copy &copy,
                                     const RegionRequirement &req, unsigned index,

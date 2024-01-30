@@ -43,12 +43,12 @@ public:
                 std::map<Memory, std::vector<Processor> >* sysmem_local_procs,
                 std::map<Processor, Memory>* proc_sysmems,
                 std::map<Processor, Memory>* proc_regmems);
-  virtual Processor default_policy_select_initial_processor(
-                                    MapperContext ctx, const Task &task);
-  virtual void default_policy_select_target_processors(
+  Processor default_policy_select_initial_processor(
+                                    MapperContext ctx, const Task &task) override;
+  void default_policy_select_target_processors(
                                     MapperContext ctx,
                                     const Task &task,
-                                    std::vector<Processor> &target_procs);
+                                    std::vector<Processor> &target_procs) override;
 private:
   // std::vector<Processor>& procs_list;
   // std::vector<Memory>& sysmems_list;

@@ -1025,17 +1025,14 @@ namespace Legion {
            bool check_extent, bool silence_warnings, const char *warning_string)
     //--------------------------------------------------------------------------
     {
-      const RtEvent ready_event = subscribe();
-      if (ready_event.exists() && !ready_event.has_triggered())
-        ready_event.wait();
+      // Wait to make sure that the future is complete first
+      wait(silence_warnings, warning_string);
       ApEvent inst_ready;
       FutureInstance *instance = find_or_create_instance(memory,
           (implicit_context != NULL) ? implicit_context->owner_task : NULL,
           (implicit_context != NULL) && (implicit_context->owner_task != NULL) ?
            implicit_context->owner_task->get_unique_op_id() : 0, true/*eager*/,
            inst_ready);
-      // Wait to make sure that the future is complete first
-      wait(silence_warnings, warning_string);
       if (extent_in_bytes != NULL)
       {
         if (check_extent)
@@ -1103,17 +1100,14 @@ namespace Legion {
         else
           memory = runtime->runtime_system_memory;
       }
-      const RtEvent ready_event = subscribe();
-      if (ready_event.exists() && !ready_event.has_triggered())
-        ready_event.wait();
+      // Wait to make sure that the future is complete first
+      wait(silence_warnings, warning_string);
       ApEvent inst_ready;
       FutureInstance *instance = find_or_create_instance(memory,
           (implicit_context != NULL) ? implicit_context->owner_task : NULL,
           (implicit_context != NULL) && (implicit_context->owner_task != NULL) ?
            implicit_context->owner_task->get_unique_op_id() : 0, true/*eager*/,
            inst_ready);
-      // Wait to make sure that the future is complete first
-      wait(silence_warnings, warning_string); 
       if (empty.load())
         REPORT_LEGION_ERROR(ERROR_REQUEST_FOR_EMPTY_FUTURE, 
             "Accessing empty future when making an accessor! (UID %lld)",
@@ -7154,8 +7148,6 @@ namespace Legion {
       ImplicitShardManager *manager = runtime->find_implicit_shard_manager(
           task_id, mapper_id, kind, shards_per_address_space);
       manager->process_implicit_rendezvous(derez);
-      if (manager->remove_reference())
-        delete manager;
     }
 
     /////////////////////////////////////////////////////////////
@@ -15295,7 +15287,7 @@ namespace Legion {
     bool IdentityProjectionFunctor::is_exclusive(void) const
     //--------------------------------------------------------------------------
     {
-      return true;
+      return false;
     }
 
     //--------------------------------------------------------------------------
@@ -17992,7 +17984,7 @@ namespace Legion {
           { \
             DomainT<DIM,coord_t> color_index_space; \
             forest->get_index_space_domain(color_space, &color_index_space, \
-                                           color_space.get_type_tag()); \
+                NT_TemplateHelper::encode_tag<DIM,coord_t>()); \
             return Domain(color_index_space); \
           }
         LEGION_FOREACH_N(DIMFUNC)
@@ -27240,7 +27232,7 @@ namespace Legion {
               = dist_collectables.begin(); it != dist_collectables.end(); it++)
         {
           // See if this is a future
-          if (LEGION_DISTRIBUTED_HELP_DECODE(it->first) != FUTURE_DC)
+          if (LEGION_DISTRIBUTED_HELP_DECODE(it->second->did) != FUTURE_DC)
             continue;
 #ifdef DEBUG_LEGION
           FutureImpl *impl = dynamic_cast<FutureImpl*>(it->second);
@@ -27739,10 +27731,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    template<>
+    ApEvent Memoizable<AllReduceOp>::compute_sync_precondition(
+                                              const TraceInfo &trace_info) const
+    //--------------------------------------------------------------------------
+    {
+      return this->execution_fence_event;
+    }
+
+    //--------------------------------------------------------------------------
     AllReduceOp* Runtime::get_available_all_reduce_op(void)
     //--------------------------------------------------------------------------
     {
-      return get_available(all_reduce_op_lock, available_all_reduce_ops);
+      return get_available<AllReduceOp, Memoizable<AllReduceOp> >(
+                      all_reduce_op_lock, available_all_reduce_ops);
     }
 
     //--------------------------------------------------------------------------
@@ -27869,10 +27871,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    template<>
+    ApEvent Memoizable<ReplAllReduceOp>::compute_sync_precondition(
+                                              const TraceInfo &trace_info) const
+    //--------------------------------------------------------------------------
+    {
+      return this->execution_fence_event;
+    }
+
+    //--------------------------------------------------------------------------
     ReplAllReduceOp* Runtime::get_available_repl_all_reduce_op(void)
     //--------------------------------------------------------------------------
     {
-      return get_available(all_reduce_op_lock, available_repl_all_reduce_ops);
+      return get_available<ReplAllReduceOp, Memoizable<ReplAllReduceOp> >(
+                        all_reduce_op_lock, available_repl_all_reduce_ops);
     }
 
     //--------------------------------------------------------------------------
@@ -30424,14 +30436,11 @@ namespace Legion {
       std::map<TaskID,ImplicitShardManager*>::iterator finder = 
         implicit_shard_managers.find(top_task_id);
       if (finder != implicit_shard_managers.end())
-      {
-        finder->second->add_reference();
         return finder->second;
-      }
       ImplicitShardManager *result = new ImplicitShardManager(this,
           top_task_id, mapper_id, kind, shards_per_address_space);
       implicit_shard_managers[top_task_id] = result;
-      result->add_reference();
+      result->add_reference(shards_per_address_space);
       return result;
     }
 

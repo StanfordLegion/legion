@@ -25,9 +25,9 @@ class VariantMapper : public DefaultMapper
 public:
   VariantMapper(MapperRuntime *rt, Machine machine, Processor local,
                 const char *mapper_name);
-  virtual void default_policy_rank_processor_kinds(
+  void default_policy_rank_processor_kinds(
                                     MapperContext ctx, const Task &task, 
-                                    std::vector<Processor::Kind> &ranking);
+                                    std::vector<Processor::Kind> &ranking) override;
 };
 
 VariantMapper::VariantMapper(MapperRuntime *rt, Machine machine, Processor local,

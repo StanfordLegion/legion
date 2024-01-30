@@ -1583,8 +1583,10 @@ namespace Legion {
     void PhysicalTrace::record_failed_capture(PhysicalTemplate *tpl)
     //--------------------------------------------------------------------------
     {
-      if ((last_memoized > 0) && 
-          (++nonreplayable_count > LEGION_NON_REPLAYABLE_WARNING))
+      // We won't consider failure from mappers refusing to memoize
+      // as a warning that gets bubbled up to end users.
+      if (!tpl->get_no_consensus() &&
+          ++nonreplayable_count > LEGION_NON_REPLAYABLE_WARNING)
       {
         const std::string &message = tpl->get_replayable_message();
         const char *message_buffer = message.c_str();
@@ -6451,6 +6453,25 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void PhysicalTemplate::get_allreduce_mapping(AllReduceOp *allreduce,
+                      std::vector<Memory> &target_memories, size_t &future_size)
+    //--------------------------------------------------------------------------
+    {
+      TraceLocalID op_key = allreduce->get_trace_local_id();
+      AutoLock t_lock(template_lock, 1, false/*exclusive*/);
+#ifdef DEBUG_LEGION
+      assert(is_replaying());
+#endif
+      std::map<TraceLocalID,CachedAllreduce>::const_iterator finder =
+        cached_allreduces.find(op_key);
+#ifdef DEBUG_LEGION
+      assert(finder != cached_allreduces.end());
+#endif
+      target_memories = finder->second.target_memories;
+      future_size = finder->second.future_size;
+    }
+
+    //--------------------------------------------------------------------------
     void PhysicalTemplate::record_completion_event(ApEvent lhs,
                                      unsigned op_kind, const TraceLocalID &tlid)
     //--------------------------------------------------------------------------
@@ -7058,6 +7079,21 @@ namespace Legion {
       assert(cached_reservations.find(tlid) == cached_reservations.end());
 #endif
       cached_reservations[tlid] = reservations;
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::record_future_allreduce(const TraceLocalID &tlid,
+        const std::vector<Memory> &target_memories, size_t future_size)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock tpl_lock(template_lock);
+#ifdef DEBUG_LEGION
+      assert(is_recording());
+      assert(cached_allreduces.find(tlid) == cached_allreduces.end());
+#endif
+      CachedAllreduce &allreduce = cached_allreduces[tlid];
+      allreduce.target_memories = target_memories;
+      allreduce.future_size = future_size;
     }
 
     //--------------------------------------------------------------------------

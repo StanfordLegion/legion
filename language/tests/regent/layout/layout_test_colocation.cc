@@ -43,21 +43,21 @@ public:
                 std::map<Memory, std::vector<Processor> >* sysmem_local_procs,
                 std::map<Processor, Memory>* proc_sysmems,
                 std::map<Processor, Memory>* proc_regmems);
-  virtual void map_task(const MapperContext      ctx,
-                        const Task&              task,
-                        const MapTaskInput&      input,
-                              MapTaskOutput&     output);
-  virtual LogicalRegion default_policy_select_instance_region(
+  void map_task(const MapperContext      ctx,
+                const Task&              task,
+                const MapTaskInput&      input,
+                      MapTaskOutput&     output) override;
+  LogicalRegion default_policy_select_instance_region(
                                 MapperContext ctx, Memory target_memory,
                                 const RegionRequirement &req,
                                 const LayoutConstraintSet &constraints,
                                 bool force_new_instances,
-                                bool meets_constraints);
-  //virtual void default_policy_select_instance_fields(
+                                bool meets_constraints) override;
+  // void default_policy_select_instance_fields(
   //                              MapperContext ctx,
   //                              const RegionRequirement &req,
   //                              const std::set<FieldID> &needed_fields,
-  //                              std::vector<FieldID> &fields);
+  //                              std::vector<FieldID> &fields) override;
 
 private:
   // std::vector<Processor>& procs_list;
