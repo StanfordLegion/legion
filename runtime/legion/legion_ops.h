@@ -1710,6 +1710,8 @@ namespace Legion {
     public:
       // From MemoizableOp
       virtual void trigger_replay(void);
+      virtual void complete_replay(ApEvent precondition,
+                                   ApEvent postcondition);
     public:
       virtual size_t get_collective_points(void) const;
     public:
@@ -1735,6 +1737,8 @@ namespace Legion {
         RtUserEvent dst_ready;
       };
       std::vector<IndirectionExchange>                   collective_exchanges;
+      std::vector<ApEvent>                               replay_postconditions;
+      unsigned                                           points_replayed;
       unsigned                                           points_committed;
       bool                                       collective_src_indirect_points;
       bool                                       collective_dst_indirect_points;
@@ -1771,6 +1775,8 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       // trigger_mapping same as base class
+      virtual void complete_replay(ApEvent precondition,
+                                   ApEvent postcondition);
       virtual void trigger_commit(void);
       virtual RtEvent exchange_indirect_records(
           const unsigned index, const ApEvent local_pre,
@@ -3814,6 +3820,8 @@ namespace Legion {
     public:
       // From MemoizableOp
       virtual void trigger_replay(void);
+      virtual void complete_replay(ApEvent precondition,
+                                   ApEvent postcondition);
     public:
       virtual size_t get_collective_points(void) const;
       virtual IndexSpaceNode* get_shard_points(void) const 
@@ -3827,6 +3835,8 @@ namespace Legion {
       IndexSpaceNode*               launch_space;
     protected:
       std::vector<PointFillOp*>     points;
+      std::vector<ApEvent>          replayed_postconditions;
+      unsigned                      points_replayed;
       unsigned                      points_committed;
       bool                          commit_request;
     };
@@ -3854,6 +3864,8 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       // trigger_mapping same as base class
+      virtual void complete_replay(ApEvent precondition,
+                                   ApEvent postcondition);
       virtual void trigger_commit(void);
       virtual void record_completion_effect(ApEvent effect);
       virtual void record_completion_effect(ApEvent effect,

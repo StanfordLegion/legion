@@ -8569,6 +8569,7 @@ namespace Legion {
       index_domain = Domain::NO_DOMAIN;
       sharding_space = IndexSpace::NO_SPACE;
       launch_space = NULL;
+      points_replayed = 0;
       points_committed = 0;
       commit_request = false;
     }
@@ -8584,6 +8585,7 @@ namespace Legion {
         (*it)->deactivate();
       points.clear();
       collective_exchanges.clear();
+      replay_postconditions.clear();
       commit_preconditions.clear();
       interfering_requirements.clear();
       intra_space_dependences.clear();
@@ -8847,7 +8849,28 @@ namespace Legion {
         points[idx]->trigger_replay();
       }
       complete_mapping(Runtime::merge_events(mapped_preconditions));
-      complete_execution();
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexCopyOp::complete_replay(ApEvent precondition,
+                                      ApEvent postcondition)
+    //--------------------------------------------------------------------------
+    {
+      {
+        AutoLock o_lock(op_lock);
+        if (postcondition)
+          replayed_postconditions.push_back(postcondition);
+#ifdef DEBUG_LEGION
+        assert(points_replayed < points.size());
+#endif
+        if (++points_replayed < points.size())
+          return;
+      }
+      if (!replayed_postconditions.empty())
+        CopyOp::complete_replay(ApEvent::NO_AP_EVENT,
+            Runtime::merge_events(replayed_postconditions));
+      else
+        CopyOp::complete_replay(ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
     }
 
     //--------------------------------------------------------------------------
@@ -9537,6 +9560,15 @@ namespace Legion {
     {
       // should never be called
       assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void PointCopyOp::complete_replay(ApEvent precondition,
+                                      ApEvent postcondition)
+    //--------------------------------------------------------------------------
+    {
+      owner->complete_replay(precondition, postcondition);
+      complete_execution();
     }
 
     //--------------------------------------------------------------------------
@@ -19256,6 +19288,7 @@ namespace Legion {
       index_domain = Domain::NO_DOMAIN;
       sharding_space = IndexSpace::NO_SPACE;
       launch_space = NULL;
+      points_replayed = 0;
       points_committed = 0;
       commit_request = false;
     }
@@ -19270,6 +19303,7 @@ namespace Legion {
             it != points.end(); it++)
         (*it)->deactivate();
       points.clear();
+      replayed_postconditions.clear();
       if (remove_launch_space_reference(launch_space))
         delete launch_space;
       // Return the operation to the runtime
@@ -19420,7 +19454,28 @@ namespace Legion {
         points[idx]->trigger_replay();
       }
       complete_mapping(Runtime::merge_events(mapped_preconditions));
-      complete_execution();
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexFillOp::complete_replay(ApEvent precondition,
+                                      ApEvent postcondition)
+    //--------------------------------------------------------------------------
+    {
+      {
+        AutoLock o_lock(op_lock);
+        if (postcondition)
+          replayed_postconditions.push_back(postcondition);
+#ifdef DEBUG_LEGION
+        assert(points_replayed < points.size());
+#endif
+        if (++points_replayed < points.size())
+          return;
+      }
+      if (!replayed_postconditions.empty())
+        FillOp::complete_replay(ApEvent::NO_AP_EVENT,
+            Runtime::merge_events(replayed_postconditions));
+      else
+        FillOp::complete_replay(ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
     }
 
     //--------------------------------------------------------------------------
@@ -19782,6 +19837,15 @@ namespace Legion {
     {
       // should never be called
       assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void PointFillOp::complete_replay(ApEvent precondition,
+                                      ApEvent postcondition)
+    //--------------------------------------------------------------------------
+    {
+      owner->complete_replay(precondition, postcondition);
+      complete_execution();
     }
 
     //--------------------------------------------------------------------------
