@@ -3292,7 +3292,6 @@ namespace Realm {
       xd_nodes.resize(xd_idx + 1);
       TransferGraph::XDTemplate& xdn = xd_nodes[xd_idx];
       xdn.target_node = ID(dst_mem).memory_owner_node();
-      xdn.channel = nullptr;
       //xdn.kind = last_kind;
       xdn.factory = last_channel->get_factory();
       xdn.gather_control_input = spaces_size;
@@ -3461,7 +3460,6 @@ namespace Realm {
 
 	TransferGraph::XDTemplate& xdn = xd_nodes[xd_base];
 	xdn.target_node = addr_node;
-        xdn.channel = nullptr;
 	//xdn.kind = XFER_ADDR_SPLIT;
 	assert(!is_ranges && "need range address splitter");
         xdn.factory = create_addrsplit_factory(bytes_per_element);
