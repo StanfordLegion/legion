@@ -9202,13 +9202,45 @@ namespace Legion {
     {
       regions = rs;
       // Rewrite any singular region requirements to projections
-      for (std::vector<RegionRequirement>::iterator it =
-            regions.begin(); it != regions.end(); it++)
+      for (unsigned idx = 0; idx < regions.size(); idx++)
       {
-        if (it->handle_type == LEGION_SINGULAR_PROJECTION)
+        RegionRequirement &req = regions[idx];
+        if (req.handle_type == LEGION_SINGULAR_PROJECTION)
         {
-          it->handle_type = LEGION_REGION_PROJECTION;
-          it->projection = 0; // identity
+          req.handle_type = LEGION_REGION_PROJECTION;
+          req.projection = 0; // identity
+        }
+        // These are some checks for sanity if the user is using the default
+        // projection functor from an upper bound region to make sure they
+        // know what they are doing
+        if (IS_WRITE(req) && (req.projection == 0) &&
+            (req.handle_type == LEGION_REGION_PROJECTION))
+        {
+          if (IS_DISCARD(req))
+          {
+            if (!IS_COLLECTIVE(req))
+              REPORT_LEGION_ERROR(ERROR_ALIASED_INTERFERING_REGION,
+                  "Parent task %s (UID %lld) issued index space task %s "
+                  "(UID %lld) with interfering region requirement %d that "
+                  "requested write-discard privileges for all point tasks "
+                  "on the same logical region without indicating that they "
+                  "should be performed concurrently. If you intend for all "
+                  "the point tasks to perform independent writes to the same "
+                  "logical region then you must mark the region requirement "
+                  "as being a collective write.", parent_ctx->get_task_name(),
+                  parent_ctx->get_unique_id(), get_task_name(),
+                  get_unique_op_id(), idx)
+          }
+          else if (runtime->runtime_warnings)
+            REPORT_LEGION_WARNING(
+                LEGION_WARNING_NON_SCALABLE_IDENTITY_PROJECTION,
+                "Parent task %s (UID %lld) issued index space task %s "
+                "(UID %lld) with non-scalable projection region requirement %d "
+                "that ensures all point tasks will be reading and writing to "
+                "the same logical region. This implies there will be no task "
+                "parallelism in this index space task launch.",
+                parent_ctx->get_task_name(), parent_ctx->get_unique_id(),
+                get_task_name(), get_unique_op_id(), idx)
         }
       }
     }
