@@ -27421,7 +27421,7 @@ namespace Legion {
               = dist_collectables.begin(); it != dist_collectables.end(); it++)
         {
           // See if this is a future
-          if (LEGION_DISTRIBUTED_HELP_DECODE(it->first) != FUTURE_DC)
+          if (LEGION_DISTRIBUTED_HELP_DECODE(it->second->did) != FUTURE_DC)
             continue;
 #ifdef DEBUG_LEGION
           FutureImpl *impl = dynamic_cast<FutureImpl*>(it->second);
