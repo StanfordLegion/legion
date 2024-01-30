@@ -465,7 +465,8 @@ namespace Legion {
       }
       log_auto_trace.debug() << "Replaying trace " << tid
                              << " of length "
-                             << (opidx - this->operation_start_idx);
+                             << (opidx - this->operation_start_idx)
+                             << " at opidx: " << opidx;
       // Similar logic as flush_buffer, but issue a begin and end trace
       // around the flushed operations.
       this->executor->issue_begin_trace(tid);
