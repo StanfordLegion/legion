@@ -3098,8 +3098,8 @@ namespace Realm {
       for(size_t i = 0; i < pathlen; i++) {
 	TransferGraph::XDTemplate& xdn = xd_nodes[xd_idx + i];
         xdn.channel = path_infos[0].xd_channels[i];
-	xdn.target_node = path_infos[0].xd_channels[i]->node;
-	//xdn.kind = path_infos[0].xd_kinds[i];
+        xdn.target_node = path_infos[0].xd_channels[i]->node;
+        //xdn.kind = path_infos[0].xd_kinds[i];
 	xdn.factory = path_infos[0].xd_channels[i]->get_factory();
 	xdn.gather_control_input = -1;
 	xdn.scatter_control_input = -1;
@@ -3261,12 +3261,12 @@ namespace Realm {
 	  for(size_t j = 0; j < hops; j++) {
 	    TransferGraph::XDTemplate& xdn = xd_nodes[xd_base + j];
 
-	    xdn.factory = mpi.xd_channels[j]->get_factory();
-	    xdn.gather_control_input = -1;
-	    xdn.scatter_control_input = -1;
-	    xdn.target_node = mpi.xd_channels[j]->node;
-	    xdn.channel = mpi.xd_channels[j];
-	    if(j == 0) {
+            xdn.factory = mpi.xd_channels[j]->get_factory();
+            xdn.gather_control_input = -1;
+            xdn.scatter_control_input = -1;
+            xdn.target_node = mpi.xd_channels[j]->node;
+            xdn.channel = mpi.xd_channels[j];
+            if(j == 0) {
 	      xdn.inputs.resize(2);
 	      xdn.inputs[0] = TransferGraph::XDTemplate::mk_indirect(indirect_idx,
 								     1,
@@ -3290,7 +3290,7 @@ namespace Realm {
       // and finally the last xd that merges the streams together
       size_t xd_idx = xd_nodes.size();
       xd_nodes.resize(xd_idx + 1);
-      TransferGraph::XDTemplate& xdn = xd_nodes[xd_idx];
+      TransferGraph::XDTemplate &xdn = xd_nodes[xd_idx];
       xdn.target_node = ID(dst_mem).memory_owner_node();
       //xdn.kind = last_kind;
       xdn.factory = last_channel->get_factory();
@@ -3400,10 +3400,10 @@ namespace Realm {
       ib_edges.resize(ib_idx + pathlen - 1);
 
       for(size_t i = 0; i < pathlen; i++) {
-	TransferGraph::XDTemplate& xdn = xd_nodes[xd_idx + i];
+        TransferGraph::XDTemplate &xdn = xd_nodes[xd_idx + i];
         xdn.channel = path_infos[0].xd_channels[i];
-	xdn.target_node = path_infos[0].xd_channels[i]->node;
-	//xdn.kind = path_infos[0].xd_kinds[i];
+        xdn.target_node = path_infos[0].xd_channels[i]->node;
+        //xdn.kind = path_infos[0].xd_kinds[i];
 	xdn.factory = path_infos[0].xd_channels[i]->get_factory();
 	xdn.gather_control_input = -1;
 	xdn.scatter_control_input = -1;
@@ -3611,10 +3611,10 @@ namespace Realm {
 
 	    xdn.factory = mpi.xd_channels[j + 1]->get_factory();
 	    xdn.gather_control_input = -1;
-	    xdn.scatter_control_input = -1;
-	    xdn.target_node = mpi.xd_channels[j + 1]->node;
+            xdn.scatter_control_input = -1;
+            xdn.target_node = mpi.xd_channels[j + 1]->node;
             xdn.channel = mpi.xd_channels[j + 1];
-	    if(j < (hops - 1)) {
+            if(j < (hops - 1)) {
 	      xdn.inputs.resize(1);
 	      xdn.inputs[0] = ((j == 0) ?
 			         data_edges[i] :
@@ -4184,9 +4184,9 @@ namespace Realm {
 	  xdn.factory = path_info.xd_channels[j]->get_factory();
 	  xdn.gather_control_input = -1;
 	  xdn.scatter_control_input = -1;
-	  xdn.target_node = path_info.xd_channels[j]->node;
+          xdn.target_node = path_info.xd_channels[j]->node;
           xdn.channel = path_info.xd_channels[j];
-	  xdn.inputs.resize(1);
+          xdn.inputs.resize(1);
           xdn.inputs[0] = ((j == 0) ?
                              TransferGraph::XDTemplate::mk_fill(fill_ofs,
                                                                 combined_field_size,
@@ -4325,10 +4325,10 @@ namespace Realm {
 	      xdn.factory = path_info.xd_channels[j]->get_factory();
 	      xdn.gather_control_input = -1;
 	      xdn.scatter_control_input = -1;
-	      xdn.target_node = path_info.xd_channels[j]->node;
+              xdn.target_node = path_info.xd_channels[j]->node;
               xdn.channel = path_info.xd_channels[j];
-	      xdn.inputs.resize(1);
-	      xdn.inputs[0] = ((j == 0) ?
+              xdn.inputs.resize(1);
+              xdn.inputs[0] = ((j == 0) ?
 			         TransferGraph::XDTemplate::mk_inst(srcs[i].inst,
 								    fld_start,
                                                                     num_fields) :
