@@ -3397,7 +3397,7 @@ namespace Realm {
         TransferGraph::XDTemplate &xdn = xd_nodes[xd_idx + i];
         xdn.channel = path_infos[0].xd_channels[i];
         xdn.target_node = path_infos[0].xd_channels[i]->node;
-        //xdn.kind = path_infos[0].xd_kinds[i];
+        // xdn.kind = path_infos[0].xd_kinds[i];
         xdn.factory = path_infos[0].xd_channels[i]->get_factory();
         xdn.gather_control_input = -1;
         xdn.scatter_control_input = -1;
