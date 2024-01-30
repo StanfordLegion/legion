@@ -3835,7 +3835,7 @@ namespace Legion {
       IndexSpaceNode*               launch_space;
     protected:
       std::vector<PointFillOp*>     points;
-      std::vector<ApEvent>          replayed_postconditions;
+      std::vector<ApEvent>          replay_postconditions;
       unsigned                      points_replayed;
       unsigned                      points_committed;
       bool                          commit_request;

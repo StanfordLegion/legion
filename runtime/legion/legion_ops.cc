@@ -8858,17 +8858,17 @@ namespace Legion {
     {
       {
         AutoLock o_lock(op_lock);
-        if (postcondition)
-          replayed_postconditions.push_back(postcondition);
+        if (postcondition.exists())
+          replay_postconditions.push_back(postcondition);
 #ifdef DEBUG_LEGION
         assert(points_replayed < points.size());
 #endif
         if (++points_replayed < points.size())
           return;
       }
-      if (!replayed_postconditions.empty())
+      if (!replay_postconditions.empty())
         CopyOp::complete_replay(ApEvent::NO_AP_EVENT,
-            Runtime::merge_events(replayed_postconditions));
+            Runtime::merge_events(NULL, replay_postconditions));
       else
         CopyOp::complete_replay(ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
     }
@@ -19303,7 +19303,7 @@ namespace Legion {
             it != points.end(); it++)
         (*it)->deactivate();
       points.clear();
-      replayed_postconditions.clear();
+      replay_postconditions.clear();
       if (remove_launch_space_reference(launch_space))
         delete launch_space;
       // Return the operation to the runtime
@@ -19463,17 +19463,17 @@ namespace Legion {
     {
       {
         AutoLock o_lock(op_lock);
-        if (postcondition)
-          replayed_postconditions.push_back(postcondition);
+        if (postcondition.exists())
+          replay_postconditions.push_back(postcondition);
 #ifdef DEBUG_LEGION
         assert(points_replayed < points.size());
 #endif
         if (++points_replayed < points.size())
           return;
       }
-      if (!replayed_postconditions.empty())
+      if (!replay_postconditions.empty())
         FillOp::complete_replay(ApEvent::NO_AP_EVENT,
-            Runtime::merge_events(replayed_postconditions));
+            Runtime::merge_events(NULL, replay_postconditions));
       else
         FillOp::complete_replay(ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
     }
