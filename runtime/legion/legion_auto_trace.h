@@ -528,7 +528,7 @@ namespace Legion {
 
     template <typename T>
     void AutomaticTracingContext<T>::record_blocking_call(uint64_t future_coordinate) {
-      if (future_coordinate != std::numeric_limits<uint64_t>::max()) {
+      if (future_coordinate != InnerContext::NO_FUTURE_COORDINATE) {
         // Handling waits from the application is very similar
         // to the case in add_to_dependence_queue when we encounter an
         // operation that is not traceable. We interrupt traces in
