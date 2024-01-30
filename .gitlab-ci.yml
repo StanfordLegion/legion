@@ -945,7 +945,7 @@ gcc9_cxx11_32bit_release_legion:
 gcc9_cxx11_debug_external1:
   <<: [*linux_compute, *image_2004, *external_tests]
   variables:
-    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *openmp, *hdf5, *external1, *short, *libdw]
+    <<: [*gcc9, *debug, *cxx11_normal, *openmp, *hdf5, *external1, *short, *libdw]
 gcc9_cxx17_debug_maxdim4_external2:
   <<: [*linux_compute, *image_2004, *external_tests]
   variables:
@@ -1131,7 +1131,7 @@ clang12_cxx11_32bit_release_legion:
 clang12_cxx11_debug_external1:
   <<: [*linux_compute, *image_2004, *external_tests]
   variables:
-    <<: [*clang12, *terra12, *debug, *cxx11_normal, *openmp, *hdf5, *external1, *libdw]
+    <<: [*clang12, *debug, *cxx11_normal, *openmp, *hdf5, *external1, *libdw]
 clang12_cxx12_debug_maxdim4_external2:
   <<: [*linux_compute, *image_2004, *external_tests]
   variables:
