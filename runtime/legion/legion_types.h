@@ -2140,6 +2140,9 @@ namespace Legion {
     class RemoteContext;
     class LeafContext;
 
+    // legion_auto_trace.h
+    class TraceHashHelper;
+
     // legion_trace.h
     class LogicalTrace;
     class TraceCaptureOp;
@@ -2509,6 +2512,7 @@ namespace Legion {
     friend class Internal::RemoteContext;                   \
     friend class Internal::LeafContext;                     \
     friend class Internal::ReplicateContext;                \
+    friend class Internal::TraceHashHelper;                 \
     friend class Internal::InstanceBuilder;                 \
     friend class Internal::FutureNameExchange;              \
     friend class Internal::MustEpochMappingExchange;        \

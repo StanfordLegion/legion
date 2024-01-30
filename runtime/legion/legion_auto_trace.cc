@@ -99,6 +99,12 @@ namespace Legion {
       if (op->is_index_space) {
         hasher.hash(op->index_domain);
       }
+      // The value inside the fill is also part of the hash criteria.
+      if (op->future.exists()) {
+        hasher.hash(op->future.impl->did);
+      } else {
+        hasher.hash(op->value, op->value_size);
+      }
     }
 
     void TraceHashHelper::hash(FenceOp* op) {
