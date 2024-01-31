@@ -652,7 +652,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ResourceTracker::return_resources(ResourceTracker *target, 
-                          size_t return_index, std::set<RtEvent> &preconditions)
+                        uint64_t return_index, std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
       if (created_regions.empty() && deleted_regions.empty() && 
@@ -682,7 +682,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ResourceTracker::pack_resources_return(Serializer &rez, 
-                                                size_t return_index)
+                                                uint64_t return_index)
     //--------------------------------------------------------------------------
     {
       // Shouldn't need the lock here since we only do this
@@ -809,7 +809,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void ResourceTracker::pack_empty_resources(Serializer &rez,
-                                                          size_t return_index)
+                                                          uint64_t return_index)
     //--------------------------------------------------------------------------
     {
       RezCheck z(rez);
@@ -835,7 +835,7 @@ namespace Legion {
       // Hold the lock while doing the unpack to avoid conflicting
       // with anyone else returning state
       DerezCheck z(derez);
-      size_t return_index;
+      uint64_t return_index;
       derez.deserialize(return_index);
       size_t num_created_regions;
       derez.deserialize(num_created_regions);
@@ -1169,8 +1169,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     Operation::Operation(Runtime *rt)
       : runtime(rt), gen(0), unique_op_id(0), context_index(0), 
-        outstanding_mapping_references(0), hardened(false), parent_ctx(NULL),
-        mapping_tracker(NULL), commit_tracker(NULL), provenance(NULL)
+        outstanding_mapping_references(0), hardened(false),
+        trigger_commit_invoked(false), early_commit_request(false),
+        track_parent(false), tracing(false), trace(NULL), trace_local_id(0),
+        parent_ctx(NULL), must_epoch(NULL), mapping_tracker(NULL),
+        commit_tracker(NULL), provenance(NULL)
     //--------------------------------------------------------------------------
     {
       if (!runtime->resilient_mode)
@@ -1327,20 +1330,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Operation::set_tracking_parent(size_t index)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!track_parent);
-#endif
-      track_parent = true;
-      context_index = index;
-      if (runtime->legion_spy_enabled)
-        LegionSpy::log_unordered_operation(parent_ctx->get_unique_id(),
-                                           unique_op_id, context_index);
-    }
-
-    //--------------------------------------------------------------------------
     void Operation::set_trace(LogicalTrace *t,
                               const std::vector<StaticDependence> *dependences)
     //--------------------------------------------------------------------------
@@ -1354,6 +1343,28 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    uint64_t Operation::get_context_index(void) const
+    //--------------------------------------------------------------------------
+    {
+      return (must_epoch == NULL) ? context_index :
+        must_epoch->get_context_index();
+    }
+
+    //--------------------------------------------------------------------------
+    void Operation::set_context_index(uint64_t index, bool track)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(must_epoch == NULL);
+#endif
+      context_index = index;
+      track_parent = track;
+      if (track && runtime->legion_spy_enabled)
+        LegionSpy::log_child_operation_index(parent_ctx->get_unique_id(), 
+            context_index, unique_op_id);
+    }
+
+    //--------------------------------------------------------------------------
     void Operation::set_must_epoch(MustEpochOp *epoch, bool do_registration)
     //--------------------------------------------------------------------------
     {
@@ -1362,7 +1373,6 @@ namespace Legion {
       assert(epoch != NULL);
 #endif
       must_epoch = epoch;
-      context_index = must_epoch->get_ctx_index();
       if (do_registration)
         must_epoch->register_subop(this);
     }
@@ -1517,28 +1527,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Operation::initialize_operation(InnerContext *ctx, bool track, 
-                                         unsigned regs/*= 0*/,
+    void Operation::initialize_operation(InnerContext *ctx,
                                          Provenance *prov/*= NULL*/,
-                      const std::vector<StaticDependence> *dependences/*=NULL*/)
+                                         unsigned regs/*= 0*/)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(ctx != NULL);
 #endif
       parent_ctx = ctx;
-      track_parent = track;
-      if (track_parent)
-      {
-        context_index = parent_ctx->register_new_child_operation(this,
-                                          resolved_event, dependences);
-        // If we don't have a resolved event then we can consider
-        // speculation already resolved
-        if (!resolved_event.exists())
-          resolved = true;
-      }
-      else // Untracked operations will never resolve speculation
-        resolved = true;
+      // If we don't have a resolved event then we can consider
+      // speculation already resolved
+      resolved = !resolved_event.exists();
       for (unsigned idx = 0; idx < regs; idx++)
         unverified_regions.insert(idx);
       provenance = prov;
@@ -4479,12 +4479,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PredicatedOp::initialize_predication(InnerContext *ctx, bool track,
-        unsigned regions, const std::vector<StaticDependence> *dependences,
-        const Predicate &p, Provenance *provenance)
+    void PredicatedOp::initialize_predication(InnerContext *ctx,
+        unsigned regions, const Predicate &p, Provenance *provenance)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, track, regions, provenance, dependences);
+      initialize_operation(ctx, provenance, regions);
       if (p == Predicate::TRUE_PRED)
       {
         predication_state = PREDICATED_TRUE_STATE;
@@ -4513,7 +4512,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool PredicatedOp::get_predicate_value(void)
+    bool PredicatedOp::get_predicate_value(size_t index)
     //--------------------------------------------------------------------------
     {
       // This should only be called for inlining operations
@@ -4525,8 +4524,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(predicate != NULL);
 #endif
-        bool value =
-          predicate->get_predicate(context_index, true_guard, false_guard);
+        bool value = predicate->get_predicate(index, true_guard, false_guard);
         if (false_guard.exists())
           // Wait for the predicate to resolve
           // If false was poisoned then the predicate resolved true
@@ -4565,7 +4563,7 @@ namespace Legion {
         pack_phase_barrier(arrive_barriers[idx], rez);
       rez.serialize(layout_constraint_id);
       pack_mappable(*this, rez);
-      rez.serialize<size_t>(get_context_index());
+      rez.serialize(get_context_index());
     }
 
     //--------------------------------------------------------------------------
@@ -4592,7 +4590,7 @@ namespace Legion {
         unpack_phase_barrier(arrive_barriers[idx], derez);
       derez.deserialize(layout_constraint_id);
       unpack_mappable(*this, derez);
-      size_t index;
+      uint64_t index;
       derez.deserialize(index);
       set_context_index(index);
     }
@@ -4638,8 +4636,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       parent_task = ctx->get_task();
-      initialize_operation(ctx, true/*track*/, 1/*regions*/,
-                           provenance, launcher.static_dependences);
+      initialize_operation(ctx, provenance, 1/*regions*/);
       if (launcher.requirement.privilege_fields.empty())
       {
         REPORT_LEGION_WARNING(LEGION_WARNING_REGION_REQUIREMENT_INLINE,
@@ -4688,7 +4685,7 @@ namespace Legion {
       
       if (runtime->legion_spy_enabled)
         LegionSpy::log_mapping_operation(parent_ctx->get_unique_id(),
-                                         unique_op_id, context_index);
+                                         unique_op_id);
       return region;
     }
 
@@ -4697,7 +4694,7 @@ namespace Legion {
                            Provenance *provenance)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/, 1/*regions*/, provenance);
+      initialize_operation(ctx, provenance, 1/*regions*/);
       parent_task = ctx->get_task();
       requirement = reg.impl->get_requirement();
       // If this was a write-discard privilege, change it to read-write
@@ -4713,7 +4710,7 @@ namespace Legion {
       // them from the first time that we made this physical region
       if (runtime->legion_spy_enabled)
         LegionSpy::log_mapping_operation(parent_ctx->get_unique_id(),
-                                         unique_op_id, context_index);
+                                         unique_op_id);
     }
 
     //--------------------------------------------------------------------------
@@ -5080,14 +5077,14 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    size_t MapOp::get_context_index(void) const
+    uint64_t MapOp::get_context_index(void) const
     //--------------------------------------------------------------------------
     {
       return context_index;
     }
 
     //--------------------------------------------------------------------------
-    void MapOp::set_context_index(size_t index)
+    void MapOp::set_context_index(uint64_t index)
     //--------------------------------------------------------------------------
     {
       context_index = index;
@@ -5710,7 +5707,7 @@ namespace Legion {
       rez.serialize(index_domain);
       rez.serialize(index_point);
       pack_mappable(*this, rez);
-      rez.serialize<size_t>(get_context_index());
+      rez.serialize(get_context_index());
     }
 
     //--------------------------------------------------------------------------
@@ -5758,7 +5755,7 @@ namespace Legion {
       derez.deserialize(index_domain);
       derez.deserialize(index_point);
       unpack_mappable(*this, derez);
-      size_t index;
+      uint64_t index;
       derez.deserialize(index);
       set_context_index(index);
     }
@@ -5959,10 +5956,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       parent_task = ctx->get_task();
-      initialize_predication(ctx, true/*track*/, 
+      initialize_predication(ctx,
                              launcher.src_requirements.size() + 
                                launcher.dst_requirements.size(), 
-                             launcher.static_dependences,
                              launcher.predicate, provenance);
       src_requirements.resize(launcher.src_requirements.size());
       dst_requirements.resize(launcher.dst_requirements.size());
@@ -6132,7 +6128,7 @@ namespace Legion {
         const unsigned copy_kind = (src_indirect_requirements.empty() ? 0 : 1) +
           (dst_indirect_requirements.empty() ? 0 : 2);
         LegionSpy::log_copy_operation(parent_ctx->get_unique_id(), unique_op_id,
-            copy_kind, context_index, false, false);
+            copy_kind, false, false);
       }
       if (runtime->check_privileges)
       {
@@ -7641,14 +7637,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    size_t CopyOp::get_context_index(void) const
+    uint64_t CopyOp::get_context_index(void) const
     //--------------------------------------------------------------------------
     {
       return context_index;
     }
 
     //--------------------------------------------------------------------------
-    void CopyOp::set_context_index(size_t index)
+    void CopyOp::set_context_index(uint64_t index)
     //--------------------------------------------------------------------------
     {
       context_index = index;
@@ -8346,10 +8342,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       parent_task = ctx->get_task();
-      initialize_predication(ctx, true/*track*/, 
+      initialize_predication(ctx,
                              launcher.src_requirements.size() + 
                                launcher.dst_requirements.size(), 
-                             launcher.static_dependences,
                              launcher.predicate, provenance);
 #ifdef DEBUG_LEGION
       assert(launch_sp.exists());
@@ -8551,7 +8546,7 @@ namespace Legion {
         const unsigned copy_kind = (src_indirect_requirements.empty() ? 0 : 1) +
           (dst_indirect_requirements.empty() ? 0 : 2);
         LegionSpy::log_copy_operation(parent_ctx->get_unique_id(),
-                                      unique_op_id, copy_kind, context_index,
+                                      unique_op_id, copy_kind,
                                       collective_src_indirect_points,
                                       collective_dst_indirect_points);
         runtime->forest->log_launch_space(launch_space->handle, unique_op_id);
@@ -9471,14 +9466,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Initialize the operation
-      initialize_operation(own->get_context(), false/*track*/, 
-          own->src_requirements.size() + own->dst_requirements.size(),
-          own->get_provenance());
+      initialize_operation(own->get_context(), own->get_provenance(),
+          own->src_requirements.size() + own->dst_requirements.size());
       index_point = p;
       index_domain = own->index_domain;
       sharding_space = own->sharding_space;
       owner = own;
-      context_index = own->get_ctx_index();
+      context_index = own->get_context_index();
       execution_fence_event = own->get_execution_fence_event();
       // From Memoizable
       trace_local_id            = owner->get_trace_local_id().context_index;
@@ -9854,18 +9848,18 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Future FenceOp::initialize(InnerContext *ctx, FenceKind kind,
-                           bool need_future, Provenance *provenance, bool track)
+                           bool need_future, Provenance *provenance)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, track, 0/*regions*/, provenance);
+      initialize_operation(ctx, provenance);
       fence_kind = kind;
       if (need_future)
         result = Future(new FutureImpl(parent_ctx, runtime, true/*register*/,
               runtime->get_available_distributed_id(),
-              get_provenance(), track ? this : NULL));
+              get_provenance(), this));
       if (runtime->legion_spy_enabled)
         LegionSpy::log_fence_operation(parent_ctx->get_unique_id(),
-            unique_op_id, context_index, (kind == EXECUTION_FENCE));
+            unique_op_id, (kind == EXECUTION_FENCE));
       return result;
     }
 
@@ -10185,7 +10179,7 @@ namespace Legion {
       assert(index_space_node == NULL);
       assert(futures.empty());
 #endif
-      initialize_operation(ctx, true/*track*/, 0/*regions*/, provenance);
+      initialize_operation(ctx, provenance);
       kind = INDEX_SPACE_CREATION;
       index_space_node = n;
       futures.push_back(f);
@@ -10193,7 +10187,7 @@ namespace Legion {
       owner = own;
       if (runtime->legion_spy_enabled)
         LegionSpy::log_creation_operation(parent_ctx->get_unique_id(),
-                                          unique_op_id, context_index);
+                                          unique_op_id);
     }
 
     //--------------------------------------------------------------------------
@@ -10207,7 +10201,7 @@ namespace Legion {
       assert(fields.empty());
       assert(futures.empty());
 #endif
-      initialize_operation(ctx, true/*track*/, 0/*regions*/, provenance);
+      initialize_operation(ctx, provenance);
       kind = FIELD_ALLOCATION;
       field_space_node = node;
       fields.push_back(fid);
@@ -10215,7 +10209,7 @@ namespace Legion {
       owner = own;
       if (runtime->legion_spy_enabled)
         LegionSpy::log_creation_operation(parent_ctx->get_unique_id(),
-                                          unique_op_id, context_index);
+                                          unique_op_id);
     }
 
     //--------------------------------------------------------------------------
@@ -10231,7 +10225,7 @@ namespace Legion {
       assert(futures.empty());
       assert(fids.size() == field_sizes.size());
 #endif
-      initialize_operation(ctx, true/*track*/, 0/*regions*/, provenance);
+      initialize_operation(ctx, provenance);
       kind = FIELD_ALLOCATION;
       field_space_node = node;     
       fields = fids;
@@ -10239,7 +10233,7 @@ namespace Legion {
       owner = own;
       if (runtime->legion_spy_enabled)
         LegionSpy::log_creation_operation(parent_ctx->get_unique_id(),
-                                          unique_op_id, context_index);
+                                          unique_op_id);
     }
 
     //--------------------------------------------------------------------------
@@ -10250,7 +10244,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(futures.empty());
 #endif
-      initialize_operation(ctx, true/*track*/, 0/*regions*/, provenance);
+      initialize_operation(ctx, provenance);
       kind = FUTURE_MAP_CREATION;
       futures.resize(future_points.size());
       unsigned index = 0;
@@ -10259,7 +10253,7 @@ namespace Legion {
         futures[index] = it->second;
       if (runtime->legion_spy_enabled)
         LegionSpy::log_creation_operation(parent_ctx->get_unique_id(),
-                                          unique_op_id, context_index);
+                                          unique_op_id);
     }
 
     //--------------------------------------------------------------------------
@@ -10515,13 +10509,13 @@ namespace Legion {
                            const bool unordered, Provenance *provenance)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, !unordered/*track*/, 0/*regions*/, provenance);
+      initialize_operation(ctx, provenance);
       kind = INDEX_SPACE_DELETION;
       index_space = handle;
       sub_partitions.swap(subs);
       if (runtime->legion_spy_enabled)
         LegionSpy::log_deletion_operation(parent_ctx->get_unique_id(),
-                              unique_op_id, context_index, unordered);
+                                          unique_op_id, unordered);
     }
 
     //--------------------------------------------------------------------------
@@ -10530,13 +10524,13 @@ namespace Legion {
                        const bool unordered, Provenance *provenance)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, !unordered/*track*/, 0/*regions*/, provenance);
+      initialize_operation(ctx, provenance);
       kind = INDEX_PARTITION_DELETION;
       index_part = handle;
       sub_partitions.swap(subs);
       if (runtime->legion_spy_enabled)
         LegionSpy::log_deletion_operation(parent_ctx->get_unique_id(),
-                              unique_op_id, context_index, unordered);
+                                          unique_op_id, unordered);
     }
 
     //--------------------------------------------------------------------------
@@ -10544,12 +10538,12 @@ namespace Legion {
                 FieldSpace handle, const bool unordered, Provenance *provenance)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, !unordered/*track*/, 0/*regions*/, provenance);
+      initialize_operation(ctx, provenance);
       kind = FIELD_SPACE_DELETION;
       field_space = handle;
       if (runtime->legion_spy_enabled)
         LegionSpy::log_deletion_operation(parent_ctx->get_unique_id(),
-                              unique_op_id, context_index, unordered);
+                                          unique_op_id, unordered);
     }
 
     //--------------------------------------------------------------------------
@@ -10565,7 +10559,7 @@ namespace Legion {
       assert(impl != NULL);
       assert(allocator == NULL);
 #endif
-      initialize_operation(ctx, !unordered/*track*/, 0/*regions*/, provenance);
+      initialize_operation(ctx, provenance);
       kind = FIELD_DELETION;
       field_space = handle;
       free_fields.insert(fid);
@@ -10585,7 +10579,7 @@ namespace Legion {
                                           mapped_event, non_owner_shard);
       if (runtime->legion_spy_enabled)
         LegionSpy::log_deletion_operation(parent_ctx->get_unique_id(),
-                              unique_op_id, context_index, unordered);
+                                          unique_op_id, unordered);
     }
 
     //--------------------------------------------------------------------------
@@ -10601,7 +10595,7 @@ namespace Legion {
       assert(impl != NULL);
       assert(allocator == NULL);
 #endif
-      initialize_operation(ctx, !unordered/*track*/, 0/*regions*/, provenance);
+      initialize_operation(ctx, provenance);
       kind = FIELD_DELETION;
       field_space = handle;
       free_fields = to_free; 
@@ -10628,7 +10622,7 @@ namespace Legion {
       if (runtime->legion_spy_enabled)
       {
         LegionSpy::log_deletion_operation(parent_ctx->get_unique_id(),
-                              unique_op_id, context_index, unordered);
+                                          unique_op_id, unordered);
         if (skip_dependence_analysis)
           log_deletion_requirements();
       }
@@ -10641,7 +10635,7 @@ namespace Legion {
                                      const bool skip_dependence_analysis)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, !unordered/*track*/, 0/*regions*/, provenance);
+      initialize_operation(ctx, provenance);
       kind = LOGICAL_REGION_DELETION;
       logical_region = handle; 
       // If we're unordered then do this analysis here since we won't go
@@ -10652,7 +10646,7 @@ namespace Legion {
       if (runtime->legion_spy_enabled)
       {
         LegionSpy::log_deletion_operation(parent_ctx->get_unique_id(),
-                              unique_op_id, context_index, unordered);
+                                          unique_op_id, unordered);
         if (skip_dependence_analysis)
           log_deletion_requirements();
       }
@@ -11011,9 +11005,8 @@ namespace Legion {
       assert(creator != NULL);
 #endif
       // We never track internal operations
-      initialize_operation(creator->get_context(), false/*track*/,
-                          1/*regions*/, creator->get_provenance());
-      context_index = creator->get_ctx_index();
+      initialize_operation(creator->get_context(), creator->get_provenance());
+      context_index = creator->get_context_index();
 #ifdef DEBUG_LEGION
       assert(creator_req_idx == -1);
       assert(create_op == NULL);
@@ -11097,7 +11090,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       pack_region_requirement(requirement, rez);
-      rez.serialize<size_t>(get_context_index());
+      rez.serialize(get_context_index());
     }
 
     //--------------------------------------------------------------------------
@@ -11106,7 +11099,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       unpack_region_requirement(requirement, derez);
-      size_t index;
+      uint64_t index;
       derez.deserialize(index);
       set_context_index(index);
     }
@@ -11154,14 +11147,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    size_t CloseOp::get_context_index(void) const
+    uint64_t CloseOp::get_context_index(void) const
     //--------------------------------------------------------------------------
     {
       return context_index;
     }
 
     //--------------------------------------------------------------------------
-    void CloseOp::set_context_index(size_t index)
+    void CloseOp::set_context_index(uint64_t index)
     //--------------------------------------------------------------------------
     {
       context_index = index;
@@ -11219,11 +11212,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void CloseOp::initialize_close(InnerContext *ctx,
-                                   const RegionRequirement &req, bool track)
+                                   const RegionRequirement &req)
     //--------------------------------------------------------------------------
     {
       // Only initialize the operation here, this is not a trace-able op
-      initialize_operation(ctx, track);
+      initialize_operation(ctx);
       // Never track this so don't get the close index
       parent_task = ctx->get_task();
       requirement = req;
@@ -11248,7 +11241,7 @@ namespace Legion {
       if (!runtime->legion_spy_enabled)
         return;
       LegionSpy::log_close_operation(parent_ctx->get_unique_id(), unique_op_id,
-                                     context_index, merge);
+                                     merge);
       LegionSpy::log_internal_op_creator(unique_op_id, 
                                          creator->get_unique_op_id(), index);
       if (requirement.handle_type == LEGION_PARTITION_PROJECTION)
@@ -11464,7 +11457,7 @@ namespace Legion {
                                  const InstanceSet &targets) 
     //--------------------------------------------------------------------------
     {
-      initialize_close(ctx, ctx->regions[idx], true/*track*/);
+      initialize_close(ctx, ctx->regions[idx]);
       parent_idx = idx;
       target_instances = targets;
       localize_region_requirement(requirement);
@@ -11816,7 +11809,7 @@ namespace Legion {
                                     const VersionInfo *target)
     //--------------------------------------------------------------------------
     {
-      initialize_close(ctx, req, true/*track*/);
+      initialize_close(ctx, req);
       parent_idx = index;
       localize_region_requirement(requirement);
 #ifdef DEBUG_LEGION
@@ -12155,7 +12148,7 @@ namespace Legion {
                              LogicalRegion region,const std::set<FieldID> &fids)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/);
+      initialize_operation(ctx);
       requirement =
         RegionRequirement(region, LEGION_READ_WRITE, LEGION_EXCLUSIVE, parent);
       requirement.privilege_fields = fids;
@@ -12300,7 +12293,7 @@ namespace Legion {
       for (unsigned idx = 0; idx < arrive_barriers.size(); idx++)
         pack_phase_barrier(arrive_barriers[idx], rez);
       pack_mappable(*this, rez);
-      rez.serialize<size_t>(get_context_index());
+      rez.serialize(get_context_index());
     }
 
     //--------------------------------------------------------------------------
@@ -12335,7 +12328,7 @@ namespace Legion {
       for (unsigned idx = 0; idx < arrive_barriers.size(); idx++)
         unpack_phase_barrier(arrive_barriers[idx], derez);
       unpack_mappable(*this, derez);
-      size_t index;
+      uint64_t index;
       derez.deserialize(index);
       set_context_index(index);
     }
@@ -12381,9 +12374,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       parent_task = ctx->get_task();
-      initialize_predication(ctx, true/*track*/,
-                             1/*num region requirements*/,
-                             launcher.static_dependences,
+      initialize_predication(ctx, 1/*num region requirements*/,
                              launcher.predicate, provenance);
       // Note we give it READ WRITE EXCLUSIVE to make sure that nobody
       // can be re-ordered around this operation for mapping or
@@ -12447,7 +12438,7 @@ namespace Legion {
       }
       if (runtime->legion_spy_enabled)
         LegionSpy::log_acquire_operation(parent_ctx->get_unique_id(),
-                                         unique_op_id, context_index);
+                                         unique_op_id);
     }
 
     //--------------------------------------------------------------------------
@@ -12734,14 +12725,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    size_t AcquireOp::get_context_index(void) const
+    uint64_t AcquireOp::get_context_index(void) const
     //--------------------------------------------------------------------------
     {
       return context_index;
     }
 
     //--------------------------------------------------------------------------
-    void AcquireOp::set_context_index(size_t index)
+    void AcquireOp::set_context_index(uint64_t index)
     //--------------------------------------------------------------------------
     {
       context_index = index;
@@ -13118,7 +13109,7 @@ namespace Legion {
       for (unsigned idx = 0; idx < arrive_barriers.size(); idx++)
         pack_phase_barrier(arrive_barriers[idx], rez);
       pack_mappable(*this, rez);
-      rez.serialize<size_t>(get_context_index());
+      rez.serialize(get_context_index());
     }
 
     //--------------------------------------------------------------------------
@@ -13153,7 +13144,7 @@ namespace Legion {
       for (unsigned idx = 0; idx < arrive_barriers.size(); idx++)
         unpack_phase_barrier(arrive_barriers[idx], derez);
       unpack_mappable(*this, derez);
-      size_t index;
+      uint64_t index;
       derez.deserialize(index);
       set_context_index(index);
     }
@@ -13199,9 +13190,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       parent_task = ctx->get_task();
-      initialize_predication(ctx, true/*track*/, 
-                             1/*num region requirements*/,
-                             launcher.static_dependences,
+      initialize_predication(ctx, 1/*num region requirements*/,
                              launcher.predicate, provenance);
       // Note we give it READ WRITE EXCLUSIVE to make sure that nobody
       // can be re-ordered around this operation for mapping or
@@ -13264,7 +13253,7 @@ namespace Legion {
       }
       if (runtime->legion_spy_enabled)
         LegionSpy::log_release_operation(parent_ctx->get_unique_id(),
-                                         unique_op_id, context_index);
+                                         unique_op_id);
     }
 
     //--------------------------------------------------------------------------
@@ -13580,14 +13569,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    size_t ReleaseOp::get_context_index(void) const
+    uint64_t ReleaseOp::get_context_index(void) const
     //--------------------------------------------------------------------------
     {
       return context_index;
     }
 
     //--------------------------------------------------------------------------
-    void ReleaseOp::set_context_index(size_t index)
+    void ReleaseOp::set_context_index(uint64_t index)
     //--------------------------------------------------------------------------
     {
       context_index = index;
@@ -13980,7 +13969,7 @@ namespace Legion {
                             const DynamicCollective &dc, Provenance *provenance)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/, 0/*regions*/, provenance);
+      initialize_operation(ctx, provenance);
       future = Future(new FutureImpl(parent_ctx, runtime, true/*register*/,
             runtime->get_available_distributed_id(),
             get_provenance(), this));
@@ -13990,8 +13979,7 @@ namespace Legion {
                                           runtime->address_space);
       if (runtime->legion_spy_enabled)
       {
-        LegionSpy::log_dynamic_collective(ctx->get_unique_id(),
-                                          unique_op_id, context_index);
+        LegionSpy::log_dynamic_collective(ctx->get_unique_id(), unique_op_id);
         DomainPoint empty_point;
         LegionSpy::log_future_creation(unique_op_id, 
                                        future.impl->did, empty_point);
@@ -14166,14 +14154,13 @@ namespace Legion {
       assert(ctx != NULL);
       assert(f.impl != NULL);
 #endif
-      initialize_operation(ctx, true/*track*/, 0/*regions*/, provenance);
+      initialize_operation(ctx, provenance);
       future = f;
       predicate = Predicate(ctx->create_predicate_impl(this));
       to_predicate = true;
       if (runtime->legion_spy_enabled)
       {
-        LegionSpy::log_predicate_operation(ctx->get_unique_id(),
-                                           unique_op_id, context_index);
+        LegionSpy::log_predicate_operation(ctx->get_unique_id(), unique_op_id);
         if ((future.impl != NULL) && future.impl->get_ready_event().exists())
           LegionSpy::log_future_use(unique_op_id, future.impl->did); 
       }
@@ -14189,7 +14176,7 @@ namespace Legion {
       assert(ctx != NULL);
       assert(p.impl != NULL);
 #endif
-      initialize_operation(ctx, true/*track*/, 0/*regions*/, provenance);
+      initialize_operation(ctx, provenance);
       predicate = p;
       future = Future(new FutureImpl(parent_ctx, runtime, true/*register*/,
                 runtime->get_available_distributed_id(),
@@ -14197,8 +14184,7 @@ namespace Legion {
       to_predicate = false;
       if (runtime->legion_spy_enabled)
       {
-        LegionSpy::log_predicate_operation(ctx->get_unique_id(),
-                                    unique_op_id, context_index);
+        LegionSpy::log_predicate_operation(ctx->get_unique_id(), unique_op_id);
         LegionSpy::log_predicate_use(unique_op_id, p.impl->creator_uid);
       }
       return future;
@@ -14318,13 +14304,12 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(ctx != NULL);
 #endif
-      initialize_operation(ctx, true/*track*/, 0/*regions*/, provenance);
+      initialize_operation(ctx, provenance);
       to_set = Predicate(ctx->create_predicate_impl(this));
       previous = p;
       if (runtime->legion_spy_enabled)
       {
-        LegionSpy::log_predicate_operation(ctx->get_unique_id(),
-                                    unique_op_id, context_index);
+        LegionSpy::log_predicate_operation(ctx->get_unique_id(), unique_op_id);
         LegionSpy::log_predicate_use(unique_op_id, p.impl->creator_uid);
       }
       return to_set;
@@ -14442,13 +14427,12 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(ctx != NULL);
 #endif
-      initialize_operation(ctx, true/*track*/,0/*regions*/, provenance);
+      initialize_operation(ctx, provenance);
       to_set = Predicate(ctx->create_predicate_impl(this));
       previous.swap(predicates);
       if (runtime->legion_spy_enabled)
       {
-        LegionSpy::log_predicate_operation(ctx->get_unique_id(),
-                                    unique_op_id, context_index);
+        LegionSpy::log_predicate_operation(ctx->get_unique_id(), unique_op_id);
         for (std::vector<Predicate>::const_iterator it = previous.begin();
               it != previous.end(); it++)
           LegionSpy::log_predicate_use(unique_op_id, it->impl->creator_uid); 
@@ -14589,13 +14573,12 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(ctx != NULL);
 #endif
-      initialize_operation(ctx, true/*track*/, 0/*regions*/, provenance);
+      initialize_operation(ctx, provenance);
       previous.swap(predicates);
       to_set = Predicate(ctx->create_predicate_impl(this));
       if (runtime->legion_spy_enabled)
       {
-        LegionSpy::log_predicate_operation(ctx->get_unique_id(),
-                                    unique_op_id, context_index);
+        LegionSpy::log_predicate_operation(ctx->get_unique_id(), unique_op_id);
         for (std::vector<Predicate>::const_iterator it = previous.begin();
               it != previous.end(); it++)
           LegionSpy::log_predicate_use(unique_op_id, it->impl->creator_uid);
@@ -14735,7 +14718,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    size_t MustEpochOp::get_context_index(void) const
+    uint64_t MustEpochOp::get_context_index(void) const
     //--------------------------------------------------------------------------
     {
       return context_index;
@@ -14774,7 +14757,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Initialize this operation
-      initialize_operation(ctx, true/*track*/, 0/*regions*/, provenance);
+      initialize_operation(ctx, provenance);
       // Compute our launch domain if we need it
       launch_domain = launcher.launch_domain;
       IndexSpace launch_space = launcher.launch_space;
@@ -14806,8 +14789,7 @@ namespace Legion {
             "Nested concurrency is not supported.", 
             parent_ctx->get_task_name(), parent_ctx->get_unique_id())
       if (runtime->legion_spy_enabled)
-        LegionSpy::log_must_epoch_operation(ctx->get_unique_id(),
-                                    unique_op_id, context_index);
+        LegionSpy::log_must_epoch_operation(ctx->get_unique_id(), unique_op_id);
       return result_map;
     }
 
@@ -14843,7 +14825,7 @@ namespace Legion {
       {
         indiv_tasks[idx] = runtime->get_available_individual_task();
         indiv_tasks[idx]->initialize_task(ctx, launcher.single_tasks[idx],
-                                          provenance, false/*track*/,
+                                          provenance,
                                           false/*top level*/,
                                           true/*must epoch*/);
         indiv_tasks[idx]->set_must_epoch(this, idx, true/*register*/);
@@ -14982,6 +14964,23 @@ namespace Legion {
         result += (*it)->get_region_count();
       }
       return result;
+    }
+
+    //--------------------------------------------------------------------------
+    void MustEpochOp::trigger_prepipeline_stage(void)
+    //--------------------------------------------------------------------------
+    {
+      if (runtime->legion_spy_enabled)
+      {
+        for (std::vector<IndividualTask*>::const_iterator it = 
+              indiv_tasks.begin(); it != indiv_tasks.end(); it++)
+          LegionSpy::log_child_operation_index(parent_ctx->get_unique_id(),
+              context_index, (*it)->get_unique_op_id());
+        for (std::vector<IndexTask*>::const_iterator it = 
+              index_tasks.begin(); it != index_tasks.end(); it++)
+          LegionSpy::log_child_operation_index(parent_ctx->get_unique_id(),
+              context_index, (*it)->get_unique_op_id());
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -15195,7 +15194,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MustEpochOp::receive_resources(size_t return_index,
+    void MustEpochOp::receive_resources(uint64_t return_index,
               std::map<LogicalRegion,unsigned> &created_regs,
               std::vector<DeletedRegion> &deleted_regs,
               std::set<std::pair<FieldSpace,FieldID> > &created_fids,
@@ -16046,7 +16045,7 @@ namespace Legion {
                                                         Provenance *provenance)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/, 0/*regions*/, provenance);
+      initialize_operation(ctx, provenance);
 #ifdef DEBUG_LEGION
       assert(thunk == NULL);
 #endif
@@ -16061,7 +16060,7 @@ namespace Legion {
                                    size_t granularity, Provenance *provenance)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/, 0/*regions*/, provenance);
+      initialize_operation(ctx, provenance);
 #ifdef DEBUG_LEGION
       assert(thunk == NULL);
 #endif
@@ -16080,7 +16079,7 @@ namespace Legion {
                                                         Provenance *provenance)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/, 0/*regions*/, provenance);
+      initialize_operation(ctx, provenance);
 #ifdef DEBUG_LEGION
       assert(thunk == NULL);
 #endif
@@ -16098,7 +16097,7 @@ namespace Legion {
                                                             Provenance *prov)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/, 0/*regions*/, prov);
+      initialize_operation(ctx, prov);
 #ifdef DEBUG_LEGION
       assert(thunk == NULL);
 #endif
@@ -16116,7 +16115,7 @@ namespace Legion {
                                                            Provenance *prov)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/, 0/*regions*/, prov);
+      initialize_operation(ctx, prov);
 #ifdef DEBUG_LEGION
       assert(thunk == NULL);
 #endif
@@ -16133,7 +16132,7 @@ namespace Legion {
                                                              Provenance *prov)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/, 0/*regions*/, prov);
+      initialize_operation(ctx, prov);
 #ifdef DEBUG_LEGION
       assert(thunk == NULL);
 #endif
@@ -16152,7 +16151,7 @@ namespace Legion {
                                                           Provenance *prov)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/, 0/*regions*/, prov);
+      initialize_operation(ctx, prov);
 #ifdef DEBUG_LEGION
       assert(thunk == NULL);
 #endif
@@ -16170,7 +16169,7 @@ namespace Legion {
                                                   Provenance *provenance)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/, 0/*regions*/, provenance);
+      initialize_operation(ctx, provenance);
 #ifdef DEBUG_LEGION
       assert(thunk == NULL);
 #endif
@@ -16192,7 +16191,7 @@ namespace Legion {
                                                     const ShardMapping *mapping)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/, 0/*regions*/, provenance);
+      initialize_operation(ctx, provenance);
 #ifdef DEBUG_LEGION
       assert(thunk == NULL);
 #endif
@@ -16208,7 +16207,7 @@ namespace Legion {
                                                          Provenance *provenance)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/, 0/*regions*/, provenance);
+      initialize_operation(ctx, provenance);
 #ifdef DEBUG_LEGION
       assert(thunk == NULL);
 #endif
@@ -16224,7 +16223,7 @@ namespace Legion {
                                                          Provenance *provenance)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/, 0/*regions*/, provenance);
+      initialize_operation(ctx, provenance);
 #ifdef DEBUG_LEGION
       assert(thunk == NULL);
 #endif
@@ -16240,7 +16239,7 @@ namespace Legion {
                                          Provenance *provenance)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/, 0/*regions*/, provenance);
+      initialize_operation(ctx, provenance);
 #ifdef DEBUG_LEGION
       assert(thunk == NULL);
 #endif
@@ -16255,7 +16254,7 @@ namespace Legion {
                                   IndexPartition handle, Provenance *provenance)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/, 0/*regions*/, provenance);
+      initialize_operation(ctx, provenance);
 #ifdef DEBUG_LEGION
       assert(thunk == NULL);
 #endif
@@ -16272,7 +16271,7 @@ namespace Legion {
                                          Provenance *provenance)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/, 0/*regions*/, provenance);
+      initialize_operation(ctx, provenance);
 #ifdef DEBUG_LEGION
       assert(thunk == NULL);
 #endif
@@ -16286,7 +16285,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       LegionSpy::log_pending_partition_operation(
-          parent_ctx->get_unique_id(), unique_op_id, context_index);
+          parent_ctx->get_unique_id(), unique_op_id);
       thunk->perform_logging(this);
     }
 
@@ -16527,7 +16526,7 @@ namespace Legion {
       rez.serialize(index_domain);
       rez.serialize(index_point);
       pack_mappable(*this, rez);
-      rez.serialize<size_t>(get_context_index());
+      rez.serialize(get_context_index());
     }
 
     //--------------------------------------------------------------------------
@@ -16541,7 +16540,7 @@ namespace Legion {
       derez.deserialize(index_domain);
       derez.deserialize(index_point);
       unpack_mappable(*this, derez);
-      size_t index;
+      uint64_t index;
       derez.deserialize(index);
       set_context_index(index);
     }
@@ -16596,7 +16595,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       parent_task = ctx->get_task();
-      initialize_operation(ctx, true/*track*/, 0, prov); 
+      initialize_operation(ctx, prov); 
       // Start without the projection requirement, we'll ask
       // the mapper later if it wants to turn this into an index launch
       requirement = 
@@ -16667,7 +16666,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       parent_task = ctx->get_task();
-      initialize_operation(ctx, true/*track*/, 1/*regions*/, prov);
+      initialize_operation(ctx, prov, 1/*regions*/);
       requirement = RegionRequirement(projection, 0/*identity*/,
                       LEGION_READ_ONLY, LEGION_EXCLUSIVE, parent);
       requirement.add_field(fid);
@@ -16738,7 +16737,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       parent_task = ctx->get_task();
-      initialize_operation(ctx, true/*track*/, 1/*regions*/, prov);
+      initialize_operation(ctx, prov, 1/*regions*/);
       requirement = RegionRequirement(projection, 0/*identity*/,
                       LEGION_READ_ONLY, LEGION_EXCLUSIVE, parent);
       requirement.add_field(fid);
@@ -16804,7 +16803,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       parent_task = ctx->get_task();
-      initialize_operation(ctx, true/*track*/, 1/*regions*/, prov);
+      initialize_operation(ctx, prov, 1/*regions*/);
       // Start without the projection requirement, we'll ask
       // the mapper later if it wants to turn this into an index launch
       requirement = 
@@ -16873,7 +16872,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       parent_task = ctx->get_task();
-      initialize_operation(ctx, true/*track*/, 1/*regions*/, prov);
+      initialize_operation(ctx, prov, 1/*regions*/);
       // Start without the projection requirement, we'll ask
       // the mapper later if it wants to turn this into an index launch
       requirement = 
@@ -16942,7 +16941,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       parent_task = ctx->get_task();
-      initialize_operation(ctx, true/*track*/, 1/*regions*/, prov);
+      initialize_operation(ctx, prov, 1/*regions*/);
       // start-off with non-projection requirement
       requirement = RegionRequirement(domain, LEGION_READ_WRITE, 
                                       LEGION_EXCLUSIVE, domain_parent);
@@ -17004,7 +17003,7 @@ namespace Legion {
     {
       LegionSpy::log_dependent_partition_operation(
           parent_ctx->get_unique_id(), unique_op_id, 
-          thunk->get_partition().get_id(), thunk->get_kind(), context_index);
+          thunk->get_partition().get_id(), thunk->get_kind());
     }
 
     //--------------------------------------------------------------------------
@@ -17752,14 +17751,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    size_t DependentPartitionOp::get_context_index(void) const
+    uint64_t DependentPartitionOp::get_context_index(void) const
     //--------------------------------------------------------------------------
     {
       return context_index;
     }
 
     //--------------------------------------------------------------------------
-    void DependentPartitionOp::set_context_index(size_t index)
+    void DependentPartitionOp::set_context_index(uint64_t index)
     //--------------------------------------------------------------------------
     {
       context_index = index;
@@ -18243,11 +18242,10 @@ namespace Legion {
                                     const DomainPoint &p)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(own->get_context(), false/*track*/, 1/*size*/,
-          own->get_provenance());
+      initialize_operation(own->get_context(), own->get_provenance(),1/*size*/);
       index_point = p;
       owner = own;
-      context_index = owner->get_ctx_index();
+      context_index = owner->get_context_index();
       index_domain = owner->index_domain;
       requirement  = owner->requirement;
       parent_task  = owner->parent_task;
@@ -18456,7 +18454,7 @@ namespace Legion {
       rez.serialize(index_domain);
       rez.serialize(index_point);
       pack_mappable(*this, rez);
-      rez.serialize<size_t>(get_context_index());
+      rez.serialize(get_context_index());
     }
 
     //--------------------------------------------------------------------------
@@ -18485,7 +18483,7 @@ namespace Legion {
       derez.deserialize(index_domain);
       derez.deserialize(index_point);
       unpack_mappable(*this, derez);
-      size_t index;
+      uint64_t index;
       derez.deserialize(index);
       set_context_index(index);
     }
@@ -18533,8 +18531,7 @@ namespace Legion {
     {
       parent_ctx = ctx;
       parent_task = ctx->get_task();
-      initialize_predication(ctx, true/*track*/, 1, launcher.static_dependences,
-                             launcher.predicate, provenance);
+      initialize_predication(ctx, 1/*regions*/, launcher.predicate, provenance);
       requirement = RegionRequirement(launcher.handle, LEGION_WRITE_DISCARD,
                                       LEGION_EXCLUSIVE, launcher.parent);
       requirement.privilege_fields = launcher.fields;
@@ -18572,7 +18569,7 @@ namespace Legion {
       if (runtime->legion_spy_enabled)
       {
         LegionSpy::log_fill_operation(parent_ctx->get_unique_id(), 
-                                      unique_op_id, context_index);
+                                      unique_op_id);
         if ((future.impl != NULL) &&
             future.impl->get_ready_event().exists())
           LegionSpy::log_future_use(unique_op_id, future.impl->did); 
@@ -18649,14 +18646,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    size_t FillOp::get_context_index(void) const
+    uint64_t FillOp::get_context_index(void) const
     //--------------------------------------------------------------------------
     {
       return context_index; 
     }
 
     //--------------------------------------------------------------------------
-    void FillOp::set_context_index(size_t index)
+    void FillOp::set_context_index(uint64_t index)
     //--------------------------------------------------------------------------
     {
       context_index = index;
@@ -19209,8 +19206,7 @@ namespace Legion {
     {
       parent_ctx = ctx;
       parent_task = ctx->get_task();
-      initialize_predication(ctx, true/*track*/, 1, launcher.static_dependences,
-                             launcher.predicate, provenance);
+      initialize_predication(ctx, 1/*regions*/, launcher.predicate, provenance);
 #ifdef DEBUG_LEGION
       assert(launch_sp.exists());
 #endif
@@ -19272,7 +19268,7 @@ namespace Legion {
       if (runtime->legion_spy_enabled)
       {
         LegionSpy::log_fill_operation(parent_ctx->get_unique_id(), 
-                                      unique_op_id, context_index);
+                                      unique_op_id);
         if ((future.impl != NULL) &&
             future.impl->get_ready_event().exists())
           LegionSpy::log_future_use(unique_op_id, future.impl->did); 
@@ -19760,13 +19756,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Initialize the operation
-      initialize_operation(own->get_context(), false/*track*/, 1/*regions*/,
-          own->get_provenance());
+      initialize_operation(own->get_context(), own->get_provenance(),
+                            1/*regions*/);
       index_point = p;
       index_domain = own->index_domain;
       sharding_space = own->sharding_space;
       owner = own;
-      context_index = own->get_ctx_index();
+      context_index = own->get_context_index();
       execution_fence_event = own->get_execution_fence_event();
       // From Memoizable
       trace_local_id     = owner->get_trace_local_id().context_index;
@@ -20034,8 +20030,7 @@ namespace Legion {
                         const DiscardLauncher &launcher, Provenance *provenance)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/, 1/*regions*/,
-                           provenance, launcher.static_dependences);
+      initialize_operation(ctx, provenance, 1/*regions*/);
       requirement.region = launcher.handle;
       requirement.parent = launcher.parent;
       requirement.privilege = LEGION_WRITE_DISCARD;
@@ -20044,7 +20039,7 @@ namespace Legion {
       requirement.privilege_fields = launcher.fields;
       if (runtime->legion_spy_enabled)
         LegionSpy::log_discard_operation(parent_ctx->get_unique_id(),
-                                         unique_op_id, context_index);
+                                         unique_op_id);
     }
 
     //--------------------------------------------------------------------------
@@ -20317,8 +20312,7 @@ namespace Legion {
                                         Provenance *provenance)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/, 1/*regions*/, 
-                           provenance, launcher.static_dependences);
+      initialize_operation(ctx, provenance, 1/*regions*/);
       resource = launcher.resource;
       layout_constraint_set = launcher.constraints;
       restricted = launcher.restricted;
@@ -20448,7 +20442,7 @@ namespace Legion {
       requirement.privilege = LEGION_WRITE_DISCARD;
       if (runtime->legion_spy_enabled)
         LegionSpy::log_attach_operation(parent_ctx->get_unique_id(),
-                            unique_op_id, context_index, restricted);
+                                        unique_op_id, restricted);
       return region;
     }
 
@@ -20993,8 +20987,7 @@ namespace Legion {
                                       const bool replicated)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/, 1/*regions*/,
-                           provenance, launcher.static_dependences);
+      initialize_operation(ctx, provenance, 1/*regions*/);
       // Construct the region requirement
       // Use a fake projection ID for now, we'll fill it in later during the
       // prepipeline stage before the logical dependence analysis
@@ -21030,7 +21023,7 @@ namespace Legion {
       if (runtime->legion_spy_enabled)
       {
         LegionSpy::log_attach_operation(parent_ctx->get_unique_id(),
-                  unique_op_id, context_index, false/*restricted*/);
+                                        unique_op_id, false/*restricted*/);
         if (launch_space != NULL)
           runtime->forest->log_launch_space(launch_space->handle, unique_op_id);
       }
@@ -21479,11 +21472,10 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(index < launcher.handles.size());
 #endif
-      initialize_operation(ctx, false/*track*/, 1/*regions*/,
-          own->get_provenance());
+      initialize_operation(ctx, own->get_provenance(), 1/*regions*/);
       owner = own;
       index_point = point;
-      context_index = own->get_ctx_index();
+      context_index = own->get_context_index();
       layout_constraint_set = launcher.constraints;
       restricted = launcher.restricted;
       requirement = RegionRequirement(launcher.handles[index], 
@@ -21759,7 +21751,7 @@ namespace Legion {
                   const bool flsh, const bool unordered, Provenance *provenance)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, !unordered/*track*/, 0, provenance);
+      initialize_operation(ctx, provenance);
       flush = flsh;
       // Get a reference to the region to keep it alive
       this->region = region; 
@@ -21775,7 +21767,7 @@ namespace Legion {
                 get_provenance(), this));
       if (runtime->legion_spy_enabled)
         LegionSpy::log_detach_operation(parent_ctx->get_unique_id(),
-                            unique_op_id, context_index, unordered);
+                                        unique_op_id, unordered);
       return result;
     }
 
@@ -22138,7 +22130,7 @@ namespace Legion {
                                    Provenance *provenance)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, !unordered/*track*/, 0, provenance);
+      initialize_operation(ctx, provenance);
       // Construct the region requirement
       // We'll get the projection later after we know its been written
       // in the dependence analysis stage of the pipeline
@@ -22170,7 +22162,7 @@ namespace Legion {
       if (runtime->legion_spy_enabled)
       {
         LegionSpy::log_detach_operation(parent_ctx->get_unique_id(),
-                            unique_op_id, context_index, unordered);
+                                        unique_op_id, unordered);
         runtime->forest->log_launch_space(launch_space->handle, unique_op_id);
       }
       return result;
@@ -22434,12 +22426,11 @@ namespace Legion {
               const PhysicalRegion &region, const DomainPoint &point, bool flsh)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, false/*track*/, 1/*regions*/,
-          own->get_provenance());
+      initialize_operation(ctx, own->get_provenance(), 1/*regions*/);
       index_point = point;
       owner = own;
       flush = flsh;
-      context_index = own->get_ctx_index();
+      context_index = own->get_context_index();
       // Get a reference to the region to keep it alive
       this->region = region; 
       requirement = region.impl->get_requirement();
@@ -22593,7 +22584,7 @@ namespace Legion {
                          const TimingLauncher &launcher, Provenance *provenance)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/, 0/*regions*/, provenance);
+      initialize_operation(ctx, provenance);
       measurement = launcher.measurement;
       // Only allow non-empty futures 
       if (!launcher.preconditions.empty())
@@ -22609,8 +22600,7 @@ namespace Legion {
                 get_provenance(), this));
       if (runtime->legion_spy_enabled)
       {
-        LegionSpy::log_timing_operation(ctx->get_unique_id(),
-                                        unique_op_id, context_index);
+        LegionSpy::log_timing_operation(ctx->get_unique_id(), unique_op_id);
         DomainPoint empty_point;
         LegionSpy::log_future_creation(unique_op_id, result.impl->did,
                                        empty_point);
@@ -22762,7 +22752,7 @@ namespace Legion {
                         const TunableLauncher &launcher, Provenance *provenance)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/, 0/*regions*/, provenance);
+      initialize_operation(ctx, provenance);
       tunable_id = launcher.tunable;
       mapper_id = launcher.mapper;
       tag = launcher.tag;
@@ -22778,8 +22768,7 @@ namespace Legion {
             runtime->get_available_distributed_id(), get_provenance(), this));
       if (runtime->legion_spy_enabled)
       {
-        LegionSpy::log_tunable_operation(ctx->get_unique_id(),
-                                         unique_op_id, context_index);
+        LegionSpy::log_tunable_operation(ctx->get_unique_id(), unique_op_id);
         const DomainPoint empty_point;
         LegionSpy::log_future_creation(unique_op_id, result.impl->did,
                                        empty_point);
@@ -22955,7 +22944,7 @@ namespace Legion {
                                    Future initial_value)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/, 0/*regions*/, provenance);
+      initialize_operation(ctx, provenance);
       future_map = fm;
       redop_id = redid;
       redop = runtime->get_reduction(redop_id);
@@ -22972,8 +22961,7 @@ namespace Legion {
       deterministic = is_deterministic;
       if (runtime->legion_spy_enabled)
       {
-        LegionSpy::log_all_reduce_operation(ctx->get_unique_id(),
-                                            unique_op_id, context_index);
+        LegionSpy::log_all_reduce_operation(ctx->get_unique_id(), unique_op_id);
         const DomainPoint empty_point;
         LegionSpy::log_future_creation(unique_op_id, result.impl->did,
                                        empty_point);
@@ -23879,14 +23867,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    size_t RemoteMapOp::get_context_index(void) const
+    uint64_t RemoteMapOp::get_context_index(void) const
     //--------------------------------------------------------------------------
     {
       return context_index;
     }
 
     //--------------------------------------------------------------------------
-    void RemoteMapOp::set_context_index(size_t index)
+    void RemoteMapOp::set_context_index(uint64_t index)
     //--------------------------------------------------------------------------
     {
       context_index = index;
@@ -24022,14 +24010,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    size_t RemoteCopyOp::get_context_index(void) const
+    uint64_t RemoteCopyOp::get_context_index(void) const
     //--------------------------------------------------------------------------
     {
       return context_index;
     }
 
     //--------------------------------------------------------------------------
-    void RemoteCopyOp::set_context_index(size_t index)
+    void RemoteCopyOp::set_context_index(uint64_t index)
     //--------------------------------------------------------------------------
     {
       context_index = index;
@@ -24198,14 +24186,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    size_t RemoteCloseOp::get_context_index(void) const
+    uint64_t RemoteCloseOp::get_context_index(void) const
     //--------------------------------------------------------------------------
     {
       return context_index;
     }
 
     //--------------------------------------------------------------------------
-    void RemoteCloseOp::set_context_index(size_t index)
+    void RemoteCloseOp::set_context_index(uint64_t index)
     //--------------------------------------------------------------------------
     {
       context_index = index;
@@ -24342,14 +24330,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    size_t RemoteAcquireOp::get_context_index(void) const
+    uint64_t RemoteAcquireOp::get_context_index(void) const
     //--------------------------------------------------------------------------
     {
       return context_index;
     }
 
     //--------------------------------------------------------------------------
-    void RemoteAcquireOp::set_context_index(size_t index)
+    void RemoteAcquireOp::set_context_index(uint64_t index)
     //--------------------------------------------------------------------------
     {
       context_index = index;
@@ -24458,14 +24446,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    size_t RemoteReleaseOp::get_context_index(void) const
+    uint64_t RemoteReleaseOp::get_context_index(void) const
     //--------------------------------------------------------------------------
     {
       return context_index;
     }
 
     //--------------------------------------------------------------------------
-    void RemoteReleaseOp::set_context_index(size_t index)
+    void RemoteReleaseOp::set_context_index(uint64_t index)
     //--------------------------------------------------------------------------
     {
       context_index = index;
@@ -24601,14 +24589,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    size_t RemoteFillOp::get_context_index(void) const
+    uint64_t RemoteFillOp::get_context_index(void) const
     //--------------------------------------------------------------------------
     {
       return context_index;
     }
 
     //--------------------------------------------------------------------------
-    void RemoteFillOp::set_context_index(size_t index)
+    void RemoteFillOp::set_context_index(uint64_t index)
     //--------------------------------------------------------------------------
     {
       context_index = index;
@@ -24697,14 +24685,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    size_t RemoteDiscardOp::get_context_index(void) const
+    uint64_t RemoteDiscardOp::get_context_index(void) const
     //--------------------------------------------------------------------------
     {
       return context_index;
     }
 
     //--------------------------------------------------------------------------
-    void RemoteDiscardOp::set_context_index(size_t index)
+    void RemoteDiscardOp::set_context_index(uint64_t index)
     //--------------------------------------------------------------------------
     {
       context_index = index;
@@ -24791,14 +24779,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    size_t RemotePartitionOp::get_context_index(void) const
+    uint64_t RemotePartitionOp::get_context_index(void) const
     //--------------------------------------------------------------------------
     {
       return context_index;
     }
 
     //--------------------------------------------------------------------------
-    void RemotePartitionOp::set_context_index(size_t index)
+    void RemotePartitionOp::set_context_index(uint64_t index)
     //--------------------------------------------------------------------------
     {
       context_index = index;
@@ -24945,14 +24933,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    size_t RemoteAttachOp::get_context_index(void) const
+    uint64_t RemoteAttachOp::get_context_index(void) const
     //--------------------------------------------------------------------------
     {
       return context_index;
     }
 
     //--------------------------------------------------------------------------
-    void RemoteAttachOp::set_context_index(size_t index)
+    void RemoteAttachOp::set_context_index(uint64_t index)
     //--------------------------------------------------------------------------
     {
       context_index = index;
@@ -25038,14 +25026,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    size_t RemoteDetachOp::get_context_index(void) const
+    uint64_t RemoteDetachOp::get_context_index(void) const
     //--------------------------------------------------------------------------
     {
       return context_index;
     }
 
     //--------------------------------------------------------------------------
-    void RemoteDetachOp::set_context_index(size_t index)
+    void RemoteDetachOp::set_context_index(uint64_t index)
     //--------------------------------------------------------------------------
     {
       context_index = index;
@@ -25142,14 +25130,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    size_t RemoteDeletionOp::get_context_index(void) const
+    uint64_t RemoteDeletionOp::get_context_index(void) const
     //--------------------------------------------------------------------------
     {
       return context_index;
     }
 
     //--------------------------------------------------------------------------
-    void RemoteDeletionOp::set_context_index(size_t index)
+    void RemoteDeletionOp::set_context_index(uint64_t index)
     //--------------------------------------------------------------------------
     {
       context_index = index;
@@ -25235,14 +25223,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    size_t RemoteReplayOp::get_context_index(void) const
+    uint64_t RemoteReplayOp::get_context_index(void) const
     //--------------------------------------------------------------------------
     {
       return context_index;
     }
 
     //--------------------------------------------------------------------------
-    void RemoteReplayOp::set_context_index(size_t index)
+    void RemoteReplayOp::set_context_index(uint64_t index)
     //--------------------------------------------------------------------------
     {
       context_index = index;
@@ -25328,14 +25316,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    size_t RemoteSummaryOp::get_context_index(void) const
+    uint64_t RemoteSummaryOp::get_context_index(void) const
     //--------------------------------------------------------------------------
     {
       return context_index;
     }
 
     //--------------------------------------------------------------------------
-    void RemoteSummaryOp::set_context_index(size_t index)
+    void RemoteSummaryOp::set_context_index(uint64_t index)
     //--------------------------------------------------------------------------
     {
       context_index = index;

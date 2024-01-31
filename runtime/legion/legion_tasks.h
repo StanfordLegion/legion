@@ -46,7 +46,7 @@ namespace Legion {
       static void unpack_output_requirement(
           OutputRequirement &req, Deserializer &derez);
     public:
-      virtual void set_context_index(size_t index) = 0;
+      virtual void set_context_index(uint64_t index) = 0;
     protected:
       AllocManager *arg_manager;
     };
@@ -135,8 +135,8 @@ namespace Legion {
       virtual ~TaskOp(void);
     public:
       virtual UniqueID get_unique_id(void) const;
-      virtual size_t get_context_index(void) const;
-      virtual void set_context_index(size_t index);
+      virtual uint64_t get_context_index(void) const;
+      virtual void set_context_index(uint64_t index);
       virtual bool has_parent_task(void) const;
       virtual const Task* get_parent_task(void) const;
       virtual const std::string& get_provenance_string(bool human = true) const;
@@ -168,8 +168,7 @@ namespace Legion {
       void unpack_base_external_task(Deserializer &derez);
     public:
       void mark_stolen(void);
-      void initialize_base_task(InnerContext *ctx, bool track,
-            const std::vector<StaticDependence> *dependences,
+      void initialize_base_task(InnerContext *ctx,
             const Predicate &p, Processor::TaskFuncID tid,
             Provenance *provenance);
       void check_empty_field_requirements(void);
@@ -329,7 +328,7 @@ namespace Legion {
       RemoteTaskOp& operator=(const RemoteTaskOp &rhs);
     public:
       virtual UniqueID get_unique_id(void) const;
-      virtual size_t get_context_index(void) const;
+      virtual uint64_t get_context_index(void) const;
       virtual int get_depth(void) const;
       virtual bool has_parent_task(void) const;
       virtual const Task* get_parent_task(void) const;
@@ -340,7 +339,7 @@ namespace Legion {
       virtual size_t get_total_shards(void) const;
       virtual DomainPoint get_shard_point(void) const;
       virtual Domain get_shard_domain(void) const;
-      virtual void set_context_index(size_t index);
+      virtual void set_context_index(uint64_t index);
     public:
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
@@ -694,6 +693,7 @@ namespace Legion {
       IndexSpaceNode *launch_space; // global set of points
       IndexSpace internal_space; // local set of points
       FutureMap future_map;
+      size_t future_map_coordinate;
       FutureHandles *future_handles;
       ReductionOpID redop;
       bool deterministic_redop;
@@ -768,7 +768,7 @@ namespace Legion {
       Future initialize_task(InnerContext *ctx,
                              const TaskLauncher &launcher,
                              Provenance *provenance,
-                             bool track = true, bool top_level=false,
+                             bool top_level=false,
                              bool must_epoch_launch = false,
                              std::vector<OutputRequirement> *outputs = NULL);
       void perform_base_dependence_analysis(void);
@@ -1152,16 +1152,14 @@ namespace Legion {
       FutureMap initialize_task(InnerContext *ctx,
                                 const IndexTaskLauncher &launcher,
                                 IndexSpace launch_space,
-                                Provenance *provenance,
-                                bool track = true,
+                                Provenance *provenance, bool track,
                                 std::vector<OutputRequirement> *outputs = NULL);
       Future initialize_task(InnerContext *ctx,
                              const IndexTaskLauncher &launcher,
                              IndexSpace launch_space,
                              Provenance *provenance,
                              ReductionOpID redop,
-                             bool deterministic,
-                             bool track = true,
+                             bool deterministic, bool track,
                              std::vector<OutputRequirement> *outputs = NULL);
       void initialize_regions(const std::vector<RegionRequirement> &regions);
       void initialize_predicate(const Future &pred_future,
@@ -1431,7 +1429,7 @@ namespace Legion {
     public:
       static void handle_slice_return(Runtime *rt, Deserializer &derez);
     public: // Privilege tracker methods
-      virtual void receive_resources(size_t return_index,
+      virtual void receive_resources(uint64_t return_index,
               std::map<LogicalRegion,unsigned> &created_regions,
               std::vector<DeletedRegion> &deleted_regions,
               std::set<std::pair<FieldSpace,FieldID> > &created_fields,

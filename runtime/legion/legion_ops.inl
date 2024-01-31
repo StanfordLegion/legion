@@ -53,10 +53,7 @@ namespace Legion {
         if (this->tpl == NULL)
         {
           this->trace->set_state_record();
-          TaskTreeCoordinates coordinates;
-          this->compute_task_tree_coordinates(coordinates);
-          this->tpl =
-            physical_trace->start_new_template(std::move(coordinates));
+          this->tpl = physical_trace->start_new_template();
 #ifdef DEBUG_LEGION
           assert(this->tpl != NULL);
 #endif
