@@ -525,17 +525,7 @@ namespace Legion {
       virtual void record_previous_trace(LogicalTrace *trace) = 0;
       virtual void invalidate_trace_cache(LogicalTrace *trace,
                                           Operation *invalidator) = 0;
-<<<<<<< HEAD
-      // record_blocking_call is called when the application performs
-      // a blocking operation, like waiting on a future. The callback gets
-      // a bit about whether the waited on operation is actually part of the
-      // application's operation stream. For example, waiting on a future
-      // produced by a consensus_match operation is not inside the
-      // application's operation stream.
-      virtual void record_blocking_call(bool in_operation_stream) = 0;
-=======
       virtual void record_blocking_call(uint64_t future_coordinate) = 0;
->>>>>>> control_replication
     public:
       virtual void issue_frame(FrameOp *frame, ApEvent frame_termination) = 0;
       virtual void perform_frame_issue(FrameOp *frame, 
