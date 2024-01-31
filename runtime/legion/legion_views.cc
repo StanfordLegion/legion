@@ -6985,7 +6985,7 @@ namespace Legion {
             op->pack_remote_operation(rez, origin, applied_events);
           rez.serialize(index);
           rez.serialize(collective_match_space);
-          rez.serialize(op->get_ctx_index());
+          rez.serialize(op->get_context_index());
           rez.serialize(fill_mask);
           trace_info.pack_trace_info(rez, applied_events);
           rez.serialize(recorded);
@@ -7030,7 +7030,7 @@ namespace Legion {
         }
         perform_collective_fill(fill_view, precondition,
             predicate_guard, fill_expression, op, index,
-            collective_match_space, op->get_ctx_index(),
+            collective_match_space, op->get_context_index(),
             fill_mask, trace_info, recorded_events, applied_events,
             to_trigger, local_space, fill_restricted);
       }
@@ -7153,7 +7153,7 @@ namespace Legion {
               op->pack_remote_operation(rez, origin, applied_events);
             rez.serialize(index);
             rez.serialize(collective_match_space);
-            rez.serialize(op->get_ctx_index());
+            rez.serialize(op->get_context_index());
             rez.serialize(copy_mask);
             trace_info.pack_trace_info(rez, applied_events);
             rez.serialize(recorded);
@@ -7196,14 +7196,14 @@ namespace Legion {
           if (reduction_op_id > 0)
             perform_collective_reducecast(source_view->as_reduction_view(), 
                 src_fields, precondition, predicate_guard, copy_expression,
-                op, index, collective_match_space, op->get_ctx_index(), 
+                op, index, collective_match_space, op->get_context_index(), 
                 copy_mask, src_inst, source_manager->get_unique_event(),
                 trace_info, recorded_events, applied_events, copy_done,
                 all_bar, owner_shard, origin, copy_restricted);
           else
             perform_collective_broadcast(src_fields, precondition,
                 predicate_guard, copy_expression, op, index, 
-                collective_match_space, op->get_ctx_index(), copy_mask,
+                collective_match_space, op->get_context_index(), copy_mask,
                 src_inst, source_manager->get_unique_event(), trace_info,
                 recorded_events, applied_events, copy_done, all_done,
                 all_bar, owner_shard, origin, copy_restricted, 
@@ -7281,7 +7281,7 @@ namespace Legion {
               op->pack_remote_operation(rez, origin, applied_events);
             rez.serialize(index);
             rez.serialize(collective_match_space);
-            rez.serialize(op->get_ctx_index());
+            rez.serialize(op->get_context_index());
             rez.serialize(copy_mask);
             if (src_point != NULL)
               rez.serialize(src_point->did);
@@ -7309,7 +7309,7 @@ namespace Legion {
         else
           perform_collective_pointwise(collective, precondition,
               predicate_guard, copy_expression, op, index, 
-              collective_match_space, op->get_ctx_index(),
+              collective_match_space, op->get_context_index(),
               copy_mask, (src_point != NULL) ? src_point->did : 0, 
               op->get_unique_op_id(), trace_info, recorded_events, 
               applied_events, all_done, all_bar, owner_shard, origin, 
@@ -7382,7 +7382,7 @@ namespace Legion {
         assert(collective_mapping->contains(local_space));
         assert((op != NULL) || !copy_restricted);
 #endif
-        const size_t op_ctx_index = op->get_ctx_index();
+        const size_t op_ctx_index = op->get_context_index();
         CollectiveAnalysis *first_local_analysis = NULL;
         if (!copy_restricted && ((op == NULL) || trace_info.recording))
         {
@@ -10976,7 +10976,7 @@ namespace Legion {
               op->pack_remote_operation(rez, origin, applied_events); 
             rez.serialize(index);
             rez.serialize(match_space);
-            rez.serialize(op->get_ctx_index());
+            rez.serialize(op->get_context_index());
             rez.serialize(copy_mask);
             trace_info.pack_trace_info(rez, applied_events);
             rez.serialize(recorded);

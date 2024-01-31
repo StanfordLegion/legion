@@ -96,7 +96,7 @@ namespace Legion {
       // No need to pack remote, it will get set
       rez.serialize(speculated);
       // No need to pack local function, it's not if we're sending this remote
-      rez.serialize<size_t>(get_context_index());
+      rez.serialize<uint64_t>(get_context_index());
     }
 
     //--------------------------------------------------------------------------
@@ -175,7 +175,7 @@ namespace Legion {
       derez.deserialize(orig_proc);
       derez.deserialize(steal_count);
       derez.deserialize(speculated);
-      size_t index;
+      uint64_t index;
       derez.deserialize(index);
       set_context_index(index);
     } 
@@ -234,14 +234,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    size_t TaskOp::get_context_index(void) const
+    uint64_t TaskOp::get_context_index(void) const
     //--------------------------------------------------------------------------
     {
       return context_index;
     }
 
     //--------------------------------------------------------------------------
-    void TaskOp::set_context_index(size_t index)
+    void TaskOp::set_context_index(uint64_t index)
     //--------------------------------------------------------------------------
     {
       context_index = index;
@@ -422,12 +422,10 @@ namespace Legion {
         const TaskKind kind = get_task_kind();
         if (kind == INDEX_TASK_KIND)
           LegionSpy::log_index_task(parent_ctx->get_unique_id(),
-                                    unique_op_id, task_id,
-                                    epoch->get_ctx_index(), get_task_name());
+                                    unique_op_id, task_id, get_task_name());
         else if (kind == INDIVIDUAL_TASK_KIND)
           LegionSpy::log_individual_task(parent_ctx->get_unique_id(),
-                                    unique_op_id, task_id,
-                                    epoch->get_ctx_index(), get_task_name());
+                                    unique_op_id, task_id, get_task_name());
       }
     }
 
@@ -647,12 +645,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TaskOp::initialize_base_task(InnerContext *ctx, bool track, 
-                const std::vector<StaticDependence> *dependences,
+    void TaskOp::initialize_base_task(InnerContext *ctx,
                 const Predicate &p, Processor::TaskFuncID tid, Provenance *prov)
     //--------------------------------------------------------------------------
     {
-      initialize_predication(ctx, track, get_region_count(),dependences,p,prov);
+      initialize_predication(ctx, get_region_count(), p, prov);
       parent_task = ctx->get_task(); // initialize the parent task
       // Fill in default values for all of the Task fields
       orig_proc = ctx->get_executing_processor();
@@ -1359,7 +1356,7 @@ namespace Legion {
 #endif
       // From Operation
       this->parent_ctx = rhs->parent_ctx;
-      this->context_index = rhs->context_index;
+      this->context_index = rhs->get_context_index();
       this->execution_fence_event = rhs->get_execution_fence_event();
       // Don't register this an operation when setting the must epoch info
       if (rhs->must_epoch != NULL)
@@ -2061,14 +2058,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    size_t RemoteTaskOp::get_context_index(void) const
+    uint64_t RemoteTaskOp::get_context_index(void) const
     //--------------------------------------------------------------------------
     {
       return context_index;
     }
 
     //--------------------------------------------------------------------------
-    void RemoteTaskOp::set_context_index(size_t index)
+    void RemoteTaskOp::set_context_index(uint64_t index)
     //--------------------------------------------------------------------------
     {
       context_index = index;
@@ -2967,6 +2964,17 @@ namespace Legion {
       // Record the future output size
       handle_future_size(variant_impl->return_type_size,
           variant_impl->has_return_type_size, map_applied_conditions);
+      if (is_recording() && !variant_impl->has_return_type_size)
+        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+            "Invalid mapper output from invocation of '%s' on mapper %s. "
+            "Mapper selected task variant %d when mapping task %s (UID %lld) "
+            "being recorded for trace %d in parent task %s (UID %lld). "
+            "However this variant does not specify a static upper bound "
+            "future size. All tasks recorded as part of a trace must use "
+            "variants with statically known future result sizes.", "map_task",
+            mapper->get_mapper_name(), output.chosen_variant, get_task_name(),
+            get_unique_id(), trace->tid, parent_ctx->get_task_name(),
+            parent_ctx->get_unique_id())
       // Save variant validation until we know which instances we'll be using 
 #ifdef DEBUG_LEGION
       // Check to see if any premapped region mappings changed
@@ -3474,25 +3482,33 @@ namespace Legion {
       LegionSpy::log_replay_operation(unique_op_id);
 #endif
       tpl->register_operation(this);
-      std::vector<size_t> future_bounds_sizes;
       tpl->get_mapper_output(this, selected_variant, task_priority,
-        perform_postmap, target_processors, future_memories,
-        future_bounds_sizes, physical_instances);
+          perform_postmap, target_processors, future_memories,
+          physical_instances);
       // Then request any future mappings in advance
       if (!futures.empty())
       {
         for (unsigned idx = 0; idx < futures.size(); idx++)
         {
           const Memory memory = future_memories[idx];
-          size_t bounds = SIZE_MAX;
-          if (idx < future_bounds_sizes.size())
-            bounds = future_bounds_sizes[idx];
           const RtEvent future_mapped =
             futures[idx].impl->request_application_instance(memory, this,
-               unique_op_id, memory.address_space(), false/*can fail*/, bounds);
+               unique_op_id, memory.address_space());
           if (future_mapped.exists())
             map_applied_conditions.insert(future_mapped);
         }
+      }
+      // Make sure to propagate any future sizes that we know about here
+      if (!elide_future_return)
+      {
+        VariantImpl *variant_impl = 
+          runtime->find_variant_impl(task_id, selected_variant);
+#ifdef DEBUG_LEGION
+        assert(variant_impl->has_return_type_size);
+#endif
+        // Record the future output size
+        handle_future_size(variant_impl->return_type_size,
+            variant_impl->has_return_type_size, map_applied_conditions);
       }
       if (!single_task_termination.exists())
         single_task_termination = Runtime::create_ap_user_event(NULL);
@@ -3695,25 +3711,13 @@ namespace Legion {
         // here if we're going to record it
         if (!futures.empty())
           output.future_locations = future_memories;
-        std::vector<size_t> future_size_bounds(futures.size(), SIZE_MAX);
-        std::vector<TaskTreeCoordinates> future_coordinates(futures.size());
-        for (unsigned idx = 0; idx < futures.size(); idx++)
-        {
-          FutureImpl *impl = futures[idx].impl;
-          if (impl == NULL)
-            continue;
-          future_size_bounds[idx] = impl->get_upper_bound_size();
-          if (future_size_bounds[idx] < SIZE_MAX)
-            impl->get_future_coordinates(future_coordinates[idx]);
-        }
         const TraceLocalID tlid = get_trace_local_id();
         if (remote_trace_recorder != NULL)
           remote_trace_recorder->record_mapper_output(tlid, output,
-              physical_instances, future_size_bounds, future_coordinates,
-              map_applied_conditions);
+              physical_instances, map_applied_conditions);
         else
           tpl->record_mapper_output(tlid, output, physical_instances,
-              future_size_bounds, future_coordinates, map_applied_conditions);
+              map_applied_conditions);
       }
     }
 
@@ -3738,34 +3742,6 @@ namespace Legion {
             get_task_name(), get_unique_id(), mapper->get_mapper_name())
         return false;
       }
-#if 0
-      if (!check_collective_regions.empty())
-      {
-        REPORT_LEGION_WARNING(LEGION_WARNING_UNSUPPORTED_REPLICATION,
-            "Unsupported request to replicate task %s (UID %lld) with "
-            "collective region requirements by mapper %s. Legion does not "
-            "currently support replication of tasks with collective region "
-            "requirements at the moment. You can request support for this "
-            "feature by emailing the the Legion developers list or opening a "
-            "github issue. The mapper call to replicate_task is being elided.",
-            get_task_name(), get_unique_id(), mapper->get_mapper_name())
-        return false;
-      }
-      for (unsigned idx = 0; idx < regions.size(); idx++)
-      {
-        if (!IS_COLLECTIVE(regions[idx]))
-          continue;
-        REPORT_LEGION_WARNING(LEGION_WARNING_UNSUPPORTED_REPLICATION,
-            "Unsupported request to replicate task %s (UID %lld) with "
-            "collective region requirements by mapper %s. Legion does not "
-            "currently support replication of tasks with collective region "
-            "requirements at the moment. You can request support for this "
-            "feature by emailing the the Legion developers list or opening a "
-            "github issue. The mapper call to replicate_task is being elided.",
-            get_task_name(), get_unique_id(), mapper->get_mapper_name())
-        return false;
-      }
-#endif
       Mapper::ReplicateTaskInput input;
       Mapper::ReplicateTaskOutput output;
       output.chosen_variant = 0;
@@ -3774,26 +3750,81 @@ namespace Legion {
       // actually going to replicate this task
       if (output.target_processors.size() <= 1)
         return false;
-      VariantImpl *var_impl = runtime->find_variant_impl(task_id,
-          output.chosen_variant, true/*can_fail*/);
-      if (var_impl == NULL)
-        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
-                      "Invalid mapper output from invocation of '%s' "
-                      "on mapper %s. Mapper selected an invalid task "
-                      "variant %d for task %s (UID %lld) that was chosen "
-                      "to be replicated.", "replicate_task",
-                      mapper->get_mapper_name(), output.chosen_variant,
-                      get_task_name(), get_unique_id())
-      // Check that the chosen variant is replicable
-      if (!var_impl->is_replicable())
-        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
-                      "Invalid mapper output from invocation of '%s' "
-                      "on mapper %s. Mapper failed to pick an valid task "
-                      "variant %d for task %s (UID %lld) that was chosen "
-                      "to be replicated. Task variants selected for "
-                      "replication must be marked as replicable variants.",
-                      "replicate_task", mapper->get_mapper_name(),
-                      output.chosen_variant, get_task_name(), get_unique_id())
+      VariantImpl *var_impl = NULL;
+      if (output.leaf_variants.empty())
+      {
+        var_impl = runtime->find_variant_impl(task_id,
+            output.chosen_variant, true/*can_fail*/);
+        if (var_impl == NULL)
+          REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                        "Invalid mapper output from invocation of '%s' "
+                        "on mapper %s. Mapper selected an invalid task "
+                        "variant %d for task %s (UID %lld) that was chosen "
+                        "to be replicated.", "replicate_task",
+                        mapper->get_mapper_name(), output.chosen_variant,
+                        get_task_name(), get_unique_id())
+        // Check that the chosen variant is replicable
+        if (!var_impl->is_replicable())
+          REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                        "Invalid mapper output from invocation of '%s' "
+                        "on mapper %s. Mapper failed to pick an valid task "
+                        "variant %d for task %s (UID %lld) that was chosen "
+                        "to be replicated. Task variants selected for "
+                        "replication must be marked as replicable variants.",
+                        "replicate_task", mapper->get_mapper_name(),
+                        output.chosen_variant, get_task_name(), get_unique_id())
+      }
+      else
+      {
+        output.chosen_variant = 0;
+        if (output.leaf_variants.size() != output.target_processors.size())
+          REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                        "Invalid mapper output from invocation of '%s' "
+                        "on mapper %s. Mapper provided %zd leaf variants "
+                        "for %zd target processors for task %s (UID %lld). "
+                        "The same number of leaf variants must be provided "
+                        "as target processors.", "replicate_task", 
+                        mapper->get_mapper_name(), output.leaf_variants.size(),
+                        output.target_processors.size(), get_task_name(), 
+                        get_unique_id())
+        for (unsigned idx = 0; idx < output.leaf_variants.size(); idx++)
+        {
+          VariantImpl *impl = runtime->find_variant_impl(task_id,
+            output.leaf_variants[idx], true/*can_fail*/);
+          if (impl == NULL)
+            REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                          "Invalid mapper output from invocation of '%s' "
+                          "on mapper %s. Mapper selected an invalid leaf task "
+                          "variant %d for task %s (UID %lld) that was chosen "
+                          "to be replicated.", "replicate_task",
+                          mapper->get_mapper_name(), output.leaf_variants[idx],
+                          get_task_name(), get_unique_id())
+          if (var_impl == NULL)
+            var_impl = impl;
+          // Check that the chosen variant is a leaf
+          if (!impl->is_leaf())
+            REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                          "Invalid mapper output from invocation of '%s' "
+                          "on mapper %s. Mapper failed to pick an valid task "
+                          "variant %d for task %s (UID %lld) that was chosen "
+                          "to be replicated. All variants provided in the "
+                          "leaf_variants must be leaf task variants.",
+                          "replicate_task", mapper->get_mapper_name(),
+                          output.leaf_variants[idx], get_task_name(), 
+                          get_unique_id())
+          // Check that the chosen variant is replicable
+          if (!impl->is_replicable())
+            REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                          "Invalid mapper output from invocation of '%s' "
+                          "on mapper %s. Mapper failed to pick an valid task "
+                          "variant %d for task %s (UID %lld) that was chosen "
+                          "to be replicated. Task variants selected for "
+                          "replication must be marked as replicable variants.",
+                          "replicate_task", mapper->get_mapper_name(),
+                          output.leaf_variants[idx], get_task_name(), 
+                          get_unique_id()) 
+        }
+      }
       if (!runtime->unsafe_mapper)
       {
         // Check that all the processors exist
@@ -3808,18 +3839,20 @@ namespace Legion {
                          mapper->get_mapper_name(),
                          get_task_name(), get_unique_id())
         // Check that the chosen variant works with all the targets processors
-        const ProcessorConstraint &constraint = 
-          var_impl->execution_constraints.processor_constraint; 
-        if (constraint.is_valid())
+        if (output.leaf_variants.empty())
         {
-          const char *proc_names[] = {
+          const ProcessorConstraint &constraint = 
+            var_impl->execution_constraints.processor_constraint; 
+          if (constraint.is_valid())
+          {
+            const char *proc_names[] = {
 #define PROC_NAMES(name, desc) desc,
-            REALM_PROCESSOR_KINDS(PROC_NAMES)
+              REALM_PROCESSOR_KINDS(PROC_NAMES)
 #undef PROC_NAMES
-          };
-          for (unsigned idx = 0; idx < output.target_processors.size(); idx++)
-            if (!constraint.can_use(output.target_processors[idx].kind()))
-              REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+            };
+            for (unsigned idx = 0; idx < output.target_processors.size(); idx++)
+              if (!constraint.can_use(output.target_processors[idx].kind()))
+                REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                         "Invalid mapper output from invocation of '%s' "
                         "on mapper %s. Mapper specified %s processor " IDFMT 
                         " which cannot be used with variant %d when "
@@ -3830,6 +3863,35 @@ namespace Legion {
                          output.target_processors[idx].id,
                          output.chosen_variant, 
                          get_task_name(), get_unique_id())
+          }
+        }
+        else
+        {
+          const char *proc_names[] = {
+#define PROC_NAMES(name, desc) desc,
+            REALM_PROCESSOR_KINDS(PROC_NAMES)
+#undef PROC_NAMES
+          };
+          for (unsigned idx = 0; idx < output.target_processors.size(); idx++)
+          {
+            VariantImpl *impl = runtime->find_variant_impl(task_id,
+                output.leaf_variants[idx], false/*can_fail*/);
+            const ProcessorConstraint &constraint = 
+              impl->execution_constraints.processor_constraint; 
+            if (constraint.is_valid() &&
+                !constraint.can_use(output.target_processors[idx].kind()))
+              REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                        "Invalid mapper output from invocation of '%s' "
+                        "on mapper %s. Mapper specified %s processor " IDFMT 
+                        " which cannot be used with variant %d when "
+                        "replicating task %s (UID %lld) as the variant does "
+                        "not support that kind of processor.", "replicate_task",
+                         mapper->get_mapper_name(), 
+                         proc_names[output.target_processors[idx].kind()],
+                         output.target_processors[idx].id,
+                         output.leaf_variants[idx], 
+                         get_task_name(), get_unique_id())
+          }
         }
         // If the chosen variant is not a leaf check that processors are unique
         // Note that if the chosen variant is a leaf then they don't need to be
@@ -4024,10 +4086,11 @@ namespace Legion {
       for (unsigned idx = 0; idx < local_shards.size(); idx++)
         shard_manager->create_shard(local_shards[idx], 
             output.target_processors[local_shards[idx]],
-            output.chosen_variant, parent_ctx, this);
+            output.leaf_variants.empty() ? output.chosen_variant :
+              output.leaf_variants[local_shards[idx]], parent_ctx, this);
       // Distribute the shard manager and launch the shards 
       shard_manager->distribute_explicit(this, output.chosen_variant,
-                                         output.target_processors);
+          output.target_processors, output.leaf_variants);
       return true;
     }
 
@@ -5181,6 +5244,7 @@ namespace Legion {
       DETAILED_PROFILER(runtime, ACTIVATE_MULTI_CALL);
       CollectiveViewCreator<TaskOp>::activate();
       launch_space = NULL;
+      future_map_coordinate = 0;
       future_handles = NULL;
       internal_space = IndexSpace::NO_SPACE;
       sliced = false;
@@ -5433,6 +5497,7 @@ namespace Legion {
       this->index_domain = rhs->index_domain;
       this->launch_space = rhs->launch_space;
       add_launch_space_reference(this->launch_space);
+      this->future_map_coordinate = rhs->future_map_coordinate;
       this->future_handles = rhs->future_handles;
       if (this->future_handles != NULL)
         this->future_handles->add_reference();
@@ -5609,6 +5674,7 @@ namespace Legion {
             rez.serialize(it->second);
           }
         }
+        rez.serialize(future_map_coordinate);
       }
       else
         rez.serialize<size_t>(0);
@@ -5669,6 +5735,7 @@ namespace Legion {
             derez.deserialize(point);
             derez.deserialize(handles[point]);
           }
+          derez.deserialize(future_map_coordinate);
         }
       }
       size_t num_globals;
@@ -5853,7 +5920,6 @@ namespace Legion {
     Future IndividualTask::initialize_task(InnerContext *ctx,
                                            const TaskLauncher &launcher,
                                            Provenance *provenance,
-                                           bool track /*=true*/,
                                            bool top_level /*=false*/,
                                            bool must_epoch_launch /*=false*/,
                               std::vector<OutputRequirement> *outputs /*=NULL*/)
@@ -5888,8 +5954,7 @@ namespace Legion {
       index_domain = Domain(index_point, index_point);
       sharding_space = launcher.sharding_space;
       is_index_space = false;
-      initialize_base_task(ctx, track, launcher.static_dependences,
-                           launcher.predicate, task_id, provenance);
+      initialize_base_task(ctx, launcher.predicate, task_id, provenance);
       // If the task has any output requirements, we create fresh region names
       // return them back to the user
       if (outputs != NULL)
@@ -5957,10 +6022,10 @@ namespace Legion {
           LegionSpy::log_top_level_task(task_id, parent_ctx->get_unique_id(),
                                         unique_op_id, get_task_name());
         // Tracking as long as we are not part of a must epoch operation
-        if (track || top_level)
+        if (!must_epoch_launch || top_level)
           LegionSpy::log_individual_task(parent_ctx->get_unique_id(),
                                          unique_op_id, task_id,
-                                         context_index, get_task_name());
+                                         get_task_name());
         for (std::vector<PhaseBarrier>::const_iterator it = 
               launcher.wait_barriers.begin(); it !=
               launcher.wait_barriers.end(); it++)
@@ -5981,9 +6046,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       FutureImpl *impl = new FutureImpl(parent_ctx, runtime, true/*register*/,
-              runtime->get_available_distributed_id(),
-              this, gen, context_index, index_point, unique_op_id,
-              parent_ctx->get_depth(), get_provenance());
+              runtime->get_available_distributed_id(), get_provenance(), this);
       if (runtime->legion_spy_enabled)
         LegionSpy::log_future_creation(unique_op_id, 
                                        impl->did, index_point);
@@ -8981,8 +9044,7 @@ namespace Legion {
         index_domain = launcher.launch_domain;
       internal_space = launch_space->handle;
       sharding_space = launcher.sharding_space;
-      initialize_base_task(ctx, track, launcher.static_dependences,
-                           launcher.predicate, task_id, provenance);
+      initialize_base_task(ctx, launcher.predicate, task_id, provenance);
       if (outputs != NULL)
       {
         if (launcher.predicate != Predicate::TRUE_PRED)
@@ -9023,8 +9085,7 @@ namespace Legion {
         // Don't log this yet if we're part of a must epoch operation
         if (track)
           LegionSpy::log_index_task(parent_ctx->get_unique_id(),
-                                    unique_op_id, task_id,
-                                    context_index, get_task_name());
+                                    unique_op_id, task_id, get_task_name());
         for (std::vector<PhaseBarrier>::const_iterator it = 
               launcher.wait_barriers.begin(); it !=
               launcher.wait_barriers.end(); it++)
@@ -9123,8 +9184,7 @@ namespace Legion {
                       "Reduction operation %d for index task launch %s "
                       "(ID %lld) is not foldable.",
                       redop, get_task_name(), get_unique_id())
-      initialize_base_task(ctx, track, launcher.static_dependences,
-                           launcher.predicate, task_id, provenance);
+      initialize_base_task(ctx, launcher.predicate, task_id, provenance);
       if (outputs != NULL)
       {
         if (launcher.predicate != Predicate::TRUE_PRED)
@@ -9162,8 +9222,7 @@ namespace Legion {
       if (runtime->legion_spy_enabled && track)
       {
         LegionSpy::log_index_task(parent_ctx->get_unique_id(),
-                                  unique_op_id, task_id,
-                                  context_index, get_task_name());
+                                  unique_op_id, task_id, get_task_name());
         for (std::vector<PhaseBarrier>::const_iterator it = 
               launcher.wait_barriers.begin(); it !=
               launcher.wait_barriers.end(); it++)
@@ -9183,13 +9242,45 @@ namespace Legion {
     {
       regions = rs;
       // Rewrite any singular region requirements to projections
-      for (std::vector<RegionRequirement>::iterator it =
-            regions.begin(); it != regions.end(); it++)
+      for (unsigned idx = 0; idx < regions.size(); idx++)
       {
-        if (it->handle_type == LEGION_SINGULAR_PROJECTION)
+        RegionRequirement &req = regions[idx];
+        if (req.handle_type == LEGION_SINGULAR_PROJECTION)
         {
-          it->handle_type = LEGION_REGION_PROJECTION;
-          it->projection = 0; // identity
+          req.handle_type = LEGION_REGION_PROJECTION;
+          req.projection = 0; // identity
+        }
+        // These are some checks for sanity if the user is using the default
+        // projection functor from an upper bound region to make sure they
+        // know what they are doing
+        if (IS_WRITE(req) && (req.projection == 0) &&
+            (req.handle_type == LEGION_REGION_PROJECTION))
+        {
+          if (IS_DISCARD(req))
+          {
+            if (!IS_COLLECTIVE(req))
+              REPORT_LEGION_ERROR(ERROR_ALIASED_INTERFERING_REGION,
+                  "Parent task %s (UID %lld) issued index space task %s "
+                  "(UID %lld) with interfering region requirement %d that "
+                  "requested write-discard privileges for all point tasks "
+                  "on the same logical region without indicating that they "
+                  "should be performed concurrently. If you intend for all "
+                  "the point tasks to perform independent writes to the same "
+                  "logical region then you must mark the region requirement "
+                  "as being a collective write.", parent_ctx->get_task_name(),
+                  parent_ctx->get_unique_id(), get_task_name(),
+                  get_unique_op_id(), idx)
+          }
+          else if (runtime->runtime_warnings)
+            REPORT_LEGION_WARNING(
+                LEGION_WARNING_NON_SCALABLE_IDENTITY_PROJECTION,
+                "Parent task %s (UID %lld) issued index space task %s "
+                "(UID %lld) with non-scalable projection region requirement %d "
+                "that ensures all point tasks will be reading and writing to "
+                "the same logical region. This implies there will be no task "
+                "parallelism in this index space task launch.",
+                parent_ctx->get_task_name(), parent_ctx->get_unique_id(),
+                get_task_name(), get_unique_op_id(), idx)
         }
       }
     }
@@ -10039,8 +10130,8 @@ namespace Legion {
     {
       DETAILED_PROFILER(runtime, INDEX_CLONE_AS_SLICE_CALL);
       SliceTask *result = runtime->get_available_slice_task(); 
-      result->initialize_base_task(parent_ctx, false/*track*/, NULL/*deps*/,
-          Predicate::TRUE_PRED, this->task_id, get_provenance());
+      result->initialize_base_task(parent_ctx, Predicate::TRUE_PRED,
+                                   this->task_id, get_provenance());
       result->clone_multi_from(this, is, p, recurse, stealable);
       result->index_owner = this;
       if (runtime->legion_spy_enabled)
@@ -10199,8 +10290,10 @@ namespace Legion {
                              IndexSpace launch_space, IndexSpace sharding_space) 
     //--------------------------------------------------------------------------
     {
-      return FutureMap(new FutureMapImpl(ctx, this, this->launch_space,
-          runtime, runtime->get_available_distributed_id(), get_provenance()));
+      FutureMapImpl *result = new FutureMapImpl(ctx, this, this->launch_space,
+          runtime, runtime->get_available_distributed_id(), get_provenance());
+      future_map_coordinate = result->future_coordinate;
+      return FutureMap(result);
     }
 
     //--------------------------------------------------------------------------
@@ -11584,8 +11677,8 @@ namespace Legion {
     {
       DETAILED_PROFILER(runtime, SLICE_CLONE_AS_SLICE_CALL);
       SliceTask *result = runtime->get_available_slice_task(); 
-      result->initialize_base_task(parent_ctx,  false/*track*/, NULL/*deps*/,
-          Predicate::TRUE_PRED, this->task_id, get_provenance());
+      result->initialize_base_task(parent_ctx, Predicate::TRUE_PRED,
+                                   this->task_id, get_provenance());
       result->clone_multi_from(this, is, p, recurse, stealable);
       result->index_owner = this->index_owner;
       if (runtime->legion_spy_enabled)
@@ -11711,8 +11804,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(finder != future_handles->handles.end());
 #endif
+        const ContextCoordinate coordinate(future_map_coordinate, point);
         FutureImpl *impl = runtime->find_or_create_future(finder->second, 
-            parent_ctx->did, context_index, point, get_provenance());
+            parent_ctx->did, coordinate, get_provenance());
         if (functor != NULL)
         {
 #ifdef DEBUG_LEGION
@@ -11755,8 +11849,8 @@ namespace Legion {
     {
       DETAILED_PROFILER(runtime, SLICE_CLONE_AS_POINT_CALL);
       PointTask *result = runtime->get_available_point_task();
-      result->initialize_base_task(parent_ctx, false/*track*/, NULL/*deps*/,
-          Predicate::TRUE_PRED, this->task_id, get_provenance());
+      result->initialize_base_task(parent_ctx, Predicate::TRUE_PRED,
+                                   this->task_id, get_provenance());
       result->clone_task_op_from(this, this->target_proc, 
                                  false/*stealable*/, true/*duplicate*/);
       result->is_index_space = true;
@@ -11824,8 +11918,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(finder != future_handles->handles.end());
 #endif
+      const ContextCoordinate coordinate(future_map_coordinate, point);
       FutureImpl *impl = runtime->find_or_create_future(finder->second, 
-          parent_ctx->did, context_index, point, get_provenance());
+          parent_ctx->did, coordinate, get_provenance());
       if (predicate_false_future.impl == NULL)
       {
         if (predicate_false_size > 0)
@@ -11957,9 +12052,11 @@ namespace Legion {
       if (is_remote())
         point_context->return_resources(this, context_index, preconditions);
       else if (must_epoch != NULL)
-        point_context->return_resources(must_epoch,context_index,preconditions);
+        point_context->return_resources(must_epoch, context_index,
+                                        preconditions);
       else
-        point_context->return_resources(parent_ctx,context_index,preconditions);
+        point_context->return_resources(parent_ctx, context_index,
+                                        preconditions);
     }
 
     //--------------------------------------------------------------------------
@@ -12067,8 +12164,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(finder != handles.end());
 #endif
+      const ContextCoordinate coordinate(future_map_coordinate, point);
       FutureImpl *impl = runtime->find_or_create_future(finder->second, 
-        parent_ctx->did, context_index, point, get_provenance());
+        parent_ctx->did, coordinate, get_provenance());
       impl->set_future_result_size(future_size, runtime->address_space);
     }
 
@@ -12546,7 +12644,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SliceTask::receive_resources(size_t return_index,
+    void SliceTask::receive_resources(uint64_t return_index,
               std::map<LogicalRegion,unsigned> &created_regs,
               std::vector<DeletedRegion> &deleted_regs,
               std::set<std::pair<FieldSpace,FieldID> > &created_fids,

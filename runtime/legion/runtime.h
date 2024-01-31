@@ -200,7 +200,7 @@ namespace Legion {
     public:
       // This returns the predicate value if it is set or returns the
       // names of the guards to use if has not been set
-      virtual bool get_predicate(size_t context_index,
+      virtual bool get_predicate(uint64_t context_index,
           PredEvent &true_guard, PredEvent &false_guard);
       bool get_predicate(RtEvent &ready);
       virtual void set_predicate(bool value);
@@ -209,7 +209,6 @@ namespace Legion {
       Operation *const creator;
       const GenerationID creator_gen;
       const UniqueID creator_uid;
-      const size_t creator_ctx_index;
     protected:
       mutable LocalLock predicate_lock;
       PredUserEvent true_guard, false_guard;
@@ -228,15 +227,18 @@ namespace Legion {
      */
     class ReplPredicateImpl : public PredicateImpl {
     public:
-      ReplPredicateImpl(Operation *creator, CollectiveID id);
+      ReplPredicateImpl(Operation *creator, uint64_t coordinate,
+                        CollectiveID id);
       ReplPredicateImpl(const ReplPredicateImpl &rhs) = delete;
       virtual ~ReplPredicateImpl(void);
     public:
       ReplPredicateImpl& operator=(const ReplPredicateImpl &rhs) = delete;
     public:
-      virtual bool get_predicate(size_t context_index,
+      virtual bool get_predicate(uint64_t context_index,
           PredEvent &true_guard, PredEvent &false_guard);
       virtual void set_predicate(bool value);
+    public:
+      const uint64_t predicate_coordinate;
     protected:
       const CollectiveID collective_id;
       size_t max_observed_index;
@@ -333,7 +335,7 @@ namespace Legion {
       // which do not know the size or effects for the operation until later
       FutureImpl(TaskContext *ctx, Runtime *rt, bool register_future, 
                  DistributedID did, Operation *op, GenerationID gen,
-                 size_t op_ctx_index, const DomainPoint &op_point,
+                 const ContextCoordinate &coordinate,
                  UniqueID op_uid, int op_depth, Provenance *provenance,
                  CollectiveMapping *mapping = NULL);
       FutureImpl(const FutureImpl &rhs) = delete;
@@ -406,7 +408,8 @@ namespace Legion {
       // that is valid to access for this particular future
       RtEvent subscribe(bool need_lock = true);
       size_t get_upper_bound_size(void);
-      void get_future_coordinates(TaskTreeCoordinates &coordinates) const;
+      bool get_context_coordinate(const TaskContext *ctx,
+                                  ContextCoordinate &coordinate) const;
       void pack_future(Serializer &rez, AddressSpaceID target);
       static Future unpack_future(Runtime *runtime, 
           Deserializer &derez, Operation *op = NULL, GenerationID op_gen = 0,
@@ -459,8 +462,8 @@ namespace Legion {
       // The depth of the context in which this was made
       const int producer_depth;
       const UniqueID producer_uid;
-      const size_t producer_context_index;
-      const DomainPoint producer_point;
+      // Note this is a future coordinate and not a task tree coordinate!
+      const ContextCoordinate coordinate;
       Provenance *const provenance;
     private:
       mutable LocalLock future_lock;
@@ -644,11 +647,11 @@ namespace Legion {
                     bool register_now = true, 
                     CollectiveMapping *mapping = NULL);
       FutureMapImpl(TaskContext *ctx, Runtime *rt, IndexSpaceNode *domain,
-                    DistributedID did, size_t index,
+                    DistributedID did, uint64_t future_coordinate,
                     ApEvent completion, Provenance *provenance,
                     bool register_now = true, 
                     CollectiveMapping *mapping = NULL); // remote
-      FutureMapImpl(TaskContext *ctx, Operation *op, size_t index,
+      FutureMapImpl(TaskContext *ctx, Operation *op, uint64_t future_coordinate,
                     GenerationID gen, int depth, UniqueID uid,
                     IndexSpaceNode *domain, Runtime *rt, DistributedID did,
                     ApEvent completion, Provenance *provenance);
@@ -696,10 +699,10 @@ namespace Legion {
       TaskContext *const context;
       // Either an index space task or a must epoch op
       Operation *const op;
-      const size_t op_ctx_index;
       const GenerationID op_gen;
       const int op_depth;
       const UniqueID op_uid;
+      const uint64_t future_coordinate;
       Provenance *const provenance;
       IndexSpaceNode *const future_map_domain;
       const ApEvent completion_event;
@@ -764,7 +767,7 @@ namespace Legion {
                         CollectiveMapping *collective_mapping);
       ReplFutureMapImpl(TaskContext *ctx, ShardManager *man, Runtime *rt,
                         IndexSpaceNode *domain, IndexSpaceNode *shard_domain,
-                        DistributedID did, size_t index,
+                        DistributedID did, uint64_t index,
                         ApEvent completion, Provenance *provenance,
                         CollectiveMapping *collective_mapping);
       ReplFutureMapImpl(const ReplFutureMapImpl &rhs) = delete;
@@ -4011,8 +4014,7 @@ namespace Legion {
     public:
       FutureImpl* find_or_create_future(DistributedID did,
                                         DistributedID ctx_did,
-                                        size_t op_ctx_index,
-                                        const DomainPoint &point,
+                                        const ContextCoordinate &coordinate,
                                         Provenance *provenance,
                                         Operation *op = NULL,
                                         GenerationID op_gen = 0, 
@@ -4020,7 +4022,7 @@ namespace Legion {
                                         int op_depth = 0,
                                         CollectiveMapping *mapping = NULL);
       FutureMapImpl* find_or_create_future_map(DistributedID did, 
-                          TaskContext *ctx, size_t index, IndexSpace domain,
+                          TaskContext *ctx, uint64_t coord, IndexSpace domain,
                           ApEvent completion, Provenance *provenance);
       IndexSpace find_or_create_index_slice_space(const Domain &launch_domain,
                                     TypeTag type_tag, Provenance *provenance);

@@ -34,14 +34,14 @@ public:
                 std::map<Processor, Memory>* proc_fbmems,
                 std::map<Processor, Memory>* proc_zcmems);
 public:
-  virtual void map_task(const MapperContext      ctx,
-                        const Task&              task,
-                        const MapTaskInput&      input,
-                              MapTaskOutput&     output);
-  virtual void map_inline(const MapperContext    ctx,
-                          const InlineMapping&   inline_op,
-                          const MapInlineInput&  input,
-                                MapInlineOutput& output);
+  void map_task(const MapperContext      ctx,
+                const Task&              task,
+                const MapTaskInput&      input,
+                      MapTaskOutput&     output) override;
+  void map_inline(const MapperContext    ctx,
+                  const InlineMapping&   inline_op,
+                  const MapInlineInput&  input,
+                        MapInlineOutput& output) override;
 protected:
   void map_circuit_region(const MapperContext ctx, LogicalRegion region,
                           Processor target_proc, Memory target,

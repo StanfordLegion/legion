@@ -210,8 +210,8 @@ public:
   PaddingMapper(Machine m, Runtime *rt, Processor local)
     : DefaultMapper(rt->get_mapper_runtime(), m, local, "Padding Mapper") { }
 public:
-  virtual void default_policy_select_constraints(MapperContext ctx,
-      LayoutConstraintSet &constraints, Memory target, const RegionRequirement &req)
+  void default_policy_select_constraints(MapperContext ctx,
+      LayoutConstraintSet &constraints, Memory target, const RegionRequirement &req) override
   {
     DefaultMapper::default_policy_select_constraints(ctx, constraints, target, req);
     if ((req.privilege_fields.find(FID_x) != req.privilege_fields.end()) &&

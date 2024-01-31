@@ -41,7 +41,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     LogicalUser::LogicalUser(Operation *o, unsigned id, const RegionUsage &u,
                              ProjectionSummary *p, unsigned internal)
-      : Collectable(), usage(u), op(o), ctx_index(op->get_ctx_index()),
+      : Collectable(), usage(u), op(o), ctx_index(op->get_context_index()),
         internal_idx(internal), idx(id), gen(o->get_generation()),
         shard_proj(p)
 #ifdef LEGION_SPY
@@ -1016,15 +1016,9 @@ namespace Legion {
     void RemoteTraceRecorder::record_mapper_output(const TraceLocalID &tlid,
                               const Mapper::MapTaskOutput &output,
                               const std::deque<InstanceSet> &physical_instances,
-                              const std::vector<size_t> &future_size_bounds,
-                              const std::vector<TaskTreeCoordinates> &coords,
                               std::set<RtEvent> &external_applied)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(output.future_locations.size() == future_size_bounds.size());
-      assert(coords.size() == future_size_bounds.size());
-#endif
       if (local_space != origin_space)
       {
         RtUserEvent applied = Runtime::create_rt_user_event(); 
@@ -1042,19 +1036,6 @@ namespace Legion {
           rez.serialize<size_t>(output.future_locations.size());
           for (unsigned idx = 0; idx < output.future_locations.size(); idx++)
             rez.serialize(output.future_locations[idx]);
-          // Same size as the future locations
-          for (unsigned idx = 0; idx < future_size_bounds.size(); idx++)
-            rez.serialize(future_size_bounds[idx]);
-          // Same size as the future locations
-          for (unsigned idx = 0; idx < coords.size(); idx++)
-          {
-            const TaskTreeCoordinates &future_coordinates = coords[idx];
-            rez.serialize<size_t>(future_coordinates.size());
-            for (TaskTreeCoordinates::const_iterator it =
-                  future_coordinates.begin(); it !=
-                  future_coordinates.end(); it++)
-              it->serialize(rez);
-          }
           rez.serialize(output.chosen_variant);
           rez.serialize(output.task_priority);
           rez.serialize<bool>(output.postmap_task);
@@ -1069,7 +1050,7 @@ namespace Legion {
       }
       else
         remote_tpl->record_mapper_output(tlid, output, physical_instances,
-                            future_size_bounds, coords, external_applied);
+                                         external_applied);
     }
 
     //--------------------------------------------------------------------------
@@ -1605,24 +1586,11 @@ namespace Legion {
               derez.deserialize(output.target_procs[idx]);
             size_t num_future_locations;
             derez.deserialize(num_future_locations);
-            std::vector<size_t> future_size_bounds(num_future_locations);
-            std::vector<TaskTreeCoordinates> coordinates(num_future_locations);
             if (num_future_locations > 0)
             {
               output.future_locations.resize(num_future_locations);
               for (unsigned idx = 0; idx < num_future_locations; idx++)
                 derez.deserialize(output.future_locations[idx]);
-              for (unsigned idx = 0; idx < num_future_locations; idx++)
-                derez.deserialize(future_size_bounds[idx]);
-              for (unsigned idx = 0; idx < num_future_locations; idx++)
-              {
-                TaskTreeCoordinates &coords = coordinates[idx];
-                size_t num_coords;
-                derez.deserialize(num_coords);
-                coords.resize(num_coords);
-                for (unsigned idx2 = 0; idx2 < num_coords; idx2++)
-                  coords[idx2].deserialize(derez);
-              }
             }
             derez.deserialize(output.chosen_variant);
             derez.deserialize(output.task_priority);
@@ -1642,7 +1610,7 @@ namespace Legion {
             }
             std::set<RtEvent> applied_events;
             tpl->record_mapper_output(tlid, output, physical_instances,
-                      future_size_bounds, coordinates, applied_events);
+                                      applied_events);
             if (!applied_events.empty())
               Runtime::trigger_event(applied, 
                   Runtime::merge_events(applied_events));
@@ -8146,7 +8114,7 @@ namespace Legion {
                                const PhysicalTraceInfo &t_info, bool exclusive)
       : PhysicalAnalysis(rt, op, index, node->row_source, on_heap,
                          false/*immutable*/, exclusive), 
-        region(node), context_index(op->get_ctx_index()), trace_info(t_info)
+        region(node), context_index(op->get_context_index()), trace_info(t_info)
     //--------------------------------------------------------------------------
     {
       region->add_base_resource_ref(PHYSICAL_ANALYSIS_REF);
@@ -8166,9 +8134,9 @@ namespace Legion {
                                 bool exclusive)
       : PhysicalAnalysis(rt, src, prev, op, index, node->row_source, on_heap, 
                          false/*immutable*/, mapping, exclusive, first_local),
-        region(node), context_index(op->get_ctx_index()), trace_info(t_info),
-        target_instances(target_insts), target_views(target_vws), 
-        source_views(source_vws)
+        region(node), context_index(op->get_context_index()),
+        trace_info(t_info), target_instances(target_insts),
+        target_views(target_vws), source_views(source_vws)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -8188,7 +8156,7 @@ namespace Legion {
                                 bool exclusive)
       : PhysicalAnalysis(rt, src, prev, op, index, node->row_source, on_heap, 
                          false/*immutable*/, mapping, exclusive, first_local),
-        region(node), context_index(op->get_ctx_index()), trace_info(t_info)
+        region(node), context_index(op->get_context_index()), trace_info(t_info)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -8284,7 +8252,7 @@ namespace Legion {
          trace_info, init_precondition, termination, instances_ready, symbolic);
       // Perform the registration
       const UniqueID op_id = op->get_unique_op_id();
-      const size_t op_ctx_index = op->get_ctx_index();
+      const size_t op_ctx_index = op->get_context_index();
       const AddressSpaceID local_space = runtime->address_space;
       IndexSpaceNode *expr_node = region->row_source;
 #ifdef DEBUG_LEGION
@@ -10886,7 +10854,7 @@ namespace Legion {
         return defer_registration(precondition, usage, applied_events,
          trace_info, init_precondition, termination, instances_ready, symbolic);
       const UniqueID op_id = op->get_unique_op_id();
-      const size_t op_ctx_index = op->get_ctx_index();
+      const size_t op_ctx_index = op->get_context_index();
       const AddressSpaceID local_space = runtime->address_space;
 #ifdef DEBUG_LEGION
       // In this case we know the expression should be a region
@@ -19070,9 +19038,13 @@ namespace Legion {
         for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
               not_dominated.begin(); it != not_dominated.end(); it++)
           tracing_preconditions->insert(view, it->first, it->second);
-        if (view->is_reduction_kind())
+        if (view->is_reduction_kind() && !IS_REDUCE(usage))
         {
-          // Invalidate this reduction view since we read it
+          // Invalidate this reduction view since we read it. We need
+          // to check !IS_REDUCE(usage) as both reads and reductions
+          // fall through to this code path. If we actually performed
+          // a reduction, then we don't want to be removing it from the
+          // postcondition, as the reduction buffers are now valid.
           if (tracing_postconditions != NULL)
             tracing_postconditions->invalidate(view, expr, user_mask);
           return;
@@ -19101,10 +19073,24 @@ namespace Legion {
                                                    const FieldMask &mask) 
     //--------------------------------------------------------------------------
     {
-      if (tracing_anticonditions == NULL)
+      // Here, we have to do the converse of the anticondition
+      // check in update_tracing_valid_views. In particular, if the
+      // trace has already read this particular equivalence set, then
+      // we don't need to add the equivalence set to the anti-conditions,
+      // as the reduction data has already been consumed, and can be read
+      // out from the resulting instance.
+      FieldMaskSet<IndexSpaceExpression> not_dominated;
+      if (tracing_preconditions != NULL)
+        tracing_preconditions->dominates(view, expr, mask, not_dominated);
+      else
+        not_dominated.insert(expr, mask);
+
+      if ((tracing_anticonditions == NULL) && !not_dominated.empty())
         tracing_anticonditions =
           new TraceViewSet(context, did, set_expr, tree_id);
-      tracing_anticonditions->insert(view, expr, mask);
+      for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+            not_dominated.begin(); it != not_dominated.end(); it++)
+        tracing_anticonditions->insert(view, it->first, it->second);
     }
 
     //--------------------------------------------------------------------------

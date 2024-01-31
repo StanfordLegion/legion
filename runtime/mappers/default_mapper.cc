@@ -377,25 +377,6 @@ namespace Legion {
       // This is the best choice for the default mapper assuming
       // there is locality in the remote mapped tasks
       output.map_locally = map_locally;
-      // If all the points are using the same logical region then make this
-      // a collective rendezvous
-      if (task.is_index_space)
-      {
-        // Check for any collective region requirements
-        for (unsigned idx = 0; idx < task.regions.size(); idx++)
-        {
-          const RegionRequirement &req = task.regions[idx];
-          // The runtime will pick this up for us anyway
-          if (req.prop & LEGION_COLLECTIVE_MASK)
-            continue;
-          // If all the points are using the same logical region then
-          // we assume we should do a collective analysis
-          if ((req.handle_type == LEGION_SINGULAR_PROJECTION) ||
-              ((req.handle_type == LEGION_REGION_PROJECTION) && 
-               (req.projection == 0)))
-            output.check_collective_regions.insert(idx);
-        }
-      }
       // Control replicate the top-level task in multi-node settings
       // otherwise we do no control replication
 #ifdef DEBUG_CTRL_REPL
@@ -416,6 +397,9 @@ namespace Legion {
         for (unsigned idx = 0; idx < task.regions.size(); idx++)
         {
           const RegionRequirement &req = task.regions[idx];
+          // The runtime will pick this up for us anyway
+          if (req.prop & LEGION_COLLECTIVE_MASK)
+            continue;
           const bool is_read_only =
             ((req.privilege & LEGION_READ_WRITE) == LEGION_READ_PRIV);
           const bool is_reduction =

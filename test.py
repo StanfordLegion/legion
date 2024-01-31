@@ -382,28 +382,33 @@ def run_test_legion_python_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread
     python_dir = os.path.join(root_dir, 'bindings', 'python')
     # Hack: Fix up the environment so that Python can find all the examples.
     env = dict(list(env.items()) + [
-        ('PYTHONPATH', ':'.join([python_dir])),
-        ('LD_LIBRARY_PATH', ':'.join([python_dir])),
+        # In Make, this is where all Python files lives.
+        # In CMake, we still need this, but only for tests.
+        ('PYTHONPATH', ':'.join([env.get('PYTHONPATH'), python_dir])),
     ])
-    # Clean up around python because we are going to make shared objects
-    # which is not something that anyone else does
-    cmd([make_exe, '-C', python_dir, 'clean'], env=env)
+    if bin_dir is None:
+        env['LD_LIBRARY_PATH'] = python_dir
+    # If we're not already using shared libraries, clean up because
+    # we're going to force them
+    if bin_dir is None and env['SHARED_OBJECTS'] != '1':
+        cmd([make_exe, '-C', python_dir, 'clean'], env=env)
     run_cxx(legion_python_cxx_tests, flags, launcher, root_dir, bin_dir, env, thread_count, timelimit)
-    cmd([make_exe, '-C', python_dir, 'clean'], env=env)
+    if bin_dir is None and env['SHARED_OBJECTS'] != '1':
+        cmd([make_exe, '-C', python_dir, 'clean'], env=env)
 
 def run_test_legion_jupyter_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit):
     # Hack: legion_python currently requires the module name to come first
     flags = [] # ['-logfile', 'out_%.log']
     python_dir = os.path.join(root_dir, 'bindings', 'python')
-    # Hack: Fix up the environment so that Python can find all the examples.
-    env = dict(list(env.items()) + [
-        ('PYTHONPATH', ':'.join([python_dir])),
-        ('LD_LIBRARY_PATH', ':'.join([python_dir])),
-    ])
-    # Clean up around python because we are going to make shared objects
-    # which is not something that anyone else does
-    cmd([make_exe, '-C', python_dir, 'clean'], env=env)
-    cmd([make_exe, '-C', python_dir, '-j', str(thread_count)], env=env)
+    env = env.copy()
+    if bin_dir is None:
+        env['LD_LIBRARY_PATH'] = python_dir
+    # If we're not already using shared libraries, clean up because
+    # we're going to force them
+    if bin_dir is None and env['SHARED_OBJECTS'] != '1':
+        cmd([make_exe, '-C', python_dir, 'clean'], env=env)
+    if bin_dir is None:
+        cmd([make_exe, '-C', python_dir, '-j', str(thread_count)], env=env)
     jupyter_dir = os.path.join(root_dir, 'jupyter_notebook')
     jupyter_install_cmd = [sys.executable, './install_jupyter.py', '--legion-prefix', python_dir, '--verbose']
     cmd(jupyter_install_cmd, env=env, cwd=jupyter_dir)
@@ -415,7 +420,8 @@ def run_test_legion_jupyter_cxx(launcher, root_dir, tmp_dir, bin_dir, env, threa
     cmd(canonical_jupyter_test_cmd, env=env)
     canonical_python_test_cmd = [sys.executable, canonical_jupyter_test_file]
     cmd(canonical_python_test_cmd, env=env)
-    cmd([make_exe, '-C', python_dir, 'clean'], env=env)
+    if bin_dir is None and env['SHARED_OBJECTS'] != '1':
+        cmd([make_exe, '-C', python_dir, 'clean'], env=env)
 
 def run_test_legion_prof_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit):
     flags = ['-lg:prof','1', '-lg:prof_logfile', 'prof_%.gz']
@@ -467,8 +473,8 @@ def run_test_external1(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, 
     # Fast Direct Solver
     # Contact: Chao Chen <cchen10@stanford.edu>
     solver_dir = os.path.join(tmp_dir, 'fastSolver2')
-    clone_github('Charles-Chao-Chen', 'fastSolver2', solver_dir, tmp_dir)
-    # cmd(['git', 'checkout', '4c7a59de63dd46a0abcc7f296fa3b0f511e5e6d2', ], cwd=solver_dir)
+    # clone_github('Charles-Chao-Chen', 'fastSolver2', solver_dir, tmp_dir)
+    clone_github('elliottslaughter', 'fastSolver2', solver_dir, tmp_dir, branch='modernize-legion')
     solver = [[os.path.join(solver_dir, 'spmd_driver/solver'),
         ['-machine', '1', '-core', '8', '-mtxlvl', '6', '-ll:cpu', '8', '-ll:csize', '1024']]]
     run_cxx(solver, flags, launcher, root_dir, None, env, thread_count, timelimit)
@@ -491,7 +497,7 @@ def run_test_external1(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, 
     cmd([make_exe, '-f', makefile, '-C', stencil_dir, '-j', str(thread_count)], env=stencil_env)
     stencil = os.path.join(stencil_dir, 'stencil')
     # HACK: work around stencil mapper issue with -ll:ext_sysmem 0
-    cmd([stencil, '4', '10', '1000', '-ll:ext_sysmem', '0'], timelimit=timelimit)
+    cmd([stencil, '4', '10', '1000', '-ll:ext_sysmem', '0'], env=env, timelimit=timelimit)
 
     # SNAP
     # Contact: Mike Bauer <mbauer@nvidia.com>
@@ -502,21 +508,9 @@ def run_test_external1(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, 
     # them after.
     snap = [[os.path.join(snap_dir, 'src/snap'),
              [os.path.join(snap_dir, 'input/mms.in')] + flags]]
-    run_cxx(snap, [], launcher, root_dir, None, env, thread_count, timelimit)
+    run_cxx(snap, [], launcher, root_dir, None, env, thread_count, timelimit) 
 
-    # Soleil-X
-    # Contact: Manolis Papadakis <mpapadak@stanford.edu>
-    soleil_dir = os.path.join(tmp_dir, 'soleil-x')
-    clone_github('stanfordhpccenter', 'soleil-x', soleil_dir, tmp_dir)
-    soleil_env = dict(list(env.items()) + [
-        ('LEGION_DIR', root_dir),
-        ('SOLEIL_DIR', soleil_dir),
-        ('CC', 'gcc'),
-    ])
-    cmd([make_exe, '-C', os.path.join(soleil_dir, 'src')], env=soleil_env)
-    # FIXME: Actually run it
-
-def run_test_external2(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit):
+def run_test_external2(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit, use_cuda):
     # HTR
     # Contact: Mario Di Renzo <direnzo.mario1@gmail.com>
     htr_dir = os.path.join(tmp_dir, 'htr')
@@ -532,6 +526,17 @@ def run_test_external2(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, 
         ('CXX', 'g++'),
         ('DEBUG', '0'),
     ])
+
+    # Try to auto-detect the runner's GPU_ARCH for the test
+    if env['USE_CUDA'] == '1' and 'GPU_ARCH' not in env:
+        try:
+            device_query = subprocess.check_output(['nvidia-smi', '-i', '0', '-q']).decode('utf-8').splitlines()
+            htr_env['GPU_ARCH'] = [line.split()[-1].lower() for line in device_query if line.strip().startswith('Product Architecture')][0]
+            print("Auto-detected GPU_ARCH='%s'" % htr_env['GPU_ARCH'])
+        except OSError:
+            print('Command failed: %s' % cmd, file=sys.stderr, flush=True)
+            raise
+
     cmd(['python3', os.path.join(htr_dir, 'unitTests', 'testAll.py')], env=htr_env)
 
     # TaskAMR
@@ -561,6 +566,20 @@ def run_test_external2(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, 
         cwd=barnes_hut_dir,
         env=env,
         timelimit=timelimit)
+
+    # Since we're not actually testing this, don't both building on GPUs currently
+    if not use_cuda:
+        # Soleil-X
+        # Contact: Manolis Papadakis <mpapadak@stanford.edu>
+        soleil_dir = os.path.join(tmp_dir, 'soleil-x')
+        clone_github('stanfordhpccenter', 'soleil-x', soleil_dir, tmp_dir)
+        soleil_env = dict(list(env.items()) + [
+            ('LEGION_DIR', root_dir),
+            ('SOLEIL_DIR', soleil_dir),
+            ('CC', 'gcc'),
+        ])
+        cmd([make_exe, '-C', os.path.join(soleil_dir, 'src')], env=soleil_env)
+        # FIXME: Actually run it
 
 def run_test_private(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit):
     flags = ['-logfile', 'out_%.log']
@@ -601,6 +620,7 @@ def run_test_private(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, ti
     cmd([make_exe, '-f', makefile, '-C', pennant_dir, '-j', str(thread_count)], env=pennant_env)
     pennant = os.path.join(pennant_dir, 'pennant')
     cmd([pennant, str(app_cores), 'test/sedovsmall/sedovsmall.pnt', '-ll:cpu', str(app_cores)],
+        env=env,
         cwd=pennant_dir,
         timelimit=timelimit)
 
@@ -886,7 +906,18 @@ def build_cmake(root_dir, tmp_dir, env, thread_count,
     verbose_env['VERBOSE'] = '1'
     cmd([make_exe, '-C', build_dir, '-j', str(thread_count)], env=verbose_env)
     cmd([make_exe, '-C', build_dir, 'install'], env=env)
-    return os.path.join(build_dir, 'bin')
+
+    bin_dir = os.path.join(build_dir, 'bin')
+    python_dir = None
+    if env['USE_PYTHON'] == '1':
+        for dir_entry in os.scandir(os.path.join(install_dir, 'lib')):
+            if dir_entry.name.startswith('python'):
+                site_packages = os.path.join(dir_entry.path, 'site-packages')
+                if os.path.exists(site_packages):
+                    python_dir = site_packages
+        if python_dir is None:
+            raise Exception('Unable to find Python site-packages in installation directory')
+    return bin_dir, python_dir
 
 def build_legion_prof_rs(root_dir, tmp_dir, env):
     legion_prof_dir = os.path.join(root_dir, 'tools', 'legion_prof_rs')
@@ -919,6 +950,34 @@ def build_make_clean(root_dir, env, thread_count, test_legion_cxx, test_perf,
         clean_cxx(legion_cxx_tests, root_dir, env, thread_count)
     if test_legion_cxx and env['LEGION_USE_FORTRAN'] == '1':
         clean_cxx(legion_fortran_tests, root_dir, env, thread_count)
+
+def build_make(root_dir, tmp_dir, env, thread_count, networks):
+    build_dir = os.path.join(tmp_dir, 'build')
+    install_dir = os.path.join(tmp_dir, 'install')
+    os.mkdir(build_dir)
+    os.mkdir(install_dir)
+    makefile = os.path.join(build_dir, 'Makefile')
+    cmd(['cp', os.path.join(root_dir, 'apps', 'Makefile.template'), makefile])
+    # We'll just always for shared objects here for performance
+    env['SHARED_OBJECTS'] = '1'
+    # If we have networks always turn on the use of the network
+    if networks:
+        env['USE_NETWORK'] = '1'
+    local_env = dict(list(env.items()) + [
+        ('PREFIX', install_dir),
+    ])
+    cmd([make_exe, '-C', build_dir, 'install', '-j', str(thread_count)], env=local_env)
+    # Setup the LEGION_DIR for the Makefile to use that instead of building everything from source
+    env['LG_INSTALL_DIR'] = install_dir
+    if platform.system() == 'Darwin':
+        # Be aware this doesn't really work on subprocessses on MacOS systems that have their system
+        # integrity protections enabled which will prevent this from having any effect
+        # https://stackoverflow.com/questions/35568122/why-isnt-dyld-library-path-being-propagated-here
+        ld_path = env.get('DYLD_LIBRARY_PATH', '')
+        env['DYLD_LIBRARY_PATH'] = ld_path+':'+os.path.join(install_dir,'lib')
+    else:
+        ld_path = env.get('LD_LIBRARY_PATH', '')
+        env['LD_LIBRARY_PATH'] = ld_path+':'+os.path.join(install_dir,'lib')
 
 def option_enabled(option, options, default, envprefix='', envname=None):
     if options is not None: return option in options
@@ -1201,7 +1260,7 @@ def run_tests(test_modules=None,
                 # cmake, except for some unusual cases with Regent
                 # (ask @eslaught for details about Regent cases)
                 assert test_ctest or test_regent
-                bin_dir = build_cmake(
+                bin_dir, python_dir = build_cmake(
                     root_dir, tmp_dir, env, thread_count,
                     test_regent, test_legion_cxx, test_external1,
                     test_external2,
@@ -1212,7 +1271,17 @@ def run_tests(test_modules=None,
                     root_dir, env, thread_count, test_legion_cxx, test_perf,
                     # These configurations also need to be cleaned first.
                     test_external1, test_external2, test_private)
+                # Build just one copy of the runtime unless we're running regent tests
+                if not test_regent and not test_external2:
+                    build_make(root_dir, tmp_dir, env, thread_count, networks)
                 bin_dir = None
+                python_dir = None
+                if use_python:
+                    python_dir = os.path.join(root_dir, 'bindings', 'python')
+
+        # Set PYTHONPATH for Python tests.
+        if use_python:
+            env['PYTHONPATH'] = python_dir
 
         # Run tests.
         if test_regent:
@@ -1243,14 +1312,12 @@ def run_tests(test_modules=None,
                 run_test_realm(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit)
         if test_external1:
             with Stage('external1'):
-                if not test_regent:
-                    build_regent(root_dir, env)
                 run_test_external1(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit)
         if test_external2:
             with Stage('external2'):
                 if not test_regent:
                     build_regent(root_dir, env)
-                run_test_external2(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit)
+                run_test_external2(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit, use_cuda)
         if test_private:
             with Stage('private'):
                 run_test_private(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit)

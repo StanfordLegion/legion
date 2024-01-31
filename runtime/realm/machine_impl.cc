@@ -187,12 +187,17 @@ namespace Realm {
 
   MachineNodeInfo::MachineNodeInfo(int _node)
     : node(_node)
+    , process_info(nullptr)
   {}
 
   MachineNodeInfo::~MachineNodeInfo(void)
   {
     delete_map_contents(procs);
     delete_map_contents(mems);
+    // TODO: assert process_info is valid after adding machine announcement
+    if(process_info) {
+      delete process_info;
+    }
   }
 
   bool MachineNodeInfo::add_processor(Processor p)
@@ -263,6 +268,17 @@ namespace Realm {
     return changed;
   }
 
+  bool MachineNodeInfo::add_process_info(const Machine::ProcessInfo &proc_info)
+  {
+    if(!process_info) {
+      process_info = new Machine::ProcessInfo();
+      *process_info = proc_info;
+      return true;
+    } else {
+      return false;
+    }
+  }
+
   void MachineNodeInfo::update_kind_maps()
   {
     proc_by_kind.clear();
@@ -296,54 +312,62 @@ namespace Realm {
 
     void Machine::get_all_memories(std::set<Memory>& mset) const
     {
-      return ((MachineImpl *)impl)->get_all_memories(mset);
+      return (static_cast<MachineImpl *>(impl))->get_all_memories(mset);
     }
     
     void Machine::get_all_processors(std::set<Processor>& pset) const
     {
-      return ((MachineImpl *)impl)->get_all_processors(pset);
+      return (static_cast<MachineImpl *>(impl))->get_all_processors(pset);
     }
 
     void Machine::get_local_processors(std::set<Processor>& pset) const
     {
-      return ((MachineImpl *)impl)->get_local_processors(pset);
+      return (static_cast<MachineImpl *>(impl))->get_local_processors(pset);
     }
 
     void Machine::get_local_processors_by_kind(std::set<Processor>& pset,
 					       Processor::Kind kind) const
     {
-      return ((MachineImpl *)impl)->get_local_processors_by_kind(pset, kind);
+      return (static_cast<MachineImpl *>(impl))->get_local_processors_by_kind(pset, kind);
     }
 
     // Return the set of memories visible from a processor
     void Machine::get_visible_memories(Processor p, std::set<Memory>& mset,
 				       bool local_only /*= true*/) const
     {
-      return ((MachineImpl *)impl)->get_visible_memories(p, mset, local_only);
+      return (static_cast<MachineImpl *>(impl))
+          ->get_visible_memories(p, mset, local_only);
     }
 
     // Return the set of memories visible from a memory
     void Machine::get_visible_memories(Memory m, std::set<Memory>& mset,
 				       bool local_only /*= true*/) const
     {
-      return ((MachineImpl *)impl)->get_visible_memories(m, mset, local_only);
+      return (static_cast<MachineImpl *>(impl))
+          ->get_visible_memories(m, mset, local_only);
     }
 
     // Return the set of processors which can all see a given memory
     void Machine::get_shared_processors(Memory m, std::set<Processor>& pset,
 					bool local_only /*= true*/) const
     {
-      return ((MachineImpl *)impl)->get_shared_processors(m, pset, local_only);
+      return (static_cast<MachineImpl *>(impl))
+          ->get_shared_processors(m, pset, local_only);
+    }
+
+    bool Machine::get_process_info(Processor p, ProcessInfo *info) const
+    {
+      return (static_cast<MachineImpl *>(impl))->get_process_info(p, info);
     }
 
     bool Machine::has_affinity(Processor p, Memory m, AffinityDetails *details /*= 0*/) const
     {
-      return ((MachineImpl *)impl)->has_affinity(p, m, details);
+      return (static_cast<MachineImpl *>(impl))->has_affinity(p, m, details);
     }
 
     bool Machine::has_affinity(Memory m1, Memory m2, AffinityDetails *details /*= 0*/) const
     {
-      return ((MachineImpl *)impl)->has_affinity(m1, m2, details);
+      return (static_cast<MachineImpl *>(impl))->has_affinity(m1, m2, details);
     }
 
     int Machine::get_proc_mem_affinity(std::vector<Machine::ProcessorMemoryAffinity>& result,
@@ -351,7 +375,8 @@ namespace Realm {
 				       Memory restrict_memory /*= Memory::NO_MEMORY*/,
 				       bool local_only /*= true*/) const
     {
-      return ((MachineImpl *)impl)->get_proc_mem_affinity(result, restrict_proc, restrict_memory, local_only);
+      return (static_cast<MachineImpl *>(impl))
+          ->get_proc_mem_affinity(result, restrict_proc, restrict_memory, local_only);
     }
 
     int Machine::get_mem_mem_affinity(std::vector<Machine::MemoryMemoryAffinity>& result,
@@ -359,17 +384,18 @@ namespace Realm {
 				      Memory restrict_mem2 /*= Memory::NO_MEMORY*/,
 				      bool local_only /*= true*/) const
     {
-      return ((MachineImpl *)impl)->get_mem_mem_affinity(result, restrict_mem1, restrict_mem2, local_only);
+      return (static_cast<MachineImpl *>(impl))
+          ->get_mem_mem_affinity(result, restrict_mem1, restrict_mem2, local_only);
     }
 
     void Machine::add_subscription(MachineUpdateSubscriber *subscriber)
     {
-      ((MachineImpl *)impl)->add_subscription(subscriber);
+      (static_cast<MachineImpl *>(impl))->add_subscription(subscriber);
     }
 
     void Machine::remove_subscription(MachineUpdateSubscriber *subscriber)
     {
-      ((MachineImpl *)impl)->remove_subscription(subscriber);
+      (static_cast<MachineImpl *>(impl))->remove_subscription(subscriber);
     }
 
 
@@ -821,6 +847,22 @@ namespace Realm {
 #endif
     }
 
+    bool MachineImpl::get_process_info(Processor p, Machine::ProcessInfo *info) const
+    {
+      // TODO: remove the static_cast once we fix the type
+      if(p.address_space() == static_cast<AddressSpace>(Network::my_node_id)) {
+        MachineNodeInfo *node_info = get_nodeinfo(p);
+        if(!node_info) {
+          return false;
+        }
+        assert(node_info->process_info != nullptr);
+        *info = *(node_info->process_info);
+        return true;
+      } else {
+        return false;
+      }
+    }
+
     bool MachineImpl::has_affinity(Processor p, Memory m, Machine::AffinityDetails *details /*= 0*/) const
     {
       // TODO: consider using a reader/writer lock here instead
@@ -1129,6 +1171,23 @@ namespace Realm {
         }
       }
       invalidate_query_caches();
+    }
+
+    void MachineImpl::add_process_info(int node_id,
+                                       const Machine::ProcessInfo &process_info,
+                                       bool lock_held /*= false*/)
+    {
+      if(!lock_held) {
+        mutex.lock();
+      }
+      MachineNodeInfo *&ptr = nodeinfos[node_id];
+      if(!ptr) {
+        ptr = new MachineNodeInfo(node_id);
+      }
+      assert(ptr->add_process_info(process_info));
+      if(!lock_held) {
+        mutex.unlock();
+      }
     }
 
     void MachineImpl::invalidate_query_caches()

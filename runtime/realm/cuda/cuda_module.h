@@ -84,6 +84,18 @@ namespace Realm {
 					   const void *user_data, size_t user_data_len,
 					   Processor proc, CUstream_st *stream);
 
+    // this is the same data structure of CUuuid
+    static const size_t UUID_SIZE = 16; // bytes
+    typedef char Uuid[UUID_SIZE];
+
+    // fill in cude related info according to CUDA-capable device associated with
+    // processor
+    //  `p` if available and returns true, or returns false if processor is unknown,
+    //  not associated with a CUDA-capable device, or information is unavailable
+    REALM_PUBLIC_API bool get_cuda_device_uuid(Processor p, Uuid *uuid);
+
+    REALM_PUBLIC_API bool get_cuda_device_id(Processor p, int *device);
+
     class GPU;
     class GPUWorker;
     struct GPUInfo;
@@ -190,6 +202,10 @@ namespace Realm {
       /// @return A Realm::Event that is triggered some time after the given
       /// \p cuda_stream completes
       Event make_realm_event(CUstream_st *cuda_stream);
+
+      bool get_cuda_device_uuid(Processor p, Uuid *uuid) const;
+
+      bool get_cuda_device_id(Processor p, int *device) const;
 
     public:
       CudaModuleConfig *config;

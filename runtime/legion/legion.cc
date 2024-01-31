@@ -1998,7 +1998,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     DiscardLauncher::DiscardLauncher(LogicalRegion h, LogicalRegion p)
-      : handle(h), parent(p)
+      : handle(h), parent(p), static_dependences(NULL), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -5428,7 +5428,8 @@ namespace Legion {
         case DIM: \
           { \
             DomainT<DIM,coord_t> realm_is; \
-            runtime->get_index_space_domain(ctx, handle, &realm_is, type_tag); \
+            runtime->get_index_space_domain(ctx, handle, &realm_is, \
+                Internal::NT_TemplateHelper::encode_tag<DIM,coord_t>()); \
             return Domain(realm_is); \
           }
         LEGION_FOREACH_N(DIMFUNC)
@@ -5450,7 +5451,8 @@ namespace Legion {
         case DIM: \
           { \
             DomainT<DIM,coord_t> realm_is; \
-            runtime->get_index_space_domain(handle, &realm_is, type_tag); \
+            runtime->get_index_space_domain(handle, &realm_is, \
+                Internal::NT_TemplateHelper::encode_tag<DIM,coord_t>()); \
             return Domain(realm_is); \
           }
         LEGION_FOREACH_N(DIMFUNC)

@@ -821,13 +821,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       initialize(ctx, EXECUTION_FENCE, false/*need future*/, provenance);
-#ifdef DEBUG_LEGION
-      assert(trace != NULL);
-#endif
-      tracing = false;
-      current_template = NULL;
       has_blocking_call = has_block;
-      is_recording = false;
       remove_trace_reference = remove_trace_ref;
     }
 
@@ -865,6 +859,9 @@ namespace Legion {
     void TraceCaptureOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
+      tracing = false;
+      current_template = NULL;
+      is_recording = false;
       // Indicate that we are done capturing this trace
       trace->end_trace_execution(this);
       // Register this fence with all previous users in the parent's context
@@ -965,14 +962,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       initialize(ctx, EXECUTION_FENCE, false/*need future*/, provenance);
-#ifdef DEBUG_LEGION
-      assert(trace != NULL);
-#endif
-      tracing = false;
-      current_template = NULL;
-      replayed = false;
       has_blocking_call = has_block;
-      is_recording = false;
     }
 
     //--------------------------------------------------------------------------
@@ -1009,6 +999,10 @@ namespace Legion {
     void TraceCompleteOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
+      tracing = false;
+      current_template = NULL;
+      replayed = false;
+      is_recording = false;
       trace->end_trace_execution(this);
       parent_ctx->record_previous_trace(trace);
 
@@ -1165,6 +1159,7 @@ namespace Legion {
     {
       initialize(ctx, EXECUTION_FENCE, false/*need future*/, provenance);
       trace = tr;
+
     }
 
     //--------------------------------------------------------------------------
@@ -1410,12 +1405,16 @@ namespace Legion {
                                             Provenance *provenance)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, false/*track*/, 0/*regions*/, provenance);
+      initialize_operation(ctx, provenance);
       fence_kind = MAPPING_FENCE;
-      context_index = invalidator->get_ctx_index();
+      context_index = invalidator->get_context_index();
       if (runtime->legion_spy_enabled)
+      {
         LegionSpy::log_fence_operation(parent_ctx->get_unique_id(),
-            unique_op_id, context_index, false/*execution fence*/);
+            unique_op_id, false/*execution fence*/);
+        LegionSpy::log_child_operation_index(parent_ctx->get_unique_id(),
+            context_index, unique_op_id);
+      }
       current_template = tpl;
       // The summary could have been marked as being traced,
       // so here we forcibly clear them out.
@@ -1583,8 +1582,10 @@ namespace Legion {
     void PhysicalTrace::record_failed_capture(PhysicalTemplate *tpl)
     //--------------------------------------------------------------------------
     {
-      if ((last_memoized > 0) && 
-          (++nonreplayable_count > LEGION_NON_REPLAYABLE_WARNING))
+      // We won't consider failure from mappers refusing to memoize
+      // as a warning that gets bubbled up to end users.
+      if (!tpl->get_no_consensus() &&
+          ++nonreplayable_count > LEGION_NON_REPLAYABLE_WARNING)
       {
         const std::string &message = tpl->get_replayable_message();
         const char *message_buffer = message.c_str();
@@ -1705,17 +1706,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalTemplate* PhysicalTrace::start_new_template(
-                                              TaskTreeCoordinates &&coordinates)
+    PhysicalTemplate* PhysicalTrace::start_new_template(void)
     //--------------------------------------------------------------------------
     {
       // If we have a replicated context then we are making sharded templates
       if (repl_ctx != NULL)
-        current_template = new ShardedPhysicalTemplate(this, 
-            execution_fence_event, std::move(coordinates), repl_ctx);
+        current_template = 
+          new ShardedPhysicalTemplate(this, execution_fence_event, repl_ctx);
       else
-        current_template = new PhysicalTemplate(this, execution_fence_event,
-                                                std::move(coordinates));
+        current_template = new PhysicalTemplate(this, execution_fence_event);
       return current_template;
     }
 
@@ -3976,10 +3975,9 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    PhysicalTemplate::PhysicalTemplate(PhysicalTrace *t, ApEvent fence_event,
-                                       TaskTreeCoordinates &&coords)
-      : trace(t), coordinates(std::move(coords)), total_replays(1),
-        replayable(false, "uninitialized"), fence_completion_id(0),
+    PhysicalTemplate::PhysicalTemplate(PhysicalTrace *t, ApEvent fence_event)
+      : trace(t), total_replays(1), replayable(false, "uninitialized"),
+        fence_completion_id(0),
         replay_parallelism(t->runtime->max_replay_parallelism),
         has_virtual_mapping(false), has_no_consensus(false), last_fence(NULL)
     //--------------------------------------------------------------------------
@@ -4293,8 +4291,7 @@ namespace Legion {
       assert(memoizable != NULL);
 #endif
       const TraceLocalID tid = memoizable->get_trace_local_id();
-      // Should be able to call back() without the lock even when
-      // operations are being removed from the front
+      AutoLock tpl_lock(template_lock);
       std::map<TraceLocalID,MemoizableOp*> &ops = operations.back();
 #ifdef DEBUG_LEGION
       assert(ops.find(tid) == ops.end());
@@ -6350,8 +6347,6 @@ namespace Legion {
     void PhysicalTemplate::record_mapper_output(const TraceLocalID &tlid,
                                             const Mapper::MapTaskOutput &output,
                               const std::deque<InstanceSet> &physical_instances,
-                              const std::vector<size_t> &future_size_bounds,
-                              const std::vector<TaskTreeCoordinates> &coords,
                                               std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
@@ -6368,43 +6363,6 @@ namespace Legion {
       mapping.task_priority = output.task_priority;
       mapping.postmap_task = output.postmap_task;
       mapping.future_locations = output.future_locations;
-      mapping.future_size_bounds = future_size_bounds;
-      // Check to see if the future coordinates are inside of our trace
-      // They have to be inside of our trace in order for it to be safe
-      // for use to be able to re-use their upper bound sizes (because
-      // we know those tasks are reusing the same variants)
-      for (unsigned idx = 0; idx < future_size_bounds.size(); idx++)
-      {
-        // If there's no upper bound then no need to check if the
-        // future is inside 
-        if (future_size_bounds[idx] == SIZE_MAX)
-          continue;
-        const TaskTreeCoordinates &future_coords = coords[idx];
-#ifdef DEBUG_LEGION
-        assert(future_coords.size() <= coordinates.size()); 
-#endif
-        if (future_coords.empty() ||
-            (future_coords.size() < coordinates.size()))
-        {
-          mapping.future_size_bounds[idx] = SIZE_MAX;
-          continue;
-        }
-#ifdef DEBUG_LEGION
-#ifndef NDEBUG
-        // If the size of the coordinates are the same we better
-        // be inside the same parent task or something is really wrong
-        for (unsigned idx2 = 0; idx2 < (future_coords.size()-1); idx2++)
-          assert(future_coords[idx2] == coordinates[idx2]);
-#endif
-#endif
-        // check to see if it came after the start of the trace
-        unsigned last = future_coords.size() - 1;
-        if (coordinates[last].context_index <=future_coords[last].context_index)
-          continue;
-        // Otherwise not inside the trace and therefore we cannot
-        // record the bounds for the future
-        mapping.future_size_bounds[idx] = SIZE_MAX;
-      }
       mapping.physical_instances = physical_instances;
       for (std::deque<InstanceSet>::iterator it =
            mapping.physical_instances.begin(); it !=
@@ -6428,7 +6386,6 @@ namespace Legion {
                                              bool &postmap_task,
                               std::vector<Processor> &target_procs,
                               std::vector<Memory> &future_locations,
-                              std::vector<size_t> &future_size_bounds,
                               std::deque<InstanceSet> &physical_instances) const
     //--------------------------------------------------------------------------
     {
@@ -6446,7 +6403,6 @@ namespace Legion {
       postmap_task = finder->second.postmap_task;
       target_procs = finder->second.target_procs;
       future_locations = finder->second.future_locations;
-      future_size_bounds = finder->second.future_size_bounds;
       physical_instances = finder->second.physical_instances;
     }
 
@@ -7482,8 +7438,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ShardedPhysicalTemplate::ShardedPhysicalTemplate(PhysicalTrace *trace,
-       ApEvent fence_event, TaskTreeCoordinates &&coords, ReplicateContext *ctx)
-      : PhysicalTemplate(trace, fence_event, std::move(coords)), repl_ctx(ctx),
+                                    ApEvent fence_event, ReplicateContext *ctx)
+      : PhysicalTemplate(trace, fence_event), repl_ctx(ctx),
         local_shard(repl_ctx->owner_shard->shard_id), 
         total_shards(repl_ctx->shard_manager->total_shards),
         template_index(repl_ctx->register_trace_template(this)),
