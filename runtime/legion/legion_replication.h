@@ -2009,7 +2009,8 @@ namespace Legion {
      * A virtual close operation is aware that it is being
      * executed in a control replicated context
      */
-    class ReplVirtualCloseOp : public VirtualCloseOp {
+    class ReplVirtualCloseOp :
+      public ReplCollectiveVersioning<CollectiveVersioning<VirtualCloseOp> > {
     public:
       ReplVirtualCloseOp(Runtime *runtime);
       ReplVirtualCloseOp(const ReplVirtualCloseOp &rhs) = delete;
@@ -2020,7 +2021,13 @@ namespace Legion {
       virtual void activate(void);
       virtual void deactivate(bool free = true);
     public:
-      virtual void trigger_mapping(void);
+      virtual void trigger_ready(void);
+      virtual bool perform_collective_analysis(CollectiveMapping *&mapping,
+                                               bool &first_local);
+      virtual RtEvent perform_collective_versioning_analysis(unsigned index,
+                       LogicalRegion handle, EqSetTracker *tracker,
+                       const FieldMask &mask, unsigned parent_req_index);
+      virtual bool is_collective_first_local_shard(void) const;
     };
 
     /**
