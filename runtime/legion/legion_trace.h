@@ -424,7 +424,7 @@ namespace Legion {
         { return execution_fence_event; }
     public:
       PhysicalTemplate* start_new_template(void);
-      ApEvent record_replayable_capture(PhysicalTemplate *tpl,
+      ApEvent record_capture(PhysicalTemplate *tpl,
                     std::set<RtEvent> &map_applied_conditions);
       void record_failed_capture(PhysicalTemplate *tpl);
       void record_intermediate_execution_fence(FenceOp *fence);
@@ -607,7 +607,7 @@ namespace Legion {
       void receive_capture(TraceViewSet *pre, TraceViewSet *anti,
                            TraceViewSet *post, std::set<RtEvent> &ready);
       bool is_empty(void) const;
-      bool is_replayable(bool &not_subsumed, 
+      bool is_idempotent(bool &not_subsumed,
                          TraceViewSet::FailedPrecondition *failed);
       void dump_preconditions(void) const;
       void dump_anticonditions(void) const;
@@ -792,26 +792,28 @@ namespace Legion {
       void finalize(InnerContext *context, Operation *op,
                     bool has_blocking_call);
     public:
-      struct Replayable {
-        explicit Replayable(bool r)
-          : replayable(r), message()
+      struct DetailedBoolean {
+        explicit DetailedBoolean(bool r)
+          : result(r), message()
         {}
-        Replayable(bool r, const char *m)
-          : replayable(r), message(m)
+        DetailedBoolean(bool r, const char *m)
+          : result(r), message(m)
         {}
-        Replayable(bool r, const std::string &m)
-          : replayable(r), message(m)
+        DetailedBoolean(bool r, const std::string &m)
+          : result(r), message(m)
         {}
-        Replayable(const Replayable &r)
-          : replayable(r.replayable), message(r.message)
+        DetailedBoolean(const DetailedBoolean& r)
+          : result(r.result), message(r.message)
         {}
-        operator bool(void) const { return replayable; }
-        bool replayable;
+        operator bool(void) const { return result; }
+        bool result;
         std::string message;
       };
     protected:
-      virtual Replayable check_replayable(Operation *op, 
+      virtual DetailedBoolean check_replayable(Operation *op,
           InnerContext *context, bool has_blocking_call);
+      virtual DetailedBoolean check_idempotent(Operation* op,
+                                               InnerContext* context);
     public:
       void optimize(Operation *op, bool do_transitive_reduction);
     private:
@@ -875,9 +877,12 @@ namespace Legion {
 #endif
     public:
       inline bool is_replaying(void) const { return !recording.load(); }
-      inline bool is_replayable(void) const { return replayable.replayable; }
+      inline bool is_replayable(void) const { return replayable.result; }
+      inline bool is_idempotent(void) const { return idempotent.result; }
       inline const std::string& get_replayable_message(void) const
         { return replayable.message; }
+      inline const std::string& get_idempotent_message(void) const
+        { return idempotent.message; }
       inline void record_no_consensus(void) { has_no_consensus = true; }
       inline bool get_no_consensus(void) { return has_no_consensus; }
     public:
@@ -1092,7 +1097,8 @@ namespace Legion {
       // capture, while others are not used until the first replay, that throws
       // away one barrier generation on some barriers, but whatever
       size_t total_replays;
-      Replayable replayable;
+      DetailedBoolean replayable;
+      DetailedBoolean idempotent;
     protected:
       mutable LocalLock template_lock;
       const unsigned fence_completion_id;
@@ -1350,8 +1356,10 @@ namespace Legion {
       virtual unsigned find_event(const ApEvent &event, AutoLock &tpl_lock);
       void request_remote_shard_event(ApEvent event, RtUserEvent done_event);
       static AddressSpaceID find_event_space(ApEvent event);
-      virtual Replayable check_replayable(Operation *op,
+      virtual DetailedBoolean check_replayable(Operation *op,
           InnerContext *context, bool has_blocking_call);
+      virtual DetailedBoolean check_idempotent(Operation *op,
+                                               InnerContext* context);
     protected:
       ShardID find_inst_owner(const UniqueInst &inst);
       void find_owner_shards(AddressSpace owner, std::vector<ShardID> &shards);

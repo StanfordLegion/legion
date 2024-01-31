@@ -7853,12 +7853,29 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ReplTraceOp::sync_for_idempotent_check(void)
+    //--------------------------------------------------------------------------
+    {
+    // Should only be called by derived classes
+    assert(false);
+    }
+
+    //--------------------------------------------------------------------------
     bool ReplTraceOp::exchange_replayable(ReplicateContext *ctx,bool replayable)
     //--------------------------------------------------------------------------
     {
       // Should only be called by derived classes
       assert(false);
       return false;
+    }
+
+    //--------------------------------------------------------------------------
+    bool ReplTraceOp::exchange_idempotent(ReplicateContext *ctx,bool idempotent)
+    //--------------------------------------------------------------------------
+    {
+    // Should only be called by derived classes
+    assert(false);
+    return false;
     }
 
     //--------------------------------------------------------------------------
@@ -7918,6 +7935,10 @@ namespace Legion {
         ctx->get_next_collective_index(COLLECTIVE_LOC_85); 
       replay_sync_collective_id =
         ctx->get_next_collective_index(COLLECTIVE_LOC_91);
+      idempotent_collective_id =
+        ctx->get_next_collective_index(COLLECTIVE_LOC_94);
+      idempotent_sync_collective_id =
+        ctx->get_next_collective_index(COLLECTIVE_LOC_95);
       sync_compute_frontiers_collective_id =
         ctx->get_next_collective_index(COLLECTIVE_LOC_92);
     }
@@ -8039,8 +8060,8 @@ namespace Legion {
         }
         else
         {
-          ApEvent pending_deletion = physical_trace->record_replayable_capture(
-                                      current_template, map_applied_conditions);
+          ApEvent pending_deletion = physical_trace->record_capture(
+            current_template, map_applied_conditions);
           if (pending_deletion.exists())
             execution_preconditions.insert(pending_deletion);
         }
@@ -8067,6 +8088,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ReplTraceCaptureOp::sync_for_idempotent_check(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx =dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      SlowBarrier replay_sync_barrier(repl_ctx, idempotent_sync_collective_id);
+      replay_sync_barrier.perform_collective_sync();
+    }
+
+    //--------------------------------------------------------------------------
     bool ReplTraceCaptureOp::exchange_replayable(ReplicateContext *repl_ctx,
                                                  bool shard_replayable)
     //--------------------------------------------------------------------------
@@ -8075,6 +8110,17 @@ namespace Legion {
       AllReduceCollective<ProdReduction<bool> > 
         all_replayable_collective(repl_ctx, replayable_collective_id);
       return all_replayable_collective.sync_all_reduce(shard_replayable);
+    }
+
+    //--------------------------------------------------------------------------
+    bool ReplTraceCaptureOp::exchange_idempotent(ReplicateContext *repl_ctx,
+                                                 bool shard_idempotent)
+    //--------------------------------------------------------------------------
+    {
+      // Check to see if this template is replayable across all the shards
+      AllReduceCollective<ProdReduction<bool> >
+        all_idempotent_collective(repl_ctx, idempotent_collective_id);
+      return all_idempotent_collective.sync_all_reduce(shard_idempotent);
     }
 
     //--------------------------------------------------------------------------
@@ -8141,6 +8187,10 @@ namespace Legion {
         ctx->get_next_collective_index(COLLECTIVE_LOC_86);
       replay_sync_collective_id =
         ctx->get_next_collective_index(COLLECTIVE_LOC_91);
+      idempotent_collective_id =
+        ctx->get_next_collective_index(COLLECTIVE_LOC_94);
+      idempotent_sync_collective_id =
+        ctx->get_next_collective_index(COLLECTIVE_LOC_95);
       sync_compute_frontiers_collective_id =
         ctx->get_next_collective_index(COLLECTIVE_LOC_92);
     }
@@ -8305,8 +8355,8 @@ namespace Legion {
         }
         else
         {
-          ApEvent pending_deletion = physical_trace->record_replayable_capture(
-                                      current_template, map_applied_conditions);
+          ApEvent pending_deletion = physical_trace->record_capture(
+                                        current_template, map_applied_conditions);
           if (pending_deletion.exists())
             execution_preconditions.insert(pending_deletion);
         }
@@ -8350,6 +8400,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ReplTraceCompleteOp::sync_for_idempotent_check(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx =dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      SlowBarrier idemp_sync_barrier(repl_ctx, idempotent_sync_collective_id);
+      idemp_sync_barrier.perform_collective_sync();
+    }
+
+    //--------------------------------------------------------------------------
     bool ReplTraceCompleteOp::exchange_replayable(ReplicateContext *repl_ctx,
                                                   bool shard_replayable)
     //--------------------------------------------------------------------------
@@ -8358,6 +8422,17 @@ namespace Legion {
       AllReduceCollective<ProdReduction<bool> > 
         all_replayable_collective(repl_ctx, replayable_collective_id);
       return all_replayable_collective.sync_all_reduce(shard_replayable);
+    }
+
+    //--------------------------------------------------------------------------
+    bool ReplTraceCompleteOp::exchange_idempotent(ReplicateContext *repl_ctx,
+                                                  bool shard_idempotent)
+    //--------------------------------------------------------------------------
+    {
+      // Check to see if this template is replayable across all the shards
+      AllReduceCollective<ProdReduction<bool> >
+        all_replayable_collective(repl_ctx, idempotent_collective_id);
+      return all_replayable_collective.sync_all_reduce(shard_idempotent);
     }
 
     //--------------------------------------------------------------------------
@@ -8806,8 +8881,7 @@ namespace Legion {
     void ReplTraceSummaryOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
-      if (current_template->is_replayable())
-        current_template->apply_postcondition(this, map_applied_conditions);
+      current_template->apply_postcondition(this, map_applied_conditions);
       ReplFenceOp::trigger_mapping();
     }
 

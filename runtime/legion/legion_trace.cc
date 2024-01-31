@@ -50,13 +50,13 @@ namespace Legion {
     }
 
     std::ostream& operator<<(std::ostream &out,
-                             const PhysicalTemplate::Replayable &r)
+                             const PhysicalTemplate::DetailedBoolean &r)
     {
-      if (r.replayable)
-        out << "Replayable";
+      if (r.result)
+        out << "True";
       else
       {
-        out << "Non-replayable (" << r.message << ")";
+        out << "False (" << r.message << ")";
       }
       return out;
     }
@@ -908,8 +908,8 @@ namespace Legion {
         }
         else
         {
-          ApEvent pending_deletion = physical_trace->record_replayable_capture(
-                                      current_template, map_applied_conditions);
+          ApEvent pending_deletion = physical_trace->record_capture(
+              current_template, map_applied_conditions);
           if (pending_deletion.exists())
             execution_preconditions.insert(pending_deletion);
         }
@@ -1032,6 +1032,16 @@ namespace Legion {
                                       get_completion_event());
         trace->initialize_tracing_state();
         replayed = true;
+
+        // If the template we just replayed is not idempotent, then we
+        // will issue the summary operation, and clear our cached template
+        // so that at the next replay (of this template or another) we will be
+        // forced to check preconditions and select a new template (which may
+        // or may not be this template).
+        if (!current_template->is_idempotent()) {
+          physical_trace->clear_cached_template();
+          current_template->issue_summary_operations(parent_ctx, this, this->get_provenance());
+        }
         return;
       }
       else if (trace->is_recording())
@@ -1095,8 +1105,8 @@ namespace Legion {
         }
         else
         {
-          ApEvent pending_deletion = physical_trace->record_replayable_capture(
-                                      current_template, map_applied_conditions);
+          ApEvent pending_deletion = physical_trace->record_capture(
+              current_template, map_applied_conditions);
           if (pending_deletion.exists())
             execution_preconditions.insert(pending_deletion);
         }
@@ -1534,7 +1544,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent PhysicalTrace::record_replayable_capture(PhysicalTemplate *tpl,
+    ApEvent PhysicalTrace::record_capture(PhysicalTemplate *tpl,
                                       std::set<RtEvent> &map_applied_conditions)
     //--------------------------------------------------------------------------
     {
@@ -1759,7 +1769,8 @@ namespace Legion {
       // We're also not going to be considered recurrent here if we didn't
       // do fence elision since since we'll still need to track the fence
       current_template->initialize_replay(fence_completion, 
-          recurrent && perform_fence_elision && !intermediate_execution_fence);
+          recurrent && perform_fence_elision && !intermediate_execution_fence
+                    && current_template->is_idempotent());
       // Reset this for the next replay
       intermediate_execution_fence = false;
     }
@@ -3642,11 +3653,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool TraceConditionSet::is_replayable(bool &not_subsumed,
+    bool TraceConditionSet::is_idempotent(bool &not_subsumed,
                                        TraceViewSet::FailedPrecondition *failed)
     //--------------------------------------------------------------------------
     {
-      bool replayable = true;
+      bool idempotent = true;
       // Note that it is ok to have precondition views and no postcondition
       // views because that means that everything was read-only and therefore
       // still idempotent and replayable
@@ -3655,14 +3666,14 @@ namespace Legion {
       {
         if ((failed != NULL) && (postcondition_views == NULL))
           precondition_views->record_first_failed(failed);
-        replayable = false;
+        idempotent = false;
         not_subsumed = true;
       }
-      if (replayable && 
+      if (idempotent &&
           (postcondition_views != NULL) && (anticondition_views != NULL) &&
           !postcondition_views->independent_of(*anticondition_views, failed))
       {
-        replayable = false;
+        idempotent = false;
         not_subsumed = false;
       }
       // Clean up our view objects since we no longer need them
@@ -3681,7 +3692,7 @@ namespace Legion {
         delete postcondition_views;
         postcondition_views = NULL;
       }
-      return replayable;
+      return idempotent;
     }
 
     //--------------------------------------------------------------------------
@@ -3977,7 +3988,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     PhysicalTemplate::PhysicalTemplate(PhysicalTrace *t, ApEvent fence_event)
       : trace(t), total_replays(1), replayable(false, "uninitialized"),
-        fence_completion_id(0),
+        idempotent(false, "uninitialized"), fence_completion_id(0),
         replay_parallelism(t->runtime->max_replay_parallelism),
         has_virtual_mapping(false), has_no_consensus(false), last_fence(NULL)
     //--------------------------------------------------------------------------
@@ -4135,19 +4146,27 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalTemplate::Replayable PhysicalTemplate::check_replayable(
+    PhysicalTemplate::DetailedBoolean PhysicalTemplate::check_replayable(
                    Operation *op, InnerContext *context, bool has_blocking_call)
     //--------------------------------------------------------------------------
     {
       if (has_blocking_call)
-        return Replayable(false, "blocking call");
+        return DetailedBoolean(false, "blocking call");
 
       if (has_virtual_mapping)
-        return Replayable(false, "virtual mapping");
+        return DetailedBoolean(false, "virtual mapping");
 
       if (has_no_consensus)
-        return Replayable(false, "no recording consensus");
-      
+        return DetailedBoolean(false, "no recording consensus");
+
+      return DetailedBoolean(true);
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalTemplate::DetailedBoolean PhysicalTemplate::check_idempotent(
+        Operation* op, InnerContext* context)
+    //--------------------------------------------------------------------------
+    {
       // First let's get the equivalence sets with data for these regions
       // We'll use the result to get guide the creation of the trace condition
       // sets. Note we're going to end up recomputing the equivalence sets
@@ -4164,14 +4183,14 @@ namespace Legion {
         std::map<RegionNode*,unsigned>::const_iterator req_it =
           trace_region_parent_req_indexes.begin();
         for (FieldMaskSet<RegionNode>::const_iterator it =
-              trace_regions.begin(); it != trace_regions.end(); 
+              trace_regions.begin(); it != trace_regions.end();
               it++, req_it++, index++)
         {
 #ifdef DEBUG_LEGION
           // Make sure the parent_req_indexes zip with the trace_regions
           assert(req_it->first == it->first);
 #endif
-          it->first->perform_versioning_analysis(ctx, context, 
+          it->first->perform_versioning_analysis(ctx, context,
             &version_infos[index], it->second, op, 0/*index*/,
             req_it->second, eq_events);
         }
@@ -4189,9 +4208,9 @@ namespace Legion {
         }
         for (unsigned idx = 0; idx < version_infos.size(); idx++, req_it++)
         {
-          const FieldMaskSet<EquivalenceSet> &region_sets = 
+          const FieldMaskSet<EquivalenceSet> &region_sets =
               version_infos[idx].get_equivalence_sets();
-          for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
+          for (FieldMaskSet<EquivalenceSet>::const_iterator it =
                 region_sets.begin(); it != region_sets.end(); it++)
           {
             current_sets.insert(it->first, it->second);
@@ -4203,15 +4222,15 @@ namespace Legion {
         trace_region_parent_req_indexes.clear();
       }
       // Make a trace condition set for each one of them
-      // Note for control replication, we're just letting multiple shards 
+      // Note for control replication, we're just letting multiple shards
       // race to their equivalence sets, whichever one gets there first for
       // their fields will be the one to own the preconditions
       std::vector<RtEvent> ready_events;
-      conditions.reserve(current_sets.size()); 
+      conditions.reserve(current_sets.size());
       RegionTreeForest *forest = trace->runtime->forest;
       std::map<EquivalenceSet*,unsigned>::const_iterator req_it =
         parent_req_indexes.begin();
-      for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
+      for (FieldMaskSet<EquivalenceSet>::const_iterator it =
             current_sets.begin(); it != current_sets.end(); it++, req_it++)
       {
 #ifdef DEBUG_LEGION
@@ -4222,7 +4241,7 @@ namespace Legion {
         condition->add_reference();
         // This looks redundant because it is a bit since we're just going
         // to compute the single equivalence set we already have here but
-        // really what we're doing here is registering the condition with 
+        // really what we're doing here is registering the condition with
         // the VersionManager that owns this equivalence set which is a
         // necessary thing for us to do
         const RtEvent ready = condition->recompute_equivalence_sets(
@@ -4255,32 +4274,32 @@ namespace Legion {
           continue;
         }
         bool not_subsumed = true;
-        if (!(*it)->is_replayable(not_subsumed, &condition))
+        if (!(*it)->is_idempotent(not_subsumed, &condition))
         {
           if (trace->runtime->dump_physical_traces)
           {
             if (not_subsumed)
-              return Replayable(
+              return DetailedBoolean(
                   false, "precondition not subsumed: " +
-                    condition.to_string(trace->logical_trace->context));
+                         condition.to_string(trace->logical_trace->context));
             else
-              return Replayable(
-               false, "postcondition anti dependent: " +
-                 condition.to_string(trace->logical_trace->context));
+              return DetailedBoolean(
+                  false, "postcondition anti dependent: " +
+                         condition.to_string(trace->logical_trace->context));
           }
           else
           {
             if (not_subsumed)
-              return Replayable(
+              return DetailedBoolean(
                   false, "precondition not subsumed by postcondition");
             else
-              return Replayable(
+              return DetailedBoolean(
                   false, "postcondition anti dependent");
           }
         }
         it++;
       }
-      return Replayable(true);
+      return DetailedBoolean(true);
     }
 
     //--------------------------------------------------------------------------
@@ -4337,17 +4356,16 @@ namespace Legion {
     {
       recording = false;
       replayable = check_replayable(op, context, has_blocking_call);
-
-      if (!replayable)
-      {
-        if (trace->runtime->dump_physical_traces)
-        {
-          optimize(op, !trace->runtime->no_transitive_reduction);
-          dump_template();
-        }
+      if (!replayable) {
         return;
       }
+      idempotent = check_idempotent(op, context);
       optimize(op, false/*do transitive reduction inline*/);
+      // TODO (rohany): Should we dump traces before and after the transitive
+      //  reduction, or just do it once the transitive reduction is done?
+      if (trace->runtime->dump_physical_traces) {
+        dump_template();
+      }
       std::fill(events.begin(), events.end(), ApEvent::NO_AP_EVENT);
       event_map.clear();
       // Defer performing the transitive reduction because it might
@@ -4379,7 +4397,8 @@ namespace Legion {
       std::vector<RtEvent> frontier_events;
       find_all_last_instance_user_events(frontier_events);
       std::vector<unsigned> gen;
-      if (!trace->perform_fence_elision)
+      // Fence elision can only be performed if the template is idempotent.
+      if (!trace->perform_fence_elision || !idempotent)
       {
         compute_frontiers(frontier_events);
         gen.resize(events.size(), 0/*fence instruction*/);
@@ -4919,7 +4938,9 @@ namespace Legion {
         if (used[idx])
         {
           Instruction *inst = instructions[idx];
-          if (trace->perform_fence_elision)
+          // Fence elision-style operations can only be performed if the
+          // trace is idempotent.
+          if (trace->perform_fence_elision && idempotent)
           {
             if (inst->get_kind() == MERGE_EVENT)
             {
@@ -6256,7 +6277,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       InnerContext *ctx = trace->logical_trace->context;
-      log_tracing.info() << "#### " << replayable << " " << this << " Trace "
+      log_tracing.info() << "#### Replayable:" << replayable << ", Idempotent:"
+        << idempotent << " " << this << " Trace "
         << trace->logical_trace->tid << " for " << ctx->get_task_name()
         << " (UID " << ctx->get_unique_id() << ") ####";
       for (unsigned sidx = 0; sidx < replay_parallelism; ++sidx)
@@ -8456,7 +8478,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalTemplate::Replayable ShardedPhysicalTemplate::check_replayable(
+    PhysicalTemplate::DetailedBoolean ShardedPhysicalTemplate::check_replayable(
                    Operation *op, InnerContext *context, bool has_blocking_call)
     //--------------------------------------------------------------------------
     {
@@ -8471,7 +8493,7 @@ namespace Legion {
       // before we can do our own replayable check
       repl_op->sync_for_replayable_check();
       // Do the base call first to determine if our local shard is replayable
-      const Replayable result = 
+      const DetailedBoolean result =
        PhysicalTemplate::check_replayable(op, context, has_blocking_call);
       if (result)
       {
@@ -8479,7 +8501,7 @@ namespace Legion {
         if (repl_op->exchange_replayable(repl_ctx, true/*replayable*/))
           return result;
         else
-          return Replayable(false, "Remote shard not replyable");
+          return DetailedBoolean(false, "Remote shard not replyable");
       }
       else
       {
@@ -8488,6 +8510,41 @@ namespace Legion {
         return result;
       }
     }
+
+    //--------------------------------------------------------------------------
+    PhysicalTemplate::DetailedBoolean ShardedPhysicalTemplate::check_idempotent(
+        Operation *op, InnerContext *context)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(op != NULL);
+      ReplTraceOp *repl_op = dynamic_cast<ReplTraceOp*>(op);
+      assert(repl_op != NULL);
+#else
+      ReplTraceOp *repl_op = static_cast<ReplTraceOp*>(op);
+#endif
+      // We need everyone else to be done capturing their traces
+      // before we can do our own idempotence check
+      repl_op->sync_for_idempotent_check();
+      // Do the base call first to determine if our local shard is replayable
+      const DetailedBoolean result =
+          PhysicalTemplate::check_idempotent(op, context);
+      if (result)
+      {
+        // Now we can do the exchange
+        if (repl_op->exchange_idempotent(repl_ctx, true/*replayable*/))
+          return result;
+        else
+          return DetailedBoolean(false, "Remote shard not replyable");
+      }
+      else
+      {
+        // Still need to do the exchange
+        repl_op->exchange_idempotent(repl_ctx, false/*replayable*/);
+        return result;
+      }
+    }
+
 
     //--------------------------------------------------------------------------
     void ShardedPhysicalTemplate::initialize_replay(

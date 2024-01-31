@@ -2883,7 +2883,9 @@ namespace Legion {
     public:
       virtual bool is_tracing_fence(void) const override { return true; }
       virtual void sync_for_replayable_check(void);
+      virtual void sync_for_idempotent_check(void);
       virtual bool exchange_replayable(ReplicateContext *ctx, bool replayable);
+      virtual bool exchange_idempotent(ReplicateContext* ctx, bool idempotent);
       virtual void sync_compute_frontiers(RtEvent precondition);
     };
     
@@ -2913,12 +2915,16 @@ namespace Legion {
       virtual void trigger_mapping(void);
       virtual void sync_for_replayable_check(void);
       virtual bool exchange_replayable(ReplicateContext *ctx, bool replayable);
+      virtual void sync_for_idempotent_check(void);
+      virtual bool exchange_idempotent(ReplicateContext *ctx, bool idempotent);
       virtual void sync_compute_frontiers(RtEvent precondition);
     protected:
       PhysicalTemplate *current_template;
       RtBarrier recording_fence;
       CollectiveID replayable_collective_id;
       CollectiveID replay_sync_collective_id;
+      CollectiveID idempotent_collective_id;
+      CollectiveID idempotent_sync_collective_id;
       CollectiveID sync_compute_frontiers_collective_id;
       bool has_blocking_call;
       bool remove_trace_reference;
@@ -2951,6 +2957,8 @@ namespace Legion {
       virtual void trigger_mapping(void);
       virtual void sync_for_replayable_check(void);
       virtual bool exchange_replayable(ReplicateContext *ctx, bool replayable);
+      virtual void sync_for_idempotent_check(void);
+      virtual bool exchange_idempotent(ReplicateContext *ctx, bool idempotent);
       virtual void sync_compute_frontiers(RtEvent precondition);
     protected:
       PhysicalTemplate *current_template;
@@ -2958,6 +2966,8 @@ namespace Legion {
       RtBarrier recording_fence;
       CollectiveID replayable_collective_id;
       CollectiveID replay_sync_collective_id;
+      CollectiveID idempotent_collective_id;
+      CollectiveID idempotent_sync_collective_id;
       CollectiveID sync_compute_frontiers_collective_id;
       bool replayed;
       bool has_blocking_call;
