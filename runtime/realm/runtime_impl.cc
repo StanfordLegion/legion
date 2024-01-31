@@ -67,10 +67,13 @@
 #endif
 
 #ifdef REALM_ON_WINDOWS
+#include <winsock2.h>
 #include <windows.h>
 #include <processthreadsapi.h>
 #include <synchapi.h>
 #include <sysinfoapi.h>
+
+#pragma comment(lib, "ws2_32.lib")
 
 static void sleep(int seconds)
 {
@@ -2172,6 +2175,25 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
 				  );
 	}
 
+      }
+
+      // retrieve process info
+      {
+        Machine::ProcessInfo process_info;
+        int errcode =
+            gethostname(process_info.hostname, Machine::ProcessInfo::MAX_HOSTNAME_LENGTH);
+        if(errcode != 0) {
+          log_runtime.warning() << "gethostname failed with " << errno;
+        }
+#ifdef REALM_ON_WINDOWS
+        process_info.processid = GetCurrentProcessId();
+        std::hash<std::string> hostname_hasher;
+        process_info.hostid = hostname_hasher(process_info.hostname);
+#else
+        process_info.processid = getpid();
+        process_info.hostid = gethostid();
+#endif
+        machine->add_process_info(Network::my_node_id, process_info);
       }
 
       // announce by network type

@@ -22,6 +22,10 @@
 #include "legion/garbage_collection.h"
 #include "realm/profiling.h"
 
+#ifdef LEGION_USE_CUDA
+#include "realm/cuda/cuda_module.h"
+#endif
+
 #include <assert.h>
 #include <deque>
 #include <algorithm>
@@ -126,6 +130,11 @@ namespace Legion {
       struct MachineDesc {
         unsigned node_id;
 	unsigned num_nodes;
+        Machine::ProcessInfo process_info;
+      };
+      struct CalibrationErr {
+      public:
+        long long calibration_err;
       };
       struct ZeroTime {
       public:
@@ -374,6 +383,9 @@ namespace Legion {
       public:
         ProcID proc_id;
         ProcKind kind;
+#ifdef LEGION_USE_CUDA
+        Realm::Cuda::Uuid cuda_device_uuid;
+#endif
       };
       struct MemDesc {
       public:

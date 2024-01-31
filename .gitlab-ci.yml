@@ -283,6 +283,14 @@ before_script:
       export THREADS=1
     fi
   - |
+    # Some features require higher CMake versions - grab them here so
+    # the default can remain an older version
+    if [[ "$USE_CMAKE" -eq 1 && "$USE_PYTHON" -eq 1 ]]; then
+      wget -nv https://github.com/Kitware/CMake/releases/download/v3.20.6/cmake-3.20.6-Linux-x86_64.tar.gz
+      echo "458777097903b0f35a0452266b923f0a2f5b62fe331e636e2dcc4b636b768e36  cmake-3.20.6-Linux-x86_64.tar.gz" | shasum --check
+      tar -zxf cmake-3.20.6-Linux-x86_64.tar.gz
+      PATH=`pwd`/cmake-3.20.6-linux-x86_64/bin:$PATH
+    fi
     if [[ "$UCX_SOURCE" != "" ]]; then
       mkdir ucx
       cd ucx
@@ -461,11 +469,6 @@ before_script:
 .nvidia: &nvidia
   tags:
     - nvidia
-# For tests that require a larger GPU:
-.nvidia_16gb: &nvidia_16gb
-  tags:
-    - nvidia
-    - 16gb
 
 .cuda_base: &cuda_base
   IS_NVIDIA_JOB: "1"
@@ -478,7 +481,6 @@ before_script:
   CUDA: "/usr/local/cuda-11.2"
   CUDA_TOOLKIT_ROOT: "$CUDA"
   CUDA_HOME: "$CUDA"
-  GPU_ARCH: "60"
   USE_NVTX: "1"
 
 .cuda117: &cuda117
@@ -486,7 +488,6 @@ before_script:
   CUDA: "/usr/local/cuda-11.7"
   CUDA_TOOLKIT_ROOT: "$CUDA"
   CUDA_HOME: "$CUDA"
-  GPU_ARCH: "60"
   USE_NVTX: "1"
 
 .cuda121: &cuda121
@@ -494,7 +495,6 @@ before_script:
   CUDA: "/usr/local/cuda-12.1"
   CUDA_TOOLKIT_ROOT: "$CUDA"
   CUDA_HOME: "$CUDA"
-  GPU_ARCH: "60"
   USE_NVTX: "1"
 
 ###
@@ -733,10 +733,10 @@ gcc9_cxx11_debug_openmp_system_regent:
   variables:
     <<: [*gcc9, *terra12, *debug, *cxx11_normal, *openmp, *openmp_system, *regent, *libdw, *short]
 #   * Python
-gcc9_cxx11_debug_python3_legion:
+gcc9_cxx11_debug_python3_cmake_prof_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *python3, *legion, *prof, *jupyter, *short]
+    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *python3, *cmake, *legion, *ctest, *prof, *shared, *short]
 #   * LLVM
 gcc9_cxx11_debug_llvm_cmake_legion:
   <<: [*linux, *image_2004, *tests]
@@ -942,7 +942,7 @@ gcc9_cxx11_32bit_release_legion:
 gcc9_cxx11_debug_external1:
   <<: [*linux_compute, *image_2004, *external_tests]
   variables:
-    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *openmp, *hdf5, *external1, *short, *libdw]
+    <<: [*gcc9, *debug, *cxx11_normal, *openmp, *hdf5, *external1, *short, *libdw]
 gcc9_cxx17_debug_maxdim4_external2:
   <<: [*linux_compute, *image_2004, *external_tests]
   variables:
@@ -1001,7 +1001,7 @@ clang12_cxx11_debug_openmp_regent:
 clang12_cxx11_debug_python3_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*clang12, *terra12, *debug, *cxx11_normal, *python3, *legion, *libdw]
+    <<: [*clang12, *terra12, *debug, *cxx11_normal, *python3, *jupyter, *legion, *libdw]
 #   * LLVM
 clang12_cxx11_debug_llvm_cmake_legion:
   <<: [*linux, *image_2004, *tests]
@@ -1124,7 +1124,7 @@ clang12_cxx11_32bit_release_legion:
 clang12_cxx11_debug_external1:
   <<: [*linux_compute, *image_2004, *external_tests]
   variables:
-    <<: [*clang12, *terra12, *debug, *cxx11_normal, *openmp, *hdf5, *external1, *libdw]
+    <<: [*clang12, *debug, *cxx11_normal, *openmp, *hdf5, *external1, *libdw]
 clang12_cxx12_debug_maxdim4_external2:
   <<: [*linux_compute, *image_2004, *external_tests]
   variables:
@@ -1288,15 +1288,15 @@ nvidia_cuda121_gcc9_cxx14_release_cmake_cuda_legion:
   variables:
     <<: [*gcc9, *release, *cxx14_normal, *cuda121, *cmake, *legion, *ctest, *shared]
 nvidia_cuda121_clang12_cxx14_release_cuda_regent:
-  <<: [*nvidia_16gb, *tests]
+  <<: [*nvidia, *tests]
   variables:
     <<: [*clang12, *llvm12, *release, *cxx14_normal, *cuda121, *regent, *cmake, *ctest, *short]
 nvidia_cuda121_clang12_cxx14_release_cmake_cuda_regent:
-  <<: [*nvidia_16gb, *tests]
+  <<: [*nvidia, *tests]
   variables:
     <<: [*clang12, *llvm12, *release, *cxx14_normal, *cuda121, *cmake, *ctest, *regent, *shared]
 nvidia_cuda121_gcc9_cxx17_debug_maxdim4_external2:
-  <<: [*nvidia_16gb, *external_tests]
+  <<: [*nvidia, *external_tests]
   variables:
     <<: [*gcc9, *llvm12, *debug, *cxx17_normal, *cuda121, *maxdim4, *openmp, *hdf5, *external2, *short]
 
@@ -1306,7 +1306,7 @@ nvidia_cuda117_gcc9_cxx14_debug_gasnetex_mpi_cmake_cuda_legion:
   variables:
     <<: [*gcc9, *debug, *cxx14_normal, *cuda117, *cmake, *gasnetex_mpi, *legion, *ctest, *short, *libdw]
 nvidia_cuda121_gcc9_cxx14_release_gasnetex_mpi_cuda_regent:
-  <<: [*nvidia_16gb, *tests]
+  <<: [*nvidia, *tests]
   variables:
     <<: [*gcc9, *llvm12, *release, *cxx14_normal, *cuda121, *gasnetex_mpi, *regent]
 
@@ -1316,7 +1316,7 @@ nvidia_cuda117_gcc9_cxx14_debug_ucx_cmake_cuda_legion:
  variables:
    <<: [*gcc9, *debug, *cxx14_normal, *cuda117, *cmake, *ucx, *legion, *ctest, *short, *libdw]
 nvidia_cuda121_gcc9_cxx14_release_ucx_cuda_regent:
-  <<: [*nvidia_16gb, *tests]
+  <<: [*nvidia, *tests]
   variables:
     <<: [*gcc9, *llvm12, *release, *cxx14_normal, *cuda121, *ucx, *regent]
 

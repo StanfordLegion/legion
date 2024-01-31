@@ -1298,4 +1298,6 @@ task toplevel()
 
   -- write_output(conf, rz, rp, rs)
 end
-regentlib.start(toplevel, cpennant.register_mappers)
+
+local launcher = require("launcher")
+launcher.launch(toplevel, "pennant", cpennant.register_mappers, {"-lpennant", "-lm"})

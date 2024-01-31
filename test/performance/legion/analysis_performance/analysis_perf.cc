@@ -175,28 +175,28 @@ class PerfMapper : public DefaultMapper
 
     virtual ~PerfMapper();
 
-    virtual Mapper::MapperSyncModel get_mapper_sync_model(void) const;
+    Mapper::MapperSyncModel get_mapper_sync_model(void) const override;
 
-    virtual void select_task_options(const MapperContext ctx,
-                                     const Task&         task,
-                                           TaskOptions&  output);
+    void select_task_options(const MapperContext ctx,
+                             const Task&         task,
+                                   TaskOptions&  output) override;
 
-    virtual void default_policy_select_target_processors(MapperContext ctx,
-                                                         const Task &task,
-                                               vector<Processor> &target_procs);
+    void default_policy_select_target_processors(MapperContext ctx,
+                                                 const Task &task,
+                                      vector<Processor> &target_procs) override;
 
-    virtual void slice_task(const MapperContext      ctx,
-                            const Task&              task,
-                            const SliceTaskInput&    input,
-                                  SliceTaskOutput&   output);
+    void slice_task(const MapperContext      ctx,
+                    const Task&              task,
+                    const SliceTaskInput&    input,
+                          SliceTaskOutput&   output) override;
 
-    virtual void map_task(const MapperContext  ctx,
-                          const Task&          task,
-                          const MapTaskInput&  input,
-                                MapTaskOutput& output);
+    void map_task(const MapperContext  ctx,
+                  const Task&          task,
+                  const MapTaskInput&  input,
+                        MapTaskOutput& output) override;
 
-    virtual bool default_policy_select_close_virtual(const MapperContext ctx,
-                                                     const Close &close);
+    bool default_policy_select_close_virtual(const MapperContext ctx,
+                                             const Close &close) override;
 
   private:
     typedef vector<vector<PhysicalInstance> > CachedMapping;

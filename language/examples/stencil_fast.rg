@@ -26,6 +26,7 @@ import "regent"
 local format = require("std/format")
 
 local common = require("stencil_common")
+local launcher = require("launcher")
 
 local gpuhelper = require("regent/gpu/helper")
 local default_foreign = gpuhelper.check_gpu_available() and '0' or '1'
@@ -83,62 +84,7 @@ if USE_FOREIGN then
                               "-DRADIUS=" .. tostring(RADIUS)})
 end
 
-local map_locally = false
-do
-  local cstring = terralib.includec("string.h")
-  for _, arg in ipairs(arg) do
-    if cstring.strcmp(arg, "-map_locally") == 0 then
-      map_locally = true
-      break
-    end
-  end
-end
-
-do
-  local root_dir = arg[0]:match(".*/") or "./"
-
-  local include_path = ""
-  local include_dirs = terralib.newlist()
-  include_dirs:insert("-I")
-  include_dirs:insert(root_dir)
-  for path in string.gmatch(os.getenv("INCLUDE_PATH"), "[^;]+") do
-    include_path = include_path .. " -I " .. path
-    include_dirs:insert("-I")
-    include_dirs:insert(path)
-  end
-
-  local mapper_cc = root_dir .. "stencil_mapper.cc"
-  if os.getenv('OBJNAME') then
-    local out_dir = os.getenv('OBJNAME'):match('.*/') or './'
-    mapper_so = out_dir .. "libstencil_mapper.so"
-  elseif os.getenv('SAVEOBJ') == '1' then
-    mapper_so = root_dir .. "libstencil_mapper.so"
-  else
-    mapper_so = os.tmpname() .. ".so" -- root_dir .. "stencil_mapper.so"
-  end
-  local cxx = os.getenv('CXX') or 'c++'
-
-  local cxx_flags = os.getenv('CXXFLAGS') or ''
-  cxx_flags = cxx_flags .. " -O2 -Wall -Werror"
-  if map_locally then cxx_flags = cxx_flags .. " -DMAP_LOCALLY " end
-  local ffi = require("ffi")
-  if ffi.os == "OSX" then
-    cxx_flags =
-      (cxx_flags ..
-         " -dynamiclib -single_module -undefined dynamic_lookup -fPIC")
-  else
-    cxx_flags = cxx_flags .. " -shared -fPIC"
-  end
-
-  local cmd = (cxx .. " " .. cxx_flags .. " " .. include_path .. " " ..
-                 mapper_cc .. " -o " .. mapper_so)
-  if os.execute(cmd) ~= 0 then
-    print("Error: failed to compile " .. mapper_cc)
-    assert(false)
-  end
-  regentlib.linklibrary(mapper_so)
-  cmapper = terralib.includec("stencil_mapper.h", include_dirs)
-end
+local cmapper = launcher.build_library("stencil_mapper")
 
 local min = regentlib.fmin
 local max = regentlib.fmax
@@ -719,21 +665,8 @@ main:set_task_id(2)
 
 end -- not use_python_main
 
-if os.getenv('SAVEOBJ') == '1' then
-  local root_dir = arg[0]:match(".*/") or "./"
-  local out_dir = (os.getenv('OBJNAME') and os.getenv('OBJNAME'):match('.*/')) or root_dir
-  local link_flags = terralib.newlist({"-L" .. out_dir, "-lstencil_mapper"})
-  if USE_FOREIGN then
-    link_flags:insert("-lstencil")
-  end
-
-  if os.getenv('STANDALONE') == '1' then
-    os.execute('cp ' .. os.getenv('LG_RT_DIR') .. '/../bindings/regent/' ..
-        regentlib.binding_library .. ' ' .. out_dir)
-  end
-
-  local exe = os.getenv('OBJNAME') or "stencil"
-  regentlib.saveobj(main, exe, "executable", cmapper.register_mappers, link_flags)
-else
-  regentlib.start(main, cmapper.register_mappers)
+local link_flags = terralib.newlist({"-lstencil_mapper"})
+if USE_FOREIGN then
+  link_flags:insert("-lstencil")
 end
+launcher.launch(main, "stencil", cmapper.register_mappers, link_flags)
