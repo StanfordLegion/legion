@@ -2034,6 +2034,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ReplVirtualCloseOp::trigger_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+      create_collective_rendezvous(0/*requirement index*/);
+      VirtualCloseOp::trigger_dependence_analysis();
+    }
+
+    //--------------------------------------------------------------------------
     void ReplVirtualCloseOp::trigger_ready(void)
     //--------------------------------------------------------------------------
     {
