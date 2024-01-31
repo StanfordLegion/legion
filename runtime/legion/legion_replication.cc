@@ -2021,14 +2021,16 @@ namespace Legion {
     void ReplVirtualCloseOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      VirtualCloseOp::activate();
+      ReplCollectiveVersioning<
+        CollectiveVersioning<VirtualCloseOp> >::activate();
     }
 
     //--------------------------------------------------------------------------
     void ReplVirtualCloseOp::deactivate(bool free)
     //--------------------------------------------------------------------------
     {
-      VirtualCloseOp::deactivate(false/*free*/);
+      ReplCollectiveVersioning<
+        CollectiveVersioning<VirtualCloseOp> >::deactivate(false/*free*/);
       if (free)
         runtime->free_repl_virtual_close_op(this);
     }
