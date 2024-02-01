@@ -618,7 +618,7 @@ def run_test_private(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, ti
     cmd([make_exe, '-f', makefile, '-C', pennant_dir, 'clean'], env=pennant_env)
     cmd([make_exe, '-f', makefile, '-C', pennant_dir, '-j', str(thread_count)], env=pennant_env)
     pennant = os.path.join(pennant_dir, 'pennant')
-    cmd([pennant, '-n', str(app_cores), '-f', 'test/sedovsmall/sedovsmall.pnt', '-ll:cpu', str(app_cores)],
+    cmd([pennant, '-n', str(app_cores), '-f', 'test/sedov/sedov.pnt', '-ll:cpu', str(app_cores)],
         env=env,
         cwd=pennant_dir,
         timelimit=timelimit)
