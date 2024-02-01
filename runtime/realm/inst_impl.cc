@@ -460,31 +460,40 @@ namespace Realm {
         bytes_needed += layouts[i]->bytes_used;
       }
 
+      Event event = GenEventImpl::create_genevent()->current_event();
+
       if(num_layouts == 0 || bytes_needed > metadata.layout->bytes_used) {
-        GenEventImpl *ev = GenEventImpl::create_genevent();
-        Event failure_event = ev->current_event();
-        GenEventImpl::trigger(failure_event, true /*poisoned*/);
-        return failure_event;
+        GenEventImpl::trigger(event, /*poisoned=*/true);
+        return event;
       }
 
+      std::vector<RegionInstanceImpl *> insts(num_layouts);
       MemoryImpl *m_impl = get_runtime()->get_memory_impl(memory);
+      for(size_t i = 0; i < num_layouts; i++) {
+        insts[i] = m_impl->new_instance();
+        insts[i]->metadata.layout = layouts[i];
+      }
+
+      auto alloc_status = m_impl->remap_allocated_range(this, insts);
+      if(alloc_status != MemoryImpl::ALLOC_INSTANT_SUCCESS) {
+        GenEventImpl::trigger(event, /*poisoned=*/true);
+        return event;
+      }
+
       size_t offset = 0;
-      for (size_t i = 0; i < num_layouts; i++) {
-        RegionInstanceImpl *impl = m_impl->new_instance();
-        impl->metadata.layout = layouts[i];
-        instances[i] = impl->me;
-        impl->metadata.layout->compile_lookup_program(impl->metadata.lookup_program);
-        impl->metadata.need_alloc_result = false;
-        impl->metadata.need_notify_dealloc = false;
-        impl->metadata.inst_offset = metadata.inst_offset + offset;
-        impl->metadata.ext_resource = 0;
+      for(size_t i = 0; i < num_layouts; i++) {
+        instances[i] = insts[i]->me;
+        insts[i]->metadata.layout->compile_lookup_program(
+            insts[i]->metadata.lookup_program);
+        insts[i]->metadata.inst_offset = metadata.inst_offset + offset;
         NodeSet early_reqs;
-        impl->metadata.mark_valid(early_reqs);
+        insts[i]->metadata.mark_valid(early_reqs);
         if(!early_reqs.empty()) {
           send_metadata(early_reqs);
         }
         offset += layouts[i]->bytes_used;
       }
+
       return Event::NO_EVENT;
     }
 

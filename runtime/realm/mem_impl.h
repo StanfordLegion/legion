@@ -90,6 +90,13 @@ namespace Realm {
       ALLOC_CANCELLED
     };
 
+    virtual AllocationResult
+    remap_allocated_range(RegionInstanceImpl *old_inst,
+                          std::vector<RegionInstanceImpl *> &new_insts)
+    {
+      return AllocationResult::ALLOC_INSTANT_SUCCESS;
+    }
+
     // default implementation falls through (directly or indirectly) to
     //  allocate_storage_immediate -  method need only be overridden by
     //  memories that support deferred allocation
@@ -278,6 +285,10 @@ namespace Realm {
       virtual void release_storage_immediate(RegionInstanceImpl *inst,
 					     bool poisoned,
 					     TimeLimit work_until);
+
+      virtual AllocationResult
+      remap_allocated_range(RegionInstanceImpl *old_inst,
+                            std::vector<RegionInstanceImpl *> &new_insts);
 
     protected:
       // for internal use by allocation routines - must be called with

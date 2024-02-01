@@ -567,6 +567,31 @@ namespace Realm {
 #endif
     }
 
+    MemoryImpl::AllocationResult LocalManagedMemory::remap_allocated_range(
+        RegionInstanceImpl *old_inst, std::vector<RegionInstanceImpl *> &new_insts)
+    {
+      AutoLock<> al(allocator_mutex);
+      current_allocator.deallocate(old_inst->me);
+
+      for(size_t i = 0; i < new_insts.size(); i++) {
+        if(!current_allocator.can_allocate(
+               new_insts[i]->me, new_insts[i]->metadata.layout->bytes_used,
+               new_insts[i]->metadata.layout->alignment_reqd)) {
+          return AllocationResult::ALLOC_INSTANT_FAILURE;
+        }
+      }
+
+      for(size_t i = 0; i < new_insts.size(); i++) {
+        size_t inst_offset = 0;
+        if(!current_allocator.allocate(
+               new_insts[i]->me, new_insts[i]->metadata.layout->bytes_used,
+               new_insts[i]->metadata.layout->alignment_reqd, inst_offset)) {
+          return AllocationResult::ALLOC_INSTANT_FAILURE;
+        }
+      }
+      return AllocationResult::ALLOC_INSTANT_SUCCESS;
+    }
+
     // attempt to allocate storage for the specified instance
     MemoryImpl::AllocationResult LocalManagedMemory::allocate_storage_deferrable(RegionInstanceImpl *inst,
 										 bool need_alloc_result,

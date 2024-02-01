@@ -10,7 +10,10 @@ protected:
   static void SetUpTestSuite()
   {
     runtime_ = new Runtime();
-    runtime_->init(0, 0);
+    const char *argv[] = {"", "-ll:csize", "1"};
+    char **cmds = const_cast<char **>(argv);
+    int argc = 3;
+    runtime_->init(&argc, &cmds);
   }
 
   static void TearDownTestSuite()
@@ -80,7 +83,8 @@ TEST_F(InstanceRedistrictTest, OutOfMemoryFailure)
 
 TEST_F(InstanceRedistrictTest, RedistrictEvenlySameLayout)
 {
-  IndexSpace<1> space(Rect<1>(Point<1>(0), Point<1>(7)));
+  size_t num_elemnts = (1048576 / sizeof(int)) - 32;
+  IndexSpace<1> space(Rect<1>(Point<1>(0), num_elemnts));
   RegionInstance inst;
   RegionInstance::create_instance(inst, memories[0], create_layout(space),
                                   ProfilingRequestSet())
@@ -102,8 +106,8 @@ TEST_F(InstanceRedistrictTest, RedistrictEvenlySameLayout)
     }
   }
 
-  IndexSpace<1> child_space_a(Rect<1>(Point<1>(0), Point<1>(3)));
-  IndexSpace<1> child_space_b(Rect<1>(Point<1>(0), Point<1>(3)));
+  IndexSpace<1> child_space_a(Rect<1>(Point<1>(0), num_elemnts / 2 - 1));
+  IndexSpace<1> child_space_b(Rect<1>(Point<1>(0), num_elemnts / 2 - 1));
 
   std::vector<RegionInstance> insts(2);
   InstanceLayoutGeneric *ilg_a = create_layout(child_space_a);
@@ -114,8 +118,10 @@ TEST_F(InstanceRedistrictTest, RedistrictEvenlySameLayout)
   e.wait_faultaware(poisoned);
   EXPECT_FALSE(poisoned);
 
-  int index = 0;
-  for(size_t i = 0; i < insts.size(); i++) {
+  insts[0].destroy();
+
+  int index = child_space_a.volume();
+  for(size_t i = 1; i < insts.size(); i++) {
     RegionInstanceImpl *child_impl = get_runtime()->get_instance_impl(insts[i]);
     child_impl->request_metadata().wait();
     AffineAccessor<int, 1, int> acc(insts[i], 0);
