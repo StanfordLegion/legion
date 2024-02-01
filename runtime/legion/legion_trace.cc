@@ -4028,6 +4028,14 @@ namespace Legion {
       TransitiveReductionState *state = finished_transitive_reduction.load();
       if (state != NULL)
         delete state;
+      for (std::map<DistributedID,IndividualView*>::const_iterator it =
+            recorded_views.begin(); it != recorded_views.end(); it++)
+        if (it->second->remove_base_valid_ref(TRACE_REF))
+          delete it->second;
+      for (std::set<IndexSpaceExpression*>::const_iterator it =
+           recorded_expressions.begin(); it != recorded_expressions.end(); it++)
+        if ((*it)->remove_base_expression_reference(TRACE_REF))
+          delete (*it);
     }
 
     //--------------------------------------------------------------------------
