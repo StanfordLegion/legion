@@ -2009,7 +2009,8 @@ namespace Legion {
      * A virtual close operation is aware that it is being
      * executed in a control replicated context
      */
-    class ReplVirtualCloseOp : public VirtualCloseOp {
+    class ReplVirtualCloseOp :
+      public ReplCollectiveVersioning<CollectiveVersioning<VirtualCloseOp> > {
     public:
       ReplVirtualCloseOp(Runtime *runtime);
       ReplVirtualCloseOp(const ReplVirtualCloseOp &rhs) = delete;
@@ -2020,7 +2021,14 @@ namespace Legion {
       virtual void activate(void);
       virtual void deactivate(bool free = true);
     public:
-      virtual void trigger_mapping(void);
+      virtual void trigger_dependence_analysis(void);
+      virtual void trigger_ready(void);
+      virtual bool perform_collective_analysis(CollectiveMapping *&mapping,
+                                               bool &first_local);
+      virtual RtEvent perform_collective_versioning_analysis(unsigned index,
+                       LogicalRegion handle, EqSetTracker *tracker,
+                       const FieldMask &mask, unsigned parent_req_index);
+      virtual bool is_collective_first_local_shard(void) const;
     };
 
     /**
@@ -2440,7 +2448,7 @@ namespace Legion {
                                       std::set<ApEvent> &tasks_complete);
       virtual bool has_prepipeline_stage(void) const { return true; }
       virtual void trigger_prepipeline_stage(void);
-      virtual void receive_resources(size_t return_index,
+      virtual void receive_resources(uint64_t return_index,
               std::map<LogicalRegion,unsigned> &created_regions,
               std::vector<DeletedRegion> &deleted_regions,
               std::set<std::pair<FieldSpace,FieldID> > &created_fields,
@@ -3196,12 +3204,12 @@ namespace Legion {
           Operation *op, IndexSpaceNode *domain, IndexSpaceNode *shard_domain,
           DistributedID did, Provenance *provenance); 
       FutureMap deduplicate_future_map_creation(ReplicateContext *ctx,
-          IndexSpaceNode *domain, IndexSpaceNode *shard_domain, size_t index,
+          IndexSpaceNode *domain, IndexSpaceNode *shard_domain,
           DistributedID did, ApEvent completion, Provenance *provenance);
       // Return true if we have a shard on every address space
       bool is_total_sharding(void);
       template<typename T>
-      inline void exchange_shard_local_op_data(size_t context_index,
+      inline void exchange_shard_local_op_data(uint64_t context_index,
                                                size_t exchange_index,
                                                const T &data)
       {
@@ -3211,11 +3219,11 @@ namespace Legion {
         exchange_shard_local_op_data(context_index, exchange_index,
                                      &data, sizeof(data));
       }
-      void exchange_shard_local_op_data(size_t context_index,
+      void exchange_shard_local_op_data(uint64_t context_index,
                                         size_t exchange_index,
                                         const void *data, size_t size);
       template<typename T>
-      inline T find_shard_local_op_data(size_t context_index,
+      inline T find_shard_local_op_data(uint64_t context_index,
                                         size_t exchange_index)
       {
 #if !defined(__GNUC__) || (__GNUC__ >= 5)
@@ -3226,10 +3234,10 @@ namespace Legion {
                                  &result, sizeof(result));
         return result;
       }
-      void find_shard_local_op_data(size_t context_index,
+      void find_shard_local_op_data(uint64_t context_index,
                                     size_t exchange_index,
                                     void *data, size_t size);
-      void barrier_shard_local(size_t context_index, size_t exchange_index);
+      void barrier_shard_local(uint64_t context_index, size_t exchange_index);
     public:
       void handle_post_mapped(bool local, RtEvent precondition);
       void handle_post_execution(FutureInstance *instance, ApEvent effects,

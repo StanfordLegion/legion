@@ -99,7 +99,7 @@ namespace Legion {
         virtual Inline* as_mappable_inline(void) const;
         virtual UniqueID get_unique_mappable_id(void) const;
         virtual UniqueID get_unique_id(void) const;
-        virtual size_t get_context_index(void) const;
+        virtual uint64_t get_context_index(void) const;
         virtual int get_depth(void) const;
         virtual bool has_parent_task(void) const;
         virtual const Legion::Task* get_parent_task(void) const;
@@ -131,7 +131,7 @@ namespace Legion {
         std::vector<RegionRequirement>  regions;
       private:
         UniqueID                        unique_id;
-        size_t                          context_index;
+        uint64_t                        context_index;
         int                             depth;
         const char * const              task_name;
       };
@@ -146,7 +146,7 @@ namespace Legion {
         virtual Inline* as_mappable_inline(void) const;
         virtual UniqueID get_unique_mappable_id(void) const;
         virtual UniqueID get_unique_id(void) const;
-        virtual size_t get_context_index(void) const;
+        virtual uint64_t get_context_index(void) const;
         virtual int get_depth(void) const;
         virtual const Legion::Task* get_parent_task(void) const;
         virtual const std::string& get_provenance_string(bool human=true) const;
@@ -156,7 +156,7 @@ namespace Legion {
         RegionRequirement               requirement;
       private:
         UniqueID                        unique_id;
-        size_t                          context_index;
+        uint64_t                        context_index;
         int                             depth;
       };
       // Our version of copy operations
@@ -170,7 +170,7 @@ namespace Legion {
         virtual Inline* as_mappable_inline(void) const;
         virtual UniqueID get_unique_mappable_id(void) const;
         virtual UniqueID get_unique_id(void) const;
-        virtual size_t get_context_index(void) const;
+        virtual uint64_t get_context_index(void) const;
         virtual int get_depth(void) const;
         virtual const Legion::Task* get_parent_task(void) const;
         virtual const std::string& get_provenance_string(bool human=true) const;
@@ -181,7 +181,7 @@ namespace Legion {
         std::vector<RegionRequirement>  dst_requirements;
       private:
         UniqueID                        unique_id;
-        size_t                          context_index;
+        uint64_t                        context_index;
         int                             depth;
       };
       // Task Variant Collection

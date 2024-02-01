@@ -4263,7 +4263,7 @@ namespace Legion {
       // Return the number of operations that came before
       // this operation in the same context (close operations
       // return number of previous close operations)
-      virtual size_t get_context_index(void) const = 0;
+      virtual uint64_t get_context_index(void) const = 0;
       // Return the depth of this operation in the task tree
       virtual int get_depth(void) const = 0;
       // Get the parent task associated with this mappable  

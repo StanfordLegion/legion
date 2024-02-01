@@ -3471,7 +3471,8 @@ class State(object):
         'minimum_call_threshold', 'mapper_call_kinds', 'mapper_calls', 'runtime_call_kinds', 
         'runtime_calls', 'instances', 'index_spaces', 'partitions', 'logical_regions', 
         'field_spaces', 'fields', 'has_spy_data', 'spy_state', 'callbacks', 'copy_map',
-        'fill_map', 'visible_nodes', 'always_parsed_callbacks', 'current_node_id'
+        'fill_map', 'visible_nodes', 'always_parsed_callbacks', 'current_node_id',
+        'hostname', 'host_id', 'process_id', 'calibration_err',
     ]
     def __init__(self, call_threshold: int) -> None:
         self.max_dim = 3
@@ -3551,10 +3552,15 @@ class State(object):
             "PhysicalInstLayoutDesc": self.log_physical_inst_layout_desc,
             "PhysicalInstDimOrderDesc": self.log_physical_inst_layout_dim_desc,
             "PhysicalInstanceUsage": self.log_physical_inst_usage,
-            "IndexSpaceSizeDesc": self.log_index_space_size_desc
+            "IndexSpaceSizeDesc": self.log_index_space_size_desc,
+            "CalibrationErr": self.log_calibration_err
             #"UserInfo": self.log_user_info
         }
         self.current_node_id: Optional[int] = None
+        self.hostname = ""
+        self.host_id = 0
+        self.process_id = 0
+        self.calibration_err = 0
 
     #############################################################
     # process logging statement
@@ -3567,12 +3573,17 @@ class State(object):
 
     # MachineDesc
     @typecheck
-    def log_machine_desc(self, node_id: int, num_nodes: int) -> int:
+    def log_machine_desc(self, node_id: int, num_nodes: int,
+                         hostname: str, host_id: int,
+                         process_id: int) -> int:
         if self.num_nodes == 0:
             self.num_nodes = num_nodes
         else:
             assert self.num_nodes == num_nodes
         self.current_node_id = node_id
+        self.hostname = hostname
+        self.host_id = host_id
+        self.process_id = process_id
         return node_id
 
     # ZeroTime
@@ -3656,6 +3667,11 @@ class State(object):
         is_sparse = bool(is_sparse)
         index_space = self.find_index_space(unique_id)
         index_space.set_size(dense_size, sparse_size, is_sparse)
+
+    # CalibrationErr
+    @typecheck
+    def log_calibration_err(self, calibration_err: int) -> None:
+        self.calibration_err = calibration_err
 
     # PhysicalInstRegionDesc
     @typecheck
@@ -3952,7 +3968,10 @@ class State(object):
 
     # ProcDesc
     @typecheck
-    def log_proc_desc(self, proc_id: int, kind: int) -> None:
+    def log_proc_desc(self, proc_id: int, kind: int,
+                      uuid_size: int = 0,
+                      cuda_device_uuid: List[int] = [],
+    ) -> None:
         assert kind in processor_kinds
         kind_str = processor_kinds[kind]
         if proc_id not in self.processors:
