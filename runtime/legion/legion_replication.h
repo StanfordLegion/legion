@@ -2021,6 +2021,7 @@ namespace Legion {
       virtual void activate(void);
       virtual void deactivate(bool free = true);
     public:
+      virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual bool perform_collective_analysis(CollectiveMapping *&mapping,
                                                bool &first_local);

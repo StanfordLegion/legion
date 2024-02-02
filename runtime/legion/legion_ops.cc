@@ -1208,7 +1208,7 @@ namespace Legion {
       unique_op_id = runtime->get_unique_operation_id();
       context_index = 0;
       outstanding_mapping_references = 0;
-      prepipelined = false;
+      prepipelined = 0;
       mapped = false;
       executed = false;
       resolved = false;
@@ -1219,6 +1219,7 @@ namespace Legion {
       early_commit_request = false;
       track_parent = false;
       parent_ctx = NULL;
+      prepipelined_event = RtUserEvent::NO_RT_USER_EVENT;
       mapped_event = Runtime::create_rt_user_event();
       resolved_event = RtUserEvent::NO_RT_USER_EVENT;
       if (runtime->resilient_mode)
@@ -1578,27 +1579,26 @@ namespace Legion {
         if (generation < gen)
           return RtEvent::NO_RT_EVENT;
         // Check to see if we've already started the analysis
-        if (prepipelined)
+        if (prepipelined > 0)
         {
           // Someone else already started, figure out if we need to wait
-          if (from_logical_analysis)
+          if (prepipelined == 1)
+          {
+            // Only partially through so make an event to trigger when done
+#ifdef DEBUG_LEGION
+            assert(from_logical_analysis);
+            assert(!prepipelined_event.exists());
+#endif
+            prepipelined_event = Runtime::create_rt_user_event();
             return prepipelined_event;
+          }
           else
             return RtEvent::NO_RT_EVENT;
         }
         else
         {
           // We got here first, mark that we're doing it
-          prepipelined = true;
-          // If we're not the logical analysis, make a wait event in
-          // case the logical analysis comes along and needs to wait
-          if (!from_logical_analysis)
-          {
-#ifdef DEBUG_LEGION
-            assert(!prepipelined_event.exists());
-#endif
-            prepipelined_event = Runtime::create_rt_user_event(); 
-          }
+          prepipelined = from_logical_analysis ? 2 : 1;
         }
       }
       trigger_prepipeline_stage();
@@ -1607,10 +1607,11 @@ namespace Legion {
       {
         AutoLock op(op_lock);
 #ifdef DEBUG_LEGION
-        assert(prepipelined_event.exists());
+        assert(prepipelined == 1);
 #endif
-        Runtime::trigger_event(prepipelined_event);
-        prepipelined_event = RtUserEvent::NO_RT_USER_EVENT;
+        prepipelined = 2;
+        if (prepipelined_event.exists())
+          Runtime::trigger_event(prepipelined_event);
       }
       return RtEvent::NO_RT_EVENT;
     }
