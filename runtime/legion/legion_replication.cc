@@ -8395,14 +8395,13 @@ namespace Legion {
           complete_execution();
         } else {
           current_template->apply_postcondition(this, map_applied_conditions);
-          // TODO (rohany): Mike to review, is this handling in the replicated
-          //  case correct? Not sure about some of these operations.
-          if (!template_postconditions.empty())
-            Runtime::phase_barrier_arrive(execution_fence_barrier, 1/*count*/,
-                Runtime::merge_events(NULL, template_postconditions));
-          else
-            Runtime::phase_barrier_arrive(execution_fence_barrier, 1/*count*/);
-          record_completion_effect(execution_fence_barrier);
+          if (!template_postconditions.empty()) {
+            // TODO (rohany): Is this the right PhysicalTraceInfo setup? I copied
+            //  it from the ReplFenceOp::trigger_mapping implementation.
+            const PhysicalTraceInfo trace_info(this, 0/*index*/);
+            record_execution_precondition(
+                Runtime::merge_events(&trace_info, template_postconditions));
+          }
           ReplFenceOp::trigger_mapping();
         }
         return;
