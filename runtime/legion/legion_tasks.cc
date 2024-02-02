@@ -7194,8 +7194,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // First time through do the concurrent analysis to get it in flight
-      // and record any map applied conditions for it
-      if (concurrent_task && (args == NULL))
+      // and record any map applied conditions for it, note we'll always have
+      // a non-null args for concurrent tasks so points can map in parallel
+      if (concurrent_task && (args->invocation_count == 0))
       {
 #ifdef DEBUG_LEGION
         assert(target_proc.exists());
@@ -11224,7 +11225,7 @@ namespace Legion {
         enumerate_points(false/*inlining*/);
       // Once we start mapping then we are no longer stealable
       stealable = false;
-      std::set<RtEvent> mapped_events;
+      std::vector<RtEvent> mapped_events;
       for (std::vector<PointTask*>::const_iterator it = 
             points.begin(); it != points.end(); it++)
       {
@@ -11232,8 +11233,12 @@ namespace Legion {
         // enable all the point tasks to be mapping in parallel with
         // each other in case they need to synchronize to create 
         // collective instances
-        mapped_events.insert((*it)->defer_perform_mapping(RtEvent::NO_RT_EVENT,
-                                    epoch_owner, args, 0/*invocation count*/));
+        const RtEvent point_mapped = concurrent_task ?
+          (*it)->defer_perform_mapping(RtEvent::NO_RT_EVENT,
+              epoch_owner, args, 0/*invocation count*/) :
+          (*it)->perform_mapping(epoch_owner);
+        if (point_mapped.exists())
+          mapped_events.push_back(point_mapped);
       }
       return Runtime::merge_events(mapped_events);
     }
@@ -11280,11 +11285,12 @@ namespace Legion {
         // enable all the point tasks to be mapping in parallel with
         // each other in case they need to synchronize to create 
         // collective instances
-        const RtEvent map_event = point->defer_perform_mapping(
-            RtEvent::NO_RT_EVENT, NULL/*must epoch*/, 
-            NULL/*defer args*/, 0/*invocation count*/);
-        if (map_event.exists() && !map_event.has_triggered())
-          point->defer_launch_task(map_event);
+        const RtEvent point_mapped = concurrent_task ?
+          point->defer_perform_mapping(RtEvent::NO_RT_EVENT,
+              NULL/*must epoch*/, NULL/*defer args*/, 0/*invocation count*/) :
+          point->perform_mapping();
+        if (point_mapped.exists() && !point_mapped.has_triggered())
+          point->defer_launch_task(point_mapped);
         else
           point->launch_task();
       }
