@@ -6647,7 +6647,7 @@ namespace Legion {
           // Send back the event that will be triggered when the task is mapped
           Serializer rez;
           {
-            RezCheck z(rez);
+            RezCheck z2(rez);
             rez.serialize<SingleTask*>(orig_task);
             rez.serialize(mapped_event);
           }
@@ -6903,6 +6903,7 @@ namespace Legion {
       SingleTask *task;
       derez.deserialize(task);
       RtEvent mapped_event;
+      derez.deserialize(mapped_event);
       task->handle_post_mapped(mapped_event);
     }
 
@@ -7408,7 +7409,7 @@ namespace Legion {
       {
         Serializer rez;
         {
-          RezCheck z(rez);
+          RezCheck z2(rez);
           rez.serialize<SingleTask*>(orig_task);
           rez.serialize(mapped_event);
         }
