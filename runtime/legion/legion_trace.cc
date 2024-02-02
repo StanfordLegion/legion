@@ -4028,6 +4028,14 @@ namespace Legion {
       TransitiveReductionState *state = finished_transitive_reduction.load();
       if (state != NULL)
         delete state;
+      for (std::map<DistributedID,IndividualView*>::const_iterator it =
+            recorded_views.begin(); it != recorded_views.end(); it++)
+        if (it->second->remove_base_valid_ref(TRACE_REF))
+          delete it->second;
+      for (std::set<IndexSpaceExpression*>::const_iterator it =
+           recorded_expressions.begin(); it != recorded_expressions.end(); it++)
+        if ((*it)->remove_base_expression_reference(TRACE_REF))
+          delete (*it);
     }
 
     //--------------------------------------------------------------------------
@@ -4501,19 +4509,9 @@ namespace Legion {
 #endif
           if (ready.exists() && !ready.has_triggered())
             ready.wait();
-          // Query the view for the events that it needs
-          // Note that if we're not performing actual fence elision
-          // we switch the usage to full read-write privileges so 
-          // that we can capture all dependences for the end of the trace
-          if (!trace->perform_fence_elision)
-          {
-            const RegionUsage usage(LEGION_READ_WRITE, LEGION_EXCLUSIVE, 0);
-            finder->second->find_last_users(manager, result.events, usage,
-                uit->mask, uit->expr, frontier_events);
-          }
-          else
-            finder->second->find_last_users(manager, result.events,
-                uit->usage, uit->mask, uit->expr, frontier_events);
+          const RegionUsage usage(LEGION_READ_WRITE, LEGION_EXCLUSIVE, 0);
+          finder->second->find_last_users(manager, result.events, usage,
+              uit->mask, uit->expr, frontier_events);
         }
       }
     }

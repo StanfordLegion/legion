@@ -748,7 +748,7 @@ namespace Legion {
       bool activated;
 #endif
       // Whether this operation has executed its prepipeline stage yet
-      bool prepipelined;
+      uint8_t prepipelined;
       // Whether this operation has mapped, once it has mapped then
       // the set of incoming dependences is fixed
       bool mapped;
