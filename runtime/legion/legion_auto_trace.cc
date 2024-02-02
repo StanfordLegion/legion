@@ -205,26 +205,14 @@ namespace Legion {
       log_auto_trace.debug() << "Executing processing repeats meta task.";
       const InnerContext::AutoTraceProcessRepeatsArgs* args = (const InnerContext::AutoTraceProcessRepeatsArgs*)args_;
       std::vector<NonOverlappingRepeatsResult> result =
-          compute_longest_nonoverlapping_repeats(*args->operations, args->min_trace_length);
-      // Filter the result to remove substrings of longer repeats from consideration.
-      size_t copyidx = 0;
-      std::unordered_set<size_t> ends;
-      for (auto res : result) {
-        if (ends.find(res.end) != ends.end()) {
-          continue;
-        }
-        result[copyidx] = res;
-        copyidx++;
-        ends.insert(res.end);
-      }
-      // Erase the unused pieces of result.
-      result.erase(result.begin() + copyidx, result.end());
+          compute_longest_nonoverlapping_repeats(*args->operations, args->min_trace_length, args->alg);
       *args->result = std::move(result);
     }
 
     BatchedTraceIdentifier::BatchedTraceIdentifier(
         TraceProcessingJobExecutor* executor_,
         TraceOccurrenceWatcher& watcher_,
+        NonOverlappingAlgorithm repeats_alg_,
         size_t batchsize_,
         size_t max_add_,
         size_t max_inflight_requests_,
@@ -233,6 +221,7 @@ namespace Legion {
         )
         : executor(executor_),
           watcher(watcher_),
+          repeats_alg(repeats_alg_),
           batchsize(batchsize_),
           max_add(max_add_),
           min_trace_length(min_trace_length_),
@@ -255,7 +244,12 @@ namespace Legion {
         // Move the existing vector of hashes into the descriptor, and
         // allocate a result space for the meta task to write into.
         request.hashes = std::move(this->hashes);
-        InnerContext::AutoTraceProcessRepeatsArgs args(&request.hashes, &request.result, this->min_trace_length);
+        InnerContext::AutoTraceProcessRepeatsArgs args(
+          &request.hashes,
+          &request.result,
+          this->min_trace_length,
+          this->repeats_alg
+        );
         // Launch the meta task and record the finish event.
         request.finish_event = this->executor->enqueue_task(args, opidx, this->wait_on_async_job);
         // Finally, allocate a new vector to accumulate hashes into. As before,

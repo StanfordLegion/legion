@@ -26,6 +26,7 @@
 #include "legion/legion_profiling.h"
 #include "legion/legion_allocation.h"
 #include "legion/garbage_collection.h"
+#include "legion/suffix_tree.h"
 
 #define REPORT_LEGION_FATAL(code, fmt, ...)               \
 {                                                         \
@@ -2470,6 +2471,7 @@ namespace Legion {
             auto_trace_commit_threshold(15),
             auto_trace_max_start_watch(10),
             auto_trace_min_trace_length(5),
+            auto_trace_repeats_alg(NonOverlappingAlgorithm::SUFFIX_TREE_WALK),
             no_tracing(false),
             no_physical_tracing(false),
             no_trace_optimization(false),
@@ -2535,6 +2537,7 @@ namespace Legion {
         unsigned auto_trace_commit_threshold;
         unsigned auto_trace_max_start_watch;
         unsigned auto_trace_min_trace_length;
+        NonOverlappingAlgorithm auto_trace_repeats_alg;
         bool no_tracing;
         bool no_physical_tracing;
         bool no_trace_optimization;
@@ -2575,6 +2578,7 @@ namespace Legion {
         size_t prof_call_threshold;
       public:
         bool parse_alloc_percentage_override_argument(const std::string& s);
+        bool parse_auto_trace_repeats_algorithm_argument(const std::string& s);
       };
     public:
       struct TopFinishArgs : public LgTaskArgs<TopFinishArgs> {
@@ -2692,6 +2696,9 @@ namespace Legion {
       const unsigned auto_trace_max_start_watch;
       // The minimum trace length that we are willing to record (default 5).
       const unsigned auto_trace_min_trace_length;
+      // The algorithm we will use to identify repeated sequences of
+      // tasks issued by the program.
+      const NonOverlappingAlgorithm auto_trace_repeats_alg;
       const bool no_tracing;
       const bool no_physical_tracing;
       const bool no_trace_optimization;

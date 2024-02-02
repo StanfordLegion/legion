@@ -16676,6 +16676,7 @@ namespace Legion {
         auto_trace_commit_threshold(config.auto_trace_commit_threshold),
         auto_trace_max_start_watch(config.auto_trace_max_start_watch),
         auto_trace_min_trace_length(config.auto_trace_min_trace_length),
+        auto_trace_repeats_alg(config.auto_trace_repeats_alg),
         no_tracing(config.no_tracing),
         no_physical_tracing(config.no_physical_tracing),
         no_trace_optimization(config.no_trace_optimization),
@@ -16904,6 +16905,7 @@ namespace Legion {
         auto_trace_commit_threshold(rhs.auto_trace_commit_threshold),
         auto_trace_max_start_watch(rhs.auto_trace_max_start_watch),
         auto_trace_min_trace_length(rhs.auto_trace_min_trace_length),
+        auto_trace_repeats_alg(rhs.auto_trace_repeats_alg),
         no_tracing(rhs.no_tracing),
         no_physical_tracing(rhs.no_physical_tracing),
         no_trace_optimization(rhs.no_trace_optimization),
@@ -30297,6 +30299,10 @@ namespace Legion {
                         config.auto_trace_max_start_watch, !filter)
         .add_option_int("-lg:auto_trace:min_trace_length",
                         config.auto_trace_min_trace_length, !filter)
+        .add_option_method("-lg:auto_trace:repeats_algorithm",
+                           &config,
+                           &LegionConfiguration::parse_auto_trace_repeats_algorithm_argument,
+                           !filter)
         .add_option_bool("-lg:no_tracing",config.no_tracing, !filter)
         .add_option_bool("-lg:no_physical_tracing",
                          config.no_physical_tracing, !filter)
@@ -30557,6 +30563,24 @@ namespace Legion {
           p1 = p2;
         }
       }
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    bool Runtime::LegionConfiguration::parse_auto_trace_repeats_algorithm_argument(
+        const std::string &s)
+    //--------------------------------------------------------------------------
+    {
+      NonOverlappingAlgorithm alg = parse_non_overlapping_algorithm(s);
+      if (alg == NonOverlappingAlgorithm::NO_ALGORITHM) {
+        fprintf(
+          stderr,
+          "ERROR: unable to parse repeats algorithm, falling back to %s.\n",
+          non_overlapping_algorithm_to_string(this->auto_trace_repeats_alg)
+        );
+        return false;
+      }
+      this->auto_trace_repeats_alg = alg;
       return true;
     }
 

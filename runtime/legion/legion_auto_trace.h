@@ -95,6 +95,7 @@ namespace Legion {
       BatchedTraceIdentifier(
         TraceProcessingJobExecutor* executor,
         TraceOccurrenceWatcher& watcher,
+        NonOverlappingAlgorithm repeats_alg,
         size_t batchsize,  // Number of operations batched at once.
         size_t max_add, // Maximum number of traces to add to the watcher at once.
         size_t max_inflight_requests, // Maximum number of async jobs in flight
@@ -107,6 +108,7 @@ namespace Legion {
       TraceProcessingJobExecutor* executor;
       std::vector<Murmur3Hasher::Hash> hashes;
       TraceOccurrenceWatcher& watcher;
+      NonOverlappingAlgorithm repeats_alg;
       size_t batchsize;
       size_t max_add;
       size_t min_trace_length;
@@ -343,6 +345,7 @@ namespace Legion {
           opidx(0),
           identifier(this,
                      this->watcher,
+                     this->runtime->auto_trace_repeats_alg,
                      this->runtime->auto_trace_batchsize,
                      this->runtime->auto_trace_max_start_watch,
                      this->runtime->auto_trace_in_flight_jobs,

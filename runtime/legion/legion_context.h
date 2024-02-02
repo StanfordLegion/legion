@@ -958,15 +958,18 @@ namespace Legion {
         AutoTraceProcessRepeatsArgs(
             std::vector<Murmur3Hasher::Hash>* operations_,
             std::vector<NonOverlappingRepeatsResult>* result_,
-            size_t min_trace_length_
+            size_t min_trace_length_,
+            NonOverlappingAlgorithm alg_
         ) : LgTaskArgs<AutoTraceProcessRepeatsArgs>(implicit_provenance),
             operations(operations_),
             result(result_),
-            min_trace_length(min_trace_length_) {}
+            min_trace_length(min_trace_length_),
+            alg(alg_) {}
       public:
         std::vector<Murmur3Hasher::Hash>* operations;
         std::vector<NonOverlappingRepeatsResult>* result;
         size_t min_trace_length;
+        NonOverlappingAlgorithm alg;
       };
 
       template<typename T>

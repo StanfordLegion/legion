@@ -17,8 +17,10 @@
 #define __LEGION_SUFFIX_TREE_H__
 
 #include <algorithm>
+#include <cassert>
 #include <limits>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -254,6 +256,15 @@ namespace Legion {
       size_t repeats;
     };
 
+    // The algorithm that should be used to compute the repeats.
+    enum NonOverlappingAlgorithm {
+      SUFFIX_TREE_WALK = 0,
+      // TODO (broman): Add your new algorithm here, and update the parser/printer.
+      NO_ALGORITHM,
+    };
+    NonOverlappingAlgorithm parse_non_overlapping_algorithm(const std::string&);
+    const char* non_overlapping_algorithm_to_string(NonOverlappingAlgorithm);
+
     // Helper functions.
     namespace {
       struct RepeatsWalkResult {
@@ -330,16 +341,41 @@ namespace Legion {
 
     // The input string must also be formatted correctly for the suffix tree (unique last character).
     template<typename T>
-    std::vector<NonOverlappingRepeatsResult> compute_longest_nonoverlapping_repeats(const std::vector<T>& str, size_t min_length = 0) {
-      SuffixTree<T> tree(str);
-      std::vector<NonOverlappingRepeatsResult> result;
-      walk(tree.get_root(), result, min_length);
-      std::sort(result.begin(), result.end(), [](const NonOverlappingRepeatsResult& left, const NonOverlappingRepeatsResult& right) {
-        // Note: using > instead of < to sort in descending order.
-        return std::make_pair((left.end - left.start) * left.repeats, left.repeats) >
-               std::make_pair((right.end - right.start) * right.repeats, right.repeats);
-      });
-      return result;
+    std::vector<NonOverlappingRepeatsResult> compute_longest_nonoverlapping_repeats(
+        const std::vector<T>& str,
+        size_t min_length = 0,
+        NonOverlappingAlgorithm algorithm = NonOverlappingAlgorithm::SUFFIX_TREE_WALK
+    ) {
+      switch (algorithm) {
+        case NonOverlappingAlgorithm::SUFFIX_TREE_WALK: {
+          SuffixTree<T> tree(str);
+          std::vector<NonOverlappingRepeatsResult> result;
+          walk(tree.get_root(), result, min_length);
+          std::sort(result.begin(), result.end(), [](const NonOverlappingRepeatsResult& left, const NonOverlappingRepeatsResult& right) {
+            // Note: using > instead of < to sort in descending order.
+            return std::make_pair((left.end - left.start) * left.repeats, left.repeats) >
+                   std::make_pair((right.end - right.start) * right.repeats, right.repeats);
+          });
+          // Filter the result to remove substrings of longer repeats from consideration.
+          size_t copyidx = 0;
+          std::unordered_set<size_t> ends;
+          for (auto res : result) {
+            if (ends.find(res.end) != ends.end()) {
+              continue;
+            }
+            result[copyidx] = res;
+            copyidx++;
+            ends.insert(res.end);
+          }
+          // Erase the unused pieces of result.
+          result.erase(result.begin() + copyidx, result.end());
+          return result;
+        }
+        // TODO (broman): Add dispatch here.
+        default:
+          assert(false);
+      }
+      return {};
     }
   };
 };
