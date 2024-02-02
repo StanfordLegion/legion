@@ -23756,6 +23756,11 @@ namespace Legion {
             result = new RemoteSummaryOp(runtime, remote_ptr, source);
             break;
           }
+	case TRACE_COMPLETE_OP_KIND:
+	  {
+	    result = new RemoteCompleteOp(runtime, remote_ptr, source);
+	    break;
+	  }
         default:
           assert(false);
       }
@@ -25362,6 +25367,99 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RemoteSummaryOp::unpack(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      // Nothing for the moment
+    }
+
+    ///////////////////////////////////////////////////////////// 
+    // Remote Complete Op 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    RemoteCompleteOp::RemoteCompleteOp(Runtime *rt,
+                                       Operation *ptr, AddressSpaceID src)
+      : RemoteOp(rt, ptr, src)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    RemoteCompleteOp::RemoteCompleteOp(const RemoteCompleteOp &rhs)
+      : RemoteOp(rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    RemoteCompleteOp::~RemoteCompleteOp(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    RemoteCompleteOp& RemoteCompleteOp::operator=(const RemoteCompleteOp &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    UniqueID RemoteCompleteOp::get_unique_id(void) const
+    //--------------------------------------------------------------------------
+    {
+      return unique_op_id;
+    }
+
+    //--------------------------------------------------------------------------
+    uint64_t RemoteCompleteOp::get_context_index(void) const
+    //--------------------------------------------------------------------------
+    {
+      return context_index;
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteCompleteOp::set_context_index(uint64_t index)
+    //--------------------------------------------------------------------------
+    {
+      context_index = index;
+    }
+
+    //--------------------------------------------------------------------------
+    int RemoteCompleteOp::get_depth(void) const
+    //--------------------------------------------------------------------------
+    {
+      return (parent_ctx->get_depth() + 1);
+    }
+
+    //--------------------------------------------------------------------------
+    const char* RemoteCompleteOp::get_logging_name(void) const
+    //--------------------------------------------------------------------------
+    {
+      return op_names[TRACE_COMPLETE_OP_KIND];
+    }
+
+    //--------------------------------------------------------------------------
+    Operation::OpKind RemoteCompleteOp::get_operation_kind(void) const
+    //--------------------------------------------------------------------------
+    {
+      return TRACE_COMPLETE_OP_KIND;
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteCompleteOp::pack_remote_operation(Serializer &rez,
+                 AddressSpaceID target, std::set<RtEvent> &applied_events) const
+    //--------------------------------------------------------------------------
+    {
+      pack_remote_base(rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteCompleteOp::unpack(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       // Nothing for the moment

@@ -4896,6 +4896,34 @@ namespace Legion {
       virtual void unpack(Deserializer &derez);
     };
 
+    /**
+     * \class RemoteCompleteOp
+     * This is a remote copy of a trace complete op, it really doesn't
+     * have to do very much at all other than implement the interface
+     * for remote ops as it will only be used for updating state for
+     * physical template replays
+     */
+    class RemoteCompleteOp : public RemoteOp,
+                             public LegionHeapify<RemoteCompleteOp> {
+    public:
+      RemoteCompleteOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
+      RemoteCompleteOp(const RemoteCompleteOp &rhs);
+      virtual ~RemoteCompleteOp(void);
+    public:
+      RemoteCompleteOp& operator=(const RemoteCompleteOp &rhs);
+    public:
+      virtual UniqueID get_unique_id(void) const;
+      virtual uint64_t get_context_index(void) const;
+      virtual void set_context_index(uint64_t index);
+      virtual int get_depth(void) const;
+    public:
+      virtual const char* get_logging_name(void) const;
+      virtual OpKind get_operation_kind(void) const;
+      virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
+                                         std::set<RtEvent> &applied) const;
+      virtual void unpack(Deserializer &derez);
+    };
+
   }; //namespace Internal 
 }; // namespace Legion 
 
