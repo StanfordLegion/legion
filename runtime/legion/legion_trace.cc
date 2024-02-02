@@ -670,9 +670,14 @@ namespace Legion {
         }
         else
         {
-          physical_trace->clear_cached_template();
-          current_template->issue_summary_operations(context, invalidator, 
-                                                     end_provenance);
+          // Non-idempotent traces have already applied their post-conditions
+          // and cleared the template cache eagerly once the traces have
+          // completed. So only perform this logic for idempotent traces.
+          if (current_template->is_idempotent()) {
+            physical_trace->clear_cached_template();
+            current_template->issue_summary_operations(context, invalidator,
+                                                       end_provenance);
+          }
           has_intermediate_ops = false;
         }
       }
@@ -1032,15 +1037,12 @@ namespace Legion {
                                       get_completion_event());
         trace->initialize_tracing_state();
         replayed = true;
-
-        // If the template we just replayed is not idempotent, then we
-        // will issue the summary operation, and clear our cached template
-        // so that at the next replay (of this template or another) we will be
-        // forced to check preconditions and select a new template (which may
-        // or may not be this template).
+        // If the template we just replayed is not idempotent, clear our
+        // cached template so that at the next replay (of this template
+        // or another) we will be forced to check preconditions and select
+        // a new template (which may or may not be this template).
         if (!current_template->is_idempotent()) {
           physical_trace->clear_cached_template();
-          current_template->issue_summary_operations(parent_ctx, this, this->get_provenance());
         }
         return;
       }
@@ -1119,9 +1121,20 @@ namespace Legion {
 #endif
         std::set<ApEvent> template_postconditions;
         current_template->finish_replay(template_postconditions);
-        complete_mapping();
-        record_completion_effects(template_postconditions);
-        complete_execution();
+        // If this template is idempotent, then we don't need to act
+        // as a fence right now and apply any post-conditions, as the
+        // invalidate_trace_cache operation will do that for us. If we
+        // aren't an idempotent trace, then we need to eagerly apply
+        // the trace post-conditions and act like a fence.
+        if (current_template->is_idempotent()) {
+          complete_mapping();
+          record_completion_effects(template_postconditions);
+          complete_execution();
+        } else {
+          current_template->apply_postcondition(this, map_applied_conditions);
+          record_completion_effects(template_postconditions);
+          FenceOp::trigger_mapping();
+        }
         return;
       }
       FenceOp::trigger_mapping();
@@ -4103,7 +4116,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::apply_postcondition(TraceSummaryOp *op,
+    void PhysicalTemplate::apply_postcondition(Operation *op,
                                               std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
@@ -4134,16 +4147,6 @@ namespace Legion {
           result = false;
       return result;
     } 
-
-    //--------------------------------------------------------------------------
-    void PhysicalTemplate::apply_postcondition(ReplTraceSummaryOp *op,
-                                              std::set<RtEvent> &applied_events)
-    //--------------------------------------------------------------------------
-    {
-      for (std::vector<TraceConditionSet*>::const_iterator it = 
-            conditions.begin(); it != conditions.end(); it++)
-        (*it)->ensure(op, applied_events);
-    }
 
     //--------------------------------------------------------------------------
     PhysicalTemplate::DetailedBoolean PhysicalTemplate::check_replayable(

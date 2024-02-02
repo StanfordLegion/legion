@@ -8273,6 +8273,13 @@ namespace Legion {
                                       get_completion_event());
         trace->initialize_tracing_state();
         replayed = true;
+        // If the template we just replayed is not idempotent, clear our
+        // cached template so that at the next replay (of this template
+        // or another) we will be forced to check preconditions and select
+        // a new template (which may or may not be this template).
+        if (!current_template->is_idempotent()) {
+          physical_trace->clear_cached_template();
+        }
         return;
       }
       else if (trace->is_recording())
@@ -8370,16 +8377,34 @@ namespace Legion {
 #endif
         std::set<ApEvent> template_postconditions;
         current_template->finish_replay(template_postconditions);
-        // Do our arrival on the mapping fence
-        Runtime::phase_barrier_arrive(mapping_fence_barrier, 1/*count*/);
-        complete_mapping(mapping_fence_barrier);
-        if (!template_postconditions.empty())
-          Runtime::phase_barrier_arrive(execution_fence_barrier, 1/*count*/,
-              Runtime::merge_events(NULL, template_postconditions));
-        else
-          Runtime::phase_barrier_arrive(execution_fence_barrier, 1/*count*/);
-        record_completion_effect(execution_fence_barrier);
-        complete_execution();
+        // If this template is idempotent, then we don't need to act
+        // as a fence right now and apply any post-conditions, as the
+        // invalidate_trace_cache operation will do that for us. If we
+        // aren't an idempotent trace, then we need to eagerly apply
+        // the trace post-conditions and act like a fence.
+        if (current_template->is_idempotent()) {
+          // Do our arrival on the mapping fence
+          Runtime::phase_barrier_arrive(mapping_fence_barrier, 1/*count*/);
+          complete_mapping(mapping_fence_barrier);
+          if (!template_postconditions.empty())
+            Runtime::phase_barrier_arrive(execution_fence_barrier, 1/*count*/,
+                Runtime::merge_events(NULL, template_postconditions));
+          else
+            Runtime::phase_barrier_arrive(execution_fence_barrier, 1/*count*/);
+          record_completion_effect(execution_fence_barrier);
+          complete_execution();
+        } else {
+          current_template->apply_postcondition(this, map_applied_conditions);
+          // TODO (rohany): Mike to review, is this handling in the replicated
+          //  case correct? Not sure about some of these operations.
+          if (!template_postconditions.empty())
+            Runtime::phase_barrier_arrive(execution_fence_barrier, 1/*count*/,
+                Runtime::merge_events(NULL, template_postconditions));
+          else
+            Runtime::phase_barrier_arrive(execution_fence_barrier, 1/*count*/);
+          record_completion_effect(execution_fence_barrier);
+          ReplFenceOp::trigger_mapping();
+        }
         return;
       }
       ReplFenceOp::trigger_mapping();
