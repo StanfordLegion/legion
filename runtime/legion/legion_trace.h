@@ -294,6 +294,8 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
+      virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
+                                         std::set<RtEvent> &applied) const;
     protected:
       PhysicalTemplate *current_template;
       bool replayed;

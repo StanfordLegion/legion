@@ -1140,6 +1140,14 @@ namespace Legion {
       FenceOp::trigger_mapping();
     }
 
+    //--------------------------------------------------------------------------
+    void TraceCompleteOp::pack_remote_operation(Serializer &rez,
+            AddressSpaceID target, std::set<RtEvent> &applied_events) const
+    //--------------------------------------------------------------------------
+    {
+      pack_local_remote_operation(rez);
+    }
+
     /////////////////////////////////////////////////////////////
     // TraceReplayOp
     /////////////////////////////////////////////////////////////

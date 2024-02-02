@@ -8484,6 +8484,14 @@ namespace Legion {
       pre_sync_barrier.perform_collective_sync(precondition);
     }
 
+    //--------------------------------------------------------------------------
+    void ReplTraceCompleteOp::pack_remote_operation(Serializer &rez,
+            AddressSpaceID target, std::set<RtEvent> &applied_events) const
+    //--------------------------------------------------------------------------
+    {
+      pack_local_remote_operation(rez);
+    }
+
     /////////////////////////////////////////////////////////////
     // ReplTraceReplayOp
     /////////////////////////////////////////////////////////////

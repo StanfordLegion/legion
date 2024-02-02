@@ -2961,6 +2961,8 @@ namespace Legion {
       virtual void sync_for_idempotent_check(void);
       virtual bool exchange_idempotent(ReplicateContext *ctx, bool idempotent);
       virtual void sync_compute_frontiers(RtEvent precondition);
+      virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
+                                         std::set<RtEvent> &applied) const;
     protected:
       PhysicalTemplate *current_template;
       ApEvent template_completion;
