@@ -195,18 +195,10 @@ namespace Legion {
         for (size_t start = 0; start < end; start++) {
           // Substep a.
 
-          // debug
-          // std::cout << "Start of substep A with head " << head->is_internal() << " depth=" << head->depth() << std::endl;
-          // debug
-
           SuffixTreeNode<T>* c = head->suffix_link;
           if (c == nullptr) {
             c = head->parent->suffix_link;
           }
-
-          // debug
-          // std::cout << "Start of substep B with c " << c->is_internal() << " depth=" << c->depth() << std::endl;
-          // debug
 
           // Substep b.
           if (matched_len > 1) {
@@ -224,10 +216,6 @@ namespace Legion {
               c = c->parent->split_edge(*this, str, depth, c);
             }
 
-            // debug
-            // std::cout << "rescanned to depth of " << depth << std::endl;
-            // debug
-
             assert(c->depth() == depth);
           }
 
@@ -235,10 +223,6 @@ namespace Legion {
             assert(c->is_internal());
             head->suffix_link = c;
           }
-
-          // debug
-          // std::cout << "start of substep C on c " << c->is_internal() << " depth=" << c->depth() << std::endl;
-          // debug
 
           // Substep c.
           // Slow scan from d.
@@ -248,28 +232,12 @@ namespace Legion {
           matched_len = find_path_result.matched_len;
           SuffixTreeNode<T>* child = find_path_result.child;
 
-          // debug
-          // std::cout << "scanned to depth of " << matched_len << std::endl;
-          // debug
-
           if (child != nullptr) {
             // The path ended in the middle of an edge.
             head = head->split_edge(*this, str, matched_len, child);
           }
 
-          // debug
-          // std::cout << "new head is head " << c->is_internal() << " depth=" << head->depth() << std::endl;
-          // debug
-
           head->children[str[start + matched_len]] = this->alloc(head, start, end, false /* internal */);
-
-          // debug
-          // std::cout << "Added ";
-          // printvec(std::cout, std::vector<T>(str.begin() + start, str.begin() + end));
-          // std::cout << " to node ";
-          // printvec(std::cout, std::vector<T>(str.begin() + head->start, str.begin() + head->end));
-          // std::cout << " as " << str[start + head->depth()] << std::endl;
-          // debug
         }
       }
 
