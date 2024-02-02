@@ -1043,6 +1043,10 @@ namespace Legion {
         // a new template (which may or may not be this template).
         if (!current_template->is_idempotent()) {
           physical_trace->clear_cached_template();
+          // If our current template is not idempotent, then this
+          // TraceCompleteOp needs to act like a fence.
+          parent_ctx->perform_fence_analysis(
+              this, execution_preconditions, true, true);
         }
         return;
       }
