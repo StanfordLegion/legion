@@ -53,12 +53,11 @@ do
 end
 
 task main()
-  -- TODO (rohany): Make this handle a multi-node/shard case too?
   var is = ispace(int1d, 100)
   var r = region(is, int)
   -- Partition the region into some overlapping pieces.
-  var is1 = ispace(int1d, 2)
-  var is2 = ispace(int1d, 3)
+  var is1 = ispace(int1d, 4)
+  var is2 = ispace(int1d, 5)
   var p1 = partition(equal, r, is1)
   var p2 = partition(equal, r, is2)
 
