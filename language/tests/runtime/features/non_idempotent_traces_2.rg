@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 -- runs-with:
--- [["-dm:memoize", "-ll:cpu", "2", "-lg:no_fence_elision"]]
+-- [["-dm:memoize", "-ll:cpu", "2"]]
 
 -- This test is a basic test to see that the runtime can record and
 -- replay a non-idempotent trace that has multiple different templates
