@@ -28,22 +28,21 @@ def find_header(filename, search_dir):
         if os.path.exists(legion_h_path):
             return prefix_dir, legion_h_path
 
-    # We should always be in an in-source build, so just find the file
-    # relative to the source directory.
-    root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
-    runtime_dir = os.path.join(root_dir, search_dir)
-    result = try_prefix(filename, runtime_dir)
+    result = try_prefix(filename, search_dir)
     if result:
         return result
 
-    raise Exception('Unable to locate header file:' + filename + " in:" + runtime_dir)
+    raise Exception('Unable to locate header file: ' + filename + ' in: ' + search_dir)
 
-def build_cffi(libname, defines_dir, output_dir, header_files, header_file_search_dirs, output_file):
+def build_cffi(libname, source_dir, defines_dir, output_dir, header_files, header_file_search_dirs, output_file):
+    if source_dir is None:
+        source_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
+
     headers_prefix_dir = []
     headers_path = []
     assert len(header_files) == len(header_file_search_dirs)
     for (header_file, search_dir) in zip(header_files, header_file_search_dirs):
-        prefix_dir, h_path = find_header(header_file, search_dir)
+        prefix_dir, h_path = find_header(header_file, os.path.join(source_dir, search_dir))
         headers_prefix_dir.append(prefix_dir)
         headers_path.append(h_path)
 
@@ -85,6 +84,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.canonical:
-        build_cffi(args.libname, args.defines_dir, args.output_dir, ['canonical_python.h', 'legion.h'], [os.path.join('bindings', 'python'), 'runtime'], 'legion_canonical_cffi.py')
+        build_cffi(args.libname, None, args.defines_dir, args.output_dir, ['canonical_python.h', 'legion.h'], [os.path.join('bindings', 'python'), 'runtime'], 'legion_canonical_cffi.py')
     else:
-        build_cffi(None, args.defines_dir, args.output_dir, ['legion.h'], ['runtime'], 'legion_builtin_cffi.py')
+        build_cffi(None, None, args.defines_dir, args.output_dir, ['legion.h'], ['runtime'], 'legion_builtin_cffi.py')

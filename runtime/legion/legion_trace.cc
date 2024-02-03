@@ -821,13 +821,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       initialize(ctx, EXECUTION_FENCE, false/*need future*/, provenance);
-#ifdef DEBUG_LEGION
-      assert(trace != NULL);
-#endif
-      tracing = false;
-      current_template = NULL;
       has_blocking_call = has_block;
-      is_recording = false;
       remove_trace_reference = remove_trace_ref;
     }
 
@@ -865,6 +859,9 @@ namespace Legion {
     void TraceCaptureOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
+      tracing = false;
+      current_template = NULL;
+      is_recording = false;
       // Indicate that we are done capturing this trace
       trace->end_trace_execution(this);
       // Register this fence with all previous users in the parent's context
@@ -965,14 +962,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       initialize(ctx, EXECUTION_FENCE, false/*need future*/, provenance);
-#ifdef DEBUG_LEGION
-      assert(trace != NULL);
-#endif
-      tracing = false;
-      current_template = NULL;
-      replayed = false;
       has_blocking_call = has_block;
-      is_recording = false;
     }
 
     //--------------------------------------------------------------------------
@@ -1009,6 +999,10 @@ namespace Legion {
     void TraceCompleteOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
+      tracing = false;
+      current_template = NULL;
+      replayed = false;
+      is_recording = false;
       trace->end_trace_execution(this);
       parent_ctx->record_previous_trace(trace);
 
@@ -1165,6 +1159,7 @@ namespace Legion {
     {
       initialize(ctx, EXECUTION_FENCE, false/*need future*/, provenance);
       trace = tr;
+
     }
 
     //--------------------------------------------------------------------------
@@ -1410,12 +1405,16 @@ namespace Legion {
                                             Provenance *provenance)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, false/*track*/, 0/*regions*/, provenance);
+      initialize_operation(ctx, provenance);
       fence_kind = MAPPING_FENCE;
-      context_index = invalidator->get_ctx_index();
+      context_index = invalidator->get_context_index();
       if (runtime->legion_spy_enabled)
+      {
         LegionSpy::log_fence_operation(parent_ctx->get_unique_id(),
-            unique_op_id, context_index, false/*execution fence*/);
+            unique_op_id, false/*execution fence*/);
+        LegionSpy::log_child_operation_index(parent_ctx->get_unique_id(),
+            context_index, unique_op_id);
+      }
       current_template = tpl;
       // The summary could have been marked as being traced,
       // so here we forcibly clear them out.
@@ -1583,8 +1582,10 @@ namespace Legion {
     void PhysicalTrace::record_failed_capture(PhysicalTemplate *tpl)
     //--------------------------------------------------------------------------
     {
-      if ((last_memoized > 0) && 
-          (++nonreplayable_count > LEGION_NON_REPLAYABLE_WARNING))
+      // We won't consider failure from mappers refusing to memoize
+      // as a warning that gets bubbled up to end users.
+      if (!tpl->get_no_consensus() &&
+          ++nonreplayable_count > LEGION_NON_REPLAYABLE_WARNING)
       {
         const std::string &message = tpl->get_replayable_message();
         const char *message_buffer = message.c_str();
@@ -1705,17 +1706,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalTemplate* PhysicalTrace::start_new_template(
-                                              TaskTreeCoordinates &&coordinates)
+    PhysicalTemplate* PhysicalTrace::start_new_template(void)
     //--------------------------------------------------------------------------
     {
       // If we have a replicated context then we are making sharded templates
       if (repl_ctx != NULL)
-        current_template = new ShardedPhysicalTemplate(this, 
-            execution_fence_event, std::move(coordinates), repl_ctx);
+        current_template = 
+          new ShardedPhysicalTemplate(this, execution_fence_event, repl_ctx);
       else
-        current_template = new PhysicalTemplate(this, execution_fence_event,
-                                                std::move(coordinates));
+        current_template = new PhysicalTemplate(this, execution_fence_event);
       return current_template;
     }
 
@@ -3976,10 +3975,9 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    PhysicalTemplate::PhysicalTemplate(PhysicalTrace *t, ApEvent fence_event,
-                                       TaskTreeCoordinates &&coords)
-      : trace(t), coordinates(std::move(coords)), total_replays(1),
-        replayable(false, "uninitialized"), fence_completion_id(0),
+    PhysicalTemplate::PhysicalTemplate(PhysicalTrace *t, ApEvent fence_event)
+      : trace(t), total_replays(1), replayable(false, "uninitialized"),
+        fence_completion_id(0),
         replay_parallelism(t->runtime->max_replay_parallelism),
         has_virtual_mapping(false), has_no_consensus(false), last_fence(NULL)
     //--------------------------------------------------------------------------
@@ -4030,6 +4028,14 @@ namespace Legion {
       TransitiveReductionState *state = finished_transitive_reduction.load();
       if (state != NULL)
         delete state;
+      for (std::map<DistributedID,IndividualView*>::const_iterator it =
+            recorded_views.begin(); it != recorded_views.end(); it++)
+        if (it->second->remove_base_valid_ref(TRACE_REF))
+          delete it->second;
+      for (std::set<IndexSpaceExpression*>::const_iterator it =
+           recorded_expressions.begin(); it != recorded_expressions.end(); it++)
+        if ((*it)->remove_base_expression_reference(TRACE_REF))
+          delete (*it);
     }
 
     //--------------------------------------------------------------------------
@@ -4159,50 +4165,59 @@ namespace Legion {
       FieldMaskSet<EquivalenceSet> current_sets;
       std::map<EquivalenceSet*,unsigned> parent_req_indexes;
       {
-        unsigned index = 0;
         std::set<RtEvent> eq_events;
         const ContextID ctx = context->get_physical_tree_context();
-        LegionVector<VersionInfo> version_infos(trace_regions.size());
-        std::map<RegionNode*,unsigned>::const_iterator req_it =
-          trace_region_parent_req_indexes.begin();
-        for (FieldMaskSet<RegionNode>::const_iterator it =
-              trace_regions.begin(); it != trace_regions.end(); 
-              it++, req_it++, index++)
+        // Need to count how many version infos there are before we
+        // start since we can't resize the vector once we start
+        // compute the equivalence sets for any of them
+        unsigned index = 0;
+        for (LegionVector<FieldMaskSet<RegionNode> >::const_iterator it =
+              trace_regions.begin(); it != trace_regions.end(); it++)
+          index += it->size();
+        LegionVector<VersionInfo> version_infos(index);
+        index = 0;
+        for (unsigned idx = 0; idx < trace_regions.size(); idx++)
         {
-#ifdef DEBUG_LEGION
-          // Make sure the parent_req_indexes zip with the trace_regions
-          assert(req_it->first == it->first);
-#endif
-          it->first->perform_versioning_analysis(ctx, context, 
-            &version_infos[index], it->second, op, 0/*index*/,
-            req_it->second, eq_events);
+          for (FieldMaskSet<RegionNode>::const_iterator it = 
+                trace_regions[idx].begin(); it !=
+                trace_regions[idx].end(); it++)
+          {
+            it->first->perform_versioning_analysis(ctx, context,
+                &version_infos[index++], it->second, op, 0/*index*/,
+                idx, eq_events);
+          }
         }
-#ifdef DEBUG_LEGION
-        assert(req_it == trace_region_parent_req_indexes.end());
-#endif
-        // Reset in debug mode since we traversed to check
-        req_it = trace_region_parent_req_indexes.begin();
-        trace_regions.clear();
+        index = 0;
         if (!eq_events.empty())
         {
           const RtEvent wait_on = Runtime::merge_events(eq_events);
           if (wait_on.exists() && !wait_on.has_triggered())
             wait_on.wait();
         }
-        for (unsigned idx = 0; idx < version_infos.size(); idx++, req_it++)
+        // Transpose over to equivalence sets
+        for (unsigned idx = 0; idx < trace_regions.size(); idx++)
         {
-          const FieldMaskSet<EquivalenceSet> &region_sets = 
-              version_infos[idx].get_equivalence_sets();
-          for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
-                region_sets.begin(); it != region_sets.end(); it++)
+          for (FieldMaskSet<RegionNode>::const_iterator rit = 
+                trace_regions[idx].begin(); rit !=
+                trace_regions[idx].end(); rit++)
           {
-            current_sets.insert(it->first, it->second);
-            parent_req_indexes[it->first] = req_it->second;
+            const FieldMaskSet<EquivalenceSet> &region_sets = 
+                version_infos[index++].get_equivalence_sets();
+            for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
+                  region_sets.begin(); it != region_sets.end(); it++)
+            {
+              if (current_sets.insert(it->first, it->second))
+                parent_req_indexes[it->first] = idx; 
+#ifdef DEBUG_LEGION
+              else
+                assert(parent_req_indexes[it->first] == idx);
+#endif
+            }
+            if (rit->first->remove_base_resource_ref(TRACE_REF))
+              delete rit->first;
           }
-          if (req_it->first->remove_base_resource_ref(TRACE_REF))
-            delete req_it->first;
         }
-        trace_region_parent_req_indexes.clear();
+        trace_regions.clear();
       }
       // Make a trace condition set for each one of them
       // Note for control replication, we're just letting multiple shards 
@@ -4293,8 +4308,7 @@ namespace Legion {
       assert(memoizable != NULL);
 #endif
       const TraceLocalID tid = memoizable->get_trace_local_id();
-      // Should be able to call back() without the lock even when
-      // operations are being removed from the front
+      AutoLock tpl_lock(template_lock);
       std::map<TraceLocalID,MemoizableOp*> &ops = operations.back();
 #ifdef DEBUG_LEGION
       assert(ops.find(tid) == ops.end());
@@ -4504,19 +4518,9 @@ namespace Legion {
 #endif
           if (ready.exists() && !ready.has_triggered())
             ready.wait();
-          // Query the view for the events that it needs
-          // Note that if we're not performing actual fence elision
-          // we switch the usage to full read-write privileges so 
-          // that we can capture all dependences for the end of the trace
-          if (!trace->perform_fence_elision)
-          {
-            const RegionUsage usage(LEGION_READ_WRITE, LEGION_EXCLUSIVE, 0);
-            finder->second->find_last_users(manager, result.events, usage,
-                uit->mask, uit->expr, frontier_events);
-          }
-          else
-            finder->second->find_last_users(manager, result.events,
-                uit->usage, uit->mask, uit->expr, frontier_events);
+          const RegionUsage usage(LEGION_READ_WRITE, LEGION_EXCLUSIVE, 0);
+          finder->second->find_last_users(manager, result.events, usage,
+              uit->mask, uit->expr, frontier_events);
         }
       }
     }
@@ -6350,8 +6354,6 @@ namespace Legion {
     void PhysicalTemplate::record_mapper_output(const TraceLocalID &tlid,
                                             const Mapper::MapTaskOutput &output,
                               const std::deque<InstanceSet> &physical_instances,
-                              const std::vector<size_t> &future_size_bounds,
-                              const std::vector<TaskTreeCoordinates> &coords,
                                               std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
@@ -6368,43 +6370,6 @@ namespace Legion {
       mapping.task_priority = output.task_priority;
       mapping.postmap_task = output.postmap_task;
       mapping.future_locations = output.future_locations;
-      mapping.future_size_bounds = future_size_bounds;
-      // Check to see if the future coordinates are inside of our trace
-      // They have to be inside of our trace in order for it to be safe
-      // for use to be able to re-use their upper bound sizes (because
-      // we know those tasks are reusing the same variants)
-      for (unsigned idx = 0; idx < future_size_bounds.size(); idx++)
-      {
-        // If there's no upper bound then no need to check if the
-        // future is inside 
-        if (future_size_bounds[idx] == SIZE_MAX)
-          continue;
-        const TaskTreeCoordinates &future_coords = coords[idx];
-#ifdef DEBUG_LEGION
-        assert(future_coords.size() <= coordinates.size()); 
-#endif
-        if (future_coords.empty() ||
-            (future_coords.size() < coordinates.size()))
-        {
-          mapping.future_size_bounds[idx] = SIZE_MAX;
-          continue;
-        }
-#ifdef DEBUG_LEGION
-#ifndef NDEBUG
-        // If the size of the coordinates are the same we better
-        // be inside the same parent task or something is really wrong
-        for (unsigned idx2 = 0; idx2 < (future_coords.size()-1); idx2++)
-          assert(future_coords[idx2] == coordinates[idx2]);
-#endif
-#endif
-        // check to see if it came after the start of the trace
-        unsigned last = future_coords.size() - 1;
-        if (coordinates[last].context_index <=future_coords[last].context_index)
-          continue;
-        // Otherwise not inside the trace and therefore we cannot
-        // record the bounds for the future
-        mapping.future_size_bounds[idx] = SIZE_MAX;
-      }
       mapping.physical_instances = physical_instances;
       for (std::deque<InstanceSet>::iterator it =
            mapping.physical_instances.begin(); it !=
@@ -6428,7 +6393,6 @@ namespace Legion {
                                              bool &postmap_task,
                               std::vector<Processor> &target_procs,
                               std::vector<Memory> &future_locations,
-                              std::vector<size_t> &future_size_bounds,
                               std::deque<InstanceSet> &physical_instances) const
     //--------------------------------------------------------------------------
     {
@@ -6446,8 +6410,26 @@ namespace Legion {
       postmap_task = finder->second.postmap_task;
       target_procs = finder->second.target_procs;
       future_locations = finder->second.future_locations;
-      future_size_bounds = finder->second.future_size_bounds;
       physical_instances = finder->second.physical_instances;
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::get_allreduce_mapping(AllReduceOp *allreduce,
+                      std::vector<Memory> &target_memories, size_t &future_size)
+    //--------------------------------------------------------------------------
+    {
+      TraceLocalID op_key = allreduce->get_trace_local_id();
+      AutoLock t_lock(template_lock, 1, false/*exclusive*/);
+#ifdef DEBUG_LEGION
+      assert(is_replaying());
+#endif
+      std::map<TraceLocalID,CachedAllreduce>::const_iterator finder =
+        cached_allreduces.find(op_key);
+#ifdef DEBUG_LEGION
+      assert(finder != cached_allreduces.end());
+#endif
+      target_memories = finder->second.target_memories;
+      future_size = finder->second.future_size;
     }
 
     //--------------------------------------------------------------------------
@@ -6854,11 +6836,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock tpl_lock(template_lock);
-      if (trace_regions.insert(node, user_mask))
-      {
-        trace_region_parent_req_indexes[node] = parent_req_index;
+      if (trace_regions.size() <= parent_req_index)
+        trace_regions.resize(parent_req_index + 1);
+      if (trace_regions[parent_req_index].insert(node, user_mask))
         node->add_base_resource_ref(TRACE_REF);
-      }
       if (update_validity)
         record_instance_user(op_insts[tlid], inst, usage, 
                              node->row_source, user_mask, applied);
@@ -7058,6 +7039,21 @@ namespace Legion {
       assert(cached_reservations.find(tlid) == cached_reservations.end());
 #endif
       cached_reservations[tlid] = reservations;
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::record_future_allreduce(const TraceLocalID &tlid,
+        const std::vector<Memory> &target_memories, size_t future_size)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock tpl_lock(template_lock);
+#ifdef DEBUG_LEGION
+      assert(is_recording());
+      assert(cached_allreduces.find(tlid) == cached_allreduces.end());
+#endif
+      CachedAllreduce &allreduce = cached_allreduces[tlid];
+      allreduce.target_memories = target_memories;
+      allreduce.future_size = future_size;
     }
 
     //--------------------------------------------------------------------------
@@ -7448,8 +7444,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ShardedPhysicalTemplate::ShardedPhysicalTemplate(PhysicalTrace *trace,
-       ApEvent fence_event, TaskTreeCoordinates &&coords, ReplicateContext *ctx)
-      : PhysicalTemplate(trace, fence_event, std::move(coords)), repl_ctx(ctx),
+                                    ApEvent fence_event, ReplicateContext *ctx)
+      : PhysicalTemplate(trace, fence_event), repl_ctx(ctx),
         local_shard(repl_ctx->owner_shard->shard_id), 
         total_shards(repl_ctx->shard_manager->total_shards),
         template_index(repl_ctx->register_trace_template(this)),

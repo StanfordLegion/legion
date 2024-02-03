@@ -633,7 +633,13 @@ namespace Legion {
        * the execution of this task on multiple different processors. All the
        * copies of the task must use the same variant which must be set as
        * supporting replication. If the variant is a non-leaf variant then the
-       * execution will be control-replicated.
+       * execution will be control-replicated. If instead you are doing
+       * replication of leaf tasks on different kinds of processors you can 
+       * pick different variants for them using the leaf_variants vector which
+       * must be the same size as the target_processors vector and all the
+       * selected variants for each processor must be a leaf variant. If you
+       * specify a non-empty leaf_variants data structure then the 
+       * chosen_variant member will be ignored.
        *
        * Note that if the task has any region requirements with write or
        * reduction privileges then it will be incumbent upon the mapper to
@@ -658,6 +664,7 @@ namespace Legion {
         VariantID                                     chosen_variant;
         std::vector<Processor>                        target_processors;
         // The following outputs are optional
+        std::vector<VariantID>                        leaf_variants;
         std::vector<DomainPoint>                      shard_points;
         Domain                                        shard_domain;
       };

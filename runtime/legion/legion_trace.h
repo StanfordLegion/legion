@@ -423,7 +423,7 @@ namespace Legion {
       ApEvent get_current_execution_fence_event(void) const
         { return execution_fence_event; }
     public:
-      PhysicalTemplate* start_new_template(TaskTreeCoordinates &&cordinates);
+      PhysicalTemplate* start_new_template(void);
       ApEvent record_replayable_capture(PhysicalTemplate *tpl,
                     std::set<RtEvent> &map_applied_conditions);
       void record_failed_capture(PhysicalTemplate *tpl);
@@ -696,10 +696,14 @@ namespace Legion {
         bool                    postmap_task;
         std::vector<Processor>  target_procs;
         std::vector<Memory>     future_locations;
-        std::vector<size_t>     future_size_bounds;
         std::deque<InstanceSet> physical_instances;
       };
       typedef LegionMap<TraceLocalID,CachedMapping> CachedMappings;
+    private:
+      struct CachedAllreduce {
+        std::vector<Memory> target_memories;
+        size_t future_size;
+      };
     protected:
       struct InstanceUser {
       public:
@@ -769,8 +773,7 @@ namespace Legion {
         TransitiveReductionState *const state;
       };
     public:
-      PhysicalTemplate(PhysicalTrace *trace, ApEvent fence_event,
-                       TaskTreeCoordinates &&cordinates);
+      PhysicalTemplate(PhysicalTrace *trace, ApEvent fence_event);
       PhysicalTemplate(const PhysicalTemplate &rhs) = delete;
       virtual ~PhysicalTemplate(void);
     public:
@@ -876,6 +879,7 @@ namespace Legion {
       inline const std::string& get_replayable_message(void) const
         { return replayable.message; }
       inline void record_no_consensus(void) { has_no_consensus = true; }
+      inline bool get_no_consensus(void) { return has_no_consensus; }
     public:
       virtual bool is_recording(void) const { return recording.load(); }
       virtual void add_recorder_reference(void) { /*do nothing*/ }
@@ -892,8 +896,6 @@ namespace Legion {
       virtual void record_mapper_output(const TraceLocalID &tlid,
                              const Mapper::MapTaskOutput &output,
                              const std::deque<InstanceSet> &physical_instances,
-                             const std::vector<size_t> &future_size_bounds,
-                             const std::vector<TaskTreeCoordinates> &coords,
                              std::set<RtEvent> &applied_events);
       void get_mapper_output(SingleTask *task,
                              VariantID &chosen_variant,
@@ -901,10 +903,11 @@ namespace Legion {
                              bool &postmap_task,
                              std::vector<Processor> &target_proc,
                              std::vector<Memory> &future_locations,
-                             std::vector<size_t> &future_size_bounds,
                              std::deque<InstanceSet> &physical_instances) const;
       void get_task_reservations(SingleTask *task,
                              std::map<Reservation,bool> &reservations) const;
+      void get_allreduce_mapping(AllReduceOp *op,
+          std::vector<Memory> &target_memories, size_t &future_size);
     public:
       virtual void record_completion_event(ApEvent lhs, unsigned op_kind,
                                            const TraceLocalID &tlid);
@@ -1022,6 +1025,8 @@ namespace Legion {
       virtual void record_reservations(const TraceLocalID &tlid,
                                 const std::map<Reservation,bool> &locks,
                                 std::set<RtEvent> &applied_events); 
+      virtual void record_future_allreduce(const TraceLocalID &tlid,
+          const std::vector<Memory> &target_memories, size_t future_size);
     public:
       virtual void record_owner_shard(unsigned trace_local_id, ShardID owner);
       virtual void record_local_space(unsigned trace_local_id, IndexSpace sp);
@@ -1079,7 +1084,6 @@ namespace Legion {
       inline ApEvent get_fence_completion(void) { return fence_completion; }
     public:
       PhysicalTrace * const trace;
-      const TaskTreeCoordinates coordinates;
     protected:
       std::atomic<bool> recording;
       // Count how many times we've been replayed so we know when we're going
@@ -1107,6 +1111,7 @@ namespace Legion {
       CachedPremappings cached_premappings;
       CachedMappings cached_mappings;
       std::map<TraceLocalID,std::map<Reservation,bool> > cached_reservations;
+      std::map<TraceLocalID,CachedAllreduce> cached_allreduces;
       bool has_virtual_mapping;
       bool has_no_consensus;
     protected:
@@ -1156,9 +1161,7 @@ namespace Legion {
       // at the end of the trace capture to compute the equivalence sets for
       // this trace and then extract the different condition sets for this trace
       // THESE ARE SHARDED FOR CONTROL REPLICATION!!!
-      FieldMaskSet<RegionNode> trace_regions;
-      // Parent context requirement indexes for each of the regions
-      std::map<RegionNode*,unsigned> trace_region_parent_req_indexes;
+      LegionVector<FieldMaskSet<RegionNode> > trace_regions;
       std::vector<TraceConditionSet*> conditions;
 #ifdef LEGION_SPY
     private:
@@ -1238,7 +1241,6 @@ namespace Legion {
       };
     public:
       ShardedPhysicalTemplate(PhysicalTrace *trace, ApEvent fence_event,
-                              TaskTreeCoordinates &&coordinates,
                               ReplicateContext *repl_ctx);
       ShardedPhysicalTemplate(const ShardedPhysicalTemplate &rhs) = delete;
       virtual ~ShardedPhysicalTemplate(void);
