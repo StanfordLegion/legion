@@ -1883,7 +1883,7 @@ namespace Legion {
       void record_view(LogicalView *new_view);
       void resize_reductions(size_t new_size);
       void update_tracing_valid_views(EquivalenceSet *tracing_eq,
-            LogicalView *src, LogicalView *dst, const FieldMask &mask,
+            InstanceView *src, InstanceView *dst, const FieldMask &mask,
             IndexSpaceExpression *expr, ReductionOpID redop) const;
       void record_instance_update(InstanceView *dst_view,
                           InstanceView *src_view,
@@ -3473,14 +3473,40 @@ namespace Legion {
                       const bool invalidate_overlap,
                       const bool filter_invalidations);
       void make_owner(RtEvent precondition = RtEvent::NO_RT_EVENT);
-      void update_tracing_valid_views(LogicalView *view,
-                                      IndexSpaceExpression *expr,
-                                      const RegionUsage &usage,
-                                      const FieldMask &user_mask,
-                                      const bool invalidates);
-      void update_tracing_anti_views(LogicalView *view,
-                                     IndexSpaceExpression *expr,
-                                     const FieldMask &user_mask);
+    public:
+      // View that was read by a task during a trace
+      void update_tracing_read_only_view(InstanceView *view,
+                                    IndexSpaceExpression *expr,
+                                    const FieldMask &view_mask);
+      // View that was only written to by a task during a trace
+      void update_tracing_write_discard_view(LogicalView *view,
+                                   IndexSpaceExpression *expr,
+                                   const FieldMask &view_mask);
+      // View that was read and written to by a task during a trace
+      void update_tracing_read_write_view(InstanceView *view,
+                                   IndexSpaceExpression *expr,
+                                   const FieldMask &view_mask);
+      // View that was reduced by a task during a trace
+      void update_tracing_reduced_view(InstanceView *view,
+                                   IndexSpaceExpression *expr,
+                                   const FieldMask &view_mask);
+      // View that was filled during a trace
+      void update_tracing_fill_views(FillView *src_view,
+                                   InstanceView *dst_view,
+                                   IndexSpaceExpression *expr,
+                                   const FieldMask &fill_mask,
+                                   bool across);
+      // Views that were copied between during a trace
+      void update_tracing_copy_views(LogicalView *src_view,
+                                   InstanceView *dst_view,
+                                   IndexSpaceExpression *expr,
+                                   const FieldMask &copy_mask,
+                                   bool across);
+      // Views that were reduced between during a trace
+      void update_tracing_reduction_views(InstanceView *src_view,
+                                   InstanceView *dst_view,
+                                   IndexSpaceExpression *expr,
+                                   const FieldMask &copy_mask);
       RtEvent capture_trace_conditions(TraceConditionSet *target,
                                        AddressSpaceID target_space,
                                        IndexSpaceExpression *expr,
