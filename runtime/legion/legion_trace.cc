@@ -4165,50 +4165,59 @@ namespace Legion {
       FieldMaskSet<EquivalenceSet> current_sets;
       std::map<EquivalenceSet*,unsigned> parent_req_indexes;
       {
-        unsigned index = 0;
         std::set<RtEvent> eq_events;
         const ContextID ctx = context->get_physical_tree_context();
-        LegionVector<VersionInfo> version_infos(trace_regions.size());
-        std::map<RegionNode*,unsigned>::const_iterator req_it =
-          trace_region_parent_req_indexes.begin();
-        for (FieldMaskSet<RegionNode>::const_iterator it =
-              trace_regions.begin(); it != trace_regions.end(); 
-              it++, req_it++, index++)
+        // Need to count how many version infos there are before we
+        // start since we can't resize the vector once we start
+        // compute the equivalence sets for any of them
+        unsigned index = 0;
+        for (LegionVector<FieldMaskSet<RegionNode> >::const_iterator it =
+              trace_regions.begin(); it != trace_regions.end(); it++)
+          index += it->size();
+        LegionVector<VersionInfo> version_infos(index);
+        index = 0;
+        for (unsigned idx = 0; idx < trace_regions.size(); idx++)
         {
-#ifdef DEBUG_LEGION
-          // Make sure the parent_req_indexes zip with the trace_regions
-          assert(req_it->first == it->first);
-#endif
-          it->first->perform_versioning_analysis(ctx, context, 
-            &version_infos[index], it->second, op, 0/*index*/,
-            req_it->second, eq_events);
+          for (FieldMaskSet<RegionNode>::const_iterator it = 
+                trace_regions[idx].begin(); it !=
+                trace_regions[idx].end(); it++)
+          {
+            it->first->perform_versioning_analysis(ctx, context,
+                &version_infos[index++], it->second, op, 0/*index*/,
+                idx, eq_events);
+          }
         }
-#ifdef DEBUG_LEGION
-        assert(req_it == trace_region_parent_req_indexes.end());
-#endif
-        // Reset in debug mode since we traversed to check
-        req_it = trace_region_parent_req_indexes.begin();
-        trace_regions.clear();
+        index = 0;
         if (!eq_events.empty())
         {
           const RtEvent wait_on = Runtime::merge_events(eq_events);
           if (wait_on.exists() && !wait_on.has_triggered())
             wait_on.wait();
         }
-        for (unsigned idx = 0; idx < version_infos.size(); idx++, req_it++)
+        // Transpose over to equivalence sets
+        for (unsigned idx = 0; idx < trace_regions.size(); idx++)
         {
-          const FieldMaskSet<EquivalenceSet> &region_sets = 
-              version_infos[idx].get_equivalence_sets();
-          for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
-                region_sets.begin(); it != region_sets.end(); it++)
+          for (FieldMaskSet<RegionNode>::const_iterator rit = 
+                trace_regions[idx].begin(); rit !=
+                trace_regions[idx].end(); rit++)
           {
-            current_sets.insert(it->first, it->second);
-            parent_req_indexes[it->first] = req_it->second;
+            const FieldMaskSet<EquivalenceSet> &region_sets = 
+                version_infos[index++].get_equivalence_sets();
+            for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
+                  region_sets.begin(); it != region_sets.end(); it++)
+            {
+              if (current_sets.insert(it->first, it->second))
+                parent_req_indexes[it->first] = idx; 
+#ifdef DEBUG_LEGION
+              else
+                assert(parent_req_indexes[it->first] == idx);
+#endif
+            }
+            if (rit->first->remove_base_resource_ref(TRACE_REF))
+              delete rit->first;
           }
-          if (req_it->first->remove_base_resource_ref(TRACE_REF))
-            delete req_it->first;
         }
-        trace_region_parent_req_indexes.clear();
+        trace_regions.clear();
       }
       // Make a trace condition set for each one of them
       // Note for control replication, we're just letting multiple shards 
@@ -6827,11 +6836,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock tpl_lock(template_lock);
-      if (trace_regions.insert(node, user_mask))
-      {
-        trace_region_parent_req_indexes[node] = parent_req_index;
+      if (trace_regions.size() <= parent_req_index)
+        trace_regions.resize(parent_req_index + 1);
+      if (trace_regions[parent_req_index].insert(node, user_mask))
         node->add_base_resource_ref(TRACE_REF);
-      }
       if (update_validity)
         record_instance_user(op_insts[tlid], inst, usage, 
                              node->row_source, user_mask, applied);

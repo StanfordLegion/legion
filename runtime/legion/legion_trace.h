@@ -1161,9 +1161,7 @@ namespace Legion {
       // at the end of the trace capture to compute the equivalence sets for
       // this trace and then extract the different condition sets for this trace
       // THESE ARE SHARDED FOR CONTROL REPLICATION!!!
-      FieldMaskSet<RegionNode> trace_regions;
-      // Parent context requirement indexes for each of the regions
-      std::map<RegionNode*,unsigned> trace_region_parent_req_indexes;
+      LegionVector<FieldMaskSet<RegionNode> > trace_regions;
       std::vector<TraceConditionSet*> conditions;
 #ifdef LEGION_SPY
     private:
