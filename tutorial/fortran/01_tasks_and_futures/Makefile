@@ -20,7 +20,7 @@ endif
 
 # Flags for directing the runtime makefile what to include
 DEBUG           ?= 1		# Include debugging symbols
-OUTPUT_LEVEL    ?= LEVEL_DEBUG	# Compile time logging level
+OUTPUT_LEVEL    ?= LEVEL_INFO	# Compile time logging level
 USE_CUDA        ?= 0		# Include CUDA support (requires CUDA)
 USE_GASNET      ?= 0		# Include GASNet support (requires GASNet)
 USE_HDF         ?= 0		# Include HDF5 support (requires HDF5)

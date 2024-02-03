@@ -22,7 +22,7 @@ endif
 # FIXME: DEBUG=1 causes a crash because the postamble attempts to take a lock and causes the task to block
 DEBUG           ?= 1		# Include debugging symbols
 MAX_DIM         ?= 3		# Maximum number of dimensions
-OUTPUT_LEVEL    ?= LEVEL_DEBUG	# Compile time logging level
+OUTPUT_LEVEL    ?= LEVEL_INFO	# Compile time logging level
 USE_CUDA        ?= 0		# Include CUDA support (requires CUDA)
 USE_GASNET      ?= 0		# Include GASNet support (requires GASNet)
 USE_HDF         ?= 0		# Include HDF5 support (requires HDF5)

@@ -50,6 +50,7 @@ namespace Legion {
       virtual void serialize(const LegionProfDesc::MaxDimDesc&) = 0;
       virtual void serialize(const LegionProfDesc::MachineDesc&) = 0;
       virtual void serialize(const LegionProfDesc::ZeroTime&) = 0;
+      virtual void serialize(const LegionProfDesc::CalibrationErr&) = 0;
       virtual void serialize(const LegionProfInstance::IndexSpacePointDesc&) = 0;
       virtual void serialize(const LegionProfInstance::IndexSpaceRectDesc&) = 0;
       virtual void serialize(const LegionProfInstance::IndexSpaceEmptyDesc&) = 0;
@@ -119,6 +120,7 @@ namespace Legion {
       void serialize(const LegionProfDesc::MaxDimDesc&);
       void serialize(const LegionProfDesc::MachineDesc&);
       void serialize(const LegionProfDesc::ZeroTime&);
+      void serialize(const LegionProfDesc::CalibrationErr&);
       void serialize(const LegionProfInstance::IndexSpacePointDesc&);
       void serialize(const LegionProfInstance::IndexSpaceRectDesc&);
       void serialize(const LegionProfInstance::IndexSpaceEmptyDesc&);
@@ -220,6 +222,7 @@ namespace Legion {
         PROFTASK_INFO_ID,
 #endif
         ZERO_TIME_ID,
+        CALIBRATION_ERR_ID,
       };
     };
 
@@ -238,6 +241,7 @@ namespace Legion {
       void serialize(const LegionProfDesc::MaxDimDesc&);
       void serialize(const LegionProfDesc::MachineDesc&);
       void serialize(const LegionProfDesc::ZeroTime&);
+      void serialize(const LegionProfDesc::CalibrationErr&);
       void serialize(const LegionProfInstance::IndexSpacePointDesc&);
       void serialize(const LegionProfInstance::IndexSpaceRectDesc&);
       void serialize(const LegionProfInstance::IndexSpaceEmptyDesc&);

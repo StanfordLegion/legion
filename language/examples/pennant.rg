@@ -1547,18 +1547,5 @@ toplevel:set_task_id(2)
 
 end -- not use_python_main
 
-if os.getenv('SAVEOBJ') == '1' then
-  local root_dir = arg[0]:match(".*/") or "./"
-  local out_dir = (os.getenv('OBJNAME') and os.getenv('OBJNAME'):match('.*/')) or root_dir
-  local link_flags = {"-L" .. out_dir, "-lpennant", "-lm"}
-
-  if os.getenv('STANDALONE') == '1' then
-    os.execute('cp ' .. os.getenv('LG_RT_DIR') .. '/../bindings/regent/' ..
-        regentlib.binding_library .. ' ' .. out_dir)
-  end
-
-  local exe = os.getenv('OBJNAME') or "pennant"
-  regentlib.saveobj(toplevel, exe, "executable", cpennant.register_mappers, link_flags)
-else
-  regentlib.start(toplevel, cpennant.register_mappers)
-end
+local launcher = require("launcher")
+launcher.launch(toplevel, "pennant", cpennant.register_mappers, {"-lpennant", "-lm"})
