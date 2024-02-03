@@ -8261,7 +8261,6 @@ namespace Legion {
       const GenerationID gen = op->get_generation();
       {
         AutoLock p_lock(prepipeline_lock);
-        issue_task = prepipeline_queue.empty();
         prepipeline_queue.emplace_back(std::make_pair(op,gen));
         // Cap the number of outstanding prepipeline tasks as no more than
         // the number of utility processors that we're running on
