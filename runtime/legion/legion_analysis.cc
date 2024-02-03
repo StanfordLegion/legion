@@ -18329,19 +18329,15 @@ namespace Legion {
 #endif
           InstanceView *inst_view = log_view->as_instance_view();
           record_restriction(expr, expr_covers, overwrite_mask, inst_view);
-          if (tracing_postconditions != NULL)
-            tracing_postconditions->invalidate_all_but(inst_view, expr,
-                                                       overwrite_mask);
         }
       }
       // Record that there is initialized data for this equivalence set
       update_initialized_data(expr, expr_covers, overwrite_mask);
       if (analysis.trace_info.recording)
       {
-        if (tracing_postconditions == NULL)
-          tracing_postconditions =
-            new TraceViewSet(context, did, set_expr, tree_id);
-        const RegionUsage usage(LEGION_WRITE_PRIV, LEGION_EXCLUSIVE, 0);
+#ifdef DEBUG_LEGION
+        assert(analysis.reduction_views.empty());
+#endif
         for (FieldMaskSet<LogicalView>::const_iterator it =
               analysis.views.begin(); it != analysis.views.end(); it++)
           update_tracing_write_discard_view(it->first, expr, it->second);
@@ -19173,15 +19169,11 @@ namespace Legion {
           tracing_preconditions->insert(src_view, it->first, it->second);
       }
       // record the destination view
-      if (tracing_postconditions != NULL)
-      {
-        // Invalidate only in the across case
-        if (across)
-          tracing_postconditions->invalidate_all_but(dst_view,expr,view_mask);
-      }
-      else
+      if (tracing_postconditions == NULL)
         tracing_postconditions =
-          new TraceViewSet(context, did, set_expr, tree_id); 
+          new TraceViewSet(context, did, set_expr, tree_id);
+      else if (across) // Invalidate only in the across case
+        tracing_postconditions->invalidate_all_but(dst_view, expr, view_mask);
       tracing_postconditions->insert(dst_view, expr, view_mask);
     }
 
