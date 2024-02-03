@@ -465,8 +465,8 @@ namespace Legion {
         // We know that they are already completed 
         DistributedID did = runtime->get_available_distributed_id();
         future_map = FutureMap(new FutureMapImpl(ctx, runtime, point_set, did,
-                      0/*index*/, ApEvent::NO_AP_EVENT,
-                      provenance, true/*reg now*/));
+              InnerContext::NO_FUTURE_COORDINATE, ApEvent::NO_AP_EVENT, 
+              provenance, true/*reg now*/));
         future_map.impl->set_all_futures(arguments);
       }
       else
@@ -647,7 +647,7 @@ namespace Legion {
     PredicateImpl::PredicateImpl(Operation *op)
       : context(op->get_context()), creator(op),
         creator_gen(op->get_generation()), creator_uid(op->get_unique_op_id()),
-        creator_ctx_index(op->get_ctx_index()), value(-1)
+        value(-1)
     //--------------------------------------------------------------------------
     {
       context->add_base_resource_ref(APPLICATION_REF);
@@ -665,7 +665,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool PredicateImpl::get_predicate(size_t context_index,
+    bool PredicateImpl::get_predicate(uint64_t context_index,
                                       PredEvent &true_g, PredEvent &false_g)
     //--------------------------------------------------------------------------
     {
@@ -730,9 +730,10 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    ReplPredicateImpl::ReplPredicateImpl(Operation *op, CollectiveID id)
-      : PredicateImpl(op), collective_id(id), max_observed_index(0),
-        collective(NULL)
+    ReplPredicateImpl::ReplPredicateImpl(Operation *op, uint64_t coordinate,
+                                         CollectiveID id)
+      : PredicateImpl(op), predicate_coordinate(coordinate), collective_id(id),
+        max_observed_index(0), collective(NULL)
     //--------------------------------------------------------------------------
     {
     }
@@ -746,7 +747,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool ReplPredicateImpl::get_predicate(size_t context_index,
+    bool ReplPredicateImpl::get_predicate(uint64_t context_index,
                                           PredEvent &true_g, PredEvent &false_g)
     //--------------------------------------------------------------------------
     {
@@ -850,7 +851,9 @@ namespace Legion {
         producer_op(o), op_gen((o == NULL) ? 0 : o->get_generation()),
         producer_depth((o == NULL) ? -1 : o->get_context()->get_depth()),
         producer_uid((o == NULL) ? 0 : o->get_unique_op_id()),
-        producer_context_index((o == NULL) ? SIZE_MAX : o->get_ctx_index()),
+        coordinate((o == NULL) ?
+            ContextCoordinate(InnerContext::NO_FUTURE_COORDINATE) :
+            ContextCoordinate(o->get_context()->get_next_future_coordinate())),
         provenance(prov), local_visible_memory(Memory::NO_MEMORY),
         metadata(NULL), metasize(0), future_size(0), upper_bound_size(SIZE_MAX),
         callback_functor(NULL), own_callback_functor(false),
@@ -872,18 +875,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FutureImpl::FutureImpl(TaskContext *ctx, Runtime *rt, bool register_now, 
                            DistributedID did, Operation *o, GenerationID gen,
-                           size_t op_ctx_index, const DomainPoint &op_point,
-                           UniqueID uid, int depth, Provenance *prov,
-                           CollectiveMapping *map)
+                           const ContextCoordinate &coord, UniqueID uid,
+                           int depth, Provenance *prov, CollectiveMapping *map)
       : DistributedCollectable(rt, 
           LEGION_DISTRIBUTED_HELP_ENCODE(did, FUTURE_DC), 
           register_now, map), context(ctx),
         producer_op(o), op_gen(gen), producer_depth(depth), producer_uid(uid),
-        producer_context_index(op_ctx_index), producer_point(op_point),
-        provenance(prov), local_visible_memory(Memory::NO_MEMORY),
-        metadata(NULL), metasize(0), future_size(0), upper_bound_size(SIZE_MAX),
-        callback_functor(NULL), own_callback_functor(false),
-        future_size_set(false)
+        coordinate(coord), provenance(prov), 
+        local_visible_memory(Memory::NO_MEMORY), metadata(NULL), metasize(0),
+        future_size(0), upper_bound_size(SIZE_MAX), callback_functor(NULL),
+        own_callback_functor(false), future_size_set(false)
     //--------------------------------------------------------------------------
     {
       empty.store(true);
@@ -974,8 +975,8 @@ namespace Legion {
              implicit_context->get_unique_id(),
              (warning_string == NULL) ? "" : warning_string)
       }
-      if ((implicit_context != NULL) && !runtime->separate_runtime_instances)
-        implicit_context->record_blocking_call();
+      if ((context != NULL) && (context == implicit_context))
+        context->record_blocking_call(coordinate.context_index);
       bool poisoned = false;
       const ApEvent complete = get_ready_event();
       if (!complete.has_triggered_faultaware(poisoned))
@@ -1025,17 +1026,14 @@ namespace Legion {
            bool check_extent, bool silence_warnings, const char *warning_string)
     //--------------------------------------------------------------------------
     {
-      const RtEvent ready_event = subscribe();
-      if (ready_event.exists() && !ready_event.has_triggered())
-        ready_event.wait();
+      // Wait to make sure that the future is complete first
+      wait(silence_warnings, warning_string);
       ApEvent inst_ready;
       FutureInstance *instance = find_or_create_instance(memory,
           (implicit_context != NULL) ? implicit_context->owner_task : NULL,
           (implicit_context != NULL) && (implicit_context->owner_task != NULL) ?
            implicit_context->owner_task->get_unique_op_id() : 0, true/*eager*/,
            inst_ready);
-      // Wait to make sure that the future is complete first
-      wait(silence_warnings, warning_string);
       if (extent_in_bytes != NULL)
       {
         if (check_extent)
@@ -1103,17 +1101,14 @@ namespace Legion {
         else
           memory = runtime->runtime_system_memory;
       }
-      const RtEvent ready_event = subscribe();
-      if (ready_event.exists() && !ready_event.has_triggered())
-        ready_event.wait();
+      // Wait to make sure that the future is complete first
+      wait(silence_warnings, warning_string);
       ApEvent inst_ready;
       FutureInstance *instance = find_or_create_instance(memory,
           (implicit_context != NULL) ? implicit_context->owner_task : NULL,
           (implicit_context != NULL) && (implicit_context->owner_task != NULL) ?
            implicit_context->owner_task->get_unique_op_id() : 0, true/*eager*/,
            inst_ready);
-      // Wait to make sure that the future is complete first
-      wait(silence_warnings, warning_string); 
       if (empty.load())
         REPORT_LEGION_ERROR(ERROR_REQUEST_FOR_EMPTY_FUTURE, 
             "Accessing empty future when making an accessor! (UID %lld)",
@@ -1566,8 +1561,8 @@ namespace Legion {
                 context->get_unique_id(),
                 (warning_string == NULL) ? "" : warning_string)
         }
-        if (block && producer_op != NULL && Internal::implicit_context != NULL)
-          Internal::implicit_context->record_blocking_call();
+        if (block && (context != NULL) &&  (implicit_context == context))
+          context->record_blocking_call(coordinate.context_index);
       }
       if (block)
       {
@@ -2396,15 +2391,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FutureImpl::get_future_coordinates(TaskTreeCoordinates &coords) const
+    bool FutureImpl::get_context_coordinate(const TaskContext *ctx,
+                                            ContextCoordinate &coord) const
     //--------------------------------------------------------------------------
     {
+      // If contexts don't match then we don't return the coordinate
+      if (ctx != context)
+        return false;
       // No coordinates if we are an application-generated future
-      if (producer_context_index == SIZE_MAX)
-        return;
-      context->compute_task_tree_coordinates(coords);
-      coords.push_back(
-          ContextCoordinate(producer_context_index, producer_point));
+      if (coordinate.context_index == InnerContext::NO_FUTURE_COORDINATE)
+        return false;
+      coord = coordinate;
+      return true;
     }
 
     //--------------------------------------------------------------------------
@@ -2421,8 +2419,7 @@ namespace Legion {
       else
         rez.serialize<bool>(false); // collective
       rez.serialize(context->did);
-      rez.serialize(producer_context_index);
-      rez.serialize(producer_point);
+      coordinate.serialize(rez);
       if (collective_mapping != NULL)
         collective_mapping->pack(rez);
       else
@@ -2455,10 +2452,8 @@ namespace Legion {
         return result;
       }
       derez.deserialize(ctx_did);
-      size_t op_ctx_index;
-      derez.deserialize(op_ctx_index);
-      DomainPoint point;
-      derez.deserialize(point);
+      ContextCoordinate coordinate;
+      coordinate.deserialize(derez);
       size_t collective_spaces;
       derez.deserialize(collective_spaces);
       CollectiveMapping *collective_mapping = (collective_spaces == 0) ? NULL :
@@ -2467,7 +2462,7 @@ namespace Legion {
         collective_mapping->add_reference();
       AutoProvenance provenance(Provenance::deserialize(derez));
       Future result(runtime->find_or_create_future(future_did, ctx_did,
-                                            op_ctx_index, point, provenance,
+                                            coordinate, provenance,
                                             op, op_gen, op_uid, op_depth,
                                             collective_mapping));
       result.impl->unpack_global_ref();
@@ -3733,9 +3728,9 @@ namespace Legion {
       : DistributedCollectable(rt, 
           LEGION_DISTRIBUTED_HELP_ENCODE(did, FUTURE_MAP_DC),
           register_now, mapping),
-        context(ctx), op(o), op_ctx_index(o->get_ctx_index()),
-        op_gen(o->get_generation()), op_depth(o->get_context()->get_depth()),
-        op_uid(o->get_unique_op_id()),
+        context(ctx), op(o), op_gen(o->get_generation()),
+        op_depth(o->get_context()->get_depth()), op_uid(o->get_unique_op_id()),
+        future_coordinate(o->get_context()->get_next_future_coordinate()),
         provenance(prov), future_map_domain(domain),
         completion_event(o->get_completion_event())
     //--------------------------------------------------------------------------
@@ -3754,14 +3749,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FutureMapImpl::FutureMapImpl(TaskContext *ctx,Runtime *rt,IndexSpaceNode *d,
-                                 DistributedID did, size_t index,
+                                 DistributedID did, uint64_t coordinate,
                                  ApEvent completion, Provenance *prov,
                                  bool register_now, CollectiveMapping *mapping)
       : DistributedCollectable(rt, 
           LEGION_DISTRIBUTED_HELP_ENCODE(did, FUTURE_MAP_DC),
           register_now, mapping),
-        context(ctx), op(NULL), op_ctx_index(index), op_gen(0), op_depth(0),
-        op_uid(0), provenance(prov), future_map_domain(d), 
+        context(ctx), op(NULL), op_gen(0), op_depth(0), op_uid(0),
+        future_coordinate(coordinate), provenance(prov), future_map_domain(d), 
         completion_event(completion)
     //--------------------------------------------------------------------------
     {
@@ -3778,15 +3773,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FutureMapImpl::FutureMapImpl(TaskContext *ctx, Operation *o, size_t index,
+    FutureMapImpl::FutureMapImpl(TaskContext *ctx, Operation *o, uint64_t coord,
                                  GenerationID gen, int depth, UniqueID uid,
                                  IndexSpaceNode *domain, Runtime *rt,
                                  DistributedID did, ApEvent completion,
                                  Provenance *prov)
       : DistributedCollectable(rt, 
           LEGION_DISTRIBUTED_HELP_ENCODE(did, FUTURE_MAP_DC)), 
-        context(ctx), op(o), op_ctx_index(index), op_gen(gen), op_depth(depth),
-        op_uid(uid), provenance(prov), future_map_domain(domain),
+        context(ctx), op(o), op_gen(gen), op_depth(depth), op_uid(uid),
+        future_coordinate(coord), provenance(prov), future_map_domain(domain),
         completion_event(completion)
     //--------------------------------------------------------------------------
     {
@@ -3898,8 +3893,9 @@ namespace Legion {
         // Otherwise we need a future from the context to use for
         // the point that we will fill in later
         FutureImpl *result = new FutureImpl(context, runtime, true/*register*/,
-              runtime->get_available_distributed_id(),
-              op, op_gen, op_ctx_index, point, op_uid, op_depth, provenance);
+              runtime->get_available_distributed_id(), op, op_gen, 
+              ContextCoordinate(future_coordinate, point),
+              op_uid, op_depth, provenance);
         result->add_nested_gc_ref(did);
         result->add_nested_resource_ref(did);
         futures[point] = result;
@@ -3940,6 +3936,8 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(is_owner());
+      assert(implicit_context != NULL);
+      assert(implicit_context == context);
 #endif
       if (runtime->runtime_warnings && !silence_warnings && 
           (context != NULL) && !context->is_leaf_context())
@@ -3951,8 +3949,7 @@ namespace Legion {
             context->get_task_name(),
             context->get_unique_id(),
             (warning_string == NULL) ? "" : warning_string)
-      if ((op != NULL) && (Internal::implicit_context != NULL))
-        Internal::implicit_context->record_blocking_call();
+      context->record_blocking_call(future_coordinate);
       bool poisoned = false;
       if (!completion_event.has_triggered_faultaware(poisoned))
         completion_event.wait_faultaware(poisoned);
@@ -3988,7 +3985,7 @@ namespace Legion {
         rez.serialize<bool>(true); // can create
         rez.serialize(future_map_domain->handle);
         rez.serialize(completion_event);
-        rez.serialize(op_ctx_index);
+        rez.serialize(future_coordinate);
         if (provenance != NULL)
           provenance->serialize(rez);
         else
@@ -4022,11 +4019,11 @@ namespace Legion {
       derez.deserialize(future_map_domain);
       ApEvent completion;
       derez.deserialize(completion);
-      size_t index;
-      derez.deserialize(index);
+      uint64_t coordinate;
+      derez.deserialize(coordinate);
       AutoProvenance provenance(Provenance::deserialize(derez));
       FutureMap result(runtime->find_or_create_future_map(future_map_did, ctx, 
-                            index, future_map_domain, completion, provenance));
+                      coordinate, future_map_domain, completion, provenance));
       result.impl->unpack_global_ref();
       return result;
     }
@@ -4198,18 +4195,18 @@ namespace Legion {
     void FutureMapImpl::process_future_response(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      DomainPoint point;
-      derez.deserialize(point);
+      ContextCoordinate coordinate(future_coordinate);
+      derez.deserialize(coordinate.index_point);
       DistributedID future_did;
       derez.deserialize(future_did);
       FutureImpl *impl = runtime->find_or_create_future(future_did,
-                                    context->did, op_ctx_index, point,
+                                    context->did, coordinate,
                                     provenance, op, op_gen,
 #ifdef LEGION_SPY
                                     op_uid,
 #endif
                                     op_depth);
-      set_future(point, impl);
+      set_future(coordinate.index_point, impl);
       impl->unpack_global_ref();
     }
 
@@ -4245,8 +4242,8 @@ namespace Legion {
     TransformFutureMapImpl::TransformFutureMapImpl(FutureMapImpl *prev,
                               IndexSpaceNode *domain, PointTransformFnptr fnptr,
                               Provenance *prov)
-      : FutureMapImpl(prev->context, prev->op, prev->op_ctx_index, prev->op_gen,
-          prev->op_depth, prev->op_uid,
+      : FutureMapImpl(prev->context, prev->op, prev->future_coordinate,
+          prev->op_gen, prev->op_depth, prev->op_uid,
           domain, prev->runtime, prev->runtime->get_available_distributed_id(),
           prev->completion_event, prov),
         previous(prev), own_functor(false), is_functor(false)
@@ -4260,8 +4257,8 @@ namespace Legion {
     TransformFutureMapImpl::TransformFutureMapImpl(FutureMapImpl *prev,
           IndexSpaceNode *domain, PointTransformFunctor *functor, bool own_func,
           Provenance *prov)
-      : FutureMapImpl(prev->context, prev->op, prev->op_ctx_index, prev->op_gen,
-          prev->op_depth, prev->op_uid,
+      : FutureMapImpl(prev->context, prev->op, prev->future_coordinate,
+          prev->op_gen, prev->op_depth, prev->op_uid,
           domain, prev->runtime, prev->runtime->get_available_distributed_id(),
           prev->completion_event, prov),
         previous(prev), own_functor(own_func), is_functor(true)
@@ -4492,9 +4489,9 @@ namespace Legion {
     ReplFutureMapImpl::ReplFutureMapImpl(TaskContext *ctx, ShardManager *man,
                             Runtime *rt, IndexSpaceNode *domain,
                             IndexSpaceNode *shard_dom, DistributedID did, 
-                            size_t index, ApEvent completion, Provenance *prov,
-                            CollectiveMapping *mapping)
-      : FutureMapImpl(ctx, rt, domain, did, index, completion, prov, 
+                            uint64_t coord, ApEvent completion,
+                            Provenance *prov, CollectiveMapping *mapping)
+      : FutureMapImpl(ctx, rt, domain, did, coord, completion, prov, 
                       false/*register now*/, mapping),
         shard_manager(man), shard_domain(shard_dom),
         op_depth(ctx->get_depth()), sharding_function(NULL),
@@ -4587,8 +4584,9 @@ namespace Legion {
         // Otherwise we need a future from the context to use for
         // the point that we will fill in later
         FutureImpl *result = new FutureImpl(context, runtime, true/*register*/,
-              runtime->get_available_distributed_id(),
-              op, op_gen, op_ctx_index, point, op_uid, op_depth, provenance);
+              runtime->get_available_distributed_id(), op, op_gen, 
+              ContextCoordinate(future_coordinate, point),
+              op_uid, op_depth, provenance);
         result->add_nested_gc_ref(did);
         result->add_nested_resource_ref(did);
         futures[point] = result;
@@ -4651,6 +4649,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
+      assert(implicit_context != NULL);
+      assert(implicit_context == context);
       ReplicateContext *repl_ctx =
         dynamic_cast<ReplicateContext*>(implicit_context);
       assert(repl_ctx != NULL);
@@ -4667,8 +4667,7 @@ namespace Legion {
             "performance degredation. Warning string: %s", 
             context->get_task_name(), context->get_unique_id(),
             (warning_string == NULL) ? "" : warning_string)
-      if ((op != NULL) && (Internal::implicit_context != NULL))
-        Internal::implicit_context->record_blocking_call();
+      context->record_blocking_call(future_coordinate);
       for (int i = 0; runtime->safe_control_replication && (i < 2); i++)
       {
         Murmur3Hasher hasher(repl_ctx, 
@@ -4807,8 +4806,11 @@ namespace Legion {
                                               bool warn, const char *source)
     //--------------------------------------------------------------------------
     {
-      if (context != NULL)
-        context->record_blocking_call();
+#ifdef DEBUG_LEGION
+      assert(implicit_context != NULL);
+      assert(implicit_context == context);
+#endif
+      context->record_blocking_call(InnerContext::NO_FUTURE_COORDINATE);
       if (runtime->runtime_warnings && !silence_warnings &&
           (context != NULL) && !context->is_leaf_context())
       {
@@ -5050,6 +5052,33 @@ namespace Legion {
 #endif
       // trigger the termination event conditional upon the ready event
       Runtime::trigger_event(NULL, termination_event, ready_event);
+#ifdef LEGION_SPY
+      // This is a really mind-bending corner case so be prepared 
+      // If we're doing a trace replay and we actually end up replaying a 
+      // physical template, we need to make it look to Legion Spy like the
+      // fence at the beginning of the trace depends on any mapped physical 
+      // regions in the context that will be unmapped during the execution 
+      // of the trace otherwise Legion Spy will be unhappy with its validation.
+      // We can fake this because it is already safe by definition, but just
+      // in a way that Legion Spy can't actually see with its analysis. There
+      // are two different sceanrios in the case where unmapping of physical
+      // region occurs inside of the trace:
+      // 1. the application doesn't unmap before launching a task or other
+      //    operation that uses an interfering region requirement and the
+      //    runtime has to insert unmap/remap operations which by definition
+      //    will prevent a physical template from being captured because
+      //    inline mapping operations are not (and never will be) memoizable
+      //    so on all future traces we can only do logical analysis
+      // 2. the application does its own unmap before a conflicting use of 
+      //    the logical region which creates an implicit happens-before
+      //    relationship between the unmap and any uses by the template 
+      //    because operations can't be replayed before they are launched
+      // There we can see this is trivially safe, but we need to create this
+      // explicit event relationship for Legion Spy here to keep it happy
+      const ApEvent tracing_replay_event = context->get_tracing_replay_event();
+      if (tracing_replay_event.exists())
+        LegionSpy::log_event_dependence(termination_event,tracing_replay_event);
+#endif
 #ifdef DEBUG_LEGION
       termination_event = ApUserEvent::NO_AP_USER_EVENT;
 #endif
@@ -6496,8 +6525,6 @@ namespace Legion {
             this, privilege_fields, regions, flush, unordered, provenance);
     }
 
-    
-
     /////////////////////////////////////////////////////////////
     // Grant Impl 
     /////////////////////////////////////////////////////////////
@@ -7337,8 +7364,6 @@ namespace Legion {
       ImplicitShardManager *manager = runtime->find_implicit_shard_manager(
           task_id, mapper_id, kind, shards_per_address_space);
       manager->process_implicit_rendezvous(derez);
-      if (manager->remove_reference())
-        delete manager;
     }
 
     /////////////////////////////////////////////////////////////
@@ -12421,6 +12446,11 @@ namespace Legion {
               runtime->handle_individual_remote_output_registration(derez);
               break;
             }
+          case INDIVIDUAL_REMOTE_MAPPED:
+            {
+              runtime->handle_individual_remote_mapped(derez);
+              break;
+            }
           case INDIVIDUAL_REMOTE_COMPLETE:
             {
               runtime->handle_individual_remote_complete(derez);
@@ -15626,7 +15656,7 @@ namespace Legion {
     bool IdentityProjectionFunctor::is_exclusive(void) const
     //--------------------------------------------------------------------------
     {
-      return true;
+      return false;
     }
 
     //--------------------------------------------------------------------------
@@ -18045,7 +18075,7 @@ namespace Legion {
       // Get an individual task to be the top-level task
       IndividualTask *mapper_task = get_available_individual_task();
       Future f = mapper_task->initialize_task(map_context, launcher, 
-                          NULL/*provenance*/, false/*track parent*/);
+                          NULL/*provenance*/, true/*top level*/);
       mapper_task->set_current_proc(proc);
       mapper_task->select_task_options(false/*prioritize*/);
       // Create a temporary event to name the result since we 
@@ -18350,7 +18380,7 @@ namespace Legion {
           { \
             DomainT<DIM,coord_t> color_index_space; \
             forest->get_index_space_domain(color_space, &color_index_space, \
-                                           color_space.get_type_tag()); \
+                NT_TemplateHelper::encode_tag<DIM,coord_t>()); \
             return Domain(color_index_space); \
           }
         LEGION_FOREACH_N(DIMFUNC)
@@ -21990,6 +22020,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_individual_remote_mapped(Processor target,
+                                                Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(INDIVIDUAL_REMOTE_MAPPED, rez,
+                                          true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_individual_remote_complete(Processor target,
                                                         Serializer &rez)
     //--------------------------------------------------------------------------
@@ -24518,6 +24557,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       IndividualTask::handle_remote_output_registration(derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_individual_remote_mapped(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      IndividualTask::process_unpack_remote_mapped(derez);
     }
 
     //--------------------------------------------------------------------------
@@ -27216,8 +27262,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FutureImpl* Runtime::find_or_create_future(DistributedID did,
                                                DistributedID ctx_did,
-                                               size_t op_ctx_index,
-                                               const DomainPoint &op_point,
+                                               const ContextCoordinate &coord,
                                                Provenance *provenance,
                                                Operation *op, GenerationID gen,
                                                UniqueID op_uid, int op_depth, 
@@ -27242,7 +27287,7 @@ namespace Legion {
       }
       InnerContext *context = find_or_request_inner_context(ctx_did);
       FutureImpl *result = new FutureImpl(context, this, false/*register*/, did,
-        op, gen, op_ctx_index, op_point, op_uid, op_depth, provenance, mapping);
+          op, gen, coord, op_uid, op_depth, provenance, mapping);
       // Retake the lock and see if we lost the race
       RtEvent ready;
       {
@@ -27271,7 +27316,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FutureMapImpl* Runtime::find_or_create_future_map(DistributedID did,
-                          TaskContext *ctx, size_t index, IndexSpace domain,
+                          TaskContext *ctx, uint64_t coord, IndexSpace domain,
                           ApEvent completion, Provenance *provenance)
     //--------------------------------------------------------------------------
     {
@@ -27296,7 +27341,7 @@ namespace Legion {
 #endif
       IndexSpaceNode *domain_node = forest->get_node(domain);
       FutureMapImpl *result = new FutureMapImpl(ctx, this, domain_node, did,
-           index, completion, provenance, false/*register now*/);
+           coord, completion, provenance, false/*register now*/);
       // Retake the lock and see if we lost the race
       RtEvent ready;
       {
@@ -27495,7 +27540,7 @@ namespace Legion {
               = dist_collectables.begin(); it != dist_collectables.end(); it++)
         {
           // See if this is a future
-          if (LEGION_DISTRIBUTED_HELP_DECODE(it->first) != FUTURE_DC)
+          if (LEGION_DISTRIBUTED_HELP_DECODE(it->second->did) != FUTURE_DC)
             continue;
 #ifdef DEBUG_LEGION
           FutureImpl *impl = dynamic_cast<FutureImpl*>(it->second);
@@ -30659,7 +30704,7 @@ namespace Legion {
       AutoProvenance provenance(launcher.provenance);
       // Mark that this task is the top-level task
       Future result = top_task->initialize_task(top_context, launcher,
-          provenance, false/*track parent*/, true/*top level task*/);
+          provenance, true/*top level task*/);
       // Set this to be the current processor
       top_task->set_current_proc(target);
       top_task->select_task_options(false/*prioritize*/);
@@ -30702,7 +30747,7 @@ namespace Legion {
                             Predicate::TRUE_PRED, top_mapper_id);
       // Mark that this task is the top-level task
       top_task->initialize_task(top_context, launcher, NULL/*provenance*/,
-          false/*track parent*/, true/*top level task*/);
+          true/*top level task*/);
       increment_outstanding_top_level_tasks();
       // Launch a task to deactivate the top-level context
       // when the top-level task is done
@@ -30723,14 +30768,11 @@ namespace Legion {
       std::map<TaskID,ImplicitShardManager*>::iterator finder = 
         implicit_shard_managers.find(top_task_id);
       if (finder != implicit_shard_managers.end())
-      {
-        finder->second->add_reference();
         return finder->second;
-      }
       ImplicitShardManager *result = new ImplicitShardManager(this,
           top_task_id, mapper_id, kind, shards_per_address_space);
       implicit_shard_managers[top_task_id] = result;
-      result->add_reference();
+      result->add_reference(shards_per_address_space);
       return result;
     }
 

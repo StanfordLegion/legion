@@ -36,6 +36,7 @@ pub enum ValueFormat {
     MemKind,
     MessageKind,
     Point,
+    Uuid,
     ProcID,
     ProcKind,
     RuntimeCallKind,
@@ -79,6 +80,9 @@ pub struct Array(pub Vec<u64>);
 #[derive(Debug, Clone, Serialize)]
 pub struct Point(pub Vec<u64>);
 
+#[derive(Debug, Clone, Serialize)]
+pub struct Uuid(pub Vec<u8>);
+
 #[rustfmt::skip]
 #[derive(Debug, Clone, Serialize)]
 pub enum Record {
@@ -87,9 +91,9 @@ pub enum Record {
     MetaDesc { kind: VariantID, message: bool, ordered_vc: bool, name: String },
     OpDesc { kind: u32, name: String },
     MaxDimDesc { max_dim: MaxDim },
-    MachineDesc { node_id: NodeID, num_nodes: u32 },
+    MachineDesc { node_id: NodeID, num_nodes: u32, hostname: String, host_id: u64, process_id: u32 },
     ZeroTime { zero_time: i64 },
-    ProcDesc { proc_id: ProcID, kind: ProcKind },
+    ProcDesc { proc_id: ProcID, kind: ProcKind, cuda_device_uuid: Uuid },
     MemDesc { mem_id: MemID, kind: MemKind, capacity: u64 },
     ProcMDesc { proc_id: ProcID, mem_id: MemID, bandwidth: u32, latency: u32 },
     IndexSpacePointDesc { ispace_id: ISpaceID, dim: u32, rem: Point },
@@ -126,6 +130,7 @@ pub enum Record {
     MapperCallInfo { kind: MapperCallKindID, op_id: OpID, start: Timestamp, stop: Timestamp, proc_id: ProcID, fevent: EventID },
     RuntimeCallInfo { kind: RuntimeCallKindID, start: Timestamp, stop: Timestamp, proc_id: ProcID, fevent: EventID },
     ProfTaskInfo { proc_id: ProcID, op_id: OpID, start: Timestamp, stop: Timestamp, fevent: EventID  },
+    CalibrationErr { calibration_err: i64 },
 }
 
 fn convert_value_format(name: String) -> Option<ValueFormat> {
@@ -141,6 +146,8 @@ fn convert_value_format(name: String) -> Option<ValueFormat> {
         "MemKind" => Some(ValueFormat::MemKind),
         "MessageKind" => Some(ValueFormat::MessageKind),
         "point" => Some(ValueFormat::Point),
+        "uuid" => Some(ValueFormat::Uuid),
+        "uuid_size" => Some(ValueFormat::U32),
         "ProcID" => Some(ValueFormat::ProcID),
         "ProcKind" => Some(ValueFormat::ProcKind),
         "RuntimeCallKind" => Some(ValueFormat::RuntimeCallKind),
@@ -265,6 +272,12 @@ fn parse_point(input: &[u8], max_dim: i32) -> IResult<&[u8], Point> {
     let (input, values) = many_m_n(n, n, le_u64)(input)?;
     Ok((input, Point(values)))
 }
+fn parse_cuda_device_uuid(input: &[u8]) -> IResult<&[u8], Uuid> {
+    let (input, uuid_size) = le_u32(input)?;
+    let n = uuid_size as usize;
+    let (input, values) = many_m_n(n, n, le_u8)(input)?;
+    Ok((input, Uuid(values)))
+}
 fn parse_string(input: &[u8]) -> IResult<&[u8], String> {
     let (input, value) = map_res(take_till(is_nul), |x: &[u8]| {
         String::from_utf8(x.to_owned())
@@ -368,8 +381,20 @@ fn parse_max_dim_desc(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
 fn parse_machine_desc(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, nodeid) = le_u32(input)?;
     let (input, num_nodes) = le_u32(input)?;
+    let (input, hostname) = parse_string(input)?;
+    let (input, host_id) = le_u64(input)?;
+    let (input, process_id) = le_u32(input)?;
     let node_id = NodeID(u64::from(nodeid));
-    Ok((input, Record::MachineDesc { node_id, num_nodes }))
+    Ok((
+        input,
+        Record::MachineDesc {
+            node_id,
+            num_nodes,
+            hostname,
+            host_id,
+            process_id,
+        },
+    ))
 }
 fn parse_zero_time(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, zero_time) = le_i64(input)?;
@@ -378,7 +403,15 @@ fn parse_zero_time(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
 fn parse_proc_desc(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, proc_id) = parse_proc_id(input)?;
     let (input, kind) = le_i32(input)?;
-    Ok((input, Record::ProcDesc { proc_id, kind }))
+    let (input, cuda_device_uuid) = parse_cuda_device_uuid(input)?;
+    Ok((
+        input,
+        Record::ProcDesc {
+            proc_id,
+            kind,
+            cuda_device_uuid,
+        },
+    ))
 }
 fn parse_mem_desc(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, mem_id) = parse_mem_id(input)?;
@@ -392,6 +425,10 @@ fn parse_mem_desc(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
             capacity,
         },
     ))
+}
+fn parse_calibration_err(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
+    let (input, calibration_err) = le_i64(input)?;
+    Ok((input, Record::CalibrationErr { calibration_err }))
 }
 fn parse_mem_proc_affinity_desc(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, proc_id) = parse_proc_id(input)?;
@@ -1009,6 +1046,7 @@ fn parse<'a>(
     parsers.insert(ids["ProcDesc"], parse_proc_desc);
     parsers.insert(ids["MemDesc"], parse_mem_desc);
     parsers.insert(ids["ProcMDesc"], parse_mem_proc_affinity_desc);
+    parsers.insert(ids["CalibrationErr"], parse_calibration_err);
     parsers.insert(ids["IndexSpacePointDesc"], parse_index_space_point_desc);
     parsers.insert(ids["IndexSpaceRectDesc"], parse_index_space_rect_desc);
     parsers.insert(ids["IndexSpaceEmptyDesc"], parse_index_space_empty_desc);

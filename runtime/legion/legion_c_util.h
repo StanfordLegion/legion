@@ -708,7 +708,7 @@ namespace Legion {
         assert(false);
         return 0;
       }
-      virtual size_t get_context_index(void) const {
+      virtual uint64_t get_context_index(void) const {
         assert(false);
         return 0;
       }

@@ -1085,9 +1085,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FutureMap TaskContext::predicate_index_task_false(size_t context_index,
-        IndexSpace launch_space, const IndexTaskLauncher &launcher,
-        Provenance *provenance)
+    FutureMap TaskContext::predicate_index_task_false(IndexSpace launch_space,
+        const IndexTaskLauncher &launcher, Provenance *provenance)
     //--------------------------------------------------------------------------
     {
       if (launcher.elide_future_return)
@@ -1097,8 +1096,8 @@ namespace Legion {
         runtime->forest->find_domain(launch_space, launch_domain);
       IndexSpaceNode *launch_node = runtime->forest->get_node(launch_space);
       FutureMapImpl *result = new FutureMapImpl(this, runtime,
-          launch_node, runtime->get_available_distributed_id(), context_index,
-          ApEvent::NO_AP_EVENT, provenance);
+          launch_node, runtime->get_available_distributed_id(),
+          InnerContext::NO_FUTURE_COORDINATE, ApEvent::NO_AP_EVENT, provenance);
       if (launcher.predicate_false_future.impl != NULL)
       {
         for (Domain::DomainPointIterator itr(launch_domain); itr; itr++)
@@ -1239,9 +1238,9 @@ namespace Legion {
         finished_execution(false), has_inline_accessor(false),
         next_created_index(reqs.size()), parent_req_indexes(parent_indexes),
         virtual_mapped(virt_mapped), total_children_count(0),
+        next_future_coordinate(0), total_tunable_count(0),
         executing_children_count(0), executed_children_count(0),
-        total_summary_count(0), total_tunable_count(0), 
-        outstanding_children_count(0),
+        outstanding_prepipeline_tasks(0),
         ready_comp_queue(CompletionQueue::NO_QUEUE),
         enqueue_task_comp_queue(CompletionQueue::NO_QUEUE),
         distribute_task_comp_queue(CompletionQueue::NO_QUEUE),
@@ -1255,7 +1254,7 @@ namespace Legion {
         deferred_commit_comp_queue(CompletionQueue::NO_QUEUE),
         post_task_comp_queue(CompletionQueue::NO_QUEUE), 
         current_trace(NULL), previous_trace(NULL),
-        physical_trace_replay_status(0), valid_wait_event(false), 
+        physical_trace_replay_status(0),
         outstanding_subtasks(0), pending_subtasks(0), pending_frames(0),
         currently_active_context(false), current_mapping_fence_index(0), 
         current_execution_fence_event(exec_fence),
@@ -1356,11 +1355,8 @@ namespace Legion {
         bar.destroy_barrier();
         context_barriers.pop_back();
       }
-      if (valid_wait_event)
-      {
-        valid_wait_event = false;
+      if (window_wait.exists())
         Runtime::trigger_event(window_wait);
-      }
       // No need for the lock here since we're being cleaned up
       if (!local_field_infos.empty())
         local_field_infos.clear(); 
@@ -1444,7 +1440,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::receive_resources(size_t return_index,
+    void InnerContext::receive_resources(uint64_t return_index,
               std::map<LogicalRegion,unsigned> &created_regs,
               std::vector<DeletedRegion> &deleted_regs,
               std::set<std::pair<FieldSpace,FieldID> > &created_fids,
@@ -1665,7 +1661,7 @@ namespace Legion {
               true/*unordered*/, it->provenance,
               true/*skip dependence analysis*/);
           op->set_deletion_preconditions(precondition, dependences);
-          if (!add_to_dependence_queue(op, true/*unordered*/))
+          if (!add_to_dependence_queue(op, NULL/*deps*/, true/*unordered*/))
           {
             // We're past the execution of the parent task so we need
             // to run this manually and capture its effects ourselves
@@ -1752,7 +1748,7 @@ namespace Legion {
              true/*unordered*/, allocator, it->first.second,
              false/*non owner shard*/, true/*skip dependence analysis*/);
           op->set_deletion_preconditions(precondition, dependences);
-          if (!add_to_dependence_queue(op, true/*unordered*/))
+          if (!add_to_dependence_queue(op, NULL/*deps*/, true/*unordered*/))
           {
             // We're past the execution of the parent task so we need
             // to run this manually and capture its effects ourselves
@@ -1927,7 +1923,7 @@ namespace Legion {
           op->initialize_field_space_deletion(this, it->space,
                             true/*unordered*/, it->provenance);
           op->set_deletion_preconditions(precondition, dependences);
-          if (!add_to_dependence_queue(op, true/*unordered*/))
+          if (!add_to_dependence_queue(op, NULL/*deps*/, true/*unordered*/))
           {
             // We're past the execution of the parent task so we need
             // to run this manually and capture its effects ourselves
@@ -2034,7 +2030,7 @@ namespace Legion {
           op->initialize_index_space_deletion(this, delete_now[idx].space,
             sub_partitions[idx], true/*unordered*/, delete_now[idx].provenance);
           op->set_deletion_preconditions(precondition, dependences);
-          if (!add_to_dependence_queue(op, true/*unordered*/))
+          if (!add_to_dependence_queue(op, NULL/*deps*/, true/*unordered*/))
           {
             // We're past the execution of the parent task so we need
             // to run this manually and capture its effects ourselves
@@ -2142,7 +2138,7 @@ namespace Legion {
           op->initialize_index_part_deletion(this, delete_now[idx].partition,
             sub_partitions[idx], true/*unordered*/, delete_now[idx].provenance);
           op->set_deletion_preconditions(precondition, dependences);
-          if (!add_to_dependence_queue(op, true/*unordered*/))
+          if (!add_to_dependence_queue(op, NULL/*deps*/, true/*unordered*/))
           {
             // We're past the execution of the parent task so we need
             // to run this manually and capture its effects ourselves
@@ -2156,7 +2152,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ApEvent InnerContext::compute_return_deletion_dependences(
-            size_t return_index, std::map<Operation*,GenerationID> &dependences)
+          uint64_t return_index, std::map<Operation*,GenerationID> &dependences)
     //--------------------------------------------------------------------------
     {
       // This is a mixed mapping and execution fence analysis 
@@ -3455,7 +3451,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void InnerContext::return_resources(ResourceTracker *target, 
-                          size_t return_index, std::set<RtEvent> &preconditions)
+                        uint64_t return_index, std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
       if (created_regions.empty() && deleted_regions.empty() && 
@@ -3485,7 +3481,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void InnerContext::pack_return_resources(Serializer &rez,
-                                             size_t return_index)
+                                             uint64_t return_index)
     //--------------------------------------------------------------------------
     {
       pack_resources_return(rez, return_index);
@@ -3832,7 +3828,7 @@ namespace Legion {
       DeletionOp *op = runtime->get_available_deletion_op();
       op->initialize_index_space_deletion(this, handle, sub_partitions,
                                           unordered, provenance);
-      if (!add_to_dependence_queue(op, unordered))
+      if (!add_to_dependence_queue(op, NULL/*deps*/, unordered))
       {
 #ifdef DEBUG_LEGION
         assert(unordered);
@@ -3926,7 +3922,7 @@ namespace Legion {
       DeletionOp *op = runtime->get_available_deletion_op();
       op->initialize_index_part_deletion(this, handle, 
                                          sub_partitions, unordered, provenance);
-      if (!add_to_dependence_queue(op, unordered))
+      if (!add_to_dependence_queue(op, NULL/*deps*/, unordered))
       {
 #ifdef DEBUG_LEGION
         assert(unordered);
@@ -5420,7 +5416,7 @@ namespace Legion {
       }
       DeletionOp *op = runtime->get_available_deletion_op();
       op->initialize_field_space_deletion(this, handle, unordered, provenance);
-      if (!add_to_dependence_queue(op, unordered))
+      if (!add_to_dependence_queue(op, NULL/*deps*/, unordered))
       {
 #ifdef DEBUG_LEGION
         assert(unordered);
@@ -5865,7 +5861,7 @@ namespace Legion {
       DeletionOp *op = runtime->get_available_deletion_op();
       op->initialize_field_deletion(this, space, fid, unordered, allocator,
                                     provenance, false/*non owner shard*/);
-      if (!add_to_dependence_queue(op, unordered))
+      if (!add_to_dependence_queue(op, NULL/*deps*/, unordered))
       {
 #ifdef DEBUG_LEGION
         assert(unordered);
@@ -5922,7 +5918,7 @@ namespace Legion {
       DeletionOp *op = runtime->get_available_deletion_op();
       op->initialize_field_deletions(this, space, free_now, unordered, 
                      allocator, provenance, false/*non owner shard*/);
-      if (!add_to_dependence_queue(op, unordered))
+      if (!add_to_dependence_queue(op, NULL/*deps*/, unordered))
       {
 #ifdef DEBUG_LEGION
         assert(unordered);
@@ -6066,7 +6062,7 @@ namespace Legion {
       }
       DeletionOp *op = runtime->get_available_deletion_op(); 
       op->initialize_logical_region_deletion(this, handle,unordered,provenance);
-      if (!add_to_dependence_queue(op, unordered))
+      if (!add_to_dependence_queue(op, NULL/*deps*/, unordered))
       {
 #ifdef DEBUG_LEGION
         assert(unordered);
@@ -6867,7 +6863,6 @@ namespace Legion {
         return predicate_task_false(launcher, provenance);
       IndividualTask *task = runtime->get_available_individual_task();
       Future result = task->initialize_task(this, launcher, provenance,
-                                            true/*track parent*/,
                                             false/*top level*/,
                                             false/*must epoch*/,
                                             outputs);
@@ -6878,9 +6873,16 @@ namespace Legion {
                       task->get_unique_id(), task->get_task_name(), 
                       task->get_unique_id(), runtime->address_space);
 #endif
-      execute_task_launch(task, false/*index*/, current_trace, provenance, 
-                          launcher.silence_warnings, launcher.enable_inlining);
+      execute_task_launch(task, false/*index*/, launcher.static_dependences,
+          provenance, launcher.silence_warnings, launcher.enable_inlining);
       return result;
+    }
+
+    //--------------------------------------------------------------------------
+    uint64_t InnerContext::get_next_future_coordinate(void)
+    //--------------------------------------------------------------------------
+    {
+      return next_future_coordinate++;
     }
 
     //--------------------------------------------------------------------------
@@ -6914,8 +6916,7 @@ namespace Legion {
           find_index_launch_space(launcher.launch_domain, provenance);
       // Quick out for predicate false
       if (launcher.predicate == Predicate::FALSE_PRED)
-        return predicate_index_task_false(total_children_count++, launch_space,
-                                          launcher, provenance);
+        return predicate_index_task_false(launch_space, launcher, provenance);
       IndexTask *task = runtime->get_available_index_task();
       FutureMap result = task->initialize_task(this,
                                                launcher,
@@ -6930,8 +6931,8 @@ namespace Legion {
                      task->get_unique_id(), task->get_task_name(), 
                      task->get_unique_id(), runtime->address_space);
 #endif
-      execute_task_launch(task, true/*index*/, current_trace, provenance,
-                          launcher.silence_warnings, launcher.enable_inlining);
+      execute_task_launch(task, true/*index*/, launcher.static_dependences,
+          provenance, launcher.silence_warnings, launcher.enable_inlining);
       return result;
     }
 
@@ -6991,8 +6992,8 @@ namespace Legion {
                      task->get_unique_id(), task->get_task_name(), 
                      task->get_unique_id(), runtime->address_space);
 #endif
-      execute_task_launch(task, true/*index*/, current_trace, provenance,
-                          launcher.silence_warnings, launcher.enable_inlining);
+      execute_task_launch(task, true/*index*/, launcher.static_dependences,
+          provenance, launcher.silence_warnings, launcher.enable_inlining);
       return result;
     }
 
@@ -7042,7 +7043,7 @@ namespace Legion {
       const DistributedID did = runtime->get_available_distributed_id();
       IndexSpaceNode *launch_node = runtime->forest->get_node(space);
       FutureMapImpl *impl = new FutureMapImpl(this, runtime, launch_node, did,
-          total_children_count++, ApEvent::NO_AP_EVENT, provenance);
+        NO_FUTURE_COORDINATE, ApEvent::NO_AP_EVENT, provenance);
       for (std::map<DomainPoint,UntypedBuffer>::const_iterator it =
             data.begin(); it != data.end(); it++)
       {
@@ -7204,7 +7205,7 @@ namespace Legion {
                       launcher.requirement.region.tree_id,
                       get_task_name(), get_unique_id())
       register_inline_mapped_region(result);
-      add_to_dependence_queue(map_op);
+      add_to_dependence_queue(map_op, launcher.static_dependences);
       return result;
     }
 
@@ -7316,7 +7317,7 @@ namespace Legion {
           unmapped_regions[idx].impl->unmap_region();
       }
       // Issue the copy operation
-      add_to_dependence_queue(fill_op);
+      add_to_dependence_queue(fill_op, launcher.static_dependences);
       // Remap any regions which we unmapped
       if (!unmapped_regions.empty())
         remap_unmapped_regions(current_trace, unmapped_regions, provenance);
@@ -7372,7 +7373,7 @@ namespace Legion {
           unmapped_regions[idx].impl->unmap_region();
       }
       // Issue the copy operation
-      add_to_dependence_queue(fill_op);
+      add_to_dependence_queue(fill_op, launcher.static_dependences);
       // Remap any regions which we unmapped
       if (!unmapped_regions.empty())
         remap_unmapped_regions(current_trace, unmapped_regions, provenance);
@@ -7413,7 +7414,7 @@ namespace Legion {
             unmapped_regions[idx].impl->unmap_region();
         }
       }
-      add_to_dependence_queue(discard_op);
+      add_to_dependence_queue(discard_op, launcher.static_dependences);
       // Do not remap the previously mapped regions, they are uninitialized
     }
 
@@ -7448,7 +7449,7 @@ namespace Legion {
           unmapped_regions[idx].impl->unmap_region();
       }
       // Issue the copy operation
-      add_to_dependence_queue(copy_op);
+      add_to_dependence_queue(copy_op, launcher.static_dependences);
       // Remap any regions which we unmapped
       if (!unmapped_regions.empty())
         remap_unmapped_regions(current_trace, unmapped_regions, provenance);
@@ -7497,7 +7498,7 @@ namespace Legion {
           unmapped_regions[idx].impl->unmap_region();
       }
       // Issue the copy operation
-      add_to_dependence_queue(copy_op);
+      add_to_dependence_queue(copy_op, launcher.static_dependences);
       // Remap any regions which we unmapped
       if (!unmapped_regions.empty())
         remap_unmapped_regions(current_trace, unmapped_regions, provenance);
@@ -7533,7 +7534,7 @@ namespace Legion {
           unmapped_regions[idx].impl->unmap_region();
       }
       // Issue the acquire operation
-      add_to_dependence_queue(acquire_op);
+      add_to_dependence_queue(acquire_op, launcher.static_dependences);
       // Remap any regions which we unmapped
       if (!unmapped_regions.empty())
         remap_unmapped_regions(current_trace, unmapped_regions, provenance);
@@ -7569,7 +7570,7 @@ namespace Legion {
           unmapped_regions[idx].impl->unmap_region();
       }
       // Issue the release operation
-      add_to_dependence_queue(release_op);
+      add_to_dependence_queue(release_op, launcher.static_dependences);
       // Remap any regions which we unmapped
       if (!unmapped_regions.empty())
         remap_unmapped_regions(current_trace, unmapped_regions, provenance);
@@ -7615,7 +7616,7 @@ namespace Legion {
       // Add this region to the list of inline mapped regions if it is mapped
       if (result.is_mapped())
         register_inline_mapped_region(result);
-      add_to_dependence_queue(attach_op);
+      add_to_dependence_queue(attach_op, launcher.static_dependences);
       return result;
     }
 
@@ -7701,7 +7702,7 @@ namespace Legion {
                         req.region.field_space.id, req.region.tree_id,
                         get_task_name(), get_unique_id())
       }
-      add_to_dependence_queue(attach_op);
+      add_to_dependence_queue(attach_op, launcher.static_dependences);
       return result;
     }
 
@@ -7950,7 +7951,7 @@ namespace Legion {
       DetachOp *op = runtime->get_available_detach_op();
       Future result =
         op->initialize_detach(this, region, flush, unordered, provenance);
-      if (!add_to_dependence_queue(op, unordered))
+      if (!add_to_dependence_queue(op, NULL/*deps*/, unordered))
       {
 #ifdef DEBUG_LEGION
         assert(unordered);
@@ -7975,7 +7976,7 @@ namespace Legion {
       IndexDetachOp *op = runtime->get_available_index_detach_op();
       Future result =
         resources.impl->detach(this, op, flush, unordered, provenance);
-      if (!add_to_dependence_queue(op, unordered))
+      if (!add_to_dependence_queue(op, NULL/*deps*/, unordered))
       {
 #ifdef DEBUG_LEGION
         assert(unordered);
@@ -8267,38 +8268,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::perform_window_wait(void)
-    //--------------------------------------------------------------------------
-    {
-      RtEvent wait_event;
-      // Take the context lock in exclusive mode
-      {
-        AutoLock child_lock(child_op_lock);
-        // We already hold our lock from the callsite above
-        // Outstanding children count has already been incremented for the
-        // operation being launched so decrement it in case we wait and then
-        // re-increment it when we wake up again
-        const int outstanding_count = outstanding_children_count.fetch_sub(1);
-        // We already decided to wait, so we need to wait for any hysteresis
-        // to play a role here
-        if (outstanding_count >
-            int((100 - context_configuration.hysteresis_percentage) *
-                context_configuration.max_window_size / 100))
-        {
-#ifdef DEBUG_LEGION
-          assert(!valid_wait_event);
-#endif
-          window_wait = Runtime::create_rt_user_event();
-          valid_wait_event = true;
-          wait_event = window_wait;
-        }
-      }
-      wait_event.wait();
-      // Re-increment the count once we are awake again
-      outstanding_children_count.fetch_add(1);
-    }
-
-    //--------------------------------------------------------------------------
     void InnerContext::add_to_prepipeline_queue(Operation *op)
     //--------------------------------------------------------------------------
     {
@@ -8306,8 +8275,20 @@ namespace Legion {
       const GenerationID gen = op->get_generation();
       {
         AutoLock p_lock(prepipeline_lock);
-        issue_task = prepipeline_queue.empty();
-        prepipeline_queue.push_back(std::pair<Operation*,GenerationID>(op,gen));
+        prepipeline_queue.emplace_back(std::make_pair(op,gen));
+        // Cap the number of outstanding prepipeline tasks as no more than
+        // the number of utility processors that we're running on
+        if (outstanding_prepipeline_tasks < runtime->num_utility_procs)
+        {
+          const unsigned max_tasks = (prepipeline_queue.size() +
+              context_configuration.meta_task_vector_width - 1) / 
+            context_configuration.meta_task_vector_width;
+          if (outstanding_prepipeline_tasks < max_tasks)
+          {
+            issue_task = true;
+            outstanding_prepipeline_tasks++;
+          }
+        }
       }
       if (issue_task)
       {
@@ -8323,7 +8304,6 @@ namespace Legion {
     {
       std::vector<std::pair<Operation*,GenerationID> > to_perform;
       to_perform.reserve(context_configuration.meta_task_vector_width);
-      Operation *launch_next_op = NULL;
       {
         AutoLock p_lock(prepipeline_lock);
         for (unsigned idx = 0; idx < 
@@ -8334,47 +8314,81 @@ namespace Legion {
           to_perform.push_back(prepipeline_queue.front());
           prepipeline_queue.pop_front();
         }
-        if (!prepipeline_queue.empty())
-          launch_next_op = prepipeline_queue.back().first;
       }
       // Perform our prepipeline tasks
       for (std::vector<std::pair<Operation*,GenerationID> >::const_iterator it =
             to_perform.begin(); it != to_perform.end(); it++)
         it->first->execute_prepipeline_stage(it->second, false/*need wait*/);
-      if (launch_next_op != NULL)
+      AutoLock p_lock(prepipeline_lock);
+#ifdef DEBUG_LEGION
+      assert(outstanding_prepipeline_tasks > 0);
+#endif
+      const unsigned max_tasks = (prepipeline_queue.size() +
+              context_configuration.meta_task_vector_width - 1) /
+            context_configuration.meta_task_vector_width;
+      if (max_tasks < outstanding_prepipeline_tasks)
       {
-        // This could maybe give a bad op ID for profiling, but it
-        // will not impact the correctness of the code
-        PrepipelineArgs args(launch_next_op, this);
+        outstanding_prepipeline_tasks--;
+        return true;
+      }
+      else
+      {
+        PrepipelineArgs args(prepipeline_queue.front().first, this);
         runtime->issue_runtime_meta_task(args, LG_THROUGHPUT_WORK_PRIORITY);
         // Reference keeps flowing with the continuation
         return false;
       }
-      else
-        return true;
     }
 
     //--------------------------------------------------------------------------
-    bool InnerContext::add_to_dependence_queue(Operation *op, bool unordered, 
-                                               bool outermost)
+    bool InnerContext::add_to_dependence_queue(Operation *op, 
+        const std::vector<StaticDependence> *dependences,
+        bool unordered, bool outermost)
     //--------------------------------------------------------------------------
     {
       LgPriority priority = LG_THROUGHPUT_WORK_PRIORITY; 
-      // If this is tracking, add it to our data structure first
-      if (op->is_tracking_parent())
+      // If this is ordered, we need to record this in the reorder buffer
+      // and determine if we need to perform a window wait or not
+      if (!unordered)
       {
+        // Get the context index for this new operation
+        const size_t context_index = total_children_count++;
+        op->set_context_index(context_index, true/*track*/);
+        // Set the trace for the operation
+        if (current_trace != NULL)
+          op->set_trace(current_trace, dependences);
+        // Enqueue this in the reorder buffer and then see if we need to
+        // perform a window wait because there are too many outstanding ops
         AutoLock child_lock(child_op_lock);
 #ifdef DEBUG_LEGION
         assert(reorder_buffer.empty() ||
-            (reorder_buffer.back().operation_index < op->get_ctx_index()));
+            ((reorder_buffer.back().operation_index+1) == context_index));
 #endif
-        // Pad the reorder buffer for missing entries if necessary
-        while (!reorder_buffer.empty() &&
-            ((reorder_buffer.back().operation_index+1) < op->get_ctx_index()))
-          reorder_buffer.emplace_back(
-              ReorderBufferEntry(reorder_buffer.back().operation_index+1));
-        reorder_buffer.emplace_back(ReorderBufferEntry(op));
+        reorder_buffer.emplace_back(ReorderBufferEntry(op, context_index));
         executing_children_count++;
+        // Check to see if we need to perform a window wait
+        // Only need to check if we are not tracing by frames
+        // and not inside of a trace that might be replayed
+        if ((context_configuration.min_frames_to_schedule == 0) &&
+            (context_configuration.max_window_size > 0) &&
+              (executing_children_count > context_configuration.max_window_size)
+              && ((current_trace == NULL) || !current_trace->is_fixed()))
+        {
+          // Since we're going to launch we're not technically an executing
+          // child yet so we need to decrement the count here and then bump
+          // it back up when we wake up
+          executing_children_count--;
+#ifdef DEBUG_LEGION
+          assert(!window_wait.exists());
+#endif
+          window_wait = Runtime::create_rt_user_event();
+          const RtEvent wait_event = window_wait;
+          child_lock.release();
+          if (!wait_event.has_triggered())
+            wait_event.wait();
+          child_lock.reacquire();
+          executing_children_count++;
+        }
         // Bump our priority if the context is not active as it means
         // that the runtime is currently not ahead of execution
         if (!currently_active_context)
@@ -9125,30 +9139,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    size_t InnerContext::register_new_child_operation(Operation *op,
-        RtUserEvent &resolved, const std::vector<StaticDependence> *dependences)
-    //--------------------------------------------------------------------------
-    {
-      // TODO: set the resolved event for any speculative executions occurring
-      // If we are performing a trace mark that the child has a trace
-      if (current_trace != NULL)
-        op->set_trace(current_trace, dependences);
-      size_t result = total_children_count++;
-      const size_t outstanding_count =
-        outstanding_children_count.fetch_add(1) + 1;
-      // Only need to check if we are not tracing by frames
-      if ((context_configuration.min_frames_to_schedule == 0) &&
-          (context_configuration.max_window_size > 0) &&
-            (outstanding_count > context_configuration.max_window_size) &&
-            !is_replaying_physical_trace())
-        perform_window_wait();
-      if (runtime->legion_spy_enabled)
-        LegionSpy::log_child_operation_index(get_unique_id(), result,
-                                             op->get_unique_op_id());
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
     void InnerContext::insert_unordered_ops(AutoLock &d_lock)
     //--------------------------------------------------------------------------
     {
@@ -9172,28 +9162,22 @@ namespace Legion {
         {
           Operation *op = ready_operations.back();
           ready_operations.pop_back();
+          const size_t context_index = total_children_count++;
+          op->set_context_index(context_index, true/*track*/);
           // Record it in the reorder buffer
           {
             AutoLock child_lock(child_op_lock);
-            const size_t op_index = total_children_count++;
-            op->set_tracking_parent(op_index);
 #ifdef DEBUG_LEGION
             assert(reorder_buffer.empty() || 
-                (reorder_buffer.back().operation_index < op_index));
+                ((reorder_buffer.back().operation_index+1) == context_index));
 #endif       
-            // Pad the reorder buffer for missing entries if necessary
-            while (!reorder_buffer.empty() &&
-                ((reorder_buffer.back().operation_index+1) < op_index))
-              reorder_buffer.emplace_back(
-                 ReorderBufferEntry(reorder_buffer.back().operation_index+1));
-            reorder_buffer.emplace_back(ReorderBufferEntry(op));
+            reorder_buffer.emplace_back(ReorderBufferEntry(op, context_index));
             executing_children_count++;
           }
 #ifdef DEBUG_LEGION
           assert(dependence_queue.empty());
 #endif
           dependence_queue.push_back(op);
-          outstanding_children_count.fetch_add(1);
           RtEvent precondition = dependence_precondition;
           // Release the lock and launch the meta-task
           d_lock.release();
@@ -9219,18 +9203,13 @@ namespace Legion {
         for (std::vector<Operation*>::const_iterator it = 
               ready_operations.begin(); it != ready_operations.end(); it++)
         {
-          const size_t op_index = total_children_count++;
-          (*it)->set_tracking_parent(op_index);
+          const size_t context_index = total_children_count++;
+          (*it)->set_context_index(context_index, true/*track*/);
 #ifdef DEBUG_LEGION
           assert(reorder_buffer.empty() || 
-              (reorder_buffer.back().operation_index < op_index));
+              ((reorder_buffer.back().operation_index+1) == context_index));
 #endif       
-          // Pad the reorder buffer for missing entries if necessary
-          while (!reorder_buffer.empty() &&
-              ((reorder_buffer.back().operation_index+1) < op_index))
-            reorder_buffer.emplace_back(
-                ReorderBufferEntry(reorder_buffer.back().operation_index+1));
-          reorder_buffer.emplace_back(ReorderBufferEntry(*it));
+          reorder_buffer.emplace_back(ReorderBufferEntry(*it, context_index));
           executing_children_count++;
           if (dependence_queue.empty())
           {
@@ -9241,46 +9220,22 @@ namespace Legion {
           }
           dependence_queue.push_back(*it);
         }
-        outstanding_children_count.fetch_add(ready_operations.size());
         ready_operations.clear();
       }
-    }
-
-    //--------------------------------------------------------------------------
-    size_t InnerContext::register_new_summary_operation(TraceSummaryOp *op)
-    //--------------------------------------------------------------------------
-    {
-      // For now we just bump our counter
-      size_t result = total_summary_count++;
-      const size_t outstanding_count =
-        outstanding_children_count.fetch_add(1) + 1; 
-      // Only need to check if we are not tracing by frames
-      if ((context_configuration.min_frames_to_schedule == 0) && 
-          (context_configuration.max_window_size > 0) && 
-            (outstanding_count > context_configuration.max_window_size) &&
-            !is_replaying_physical_trace())
-        perform_window_wait();
-      if (runtime->legion_spy_enabled)
-        LegionSpy::log_child_operation_index(get_unique_id(), result, 
-                                             op->get_unique_op_id()); 
-      return result;
     }
 
     //--------------------------------------------------------------------------
     void InnerContext::register_executing_child(Operation *op)
     //--------------------------------------------------------------------------
     {
+      const size_t context_index = total_children_count++;
+      op->set_context_index(context_index, true/*track*/);
       AutoLock child_lock(child_op_lock);
 #ifdef DEBUG_LEGION
       assert(reorder_buffer.empty() ||
-          (reorder_buffer.back().operation_index < op->get_ctx_index()));
+            ((reorder_buffer.back().operation_index+1) == context_index));
 #endif
-      // Pad the reorder buffer for missing entries if necessary
-      while (!reorder_buffer.empty() &&
-          ((reorder_buffer.back().operation_index+1) < op->get_ctx_index()))
-        reorder_buffer.emplace_back(
-            ReorderBufferEntry(reorder_buffer.back().operation_index+1));
-      reorder_buffer.emplace_back(ReorderBufferEntry(op));
+      reorder_buffer.emplace_back(ReorderBufferEntry(op, context_index));
       executing_children_count++;
     }
 
@@ -9291,9 +9246,9 @@ namespace Legion {
     {
       ReorderBufferEntry &head = reorder_buffer.front();
 #ifdef DEBUG_LEGION
-      assert(head.operation_index <= op->get_ctx_index());
+      assert(head.operation_index <= op->get_context_index());
 #endif
-      size_t offset = op->get_ctx_index() - head.operation_index;
+      uint64_t offset = op->get_context_index() - head.operation_index;
 #ifdef DEBUG_LEGION
       assert(offset < reorder_buffer.size());
 #endif
@@ -9321,17 +9276,13 @@ namespace Legion {
         executed_children_count++;
         // Add some hysteresis here so that we have some runway for when
         // the paused task resumes it can run for a little while.
-        int outstanding_count = outstanding_children_count.fetch_sub(1) - 1;
-#ifdef DEBUG_LEGION
-        assert(outstanding_count >= 0);
-#endif
-        if (valid_wait_event && (context_configuration.max_window_size > 0) &&
-            (outstanding_count <=
-             int((100 - context_configuration.hysteresis_percentage) * 
+        if (window_wait.exists() && (context_configuration.max_window_size > 0)
+            && (executing_children_count <=
+             ((100 - context_configuration.hysteresis_percentage) * 
                  context_configuration.max_window_size / 100)))
         {
           to_trigger = window_wait;
-          valid_wait_event = false;
+          window_wait = RtUserEvent::NO_RT_USER_EVENT;
         }
       }
       if (to_trigger.exists())
@@ -9979,7 +9930,7 @@ namespace Legion {
       // Take the lock and iterate through our current pending
       // operations and find all the ones with a context index
       // that is less than the index for the fence operation
-      const size_t next_fence_index = op->get_ctx_index();
+      const uint64_t next_fence_index = op->get_context_index();
       // We only need the list of previous operations if we are recording
       // mapping dependences for this fence
       if (!execution)
@@ -10111,7 +10062,7 @@ namespace Legion {
     {
       if (mapping)
       {
-        current_mapping_fence_index = op->get_ctx_index();
+        current_mapping_fence_index = op->get_context_index();
         current_mapping_fence_event = op->get_mapped_event();
 #ifdef LEGION_SPY
         current_fence_uid = op->get_unique_op_id();
@@ -10124,7 +10075,7 @@ namespace Legion {
         // Only update the current fence event if we're actually an
         // execution fence, otherwise by definition we need the previous event
         current_execution_fence_event = op->get_completion_event();
-        current_execution_fence_index = op->get_ctx_index();
+        current_execution_fence_index = op->get_context_index();
       }
     }
 
@@ -10204,11 +10155,14 @@ namespace Legion {
         replay->initialize_replay(this, trace, provenance);
         // Record the event for when the trace replay is ready
         physical_trace_replay_status.store(replay->get_mapped_event().id);
+#ifdef LEGION_SPY
+        tracing_replay_event = replay->get_completion_event();
+#endif
         add_to_dependence_queue(replay);
       }
-
       // Now mark that we are starting a trace
       current_trace = trace;
+      current_trace_future_coordinate = next_future_coordinate;
     }
 
     //--------------------------------------------------------------------------
@@ -10273,9 +10227,6 @@ namespace Legion {
         // Already fixed, dump a complete trace op into the stream
         TraceCompleteOp *complete_op = runtime->get_available_trace_op();
         complete_op->initialize_complete(this, has_blocking_call, provenance);
-        // Remove the current trace now so we block at the end of the
-        // trace in the case of program order execution
-        current_trace = NULL;
         add_to_dependence_queue(complete_op);
       }
       else
@@ -10284,13 +10235,14 @@ namespace Legion {
         TraceCaptureOp *capture_op = runtime->get_available_capture_op(); 
         capture_op->initialize_capture(this, has_blocking_call,
                                        deprecated, provenance);
+        add_to_dependence_queue(capture_op);
         // Mark that the current trace is now fixed
         current_trace->fix_trace(provenance);
-        // Remove the current trace now so we block at the end of the
-        // trace in the case of program order execution
-        current_trace = NULL;
-        add_to_dependence_queue(capture_op);
       }
+      current_trace = NULL;
+#ifdef LEGION_SPY
+      tracing_replay_event = ApEvent::NO_AP_EVENT;
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -10311,10 +10263,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::record_blocking_call(void)
+    void InnerContext::record_blocking_call(uint64_t future_coordinate)
     //--------------------------------------------------------------------------
     {
-      if (current_trace != NULL)
+      // It's only a blocking call if the wait occurs from an operation 
+      // inside the trace so we can eliminate any waits from futures that
+      // were produced before the trace or in the case of inline mappings
+      // we know those operations are not traceable so they had to be 
+      // issued before we started capturing the trace
+      if ((current_trace != NULL) && 
+          (future_coordinate != NO_FUTURE_COORDINATE) &&
+          (current_trace_future_coordinate <= future_coordinate))
         current_trace->record_blocking_call();
     }
 
@@ -11369,8 +11328,17 @@ namespace Legion {
       // need to defer this is at should always be here
       InnerContext *local_ctx = static_cast<InnerContext*>(
         runtime->find_distributed_collectable(context_did));
-      std::vector<EqSetTracker*> targets(1);
-      derez.deserialize(targets.back());
+      size_t num_targets;
+      derez.deserialize(num_targets);
+      std::vector<EqSetTracker*> targets(num_targets);
+      std::vector<AddressSpaceID> target_spaces(num_targets);
+      for (unsigned idx = 0; idx < num_targets; idx++)
+      {
+        derez.deserialize(targets[idx]);
+        derez.deserialize(target_spaces[idx]);
+      }
+      AddressSpaceID creation_target_space;
+      derez.deserialize(creation_target_space);
       IndexSpaceExpression *expr = 
         IndexSpaceExpression::unpack_expression(derez, runtime->forest, source);
       FieldMask mask;
@@ -11379,10 +11347,9 @@ namespace Legion {
       derez.deserialize(req_index);
       RtUserEvent ready_event;
       derez.deserialize(ready_event);
-      std::vector<AddressSpaceID> target_spaces(1, source);
 
       const RtEvent done = local_ctx->compute_equivalence_sets(req_index,
-          targets, target_spaces, source, expr, mask);
+          targets, target_spaces, creation_target_space, expr, mask);
       Runtime::trigger_event(ready_event, done);
     }
 
@@ -12300,6 +12267,7 @@ namespace Legion {
     {
       owner_task->handle_post_mapped();
       owner_task->record_inner_termination(ApEvent::NO_AP_EVENT);
+      unmap_all_regions(false/*external*/);
       TaskContext::handle_mispredication();
     }
 
@@ -12461,7 +12429,7 @@ namespace Legion {
       {
         // See if the predicate speculates false, if so return false
         // and then we are done.
-        if (!child->get_predicate_value())
+        if (!child->get_predicate_value(total_children_count))
           return true;
       }
       // Find the mapped physical regions associated with each of the
@@ -12612,8 +12580,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void InnerContext::execute_task_launch(TaskOp *task, bool index,
-                            LogicalTrace *current_trace, Provenance *provenance,
-                            bool silence_warnings, bool inlining_enabled)
+                            const std::vector<StaticDependence> *dependences,
+                            Provenance *provenance, bool silence_warnings,
+                            bool inlining_enabled)
     //--------------------------------------------------------------------------
     {
       bool perform_inlining = false;
@@ -12651,7 +12620,7 @@ namespace Legion {
             unmapped_regions[idx].impl->unmap_region();
         }
         // Issue the task call
-        add_to_dependence_queue(task);
+        add_to_dependence_queue(task, dependences);
         // Remap any unmapped regions
         if (!unmapped_regions.empty())
           remap_unmapped_regions(current_trace, unmapped_regions, provenance);
@@ -13502,17 +13471,15 @@ namespace Legion {
     {
       if (future.impl == NULL)
         return;
-      TaskTreeCoordinates coordinates;
-      future.impl->get_future_coordinates(coordinates);
-      if (!coordinates.empty())
+      ContextCoordinate coordinate;
+      if (future.impl->get_context_coordinate(this, coordinate))
       {
-        for (TaskTreeCoordinates::const_iterator it =
-              coordinates.begin(); it != coordinates.end(); it++)
-        {
-          hasher.hash(it->context_index, description);
-          for (int idx = 0; idx < it->index_point.get_dim(); idx++)
-            hasher.hash(it->index_point[idx], description);
-        }
+        // If it came from this context make sure they are the same across
+        // the shards, if the future didn't come from this context then by
+        // definition it must be the same across the shards
+        hasher.hash(coordinate.context_index, description);
+        for (int idx = 0; idx < coordinate.index_point.get_dim(); idx++)
+          hasher.hash(coordinate.index_point[idx], description);
       }
       else if (safe_level > 1)
       {
@@ -13530,7 +13497,7 @@ namespace Legion {
     {
       if (map.impl == NULL)
         return;
-      hasher.hash(map.impl->op_ctx_index, description);
+      hasher.hash(map.impl->future_coordinate, description);
     }
 
     //--------------------------------------------------------------------------
@@ -13630,7 +13597,15 @@ namespace Legion {
       else if (pred == Predicate::FALSE_PRED)
         hasher.hash(SIZE_MAX, description);
       else
-        hasher.hash(pred.impl->creator_ctx_index, description);
+      {
+#ifdef DEBUG_LEGION
+        ReplPredicateImpl *impl = dynamic_cast<ReplPredicateImpl*>(pred.impl);
+        assert(impl != NULL);
+#else
+        ReplPredicateImpl *impl = static_cast<ReplPredicateImpl*>(pred.impl);
+#endif
+        hasher.hash(impl->predicate_coordinate, description);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -14829,7 +14804,7 @@ namespace Legion {
                                           unordered, provenance);
       op->initialize_replication(this,
           shard_manager->is_first_local_shard(owner_shard));
-      if (!add_to_dependence_queue(op, unordered))
+      if (!add_to_dependence_queue(op, NULL/*deps*/, unordered))
       {
 #ifdef DEBUG_LEGION
         assert(unordered);
@@ -14950,7 +14925,7 @@ namespace Legion {
                                          unordered, provenance);
       op->initialize_replication(this,
           shard_manager->is_first_local_shard(owner_shard));
-      if (!add_to_dependence_queue(op, unordered))
+      if (!add_to_dependence_queue(op, NULL/*deps*/, unordered))
       {
 #ifdef DEBUG_LEGION
         assert(unordered);
@@ -15834,8 +15809,8 @@ namespace Legion {
       const DistributedID did = runtime->get_available_distributed_id();
       IndexSpaceNode *color_node = runtime->forest->get_node(color_space); 
       FutureMap future_map(new FutureMapImpl(this, runtime, color_node, did,
-            total_children_count++,
-            ApEvent::NO_AP_EVENT, provenance, true/*reg now*/));
+                                 NO_FUTURE_COORDINATE, ApEvent::NO_AP_EVENT,
+                                 provenance, true/*reg now*/));
       // Prune out every N-th one for this shard and then pass through
       // the subset to the normal InnerContext variation of this
       std::map<DomainPoint,Future> shard_futures;
@@ -17175,7 +17150,7 @@ namespace Legion {
       op->initialize_field_space_deletion(this, handle, unordered, provenance);
       op->initialize_replication(this,
           shard_manager->is_first_local_shard(owner_shard));
-      if (!add_to_dependence_queue(op, unordered))
+      if (!add_to_dependence_queue(op, NULL/*deps*/, unordered))
       {
 #ifdef DEBUG_LEGION
         assert(unordered);
@@ -17474,7 +17449,7 @@ namespace Legion {
                                     provenance, (owner_shard->shard_id != 0));
       op->initialize_replication(this,
           shard_manager->is_first_local_shard(owner_shard));
-      if (!add_to_dependence_queue(op, unordered))
+      if (!add_to_dependence_queue(op, NULL/*deps*/, unordered))
       {
 #ifdef DEBUG_LEGION
         assert(unordered);
@@ -17771,7 +17746,7 @@ namespace Legion {
                     allocator, provenance, (owner_shard->shard_id != 0));
       op->initialize_replication(this,
           shard_manager->is_first_local_shard(owner_shard));
-      if (!add_to_dependence_queue(op, unordered))
+      if (!add_to_dependence_queue(op, NULL/*deps*/, unordered))
       {
 #ifdef DEBUG_LEGION
         assert(unordered);
@@ -18042,7 +18017,7 @@ namespace Legion {
       op->initialize_logical_region_deletion(this, handle,unordered,provenance);
       op->initialize_replication(this,
           shard_manager->is_first_local_shard(owner_shard));
-      if (!add_to_dependence_queue(op, unordered))
+      if (!add_to_dependence_queue(op, NULL/*deps*/, unordered))
       {
 #ifdef DEBUG_LEGION
         assert(unordered);
@@ -18391,7 +18366,6 @@ namespace Legion {
       Future result = task->initialize_task(this,
                                             launcher,
                                             provenance,
-                                            true /*track*/,
                                             false /*top_level*/,
                                             false /*must epoch*/,
                                             outputs);
@@ -18411,8 +18385,8 @@ namespace Legion {
         REPORT_LEGION_WARNING(LEGION_WARNING_INLINING_NOT_SUPPORTED,
             "Inlining is not currently supported for replicated tasks "
             "such as %s (UID %lld)", get_task_name(), get_unique_id())
-      execute_task_launch(task, false/*index*/, current_trace, provenance,
-                          launcher.silence_warnings, false/*no inlining*/);
+      execute_task_launch(task, false/*index*/, launcher.static_dependences,
+          provenance, launcher.silence_warnings, false/*no inlining*/);
       return result;
     }
 
@@ -18457,8 +18431,7 @@ namespace Legion {
                                                provenance);
       // Quick out for predicate false
       if (launcher.predicate == Predicate::FALSE_PRED)
-        return predicate_index_task_false(total_children_count++, 
-                                          launch_space, launcher, provenance);
+        return predicate_index_task_false(launch_space, launcher, provenance);
       ReplIndexTask *task = runtime->get_available_repl_index_task();
       FutureMap result = task->initialize_task(this,
                                                launcher,
@@ -18481,8 +18454,8 @@ namespace Legion {
         REPORT_LEGION_WARNING(LEGION_WARNING_INLINING_NOT_SUPPORTED,
             "Inlining is not currently supported for replicated tasks "
             "such as %s (UID %lld)", get_task_name(), get_unique_id())
-      execute_task_launch(task, true/*index*/, current_trace, provenance,
-                          launcher.silence_warnings, false/*no inlining*/);
+      execute_task_launch(task, true/*index*/, launcher.static_dependences,
+          provenance, launcher.silence_warnings, false/*no inlining*/);
       return result;
     }
 
@@ -18563,8 +18536,8 @@ namespace Legion {
         REPORT_LEGION_WARNING(LEGION_WARNING_INLINING_NOT_SUPPORTED,
             "Inlining is not currently supported for replicated tasks "
             "such as %s (UID %lld)", get_task_name(), get_unique_id())
-      execute_task_launch(task, true/*index*/, current_trace, provenance, 
-                          launcher.silence_warnings, false/*no inlining*/);
+      execute_task_launch(task, true/*index*/, launcher.static_dependences,
+          provenance, launcher.silence_warnings, false/*no inlining*/);
       return result;
     }
 
@@ -18733,9 +18706,8 @@ namespace Legion {
       if (collective)
       {
         const DistributedID map_did = get_next_distributed_id();
-        result = shard_manager->deduplicate_future_map_creation(
-              this, domain_node, domain_node, total_children_count++,
-              map_did, ApEvent::NO_AP_EVENT, provenance);
+        result = shard_manager->deduplicate_future_map_creation(this,
+          domain_node, domain_node, map_did, ApEvent::NO_AP_EVENT, provenance);
         ReplFutureMapImpl *map = static_cast<ReplFutureMapImpl*>(result.impl);
         ShardingFunction *function;
         if (implicit)
@@ -18778,7 +18750,7 @@ namespace Legion {
             get_task_name(), get_unique_id())
         const DistributedID did = runtime->get_available_distributed_id();
         result = FutureMap(new FutureMapImpl(this, runtime, domain_node, did,
-              total_children_count++, ApEvent::NO_AP_EVENT, provenance));
+              NO_FUTURE_COORDINATE, ApEvent::NO_AP_EVENT, provenance));
       }
       for (std::map<DomainPoint,UntypedBuffer>::const_iterator it =
             data.begin(); it != data.end(); it++)
@@ -18972,7 +18944,7 @@ namespace Legion {
                       launcher.requirement.region.tree_id,
                       get_task_name(), get_unique_id())
       register_inline_mapped_region(result);
-      add_to_dependence_queue(map_op);
+      add_to_dependence_queue(map_op, launcher.static_dependences);
       return result;
     }
 
@@ -19095,7 +19067,7 @@ namespace Legion {
           unmapped_regions[idx].impl->unmap_region();
       }
       // Issue the copy operation
-      add_to_dependence_queue(fill_op);
+      add_to_dependence_queue(fill_op, launcher.static_dependences);
       // Remap any regions which we unmapped
       if (!unmapped_regions.empty())
         remap_unmapped_regions(current_trace, unmapped_regions, provenance);
@@ -19185,7 +19157,7 @@ namespace Legion {
           unmapped_regions[idx].impl->unmap_region();
       }
       // Issue the copy operation
-      add_to_dependence_queue(fill_op);
+      add_to_dependence_queue(fill_op, launcher.static_dependences);
       // Remap any regions which we unmapped
       if (!unmapped_regions.empty())
         remap_unmapped_regions(current_trace, unmapped_regions, provenance);
@@ -19244,7 +19216,7 @@ namespace Legion {
             unmapped_regions[idx].impl->unmap_region();
         }
       }
-      add_to_dependence_queue(discard_op);
+      add_to_dependence_queue(discard_op, launcher.static_dependences);
       // Do not remap the previously mapped regions, they are uninitialized
     }
 
@@ -19320,7 +19292,7 @@ namespace Legion {
           unmapped_regions[idx].impl->unmap_region();
       }
       // Issue the copy operation
-      add_to_dependence_queue(copy_op);
+      add_to_dependence_queue(copy_op, launcher.static_dependences);
       // Remap any regions which we unmapped
       if (!unmapped_regions.empty())
         remap_unmapped_regions(current_trace, unmapped_regions, provenance);
@@ -19414,7 +19386,7 @@ namespace Legion {
           unmapped_regions[idx].impl->unmap_region();
       }
       // Issue the copy operation
-      add_to_dependence_queue(copy_op);
+      add_to_dependence_queue(copy_op, launcher.static_dependences);
       // Remap any regions which we unmapped
       if (!unmapped_regions.empty())
         remap_unmapped_regions(current_trace, unmapped_regions, provenance);
@@ -19480,7 +19452,7 @@ namespace Legion {
           unmapped_regions[idx].impl->unmap_region();
       }
       // Issue the acquire operation
-      add_to_dependence_queue(acquire_op);
+      add_to_dependence_queue(acquire_op, launcher.static_dependences);
       // Remap any regions which we unmapped
       if (!unmapped_regions.empty())
         remap_unmapped_regions(current_trace, unmapped_regions, provenance);
@@ -19546,7 +19518,7 @@ namespace Legion {
           unmapped_regions[idx].impl->unmap_region();
       }
       // Issue the release operation
-      add_to_dependence_queue(release_op);
+      add_to_dependence_queue(release_op, launcher.static_dependences);
       // Remap any regions which we unmapped
       if (!unmapped_regions.empty())
         remap_unmapped_regions(current_trace, unmapped_regions, provenance);
@@ -19634,7 +19606,7 @@ namespace Legion {
       // If we're counting this region as mapped we need to register it
       if (launcher.mapped)
         register_inline_mapped_region(result);
-      add_to_dependence_queue(attach_op);
+      add_to_dependence_queue(attach_op, launcher.static_dependences);
       return result;
     }
 
@@ -19755,7 +19727,7 @@ namespace Legion {
                         req.region.field_space.id, req.region.tree_id,
                         get_task_name(), get_unique_id())
       }
-      add_to_dependence_queue(attach_op);
+      add_to_dependence_queue(attach_op, launcher.static_dependences);
       return result;
     }
 
@@ -19806,7 +19778,7 @@ namespace Legion {
         unregister_inline_mapped_region(region);
         region.impl->unmap_region();
       }
-      if (!add_to_dependence_queue(op, unordered))
+      if (!add_to_dependence_queue(op, NULL/*deps*/, unordered))
       {
 #ifdef DEBUG_LEGION
         assert(unordered);
@@ -19857,7 +19829,7 @@ namespace Legion {
       Future result =
         resources.impl->detach(this, op, flush, unordered, provenance);
       op->initialize_replication(this);
-      if (!add_to_dependence_queue(op, unordered))
+      if (!add_to_dependence_queue(op, NULL/*deps*/, unordered))
       {
 #ifdef DEBUG_LEGION
         assert(unordered);
@@ -20123,11 +20095,14 @@ namespace Legion {
         replay->initialize_replay(this, trace, provenance);
         // Record the event for when the trace replay is ready
         physical_trace_replay_status.store(replay->get_mapped_event().id);
+#ifdef LEGION_SPY
+        tracing_replay_event = replay->get_completion_event();
+#endif
         add_to_dependence_queue(replay);
       }
-
       // Now mark that we are starting a trace
       current_trace = trace;
+      current_trace_future_coordinate = next_future_coordinate;
     }
 
     //--------------------------------------------------------------------------
@@ -20182,6 +20157,9 @@ namespace Legion {
       }
       // We no longer have a trace that we're executing 
       current_trace = NULL;
+#ifdef LEGION_SPY
+      tracing_replay_event = ApEvent::NO_AP_EVENT;
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -20356,7 +20334,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool ReplicateContext::add_to_dependence_queue(Operation *op,
-                                                 bool unordered, bool outermost)
+        const std::vector<StaticDependence> *dependences,
+        bool unordered, bool outermost)
     //--------------------------------------------------------------------------
     {
       // We disable program order execution when we are replaying a
@@ -20365,7 +20344,8 @@ namespace Legion {
            outermost && !is_replaying_physical_trace())
       {
         const ApEvent term_event = op->get_completion_event();
-        InnerContext::add_to_dependence_queue(op,unordered,false/*outermost*/);
+        InnerContext::add_to_dependence_queue(op, dependences,
+                                              unordered, false/*outermost*/);
         const ApBarrier inorder_bar = inorder_barrier.next(this);
         Runtime::phase_barrier_arrive(inorder_bar, 1/*count*/, term_event); 
         bool poisoned = false;
@@ -20379,14 +20359,15 @@ namespace Legion {
         return true;
       }
       else
-        return InnerContext::add_to_dependence_queue(op, unordered, outermost);
+        return InnerContext::add_to_dependence_queue(op, dependences,
+                                                     unordered, outermost);
     }
 
     //--------------------------------------------------------------------------
     PredicateImpl* ReplicateContext::create_predicate_impl(Operation *op)
     //--------------------------------------------------------------------------
     {
-      return new ReplPredicateImpl(op,
+      return new ReplPredicateImpl(op, get_next_future_coordinate(),
           get_next_collective_index(COLLECTIVE_LOC_1));
     }
 
@@ -20936,7 +20917,7 @@ namespace Legion {
                                                   std::set<RtEvent> &applied)
     //--------------------------------------------------------------------------
     {
-      size_t return_index;
+      uint64_t return_index;
       derez.deserialize(return_index);
       RtBarrier ready_barrier, mapped_barrier, execution_barrier;
       derez.deserialize(ready_barrier);
@@ -21164,11 +21145,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplicateContext::record_intra_space_dependence(size_t context_index,
+    void ReplicateContext::record_intra_space_dependence(uint64_t context_index,
         const DomainPoint &point, RtEvent point_mapped, ShardID next_shard)
     //--------------------------------------------------------------------------
     {
-      const std::pair<size_t,DomainPoint> key(context_index,point);
+      const std::pair<uint64_t,DomainPoint> key(context_index,point);
       AutoLock r_lock(replication_lock);
       IntraSpaceDeps &deps = intra_space_deps[key];
       // Check to see if someone has already registered this
@@ -21195,7 +21176,7 @@ namespace Legion {
     void ReplicateContext::handle_intra_space_dependence(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      std::pair<size_t,DomainPoint> key;
+      std::pair<uint64_t,DomainPoint> key;
       derez.deserialize(key.first);
       derez.deserialize(key.second);
       RtUserEvent pending_event;
@@ -21227,7 +21208,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplicateContext::receive_resources(size_t return_index,
+    void ReplicateContext::receive_resources(uint64_t return_index,
               std::map<LogicalRegion,unsigned> &created_regs,
               std::vector<DeletedRegion> &deleted_regs,
               std::set<std::pair<FieldSpace,FieldID> > &created_fids,
@@ -21373,7 +21354,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplicateContext::receive_replicate_resources(size_t return_index,
+    void ReplicateContext::receive_replicate_resources(uint64_t return_index,
               std::map<LogicalRegion,unsigned> &created_regs,
               std::vector<DeletedRegion> &deleted_regs,
               std::set<std::pair<FieldSpace,FieldID> > &created_fids,
@@ -22736,14 +22717,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    size_t RemoteTask::get_context_index(void) const
+    uint64_t RemoteTask::get_context_index(void) const
     //--------------------------------------------------------------------------
     {
       return context_index;
     }
 
     //--------------------------------------------------------------------------
-    void RemoteTask::set_context_index(size_t index)
+    void RemoteTask::set_context_index(uint64_t index)
     //--------------------------------------------------------------------------
     {
       context_index = index;
@@ -22905,11 +22886,7 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(!top_level_context);
-      assert(targets.size() == 1);
       assert(targets.size() == target_spaces.size());
-      assert(creation_target_space == runtime->address_space);
-      // should always be local
-      assert(target_spaces.front() == runtime->address_space); 
 #endif
       RtUserEvent ready_event = Runtime::create_rt_user_event();
       // Send off a request to the owner node to handle it
@@ -22917,7 +22894,13 @@ namespace Legion {
       {
         RezCheck z(rez);
         rez.serialize(did);
-        rez.serialize(targets.front());
+        rez.serialize<size_t>(targets.size());
+        for (unsigned idx = 0; idx < targets.size(); idx++)
+        {
+          rez.serialize(targets[idx]);
+          rez.serialize(target_spaces[idx]);
+        }
+        rez.serialize(creation_target_space);
         expr->pack_expression(rez, owner_space);
         rez.serialize(mask);
         rez.serialize(req_index);
@@ -23635,7 +23618,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LeafContext::return_resources(ResourceTracker *target, 
-                                       size_t return_index,
+                                       uint64_t return_index,
                                        std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
@@ -23644,7 +23627,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LeafContext::pack_return_resources(Serializer &rez, 
-                                            size_t return_index)
+                                            uint64_t return_index)
     //--------------------------------------------------------------------------
     {
       ResourceTracker::pack_empty_resources(rez, return_index);
@@ -24431,8 +24414,8 @@ namespace Legion {
         IndividualTask *task = runtime->get_available_individual_task(); 
         InnerContext *parent = owner_task->get_context();
         Future result =
-          task->initialize_task(parent, launcher, provenance, 
-              false/*track*/, false/*top level*/, false/*must epoch*/, outputs);
+          task->initialize_task(parent, launcher, provenance,
+              false/*top level*/, false/*must epoch*/, outputs);
         inline_child_task(task);
         return result;
       }
@@ -24461,8 +24444,7 @@ namespace Legion {
             "(ID %lld). All inline leaf task index space launches must "
             "specify a launch index space.", get_task_name(), get_unique_id())
         if (launcher.predicate == Predicate::FALSE_PRED)
-          return predicate_index_task_false(++inlined_tasks, launch_space,
-                                            launcher, provenance);
+          return predicate_index_task_false(launch_space, launcher, provenance);
         IndexTask *task = runtime->get_available_index_task();
         InnerContext *parent = owner_task->get_context();
         FutureMap result = task->initialize_task(parent, launcher, launch_space,
@@ -24967,7 +24949,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LeafContext::record_blocking_call(void)
+    void LeafContext::record_blocking_call(uint64_t future_coordinate)
     //--------------------------------------------------------------------------
     {
     }

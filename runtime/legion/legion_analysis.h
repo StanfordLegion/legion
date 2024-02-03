@@ -39,7 +39,8 @@ namespace Legion {
         : context_index(rhs.context_index), index_point(rhs.index_point) { }
       inline ContextCoordinate(ContextCoordinate &&rhs)
         : context_index(rhs.context_index), index_point(rhs.index_point) { }
-      inline ContextCoordinate(size_t index, const DomainPoint &p)
+      inline ContextCoordinate(uint64_t index) : context_index(index) { }
+      inline ContextCoordinate(uint64_t index, const DomainPoint &p)
         : context_index(index), index_point(p) { }
       inline ContextCoordinate& operator=(const ContextCoordinate &rhs)
         { context_index = rhs.context_index; 
@@ -58,7 +59,7 @@ namespace Legion {
         { rez.serialize(context_index); rez.serialize(index_point); }
       inline void deserialize(Deserializer &derez)
         { derez.deserialize(context_index); derez.deserialize(index_point); }
-      size_t context_index;
+      uint64_t context_index;
       DomainPoint index_point;
     };
 
@@ -314,8 +315,6 @@ namespace Legion {
       virtual void record_mapper_output(const TraceLocalID &tlid,
                          const Mapper::MapTaskOutput &output,
                          const std::deque<InstanceSet> &physical_instances,
-                         const std::vector<size_t> &future_size_bounds,
-                         const std::vector<TaskTreeCoordinates> &coordinates,
                          std::set<RtEvent> &applied_events) = 0;
       virtual void record_complete_replay(const TraceLocalID &tlid,
                                           ApEvent pre, ApEvent post,
@@ -471,8 +470,6 @@ namespace Legion {
       virtual void record_mapper_output(const TraceLocalID &tlid,
                           const Mapper::MapTaskOutput &output,
                           const std::deque<InstanceSet> &physical_instances,
-                          const std::vector<size_t> &future_size_bounds,
-                          const std::vector<TaskTreeCoordinates> &coordinates,
                           std::set<RtEvent> &applied_events);
       virtual void record_complete_replay(const TraceLocalID &tlid,
                                           ApEvent pre, ApEvent post,
@@ -593,13 +590,10 @@ namespace Legion {
       inline void record_mapper_output(const TraceLocalID &tlid, 
                           const Mapper::MapTaskOutput &output,
                           const std::deque<InstanceSet> &physical_instances,
-                          const std::vector<size_t> &future_size_bounds,
-                          const std::vector<TaskTreeCoordinates> &coordinates,
                           std::set<RtEvent> &applied)
         {
           base_sanity_check();
-          rec->record_mapper_output(tlid, output, physical_instances,
-                            future_size_bounds, coordinates, applied);
+          rec->record_mapper_output(tlid, output, physical_instances, applied);
         }
       inline void record_complete_replay(ApEvent pre, ApEvent post,
                                          std::set<RtEvent> &applied) const

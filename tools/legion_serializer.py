@@ -38,6 +38,7 @@ if TYPE_CHECKING:
 binary_filetype_pat = re.compile(b"FileType: BinaryLegionProf v: (?P<version>\d+(\.\d+)?)")
 
 max_dim_val = 0
+uuid_size = 0
 
 # use to parse the node id from mem_id, proc_id
 @typecheck
@@ -134,6 +135,7 @@ class LegionProfASCIIDeserializer(LegionDeserializer):
         "OpDesc": re.compile(prefix + r'Prof Op Desc (?P<kind>[0-9]+) (?P<name>[a-zA-Z0-9_ ]+)'),
         "MaxDimDesc": re.compile(prefix + r'Max Dim Desc (?P<max_dim>[0-9]+)'),
         "MachineDesc": re.compile(prefix + r'Machine Desc (?P<node_id>[0-9]+) (?P<num_nodes>[0-9]+)'),
+        "MachineDesc": re.compile(prefix + r'Machine Desc (?P<node_id>[0-9]+) (?P<num_nodes>[0-9]+) (?P<hostname>[a-zA-Z0-9_ ]+) (?P<host_id>[0-9]+) (?P<process_id>[0-9]+)'),
         "ZeroTime": re.compile(prefix + r'Zero Time (?P<zero_time>[0-9]+)'),
         "ProcDesc": re.compile(prefix + r'Prof Proc Desc (?P<proc_id>[a-f0-9]+) (?P<kind>[0-9]+)'),
         "MemDesc": re.compile(prefix + r'Prof Mem Desc (?P<mem_id>[a-f0-9]+) (?P<kind>[0-9]+) (?P<capacity>[0-9]+)'),
@@ -171,7 +173,8 @@ class LegionProfASCIIDeserializer(LegionDeserializer):
         "PartitionInfo": re.compile(prefix + r'Prof Partition Timeline (?P<op_id>[0-9]+) (?P<part_op>[0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)'),
         "MapperCallInfo": re.compile(prefix + r'Prof Mapper Call Info (?P<kind>[0-9]+) (?P<proc_id>[a-f0-9]+) (?P<op_id>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+) (?P<fevent>[0-9a-f]+)'),
         "RuntimeCallInfo": re.compile(prefix + r'Prof Runtime Call Info (?P<kind>[0-9]+) (?P<proc_id>[a-f0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+) (?P<fevent>[0-9a-f]+)'),
-        "ProfTaskInfo": re.compile(prefix + r'Prof ProfTask Info (?P<proc_id>[a-f0-9]+) (?P<op_id>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+) (?P<fevent>[0-9a-f]+)')
+        "ProfTaskInfo": re.compile(prefix + r'Prof ProfTask Info (?P<proc_id>[a-f0-9]+) (?P<op_id>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+) (?P<fevent>[0-9a-f]+)'),
+        "CalibrationErr": re.compile(prefix + r'Calibration Err (?P<calibration_err>[0-9]+)'),
         # "UserInfo": re.compile(prefix + r'Prof User Info (?P<proc_id>[a-f0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+) (?P<name>[$()a-zA-Z0-9_]+)')
     }
     parse_callbacks = {
@@ -244,6 +247,10 @@ class LegionProfASCIIDeserializer(LegionDeserializer):
         "node_id": int,
         "num_nodes": int,
         "zero_time": int,
+        "hostname": str,
+        "host_id": int,
+        "process_id": int,
+        "calibration_err": int,
     }
 
     def __init__(self, state: State, callbacks: Dict[str, Callable]) -> None:
@@ -346,6 +353,8 @@ class LegionProfBinaryDeserializer(LegionDeserializer):
         "long long":          "q", # long long
         "array":              "Q", # unsigned long long
         "point":              "Q", # unsigned long long
+        "uuid":               "b", # signed char
+        "uuid_size":          "I", # unsigned int
         "int":                "i", # int
         "ProcKind":           "i", # int (really an enum so this depends)
         "MemKind":            "i", # int (really an enum so this depends)
@@ -393,14 +402,28 @@ class LegionProfBinaryDeserializer(LegionDeserializer):
                     values.append(value)
                 return values
             return array_reader
+        if param_type == "uuid":
+            fmt = LegionProfBinaryDeserializer.fmt_dict[param_type]
+            def uuid_reader(log: io.BufferedReader) -> List:
+                global uuid_size
+                values = []
+                for index in range(uuid_size):
+                    raw_val = log.read(num_bytes)
+                    value = struct.unpack(fmt, raw_val)[0]
+                    values.append(value)
+                return values
+            return uuid_reader
         else:
             fmt = LegionProfBinaryDeserializer.fmt_dict[param_type]
             def reader(log: io.BufferedReader) -> str:
                 global max_dim_val
+                global uuid_size
                 raw_val = log.read(num_bytes)
                 val = struct.unpack(fmt, raw_val)[0]
                 if param_type == "maxdim":
                     max_dim_val = val
+                if param_type == "uuid_size":
+                    uuid_size = val
                 return val
             return reader
 

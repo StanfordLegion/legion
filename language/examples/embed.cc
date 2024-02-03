@@ -32,9 +32,9 @@ class EmbedMapper : public DefaultMapper
 public:
   EmbedMapper(MapperRuntime *rt, Machine machine, Processor local,
               const char *mapper_name);
-  virtual void select_task_options(const MapperContext    ctx,
+  void select_task_options(const MapperContext    ctx,
                                    const Task&            task,
-                                         TaskOptions&     output);
+                                         TaskOptions&     output) override;
 };
 
 EmbedMapper::EmbedMapper(MapperRuntime *rt, Machine machine, Processor local,
