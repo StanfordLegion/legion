@@ -820,6 +820,7 @@ namespace Legion {
       LOGICAL_REGION_DESTRUCTION_MESSAGE,
       INDIVIDUAL_REMOTE_FUTURE_SIZE,
       INDIVIDUAL_REMOTE_OUTPUT_REGISTRATION,
+      INDIVIDUAL_REMOTE_MAPPED,
       INDIVIDUAL_REMOTE_COMPLETE,
       INDIVIDUAL_REMOTE_COMMIT,
       SLICE_REMOTE_MAPPED,
@@ -1140,6 +1141,7 @@ namespace Legion {
         "Logical Region Destruction",                                 \
         "Individual Remote Future Size",                              \
         "Individual Remote Output Region Registration",               \
+        "Individual Remote Mapped",                                   \
         "Individual Remote Complete",                                 \
         "Individual Remote Commit",                                   \
         "Slice Remote Mapped",                                        \

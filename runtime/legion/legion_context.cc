@@ -1226,6 +1226,7 @@ namespace Legion {
         virtual_mapped(virt_mapped), total_children_count(0),
         next_future_coordinate(0), total_tunable_count(0),
         executing_children_count(0), executed_children_count(0),
+        outstanding_prepipeline_tasks(0),
         ready_comp_queue(CompletionQueue::NO_QUEUE),
         enqueue_task_comp_queue(CompletionQueue::NO_QUEUE),
         distribute_task_comp_queue(CompletionQueue::NO_QUEUE),
@@ -8260,8 +8261,20 @@ namespace Legion {
       const GenerationID gen = op->get_generation();
       {
         AutoLock p_lock(prepipeline_lock);
-        issue_task = prepipeline_queue.empty();
-        prepipeline_queue.push_back(std::pair<Operation*,GenerationID>(op,gen));
+        prepipeline_queue.emplace_back(std::make_pair(op,gen));
+        // Cap the number of outstanding prepipeline tasks as no more than
+        // the number of utility processors that we're running on
+        if (outstanding_prepipeline_tasks < runtime->num_utility_procs)
+        {
+          const unsigned max_tasks = (prepipeline_queue.size() +
+              context_configuration.meta_task_vector_width - 1) / 
+            context_configuration.meta_task_vector_width;
+          if (outstanding_prepipeline_tasks < max_tasks)
+          {
+            issue_task = true;
+            outstanding_prepipeline_tasks++;
+          }
+        }
       }
       if (issue_task)
       {
@@ -8277,7 +8290,6 @@ namespace Legion {
     {
       std::vector<std::pair<Operation*,GenerationID> > to_perform;
       to_perform.reserve(context_configuration.meta_task_vector_width);
-      Operation *launch_next_op = NULL;
       {
         AutoLock p_lock(prepipeline_lock);
         for (unsigned idx = 0; idx < 
@@ -8288,24 +8300,30 @@ namespace Legion {
           to_perform.push_back(prepipeline_queue.front());
           prepipeline_queue.pop_front();
         }
-        if (!prepipeline_queue.empty())
-          launch_next_op = prepipeline_queue.back().first;
       }
       // Perform our prepipeline tasks
       for (std::vector<std::pair<Operation*,GenerationID> >::const_iterator it =
             to_perform.begin(); it != to_perform.end(); it++)
         it->first->execute_prepipeline_stage(it->second, false/*need wait*/);
-      if (launch_next_op != NULL)
+      AutoLock p_lock(prepipeline_lock);
+#ifdef DEBUG_LEGION
+      assert(outstanding_prepipeline_tasks > 0);
+#endif
+      const unsigned max_tasks = (prepipeline_queue.size() +
+              context_configuration.meta_task_vector_width - 1) /
+            context_configuration.meta_task_vector_width;
+      if (max_tasks < outstanding_prepipeline_tasks)
       {
-        // This could maybe give a bad op ID for profiling, but it
-        // will not impact the correctness of the code
-        PrepipelineArgs args(launch_next_op, this);
+        outstanding_prepipeline_tasks--;
+        return true;
+      }
+      else
+      {
+        PrepipelineArgs args(prepipeline_queue.front().first, this);
         runtime->issue_runtime_meta_task(args, LG_THROUGHPUT_WORK_PRIORITY);
         // Reference keeps flowing with the continuation
         return false;
       }
-      else
-        return true;
     }
 
     //--------------------------------------------------------------------------

@@ -3137,6 +3137,7 @@ namespace Legion {
       void send_individual_remote_future_size(Processor target,Serializer &rez);
       void send_individual_remote_output_registration(Processor target,
                                                       Serializer &rez);
+      void send_individual_remote_mapped(Processor target, Serializer &rez);
       void send_individual_remote_complete(Processor target, Serializer &rez);
       void send_individual_remote_commit(Processor target, Serializer &rez);
       void send_slice_remote_mapped(Processor target, Serializer &rez);
@@ -3552,6 +3553,7 @@ namespace Legion {
       void handle_logical_region_destruction(Deserializer &derez);
       void handle_individual_remote_future_size(Deserializer &derez);
       void handle_individual_remote_output_registration(Deserializer &derez);
+      void handle_individual_remote_mapped(Deserializer &derez);
       void handle_individual_remote_complete(Deserializer &derez);
       void handle_individual_remote_commit(Deserializer &derez);
       void handle_slice_remote_mapped(Deserializer &derez, 
@@ -5813,6 +5815,8 @@ namespace Legion {
           return TASK_VIRTUAL_CHANNEL;
         case INDIVIDUAL_REMOTE_OUTPUT_REGISTRATION:
           return TASK_VIRTUAL_CHANNEL;
+        case INDIVIDUAL_REMOTE_MAPPED:
+          break;
         case INDIVIDUAL_REMOTE_COMPLETE:
           return TASK_VIRTUAL_CHANNEL;
         case INDIVIDUAL_REMOTE_COMMIT:

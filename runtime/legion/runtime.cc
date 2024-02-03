@@ -12116,6 +12116,11 @@ namespace Legion {
               runtime->handle_individual_remote_output_registration(derez);
               break;
             }
+          case INDIVIDUAL_REMOTE_MAPPED:
+            {
+              runtime->handle_individual_remote_mapped(derez);
+              break;
+            }
           case INDIVIDUAL_REMOTE_COMPLETE:
             {
               runtime->handle_individual_remote_complete(derez);
@@ -21657,6 +21662,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_individual_remote_mapped(Processor target,
+                                                Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(INDIVIDUAL_REMOTE_MAPPED, rez,
+                                          true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_individual_remote_complete(Processor target,
                                                         Serializer &rez)
     //--------------------------------------------------------------------------
@@ -24166,6 +24180,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       IndividualTask::handle_remote_output_registration(derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_individual_remote_mapped(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      IndividualTask::process_unpack_remote_mapped(derez);
     }
 
     //--------------------------------------------------------------------------
