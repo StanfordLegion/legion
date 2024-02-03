@@ -810,7 +810,7 @@ gcc9_cxx11_debug_gasnetex_mpi_nightly_regent:
 gcc9_cxx11_release_gasnet1_ucx_legion:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *release, *cxx11_normal, *gasnet1_ucx, *legion, *libdw]
+    <<: [*gcc9, *terra12, *release, *cxx11_normal, *gasnet1_ucx, *legion, *short, *libdw]
 gcc9_cxx11_release_gasnet1_ucx_cmake_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
