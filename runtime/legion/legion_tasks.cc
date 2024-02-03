@@ -9117,7 +9117,7 @@ namespace Legion {
         if (IS_WRITE(req) && (req.projection == 0) &&
             (req.handle_type == LEGION_REGION_PROJECTION))
         {
-          if (IS_DISCARD(req))
+          if (IS_WRITE_DISCARD(req))
           {
             if (!IS_COLLECTIVE(req))
               REPORT_LEGION_ERROR(ERROR_ALIASED_INTERFERING_REGION,
