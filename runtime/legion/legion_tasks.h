@@ -549,7 +549,6 @@ namespace Legion {
       std::vector<RtEvent>                  intra_space_mapping_dependences;
       // Events that must be triggered before we are done mapping
       std::set<RtEvent>                     map_applied_conditions;
-      RtUserEvent                           deferred_complete_mapping;
       // The single task termination event encapsulates the exeuction of the
       // task being done and all child operations and their effects being done
       // It does NOT encapsulate the 'effects_complete' of this task
@@ -830,10 +829,10 @@ namespace Legion {
       void unpack_remote_commit(Deserializer &derez);
     public:
       // From MemoizableOp
-      virtual void trigger_replay(void);
       virtual void complete_replay(ApEvent pre, ApEvent completion_event);
     public:
       static void process_unpack_remote_future_size(Deserializer &derez);
+      static void process_unpack_remote_mapped(Deserializer &derez);
       static void process_unpack_remote_complete(Deserializer &derez);
       static void process_unpack_remote_commit(Deserializer &derez);
       static void handle_remote_output_registration(Deserializer &derez);
@@ -1403,8 +1402,7 @@ namespace Legion {
     public:
       void return_privileges(TaskContext *point_context,
                              std::set<RtEvent> &preconditions);
-      void record_point_mapped(RtEvent child_mapped,
-          std::map<PhysicalManager*,unsigned> &child_acquired);
+      void record_point_mapped(RtEvent child_mapped);
       void record_point_complete(RtEvent child_complete);
       void record_point_committed(RtEvent commit_precondition =
                                   RtEvent::NO_RT_EVENT);
