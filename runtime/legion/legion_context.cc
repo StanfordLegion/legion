@@ -1226,6 +1226,7 @@ namespace Legion {
         virtual_mapped(virt_mapped), total_children_count(0),
         next_future_coordinate(0), total_tunable_count(0),
         executing_children_count(0), executed_children_count(0),
+        outstanding_prepipeline_tasks(0),
         ready_comp_queue(CompletionQueue::NO_QUEUE),
         enqueue_task_comp_queue(CompletionQueue::NO_QUEUE),
         distribute_task_comp_queue(CompletionQueue::NO_QUEUE),
@@ -8261,7 +8262,20 @@ namespace Legion {
       {
         AutoLock p_lock(prepipeline_lock);
         issue_task = prepipeline_queue.empty();
-        prepipeline_queue.push_back(std::pair<Operation*,GenerationID>(op,gen));
+        prepipeline_queue.emplace_back(std::make_pair(op,gen));
+        // Cap the number of outstanding prepipeline tasks as no more than
+        // the number of utility processors that we're running on
+        if (outstanding_prepipeline_tasks < runtime->num_utility_procs)
+        {
+          const unsigned max_tasks = (prepipeline_queue.size() +
+              context_configuration.meta_task_vector_width - 1) / 
+            context_configuration.meta_task_vector_width;
+          if (outstanding_prepipeline_tasks < max_tasks)
+          {
+            issue_task = true;
+            outstanding_prepipeline_tasks++;
+          }
+        }
       }
       if (issue_task)
       {
@@ -8288,7 +8302,14 @@ namespace Legion {
           to_perform.push_back(prepipeline_queue.front());
           prepipeline_queue.pop_front();
         }
-        if (!prepipeline_queue.empty())
+        if (prepipeline_queue.empty())
+        {
+#ifdef DEBUG_LEGION
+          assert(outstanding_prepipeline_tasks > 0);
+#endif
+          outstanding_prepipeline_tasks--;
+        }
+        else
           launch_next_op = prepipeline_queue.back().first;
       }
       // Perform our prepipeline tasks
