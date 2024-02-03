@@ -21,7 +21,6 @@ if(NOT Legion_SOURCE_DIR)
 endif()
 
 add_subdirectory(attach_file_mini)
-add_subdirectory(legion_stl)
 add_subdirectory(output_requirements)
 add_subdirectory(reduce_future)
 add_subdirectory(ctrl_repl_safety)
