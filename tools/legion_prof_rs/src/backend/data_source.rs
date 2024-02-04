@@ -847,6 +847,14 @@ impl StateDataSource {
                 });
             }
         }
+        if let Some(op) = self.state.find_op(op_id) {
+            if let Some(kind) = op.kind {
+                return Field::String(format!(
+                    "{} Operation<{}>",
+                    self.state.op_kinds[&kind].name, op_id.0
+                ));
+            }
+        }
         Field::U64(op_id.0)
     }
 
