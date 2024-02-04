@@ -8807,9 +8807,11 @@ namespace Legion {
        * and one after the collective kernel launch). Furthermore, it is the 
        * user's responsibility to make sure that the kernel has actually been
        * issued to GPU driver (be very careful with non-blocking communicators).
-       * Both methods will context-switch the task out for a length of time
-       * O(log N) in the number of tasks N, to ensure that it is safe to
-       * issue the collective kernel.
+       * Both methods will context-switch the task out while performing a
+       * barrier across the N tasks in the concurrent index space task launch
+       * to ensure that it is safe to issue the collective kernel. The expected
+       * cost of this barrier is O(log N) in the number of tasks N in the
+       * collective index space task launch.
        */
       void pre_launch_collective_kernel(Context ctx);
       void post_launch_collective_kernel(Context ctx);
