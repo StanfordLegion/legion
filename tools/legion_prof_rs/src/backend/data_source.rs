@@ -93,6 +93,8 @@ pub struct Fields {
     status_ready: FieldID,
     status_running: FieldID,
     status_waiting: FieldID,
+    deferred_time: FieldID,
+    delayed_time: FieldID,
 }
 
 #[derive(Debug)]
@@ -124,7 +126,7 @@ impl StateDataSource {
             inst_fspace: field_schema.insert("Field Space".to_owned(), true),
             inst_ispace: field_schema.insert("Index Space".to_owned(), true),
             inst_layout: field_schema.insert("Layout".to_owned(), true),
-            interval: field_schema.insert("Interval".to_owned(), false),
+            interval: field_schema.insert("Duration".to_owned(), false),
             num_items: field_schema.insert("Number of Items".to_owned(), false),
             op_id: field_schema.insert("Operation".to_owned(), false),
             provenance: field_schema.insert("Provenance".to_owned(), true),
@@ -132,6 +134,8 @@ impl StateDataSource {
             status_ready: field_schema.insert("Ready".to_owned(), false),
             status_running: field_schema.insert("Running".to_owned(), false),
             status_waiting: field_schema.insert("Waiting".to_owned(), false),
+            deferred_time: field_schema.insert("Deferred".to_owned(), false),
+            delayed_time : field_schema.insert("Delayed".to_owned(), false),
         };
 
         let mut entry_map = BTreeMap::<EntryID, EntryKind>::new();
@@ -917,6 +921,18 @@ impl StateDataSource {
                     self.fields.provenance,
                     Field::String(provenance.to_string()),
                 ));
+            }
+            if let Some(ready) = entry.time_range.ready {
+                if let Some(create) = entry.time_range.create {
+                    fields.push((
+                        self.fields.deferred_time,
+                        Field::Interval(ts::Interval::new(create.into(), ready.into()))));
+                }
+                if let Some(start) = entry.time_range.start {
+                    fields.push((
+                        self.fields.delayed_time,
+                        Field::Interval(ts::Interval::new(ready.into(), start.into()))));
+                }
             }
             ItemMeta {
                 item_uid: entry.base().prof_uid.into(),
