@@ -395,6 +395,8 @@ namespace Legion {
       // operations seen so far, used to generate unique hashes for
       // those operations.
       size_t unique_hash_idx_counter = 0;
+      // Maintain whether or not we are currently replaying a trace.
+      bool started_auto_trace = false;
     };
 
     void auto_trace_process_repeats(const void* args);
@@ -512,10 +514,12 @@ namespace Legion {
         nullptr /* provenance */,
         false /* from application */
       );
+      this->started_auto_trace = true;
     }
 
     template <typename T>
     void AutomaticTracingContext<T>::issue_end_trace(Legion::TraceID id) {
+      this->started_auto_trace = false;
       T::end_trace(id, false /* deprecated */, nullptr /* provenance */, false /* from application */);
     }
 
@@ -526,6 +530,10 @@ namespace Legion {
       bool unordered,
       bool outermost
     ) {
+      // If we're tracing and this operation is a trace no-op, then no-op.
+      if (this->started_auto_trace && is_operation_ignorable_in_traces(op) && !unordered) {
+        return true;
+      }
       return T::add_to_dependence_queue(op, dependences, unordered, outermost);
     }
 
