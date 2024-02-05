@@ -847,6 +847,13 @@ impl StateDataSource {
                 });
             }
         }
+        if let Some(task) = self.state.multi_tasks.get(&op_id) {
+            if let Some(kind) = self.state.task_kinds.get(&task.task_id) {
+                if let Some(name) = &kind.name {
+                    return Field::String(format!("Task {}<{}>", name, op_id.0));
+                }
+            }
+        }
         if let Some(op) = self.state.find_op(op_id) {
             if let Some(kind) = op.kind {
                 return Field::String(format!(
