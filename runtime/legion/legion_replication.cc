@@ -11979,8 +11979,6 @@ namespace Legion {
         received_notifications(0)
     //--------------------------------------------------------------------------
     {
-      if (expected_notifications > 1)
-        done_event = Runtime::create_rt_user_event();
     }
 
     //--------------------------------------------------------------------------
@@ -11992,18 +11990,12 @@ namespace Legion {
         received_notifications(0)
     //--------------------------------------------------------------------------
     {
-      if (expected_notifications > 1)
-        done_event = Runtime::create_rt_user_event();
     }
 
     //--------------------------------------------------------------------------
     GatherCollective::~GatherCollective(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      if (done_event.exists())
-        assert(done_event.has_triggered());
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -12021,28 +12013,60 @@ namespace Legion {
         assert(received_notifications < expected_notifications);
 #endif
         done = (++received_notifications == expected_notifications);
+        // This is a bit tricky but if we're done increment the expected
+        // notifications by one to make sure something calling get_done_event
+        // doesn't think we're done too early
+        if (done)
+          received_notifications--;
       }
       if (done)
       {
         if (local_shard != target)
           send_message();
         RtEvent postcondition = post_gather();
-        if (done_event.exists())
-          Runtime::trigger_event(done_event, postcondition);
+        AutoLock c_lock(collective_lock);
+#ifdef DEBUG_LEGION
+        assert((received_notifications+1) == expected_notifications);
+#endif
+        // remove the guard
+        received_notifications++;
+        if (done_event.to_trigger.exists())
+        {
+          RtUserEvent to_trigger = done_event.to_trigger;
+          Runtime::trigger_event(to_trigger, postcondition);
+          done_event.postcondition = to_trigger;
+        }
+        else
+          done_event.postcondition = postcondition;
       }
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent GatherCollective::get_done_event(void)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock c_lock(collective_lock);
+      if (received_notifications < expected_notifications)
+      {
+        if (!done_event.to_trigger.exists())
+          done_event.to_trigger = Runtime::create_rt_user_event();
+        return done_event.to_trigger;
+      }
+      else
+        return done_event.postcondition;
     }
 
     //--------------------------------------------------------------------------
     RtEvent GatherCollective::perform_collective_wait(bool block/*=true*/)
     //--------------------------------------------------------------------------
     {
-      if (done_event.exists() && !done_event.has_triggered())
-      {
-        if (block)
-          done_event.wait();
-        else
-          return done_event;
-      }
+      const RtEvent result = get_done_event();
+      if (!block)
+        return result;
+      if (!result.exists())
+        return result;
+      if (!result.has_triggered())
+        result.wait();
       return RtEvent::NO_RT_EVENT;
     }
 
@@ -12060,14 +12084,31 @@ namespace Legion {
         assert(received_notifications < expected_notifications);
 #endif
         done = (++received_notifications == expected_notifications);       
+        // This is a bit tricky but if we're done increment the expected
+        // notifications by one to make sure something calling get_done_event
+        // doesn't think we're done too early
+        if (done)
+          received_notifications--;
       }
       if (done)
       {
         if (local_shard != target)
           send_message();
         RtEvent postcondition = post_gather();
-        if (done_event.exists())
-          Runtime::trigger_event(done_event, postcondition);
+        AutoLock c_lock(collective_lock);
+#ifdef DEBUG_LEGION
+        assert((received_notifications+1) == expected_notifications);
+#endif
+        // Remove the guard
+        received_notifications++;
+        if (done_event.to_trigger.exists())
+        {
+          RtUserEvent to_trigger = done_event.to_trigger;
+          Runtime::trigger_event(to_trigger, postcondition);
+          done_event.postcondition = to_trigger;
+        }
+        else
+          done_event.postcondition = postcondition;
       }
     }
 
@@ -12075,8 +12116,6 @@ namespace Legion {
     void GatherCollective::elide_collective(void)
     //--------------------------------------------------------------------------
     {
-      if (done_event.exists())
-        Runtime::trigger_event(done_event);
     }
 
     //--------------------------------------------------------------------------
@@ -13358,7 +13397,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ShardSyncTree::ShardSyncTree(ReplicateContext *ctx, ShardID origin,
                                  CollectiveIndexLocation loc)
-      : GatherCollective(loc, ctx, origin) 
+      : GatherCollective(loc, ctx, origin), done(get_done_event()) 
     //--------------------------------------------------------------------------
     {
     }
@@ -13373,8 +13412,7 @@ namespace Legion {
     void ShardSyncTree::pack_collective(Serializer &rez) const
     //--------------------------------------------------------------------------
     {
-      RtEvent precondition = get_done_event();
-      rez.serialize(precondition);
+      rez.serialize(done);
     }
 
     //--------------------------------------------------------------------------
