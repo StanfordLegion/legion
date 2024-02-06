@@ -534,9 +534,9 @@ impl Proc {
             // If we don't need to look up later... don't bother building the index
             _ => {}
         }
-        self.entries
-            .entry(base.prof_uid)
-            .or_insert_with(|| ProcEntry::new(base, op, initiation_op, kind, time_range, creator, fevent))
+        self.entries.entry(base.prof_uid).or_insert_with(|| {
+            ProcEntry::new(base, op, initiation_op, kind, time_range, creator, fevent)
+        })
     }
 
     pub fn find_task(&self, op_id: OpID) -> Option<&ProcEntry> {
@@ -1079,7 +1079,7 @@ impl ContainerEntry for ChanEntry {
     fn provenance<'a, 'b>(&'a self, state: &'b State) -> Option<&'b str> {
         let initiation = self.initiation().unwrap();
         state.find_op_provenance(initiation)
-    } 
+    }
 }
 
 pub type ChanPoint = TimePoint<ProfUID, u64>;
@@ -2169,7 +2169,14 @@ pub struct Copy {
 }
 
 impl Copy {
-    fn new(base: Base, time_range: TimeRange, op_id: OpID, size: u64, creator: EventID, fevent: EventID) -> Self {
+    fn new(
+        base: Base,
+        time_range: TimeRange,
+        op_id: OpID,
+        size: u64,
+        creator: EventID,
+        fevent: EventID,
+    ) -> Self {
         Copy {
             base,
             creator,
@@ -2285,7 +2292,14 @@ pub struct Fill {
 }
 
 impl Fill {
-    fn new(base: Base, time_range: TimeRange, op_id: OpID, size: u64, creator: EventID, fevent: EventID) -> Self {
+    fn new(
+        base: Base,
+        time_range: TimeRange,
+        op_id: OpID,
+        size: u64,
+        creator: EventID,
+        fevent: EventID,
+    ) -> Self {
         Fill {
             base,
             creator,
@@ -2325,7 +2339,13 @@ pub struct DepPart {
 }
 
 impl DepPart {
-    fn new(base: Base, part_op: DepPartKind, time_range: TimeRange, op_id: OpID, creator: EventID) -> Self {
+    fn new(
+        base: Base,
+        part_op: DepPartKind,
+        time_range: TimeRange,
+        op_id: OpID,
+        creator: EventID,
+    ) -> Self {
         DepPart {
             base,
             creator,
@@ -2677,9 +2697,9 @@ impl State {
     ) -> &'a mut Copy {
         let alloc = &mut self.prof_uid_allocator;
         assert_eq!(copies.contains_key(&fevent), false);
-        copies
-            .entry(fevent)
-            .or_insert_with(|| Copy::new(Base::new(alloc), time_range, op_id, size, creator, fevent))
+        copies.entry(fevent).or_insert_with(|| {
+            Copy::new(Base::new(alloc), time_range, op_id, size, creator, fevent)
+        })
     }
 
     fn create_fill<'a>(
@@ -2693,12 +2713,18 @@ impl State {
     ) -> &'a mut Fill {
         let alloc = &mut self.prof_uid_allocator;
         assert_eq!(fills.contains_key(&fevent), false);
-        fills
-            .entry(fevent)
-            .or_insert_with(|| Fill::new(Base::new(alloc), time_range, op_id, size, creator, fevent))
+        fills.entry(fevent).or_insert_with(|| {
+            Fill::new(Base::new(alloc), time_range, op_id, size, creator, fevent)
+        })
     }
 
-    fn create_deppart(&mut self, op_id: OpID, part_op: DepPartKind, time_range: TimeRange, creator: EventID) {
+    fn create_deppart(
+        &mut self,
+        op_id: OpID,
+        part_op: DepPartKind,
+        time_range: TimeRange,
+        creator: EventID,
+    ) {
         self.create_op(op_id);
         let base = Base::new(&mut self.prof_uid_allocator); // FIXME: construct here to avoid mutability conflict
         let chan = self.find_deppart_chan_mut();
@@ -3721,7 +3747,15 @@ fn process_record(
             fevent,
         } => {
             let time_range = TimeRange::new_full(*create, *ready, *start, *stop);
-            state.create_task(*op_id, *proc_id, *task_id, *variant_id, time_range, *creator, *fevent);
+            state.create_task(
+                *op_id,
+                *proc_id,
+                *task_id,
+                *variant_id,
+                time_range,
+                *creator,
+                *fevent,
+            );
             state.update_last_time(*stop);
         }
         Record::GPUTaskInfo {
@@ -3745,7 +3779,15 @@ fn process_record(
                 gpu_start.0 = gpu_stop.0 - 1;
             }
             let time_range = TimeRange::new_full(*create, *ready, gpu_start, *gpu_stop);
-            state.create_task(*op_id, *proc_id, *task_id, *variant_id, time_range, *creator, *fevent);
+            state.create_task(
+                *op_id,
+                *proc_id,
+                *task_id,
+                *variant_id,
+                time_range,
+                *creator,
+                *fevent,
+            );
             state.update_last_time(*gpu_stop);
         }
         Record::MetaInfo {

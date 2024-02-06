@@ -964,19 +964,24 @@ impl StateDataSource {
             }
             if let Some(creator) = self.state.fevents.get(&entry.creator) {
                 if let Some(create_time) = entry.time_range.create {
-                    fields.push((self.fields.creator, self.generate_creator_link(*creator, create_time)));
+                    fields.push((
+                        self.fields.creator,
+                        self.generate_creator_link(*creator, create_time),
+                    ));
                 }
             }
             if let Some(ready) = entry.time_range.ready {
                 if let Some(create) = entry.time_range.create {
                     fields.push((
                         self.fields.deferred_time,
-                        Field::Interval(ts::Interval::new(create.into(), ready.into()))));
+                        Field::Interval(ts::Interval::new(create.into(), ready.into())),
+                    ));
                 }
                 if let Some(start) = entry.time_range.start {
                     fields.push((
                         self.fields.delayed_time,
-                        Field::Interval(ts::Interval::new(ready.into(), start.into()))));
+                        Field::Interval(ts::Interval::new(ready.into(), start.into())),
+                    ));
                 }
             }
             ItemMeta {
@@ -1075,7 +1080,10 @@ impl StateDataSource {
             if let Some(creator_uid) = entry.creator {
                 if let Some(creator) = self.state.fevents.get(&creator_uid) {
                     if let Some(create_time) = entry.time_range.create {
-                        fields.push((self.fields.creator, self.generate_creator_link(*creator, create_time)));
+                        fields.push((
+                            self.fields.creator,
+                            self.generate_creator_link(*creator, create_time),
+                        ));
                     }
                 }
             }
@@ -1291,7 +1299,10 @@ impl StateDataSource {
             if let Some(creator) = entry.creator() {
                 if let Some(creator_uid) = self.state.fevents.get(&creator) {
                     if let Some(create_time) = entry.time_range().create {
-                        fields.push((self.fields.creator , self.generate_creator_link(*creator_uid, create_time)));
+                        fields.push((
+                            self.fields.creator,
+                            self.generate_creator_link(*creator_uid, create_time),
+                        ));
                     }
                 }
             }
