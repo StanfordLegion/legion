@@ -16,6 +16,7 @@ protected:
   static void TearDownTestSuite()
   {
     runtime_->shutdown();
+    runtime_->wait_for_shutdown();
     delete runtime_;
   }
 
@@ -51,6 +52,7 @@ TEST_F(SparsityMapTest, DestroyWithEvent)
   EXPECT_TRUE(impl->is_valid());
   event.trigger();
   event.wait();
+  impl = sparsity_map.impl();
   EXPECT_FALSE(impl->is_valid());
 }
 

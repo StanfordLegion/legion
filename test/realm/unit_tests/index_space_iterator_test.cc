@@ -16,6 +16,7 @@ protected:
   static void TearDownTestSuite()
   {
     runtime_->shutdown();
+    runtime_->wait_for_shutdown();
     delete runtime_;
   }
 
@@ -78,7 +79,7 @@ TEST_F(IndexSpaceIteratorTest, StepDenseWithRestrictions)
   }
 }
 
-TEST_F(IndexSpaceIteratorTest, StepSparse)
+TEST_F(IndexSpaceIteratorTest, StepSparse1D)
 {
   std::vector<Rect<1>> rects;
   rects.push_back(Rect<1>(Point<1>(0), Point<1>(4)));
@@ -86,6 +87,30 @@ TEST_F(IndexSpaceIteratorTest, StepSparse)
   rects.push_back(Rect<1>(Point<1>(16), Point<1>(18)));
   IndexSpace<1> index_space(rects);
   IndexSpaceIterator<1> it(index_space);
+  for(int i = 0; i < 2; i++) {
+    EXPECT_TRUE(it.valid);
+    EXPECT_EQ(it.rect.lo, rects[0].lo);
+    EXPECT_EQ(it.rect.hi, rects[0].hi);
+    EXPECT_TRUE(it.step());
+    EXPECT_EQ(it.rect.lo, rects[1].lo);
+    EXPECT_EQ(it.rect.hi, rects[1].hi);
+    EXPECT_TRUE(it.step());
+    EXPECT_EQ(it.rect.lo, rects[2].lo);
+    EXPECT_EQ(it.rect.hi, rects[2].hi);
+    EXPECT_FALSE(it.step());
+    EXPECT_FALSE(it.valid);
+    it.reset(index_space);
+  }
+}
+
+TEST_F(IndexSpaceIteratorTest, StepSparse2D)
+{
+  std::vector<Rect<2>> rects;
+  rects.push_back(Rect<2>(Point<2>(0, 0), Point<2>(4, 0)));
+  rects.push_back(Rect<2>(Point<2>(0, 2), Point<2>(4, 2)));
+  rects.push_back(Rect<2>(Point<2>(0, 4), Point<2>(4, 4)));
+  IndexSpace<2> index_space(rects);
+  IndexSpaceIterator<2> it(index_space);
   for(int i = 0; i < 2; i++) {
     EXPECT_TRUE(it.valid);
     EXPECT_EQ(it.rect.lo, rects[0].lo);
