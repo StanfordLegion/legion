@@ -79,7 +79,7 @@ struct ItemInfo {
 pub struct Fields {
     chan_reqs: FieldID,
     expanded_for_visibility: FieldID,
-    initiation: FieldID,
+    operation: FieldID,
     insts: FieldID,
     inst_fields: FieldID,
     inst_fspace: FieldID,
@@ -95,6 +95,7 @@ pub struct Fields {
     status_waiting: FieldID,
     deferred_time: FieldID,
     delayed_time: FieldID,
+    creator: FieldID,
 }
 
 #[derive(Debug)]
@@ -120,7 +121,7 @@ impl StateDataSource {
             chan_reqs: field_schema.insert("Requirements".to_owned(), true),
             expanded_for_visibility: field_schema
                 .insert("(Expanded for Visibility)".to_owned(), false),
-            initiation: field_schema.insert("Initiation".to_owned(), true),
+            operation: field_schema.insert("Operation".to_owned(), true),
             insts: field_schema.insert("Instances".to_owned(), true),
             inst_fields: field_schema.insert("Fields".to_owned(), true),
             inst_fspace: field_schema.insert("Field Space".to_owned(), true),
@@ -135,7 +136,8 @@ impl StateDataSource {
             status_running: field_schema.insert("Running".to_owned(), false),
             status_waiting: field_schema.insert("Waiting".to_owned(), false),
             deferred_time: field_schema.insert("Deferred".to_owned(), false),
-            delayed_time : field_schema.insert("Delayed".to_owned(), false),
+            delayed_time: field_schema.insert("Delayed".to_owned(), false),
+            creator: field_schema.insert("Creator".to_owned(), false),
         };
 
         let mut entry_map = BTreeMap::<EntryID, EntryKind>::new();
@@ -882,6 +884,29 @@ impl StateDataSource {
         }))
     }
 
+    fn generate_creator_link(&self, prof_uid: ProfUID, create_time: Timestamp) -> Field {
+        let proc_id = self.state.prof_uid_proc.get(&prof_uid).unwrap();
+        let proc = self.state.procs.get(&proc_id).unwrap();
+        let mut entry = proc.entries.get(&prof_uid).unwrap();
+        // Check to see if we need to link one of the subcalls instead
+        // of the main task that produced the this operation
+        // Subcalls are sorted from smallest to largest so the first one we hit
+        // is the one we know that that actually made this box
+        for (call_uid, start_time, stop_time) in entry.subcalls.iter() {
+            if (*start_time <= create_time) && (create_time <= *stop_time) {
+                entry = proc.entries.get(call_uid).unwrap();
+                break;
+            }
+        }
+        let op_name = entry.name(&self.state);
+        Field::ItemLink(ItemLink {
+            item_uid: entry.base().prof_uid.into(),
+            title: op_name,
+            interval: entry.time_range().into(),
+            entry_id: self.proc_entries.get(proc_id).unwrap().clone(),
+        })
+    }
+
     fn generate_proc_slot_meta_tile(
         &self,
         entry_id: &EntryID,
@@ -909,7 +934,7 @@ impl StateDataSource {
                 fields.push((self.fields.op_id, Field::U64(op_id.0)));
             }
             if let Some(initiation_op) = entry.initiation_op {
-                fields.push((self.fields.initiation, self.generate_op_link(initiation_op)));
+                fields.push((self.fields.operation, self.generate_op_link(initiation_op)));
             }
             if let Some(op_id) = entry.op_id {
                 let op = self.state.find_op(op_id).unwrap();
@@ -936,6 +961,11 @@ impl StateDataSource {
                     self.fields.provenance,
                     Field::String(provenance.to_string()),
                 ));
+            }
+            if let Some(creator) = self.state.fevents.get(&entry.creator) {
+                if let Some(create_time) = entry.time_range.create {
+                    fields.push((self.fields.creator, self.generate_creator_link(*creator, create_time)));
+                }
             }
             if let Some(ready) = entry.time_range.ready {
                 if let Some(create) = entry.time_range.create {
@@ -1034,13 +1064,20 @@ impl StateDataSource {
             self.generate_inst_layout(entry, &mut fields);
             self.generate_inst_size(entry, &mut fields);
             if let Some(initiation_op) = entry.initiation() {
-                fields.push((self.fields.initiation, self.generate_op_link(initiation_op)));
+                fields.push((self.fields.operation, self.generate_op_link(initiation_op)));
             }
             if let Some(provenance) = provenance {
                 fields.push((
                     self.fields.provenance,
                     Field::String(provenance.to_string()),
                 ));
+            }
+            if let Some(creator_uid) = entry.creator {
+                if let Some(creator) = self.state.fevents.get(&creator_uid) {
+                    if let Some(create_time) = entry.time_range.create {
+                        fields.push((self.fields.creator, self.generate_creator_link(*creator, create_time)));
+                    }
+                }
             }
             ItemMeta {
                 item_uid: entry.base().prof_uid.into(),
@@ -1243,13 +1280,20 @@ impl StateDataSource {
             self.generate_chan_reqs(entry, &mut fields);
             self.generate_chan_size(entry, &mut fields);
             if let Some(initiation_op) = entry.initiation() {
-                fields.push((self.fields.initiation, self.generate_op_link(initiation_op)));
+                fields.push((self.fields.operation, self.generate_op_link(initiation_op)));
             }
             if let Some(provenance) = provenance {
                 fields.push((
                     self.fields.provenance,
                     Field::String(provenance.to_string()),
                 ));
+            }
+            if let Some(creator) = entry.creator() {
+                if let Some(creator_uid) = self.state.fevents.get(&creator) {
+                    if let Some(create_time) = entry.time_range().create {
+                        fields.push((self.fields.creator , self.generate_creator_link(*creator_uid, create_time)));
+                    }
+                }
             }
             ItemMeta {
                 item_uid: entry.base().prof_uid.into(),
