@@ -12116,6 +12116,19 @@ namespace Legion {
     void GatherCollective::elide_collective(void)
     //--------------------------------------------------------------------------
     {
+      AutoLock c_lock(collective_lock);
+#ifdef DEBUG_LEGION
+      assert(received_notifications == 0);
+#endif
+      received_notifications = expected_notifications;
+      if (done_event.to_trigger.exists())
+      {
+        RtUserEvent to_trigger = done_event.to_trigger;
+        Runtime::trigger_event(to_trigger);
+        done_event.postcondition = RtEvent::NO_RT_EVENT;
+      }
+      else
+        done_event.postcondition = RtEvent::NO_RT_EVENT;
     }
 
     //--------------------------------------------------------------------------
