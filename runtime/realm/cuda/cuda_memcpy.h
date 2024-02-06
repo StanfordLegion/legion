@@ -113,12 +113,12 @@ namespace Realm {
     struct MemcpyIndirectInfo {
       Offset_t volume;
       Offset_t field_size;
-      uintptr_t src_ind;
-      uintptr_t dst_ind;
-      AffineSubRect<N, Offset_t> src;
-      AffineSubRect<N, Offset_t> dst;
-      // TODO(apryakhin@): Use for out-of-bound detection.
-      // Rect<N, long long> dst_bounds;
+      Offset_t src_strides[N];
+      Offset_t dst_strides[N];
+      uintptr_t src_ind_addr;
+      uintptr_t dst_ind_addr;
+      uintptr_t src_addr;
+      uintptr_t dst_addr;
     };
 
     static const size_t CUDA_MAX_DIM = REALM_MAX_DIM < 3 ? REALM_MAX_DIM : 3;

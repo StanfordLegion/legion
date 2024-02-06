@@ -320,8 +320,8 @@ Event DistributedData<N, T>::create_instances(const FieldMap &fields, LAMBDA mem
     {
       int dim_order[N];
       for(int i = 0; i < N; i++) {
-        dim_order[i] = i;
-        // dim_order[inverse ? i : N - i - 1] = i;
+        //dim_order[i] = i;
+        dim_order[inverse ? i : N - i - 1] = i;
       }
       InstanceLayoutConstraints ilc(fields, 1);
       InstanceLayoutGeneric *ilg = InstanceLayoutGeneric::choose_instance_layout<N, T>(
@@ -964,7 +964,7 @@ template <int N, typename T, int N2, typename T2, typename DT>
 bool scatter_gather_test(const std::vector<Memory> &sys_mems,
                          const std::vector<Memory> &gpu_mems, int pieces1, int pieces2,
                          Processor p, CustomSerdezID serdez_id = 0, bool scatter = false,
-                         bool remote = false)
+                         bool remote = false, bool inverse = false)
 {
   Rect<N, T> r1;
   Rect<N2, T2> r2;
@@ -1000,7 +1000,7 @@ bool scatter_gather_test(const std::vector<Memory> &sys_mems,
   region1.add_subspaces(is1, pieces1);
   region1
       .create_instances(fields1, RoundRobinPicker<N, T>(gpu_mems),
-                        /*offset=*/0)
+                        /*offset=*/0, false)
       .wait();
 
   DistributedData<N, T> region_ind;
@@ -1016,7 +1016,7 @@ bool scatter_gather_test(const std::vector<Memory> &sys_mems,
   region2.add_subspaces(is2, pieces2, /*num_subrects=*/1);
   region2
       .create_instances(fields2, RoundRobinPicker<N2, T2>(gpu_mems),
-                        /*offset=*/2, true)
+                        /*offset=*/2, inverse)
       .wait();
 
   Matrix<N2, N, T> transform;
@@ -1149,6 +1149,30 @@ void top_level_task(const void *args, size_t arglen, const void *userdata, size_
       ok = false;
     }*/
 
+    if(!scatter_gather_test<1, long long, 1, long long, int>(
+           sys_mems, gpu_mems, TestConfig::pieces1, TestConfig::pieces2, p, 0, do_scatter,
+           true, true)) {
+      ok = false;
+    }
+
+    if(!scatter_gather_test<3, long long, 3, long long, int>(
+           sys_mems, gpu_mems, TestConfig::pieces1, TestConfig::pieces2, p, 0, do_scatter,
+           true, true)) {
+      ok = false;
+    }
+
+    if(!scatter_gather_test<2, long long, 2, long long, int>(
+           sys_mems, gpu_mems, TestConfig::pieces1, TestConfig::pieces2, p, 0, do_scatter,
+           true)) {
+      ok = false;
+    }
+
+    if(!scatter_gather_test<1, int, 1, int, long long>(
+           sys_mems, gpu_mems, TestConfig::pieces1, TestConfig::pieces2, p, 0, do_scatter,
+           true)) {
+      ok = false;
+    }
+
     if(!scatter_gather_test<1, long long, 1, long long, long long>(
            sys_mems, gpu_mems, TestConfig::pieces1, TestConfig::pieces2, p, 0, do_scatter,
            true)) {
@@ -1168,12 +1192,6 @@ void top_level_task(const void *args, size_t arglen, const void *userdata, size_
     }
 
     if(!scatter_gather_test<2, long long, 3, long long, int>(
-           sys_mems, gpu_mems, TestConfig::pieces1, TestConfig::pieces2, p, 0, do_scatter,
-           true)) {
-      ok = false;
-    }
-
-    if(!scatter_gather_test<3, long long, 3, long long, int>(
            sys_mems, gpu_mems, TestConfig::pieces1, TestConfig::pieces2, p, 0, do_scatter,
            true)) {
       ok = false;

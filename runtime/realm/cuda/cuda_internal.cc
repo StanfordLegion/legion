@@ -498,6 +498,7 @@ namespace Realm {
       // should be good here for most purposes)
       // TODO: make controllable
       const size_t flow_control_bytes = 4ULL * 1024ULL * 1024ULL * 1024ULL;
+
       ReadSequenceCache rseqcache(this, 2 << 20);
       WriteSequenceCache wseqcache(this, 2 << 20);
       GPUStream *stream = 0;
@@ -830,67 +831,29 @@ namespace Realm {
     //
     // class GPUIndirectXferDes
 
-    template <int N>
-    static MemcpyIndirectInfo<N>
-    make_indirect_info(const TransferIterator::AddressInfo &addr_info, size_t bytes,
-                       uintptr_t in_base, uintptr_t out_base, uintptr_t src_ind_base,
-                       uintptr_t dst_ind_base, bool do_scatter = false)
+    static void launch_indirect_kernel(GPU *gpu, GPUStream *stream, size_t num_dims,
+                                       size_t addr_type_size, size_t field_size,
+                                       size_t bytes, const std::vector<size_t> &strides,
+                                       uintptr_t in_base, uintptr_t out_base,
+                                       uintptr_t src_ind_base, uintptr_t dst_ind_base)
     {
-      MemcpyIndirectInfo<N> memcpy_info;
-      memset(&memcpy_info, 0, sizeof(MemcpyIndirectInfo<N>));
-      memcpy_info.src_ind = src_ind_base;
-      memcpy_info.dst_ind = dst_ind_base;
-      memcpy_info.src.addr = in_base;
-      memcpy_info.dst.addr = out_base;
-      memcpy_info.field_size = addr_info.bytes_per_chunk;
-      assert(memcpy_info.field_size);
-      memcpy_info.volume = bytes / memcpy_info.field_size;
-      assert(memcpy_info.volume);
-      if(do_scatter) {
-        memcpy_info.dst.addr += addr_info.base_offset;
-      } else {
-        memcpy_info.src.addr += addr_info.base_offset;
+      MemcpyIndirectInfo<3, size_t> memcpy_info;
+      memset(&memcpy_info, 0, sizeof(MemcpyIndirectInfo<3, size_t>));
+      memcpy_info.src_ind_addr = src_ind_base;
+      memcpy_info.dst_ind_addr = dst_ind_base;
+      memcpy_info.src_addr = in_base;
+      memcpy_info.dst_addr = out_base;
+      memcpy_info.field_size = field_size;
+      assert(memcpy_info.field_size > 0);
+      memcpy_info.volume = bytes / field_size;
+      assert(memcpy_info.volume > 0);
+      for(size_t i = 0; i < num_dims; i++) {
+        memcpy_info.src_strides[i] = strides[i] / field_size;
+        memcpy_info.dst_strides[i] = strides[i] / field_size;
       }
-      return memcpy_info;
-    }
-
-    static void launch_indirect_copy(GPU *gpu, GPUStream *stream, size_t addr_size,
-                                     uintptr_t in_base, uintptr_t out_base,
-                                     uintptr_t src_ind_base, uintptr_t dst_ind_base,
-                                     size_t bytes,
-                                     const TransferIterator::AddressInfo &addr_info)
-    {
-      bool do_scatter = (dst_ind_base != 0);
-      if(addr_info.num_lines == 0 && addr_info.num_planes == 0) {
-        MemcpyIndirectInfo<1> memcpy_info = make_indirect_info<1>(
-            addr_info, bytes, in_base, out_base, src_ind_base, dst_ind_base, do_scatter);
-        gpu->launch_indirect_copy_kernel(&memcpy_info, 1, addr_size,
-                                         memcpy_info.field_size, memcpy_info.volume,
-                                         stream);
-      } else if(addr_info.num_planes == 0) {
-        MemcpyIndirectInfo<2> memcpy_info = make_indirect_info<2>(
-            addr_info, bytes, in_base, out_base, src_ind_base, dst_ind_base, do_scatter);
-        if(do_scatter)
-          memcpy_info.dst.strides[0] = addr_info.num_lines;
-        else
-          memcpy_info.src.strides[0] = addr_info.num_lines;
-        gpu->launch_indirect_copy_kernel(&memcpy_info, 2, addr_size,
-                                         memcpy_info.field_size, memcpy_info.volume,
-                                         stream);
-      } else {
-        MemcpyIndirectInfo<3> memcpy_info = make_indirect_info<3>(
-            addr_info, bytes, in_base, out_base, src_ind_base, dst_ind_base, do_scatter);
-        if(do_scatter) {
-          memcpy_info.dst.strides[0] = addr_info.num_lines;
-          memcpy_info.dst.strides[1] = addr_info.num_planes;
-        } else {
-          memcpy_info.src.strides[0] = addr_info.num_lines;
-          memcpy_info.src.strides[1] = addr_info.num_planes;
-        }
-        gpu->launch_indirect_copy_kernel(&memcpy_info, 3, addr_size,
-                                         memcpy_info.field_size, memcpy_info.volume,
-                                         stream);
-      }
+      gpu->launch_indirect_copy_kernel(&memcpy_info, num_dims, addr_type_size,
+                                       memcpy_info.field_size, memcpy_info.volume,
+                                       stream);
     }
 
     GPUIndirectXferDes::GPUIndirectXferDes(
@@ -1008,12 +971,12 @@ namespace Realm {
           // scatter
           out_port->iter->step(max_bytes, addr_info, 0, 0);
           addr_size = out_port->iter->get_address_size();
-          write_ind_bytes = (max_bytes / addr_info.bytes_per_chunk) * addr_size;
 
           dst_ind_base = reinterpret_cast<uintptr_t>(
               input_ports[out_port->indirect_port_idx].mem->get_direct_ptr(
                   out_port->iter->get_base_offset(), 0));
 
+          out_base += addr_info.base_offset;
           dst_ind_base += (out_alc.get_offset() / addr_info.bytes_per_chunk) * addr_size;
         } else {
           out_base += out_alc.get_offset();
@@ -1025,12 +988,12 @@ namespace Realm {
           // gather
           in_port->iter->step(max_bytes, addr_info, 0, 0);
           addr_size = in_port->iter->get_address_size();
-          read_ind_bytes = (max_bytes / addr_info.bytes_per_chunk) * addr_size;
 
           src_ind_base = reinterpret_cast<uintptr_t>(
               input_ports[in_port->indirect_port_idx].mem->get_direct_ptr(
                   in_port->iter->get_base_offset(), 0));
 
+          in_base += addr_info.base_offset;
           src_ind_base += (in_alc.get_offset() / addr_info.bytes_per_chunk) * addr_size;
         } else {
           in_base += in_alc.get_offset();
@@ -1042,8 +1005,25 @@ namespace Realm {
                           << " line_stride=" << addr_info.line_stride
                           << " num_planes=" << addr_info.num_planes
                           << " plane_stride=" << addr_info.plane_stride
-                          << " addr_size=" << addr_size
                           << " base_offset=" << in_port->iter->get_base_offset();
+
+        std::vector<size_t> strides{addr_info.bytes_per_chunk, addr_info.line_stride,
+                                    addr_info.plane_stride};
+        size_t field_size = strides[0];
+        size_t num_dims =
+            addr_info.num_planes > 0 ? 3 : (addr_info.num_lines > 0 ? 2 : 1);
+        for(size_t i = 1; i < num_dims; i++) {
+          if(strides[i] > 0 && field_size >= strides[i]) {
+            field_size = strides[i];
+          }
+        }
+
+        size_t addr_type_size = addr_size / num_dims;
+
+        if(in_port->indirect_port_idx >= 0)
+          read_ind_bytes = (max_bytes / field_size) * addr_size;
+        else
+          write_ind_bytes = (max_bytes / field_size) * addr_size;
 
         auto stream = select_stream(out_gpu, in_gpu, out_mapping);
         AutoGPUContext agc(stream->get_gpu());
@@ -1053,10 +1033,15 @@ namespace Realm {
         assert(!in_nonaffine && !out_nonaffine);
 
         log_gpudma.info() << "\t launching cuda gather/scatter "
-                          << "xd=" << std::hex << guid << std::dec
-                          << " bytes=" << max_bytes << " addr_size=" << addr_size;
-        launch_indirect_copy(in_gpu, stream, addr_size, in_base, out_base, src_ind_base,
-                             dst_ind_base, max_bytes, addr_info);
+                          << "xd:" << std::hex << guid << std::dec
+                          << " bytes:" << max_bytes << " addr_size:" << addr_size
+                          << " num_dims:" << num_dims
+                          << " addr_type_size:" << addr_type_size;
+
+        launch_indirect_kernel(in_gpu, stream, num_dims, addr_type_size, field_size,
+                               max_bytes, strides, in_base, out_base, src_ind_base,
+                               dst_ind_base);
+
         in_alc.advance(0, max_bytes);
         out_alc.advance(0, max_bytes);
 
@@ -1071,9 +1056,11 @@ namespace Realm {
           add_reference();
           log_gpudma.info() << "cuda gather/scatter fence: stream=" << stream << " "
                             << " xd=" << std::hex << guid << std::dec
-                            << " bytes=" << bytes_to_fence
-                            << " in_spart_start=" << in_span_start
-                            << " out_span_start=" << out_span_start;
+                            << " bytes:" << bytes_to_fence
+                            << " in_spart_start:" << in_span_start
+                            << " out_span_start:" << out_span_start
+                            << " read_ind_bytes:" << read_ind_bytes
+                            << " write_ind_bytes:" << write_ind_bytes;
 
           stream->add_notification(new GPUIndirectTransferCompletion(
               this, input_control.current_io_port, in_span_start, total_bytes,
@@ -1106,14 +1093,17 @@ namespace Realm {
       // is_directt=false means we gather/scatter to the buffer which
       // won't be correct if ib smaller that overall size of
       // gather/scatter
-      if(channel_copy_info.addr_size != sizeof(size_t) ||
+      if(channel_copy_info.addr_size > sizeof(size_t) ||
          channel_copy_info.is_ranges == true) {
         return false;
       }
 
+      if (channel_copy_info.ind_mem == Memory::NO_MEMORY) {
+        return false;
+      }
+
       if(channel_copy_info.src_mem.kind() != Memory::GPU_FB_MEM ||
-         channel_copy_info.dst_mem.kind() != Memory::GPU_FB_MEM ||
-         channel_copy_info.ind_mem.kind() != Memory::GPU_FB_MEM) {
+         channel_copy_info.dst_mem.kind() != Memory::GPU_FB_MEM) {
         return false;
       }
       // TODO(apryakhin@): Consider checking for gpu access

@@ -680,7 +680,7 @@ namespace Realm {
       // log2(16 bytes) --> 4
       static const size_t CUDA_MEMCPY_KERNEL_MAX2_LOG2_BYTES = 5;
 
-      GPUFuncInfo indirect_copy_kernels[REALM_MAX_DIM]
+      GPUFuncInfo indirect_copy_kernels[REALM_MAX_DIM][CUDA_MEMCPY_KERNEL_MAX2_LOG2_BYTES]
                                        [CUDA_MEMCPY_KERNEL_MAX2_LOG2_BYTES];
       GPUFuncInfo batch_affine_kernels[REALM_MAX_DIM][CUDA_MEMCPY_KERNEL_MAX2_LOG2_BYTES];
       GPUFuncInfo batch_fill_affine_kernels[REALM_MAX_DIM]

@@ -933,7 +933,7 @@ namespace Realm {
     size_t addrs_in_offset = 0;
     size_t point_pos = 0;
     size_t num_points = 0;
-    static const size_t MAX_POINTS = 64;
+    static const size_t MAX_POINTS = 4194304;
   };
 
   template <int N, typename T>

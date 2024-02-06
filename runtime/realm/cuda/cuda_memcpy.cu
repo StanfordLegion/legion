@@ -196,36 +196,45 @@ memcpy_affine_batch(Realm::Cuda::AffineCopyPair<N, Offset_t> *info,
  *
  * */
 
-template <typename T, size_t N, typename Offset_t = size_t>
+template <int N, typename T, typename DT, typename Offset_t = size_t>
 static __device__ inline void
-memcpy_indirect_points(Realm::Cuda::MemcpyIndirectInfo<N> info)
+memcpy_indirect_points(Realm::Cuda::MemcpyIndirectInfo<3, Offset_t> info)
 {
   Offset_t offset = blockIdx.x * blockDim.x + threadIdx.x;
-  __restrict__ Offset_t *dst_ind_base = reinterpret_cast<Offset_t *>(info.dst_ind);
-  __restrict__ Offset_t *src_ind_base = reinterpret_cast<Offset_t *>(info.src_ind);
+  __restrict__ T *dst_ind_base = reinterpret_cast<T *>(info.dst_ind_addr);
+  __restrict__ T *src_ind_base = reinterpret_cast<T *>(info.src_ind_addr);
 
-  Offset_t chunks = info.field_size / sizeof(T);
+  Offset_t chunks = info.field_size / sizeof(DT);
+
   for(; offset < info.volume; offset += blockDim.x * gridDim.x) {
-    const Offset_t src_index =
-        info.src_ind ? coords_to_index<N, Offset_t>(&src_ind_base[offset * N],
-                                                    &info.src.strides[0])
-                     : offset;
-    Offset_t dst_index = info.dst_ind
-                             ? coords_to_index<N, Offset_t>(&dst_ind_base[offset * N],
-                                                            &info.dst.strides[0])
-                             : offset;
+    Offset_t src_index = offset;
+    if(info.src_ind_addr != 0) {
+      Offset_t index = 0;
+#pragma unroll
+      for(int i = 0; i < N; i++) {
+        index += src_ind_base[offset * N + i] * info.src_strides[i];
+      }
+      src_index = index;
+    }
 
-    Realm::Cuda::AffineSubRect<N, Offset_t> src_rect;
-    Realm::Cuda::AffineSubRect<N, Offset_t> dst_rect;
-    src_rect.addr = info.src.addr + src_index * info.field_size;
-    dst_rect.addr = info.dst.addr + dst_index * info.field_size;
-    Realm::Cuda::AffineCopyPair<N, Offset_t> copy_info;
-    memset(&copy_info, 0, sizeof(Realm::Cuda::AffineCopyPair<N, Offset_t>));
-    copy_info.src = src_rect;
-    copy_info.dst = dst_rect;
+    Offset_t dst_index = offset;
+    if(info.dst_ind_addr != 0) {
+      Offset_t index = 0;
+#pragma unroll
+      for(int i = 0; i < N; i++) {
+        index += dst_ind_base[offset * N + i] * info.dst_strides[i];
+      }
 
-    copy_info.volume = offset + 1 * chunks;
-    memcpy_affine_batch<T, N, Offset_t>(&copy_info, /*num_rects=*/1, offset);
+      dst_index = index;
+    }
+
+    __restrict__ DT *dst =
+        reinterpret_cast<DT *>(info.dst_addr + dst_index * info.field_size);
+    __restrict__ DT *src =
+        reinterpret_cast<DT *>(info.src_addr + src_index * info.field_size);
+    for(Offset_t chunk_idx = 0; chunk_idx < chunks; chunk_idx++) {
+      dst[chunk_idx] = src[chunk_idx];
+    }
   }
 }
 
@@ -241,9 +250,10 @@ memcpy_indirect_points(Realm::Cuda::MemcpyIndirectInfo<N> info)
   {                                                                                      \
   }
 
-#define FILL_LARGE_TEMPLATE_INST(type, dim, offt, name) \
-  extern "C" __global__ void fill_affine_large##name(   \
-      Realm::Cuda::AffineLargeFillInfo<dim, offt> info) {}
+#define FILL_LARGE_TEMPLATE_INST(type, dim, offt, name)                                  \
+  extern "C" __global__ void fill_affine_large##name(                                    \
+      Realm::Cuda::AffineLargeFillInfo<dim, offt> info)                                  \
+  {}
 
 #define MEMCPY_TRANSPOSE_TEMPLATE_INST(type, offt, name)                                 \
   extern "C" __global__ __launch_bounds__(1024) void memcpy_transpose##name(             \
@@ -253,18 +263,19 @@ memcpy_indirect_points(Realm::Cuda::MemcpyIndirectInfo<N> info)
     memcpy_kernel_transpose<type, offt>(info, tile_shared_##name);                       \
   }
 
-#define MEMCPY_INDIRECT_TEMPLATE_INST(type, dim, offt, name)                             \
+#define MEMCPY_INDIRECT_TEMPLATE_INST(addr_type, data_type, dim, offt, name)             \
   extern "C" __global__ __launch_bounds__(256, 8) void memcpy_indirect##name(            \
-      Realm::Cuda::MemcpyIndirectInfo<dim> info)                                         \
+      Realm::Cuda::MemcpyIndirectInfo<3, offt> info)                                     \
   {                                                                                      \
-    memcpy_indirect_points<type, dim, offt>(info);                                       \
+    memcpy_indirect_points<dim, addr_type, data_type, offt>(info);                       \
   }
 
-#define INST_TEMPLATES(type, sz, dim, off)                                     \
-  MEMCPY_TEMPLATE_INST(type, dim, off, dim##D_##sz)                            \
-  FILL_TEMPLATE_INST(type, dim, off, dim##D_##sz)                              \
-  FILL_LARGE_TEMPLATE_INST(type, dim, off, dim##D_##sz)                        \
-  MEMCPY_INDIRECT_TEMPLATE_INST(type, dim, off, dim##D_##sz)
+#define INST_TEMPLATES(type, sz, dim, off)                                               \
+  MEMCPY_TEMPLATE_INST(type, dim, off, dim##D_##sz)                                      \
+  FILL_TEMPLATE_INST(type, dim, off, dim##D_##sz)                                        \
+  FILL_LARGE_TEMPLATE_INST(type, dim, off, dim##D_##sz)                                  \
+  MEMCPY_INDIRECT_TEMPLATE_INST(int, type, dim, off, dim##D_##sz##32)                    \
+  MEMCPY_INDIRECT_TEMPLATE_INST(long long, type, dim, off, dim##D_##sz##64)
 
 #define INST_TEMPLATES_FOR_TYPES(dim, off)                                     \
   INST_TEMPLATES(unsigned char, 8, dim, off)                                   \
@@ -273,9 +284,9 @@ memcpy_indirect_points(Realm::Cuda::MemcpyIndirectInfo<N> info)
   INST_TEMPLATES(unsigned long long, 64, dim, off)                             \
   INST_TEMPLATES(uint4, 128, dim, off)
 
-#define INST_TEMPLATES_FOR_DIMS()                                              \
-  INST_TEMPLATES_FOR_TYPES(1, size_t)                                          \
-  INST_TEMPLATES_FOR_TYPES(2, size_t)                                          \
+#define INST_TEMPLATES_FOR_DIMS()                                                        \
+  INST_TEMPLATES_FOR_TYPES(1, size_t)                                                    \
+  INST_TEMPLATES_FOR_TYPES(2, size_t)                                                    \
   INST_TEMPLATES_FOR_TYPES(3, size_t)
 
 INST_TEMPLATES_FOR_DIMS()
