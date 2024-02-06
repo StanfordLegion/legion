@@ -3330,6 +3330,7 @@ namespace Realm {
       xdn.gather_control_input = -1;
       xdn.scatter_control_input = -1;
       xdn.target_node = info.xd_channels[i]->node;
+      xdn.channel = info.xd_channels[i];
       xdn.inputs.resize(1);
       xdn.inputs[0] = ((i == 0) ?
 		         start_edge :
@@ -3615,36 +3616,33 @@ namespace Realm {
 	  for(size_t j = 0; j < hops; j++) {
 	    TransferGraph::XDTemplate& xdn = xd_nodes[xd_base + j];
 
-	    xdn.factory = mpi.xd_channels[j]->get_factory();
-	    xdn.gather_control_input = -1;
-	    xdn.scatter_control_input = -1;
-	    xdn.target_node = mpi.xd_channels[j]->node;
-	    if(j == 0) {
-	      xdn.inputs.resize(2);
-	      xdn.inputs[0] = TransferGraph::XDTemplate::mk_indirect(indirect_idx,
-								     1,
-								     insts[i],
-								     src_fld_start,
-								     src_fld_count);
-	      xdn.inputs[1] = decoded_addr_edges[i];
-	    } else {
-	      xdn.inputs.resize(1);
-	      xdn.inputs[0] = TransferGraph::XDTemplate::mk_edge(ib_base + j - 1);
-	    }
-	    xdn.outputs.resize(1);
-	    xdn.outputs[0] = TransferGraph::XDTemplate::mk_edge(ib_base + j);
-	    ib_edges[ib_base + j].memory = mpi.path[j + 1];
-	    ib_edges[ib_base + j].size = 65536; // TODO: pick size?
-	  }
-	  data_edges[i] = TransferGraph::XDTemplate::mk_edge(ib_base + hops - 1);
-	}
+            xdn.factory = mpi.xd_channels[j]->get_factory();
+            xdn.gather_control_input = -1;
+            xdn.scatter_control_input = -1;
+            xdn.target_node = mpi.xd_channels[j]->node;
+            xdn.channel = mpi.xd_channels[j];
+            if(j == 0) {
+              xdn.inputs.resize(2);
+              xdn.inputs[0] = TransferGraph::XDTemplate::mk_indirect(
+                  indirect_idx, 1, insts[i], src_fld_start, src_fld_count);
+              xdn.inputs[1] = decoded_addr_edges[i];
+            } else {
+              xdn.inputs.resize(1);
+              xdn.inputs[0] = TransferGraph::XDTemplate::mk_edge(ib_base + j - 1);
+            }
+            xdn.outputs.resize(1);
+            xdn.outputs[0] = TransferGraph::XDTemplate::mk_edge(ib_base + j);
+            ib_edges[ib_base + j].memory = mpi.path[j + 1];
+            ib_edges[ib_base + j].size = 65536; // TODO: pick size?
+          }
+          data_edges[i] = TransferGraph::XDTemplate::mk_edge(ib_base + hops - 1);
+        }
       }
 
       // and finally the last xd that merges the streams together
       size_t xd_idx = xd_nodes.size();
       xd_nodes.resize(xd_idx + 1);
-      TransferGraph::XDTemplate& xdn = xd_nodes[xd_idx];
-
+      TransferGraph::XDTemplate &xdn = xd_nodes[xd_idx];
       xdn.target_node = ID(dst_mem).memory_owner_node();
       //xdn.kind = last_kind;
       xdn.factory = last_channel->get_factory();
@@ -3771,7 +3769,6 @@ namespace Realm {
         TransferGraph::XDTemplate &xdn = xd_nodes[xd_idx + i];
         xdn.channel = path_infos[0].xd_channels[i];
         xdn.target_node = path_infos[0].xd_channels[i]->node;
-        //xdn.kind = path_infos[0].xd_kinds[i];
 
 	xdn.factory = path_infos[0].xd_channels[i]->get_factory();
 	xdn.gather_control_input = -1;
@@ -3978,39 +3975,36 @@ namespace Realm {
 	  for(size_t j = 0; j < hops; j++) {
 	    TransferGraph::XDTemplate& xdn = xd_nodes[xd_base + j];
 
-	    xdn.factory = mpi.xd_channels[j + 1]->get_factory();
-	    xdn.gather_control_input = -1;
-	    xdn.scatter_control_input = -1;
-	    xdn.target_node = mpi.xd_channels[j + 1]->node;
-	    if(j < (hops - 1)) {
-	      xdn.inputs.resize(1);
-	      xdn.inputs[0] = ((j == 0) ?
-			         data_edges[i] :
-			         TransferGraph::XDTemplate::mk_edge(ib_base + j - 1));
-	      xdn.outputs.resize(1);
-	      xdn.outputs[0] = TransferGraph::XDTemplate::mk_edge(ib_base + j);
-	      ib_edges[ib_base + j].memory = mpi.path[j + 2];
-	      ib_edges[ib_base + j].size = 65536; // TODO: pick size?
-	    } else {
-	      // last hop uses the address stream
-	      xdn.inputs.resize(2);
-	      xdn.inputs[0] = ((j == 0) ?
-			         data_edges[i] :
-			         TransferGraph::XDTemplate::mk_edge(ib_base + j - 1));
-	      xdn.inputs[1] = decoded_addr_edges[i];
-	      xdn.outputs.resize(1);
-	      xdn.outputs[0] = TransferGraph::XDTemplate::mk_indirect(indirect_idx,
-								      1,
-								      insts[i],
-								      dst_fld_start,
-								      dst_fld_count);
-	    }
-	  }
-	}
+            xdn.factory = mpi.xd_channels[j + 1]->get_factory();
+            xdn.gather_control_input = -1;
+            xdn.scatter_control_input = -1;
+            xdn.target_node = mpi.xd_channels[j + 1]->node;
+            xdn.channel = mpi.xd_channels[j + 1];
+            if(j < (hops - 1)) {
+              xdn.inputs.resize(1);
+              xdn.inputs[0] =
+                  ((j == 0) ? data_edges[i]
+                            : TransferGraph::XDTemplate::mk_edge(ib_base + j - 1));
+              xdn.outputs.resize(1);
+              xdn.outputs[0] = TransferGraph::XDTemplate::mk_edge(ib_base + j);
+              ib_edges[ib_base + j].memory = mpi.path[j + 2];
+              ib_edges[ib_base + j].size = 65536; // TODO: pick size?
+            } else {
+              // last hop uses the address stream
+              xdn.inputs.resize(2);
+              xdn.inputs[0] =
+                  ((j == 0) ? data_edges[i]
+                            : TransferGraph::XDTemplate::mk_edge(ib_base + j - 1));
+              xdn.inputs[1] = decoded_addr_edges[i];
+              xdn.outputs.resize(1);
+              xdn.outputs[0] = TransferGraph::XDTemplate::mk_indirect(
+                  indirect_idx, 1, insts[i], dst_fld_start, dst_fld_count);
+            }
+          }
+        }
       }
     }
   }
-
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -4474,6 +4468,7 @@ namespace Realm {
           xdn.gather_control_input = -1;
           xdn.scatter_control_input = -1;
           xdn.target_node = path_info.xd_channels[j]->node;
+          xdn.channel = path_info.xd_channels[j];
           if(j == (pathlen - 1))
             xdn.redop = XferDesRedopInfo(dsts[i].redop_id,
                                          dsts[i].red_fold,
@@ -4556,8 +4551,9 @@ namespace Realm {
 	  xdn.factory = path_info.xd_channels[j]->get_factory();
 	  xdn.gather_control_input = -1;
 	  xdn.scatter_control_input = -1;
-	  xdn.target_node = path_info.xd_channels[j]->node;
-	  xdn.inputs.resize(1);
+          xdn.target_node = path_info.xd_channels[j]->node;
+          xdn.channel = path_info.xd_channels[j];
+          xdn.inputs.resize(1);
           xdn.inputs[0] = ((j == 0) ?
                              TransferGraph::XDTemplate::mk_fill(fill_ofs,
                                                                 combined_field_size,
@@ -4691,32 +4687,30 @@ namespace Realm {
 	    }
 	    for(size_t j = 0; j < pathlen; j++) {
 	      TransferGraph::XDTemplate& xdn = graph.xd_nodes[xd_idx++];
-	      
-	      //xdn.kind = path_info.xd_kinds[j];
-	      xdn.factory = path_info.xd_channels[j]->get_factory();
-	      xdn.gather_control_input = -1;
-	      xdn.scatter_control_input = -1;
-	      xdn.target_node = path_info.xd_channels[j]->node;
-	      xdn.inputs.resize(1);
-	      xdn.inputs[0] = ((j == 0) ?
-			         TransferGraph::XDTemplate::mk_inst(srcs[i].inst,
-								    fld_start,
-                                                                    num_fields) :
-			         TransferGraph::XDTemplate::mk_edge(ib_idx - 1));
-	      //xdn.inputs[0].indirect_inst = RegionInstance::NO_INST;
-	      xdn.outputs.resize(1);
-	      xdn.outputs[0] = ((j == (pathlen - 1)) ?
-				  TransferGraph::XDTemplate::mk_inst(dsts[i].inst,
-								     fld_start,
-                                                                     num_fields) :
-				  TransferGraph::XDTemplate::mk_edge(ib_idx));
-	      //xdn.outputs[0].indirect_inst = RegionInstance::NO_INST;
-	      if(j < (pathlen - 1)) {
-		TransferGraph::IBInfo& ibe = graph.ib_edges[ib_idx++];
-		ibe.memory = path_info.path[j + 1];
-		ibe.size = ib_alloc_size;
-	      }
-	    }
+
+              // xdn.kind = path_info.xd_kinds[j];
+              xdn.factory = path_info.xd_channels[j]->get_factory();
+              xdn.gather_control_input = -1;
+              xdn.scatter_control_input = -1;
+              xdn.target_node = path_info.xd_channels[j]->node;
+              xdn.channel = path_info.xd_channels[j];
+              xdn.inputs.resize(1);
+              xdn.inputs[0] = ((j == 0) ? TransferGraph::XDTemplate::mk_inst(
+                                              srcs[i].inst, fld_start, num_fields)
+                                        : TransferGraph::XDTemplate::mk_edge(ib_idx - 1));
+              // xdn.inputs[0].indirect_inst = RegionInstance::NO_INST;
+              xdn.outputs.resize(1);
+              xdn.outputs[0] =
+                  ((j == (pathlen - 1)) ? TransferGraph::XDTemplate::mk_inst(
+                                              dsts[i].inst, fld_start, num_fields)
+                                        : TransferGraph::XDTemplate::mk_edge(ib_idx));
+              // xdn.outputs[0].indirect_inst = RegionInstance::NO_INST;
+              if(j < (pathlen - 1)) {
+                TransferGraph::IBInfo &ibe = graph.ib_edges[ib_idx++];
+                ibe.memory = path_info.path[j + 1];
+                ibe.size = ib_alloc_size;
+              }
+            }
 
             prof_usage.source = src_mem;
             prof_usage.target = dst_mem;
@@ -4905,28 +4899,32 @@ namespace Realm {
                         << " dim_order=" << PrettyVector<int>(dim_order)
                         << " xds=" << graph.xd_nodes.size()
                         << " ibs=" << graph.ib_edges.size();
+
       for(size_t i = 0; i < graph.xd_nodes.size(); i++) {
         if(graph.xd_nodes[i].redop.id != 0) {
           log_xplan.debug()
-              << "analysis: plan=" << (void *)this << " xds[" << i << "]: channel_node"
-              << graph.xd_nodes[i].target_node << " inputs="
+              << "analysis: plan=" << (void *)this << " xds[" << i
+              << "]: target=" << graph.xd_nodes[i].target_node << " inputs="
               << PrettyVector<TransferGraph::XDTemplate::IO>(graph.xd_nodes[i].inputs)
               << " outputs="
               << PrettyVector<TransferGraph::XDTemplate::IO>(graph.xd_nodes[i].outputs)
+              << " channel="
+              << ((graph.xd_nodes[i].channel) ? graph.xd_nodes[i].channel->kind : -1)
               << " redop=(" << graph.xd_nodes[i].redop.id << ","
               << graph.xd_nodes[i].redop.is_fold << ","
               << graph.xd_nodes[i].redop.in_place << ")";
         } else {
           log_xplan.debug()
               << "analysis: plan=" << (void *)this << " xds[" << i
-              << "]: channel_node=" << graph.xd_nodes[i].target_node << " inputs="
+              << "]: target=" << graph.xd_nodes[i].target_node << " inputs="
               << PrettyVector<TransferGraph::XDTemplate::IO>(graph.xd_nodes[i].inputs)
               << " outputs="
               << PrettyVector<TransferGraph::XDTemplate::IO>(graph.xd_nodes[i].outputs)
               << " channel="
-              << ((graph.xd_nodes[i].channel) ? graph.xd_nodes[i].channel->kind : 0);
+              << ((graph.xd_nodes[i].channel) ? graph.xd_nodes[i].channel->kind : -1);
         }
       }
+
       for(size_t i = 0; i < graph.ib_edges.size(); i++) {
         log_xplan.debug() << "analysis: plan=" << (void *)this << " ibs[" << i
                           << "]: memory=" << graph.ib_edges[i].memory

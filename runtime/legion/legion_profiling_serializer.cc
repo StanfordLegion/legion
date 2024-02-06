@@ -75,9 +75,11 @@ namespace Legion {
          << "}" << std::endl;
 
       ss << "ProcDesc {" 
-         << "id:" << PROC_DESC_ID                 << delim
-         << "proc_id:ProcID:" << sizeof(ProcID)   << delim
-         << "kind:ProcKind:"  << sizeof(ProcKind)
+         << "id:" << PROC_DESC_ID                     << delim
+         << "proc_id:ProcID:"     << sizeof(ProcID)   << delim
+         << "kind:ProcKind:"      << sizeof(ProcKind) << delim
+         << "uuid_size:uuid_size:" << sizeof(unsigned) << delim
+         << "cuda_device_uuid:uuid:"          << sizeof(char)
          << "}" << std::endl;
 
       ss << "MaxDimDesc {"
@@ -86,9 +88,17 @@ namespace Legion {
          << "}" << std::endl;
 
       ss << "MachineDesc {"
-         << "id:" << MACHINE_DESC_ID                 << delim
-         << "node_id:unsigned:" << sizeof(unsigned)  << delim
-         << "num_nodes:unsigned:" << sizeof(unsigned)
+         << "id:" << MACHINE_DESC_ID                  << delim
+         << "node_id:unsigned:"   << sizeof(unsigned) << delim
+         << "num_nodes:unsigned:" << sizeof(unsigned) << delim
+         << "hostname:string:"    << "-1"             << delim
+         << "host_id:unsigned long long:" << sizeof(unsigned long long) << delim
+         << "process_id:unsigned:" << sizeof(unsigned)
+         << "}" << std::endl;
+
+      ss << "CalibrationErr {"
+         << "id:" << CALIBRATION_ERR_ID                << delim
+         << "calibration_err:long long:" << sizeof(long long)
          << "}" << std::endl;
 
       ss << "ZeroTime {"
@@ -283,12 +293,11 @@ namespace Legion {
          << "create:timestamp_t:"  << sizeof(timestamp_t) << delim
          << "ready:timestamp_t:"   << sizeof(timestamp_t) << delim
          << "start:timestamp_t:"   << sizeof(timestamp_t) << delim
-         << "stop:timestamp_t:"    << sizeof(timestamp_t)
+         << "stop:timestamp_t:"    << sizeof(timestamp_t) << delim
 #ifdef LEGION_PROF_PROVENANCE
-         << delim
          << "provenance:"          << sizeof(LgEvent) << delim
-         << "finish_event:"        << sizeof(LgEvent)
 #endif
+         << "fevent:unsigned long long:" << sizeof(LgEvent)
          << "}" << std::endl;
 
       ss << "GPUTaskInfo {"
@@ -302,12 +311,11 @@ namespace Legion {
          << "start:timestamp_t:"     << sizeof(timestamp_t) << delim
          << "stop:timestamp_t:"      << sizeof(timestamp_t) << delim
          << "gpu_start:timestamp_t:" << sizeof(timestamp_t) << delim
-         << "gpu_stop:timestamp_t:"  << sizeof(timestamp_t)
+         << "gpu_stop:timestamp_t:"  << sizeof(timestamp_t) << delim
 #ifdef LEGION_PROF_PROVENANCE
-         << delim
          << "provenance:"            << sizeof(LgEvent) << delim
-         << "finish_event:"          << sizeof(LgEvent)
 #endif
+         << "fevent:unsigned long long:" << sizeof(LgEvent)
          << "}" << std::endl;
 
       ss << "MetaInfo {"
@@ -318,12 +326,11 @@ namespace Legion {
          << "create:timestamp_t:" << sizeof(timestamp_t)  << delim
          << "ready:timestamp_t:"  << sizeof(timestamp_t)  << delim
          << "start:timestamp_t:"  << sizeof(timestamp_t)  << delim
-         << "stop:timestamp_t:"   << sizeof(timestamp_t)
+         << "stop:timestamp_t:"   << sizeof(timestamp_t)  << delim
 #ifdef LEGION_PROF_PROVENANCE
-         << delim
          << "provenance:"         << sizeof(LgEvent) << delim
-         << "finish_event:"       << sizeof(LgEvent)
 #endif
+         << "fevent:unsigned long long:" << sizeof(LgEvent)
          << "}" << std::endl;
 
       ss << "CopyInfo {"
@@ -409,7 +416,8 @@ namespace Legion {
          << "op_id:UniqueID:"       << sizeof(UniqueID)           << delim
          << "start:timestamp_t:"    << sizeof(timestamp_t)        << delim
          << "stop:timestamp_t:"     << sizeof(timestamp_t)        << delim
-         << "proc_id:ProcID:"       << sizeof(ProcID)
+         << "proc_id:ProcID:"       << sizeof(ProcID)             << delim
+         << "fevent:unsigned long long:" << sizeof(LgEvent)
          << "}" << std::endl;
 
       ss << "RuntimeCallInfo {"
@@ -417,7 +425,8 @@ namespace Legion {
          << "kind:RuntimeCallKind:" << sizeof(RuntimeCallKind) << delim
          << "start:timestamp_t:"    << sizeof(timestamp_t)     << delim
          << "stop:timestamp_t:"     << sizeof(timestamp_t)     << delim
-         << "proc_id:ProcID:"       << sizeof(ProcID)
+         << "proc_id:ProcID:"       << sizeof(ProcID)          << delim
+         << "fevent:unsigned long long:" << sizeof(LgEvent)
          << "}" << std::endl;
 
 #ifdef LEGION_PROF_SELF_PROFILE
@@ -426,7 +435,8 @@ namespace Legion {
          << "proc_id:ProcID:"         << sizeof(ProcID)      << delim
          << "op_id:UniqueID:"         << sizeof(UniqueID)    << delim
          << "start:timestamp_t:"      << sizeof(timestamp_t) << delim
-         << "stop:timestamp_t:"       << sizeof(timestamp_t)
+         << "stop:timestamp_t:"       << sizeof(timestamp_t) << delim
+         << "fevent:unsigned long long:" << sizeof(LgEvent)
          << "}" << std::endl;
 #endif
 
@@ -512,6 +522,23 @@ namespace Legion {
 		sizeof(machine_desc.node_id));
       lp_fwrite(f, (char*)&(machine_desc.num_nodes),
 		sizeof(machine_desc.num_nodes));
+      lp_fwrite(f, machine_desc.process_info.hostname, strlen(machine_desc.process_info.hostname) + 1);
+      lp_fwrite(f, (char*)&(machine_desc.process_info.hostid),
+                sizeof(machine_desc.process_info.hostid));
+      lp_fwrite(f, (char*)&(machine_desc.process_info.processid),
+                sizeof(machine_desc.process_info.processid));
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfBinarySerializer::serialize(
+                                      const LegionProfDesc::CalibrationErr
+				      &calibration_err)
+    //--------------------------------------------------------------------------
+    {
+      int ID = CALIBRATION_ERR_ID;
+      lp_fwrite(f, (char*)&ID, sizeof(ID));
+      lp_fwrite(f, (char*)&(calibration_err.calibration_err),
+		sizeof(calibration_err.calibration_err));
     }
 
     //--------------------------------------------------------------------------
@@ -874,9 +901,9 @@ namespace Legion {
       lp_fwrite(f, (char*)&(task_info.stop),      sizeof(task_info.stop));
 #ifdef LEGION_PROF_PROVENANCE
       lp_fwrite(f, (char*)&(task_info.provenance),sizeof(task_info.provenance));
+#endif
       lp_fwrite(f, (char*)&(task_info.finish_event),
                                                 sizeof(task_info.finish_event));
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -898,9 +925,9 @@ namespace Legion {
       lp_fwrite(f, (char*)&(task_info.gpu_stop),  sizeof(task_info.gpu_stop));
 #ifdef LEGION_PROF_PROVENANCE
       lp_fwrite(f, (char*)&(task_info.provenance),sizeof(task_info.provenance));
+#endif
       lp_fwrite(f, (char*)&(task_info.finish_event),
                                                 sizeof(task_info.finish_event));
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -919,9 +946,9 @@ namespace Legion {
       lp_fwrite(f, (char*)&(meta_info.stop),    sizeof(meta_info.stop));
 #ifdef LEGION_PROF_PROVENANCE
       lp_fwrite(f, (char*)&(meta_info.provenance),sizeof(meta_info.provenance));
+#endif
       lp_fwrite(f, (char*)&(meta_info.finish_event),
                                                 sizeof(meta_info.finish_event));
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -1072,6 +1099,8 @@ namespace Legion {
                 sizeof(mapper_call_info.stop));
       lp_fwrite(f, (char*)&(mapper_call_info.proc_id), 
                 sizeof(mapper_call_info.proc_id));
+      lp_fwrite(f, (char*)&(mapper_call_info.finish_event),
+                sizeof(mapper_call_info.finish_event));
     }
 
     //--------------------------------------------------------------------------
@@ -1089,6 +1118,8 @@ namespace Legion {
                 sizeof(runtime_call_info.stop));
       lp_fwrite(f, (char*)&(runtime_call_info.proc_id), 
                 sizeof(runtime_call_info.proc_id));
+      lp_fwrite(f, (char*)&(runtime_call_info.finish_event),
+                sizeof(runtime_call_info.finish_event));
     }
 
     //--------------------------------------------------------------------------
@@ -1100,6 +1131,22 @@ namespace Legion {
       lp_fwrite(f, (char*)&ID, sizeof(ID));
       lp_fwrite(f, (char*)&(proc_desc.proc_id), sizeof(proc_desc.proc_id));
       lp_fwrite(f, (char*)&(proc_desc.kind),    sizeof(proc_desc.kind));
+#ifdef LEGION_USE_CUDA
+      unsigned uuid_size = Realm::Cuda::UUID_SIZE;
+      lp_fwrite(f, (char*)&(uuid_size), sizeof(uuid_size));
+      for (size_t i=0; i<Realm::Cuda::UUID_SIZE; i++) {
+        lp_fwrite(f, (char*)&(proc_desc.cuda_device_uuid[i]),
+            sizeof(char));
+      }
+#else
+      unsigned uuid_size = 16;
+      lp_fwrite(f, (char*)&(uuid_size), sizeof(uuid_size));
+      char uuid_str[16] = {0};
+      for (size_t i=0; i<uuid_size; i++) {
+        lp_fwrite(f, (char*)&(uuid_str[i]),
+            sizeof(char));
+      }
+#endif
     }
     //--------------------------------------------------------------------------
     void LegionProfBinarySerializer::serialize(
@@ -1140,6 +1187,8 @@ namespace Legion {
       lp_fwrite(f, (char*)&(proftask_info.op_id), sizeof(proftask_info.op_id));
       lp_fwrite(f, (char*)&(proftask_info.start), sizeof(proftask_info.start));
       lp_fwrite(f, (char*)&(proftask_info.stop),  sizeof(proftask_info.stop));
+      lp_fwrite(f, (char*)&(proftask_info.finish_event),
+                                            sizeof(proftask_info.finish_event));
     }
 #endif
 
@@ -1604,8 +1653,20 @@ namespace Legion {
 				      &machine_desc)
     //--------------------------------------------------------------------------
     {
-      log_prof.print("Machine Desc %d %d",
-                     machine_desc.node_id, machine_desc.num_nodes);
+      log_prof.print("Machine Desc %d %d %s %llu %d",
+                     machine_desc.node_id, machine_desc.num_nodes,
+                     machine_desc.process_info.hostname,
+                     (unsigned long long)machine_desc.process_info.hostid,
+                     machine_desc.process_info.processid);
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfASCIISerializer::serialize(
+                                      const LegionProfDesc::CalibrationErr
+				      &calibration_err)
+    //--------------------------------------------------------------------------
+    {
+      log_prof.print("Calibration Err %lld", calibration_err.calibration_err);
     }
 
     //--------------------------------------------------------------------------
@@ -1709,10 +1770,12 @@ namespace Legion {
                      task_info.start, task_info.stop, task_info.provenance.id,
                      task_info.finish_event.id);
 #else
-      log_prof.print("Prof Task Info %llu %u %u " IDFMT " %llu %llu %llu %llu",
+      log_prof.print("Prof Task Info %llu %u %u " IDFMT " %llu %llu %llu %llu "
+                     IDFMT,
                      task_info.op_id, task_info.task_id, task_info.variant_id, 
                      task_info.proc_id, task_info.create, task_info.ready, 
-                     task_info.start, task_info.stop);
+                     task_info.start, task_info.stop,
+                     task_info.finish_event.id);
 #endif
     }
 
@@ -1731,11 +1794,11 @@ namespace Legion {
                      task_info.finish_event.id);
 #else
       log_prof.print("Prof GPU Task Info %llu %u %u " IDFMT
-		     " %llu %llu %llu %llu %llu %llu",
+		     " %llu %llu %llu %llu %llu %llu " IDFMT,
                      task_info.op_id, task_info.task_id, task_info.variant_id,
                      task_info.proc_id, task_info.create, task_info.ready,
                      task_info.start, task_info.stop, task_info.gpu_start,
-		     task_info.gpu_stop);
+		     task_info.gpu_stop, task_info.finish_event.id);
 #endif
     }
 
@@ -1751,9 +1814,10 @@ namespace Legion {
          meta_info.create, meta_info.ready, meta_info.start, meta_info.stop,
          meta_info.provenance.id, meta_info.finish_event.id);
 #else
-      log_prof.print("Prof Meta Info %llu %u " IDFMT " %llu %llu %llu %llu",
-         meta_info.op_id, meta_info.lg_id, meta_info.proc_id,
-         meta_info.create, meta_info.ready, meta_info.start, meta_info.stop);
+      log_prof.print("Prof Meta Info %llu %u " IDFMT " %llu %llu %llu %llu "
+          IDFMT, meta_info.op_id, meta_info.lg_id, meta_info.proc_id,
+         meta_info.create, meta_info.ready, meta_info.start, meta_info.stop,
+         meta_info.finish_event.id);
 #endif
     }
 
@@ -1882,6 +1946,16 @@ namespace Legion {
     {
       log_prof.print("Prof Proc Desc " IDFMT " %d",
                      proc_desc.proc_id, proc_desc.kind);
+#ifdef LEGION_USE_CUDA
+      if (proc_desc.kind == Processor::TOC_PROC) {
+        char uuid_str[Realm::Cuda::UUID_SIZE];
+        for (size_t i=0; i<Realm::Cuda::UUID_SIZE; i++) {
+          sprintf(&uuid_str[i], "%x", proc_desc.cuda_device_uuid[i] & 0xFF);
+        }
+
+        log_prof.print("Prof CUDA Proc Desc %s", uuid_str);
+      }
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -1908,9 +1982,10 @@ namespace Legion {
                           const LegionProfInstance::ProfTaskInfo& proftask_info)
     //--------------------------------------------------------------------------
     {
-      log_prof.print("Prof ProfTask Info " IDFMT " %llu %llu %llu",
+      log_prof.print("Prof ProfTask Info " IDFMT " %llu %llu %llu " IDFMT,
                      proftask_info.proc_id, proftask_info.op_id, 
-                     proftask_info.start, proftask_info.stop);
+                     proftask_info.start, proftask_info.stop,
+                     proftask_info.finish_event.id);
     }
 #endif
 

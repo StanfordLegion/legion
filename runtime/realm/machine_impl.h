@@ -69,10 +69,13 @@ namespace Realm {
     bool add_memory(Memory m);
     bool add_proc_mem_affinity(const Machine::ProcessorMemoryAffinity& pma);
     bool add_mem_mem_affinity(const Machine::MemoryMemoryAffinity& mma);
+    bool add_process_info(const Machine::ProcessInfo &proc_info);
 
     void update_kind_maps();
 
     int node;
+
+    Machine::ProcessInfo *process_info;
 
     std::map<Processor, MachineProcInfo *> procs;
     std::map<Processor::Kind, std::map<Processor, MachineProcInfo *> > proc_by_kind;
@@ -105,6 +108,8 @@ namespace Realm {
       void get_shared_processors(Memory m, std::set<Processor>& pset,
 				 bool local_only) const;
 
+      bool get_process_info(Processor p, Machine::ProcessInfo *info) const;
+
       bool has_affinity(Processor p, Memory m, Machine::AffinityDetails *details = 0) const;
       bool has_affinity(Memory m1, Memory m2, Machine::AffinityDetails *details = 0) const;
 
@@ -131,6 +136,9 @@ namespace Realm {
       void update_kind_maps(void);
 
       void enumerate_mem_mem_affinities(void);
+
+      void add_process_info(int node_id, const Machine::ProcessInfo &process_info,
+                            bool lock_held = false);
 
       mutable Mutex mutex;
       std::vector<Machine::ProcessorMemoryAffinity> proc_mem_affinities;
@@ -377,6 +385,7 @@ namespace Realm {
       NODE_ANNOUNCE_IB_MEM, // IB_MEM id size
       NODE_ANNOUNCE_PMA,    // PMA proc_id mem_id bw latency
       NODE_ANNOUNCE_DMA_CHANNEL,
+      NODE_ANNOUNCE_PROCESS_INFO,
     };
 
 }; // namespace Realm

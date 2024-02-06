@@ -67,10 +67,13 @@
 #endif
 
 #ifdef REALM_ON_WINDOWS
+#include <winsock2.h>
 #include <windows.h>
 #include <processthreadsapi.h>
 #include <synchapi.h>
 #include <sysinfoapi.h>
+
+#pragma comment(lib, "ws2_32.lib")
 
 static void sleep(int seconds)
 {
@@ -109,6 +112,8 @@ TYPE_IS_SERIALIZABLE(Realm::Memory);
 TYPE_IS_SERIALIZABLE(Realm::Memory::Kind);
 TYPE_IS_SERIALIZABLE(Realm::Channel::SupportedPath);
 TYPE_IS_SERIALIZABLE(Realm::XferDesKind);
+TYPE_IS_SERIALIZABLE(Realm::Machine::ProcessorMemoryAffinity);
+TYPE_IS_SERIALIZABLE(Realm::Machine::ProcessInfo);
 
 namespace Realm {
 
@@ -1351,7 +1356,17 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
     }
 
     template <typename T>
-    static bool serialize_announce(T& serializer, ProcessorImpl *impl,
+    static bool serialize_announce(T &serializer,
+                                   const Machine::ProcessInfo *process_info,
+                                   NetworkModule *net)
+    {
+      bool ok =
+          ((serializer << NODE_ANNOUNCE_PROCESS_INFO) && (serializer << *process_info));
+      return ok;
+    }
+
+    template <typename T>
+    static bool serialize_announce(T &serializer, const ProcessorImpl *impl,
                                    NetworkModule *net)
     {
       Processor p = impl->me;
@@ -1366,7 +1381,7 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
     }
 
     template <typename T>
-    static bool serialize_announce(T& serializer, MemoryImpl *impl,
+    static bool serialize_announce(T &serializer, const MemoryImpl *impl,
                                    NetworkModule *net)
     {
       Memory m = impl->me;
@@ -1385,7 +1400,7 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
     }
 
     template <typename T>
-    static bool serialize_announce(T& serializer, IBMemory *ibmem,
+    static bool serialize_announce(T &serializer, const IBMemory *ibmem,
                                    NetworkModule *net)
     {
       Memory m = ibmem->me;
@@ -1408,17 +1423,12 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
                                    const Machine::ProcessorMemoryAffinity& pma,
                                    NetworkModule *net)
     {
-      bool ok = ((serializer << NODE_ANNOUNCE_PMA) &&
-                 (serializer << pma.p) &&
-                 (serializer << pma.m) &&
-                 (serializer << pma.bandwidth) &&
-                 (serializer << pma.latency));
+      bool ok = ((serializer << NODE_ANNOUNCE_PMA) && (serializer << pma));
       return ok;
     }
 
     template <typename T>
-    static bool serialize_announce(T& serializer, Channel *ch,
-                                   NetworkModule *net)
+    static bool serialize_announce(T &serializer, const Channel *ch, NetworkModule *net)
     {
       RemoteChannelInfo *rci = ch->construct_remote_info();
       bool ok = ((serializer << NODE_ANNOUNCE_DMA_CHANNEL) &&
@@ -1428,7 +1438,7 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
     }
 
     template <typename T, typename Elem>
-    static bool serialize_announce(T &serializer, std::vector<Elem> &elements,
+    static bool serialize_announce(T &serializer, const std::vector<Elem> &elements,
                                    NetworkModule *net)
     {
       // TODO: rather than have each element push a tag, we can instead push a tag and
@@ -1444,7 +1454,8 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
     }
 
     template <typename T>
-    static bool serialize_announce(T &serializer, Node *node, NetworkModule *net)
+    static bool serialize_announce(T &serializer, const Node *node,
+                                   const MachineImpl *machine_impl, NetworkModule *net)
     {
       bool ok = true;
       std::vector<Machine::ProcessorMemoryAffinity> pmas;
@@ -1472,7 +1483,12 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
         }
       }
       ok = serialize_announce(serializer, node->dma_channels, net);
-
+      if(!ok) {
+        return ok;
+      }
+      ok = serialize_announce(
+          serializer, (machine_impl->nodeinfos.at(Network::my_node_id))->process_info,
+          net);
       return ok;
     }
 
@@ -2174,6 +2190,25 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
 
       }
 
+      // retrieve process info
+      {
+        Machine::ProcessInfo process_info;
+        int errcode =
+            gethostname(process_info.hostname, Machine::ProcessInfo::MAX_HOSTNAME_LENGTH);
+        if(errcode != 0) {
+          log_runtime.warning() << "gethostname failed with " << errno;
+        }
+#ifdef REALM_ON_WINDOWS
+        process_info.processid = GetCurrentProcessId();
+        std::hash<std::string> hostname_hasher;
+        process_info.hostid = hostname_hasher(process_info.hostname);
+#else
+        process_info.processid = getpid();
+        process_info.hostid = gethostid();
+#endif
+        machine->add_process_info(Network::my_node_id, process_info);
+      }
+
       // announce by network type
       Serialization::DynamicBufferSerializer dbs(4096);
 
@@ -2190,7 +2225,7 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
         }
 
         dbs.reset();
-        ok = serialize_announce(dbs, n, module);
+        ok = serialize_announce(dbs, n, machine, module);
         assert(ok && "Failed to serialize node for announcement");
 
         // Now that all of this node's network-specific information is collected, time to
@@ -2776,32 +2811,6 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
         // dlclose all dynamic module handles
         module_registrar.unload_module_sofiles();
 
-        // delete processors, memories, nodes, etc.
-        for (NodeID i = 0; i <= Network::max_node_id; i++) {
-          Node &n = nodes[i];
-
-          delete_container_contents(n.memories);
-          delete_container_contents(n.processors);
-          delete_container_contents(n.ib_memories);
-          delete_container_contents(n.dma_channels);
-
-          for (std::vector<atomic<DynamicTable<SparsityMapTableAllocator> *>>::
-                   iterator it = n.sparsity_maps.begin();
-               it != n.sparsity_maps.end(); ++it)
-            delete it->load();
-
-          for (std::vector<atomic<DynamicTable<SubgraphTableAllocator> *>>::
-                   iterator it = n.subgraphs.begin();
-               it != n.subgraphs.end(); ++it)
-            delete it->load();
-
-          for (std::vector<atomic<
-                   DynamicTable<ProcessorGroupTableAllocator> *>>::iterator it =
-                   n.proc_groups.begin();
-               it != n.proc_groups.end(); ++it)
-            delete it->load();
-        }
-
         delete[] nodes;
         delete local_event_free_list;
         delete local_barrier_free_list;
@@ -3273,10 +3282,30 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
   // class Node
   //
 
-    Node::Node(void)
-    {
-    }
+    Node::Node(void) {}
 
+    Node::~Node(void)
+    {
+      // delete processors, memories, nodes, etc.
+      delete_container_contents(memories);
+      delete_container_contents(processors);
+      delete_container_contents(ib_memories);
+      delete_container_contents(dma_channels);
+
+      for(atomic<DynamicTable<SparsityMapTableAllocator> *> &atomic_sparsity :
+          sparsity_maps) {
+        delete atomic_sparsity.load();
+      }
+
+      for(atomic<DynamicTable<SubgraphTableAllocator> *> &atomic_subgraph : subgraphs) {
+        delete atomic_subgraph.load();
+      }
+
+      for(atomic<DynamicTable<ProcessorGroupTableAllocator> *> &atomic_proc_group :
+          proc_groups) {
+        delete atomic_proc_group.load();
+      }
+    }
 
   ////////////////////////////////////////////////////////////////////////
   //

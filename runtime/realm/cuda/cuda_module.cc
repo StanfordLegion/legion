@@ -5253,6 +5253,32 @@ namespace Realm {
       return realm_event;
     }
 
+    bool CudaModule::get_cuda_device_uuid(Processor p, Uuid *uuid) const
+    {
+      for(const GPU *gpu : gpus) {
+        if((gpu->proc->me) == p) {
+          static_assert(sizeof(CUuuid) == sizeof(char) * UUID_SIZE,
+                        "UUID_SIZE is not set correctly");
+          memcpy(uuid, &(gpu->info->uuid), sizeof(CUuuid));
+          return true;
+        }
+      }
+      // can not find the Processor p, so return false
+      return false;
+    }
+
+    bool CudaModule::get_cuda_device_id(Processor p, int *device) const
+    {
+      for(const GPU *gpu : gpus) {
+        if((gpu->proc->me) == p) {
+          *device = gpu->info->index;
+          return true;
+        }
+      }
+      // can not find the Processor p, so return false
+      return false;
+    }
+
 #ifdef REALM_USE_CUDART_HIJACK
     ////////////////////////////////////////////////////////////////////////
     //

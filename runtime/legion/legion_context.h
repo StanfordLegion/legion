@@ -560,8 +560,8 @@ namespace Legion {
       void initialize_overhead_profiler(void);
       inline void begin_runtime_call(void);
       inline void end_runtime_call(void);
-      inline void begin_wait(void);
-      inline void end_wait(void);
+      inline void begin_wait(bool from_application);
+      inline void end_wait(bool from_application);
       void remap_unmapped_regions(LegionTrace *current_trace,
                            const std::vector<PhysicalRegion> &unmapped_regions,
                            const char *provenance);
@@ -2513,7 +2513,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    inline void TaskContext::begin_wait(void)
+    inline void TaskContext::begin_wait(bool from_application)
     //--------------------------------------------------------------------------
     {
       if (overhead_profiler != NULL)
@@ -2535,7 +2535,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    inline void TaskContext::end_wait(void)
+    inline void TaskContext::end_wait(bool from_application)
     //--------------------------------------------------------------------------
     {
       if (overhead_profiler != NULL)

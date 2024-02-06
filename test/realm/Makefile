@@ -22,7 +22,7 @@ override LG_RT_DIR := $(patsubst %/,%,$(LG_RT_DIR))
 
 #Flags for directing the runtime makefile what to include
 DEBUG=1                   # Include debugging symbols
-OUTPUT_LEVEL=LEVEL_DEBUG  # Compile time print level
+OUTPUT_LEVEL=LEVEL_INFO  # Compile time print level
 #ALT_MAPPERS=1		  # Compile the alternative mappers
 
 # Put the binary file name here
@@ -46,7 +46,11 @@ CXX ?= g++
 # we're going to include runtime.mk to get variable settings, but then
 #  do our own build steps
 NO_BUILD_RULES=1
+ifdef LG_INSTALL_DIR
+include $(LG_INSTALL_DIR)/share/legion/runtime.mk
+else
 include $(LG_RT_DIR)/runtime.mk
+endif
 
 TESTS := serializing test_profiling ctxswitch barrier_reduce taskreg memspeed idcheck inst_reuse transpose
 TESTS += version_check
@@ -71,6 +75,7 @@ TESTS += multiaffine
 TESTS += machine_config
 TESTS += rect_transform_test
 TESTS += rsrv_acquire_poisoned
+TESTS += sparsity_destroy
 
 ifeq ($(strip $(USE_CUDA)),1)
 TESTS += task_stream
@@ -87,7 +92,7 @@ endif
 # can set arguments to be passed to a test when running
 TESTARGS_ctxswitch := -ll:io 1 -t 30 -i 10000
 TESTARGS_proc_group := -ll:cpu 4
-TESTARGS_compqueue := -ll:cpu 4
+TESTARGS_compqueue := -ll:cpu 4 -timeout 120
 TESTARGS_event_subscribe := -ll:cpu 4
 #TESTARGS_deferred_allocs := -ll:gsize 0 -all
 TESTARGS_scatter := -p1 2 -p2 2
@@ -124,7 +129,23 @@ vpath %.cc .:$(RUNTIME_VPATH)
 vpath %.S .:$(RUNTIME_VPATH)
 #VPATH = .:$(RUNTIME_VPATH)
 
+ifdef LG_INSTALL_DIR
+ifeq ($(strip $(SHARED_OBJECTS)),0)
+REALM_LIB := $(LG_INSTALL_DIR)/lib/librealm.a
+else
+ifeq ($(shell uname -s),Darwin)
+REALM_LIB := $(LG_INSTALL_DIR)/lib/librealm.dylib
+else
+REALM_LIB := $(LG_INSTALL_DIR)/lib/librealm.so
+endif
+endif
+else
 REALM_LIB := librealm.a
+
+$(REALM_LIB) : $(REALM_OBJS) $(REALM_CUDA_OBJS)
+	rm -f $(REALM_LIB)
+	ar rc $(REALM_LIB) $(REALM_OBJS) $(REALM_CUDA_OBJS)
+endif
 
 TEST_OBJS := $(TESTS:%=%.o)
 
@@ -142,17 +163,18 @@ run_machine_config_args : machine_config
 
 build : $(TESTS)
 
+ifdef LG_INSTALL_DIR
+clean :
+	rm -f $(REALM_OBJS) $(TESTS) $(TEST_OBJS) $(REALM_FATBIN_SRC) $(REALM_FATBIN) $(REALM_CUHOOK_OBJS)
+else
 clean :
 	rm -f $(REALM_LIB) $(REALM_OBJS) $(TESTS) $(TEST_OBJS) $(REALM_FATBIN_SRC) $(REALM_FATBIN) $(SLIB_REALM_CUHOOK) $(REALM_CUHOOK_OBJS)
+endif
 
 machine_config.o : CC_FLAGS += $(REALM_SYMBOL_VISIBILITY)
 
-$(TESTS) : % : %.o librealm.a $(SLIB_REALM_CUHOOK)
-	$(CXX) -o $@ $< $(EXTRAOBJS_$*) -L. -lrealm $(LEGION_LD_FLAGS) $(LD_FLAGS)
-
-$(REALM_LIB) : $(REALM_OBJS) $(REALM_CUDA_OBJS)
-	rm -f $(REALM_LIB)
-	ar rc $(REALM_LIB) $(REALM_OBJS) $(REALM_CUDA_OBJS)
+$(TESTS) : % : %.o $(REALM_LIB) $(SLIB_REALM_CUHOOK)
+	$(CXX) -o $@ $< $(EXTRAOBJS_$*) -L. $(LD_FLAGS) -lrealm $(LEGION_LD_FLAGS) 
 
 ifeq ($(strip $(USE_CUDA)),1)
 EXTRAOBJS_memspeed := memspeed_gpu.o
@@ -196,7 +218,7 @@ task_stream : task_stream_gpu.o
 endif
 
 %.o : %.cc $(REALM_DEFINES_HEADER) $(LEGION_DEFINES_HEADER)
-	$(CXX) -fPIC -o $@ -c $< $(INC_FLAGS) $(CC_FLAGS)
+	$(CXX) -fPIC -o $@ -c $< $(INC_FLAGS) $(CC_FLAGS) $(REALM_CXX_CHECK)
 
 $(REALM_OBJS) : CC_FLAGS+=$(REALM_SYMBOL_VISIBILITY)
 

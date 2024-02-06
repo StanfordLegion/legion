@@ -114,6 +114,10 @@ foreach(test IN LISTS REALM_TESTS)
   endif()
 endforeach()
 
+if(Legion_USE_LIBDL)
+  target_link_libraries(taskreg ${CMAKE_DL_LIBS})
+endif()
+
 if(REALM_LIMIT_SYMBOL_VISIBILITY)
   set_target_properties(machine_config PROPERTIES CXX_VISIBILITY_PRESET hidden)
   set_target_properties(machine_config PROPERTIES VISIBILITY_INLINES_HIDDEN 1)
@@ -122,7 +126,7 @@ endif()
 # some tests need test-specific arguments
 set(TESTARGS_ctxswitch         -ll:io 1 -t 30 -i 10000)
 set(TESTARGS_proc_group        -ll:cpu 4)
-set(TESTARGS_compqueue         -ll:cpu 4)
+set(TESTARGS_compqueue         -ll:cpu 4 -timeout 120)
 set(TESTARGS_event_subscribe   -ll:cpu 4)
 #set(TESTARGS_deferred_allocs   -ll:gsize 0 -all)
 set(TESTARGS_scatter           -p1 2 -p2 2)
@@ -155,7 +159,7 @@ if(Legion_ENABLE_TESTING)
     add_test(NAME ${test} COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:${test}> ${Legion_TEST_ARGS} ${TESTARGS_${test}})
   endforeach()
   # test machine_config with -test_args 1
-  add_test(NAME machine_config_args COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:machine_config> ${Legion_TEST_ARGS} ${TESTARGS_machine_config_args})
+  add_test(NAME machine_config_args COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:machine_config> ${TESTARGS_machine_config_args})
 
   if(Legion_NETWORKS)
     # For verifying the -ll:networks arguments, try each network we've compiled with
