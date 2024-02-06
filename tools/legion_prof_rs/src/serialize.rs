@@ -1,6 +1,4 @@
-use regex::Regex;
 use std::collections::BTreeMap;
-use std::fs::read_to_string;
 use std::fs::File;
 use std::io;
 use std::io::Read;
@@ -1032,35 +1030,11 @@ fn filter_record<'a>(
 }
 
 fn check_version(version: u32) {
-    let legion_prof_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
-    if let Some(legion_tool_dir) = legion_prof_dir.parent() {
-        if let Some(legion_dir) = legion_tool_dir.parent() {
-            let legion_prof_h_path = legion_dir
-                .join("runtime")
-                .join("legion")
-                .join("legion_profiling.h");
-            if legion_prof_h_path.exists() {
-                for line in read_to_string(legion_prof_h_path.display().to_string())
-                    .unwrap()
-                    .lines()
-                {
-                    let re = Regex::new(r"#define LEGION_PROF_VERSION (?<version>[0-9]+)").unwrap();
-                    if let Some(caps) = re.captures(line) {
-                        let legion_version = caps["version"].parse::<u32>().unwrap();
-                        assert_eq!(
-                            version, legion_version,
-                            "Can not match the version number of legion_prof:{} with the log:{}",
-                            version, legion_version
-                        );
-                        return;
-                    }
-                }
-                println!("Warning: can not find the version number in legion_profiling.h, so legion_prof can not verify the version, the current version of the log is:{}", version);
-                return;
-            }
-        }
-    }
-    println!("Warning: can not find the legion_profiling.h, so legion_prof can not verify the version, the current version of the log is:{}", version);
+    let expected_version: u32 = include_str!("../../../runtime/legion/legion_profiling_version.h")
+        .parse()
+        .unwrap();
+
+    assert_eq!(version, expected_version, "Legion Prof was built against an incompatible Legion version. Please rebuild with the same version of Legion used by the application to generate the profile logs. (Exected version {}, got version {}.)", expected_version, version);
 }
 
 fn parse_record<'a>(
@@ -1154,9 +1128,8 @@ fn parse<'a>(
         }
         if let Record::MachineDesc {
             node_id: d,
-            num_nodes: _nn,
             version: v,
-			..
+            ..
         } = &record
         {
             node_id = Some(*d);

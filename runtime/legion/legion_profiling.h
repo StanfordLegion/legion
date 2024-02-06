@@ -40,11 +40,12 @@
 #define DETAILED_PROFILER(runtime, call) // Nothing
 #endif
 
-// This is the version of the logging statememt format,
-// please bump up the number if modifying any logging statment.
-// 1000: master branch
-// 2000: control replication branch
-#define LEGION_PROF_VERSION 1000
+// This version tracks the compabilitity of the Legion Prof logging
+// format. Whenver you make changes to the logging format, increment the number
+// stored in legion_profiling_version.h to track the change.
+constexpr unsigned LEGION_PROF_VERSION =
+#include "legion/legion_profiling_version.h"
+;
 
 namespace Legion {
   namespace Internal { 

@@ -837,6 +837,7 @@ list(APPEND LEGION_SRC
   legion/legion_ops.h                     legion/legion_ops.cc
   legion/legion_profiling.h               legion/legion_profiling.cc
   legion/legion_profiling_serializer.h    legion/legion_profiling_serializer.cc
+  legion/legion_profiling_version.h
   legion/legion_replication.h             legion/legion_replication.cc
   legion/legion_spy.h                     legion/legion_spy.cc
   legion/legion_tasks.h                   legion/legion_tasks.cc
