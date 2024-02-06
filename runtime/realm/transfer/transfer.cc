@@ -3453,6 +3453,7 @@ namespace Realm {
         xdn.target_node = path_infos[0].xd_channels[i]->node;
         xdn.channel = path_infos[0].xd_channels[i];
         //xdn.kind = path_infos[0].xd_kinds[i];
+
 	xdn.factory = path_infos[0].xd_channels[i]->get_factory();
 	xdn.gather_control_input = -1;
 	xdn.scatter_control_input = -1;
@@ -3771,6 +3772,7 @@ namespace Realm {
         xdn.channel = path_infos[0].xd_channels[i];
         xdn.target_node = path_infos[0].xd_channels[i]->node;
         //xdn.kind = path_infos[0].xd_kinds[i];
+
 	xdn.factory = path_infos[0].xd_channels[i]->get_factory();
 	xdn.gather_control_input = -1;
 	xdn.scatter_control_input = -1;
@@ -4090,8 +4092,8 @@ namespace Realm {
   }
 
   template <int N, typename T, int N2, typename T2>
-  void IndirectionInfoTyped<N, T, N2, T2>::populate_copy_info(
-      ChannelCopyInfo& info) const {
+  void IndirectionInfoTyped<N, T, N2, T2>::populate_copy_info(ChannelCopyInfo &info) const
+  {
     info.is_ranges = is_ranges;
     info.addr_size = sizeof(T2);
   }
@@ -5390,7 +5392,8 @@ namespace Realm {
             ii.ib_size = 0;
             break;
           }
-	case TransferGraph::XDTemplate::IO_EDGE:
+
+        case TransferGraph::XDTemplate::IO_EDGE:
 	  {
 	    ii.peer_guid = ib_pre_ids[xdn.inputs[j].edge].first;
 	    ii.peer_port_idx = ib_pre_ids[xdn.inputs[j].edge].second;
@@ -5403,6 +5406,7 @@ namespace Realm {
             ii.serdez_id = 0;
             break;
           }
+
 	case TransferGraph::XDTemplate::IO_FILL_DATA:
 	  {
 	    // don't actually want an input in this case
@@ -5520,6 +5524,7 @@ namespace Realm {
             oi.ib_size = 0;
             break;
           }
+
 	case TransferGraph::XDTemplate::IO_EDGE:
 	  {
 	    oi.peer_guid = ib_next_ids[xdn.outputs[j].edge].first;

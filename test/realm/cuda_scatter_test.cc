@@ -320,7 +320,7 @@ Event DistributedData<N, T>::create_instances(const FieldMap &fields, LAMBDA mem
     {
       int dim_order[N];
       for(int i = 0; i < N; i++) {
-        //dim_order[i] = i;
+        // dim_order[i] = i;
         dim_order[inverse ? i : N - i - 1] = i;
       }
       InstanceLayoutConstraints ilc(fields, 1);

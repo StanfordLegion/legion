@@ -1098,7 +1098,7 @@ namespace Realm {
         return false;
       }
 
-      if (channel_copy_info.ind_mem == Memory::NO_MEMORY) {
+      if(channel_copy_info.ind_mem == Memory::NO_MEMORY) {
         return false;
       }
 
