@@ -1120,7 +1120,6 @@ fn parse<'a>(
     let mut input = input;
     let mut max_dim = -1;
     let mut node_id: Option<NodeID> = None;
-    let mut version;
     let mut records = Vec::new();
     while let Ok((input_, record)) = parse_record(input, &parsers, max_dim) {
         if let Record::MaxDimDesc { max_dim: d } = &record {
@@ -1128,12 +1127,11 @@ fn parse<'a>(
         }
         if let Record::MachineDesc {
             node_id: d,
-            version: v,
+            version,
             ..
-        } = &record
+        } = record
         {
-            node_id = Some(*d);
-            version = *v;
+            node_id = Some(d);
             check_version(version);
         }
         input = input_;
