@@ -154,8 +154,12 @@ endif()
 
 if(Legion_ENABLE_TESTING)
   foreach(test IN LISTS REALM_TESTS)
-    add_test(NAME ${test} COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:${test}> ${Legion_TEST_ARGS} ${TESTARGS_${test}})
+    if (NOT test STREQUAL "machine_config")
+      add_test(NAME ${test} COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:${test}> ${Legion_TEST_ARGS} ${TESTARGS_${test}})
+    endif()
   endforeach()
+  # test machine_config without any Legion_TEST_ARGS
+  add_test(NAME machine_config COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:machine_config> ${TESTARGS_machine_config})
   # test machine_config with -test_args 1
   add_test(NAME machine_config_args COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:machine_config> ${TESTARGS_machine_config_args})
 
