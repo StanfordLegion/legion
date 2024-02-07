@@ -77,11 +77,11 @@ namespace Legion {
     public:
       virtual RtEvent enqueue_task(
         const InnerContext::AutoTraceProcessRepeatsArgs& args,
-        size_t opidx,
+        uint64_t opidx,
         bool wait
       ) = 0;
       virtual RtEvent poll_pending_tasks(
-        size_t opidx,
+        uint64_t opidx,
         bool must_pop
       ) = 0;
     };
@@ -95,22 +95,22 @@ namespace Legion {
         TraceProcessingJobExecutor* executor,
         TraceOccurrenceWatcher& watcher,
         NonOverlappingAlgorithm repeats_alg,
-        size_t batchsize,  // Number of operations batched at once.
-        size_t max_add, // Maximum number of traces to add to the watcher at once.
-        size_t max_inflight_requests, // Maximum number of async jobs in flight
+        uint64_t batchsize,  // Number of operations batched at once.
+        uint64_t max_add, // Maximum number of traces to add to the watcher at once.
+        uint64_t max_inflight_requests, // Maximum number of async jobs in flight
         bool wait_on_async_job, // Whether to wait on concurrent meta tasks
-        size_t min_trace_length // Minimum trace length to identify.
+        uint64_t min_trace_length // Minimum trace length to identify.
       );
-      void process(Murmur3Hasher::Hash hash, size_t opidx);
+      void process(Murmur3Hasher::Hash hash, uint64_t opidx);
     private:
       // We need a runtime here in order to launch meta tasks.
       TraceProcessingJobExecutor* executor;
       std::vector<Murmur3Hasher::Hash> hashes;
       TraceOccurrenceWatcher& watcher;
       NonOverlappingAlgorithm repeats_alg;
-      size_t batchsize;
-      size_t max_add;
-      size_t min_trace_length;
+      uint64_t batchsize;
+      uint64_t max_add;
+      uint64_t min_trace_length;
 
       // InFlightProcessingRequest represents a currently executing
       // offline string processing request. When the BatchedTraceIdentifier
@@ -125,7 +125,7 @@ namespace Legion {
         bool completed = false;
       };
       std::list<InFlightProcessingRequest> jobs_in_flight;
-      size_t max_in_flight_requests;
+      uint64_t max_in_flight_requests;
       bool wait_on_async_job;
     };
 
@@ -133,11 +133,11 @@ namespace Legion {
     // have occured in the operation stream.
     class TraceOccurrenceWatcher {
     public:
-      TraceOccurrenceWatcher(TraceReplayer& replayer, size_t visit_threshold);
-      void process(Murmur3Hasher::Hash hash, size_t opidx);
+      TraceOccurrenceWatcher(TraceReplayer& replayer, uint64_t visit_threshold);
+      void process(Murmur3Hasher::Hash hash, uint64_t opidx);
 
       template<typename T>
-      void insert(T start, T end, size_t opidx);
+      void insert(T start, T end, uint64_t opidx);
       template<typename T>
       bool prefix(T start, T end);
 
@@ -150,37 +150,37 @@ namespace Legion {
       struct TraceMeta {
         // Needs to be default constructable.
         TraceMeta() : opidx(0) { }
-        TraceMeta(size_t opidx_) : opidx(opidx_) { }
+        TraceMeta(uint64_t opidx_) : opidx(opidx_) { }
         // The opidx that this trace was inserted at.
-        size_t opidx;
+        uint64_t opidx;
         // The occurrence watcher will only maintain the number
         // of visits. I don't think that we need to do decaying visits
         // here, though we might want to lower the amount of traces that
         // get committed to the replayer.
-        size_t visits = 0;
+        uint64_t visits = 0;
         // completed marks whether this trace has moved
         // from the "watched" state to the "committed" state.
         // Once a trace has been completed, it will not be
         // returned from complete() anymore.
         bool completed = false;
         // The opidx that this trace was previously visited at.
-        size_t previous_visited_opidx = 0;
+        uint64_t previous_visited_opidx = 0;
       };
       Trie<Murmur3Hasher::Hash, TraceMeta> trie;
-      size_t visit_threshold;
+      uint64_t visit_threshold;
 
       // TriePointer maintains an active trace being
       // traversed in the watcher's trie.
       class TriePointer {
       public:
-        TriePointer(TrieNode<Murmur3Hasher::Hash, TraceMeta>* node_, size_t opidx_)
+        TriePointer(TrieNode<Murmur3Hasher::Hash, TraceMeta>* node_, uint64_t opidx_)
           : node(node_), opidx(opidx_), depth(0) { }
         bool advance(Murmur3Hasher::Hash token);
         bool complete();
       public:
         TrieNode<Murmur3Hasher::Hash, TraceMeta>* node;
-        size_t opidx;
-        size_t depth;
+        uint64_t opidx;
+        uint64_t depth;
       };
       // All currently active pointers that need advancing.
       std::vector<TriePointer> active_pointers;
@@ -213,16 +213,16 @@ namespace Legion {
         Operation* op,
         const std::vector<StaticDependence>* dependences,
         Murmur3Hasher::Hash hash,
-        size_t opidx
+        uint64_t opidx
       );
       void process_trace_noop(Operation* op);
       // Flush all pending operations out of the TraceReplayer. Accepts
       // the current opidx, used for scoring potentially replayed traces.
-      void flush(size_t opidx);
+      void flush(uint64_t opidx);
 
       // Insert a new trace into the TraceReplayer.
       template<typename T>
-      void insert(T start, T end, size_t opidx);
+      void insert(T start, T end, uint64_t opidx);
       // See if the chosen string is a prefix of a string contained
       // in the TraceReplayer.
       template<typename T>
@@ -235,32 +235,32 @@ namespace Legion {
       struct TraceMeta {
         // TraceMeta's need to be default constructable.
         TraceMeta() {}
-        TraceMeta(size_t opidx_, size_t length_)
+        TraceMeta(uint64_t opidx_, uint64_t length_)
           : opidx(opidx_), length(length_), last_visited_opidx(0),
             decaying_visits(0), replays(0),
             last_idempotent_visit_opidx(0),
             decaying_idempotent_visits(0.0), tid(0) { }
         // opidx that this trace was inserted at.
-        size_t opidx;
+        uint64_t opidx;
         // length of the trace. This is used for scoring only.
-        size_t length;
+        uint64_t length;
         // Fields for maintaining a decaying visit count.
-        size_t last_visited_opidx;
+        uint64_t last_visited_opidx;
         double decaying_visits;
         // Number of times the trace has been replayed.
-        size_t replays;
+        uint64_t replays;
         // Number of times the trace has been visited in
         // an idempotent manner (tracked in a decaying manner).
-        size_t last_idempotent_visit_opidx;
+        uint64_t last_idempotent_visit_opidx;
         double decaying_idempotent_visits;
         // ID for the trace. It is unset if replays == 0.
         TraceID tid;
 
         // visit updates the TraceMeta's decaying visit count when visited
         // at opidx.
-        void visit(size_t opidx);
+        void visit(uint64_t opidx);
         // score computes the TraceMeta's score when observed at opidx.
-        double score(size_t opidx) const;
+        double score(uint64_t opidx) const;
         // R is the exponential rate of decay for a trace.
         static constexpr double R = 0.99;
         // SCORE_CAP_MULT is the multiplier for how large the score
@@ -268,7 +268,7 @@ namespace Legion {
         static constexpr double SCORE_CAP_MULT = 10;
         // REPLAY_SCALE is at most how much a score should be increased
         // to favor replays.
-        static constexpr size_t REPLAY_SCALE = 2;
+        static constexpr uint64_t REPLAY_SCALE = 2;
         // IDEMPOTENT_VISIT_SCALE is at most how much a score should
         // be increased to favor idempotent replays.
         static constexpr double IDEMPOTENT_VISIT_SCALE = 2.0;
@@ -279,36 +279,36 @@ namespace Legion {
       // of pointers for scoring.
       class WatchPointer {
       public:
-        WatchPointer(TrieNode<Murmur3Hasher::Hash, TraceMeta>* node_, size_t opidx_)
+        WatchPointer(TrieNode<Murmur3Hasher::Hash, TraceMeta>* node_, uint64_t opidx_)
             : node(node_), opidx(opidx_) { }
         // This pointer only has an advance function, as there's nothing
         // to do on commit.
         bool advance(Murmur3Hasher::Hash token);
-        size_t get_opidx() const { return this->opidx; }
+        uint64_t get_opidx() const { return this->opidx; }
       private:
         TrieNode<Murmur3Hasher::Hash, TraceMeta>* node;
-        size_t opidx;
+        uint64_t opidx;
       };
       std::vector<WatchPointer> active_watching_pointers;
 
       // For the actual committed trie.
       class CommitPointer {
       public:
-        CommitPointer(TrieNode<Murmur3Hasher::Hash, TraceMeta>* node_, size_t opidx_)
+        CommitPointer(TrieNode<Murmur3Hasher::Hash, TraceMeta>* node_, uint64_t opidx_)
           : node(node_), opidx(opidx_), depth(0) { }
         bool advance(Murmur3Hasher::Hash token);
         void advance_for_trace_noop() { this->depth++; }
         bool complete();
         TraceID replay(OperationExecutor* executor);
-        double score(size_t opidx);
-        size_t get_opidx() const { return this->opidx; }
-        size_t get_length() { return this->depth; }
+        double score(uint64_t opidx);
+        uint64_t get_opidx() const { return this->opidx; }
+        uint64_t get_length() { return this->depth; }
       private:
         TrieNode<Murmur3Hasher::Hash, TraceMeta>* node;
-        size_t opidx;
+        uint64_t opidx;
         // depth is the number of operations (traceable and trace no-ops)
         // contained within the trace.
-        size_t depth;
+        uint64_t depth;
       };
       std::vector<CommitPointer> active_commit_pointers;
       std::vector<CommitPointer> completed_commit_pointers;
@@ -322,15 +322,15 @@ namespace Legion {
         const std::vector<StaticDependence>* dependences;
       };
       std::queue<PendingOperation> operations;
-      size_t operation_start_idx;
+      uint64_t operation_start_idx;
 
       // flush_buffer executes operations until opidx, or flushes
       // the entire operation buffer if no opidx is provided.
       void flush_buffer();
-      void flush_buffer(size_t opidx);
+      void flush_buffer(uint64_t opidx);
       // replay_trace executes operations under the trace tid
       // until opidx, after which it inserts an end trace.
-      void replay_trace(size_t opidx, TraceID tid);
+      void replay_trace(uint64_t opidx, TraceID tid);
     };
 
     template <typename T>
@@ -383,17 +383,17 @@ namespace Legion {
       ) override;
     public:
       // Overrides for TraceJobProcessingExecutor.
-      RtEvent enqueue_task(const InnerContext::AutoTraceProcessRepeatsArgs& args, size_t opidx, bool wait) override;
-      RtEvent poll_pending_tasks(size_t opidx, bool must_pop) override;
+      RtEvent enqueue_task(const InnerContext::AutoTraceProcessRepeatsArgs& args, uint64_t opidx, bool wait) override;
+      RtEvent poll_pending_tasks(uint64_t opidx, bool must_pop) override;
     private:
-      size_t opidx;
+      uint64_t opidx;
       BatchedTraceIdentifier identifier;
       TraceOccurrenceWatcher watcher;
       TraceReplayer replayer;
       // unique_hash_idx_counter maintains a counter of non-traceable
       // operations seen so far, used to generate unique hashes for
       // those operations.
-      size_t unique_hash_idx_counter = 0;
+      uint64_t unique_hash_idx_counter = 0;
       // Maintain whether or not we are currently replaying a trace.
       bool started_auto_trace = false;
     };
@@ -557,7 +557,7 @@ namespace Legion {
 
     template <typename T>
     Murmur3Hasher::Hash AutomaticTracingContext<T>::get_new_unique_hash() {
-      size_t idx = this->unique_hash_idx_counter;
+      uint64_t idx = this->unique_hash_idx_counter;
       this->unique_hash_idx_counter++;
       Murmur3Hasher hasher;
       hasher.hash(Operation::OpKind::LAST_OP_KIND);
@@ -570,7 +570,7 @@ namespace Legion {
     template <typename T>
     RtEvent AutomaticTracingContext<T>::enqueue_task(
         const InnerContext::AutoTraceProcessRepeatsArgs& args,
-        size_t opidx,
+        uint64_t opidx,
         bool wait
     ) {
       return T::enqueue_trace_analysis_meta_task(args, opidx, wait);
@@ -578,14 +578,14 @@ namespace Legion {
 
     template <typename T>
     RtEvent AutomaticTracingContext<T>::poll_pending_tasks(
-        size_t opidx,
+        uint64_t opidx,
         bool must_pop
     ) {
       return T::poll_pending_trace_analysis_tasks(opidx, must_pop);
     }
 
     template <typename T>
-    void TraceOccurrenceWatcher::insert(T start, T end, size_t opidx) {
+    void TraceOccurrenceWatcher::insert(T start, T end, uint64_t opidx) {
       this->trie.insert(start, end, TraceMeta(opidx));
     }
 
@@ -595,7 +595,7 @@ namespace Legion {
     }
 
     template <typename T>
-    void TraceReplayer::insert(T start, T end, size_t opidx) {
+    void TraceReplayer::insert(T start, T end, uint64_t opidx) {
       return this->trie.insert(start, end, TraceMeta(opidx, std::distance(start, end)));
     }
 

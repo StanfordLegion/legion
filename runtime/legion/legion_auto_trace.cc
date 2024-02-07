@@ -213,11 +213,11 @@ namespace Legion {
         TraceProcessingJobExecutor* executor_,
         TraceOccurrenceWatcher& watcher_,
         NonOverlappingAlgorithm repeats_alg_,
-        size_t batchsize_,
-        size_t max_add_,
-        size_t max_inflight_requests_,
+        uint64_t batchsize_,
+        uint64_t max_add_,
+        uint64_t max_inflight_requests_,
         bool wait_on_async_job_,
-        size_t min_trace_length_
+        uint64_t min_trace_length_
         )
         : executor(executor_),
           watcher(watcher_),
@@ -232,7 +232,7 @@ namespace Legion {
       this->hashes.reserve(this->batchsize + 1);
     }
 
-    void BatchedTraceIdentifier::process(Murmur3Hasher::Hash hash, size_t opidx) {
+    void BatchedTraceIdentifier::process(Murmur3Hasher::Hash hash, uint64_t opidx) {
       this->hashes.push_back(hash);
       if (this->hashes.size() == this->batchsize) {
         // TODO (rohany): Define this sentinel somewhere else.
@@ -282,7 +282,7 @@ namespace Legion {
         auto& finished = this->jobs_in_flight.front();
         if (finished.completed) {
           // Insert the received traces into the occurrence watcher.
-          size_t count = 0;
+          uint64_t count = 0;
           for (auto trace : finished.result) {
             // TODO (rohany): Deal with the maximum number of traces permitted in the trie.
             // TODO (rohany): Do we need to consider superstrings here?
@@ -303,15 +303,15 @@ namespace Legion {
     }
 
     TraceOccurrenceWatcher::TraceOccurrenceWatcher(
-        TraceReplayer& replayer_, size_t visit_threshold_)
+        TraceReplayer& replayer_, uint64_t visit_threshold_)
       : replayer(replayer_), visit_threshold(visit_threshold_) { }
 
-    void TraceOccurrenceWatcher::process(Murmur3Hasher::Hash hash, size_t opidx) {
+    void TraceOccurrenceWatcher::process(Murmur3Hasher::Hash hash, uint64_t opidx) {
       this->active_pointers.emplace_back(this->trie.get_root(), opidx);
       // We'll avoid any allocations here by copying in pointers
       // as we process them.
-      size_t copyidx = 0;
-      for (size_t i = 0; i < this->active_pointers.size(); i++) {
+      uint64_t copyidx = 0;
+      for (uint64_t i = 0; i < this->active_pointers.size(); i++) {
         // Try to advance the pointer.
         TriePointer pointer = this->active_pointers[i];
         if (!pointer.advance(hash)) {
@@ -336,7 +336,7 @@ namespace Legion {
           if (value.visits >= this->visit_threshold && !value.completed) {
             value.completed = true;
             std::vector<Murmur3Hasher::Hash> trace(pointer.depth);
-            for (size_t j = 0; j < pointer.depth; j++) {
+            for (uint64_t j = 0; j < pointer.depth; j++) {
               assert(node != nullptr);
               trace[pointer.depth - j - 1] = node->get_token();
               node = node->get_parent();
@@ -376,14 +376,14 @@ namespace Legion {
     // Have to also provide declarations of the static variables.
     constexpr double TraceReplayer::TraceMeta::R;
     constexpr double TraceReplayer::TraceMeta::SCORE_CAP_MULT;
-    constexpr size_t TraceReplayer::TraceMeta::REPLAY_SCALE;
+    constexpr uint64_t TraceReplayer::TraceMeta::REPLAY_SCALE;
     constexpr double TraceReplayer::TraceMeta::IDEMPOTENT_VISIT_SCALE;
 
-    void TraceReplayer::TraceMeta::visit(size_t opidx) {
+    void TraceReplayer::TraceMeta::visit(uint64_t opidx) {
       // First, compute the difference in trace lengths that
       // this trace was last visited at.
-      size_t previous_visit = this->last_visited_opidx;
-      size_t diff_in_traces = (opidx - previous_visit) / this->length;
+      uint64_t previous_visit = this->last_visited_opidx;
+      uint64_t diff_in_traces = (opidx - previous_visit) / this->length;
       // Visits only count if they are at least 1 trace length away.
       if (diff_in_traces == 0) { return; }
       // Compute the new visit count by decaying the old visit count
@@ -394,15 +394,15 @@ namespace Legion {
       // which is nice to know for scoring. Check previous_visit != 0 to ensure
       // that we at least have one visit before counting idempotent visits.
       if (previous_visit != 0 && (opidx - previous_visit) == this->length) {
-        size_t previous_idemp_visit = this->last_idempotent_visit_opidx;
-        size_t idemp_diff = (opidx - previous_idemp_visit) / this->length;
+        uint64_t previous_idemp_visit = this->last_idempotent_visit_opidx;
+        uint64_t idemp_diff = (opidx - previous_idemp_visit) / this->length;
         this->decaying_idempotent_visits = (pow(R, idemp_diff) * this->decaying_idempotent_visits) + 1;
         this->last_idempotent_visit_opidx = opidx;
       }
       this->last_visited_opidx = opidx;
     }
 
-    double TraceReplayer::TraceMeta::score(size_t opidx) const {
+    double TraceReplayer::TraceMeta::score(uint64_t opidx) const {
       // Do a similar calculation as visit, where we decay the score
       // of the trace as if reading from opidx.
       // TODO (rohany): I'm not entirely convinced that this is necessary,
@@ -410,8 +410,8 @@ namespace Legion {
       //  have just been visited, i.e. it's score was just updated. However,
       //  this worked well in the simulator so I'll start with it before
       //  switching it up.
-      size_t previous_visit = this->last_visited_opidx;
-      size_t diff_in_traces = (opidx - previous_visit) / this->length;
+      uint64_t previous_visit = this->last_visited_opidx;
+      uint64_t diff_in_traces = (opidx - previous_visit) / this->length;
       // Increase the visit count by 1 when computing the score so that
       // traces that haven't been visited before don't have a 0 score.
       // The initial score is num_visits * length.
@@ -421,13 +421,13 @@ namespace Legion {
       score = std::min(score, SCORE_CAP_MULT * ((double)this->length));
       // Then, increase the score a little bit if a trace has already been
       // replayed to favor replays.
-      size_t capped_replays = std::max(std::min(REPLAY_SCALE, this->replays), (size_t)1);
+      uint64_t capped_replays = std::max(std::min(REPLAY_SCALE, this->replays), (uint64_t)1);
       double capped_idemp_visits = std::max(std::min(IDEMPOTENT_VISIT_SCALE, this->decaying_idempotent_visits), 1.0);
       return score * (double)capped_replays * capped_idemp_visits;
     }
 
     void TraceReplayer::flush_buffer() {
-      size_t num_ops = this->operations.size();
+      uint64_t num_ops = this->operations.size();
       this->operation_start_idx += num_ops;
       while (!this->operations.empty()) {
         auto& pending = this->operations.front();
@@ -436,21 +436,21 @@ namespace Legion {
       }
     }
 
-    void TraceReplayer::flush_buffer(size_t opidx) {
+    void TraceReplayer::flush_buffer(uint64_t opidx) {
       // If we've already advanced beyond this point, then there's nothing to do.
       if (this->operation_start_idx > opidx) {
         return;
       }
-      size_t difference = opidx - this->operation_start_idx;
+      uint64_t difference = opidx - this->operation_start_idx;
       this->operation_start_idx += difference;
-      for (size_t i = 0; i < difference; i++) {
+      for (uint64_t i = 0; i < difference; i++) {
         auto& pending = this->operations.front();
         this->executor->issue_operation(pending.operation, pending.dependences);
         this->operations.pop();
       }
     }
 
-    void TraceReplayer::replay_trace(size_t opidx, Legion::TraceID tid) {
+    void TraceReplayer::replay_trace(uint64_t opidx, Legion::TraceID tid) {
       // If we've already advanced beyond this point, then there's nothing to do.
       // TODO (rohany): I don't think that this should happen when we're actually
       //  calling replay, but better safe than sorry.
@@ -464,9 +464,9 @@ namespace Legion {
       // Similar logic as flush_buffer, but issue a begin and end trace
       // around the flushed operations.
       this->executor->issue_begin_trace(tid);
-      size_t difference = opidx - this->operation_start_idx;
+      uint64_t difference = opidx - this->operation_start_idx;
       this->operation_start_idx += difference;
-      for (size_t i = 0; i < difference; i++) {
+      for (uint64_t i = 0; i < difference; i++) {
         auto& pending = this->operations.front();
         this->executor->issue_operation(pending.operation, pending.dependences);
         this->operations.pop();
@@ -524,11 +524,11 @@ namespace Legion {
       return tid;
     }
 
-    double TraceReplayer::CommitPointer::score(size_t opidx) {
+    double TraceReplayer::CommitPointer::score(uint64_t opidx) {
       return this->node->get_value().score(opidx);
     }
 
-    void TraceReplayer::flush(size_t opidx) {
+    void TraceReplayer::flush(uint64_t opidx) {
       // We have to flush all active pointers from the trie, and
       // them attempt to launch traces for any completed pointers.
       // First, clear the vectors of active pointers.
@@ -576,15 +576,15 @@ namespace Legion {
       Legion::Internal::Operation *op,
       const std::vector<StaticDependence>* dependence,
       Murmur3Hasher::Hash hash,
-      size_t opidx
+      uint64_t opidx
     ) {
       this->operations.emplace(op, dependence);
       // Update all watching pointers. This is very similar to the advancing
       // of pointers in the TraceOccurrenceWatcher.
       this->active_watching_pointers.emplace_back(this->trie.get_root(), opidx);
       // Avoid a reallocation in the same way by copying in place.
-      size_t copyidx = 0;
-      for (size_t i = 0; i < this->active_watching_pointers.size(); i++) {
+      uint64_t copyidx = 0;
+      for (uint64_t i = 0; i < this->active_watching_pointers.size(); i++) {
         WatchPointer pointer = this->active_watching_pointers[i];
         if (!pointer.advance(hash)) {
           continue;
@@ -601,7 +601,7 @@ namespace Legion {
       // around which traces we should take.
       this->active_commit_pointers.emplace_back(this->trie.get_root(), opidx);
       copyidx = 0;
-      for (size_t i = 0; i < this->active_commit_pointers.size(); i++) {
+      for (uint64_t i = 0; i < this->active_commit_pointers.size(); i++) {
         CommitPointer pointer = this->active_commit_pointers[i];
         if (!pointer.advance(hash)) {
           continue;
@@ -622,15 +622,15 @@ namespace Legion {
       this->active_commit_pointers.erase(this->active_commit_pointers.begin() + copyidx, this->active_commit_pointers.end());
 
       // Find the minimum opidx of the active and completed pointers.
-      size_t earliest_active = std::numeric_limits<size_t>::max();
-      size_t earliest_completed = std::numeric_limits<size_t>::max();
+      uint64_t earliest_active = std::numeric_limits<uint64_t>::max();
+      uint64_t earliest_completed = std::numeric_limits<uint64_t>::max();
       for (auto& pointer : this->active_commit_pointers) {
         earliest_active = std::min(earliest_active, pointer.get_opidx());
       }
       for (auto& pointer : this->completed_commit_pointers) {
         earliest_completed = std::min(earliest_completed, pointer.get_opidx());
       }
-      size_t earliest_opidx = std::min(earliest_active, earliest_completed);
+      uint64_t earliest_opidx = std::min(earliest_active, earliest_completed);
 
       // First, flush all operations until the earliest_opidx, as there is
       // nothing we are considering before there. If there are no active
@@ -717,10 +717,10 @@ namespace Legion {
               return ltup > rtup;
             }
           );
-          size_t cutoff_opidx = earliest_active;
-          size_t pending_completion_cutoff = std::numeric_limits<size_t>::max();
-          size_t copyidx = 0;
-          for (size_t i = 0; i < this->completed_commit_pointers.size(); i++) {
+          uint64_t cutoff_opidx = earliest_active;
+          uint64_t pending_completion_cutoff = std::numeric_limits<uint64_t>::max();
+          uint64_t copyidx = 0;
+          for (uint64_t i = 0; i < this->completed_commit_pointers.size(); i++) {
             auto pointer = this->completed_commit_pointers[i];
             // If this completed pointer spans into an active pointer, then we need
             // to save it for later.
