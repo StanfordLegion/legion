@@ -2281,7 +2281,6 @@ namespace Legion {
         delete shard_manager;
 #ifdef DEBUG_LEGION
       premapped_instances.clear();
-      assert(!deferred_complete_mapping.exists());
       assert(remote_trace_recorder == NULL);
 #endif
     }
@@ -2372,8 +2371,6 @@ namespace Legion {
           if (virtual_mapped[idx])
             version_infos[idx].pack_equivalence_sets(rez);
         }
-        rez.serialize(deferred_complete_mapping);
-        deferred_complete_mapping = RtUserEvent::NO_RT_USER_EVENT;
         rez.serialize(single_task_termination);
         rez.serialize<size_t>(physical_instances.size());
         for (unsigned idx = 0; idx < physical_instances.size(); idx++)
@@ -2434,8 +2431,6 @@ namespace Legion {
             version_infos[idx].unpack_equivalence_sets(derez, runtime, 
                                                        ready_events);
         }
-        derez.deserialize(deferred_complete_mapping);
-        complete_mapping(deferred_complete_mapping);
         derez.deserialize(single_task_termination);
         size_t num_phy;
         derez.deserialize(num_phy);
@@ -3513,27 +3508,29 @@ namespace Legion {
       if (!single_task_termination.exists())
         single_task_termination = Runtime::create_ap_user_event(NULL);
       set_origin_mapped(true); // it's like this was origin mapped
+#ifdef DEBUG_LEGION
+      // should only be replaying leaf tasks currently
+      // until we figure out how to handle non-leaf tasks
+      assert(is_leaf());
+#endif
+      if (is_leaf())
+        handle_post_mapped(RtEvent::NO_RT_EVENT);
     }
 
     //--------------------------------------------------------------------------
     void SingleTask::handle_post_mapped(RtEvent mapped_precondition)
     //--------------------------------------------------------------------------
     {
-      if (deferred_complete_mapping.exists())
+      if (!map_applied_conditions.empty())
       {
         if (mapped_precondition.exists())
           map_applied_conditions.insert(mapped_precondition);
-        // Little race condition here so pull it on the stack first
-        RtUserEvent to_trigger = deferred_complete_mapping;
-        deferred_complete_mapping = RtUserEvent::NO_RT_USER_EVENT;
-        if (!map_applied_conditions.empty())
-          Runtime::trigger_event(to_trigger, 
-              Runtime::merge_events(map_applied_conditions)); 
-        else
-          Runtime::trigger_event(to_trigger);
+        mapped_precondition = Runtime::merge_events(map_applied_conditions);
       }
-      else
-        complete_mapping(mapped_precondition);
+      if (!acquired_instances.empty())
+        mapped_precondition = release_nonempty_acquired_instances(
+            mapped_precondition, acquired_instances);
+      complete_mapping(mapped_precondition);
     }
 
     //--------------------------------------------------------------------------
@@ -4358,6 +4355,10 @@ namespace Legion {
           mapping_applied = Runtime::merge_events(map_applied_conditions);
         must_epoch_op->record_mapped_event(index_point, mapping_applied);
       }
+      // If we're a leaf task then call handle post mapped now since we
+      // know we're not going to get it from the context
+      if (is_leaf())
+        handle_post_mapped(RtEvent::NO_RT_EVENT);
       return RtEvent::NO_RT_EVENT;
     }
 
@@ -6257,52 +6258,47 @@ namespace Legion {
         return deferred; 
       // If we mapped, then we are no longer stealable
       stealable = false;
-      // If we succeeded in mapping and it's a leaf task
-      // then we get to mark that we are done mapping
-      RtEvent applied_condition;
-      // The common path
-      if (is_leaf())
+      // If we're remote, send back a message to the origin node instance
+      // of the task to tell it that we are mapped
+      if (is_remote())
       {
-        if (!map_applied_conditions.empty())
+        Serializer rez;
         {
-          applied_condition = Runtime::merge_events(map_applied_conditions);
-          map_applied_conditions.clear();
+          RezCheck z(rez);
+          rez.serialize<SingleTask*>(orig_task);
+          rez.serialize(mapped_event);
         }
-        // If we mapped remotely we might have a deferred complete mapping
-        // that we can trigger now
-        if (deferred_complete_mapping.exists())
-        {
-#ifdef DEBUG_LEGION
-          assert(is_remote());
-#endif
-          Runtime::trigger_event(deferred_complete_mapping,applied_condition);
-          applied_condition = deferred_complete_mapping;
-          deferred_complete_mapping = RtUserEvent::NO_RT_USER_EVENT;
-        }
+        runtime->send_individual_remote_mapped(orig_proc, rez);
       }
-      else if (!is_remote())
+      return RtEvent::NO_RT_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    bool IndividualTask::replicate_task(void)
+    //--------------------------------------------------------------------------
+    {
+      if (is_remote())
       {
-        // We did this mapping on the owner
-#ifdef DEBUG_LEGION
-        assert(!deferred_complete_mapping.exists());
-#endif
-        deferred_complete_mapping = Runtime::create_rt_user_event();
-        applied_condition = deferred_complete_mapping;
+        // Pull these onto the stack since it's unsafe to read them after
+        // we call replicate task and it goes off and does stuff
+        SingleTask *original = orig_task;
+        const Processor orig = orig_proc;
+        const RtEvent event = mapped_event;
+        const bool result = SingleTask::replicate_task();
+        if (result)
+        {
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize<SingleTask*>(original);
+            rez.serialize(event);
+          }
+          runtime->send_individual_remote_mapped(orig, rez);
+        }
+        return result;
       }
       else
-      {
-        // We did this mapping remotely so there better be an event
-#ifdef DEBUG_LEGION
-        assert(deferred_complete_mapping.exists());
-#endif
-        applied_condition = deferred_complete_mapping;
-      }
-      // Mark that we have completed mapping
-      if (!acquired_instances.empty())
-        applied_condition = release_nonempty_acquired_instances(
-                          applied_condition, acquired_instances);
-      complete_mapping(applied_condition);
-      return RtEvent::NO_RT_EVENT;
+        return SingleTask::replicate_task();
     }
 
     //--------------------------------------------------------------------------
@@ -6607,28 +6603,6 @@ namespace Legion {
       // yet been sent remotely, then send the state now
       RezCheck z(rez);
       pack_single_task(rez, target);
-      if (!is_origin_mapped())
-      {
-        if (!deferred_complete_mapping.exists())
-        {
-#ifdef DEBUG_LEGION
-          assert(!is_remote()); // should only happen on the owner
-#endif
-          // Make a user event to send remotely to serve as the 
-          // mapping completion trigger
-          RtUserEvent remote_deferred_complete_mapping = 
-            Runtime::create_rt_user_event();
-          rez.serialize(remote_deferred_complete_mapping);
-          // We can do the trigger now and defer it
-          complete_mapping(remote_deferred_complete_mapping);
-        }
-        else
-        {
-          rez.serialize(deferred_complete_mapping);
-          // Clear it once we've packed it up
-          deferred_complete_mapping = RtUserEvent::NO_RT_USER_EVENT;
-        }
-      }
       size_t valid_output_regions_size = valid_output_regions.size();
       rez.serialize(valid_output_regions_size);
       for (unsigned idx = 0; idx < valid_output_regions.size(); idx++)
@@ -6669,14 +6643,6 @@ namespace Legion {
       DETAILED_PROFILER(runtime, INDIVIDUAL_UNPACK_TASK_CALL);
       DerezCheck z(derez);
       unpack_single_task(derez, ready_events);
-      if (!is_origin_mapped())
-      {
-#ifdef DEBUG_LEGION
-        assert(!deferred_complete_mapping.exists());
-#endif
-        derez.deserialize(deferred_complete_mapping);
-        version_infos.resize(logical_regions.size());
-      }
       size_t valid_output_regions_size = 0;
       derez.deserialize(valid_output_regions_size);
       valid_output_regions.resize(valid_output_regions_size);
@@ -6702,11 +6668,6 @@ namespace Legion {
 #endif
         // If we were sent back then mark that we are no longer remote
         orig_task->sent_remotely = false;
-        if (deferred_complete_mapping.exists())
-        {
-          orig_task->deferred_complete_mapping = deferred_complete_mapping;
-          deferred_complete_mapping = RtUserEvent::NO_RT_USER_EVENT;
-        }
         // Put the original instance back on the mapping queue and
         // deactivate this version of the task
         orig_task->enqueue_ready_task(false/*target*/);
@@ -6728,6 +6689,25 @@ namespace Legion {
           derez.deserialize(predicate_false_result, predicate_false_size);
         }
       }
+      if (is_origin_mapped())
+      {
+        if (!is_leaf())
+        {
+          // Send back the event that will be triggered when the task is mapped
+          Serializer rez;
+          {
+            RezCheck z2(rez);
+            rez.serialize<SingleTask*>(orig_task);
+            rez.serialize(mapped_event);
+          }
+          runtime->send_individual_remote_mapped(orig_proc, rez);
+        }
+        else 
+          // We're not going to get a callback from the context if we're a leaf
+          complete_mapping();
+      }
+      else
+        version_infos.resize(logical_regions.size());
       set_provenance(Provenance::deserialize(derez));
       // Set our parent task for the user
       parent_task = parent_ctx->get_task();
@@ -6895,17 +6875,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndividualTask::trigger_replay(void)
-    //--------------------------------------------------------------------------
-    {
-      SingleTask::trigger_replay();
-      if (!map_applied_conditions.empty())
-        complete_mapping(Runtime::merge_events(map_applied_conditions));
-      else
-        complete_mapping();
-    }
-
-    //--------------------------------------------------------------------------
     void IndividualTask::complete_replay(ApEvent instance_ready_event,
                                          ApEvent completion_postcondition)
     //--------------------------------------------------------------------------
@@ -6970,6 +6939,21 @@ namespace Legion {
             Runtime::merge_events(applied_events));
       else
         Runtime::trigger_event(done_event);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void IndividualTask::process_unpack_remote_mapped(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      // Single task because we share this with the point task for when
+      // point tasks are origin-mapped non-leaf tasks
+      SingleTask *task;
+      derez.deserialize(task);
+      RtEvent mapped_event;
+      derez.deserialize(mapped_event);
+      task->handle_post_mapped(mapped_event);
     }
 
     //--------------------------------------------------------------------------
@@ -7077,7 +7061,6 @@ namespace Legion {
     void PointTask::trigger_replay(void)
     //--------------------------------------------------------------------------
     {
-      SingleTask::trigger_replay();
       if (concurrent_task)
       {
 #ifdef DEBUG_LEGION
@@ -7086,11 +7069,8 @@ namespace Legion {
         perform_concurrent_analysis(target_processors.back(),
                   slice_owner->get_concurrent_precondition());
       }
-      RtEvent applied_condition;
-      if (!map_applied_conditions.empty())
-        applied_condition = Runtime::merge_events(map_applied_conditions);
-      slice_owner->record_point_mapped(applied_condition, acquired_instances);
-      complete_mapping(applied_condition);
+      slice_owner->record_point_mapped(mapped_event);
+      SingleTask::trigger_replay();
     }
 
     //--------------------------------------------------------------------------
@@ -7262,14 +7242,10 @@ namespace Legion {
                                        const DeferMappingArgs *args/*=NULL*/)
     //--------------------------------------------------------------------------
     {
-      // For point tasks we use the point termination event which as the
-      // end event for this task since point tasks can be moved and
-      // the completion event is therefore not guaranteed to survive
-      // the length of the task's execution
-      const RtEvent deferred = map_all_regions(must_epoch_owner, args);
-      if (deferred.exists())
-        return deferred;
-      if (concurrent_task)
+      // First time through do the concurrent analysis to get it in flight
+      // and record any map applied conditions for it, note we'll always have
+      // a non-null args for concurrent tasks so points can map in parallel
+      if (concurrent_task && (args->invocation_count == 0))
       {
 #ifdef DEBUG_LEGION
         assert(target_proc.exists());
@@ -7285,38 +7261,29 @@ namespace Legion {
         perform_concurrent_analysis(target_proc,
             slice_owner->get_concurrent_precondition());
       }
-      RtEvent applied_condition;
-      // If we succeeded in mapping and we're a leaf so we are done mapping
-      if (is_leaf())
-      {
-        if (!map_applied_conditions.empty())
-        {
-          applied_condition = Runtime::merge_events(map_applied_conditions);
-          map_applied_conditions.clear();
-        }
-        // If we mapped remotely we might have a deferred complete mapping
-        // that we can trigger now
-        if (deferred_complete_mapping.exists())
-        {
-#ifdef DEBUG_LEGION
-          assert(is_remote());
-#endif
-          Runtime::trigger_event(deferred_complete_mapping, applied_condition);
-          applied_condition = deferred_complete_mapping;
-          deferred_complete_mapping = RtUserEvent::NO_RT_USER_EVENT;
-        }
-      }
-      else
-      {
-#ifdef DEBUG_LEGION
-        assert(!deferred_complete_mapping.exists());
-#endif
-        deferred_complete_mapping = Runtime::create_rt_user_event();
-        applied_condition = deferred_complete_mapping;
-      }
-      slice_owner->record_point_mapped(applied_condition, acquired_instances);
-      complete_mapping(applied_condition);
+      // For point tasks we use the point termination event which as the
+      // end event for this task since point tasks can be moved and
+      // the completion event is therefore not guaranteed to survive
+      // the length of the task's execution
+      const RtEvent deferred = map_all_regions(must_epoch_owner, args);
+      if (deferred.exists())
+        return deferred;
+      slice_owner->record_point_mapped(mapped_event);
       return RtEvent::NO_RT_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    bool PointTask::replicate_task(void)
+    //--------------------------------------------------------------------------
+    {
+      // Pull this onto the stack since it is unsafe to read it after we
+      // call the base class method
+      SliceTask *owner = slice_owner;
+      const RtEvent event = mapped_event;
+      const bool result = SingleTask::replicate_task();
+      if (result)
+        owner->record_point_mapped(event);
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -7351,7 +7318,7 @@ namespace Legion {
     void PointTask::shard_off(RtEvent mapped_precondition)
     //--------------------------------------------------------------------------
     {
-      slice_owner->record_point_mapped(mapped_precondition, acquired_instances);
+      slice_owner->record_point_mapped(mapped_precondition);
       SingleTask::shard_off(mapped_precondition);
     }
 
@@ -7501,8 +7468,20 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(is_origin_mapped());
 #endif
-      slice_owner->record_point_mapped(deferred_complete_mapping,
-                                       acquired_instances);
+      // We're not going to get a callback from the context if we're a leaf
+      if (!is_leaf())
+      {
+        Serializer rez;
+        {
+          RezCheck z2(rez);
+          rez.serialize<SingleTask*>(orig_task);
+          rez.serialize(mapped_event);
+        }
+        runtime->send_individual_remote_mapped(orig_proc, rez);
+      }
+      else
+        complete_mapping();
+      slice_owner->record_point_mapped(mapped_event);
       if (runtime->profiler != NULL)
         runtime->profiler->register_operation(this);
       return false;
@@ -7979,37 +7958,7 @@ namespace Legion {
       const RtEvent deferred = map_all_regions(must_epoch_owner, args);
       if (deferred.exists())
         return deferred;
-      RtEvent applied_condition;
-      // If we succeeded in mapping and we're a leaf so we are done mapping
-      if (is_leaf())
-      {
-        if (!map_applied_conditions.empty())
-        {
-          applied_condition = Runtime::merge_events(map_applied_conditions);
-          map_applied_conditions.clear();
-        }
-        // If we mapped remotely we might have a deferred complete mapping
-        // that we can trigger now
-        if (deferred_complete_mapping.exists())
-        {
-#ifdef DEBUG_LEGION
-          assert(is_remote());
-#endif
-          Runtime::trigger_event(deferred_complete_mapping, applied_condition);
-          applied_condition = deferred_complete_mapping;
-          deferred_complete_mapping = RtUserEvent::NO_RT_USER_EVENT;
-        }
-      }
-      else
-      {
-#ifdef DEBUG_LEGION
-        assert(!deferred_complete_mapping.exists());
-#endif
-        deferred_complete_mapping = Runtime::create_rt_user_event();
-        applied_condition = deferred_complete_mapping;
-      }
-      shard_manager->handle_post_mapped(true/*local*/, applied_condition);
-      complete_mapping(applied_condition);
+      shard_manager->handle_post_mapped(true/*local*/, mapped_event);
       return RtEvent::NO_RT_EVENT;
     }
 
@@ -8500,13 +8449,7 @@ namespace Legion {
       map_id = mid;
       orig_proc = proxy;
       current_proc = proxy;
-#ifdef DEBUG_LEGION
-      assert(!deferred_complete_mapping.exists());
-#endif
-      deferred_complete_mapping = Runtime::create_rt_user_event();
-      shard_manager->handle_post_mapped(true/*local*/, 
-          deferred_complete_mapping);
-      complete_mapping(deferred_complete_mapping);
+      shard_manager->handle_post_mapped(true/*local*/, mapped_event);
     }
 
     //--------------------------------------------------------------------------
@@ -8522,8 +8465,8 @@ namespace Legion {
         task_completion_effects.insert(effect);
       }
       slice_owner->record_completion_effect(effect);
-    }
-
+    } 
+   
     //--------------------------------------------------------------------------
     void PointTask::record_completion_effect(ApEvent effect,
                                           std::set<RtEvent> &map_applied_events)
@@ -11364,7 +11307,7 @@ namespace Legion {
         enumerate_points(false/*inlining*/);
       // Once we start mapping then we are no longer stealable
       stealable = false;
-      std::set<RtEvent> mapped_events;
+      std::vector<RtEvent> mapped_events;
       for (std::vector<PointTask*>::const_iterator it = 
             points.begin(); it != points.end(); it++)
       {
@@ -11372,8 +11315,12 @@ namespace Legion {
         // enable all the point tasks to be mapping in parallel with
         // each other in case they need to synchronize to create 
         // collective instances
-        mapped_events.insert((*it)->defer_perform_mapping(RtEvent::NO_RT_EVENT,
-                                    epoch_owner, args, 0/*invocation count*/));
+        const RtEvent point_mapped = concurrent_task ?
+          (*it)->defer_perform_mapping(RtEvent::NO_RT_EVENT,
+              epoch_owner, args, 0/*invocation count*/) :
+          (*it)->perform_mapping(epoch_owner);
+        if (point_mapped.exists())
+          mapped_events.push_back(point_mapped);
       }
       return Runtime::merge_events(mapped_events);
     }
@@ -11420,11 +11367,12 @@ namespace Legion {
         // enable all the point tasks to be mapping in parallel with
         // each other in case they need to synchronize to create 
         // collective instances
-        const RtEvent map_event = point->defer_perform_mapping(
-            RtEvent::NO_RT_EVENT, NULL/*must epoch*/, 
-            NULL/*defer args*/, 0/*invocation count*/);
-        if (map_event.exists() && !map_event.has_triggered())
-          point->defer_launch_task(map_event);
+        const RtEvent point_mapped = concurrent_task ?
+          point->defer_perform_mapping(RtEvent::NO_RT_EVENT,
+              NULL/*must epoch*/, NULL/*defer args*/, 0/*invocation count*/) :
+          point->perform_mapping();
+        if (point_mapped.exists() && !point_mapped.has_triggered())
+          point->defer_launch_task(point_mapped);
         else
           point->launch_task();
       }
@@ -12060,8 +12008,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SliceTask::record_point_mapped(RtEvent child_mapped,
-                            std::map<PhysicalManager*,unsigned> &child_acquired)
+    void SliceTask::record_point_mapped(RtEvent child_mapped)
     //--------------------------------------------------------------------------
     {
       bool needs_trigger = false;
@@ -12069,26 +12016,6 @@ namespace Legion {
         AutoLock o_lock(op_lock);
         if (child_mapped.exists())
           map_applied_conditions.insert(child_mapped);
-        if (!child_acquired.empty())
-        {
-          if (!acquired_instances.empty())
-          {
-            while (!child_acquired.empty())
-            {
-              std::map<PhysicalManager*,unsigned>::iterator next =
-                child_acquired.begin();
-              std::map<PhysicalManager*,unsigned>::iterator finder = 
-                acquired_instances.find(next->first);
-              if (finder == acquired_instances.end())
-                acquired_instances.insert(*next);
-              else
-                finder->second += next->second;
-              child_acquired.erase(next);
-            }
-          }
-          else
-            acquired_instances.swap(child_acquired);
-        }
 #ifdef DEBUG_LEGION
         assert(num_unmapped_points > 0);
 #endif
@@ -12414,9 +12341,6 @@ namespace Legion {
           point_completions.clear();
         }
       }
-      if (!acquired_instances.empty())
-        applied_condition = release_nonempty_acquired_instances(
-                          applied_condition, acquired_instances);
       if (is_remote())
       {
         // Only need to send something back if this wasn't origin mapped 

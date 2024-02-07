@@ -599,55 +599,26 @@ namespace Legion {
      */
     class Murmur3Hasher {
     public:
-      class HashVerifier {
-      public:
-        virtual bool verify_hash(const uint64_t hash[2],
-            const char *description, Provenance *provenance, bool every) = 0;
-      };
-    public:
-      // This constructor is used by clients that will use the HashVerifier
-      // piece of the hasher.
-      Murmur3Hasher(HashVerifier *verifier, bool precise,
-                    bool verify_every_call, Provenance *provenance = NULL,
-                    uint64_t seed = 0xCC892563);
-      // This constructor is used by clients that aim to get hash values
-      // out of the hasher.
-      Murmur3Hasher(bool precise, uint64_t seed = 0xCC892563);
+      Murmur3Hasher(uint64_t seed = 0xCC892563);
       Murmur3Hasher(const Murmur3Hasher&) = delete;
       Murmur3Hasher& operator=(const Murmur3Hasher&) = delete;
     public:
-      // Set of methods is used by clients who may be verifying
-      // hashed entries and then performing verification.
       template<typename T>
-      inline void hash(const T &value, const char *description);
-      inline void hash(const void *values, size_t size,const char *description);
-      inline bool verify(const char *description, bool every_call = false);
-    public:
-      // Set of methods for clients that want to use the hashed
-      // values directly.
-      template<typename T>
-      inline void hash(const T &value);
+      inline void hash(const T &value, bool precise = true);
       inline void hash(const void *value, size_t size);
-      // Defining a result struct here for the hash because we can't
-      // directly return a uint64_t[2].
+      inline void finalize(uint64_t hash[2]);
       struct Hash {
-        uint64_t x;
-        uint64_t y;
+        uint64_t x = 0;
+        uint64_t y = 0;
       };
-      inline Hash get_hash();
-    protected:
+      inline void finalize(Hash& hash);
+    private:
       inline uint64_t rotl64(uint64_t x, uint8_t r);
       inline uint64_t fmix64(uint64_t k);
-    public:
-      HashVerifier *const verifier;
-      Provenance *const provenance;
-    protected:
+    private:
       uint8_t blocks[16];
       uint64_t h1, h2, len;
       uint8_t bytes;
-    public:
-      const bool precise;
-      const bool verify_every_call;
     public:
       static constexpr uint64_t c1 = 0x87c37b91114253d5ULL;
       static constexpr uint64_t c2 = 0x4cf5ad432745937fULL;
@@ -1864,37 +1835,18 @@ namespace Legion {
     } 
 
     //-------------------------------------------------------------------------
-    inline Murmur3Hasher::Murmur3Hasher(HashVerifier *v, bool pre, bool every, 
-                                        Provenance *prov, uint64_t seed)
-      : verifier(v), provenance(prov), h1(seed), h2(seed), len(0), bytes(0),
-        precise(pre), verify_every_call(every)
-    //-------------------------------------------------------------------------
-    {
-    }
-
-    //-------------------------------------------------------------------------
-    inline Murmur3Hasher::Murmur3Hasher(bool pre, uint64_t seed)
-      : verifier(nullptr), provenance(nullptr), h1(seed), h2(seed), len(0), bytes(0),
-        precise(pre), verify_every_call(false)
+    inline Murmur3Hasher::Murmur3Hasher(uint64_t seed)
+      : h1(seed), h2(seed), len(0), bytes(0)
     //-------------------------------------------------------------------------
     {
     }
 
     //-------------------------------------------------------------------------
     template<typename T>
-    inline void Murmur3Hasher::hash(const T &value, const char *description)
+    inline void Murmur3Hasher::hash(const T &value, bool precise)
     //-------------------------------------------------------------------------
     {
-      hash<T>(value);
-      if (verify_every_call)
-        verify(description, true/*verify every call*/);
-    }
-
-    //-------------------------------------------------------------------------
-    template<typename T>
-    inline void Murmur3Hasher::hash(const T &value)
-    //-------------------------------------------------------------------------
-    {
+      static_assert(std::is_trivially_copyable<T>::value, "unserializable");
       const T *ptr = &value;
       const uint8_t *data = NULL;
       static_assert(sizeof(ptr) == sizeof(data), "Fuck c++");
@@ -1921,7 +1873,7 @@ namespace Legion {
 
     //-------------------------------------------------------------------------
     template<>
-    inline void Murmur3Hasher::hash<Domain>(const Domain &value)
+    inline void Murmur3Hasher::hash<Domain>(const Domain &value, bool precise)
     //-------------------------------------------------------------------------
     {
       for (int i = 0; i < 2*value.dim; i++)
@@ -1936,44 +1888,12 @@ namespace Legion {
 
     //-------------------------------------------------------------------------
     template<>
-    inline void Murmur3Hasher::hash<DomainPoint>(const DomainPoint &value)
+    inline void Murmur3Hasher::hash<DomainPoint>(const DomainPoint &value, 
+                                                 bool precise)
     //-------------------------------------------------------------------------
     {
       for (int i = 0; i < value.dim; i++)
         hash(value.point_data[i]);
-    }
-
-
-    //-------------------------------------------------------------------------
-    template<>
-    inline void Murmur3Hasher::hash<Domain>(const Domain &value,
-                                            const char *description)
-    //-------------------------------------------------------------------------
-    {
-      hash(value);
-      if (verify_every_call)
-        verify(description, true/*verify every call*/);
-    }
-
-    //-------------------------------------------------------------------------
-    template<>
-    inline void Murmur3Hasher::hash<DomainPoint>(const DomainPoint &value,
-                                                 const char *description)
-    //-------------------------------------------------------------------------
-    {
-      hash(value);
-      if (verify_every_call)
-        verify(description, true/*verify every call*/);
-    }
-
-    //-------------------------------------------------------------------------
-    inline void Murmur3Hasher::hash(const void *value, size_t size,
-                                    const char *description)
-    //-------------------------------------------------------------------------
-    {
-      hash(value, size);
-      if (verify_every_call)
-        verify(description, true/*verify every call*/);
     }
 
     //-------------------------------------------------------------------------
@@ -2004,7 +1924,7 @@ namespace Legion {
     }
 
     //-------------------------------------------------------------------------
-    inline Murmur3Hasher::Hash Murmur3Hasher::get_hash()
+    inline void Murmur3Hasher::finalize(uint64_t hash[2])
     //-------------------------------------------------------------------------
     {
       // tail
@@ -2046,17 +1966,18 @@ namespace Legion {
       h1 += h2;
       h2 += h1;
 
-      Hash hash = { .x = h1, .y = h2 };
-      return hash;
+      hash[0] = h1;
+      hash[1] = h2;
     }
 
     //-------------------------------------------------------------------------
-    inline bool Murmur3Hasher::verify(const char *description, bool every_call)
+    inline void Murmur3Hasher::finalize(Hash& hash)
     //-------------------------------------------------------------------------
     {
-      Hash hash = get_hash();
-      uint64_t hash_arr[2] = { hash.x, hash.y };
-      return verifier->verify_hash(hash_arr, description, provenance, every_call);
+      uint64_t temp[2];
+      finalize(temp);
+      hash.x = temp[0];
+      hash.y = temp[1];
     }
 
     //-------------------------------------------------------------------------

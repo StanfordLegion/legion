@@ -24,9 +24,7 @@
 namespace Legion {
   namespace Internal {
 
-    TraceHashHelper::TraceHashHelper() :
-      // TODO (rohany): Does precise need to be true here?
-      hasher(false /* precise */) {}
+    TraceHashHelper::TraceHashHelper() : hasher() {}
 
     Murmur3Hasher::Hash TraceHashHelper::hash(Operation* op) {
       Operation::OpKind kind = op->get_operation_kind();
@@ -72,8 +70,10 @@ namespace Legion {
                     << std::endl;
           assert(false);
         }
-      };
-      return hasher.get_hash();
+      }
+      Murmur3Hasher::Hash result;
+      hasher.finalize(result);
+      return result;
     }
 
     void TraceHashHelper::hash(TaskOp* op) {
@@ -103,7 +103,7 @@ namespace Legion {
       if (op->future.exists()) {
         hasher.hash(op->future.impl->did);
       } else {
-        hasher.hash(op->value, op->value_size);
+        hasher.hash((const void*)op->value, op->value_size);
       }
     }
 

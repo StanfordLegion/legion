@@ -4617,7 +4617,7 @@ namespace Legion {
 #endif
         for (int i = 0; runtime->safe_control_replication && (i < 2); i++)
         {
-          Murmur3Hasher hasher(repl_ctx, 
+          InnerContext::HashVerifier hasher(repl_ctx, 
               runtime->safe_control_replication > 1, i > 0);
           hasher.hash(
               ReplicateContext::REPLICATE_FUTURE_MAP_GET_ALL_FUTURES, __func__);
@@ -4672,7 +4672,7 @@ namespace Legion {
       context->record_blocking_call(future_coordinate);
       for (int i = 0; runtime->safe_control_replication && (i < 2); i++)
       {
-        Murmur3Hasher hasher(repl_ctx, 
+        InnerContext::HashVerifier hasher(repl_ctx, 
             runtime->safe_control_replication > 1, i > 0);
         hasher.hash(
             ReplicateContext::REPLICATE_FUTURE_MAP_WAIT_ALL_FUTURES, __func__);
@@ -12294,6 +12294,11 @@ namespace Legion {
           case INDIVIDUAL_REMOTE_OUTPUT_REGISTRATION:
             {
               runtime->handle_individual_remote_output_registration(derez);
+              break;
+            }
+          case INDIVIDUAL_REMOTE_MAPPED:
+            {
+              runtime->handle_individual_remote_mapped(derez);
               break;
             }
           case INDIVIDUAL_REMOTE_COMPLETE:
@@ -21864,6 +21869,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_individual_remote_mapped(Processor target,
+                                                Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(INDIVIDUAL_REMOTE_MAPPED, rez,
+                                          true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_individual_remote_complete(Processor target,
                                                         Serializer &rez)
     //--------------------------------------------------------------------------
@@ -24373,6 +24387,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       IndividualTask::handle_remote_output_registration(derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_individual_remote_mapped(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      IndividualTask::process_unpack_remote_mapped(derez);
     }
 
     //--------------------------------------------------------------------------

@@ -63,7 +63,6 @@ namespace Legion {
       void hash(FenceOp* op);
       void hash(CopyOp* op);
       void hash(AllReduceOp* op);
-      // TODO (rohany): DiscardOp.
       void hash(const RegionRequirement& req);
       void hash(const LogicalRegion& region);
     private:
@@ -560,10 +559,12 @@ namespace Legion {
     Murmur3Hasher::Hash AutomaticTracingContext<T>::get_new_unique_hash() {
       size_t idx = this->unique_hash_idx_counter;
       this->unique_hash_idx_counter++;
-      Murmur3Hasher hasher(false /* precise */);
+      Murmur3Hasher hasher;
       hasher.hash(Operation::OpKind::LAST_OP_KIND);
       hasher.hash(idx);
-      return hasher.get_hash();
+      Murmur3Hasher::Hash result;
+      hasher.finalize(result);
+      return result;
     }
 
     template <typename T>
