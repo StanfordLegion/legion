@@ -118,6 +118,7 @@ namespace Realm {
       ActiveMessage<typename SparsityMapRefCounter::SparsityMapRemoveReferencesMessage>
           amsg(owner);
       amsg->id = id;
+      amsg->count = 1;
       amsg->wait_on = wait_on;
       amsg.commit();
     }
