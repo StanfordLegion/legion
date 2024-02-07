@@ -694,12 +694,13 @@ namespace Realm {
 
     struct ChannelCopyInfo {
       ChannelCopyInfo(Memory _src_mem, Memory _dst_mem,
-                      Memory _ind_mem = Memory::NO_MEMORY, bool _is_scatter = false,
-                      bool _is_ranges = false, bool _is_direct = true,
-                      size_t _addr_size = 0)
+                      Memory _ind_mem = Memory::NO_MEMORY, size_t _num_spaces = 1,
+                      bool _is_scatter = false, bool _is_ranges = false,
+                      bool _is_direct = true, size_t _addr_size = 0)
         : src_mem(_src_mem)
         , dst_mem(_dst_mem)
         , ind_mem(_ind_mem)
+        , num_spaces(_num_spaces)
         , is_scatter(_is_scatter)
         , is_ranges(_is_ranges)
         , is_direct(_is_direct)
@@ -708,6 +709,7 @@ namespace Realm {
       Memory src_mem;
       Memory dst_mem;
       Memory ind_mem;
+      size_t num_spaces;
       bool is_scatter;
       bool is_ranges;
       bool is_direct;

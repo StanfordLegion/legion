@@ -3400,8 +3400,9 @@ namespace Realm {
 	// new path to compute
 	path_infos.resize(idx + 1);
         std::vector<size_t> src_frags{domain_size()}, dst_frags{1};
-        log_xpath.info() << "Find fastest path for gather op.";
+        log_xpath.info() << "Find fastest path for gather op spaces:" << spaces_size;
         ChannelCopyInfo copy_info{insts[i].get_location(), dst_mem, inst.get_location(),
+                                  spaces_size,
                                   /*is_scatter=*/false};
         populate_copy_info(copy_info);
         bool ok =
@@ -3716,6 +3717,7 @@ namespace Realm {
         std::vector<size_t> src_frags{1}, dst_frags{domain_size()};
         log_xpath.info() << "Find fastest path for scatter op.";
         ChannelCopyInfo copy_info{src_mem, insts[i].get_location(), inst.get_location(),
+                                  spaces_size,
                                   /*is_scatter=*/true};
         populate_copy_info(copy_info);
         bool ok =
