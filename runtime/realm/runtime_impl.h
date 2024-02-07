@@ -164,6 +164,12 @@ namespace Realm {
     //  implementation class and a table to look them up in
     struct Node {
       Node(void);
+      ~Node(void);
+
+      Node(const Node &) = delete;
+      Node &operator=(const Node &) = delete;
+      Node(Node &&) noexcept = delete;
+      Node &operator=(Node &&) noexcept = delete;
 
       // not currently resizable
       std::vector<MemoryImpl *> memories;
