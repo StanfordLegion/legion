@@ -12024,20 +12024,24 @@ namespace Legion {
         if (local_shard != target)
           send_message();
         RtEvent postcondition = post_gather();
-        AutoLock c_lock(collective_lock);
-#ifdef DEBUG_LEGION
-        assert((received_notifications+1) == expected_notifications);
-#endif
-        // remove the guard
-        received_notifications++;
-        if (done_event.to_trigger.exists())
+        RtUserEvent to_trigger;
         {
-          RtUserEvent to_trigger = done_event.to_trigger;
-          Runtime::trigger_event(to_trigger, postcondition);
-          done_event.postcondition = to_trigger;
+          AutoLock c_lock(collective_lock);
+#ifdef DEBUG_LEGION
+          assert((received_notifications+1) == expected_notifications);
+#endif
+          // remove the guard
+          received_notifications++;
+          if (done_event.to_trigger.exists())
+          {
+            to_trigger = done_event.to_trigger;
+            done_event.postcondition = to_trigger;
+          }
+          else
+            done_event.postcondition = postcondition;
         }
-        else
-          done_event.postcondition = postcondition;
+        if (to_trigger.exists())
+          Runtime::trigger_event(to_trigger, postcondition);
       }
     }
 
@@ -12095,20 +12099,24 @@ namespace Legion {
         if (local_shard != target)
           send_message();
         RtEvent postcondition = post_gather();
-        AutoLock c_lock(collective_lock);
-#ifdef DEBUG_LEGION
-        assert((received_notifications+1) == expected_notifications);
-#endif
-        // Remove the guard
-        received_notifications++;
-        if (done_event.to_trigger.exists())
+        RtUserEvent to_trigger;
         {
-          RtUserEvent to_trigger = done_event.to_trigger;
-          Runtime::trigger_event(to_trigger, postcondition);
-          done_event.postcondition = to_trigger;
+          AutoLock c_lock(collective_lock);
+#ifdef DEBUG_LEGION
+          assert((received_notifications+1) == expected_notifications);
+#endif
+          // Remove the guard
+          received_notifications++;
+          if (done_event.to_trigger.exists())
+          {
+            to_trigger = done_event.to_trigger;
+            done_event.postcondition = to_trigger;
+          }
+          else
+            done_event.postcondition = postcondition;
         }
-        else
-          done_event.postcondition = postcondition;
+        if (to_trigger.exists())
+          Runtime::trigger_event(to_trigger, postcondition);
       }
     }
 
