@@ -469,7 +469,7 @@ impl ProcID {
 pub struct Proc {
     pub proc_id: ProcID,
     pub kind: ProcKind,
-    pub entries: BTreeMap<ProfUID, ProcEntry>,
+    entries: BTreeMap<ProfUID, ProcEntry>,
     tasks: BTreeMap<OpID, ProfUID>,
     meta_tasks: BTreeMap<(OpID, VariantID), Vec<ProfUID>>,
     pub max_levels: u32,
@@ -561,6 +561,10 @@ impl Proc {
     ) -> Option<&mut ProcEntry> {
         let prof_uid = self.meta_tasks.get(&(op_id, variant_id))?.last()?;
         self.entries.get_mut(prof_uid)
+    }
+
+    pub fn find_entry(&self, prof_uid: ProfUID) -> Option<&ProcEntry> {
+        self.entries.get(&prof_uid)
     }
 
     pub fn is_empty(&self) -> bool {
@@ -2158,7 +2162,7 @@ impl CopyInstInfo {
 #[derive(Debug)]
 pub struct Copy {
     base: Base,
-    pub creator: EventID,
+    creator: EventID,
     fevent: EventID,
     time_range: TimeRange,
     chan_id: Option<ChanID>,
@@ -2282,7 +2286,7 @@ impl FillInstInfo {
 #[derive(Debug)]
 pub struct Fill {
     base: Base,
-    pub creator: EventID,
+    creator: EventID,
     fevent: EventID,
     time_range: TimeRange,
     chan_id: Option<ChanID>,
@@ -2332,7 +2336,7 @@ impl Fill {
 #[derive(Debug)]
 pub struct DepPart {
     base: Base,
-    pub creator: EventID,
+    creator: EventID,
     pub part_op: DepPartKind,
     time_range: TimeRange,
     pub op_id: OpID,

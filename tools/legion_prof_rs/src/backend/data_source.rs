@@ -887,14 +887,14 @@ impl StateDataSource {
     fn generate_creator_link(&self, prof_uid: ProfUID, create_time: Timestamp) -> Field {
         let proc_id = self.state.prof_uid_proc.get(&prof_uid).unwrap();
         let proc = self.state.procs.get(&proc_id).unwrap();
-        let mut entry = proc.entries.get(&prof_uid).unwrap();
+        let mut entry = proc.find_entry(prof_uid).unwrap();
         // Check to see if we need to link one of the subcalls instead
         // of the main task that produced the this operation
         // Subcalls are sorted from smallest to largest so the first one we hit
         // is the one we know that that actually made this box
-        for (call_uid, start_time, stop_time) in entry.subcalls.iter() {
-            if (*start_time <= create_time) && (create_time <= *stop_time) {
-                entry = proc.entries.get(call_uid).unwrap();
+        for (call_uid, start_time, stop_time) in &entry.subcalls {
+            if (*start_time <= create_time) && (create_time < *stop_time) {
+                entry = proc.find_entry(*call_uid).unwrap();
                 break;
             }
         }
@@ -1077,8 +1077,8 @@ impl StateDataSource {
                     Field::String(provenance.to_string()),
                 ));
             }
-            if let Some(creator_uid) = entry.creator {
-                if let Some(creator) = self.state.fevents.get(&creator_uid) {
+            if let Some(creator_event) = entry.creator {
+                if let Some(creator) = self.state.fevents.get(&creator_event) {
                     if let Some(create_time) = entry.time_range.create {
                         fields.push((
                             self.fields.creator,
