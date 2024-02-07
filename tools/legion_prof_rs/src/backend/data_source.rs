@@ -21,8 +21,8 @@ use crate::backend::common::{
 use crate::conditional_assert;
 use crate::state::{
     ChanEntry, ChanID, ChanKind, Color, Config, Container, ContainerEntry, Copy, CopyInstInfo,
-    Fill, FillInstInfo, Inst, InstUID, MemID, MemKind, NodeID, OpID, ProcID, ProcKind, ProfUID,
-    State, TimeRange, Timestamp,
+    Fill, FillInstInfo, Inst, InstUID, MemID, MemKind, NodeID, OpID, ProcEntryKind, ProcID,
+    ProcKind, ProfUID, State, TimeRange, Timestamp,
 };
 
 impl Into<ts::Timestamp> for Timestamp {
@@ -88,7 +88,6 @@ pub struct Fields {
     size: FieldID,
     interval: FieldID,
     num_items: FieldID,
-    op_id: FieldID,
     provenance: FieldID,
     status_ready: FieldID,
     status_running: FieldID,
@@ -96,6 +95,7 @@ pub struct Fields {
     deferred_time: FieldID,
     delayed_time: FieldID,
     creator: FieldID,
+    caller: FieldID,
 }
 
 #[derive(Debug)]
@@ -127,9 +127,8 @@ impl StateDataSource {
             inst_fspace: field_schema.insert("Field Space".to_owned(), true),
             inst_ispace: field_schema.insert("Index Space".to_owned(), true),
             inst_layout: field_schema.insert("Layout".to_owned(), true),
-            interval: field_schema.insert("Duration".to_owned(), false),
+            interval: field_schema.insert("Lifetime".to_owned(), false),
             num_items: field_schema.insert("Number of Items".to_owned(), false),
-            op_id: field_schema.insert("Operation".to_owned(), false),
             provenance: field_schema.insert("Provenance".to_owned(), true),
             size: field_schema.insert("Size".to_owned(), true),
             status_ready: field_schema.insert("Ready".to_owned(), false),
@@ -138,6 +137,7 @@ impl StateDataSource {
             deferred_time: field_schema.insert("Deferred".to_owned(), false),
             delayed_time: field_schema.insert("Delayed".to_owned(), false),
             creator: field_schema.insert("Creator".to_owned(), false),
+            caller: field_schema.insert("Caller".to_owned(), false),
         };
 
         let mut entry_map = BTreeMap::<EntryID, EntryKind>::new();
@@ -930,11 +930,13 @@ impl StateDataSource {
                 fields.push((self.fields.expanded_for_visibility, Field::Empty));
             }
             fields.push((self.fields.interval, Field::Interval(point_interval)));
-            if let Some(op_id) = entry.op_id {
-                fields.push((self.fields.op_id, Field::U64(op_id.0)));
-            }
             if let Some(initiation_op) = entry.initiation_op {
-                fields.push((self.fields.operation, self.generate_op_link(initiation_op)));
+                // FIXME: You might think that initiation_op is None rather than
+                // needing this check with zero, but backwards compatibility is hard
+                // You can remove this check once we stop needing to be compatible with Python
+                if initiation_op.0 > 0 {
+                    fields.push((self.fields.operation, self.generate_op_link(initiation_op)));
+                }
             }
             if let Some(op_id) = entry.op_id {
                 let op = self.state.find_op(op_id).unwrap();
@@ -963,11 +965,27 @@ impl StateDataSource {
                 ));
             }
             if let Some(creator) = self.state.fevents.get(&entry.creator) {
-                if let Some(create_time) = entry.time_range.create {
-                    fields.push((
-                        self.fields.creator,
-                        self.generate_creator_link(*creator, create_time),
-                    ));
+                // Check to see if these are function calls or tasks
+                match entry.kind {
+                    ProcEntryKind::MapperCall(_) | ProcEntryKind::RuntimeCall(_) => {
+                        if let Some(start_time) = entry.time_range.start {
+                            fields.push((
+                                self.fields.caller,
+                                // Use the first tick before the start so it is outside
+                                // of our box but hopefully in the caller's box
+                                self.generate_creator_link(*creator, start_time - Timestamp(1)),
+                            ));
+                        }
+                    }
+                    _ => {
+                        // Everything else can use the create time to find the creator
+                        if let Some(create_time) = entry.time_range.create {
+                            fields.push((
+                                self.fields.creator,
+                                self.generate_creator_link(*creator, create_time),
+                            ));
+                        }
+                    }
                 }
             }
             if let Some(ready) = entry.time_range.ready {
@@ -1069,7 +1087,12 @@ impl StateDataSource {
             self.generate_inst_layout(entry, &mut fields);
             self.generate_inst_size(entry, &mut fields);
             if let Some(initiation_op) = entry.initiation() {
-                fields.push((self.fields.operation, self.generate_op_link(initiation_op)));
+                // FIXME: You might think that initiation_op is None rather than
+                // needing this check with zero, but backwards compatibility is hard
+                // You can remove this check once we stop needing to be compatible with Python
+                if initiation_op.0 > 0 {
+                    fields.push((self.fields.operation, self.generate_op_link(initiation_op)));
+                }
             }
             if let Some(provenance) = provenance {
                 fields.push((
@@ -1288,7 +1311,12 @@ impl StateDataSource {
             self.generate_chan_reqs(entry, &mut fields);
             self.generate_chan_size(entry, &mut fields);
             if let Some(initiation_op) = entry.initiation() {
-                fields.push((self.fields.operation, self.generate_op_link(initiation_op)));
+                // FIXME: You might think that initiation_op is None rather than
+                // needing this check with zero, but backwards compatibility is hard
+                // You can remove this check once we stop needing to be compatible with Python
+                if initiation_op.0 > 0 {
+                    fields.push((self.fields.operation, self.generate_op_link(initiation_op)));
+                }
             }
             if let Some(provenance) = provenance {
                 fields.push((

@@ -2600,7 +2600,7 @@ impl State {
         proc.create_proc_entry(
             Base::new(alloc),
             None,
-            Some(op_id),
+            Some(op_id), // FIXME: should really make this None if op_id == 0 but backwards compatibilty with Python is hard
             ProcEntryKind::MetaTask(variant_id),
             time_range,
             creator,
@@ -2679,7 +2679,7 @@ impl State {
         proc.create_proc_entry(
             Base::new(alloc),
             None,
-            Some(op_id),
+            Some(op_id), // FIXME: should really make this None if op_id == 0 but backwards compatibilty with Python is hard
             ProcEntryKind::ProfTask,
             time_range,
             creator,
