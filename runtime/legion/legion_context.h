@@ -1006,7 +1006,10 @@ namespace Legion {
         template<typename T>
         inline void hash(const T &value, const char *description)
         {
-          Murmur3Hasher::hash<T>(value, precise);
+          if (precise)
+            Murmur3Hasher::hash<T,true>(value);
+          else
+            Murmur3Hasher::hash<T,false>(value);
           if (verify_every_call)
             verify(description, true/*verify every call*/);
         }

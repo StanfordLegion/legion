@@ -603,8 +603,8 @@ namespace Legion {
       Murmur3Hasher(const Murmur3Hasher&) = delete;
       Murmur3Hasher& operator=(const Murmur3Hasher&) = delete;
     public:
-      template<typename T>
-      inline void hash(const T &value, bool precise = true);
+      template<typename T, bool PRECISE = true>
+      inline void hash(const T &value);
       inline void hash(const void *value, size_t size);
       inline void finalize(uint64_t hash[2]);
     private:
@@ -1837,11 +1837,11 @@ namespace Legion {
     }
 
     //-------------------------------------------------------------------------
-    template<typename T>
-    inline void Murmur3Hasher::hash(const T &value, bool precise)
+    template<typename T, bool PRECISE>
+    inline void Murmur3Hasher::hash(const T &value)
     //-------------------------------------------------------------------------
     {
-      static_assert(std::is_trivially_copyable<T>::value, "unserializable");
+      static_assert(std::is_trivially_copyable<T>::value, "unhashable");
       const T *ptr = &value;
       const uint8_t *data = NULL;
       static_assert(sizeof(ptr) == sizeof(data), "Fuck c++");
@@ -1868,12 +1868,12 @@ namespace Legion {
 
     //-------------------------------------------------------------------------
     template<>
-    inline void Murmur3Hasher::hash<Domain>(const Domain &value, bool precise)
+    inline void Murmur3Hasher::hash<Domain, true>(const Domain &value)
     //-------------------------------------------------------------------------
     {
       for (int i = 0; i < 2*value.dim; i++)
         hash(value.rect_data[i]);
-      if (!value.dense() && precise)
+      if (!value.dense())
       {
         IndexSpaceHasher functor(value, *this);
         Internal::NT_TemplateHelper::demux<IndexSpaceHasher>(value.is_type,
@@ -1883,8 +1883,25 @@ namespace Legion {
 
     //-------------------------------------------------------------------------
     template<>
-    inline void Murmur3Hasher::hash<DomainPoint>(const DomainPoint &value, 
-                                                 bool precise)
+    inline void Murmur3Hasher::hash<Domain, false>(const Domain &value)
+    //-------------------------------------------------------------------------
+    {
+      for (int i = 0; i < 2*value.dim; i++)
+        hash(value.rect_data[i]);
+    }
+
+    //-------------------------------------------------------------------------
+    template<>
+    inline void Murmur3Hasher::hash<DomainPoint,true>(const DomainPoint &value)
+    //-------------------------------------------------------------------------
+    {
+      for (int i = 0; i < value.dim; i++)
+        hash(value.point_data[i]);
+    }
+
+    //-------------------------------------------------------------------------
+    template<>
+    inline void Murmur3Hasher::hash<DomainPoint,false>(const DomainPoint &value)
     //-------------------------------------------------------------------------
     {
       for (int i = 0; i < value.dim; i++)
