@@ -996,15 +996,32 @@ namespace Legion {
     public:
       class HashVerifier : protected Murmur3Hasher {
       public:
-        HashVerifier(InnerContext *ctx, bool precise,
-                     bool verify_every_call, Provenance *provenance = NULL);
+        HashVerifier(InnerContext *ctx, bool p,
+                     bool every_call, Provenance *prov = NULL)
+          : Murmur3Hasher(), context(ctx), provenance(prov), precise(p),
+            verify_every_call(every_call) { }
         HashVerifier(const HashVerifier &rhs) = delete;
         HashVerifier& operator=(const HashVerifier &rhs) = delete;
       public:
         template<typename T>
-        inline void hash(const T &value, const char *description);
-        inline void hash(const void *values, size_t size,const char *description);
-        inline bool verify(const char *description, bool every_call = false);
+        inline void hash(const T &value, const char *description)
+        {
+          Murmur3Hasher::hash<T>(value, precise);
+          if (verify_every_call)
+            verify(description, true/*verify every call*/);
+        }
+        inline void hash(const void *value, size_t size,const char *description)
+        {
+          Murmur3Hasher::hash(value, size);
+          if (verify_every_call)
+            verify(description, true/*verify every call*/);
+        }
+        inline bool verify(const char *description, bool every_call = false)
+        {
+          uint64_t hash[2];
+          finalize(hash);
+          return context->verify_hash(hash, description, provenance, every_call);
+        }
       public:
         InnerContext *const context;
         Provenance *const provenance;

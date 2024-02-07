@@ -1201,50 +1201,6 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
-    // Hash Verifier
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    InnerContext::HashVerifier::HashVerifier(InnerContext *ctx, bool p,
-                                             bool every_call, Provenance *prov)
-      : Murmur3Hasher(), context(ctx), provenance(prov), precise(p),
-        verify_every_call(every_call)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //-------------------------------------------------------------------------
-    template<typename T>
-    void InnerContext::HashVerifier::hash(const T &value, 
-                                          const char *description)
-    //-------------------------------------------------------------------------
-    {
-      Murmur3Hasher::hash<T>(value, precise);
-      if (verify_every_call)
-        verify(description, true/*verify every call*/);
-    }
-
-    //-------------------------------------------------------------------------
-    void InnerContext::HashVerifier::hash(const void *value, size_t size,
-                                          const char *description)
-    //-------------------------------------------------------------------------
-    {
-      Murmur3Hasher::hash(value, size);
-      if (verify_every_call)
-        verify(description, true/*verify every call*/);
-    }
-
-    //-------------------------------------------------------------------------
-    bool InnerContext::HashVerifier::verify(const char *description,
-                                            bool every_call)
-    //-------------------------------------------------------------------------
-    {
-      uint64_t hash[2];
-      finalize(hash);
-      return context->verify_hash(hash, description, provenance, every_call);
-    }
-
-    /////////////////////////////////////////////////////////////
     // Inner Context 
     /////////////////////////////////////////////////////////////
     
