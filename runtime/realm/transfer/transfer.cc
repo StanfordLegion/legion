@@ -3456,30 +3456,27 @@ namespace Realm {
         xdn.channel = path_infos[0].xd_channels[i];
         //xdn.kind = path_infos[0].xd_kinds[i];
 
-	xdn.factory = path_infos[0].xd_channels[i]->get_factory();
-	xdn.gather_control_input = -1;
-	xdn.scatter_control_input = -1;
-	if(i == 0) {
-	  xdn.inputs.resize(2);
-	  xdn.inputs[0] = TransferGraph::XDTemplate::mk_indirect(indirect_idx,
-								 1,
-								 insts[0],
-								 src_fld_start,
-								 src_fld_count);
-	  xdn.inputs[1] = addr_edge;
-	} else {
-	  xdn.inputs.resize(1);
-	  xdn.inputs[0] = TransferGraph::XDTemplate::mk_edge(ib_idx + i - 1);
-	}
-	if(i == (pathlen - 1)) {
-	  xdn.outputs.resize(1);
-	  xdn.outputs[0] = dst_edge;
-	} else {
-	  xdn.outputs.resize(1);
-	  xdn.outputs[0] = TransferGraph::XDTemplate::mk_edge(ib_idx + i);
+        xdn.factory = path_infos[0].xd_channels[i]->get_factory();
+        xdn.gather_control_input = -1;
+        xdn.scatter_control_input = -1;
+        if(i == 0) {
+          xdn.inputs.resize(2);
+          xdn.inputs[0] = TransferGraph::XDTemplate::mk_indirect(
+              indirect_idx, 1, insts[0], src_fld_start, src_fld_count);
+          xdn.inputs[1] = addr_edge;
+        } else {
+          xdn.inputs.resize(1);
+          xdn.inputs[0] = TransferGraph::XDTemplate::mk_edge(ib_idx + i - 1);
+        }
+        if(i == (pathlen - 1)) {
+          xdn.outputs.resize(1);
+          xdn.outputs[0] = dst_edge;
+        } else {
+          xdn.outputs.resize(1);
+          xdn.outputs[0] = TransferGraph::XDTemplate::mk_edge(ib_idx + i);
 
-	  TransferGraph::IBInfo& ibe = ib_edges[ib_idx + i];
-	  ibe.memory = path_infos[0].path[i + 1];
+          TransferGraph::IBInfo &ibe = ib_edges[ib_idx + i];
+          ibe.memory = path_infos[0].path[i + 1];
           ibe.size = Config::ib_size_bytes; // 1 << 20; /*TODO*/
         }
       }
@@ -3772,32 +3769,28 @@ namespace Realm {
         xdn.channel = path_infos[0].xd_channels[i];
         xdn.target_node = path_infos[0].xd_channels[i]->node;
 
-	xdn.factory = path_infos[0].xd_channels[i]->get_factory();
-	xdn.gather_control_input = -1;
-	xdn.scatter_control_input = -1;
-	if(i == (pathlen - 1)) {
-	  xdn.inputs.resize(2);
-	  xdn.inputs[1] = addr_edge;
-	} else {
-	  xdn.inputs.resize(1);
-	}
-	xdn.inputs[0] = ((i == 0) ?
-			   src_edge :
-			   TransferGraph::XDTemplate::mk_edge(ib_idx + i - 1));
+        xdn.factory = path_infos[0].xd_channels[i]->get_factory();
+        xdn.gather_control_input = -1;
+        xdn.scatter_control_input = -1;
+        if(i == (pathlen - 1)) {
+          xdn.inputs.resize(2);
+          xdn.inputs[1] = addr_edge;
+        } else {
+          xdn.inputs.resize(1);
+        }
+        xdn.inputs[0] =
+            ((i == 0) ? src_edge : TransferGraph::XDTemplate::mk_edge(ib_idx + i - 1));
 
-	xdn.outputs.resize(1);
-	if(i == (pathlen - 1)) {
-	  xdn.outputs[0] = TransferGraph::XDTemplate::mk_indirect(indirect_idx,
-								  1,
-								  insts[0],
-								  dst_fld_start,
-								  dst_fld_count);
-	} else {
-	  xdn.outputs.resize(1);
-	  xdn.outputs[0] = TransferGraph::XDTemplate::mk_edge(ib_idx + i);
+        xdn.outputs.resize(1);
+        if(i == (pathlen - 1)) {
+          xdn.outputs[0] = TransferGraph::XDTemplate::mk_indirect(
+              indirect_idx, 1, insts[0], dst_fld_start, dst_fld_count);
+        } else {
+          xdn.outputs.resize(1);
+          xdn.outputs[0] = TransferGraph::XDTemplate::mk_edge(ib_idx + i);
 
-	  TransferGraph::IBInfo& ibe = ib_edges[ib_idx + i];
-	  ibe.memory = path_infos[0].path[i + 1];
+          TransferGraph::IBInfo &ibe = ib_edges[ib_idx + i];
+          ibe.memory = path_infos[0].path[i + 1];
           ibe.size = Config::ib_size_bytes; // 1 << 20; /*TODO*/
         }
       }
@@ -5340,86 +5333,84 @@ namespace Realm {
 			  XferDesPortInfo::SCATTER_CONTROL_PORT :
 			  XferDesPortInfo::DATA_PORT);
 
-	switch(xdn.inputs[j].iotype) {
-	case TransferGraph::XDTemplate::IO_INST:
-	  {
-	    ii.peer_guid = XferDes::XFERDES_NO_GUID;
-	    ii.peer_port_idx = 0;
-	    ii.indirect_port_idx = -1;
-	    ii.mem = xdn.inputs[j].inst.inst.get_location();
-	    ii.inst = xdn.inputs[j].inst.inst;
-	    std::vector<FieldID> src_fields(xdn.inputs[j].inst.fld_count);
-	    std::vector<size_t> src_offsets(xdn.inputs[j].inst.fld_count);
-	    std::vector<size_t> src_sizes(xdn.inputs[j].inst.fld_count);
-	    for(size_t k = 0; k < xdn.inputs[j].inst.fld_count; k++) {
-	      src_fields[k] = desc.src_fields[xdn.inputs[j].inst.fld_start + k].id;
-	      src_offsets[k] = desc.src_fields[xdn.inputs[j].inst.fld_start + k].offset;
-	      src_sizes[k] = desc.src_fields[xdn.inputs[j].inst.fld_start + k].size;
-	    }
-	    ii.iter = desc.domain->create_iterator(xdn.inputs[j].inst.inst,
-						   desc.dim_order,
-						   src_fields,
-						   src_offsets,
-						   src_sizes);
-	    // use first field's serdez - they all have to be the same
-	    ii.serdez_id = desc.src_fields[xdn.inputs[j].inst.fld_start].serdez_id;
-	    ii.ib_offset = 0;
-	    ii.ib_size = 0;
-	    break;
-	  }
-	case TransferGraph::XDTemplate::IO_INDIRECT_INST:
-	  {
-	    ii.peer_guid = XferDes::XFERDES_NO_GUID;
-	    ii.peer_port_idx = 0;
-	    ii.indirect_port_idx = xdn.inputs[j].indirect.port;
-	    ii.mem = xdn.inputs[j].indirect.inst.get_location();
-	    ii.inst = xdn.inputs[j].indirect.inst;
-	    std::vector<FieldID> src_fields(xdn.inputs[j].indirect.fld_count);
-	    std::vector<size_t> src_offsets(xdn.inputs[j].indirect.fld_count);
-	    std::vector<size_t> src_sizes(xdn.inputs[j].indirect.fld_count);
-	    for(size_t k = 0; k < xdn.inputs[j].indirect.fld_count; k++) {
-	      src_fields[k] = desc.src_fields[xdn.inputs[j].indirect.fld_start + k].id;
-	      src_offsets[k] = desc.src_fields[xdn.inputs[j].indirect.fld_start + k].offset;
-	      src_sizes[k] = desc.src_fields[xdn.inputs[j].indirect.fld_start + k].size;
-	    }
-	    IndirectionInfo *gather_info = desc.indirects[xdn.inputs[j].indirect.ind_idx];
-            ii.iter = gather_info->create_indirect_iterator(
-                ii.mem, xdn.inputs[j].indirect.inst, src_fields, src_offsets, src_sizes,
-                xdn.channel);
-            // use first field's serdez - they all have to be the same
-            ii.serdez_id = desc.src_fields[xdn.inputs[j].indirect.fld_start].serdez_id;
-            ii.ib_offset = 0;
-            ii.ib_size = 0;
-            break;
+        switch(xdn.inputs[j].iotype) {
+        case TransferGraph::XDTemplate::IO_INST:
+        {
+          ii.peer_guid = XferDes::XFERDES_NO_GUID;
+          ii.peer_port_idx = 0;
+          ii.indirect_port_idx = -1;
+          ii.mem = xdn.inputs[j].inst.inst.get_location();
+          ii.inst = xdn.inputs[j].inst.inst;
+          std::vector<FieldID> src_fields(xdn.inputs[j].inst.fld_count);
+          std::vector<size_t> src_offsets(xdn.inputs[j].inst.fld_count);
+          std::vector<size_t> src_sizes(xdn.inputs[j].inst.fld_count);
+          for(size_t k = 0; k < xdn.inputs[j].inst.fld_count; k++) {
+            src_fields[k] = desc.src_fields[xdn.inputs[j].inst.fld_start + k].id;
+            src_offsets[k] = desc.src_fields[xdn.inputs[j].inst.fld_start + k].offset;
+            src_sizes[k] = desc.src_fields[xdn.inputs[j].inst.fld_start + k].size;
           }
+          ii.iter = desc.domain->create_iterator(xdn.inputs[j].inst.inst, desc.dim_order,
+                                                 src_fields, src_offsets, src_sizes);
+          // use first field's serdez - they all have to be the same
+          ii.serdez_id = desc.src_fields[xdn.inputs[j].inst.fld_start].serdez_id;
+          ii.ib_offset = 0;
+          ii.ib_size = 0;
+          break;
+        }
+        case TransferGraph::XDTemplate::IO_INDIRECT_INST:
+        {
+          ii.peer_guid = XferDes::XFERDES_NO_GUID;
+          ii.peer_port_idx = 0;
+          ii.indirect_port_idx = xdn.inputs[j].indirect.port;
+          ii.mem = xdn.inputs[j].indirect.inst.get_location();
+          ii.inst = xdn.inputs[j].indirect.inst;
+          std::vector<FieldID> src_fields(xdn.inputs[j].indirect.fld_count);
+          std::vector<size_t> src_offsets(xdn.inputs[j].indirect.fld_count);
+          std::vector<size_t> src_sizes(xdn.inputs[j].indirect.fld_count);
+          for(size_t k = 0; k < xdn.inputs[j].indirect.fld_count; k++) {
+            src_fields[k] = desc.src_fields[xdn.inputs[j].indirect.fld_start + k].id;
+            src_offsets[k] = desc.src_fields[xdn.inputs[j].indirect.fld_start + k].offset;
+            src_sizes[k] = desc.src_fields[xdn.inputs[j].indirect.fld_start + k].size;
+          }
+          IndirectionInfo *gather_info = desc.indirects[xdn.inputs[j].indirect.ind_idx];
+          ii.iter = gather_info->create_indirect_iterator(
+              ii.mem, xdn.inputs[j].indirect.inst, src_fields, src_offsets, src_sizes,
+              xdn.channel);
+          // use first field's serdez - they all have to be the same
+          ii.serdez_id = desc.src_fields[xdn.inputs[j].indirect.fld_start].serdez_id;
+          ii.ib_offset = 0;
+          ii.ib_size = 0;
+          break;
+        }
 
         case TransferGraph::XDTemplate::IO_EDGE:
-	  {
-	    ii.peer_guid = ib_pre_ids[xdn.inputs[j].edge].first;
-	    ii.peer_port_idx = ib_pre_ids[xdn.inputs[j].edge].second;
-	    ii.indirect_port_idx = -1;
-	    ii.mem = tg.ib_edges[xdn.inputs[j].edge].memory;
-	    ii.inst = RegionInstance::NO_INST;
-	    ii.ib_offset = ib_offsets[xdn.inputs[j].edge];
-	    ii.ib_size = tg.ib_edges[xdn.inputs[j].edge].size;
-            ii.iter = new WrappingFIFOIterator(ii.ib_offset, ii.ib_size);
-            ii.serdez_id = 0;
-            break;
-          }
+        {
+          ii.peer_guid = ib_pre_ids[xdn.inputs[j].edge].first;
+          ii.peer_port_idx = ib_pre_ids[xdn.inputs[j].edge].second;
+          ii.indirect_port_idx = -1;
+          ii.mem = tg.ib_edges[xdn.inputs[j].edge].memory;
+          ii.inst = RegionInstance::NO_INST;
+          ii.ib_offset = ib_offsets[xdn.inputs[j].edge];
+          ii.ib_size = tg.ib_edges[xdn.inputs[j].edge].size;
+          ii.iter = new WrappingFIFOIterator(ii.ib_offset, ii.ib_size);
+          ii.serdez_id = 0;
+          break;
+        }
 
-	case TransferGraph::XDTemplate::IO_FILL_DATA:
-	  {
-	    // don't actually want an input in this case
-	    assert((j == 0) && (xdn.inputs.size() == 1));
-	    inputs_info.clear();
-	    fill_data = static_cast<const char *>(desc.fill_data) + xdn.inputs[j].fill.fill_start;
-	    fill_size = xdn.inputs[j].fill.fill_size;
-            fill_total = xdn.inputs[j].fill.fill_total;
-	    break;
-	  }
-	default:
-	  assert(0);
-	}
+        case TransferGraph::XDTemplate::IO_FILL_DATA:
+        {
+          // don't actually want an input in this case
+          assert((j == 0) && (xdn.inputs.size() == 1));
+          inputs_info.clear();
+          fill_data =
+              static_cast<const char *>(desc.fill_data) + xdn.inputs[j].fill.fill_start;
+          fill_size = xdn.inputs[j].fill.fill_size;
+          fill_total = xdn.inputs[j].fill.fill_total;
+          break;
+        }
+        default:
+          assert(0);
+        }
 #if 0
 	if(0) {
 	    //mark_started = true;
@@ -5472,75 +5463,73 @@ namespace Realm {
 
 	oi.port_type = XferDesPortInfo::DATA_PORT;
 
-	switch(xdn.outputs[j].iotype) {
-	case TransferGraph::XDTemplate::IO_INST:
-	  {
-	    oi.peer_guid = XferDes::XFERDES_NO_GUID;
-	    oi.peer_port_idx = 0;
-	    oi.indirect_port_idx = -1;
-	    oi.mem = xdn.outputs[j].inst.inst.get_location();
-	    oi.inst = xdn.outputs[j].inst.inst;
-	    std::vector<FieldID> dst_fields(xdn.outputs[j].inst.fld_count);
-	    std::vector<size_t> dst_offsets(xdn.outputs[j].inst.fld_count);
-	    std::vector<size_t> dst_sizes(xdn.outputs[j].inst.fld_count);
-	    for(size_t k = 0; k < xdn.outputs[j].inst.fld_count; k++) {
-	      dst_fields[k] = desc.dst_fields[xdn.outputs[j].inst.fld_start + k].id;
-	      dst_offsets[k] = desc.dst_fields[xdn.outputs[j].inst.fld_start + k].offset;
-	      dst_sizes[k] = desc.dst_fields[xdn.outputs[j].inst.fld_start + k].size;
-	    }
-	    oi.iter = desc.domain->create_iterator(xdn.outputs[j].inst.inst,
-						   desc.dim_order,
-						   dst_fields,
-						   dst_offsets,
-						   dst_sizes);
-	    // use first field's serdez - they all have to be the same
-	    oi.serdez_id = desc.dst_fields[xdn.outputs[j].inst.fld_start].serdez_id;
-	    oi.ib_offset = 0;
-	    oi.ib_size = 0;
-	    break;
-	  }
-	case TransferGraph::XDTemplate::IO_INDIRECT_INST:
-	  {
-	    oi.peer_guid = XferDes::XFERDES_NO_GUID;
-	    oi.peer_port_idx = 0;
-	    oi.indirect_port_idx = xdn.outputs[j].indirect.port;
-	    oi.mem = xdn.outputs[j].indirect.inst.get_location();
-	    oi.inst = xdn.outputs[j].indirect.inst;
-	    std::vector<FieldID> dst_fields(xdn.outputs[j].indirect.fld_count);
-	    std::vector<size_t> dst_offsets(xdn.outputs[j].indirect.fld_count);
-	    std::vector<size_t> dst_sizes(xdn.outputs[j].indirect.fld_count);
-	    for(size_t k = 0; k < xdn.outputs[j].indirect.fld_count; k++) {
-	      dst_fields[k] = desc.dst_fields[xdn.outputs[j].indirect.fld_start + k].id;
-	      dst_offsets[k] = desc.dst_fields[xdn.outputs[j].indirect.fld_start + k].offset;
-	      dst_sizes[k] = desc.dst_fields[xdn.outputs[j].indirect.fld_start + k].size;
-	    }
-	    IndirectionInfo *scatter_info = desc.indirects[xdn.outputs[j].indirect.ind_idx];
-            oi.iter = scatter_info->create_indirect_iterator(
-                oi.mem, xdn.outputs[j].indirect.inst, dst_fields, dst_offsets, dst_sizes,
-                xdn.channel);
-            // use first field's serdez - they all have to be the same
-            oi.serdez_id = desc.dst_fields[xdn.outputs[j].indirect.fld_start].serdez_id;
-            oi.ib_offset = 0;
-            oi.ib_size = 0;
-            break;
+        switch(xdn.outputs[j].iotype) {
+        case TransferGraph::XDTemplate::IO_INST:
+        {
+          oi.peer_guid = XferDes::XFERDES_NO_GUID;
+          oi.peer_port_idx = 0;
+          oi.indirect_port_idx = -1;
+          oi.mem = xdn.outputs[j].inst.inst.get_location();
+          oi.inst = xdn.outputs[j].inst.inst;
+          std::vector<FieldID> dst_fields(xdn.outputs[j].inst.fld_count);
+          std::vector<size_t> dst_offsets(xdn.outputs[j].inst.fld_count);
+          std::vector<size_t> dst_sizes(xdn.outputs[j].inst.fld_count);
+          for(size_t k = 0; k < xdn.outputs[j].inst.fld_count; k++) {
+            dst_fields[k] = desc.dst_fields[xdn.outputs[j].inst.fld_start + k].id;
+            dst_offsets[k] = desc.dst_fields[xdn.outputs[j].inst.fld_start + k].offset;
+            dst_sizes[k] = desc.dst_fields[xdn.outputs[j].inst.fld_start + k].size;
           }
+          oi.iter = desc.domain->create_iterator(xdn.outputs[j].inst.inst, desc.dim_order,
+                                                 dst_fields, dst_offsets, dst_sizes);
+          // use first field's serdez - they all have to be the same
+          oi.serdez_id = desc.dst_fields[xdn.outputs[j].inst.fld_start].serdez_id;
+          oi.ib_offset = 0;
+          oi.ib_size = 0;
+          break;
+        }
+        case TransferGraph::XDTemplate::IO_INDIRECT_INST:
+        {
+          oi.peer_guid = XferDes::XFERDES_NO_GUID;
+          oi.peer_port_idx = 0;
+          oi.indirect_port_idx = xdn.outputs[j].indirect.port;
+          oi.mem = xdn.outputs[j].indirect.inst.get_location();
+          oi.inst = xdn.outputs[j].indirect.inst;
+          std::vector<FieldID> dst_fields(xdn.outputs[j].indirect.fld_count);
+          std::vector<size_t> dst_offsets(xdn.outputs[j].indirect.fld_count);
+          std::vector<size_t> dst_sizes(xdn.outputs[j].indirect.fld_count);
+          for(size_t k = 0; k < xdn.outputs[j].indirect.fld_count; k++) {
+            dst_fields[k] = desc.dst_fields[xdn.outputs[j].indirect.fld_start + k].id;
+            dst_offsets[k] =
+                desc.dst_fields[xdn.outputs[j].indirect.fld_start + k].offset;
+            dst_sizes[k] = desc.dst_fields[xdn.outputs[j].indirect.fld_start + k].size;
+          }
+          IndirectionInfo *scatter_info = desc.indirects[xdn.outputs[j].indirect.ind_idx];
+          oi.iter = scatter_info->create_indirect_iterator(
+              oi.mem, xdn.outputs[j].indirect.inst, dst_fields, dst_offsets, dst_sizes,
+              xdn.channel);
+          // use first field's serdez - they all have to be the same
+          oi.serdez_id = desc.dst_fields[xdn.outputs[j].indirect.fld_start].serdez_id;
+          oi.ib_offset = 0;
+          oi.ib_size = 0;
+          break;
+        }
 
-	case TransferGraph::XDTemplate::IO_EDGE:
-	  {
-	    oi.peer_guid = ib_next_ids[xdn.outputs[j].edge].first;
-	    oi.peer_port_idx = ib_next_ids[xdn.outputs[j].edge].second;
-	    oi.indirect_port_idx = -1;
-	    oi.mem = tg.ib_edges[xdn.outputs[j].edge].memory;
-	    oi.inst = RegionInstance::NO_INST;
-	    oi.ib_offset = ib_offsets[xdn.outputs[j].edge];
-	    oi.ib_size = tg.ib_edges[xdn.outputs[j].edge].size;
-	    oi.iter = new WrappingFIFOIterator(oi.ib_offset, oi.ib_size);
-	    oi.serdez_id = 0;
-	    break;
-	  }
-	default:
-	  assert(0);
-	}
+        case TransferGraph::XDTemplate::IO_EDGE:
+        {
+          oi.peer_guid = ib_next_ids[xdn.outputs[j].edge].first;
+          oi.peer_port_idx = ib_next_ids[xdn.outputs[j].edge].second;
+          oi.indirect_port_idx = -1;
+          oi.mem = tg.ib_edges[xdn.outputs[j].edge].memory;
+          oi.inst = RegionInstance::NO_INST;
+          oi.ib_offset = ib_offsets[xdn.outputs[j].edge];
+          oi.ib_size = tg.ib_edges[xdn.outputs[j].edge].size;
+          oi.iter = new WrappingFIFOIterator(oi.ib_offset, oi.ib_size);
+          oi.serdez_id = 0;
+          break;
+        }
+        default:
+          assert(0);
+        }
 #if 0
 	  if(xdn.outputs[j].edge_id == XDNemplate::DST_INST) {
 	    oi.peer_guid = XferDes::XFERDES_NO_GUID;
