@@ -447,11 +447,10 @@ namespace Realm {
       return inst_impl->redistrict(instances, layouts, num_layouts, prs, wait_on);
     }
 
-    Event RegionInstanceImpl::redistrict(RegionInstance* instances,
-                                         InstanceLayoutGeneric** layouts,
+    Event RegionInstanceImpl::redistrict(RegionInstance *instances,
+                                         InstanceLayoutGeneric **layouts,
                                          size_t num_layouts,
-                                         const ProfilingRequestSet &prs,
-                                         Event wait_on)
+                                         const ProfilingRequestSet &prs, Event wait_on)
     {
       assert(num_layouts > 0 || (layouts == nullptr && instances == nullptr));
 

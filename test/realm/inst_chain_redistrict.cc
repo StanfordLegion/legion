@@ -10,8 +10,9 @@ using namespace Realm;
 Logger log_app("app");
 
 // Task IDs, some IDs are reserved so start at first available number
-enum {
-  TOP_LEVEL_TASK = Processor::TASK_ID_FIRST_AVAILABLE+0,
+enum
+{
+  TOP_LEVEL_TASK = Processor::TASK_ID_FIRST_AVAILABLE + 0,
   WORKER_TASK,
 };
 
@@ -36,15 +37,13 @@ InstanceLayoutGeneric *create_layout(Rect<N> bounds)
   return ilg;
 }
 
-void top_level_task(const void *args, size_t arglen,
-		    const void *userdata, size_t userlen, Processor p)
+void top_level_task(const void *args, size_t arglen, const void *userdata, size_t userlen,
+                    Processor p)
 {
   Processor p_worker = p;
   Machine::ProcessorQuery pq(Machine::get_machine());
   pq.only_kind(Processor::LOC_PROC);
-  for(Machine::ProcessorQuery::iterator it = pq.begin();
-      it != pq.end();
-      ++it)
+  for(Machine::ProcessorQuery::iterator it = pq.begin(); it != pq.end(); ++it)
     p_worker = *it;
 
   // get a memory close to the target processor
@@ -117,15 +116,14 @@ int main(int argc, char **argv)
       num_iterations = atoi(argv[++i]);
       continue;
     }
-
   }
 
   rt.register_task(TOP_LEVEL_TASK, top_level_task);
   rt.register_task(WORKER_TASK, worker_task);
 
   Processor p = Machine::ProcessorQuery(Machine::get_machine())
-    .only_kind(Processor::LOC_PROC)
-    .first();
+                    .only_kind(Processor::LOC_PROC)
+                    .first();
   assert(p.exists());
 
   // collective launch of a single task - everybody gets the same finish event
@@ -136,7 +134,7 @@ int main(int argc, char **argv)
 
   // now sleep this thread until that shutdown actually happens
   rt.wait_for_shutdown();
-  
+
   return 0;
 }
 
