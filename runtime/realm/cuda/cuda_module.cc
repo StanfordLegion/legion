@@ -1120,6 +1120,7 @@ namespace Realm {
         return;
 
       r->add_dma_channel(new GPUChannel(this, XFER_GPU_IN_FB, &r->bgwork));
+      r->add_dma_channel(new GPUIndirectChannel(this, XFER_GPU_SC_IN_FB, &r->bgwork));
       r->add_dma_channel(new GPUfillChannel(this, &r->bgwork));
       r->add_dma_channel(new GPUreduceChannel(this, &r->bgwork));
 
@@ -1135,6 +1136,7 @@ namespace Realm {
       // only create a p2p channel if we have peers (and an fb)
       if(!peer_fbs.empty() || !cudaipc_mappings.empty()) {
         r->add_dma_channel(new GPUChannel(this, XFER_GPU_PEER_FB, &r->bgwork));
+        r->add_dma_channel(new GPUIndirectChannel(this, XFER_GPU_SC_PEER_FB, &r->bgwork));
       }
     }
 
@@ -2146,6 +2148,24 @@ namespace Realm {
       CHECK_CU(CUDA_DRIVER_FNPTR(cuLaunchKernel)(func_info.func, num_blocks, 1, 1,
                                                  num_threads, 1, 1, shared_mem_bytes,
                                                  stream->get_stream(), args, NULL));
+    }
+
+    void GPU::launch_indirect_copy_kernel(void *copy_info, size_t dim, size_t addr_size,
+                                          size_t field_size, size_t volume,
+                                          GPUStream *stream)
+    {
+      size_t log_addr_size = std::min(static_cast<size_t>(ctz(addr_size)),
+                                      CUDA_MEMCPY_KERNEL_MAX2_LOG2_BYTES - 1);
+      size_t log_field_size = std::min(static_cast<size_t>(ctz(field_size)),
+                                       CUDA_MEMCPY_KERNEL_MAX2_LOG2_BYTES - 1);
+
+      assert((1ULL << log_field_size) <= field_size);
+      assert(dim <= CUDA_MAX_DIM);
+      assert(dim >= 1);
+
+      GPUFuncInfo &func_info =
+          indirect_copy_kernels[dim - 1][log_addr_size][log_field_size];
+      launch_kernel(func_info, copy_info, volume, stream);
     }
 
     void GPU::launch_batch_affine_kernel(void *copy_info, size_t dim,
@@ -3474,16 +3494,20 @@ namespace Realm {
               0));
           batch_fill_affine_kernels[d - 1][log_bit_sz] = func_info;
 
-          std::snprintf(name, sizeof(name), "memcpy_indirect%uD_%u", d, bit_sz);
+          for(unsigned int log_addr_bit_sz = 2; log_addr_bit_sz < 4; log_addr_bit_sz++) {
+            const unsigned int addr_bit_sz = 8U << log_addr_bit_sz;
+            std::snprintf(name, sizeof(name), "memcpy_indirect%uD_%u%u", d, bit_sz,
+                          addr_bit_sz);
 
-          CHECK_CU(CUDA_DRIVER_FNPTR(cuModuleGetFunction)(&func_info.func, device_module,
-                                                          name));
+            CHECK_CU(CUDA_DRIVER_FNPTR(cuModuleGetFunction)(&func_info.func,
+                                                            device_module, name));
 
-          CHECK_CU(CUDA_DRIVER_FNPTR(cuOccupancyMaxPotentialBlockSize)(
-              &func_info.occ_num_blocks, &func_info.occ_num_threads, func_info.func, 0, 0,
-              0));
+            CHECK_CU(CUDA_DRIVER_FNPTR(cuOccupancyMaxPotentialBlockSize)(
+                &func_info.occ_num_blocks, &func_info.occ_num_threads, func_info.func, 0,
+                0, 0));
 
-          indirect_copy_kernels[d - 1][log_bit_sz] = func_info;
+            indirect_copy_kernels[d - 1][log_addr_bit_sz][log_bit_sz] = func_info;
+          }
         }
       }
 

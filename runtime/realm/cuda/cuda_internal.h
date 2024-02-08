@@ -646,6 +646,10 @@ namespace Realm {
       void launch_transpose_kernel(MemcpyTransposeInfo<size_t> &copy_info,
                                    size_t elemSize, GPUStream *stream);
 
+      void launch_indirect_copy_kernel(void *copy_info, size_t dim, size_t addr_size,
+                                       size_t field_size, size_t volume,
+                                       GPUStream *stream);
+
     protected:
       CUmodule load_cuda_module(const void *data);
 
@@ -676,7 +680,7 @@ namespace Realm {
       // log2(16 bytes) --> 4
       static const size_t CUDA_MEMCPY_KERNEL_MAX2_LOG2_BYTES = 5;
 
-      GPUFuncInfo indirect_copy_kernels[REALM_MAX_DIM]
+      GPUFuncInfo indirect_copy_kernels[REALM_MAX_DIM][CUDA_MEMCPY_KERNEL_MAX2_LOG2_BYTES]
                                        [CUDA_MEMCPY_KERNEL_MAX2_LOG2_BYTES];
       GPUFuncInfo batch_affine_kernels[REALM_MAX_DIM][CUDA_MEMCPY_KERNEL_MAX2_LOG2_BYTES];
       GPUFuncInfo batch_fill_affine_kernels[REALM_MAX_DIM]
@@ -989,6 +993,29 @@ namespace Realm {
       GPUCompletionEvent event;
     };
 
+    class GPUIndirectTransferCompletion : public GPUCompletionNotification {
+    public:
+      GPUIndirectTransferCompletion(
+          XferDes *_xd, int _read_port_idx, size_t _read_offset, size_t _read_size,
+          int _write_port_idx, size_t _write_offset, size_t _write_size,
+          int _read_ind_port_idx = -1, size_t _read_ind_offset = 0,
+          size_t _read_ind_size = 0, int _write_ind_port_idx = -1,
+          size_t _write_ind_offset = 0, size_t _write_ind_size = 0);
+
+      virtual void request_completed(void);
+
+    protected:
+      XferDes *xd;
+      int read_port_idx;
+      size_t read_offset, read_size;
+      int read_ind_port_idx;
+      size_t read_ind_offset, read_ind_size;
+      int write_port_idx;
+      size_t write_offset, write_size;
+      int write_ind_port_idx;
+      size_t write_ind_offset, write_ind_size;
+    };
+
     class GPUTransferCompletion : public GPUCompletionNotification {
     public:
       GPUTransferCompletion(XferDes *_xd, int _read_port_idx,
@@ -1047,6 +1074,95 @@ namespace Realm {
     private:
       std::vector<GPU *> src_gpus, dst_gpus;
       std::vector<bool> dst_is_ipc;
+    };
+
+    class GPUIndirectChannel;
+
+    class GPUIndirectXferDes : public XferDes {
+    public:
+      GPUIndirectXferDes(uintptr_t _dma_op, Channel *_channel, NodeID _launch_node,
+                         XferDesID _guid, const std::vector<XferDesPortInfo> &inputs_info,
+                         const std::vector<XferDesPortInfo> &outputs_info, int _priority,
+                         XferDesRedopInfo _redop_info);
+
+      long get_requests(Request **requests, long nr);
+      bool progress_xd(GPUIndirectChannel *channel, TimeLimit work_until);
+
+    protected:
+      std::vector<GPU *> src_gpus, dst_gpus;
+      std::vector<bool> dst_is_ipc;
+    };
+
+    class GPUIndirectChannel
+      : public SingleXDQChannel<GPUIndirectChannel, GPUIndirectXferDes> {
+    public:
+      GPUIndirectChannel(GPU *_src_gpu, XferDesKind _kind, BackgroundWorkManager *bgwork);
+      ~GPUIndirectChannel();
+
+      // multi-threading of cuda copies for a given device is disabled by
+      //  default (can be re-enabled with -cuda:mtdma 1)
+      static const bool is_ordered = true;
+
+      virtual bool needs_wrapping_iterator() const;
+      virtual Memory suggest_ib_memories(Memory memory) const;
+
+      virtual RemoteChannelInfo *construct_remote_info() const;
+
+      virtual uint64_t
+      supports_path(ChannelCopyInfo channel_copy_info, CustomSerdezID src_serdez_id,
+                    CustomSerdezID dst_serdez_id, ReductionOpID redop_id,
+                    size_t total_bytes, const std::vector<size_t> *src_frags,
+                    const std::vector<size_t> *dst_frags, XferDesKind *kind_ret = 0,
+                    unsigned *bw_ret = 0, unsigned *lat_ret = 0);
+
+      virtual XferDes *create_xfer_des(uintptr_t dma_op, NodeID launch_node,
+                                       XferDesID guid,
+                                       const std::vector<XferDesPortInfo> &inputs_info,
+                                       const std::vector<XferDesPortInfo> &outputs_info,
+                                       int priority, XferDesRedopInfo redop_info,
+                                       const void *fill_data, size_t fill_size,
+                                       size_t fill_total);
+
+      long submit(Request **requests, long nr);
+
+    protected:
+      friend class GPUIndirectXferDes;
+      GPU *src_gpu;
+    };
+
+    class GPUIndirectRemoteChannelInfo : public SimpleRemoteChannelInfo {
+    public:
+      GPUIndirectRemoteChannelInfo(NodeID _owner, XferDesKind _kind,
+                                   uintptr_t _remote_ptr,
+                                   const std::vector<Channel::SupportedPath> &_paths);
+
+      virtual RemoteChannel *create_remote_channel();
+
+      template <typename S>
+      bool serialize(S &serializer) const;
+
+      template <typename S>
+      static RemoteChannelInfo *deserialize_new(S &deserializer);
+
+    protected:
+      static Serialization::PolymorphicSerdezSubclass<RemoteChannelInfo,
+                                                      GPUIndirectRemoteChannelInfo>
+          serdez_subclass;
+    };
+
+    class GPUIndirectRemoteChannel : public RemoteChannel {
+      friend class GPUIndirectRemoteChannelInfo;
+
+    public:
+      GPUIndirectRemoteChannel(uintptr_t _remote_ptr);
+      virtual Memory suggest_ib_memories(Memory memory) const;
+      virtual uint64_t
+      supports_path(ChannelCopyInfo channel_copy_info, CustomSerdezID src_serdez_id,
+                    CustomSerdezID dst_serdez_id, ReductionOpID redop_id,
+                    size_t total_bytes, const std::vector<size_t> *src_frags,
+                    const std::vector<size_t> *dst_frags, XferDesKind *kind_ret = 0,
+                    unsigned *bw_ret = 0, unsigned *lat_ret = 0);
+      virtual bool needs_wrapping_iterator() const;
     };
 
     class GPUChannel : public SingleXDQChannel<GPUChannel, GPUXferDes> {
