@@ -237,7 +237,7 @@ namespace Legion {
       if (this->hashes.size() == this->batchsize) {
         // TODO (rohany): Define this sentinel somewhere else.
         // Insert the sentinel token before sending the string off to the meta task.
-        this->hashes.push_back(Murmur3Hasher::Hash{0, 0});
+        this->hashes.push_back(Murmur3Hasher::Hash{});
         // Initialize a descriptor for the pending result.
         this->jobs_in_flight.push_back(InFlightProcessingRequest{});
         InFlightProcessingRequest& request = this->jobs_in_flight.back();
