@@ -3728,7 +3728,8 @@ class State(object):
     def log_task_info(self, op_id: int, task_id: int, 
                       variant_id: int, proc_id: int,
                       create: int, ready: int, 
-                      start: int, stop: int, fevent: int
+                      start: int, stop: int,
+                      creator: int, fevent: int
     ) -> None:
         variant = self.find_or_create_variant(task_id, variant_id)
         task = self.find_or_create_task(op_id, variant, create, ready, start, stop)
@@ -3745,7 +3746,7 @@ class State(object):
                           create: int, ready: int, 
                           start: int, stop: int, 
                           gpu_start: int, gpu_stop: int,
-                          fevent: int
+                          creator: int, fevent: int
     ) -> None:
         # it is possible that gpu_start is larger than gpu_stop when cuda hijack is disabled, 
         # because the cuda event completions of these two timestamp may be out of order when
@@ -3766,7 +3767,7 @@ class State(object):
                       proc_id: int, 
                       create: int, ready: int, 
                       start: int, stop: int,
-                      fevent: int
+                      creator: int, fevent: int
     ) -> None:
         op = self.find_or_create_op(op_id)
         variant = self.find_or_create_meta_variant(lg_id)
@@ -3788,7 +3789,7 @@ class State(object):
     def log_copy_info(self, op_id: int, size: int,
                       create: int, ready: int, 
                       start: int, stop: int,
-                      fevent: int
+                      creator: int, fevent: int
     ) -> None:
         op = self.find_or_create_op(op_id)
         copy = self.create_copy(op, size, create, ready, start, stop, fevent)
@@ -3826,7 +3827,7 @@ class State(object):
     def log_fill_info(self, op_id: int, size: int,
                       create: int, ready: int, 
                       start: int, stop: int,
-                      fevent: int
+                      creator: int, fevent: int
     ) -> None:
         op = self.find_or_create_op(op_id)
         fill = self.create_fill(op, size, create, ready, start, stop, fevent)
@@ -3848,7 +3849,8 @@ class State(object):
     @typecheck
     def log_inst_timeline(self, inst_uid: int, inst_id: int,
                           mem_id: int, size: int, op_id: int,
-                          create: int, ready: int, destroy: int
+                          create: int, ready: int, destroy: int,
+                          creator: int
     ) -> None:
         op = self.find_or_create_op(op_id)
         inst = self.find_or_create_instance(inst_uid)
@@ -3862,7 +3864,8 @@ class State(object):
     @typecheck
     def log_partition_info(self, op_id: int, part_op: int, 
                            create: int, ready: int, 
-                           start: int, stop: int
+                           start: int, stop: int,
+                           creator: int
     ) -> None:
         op = self.find_or_create_op(op_id)
         deppart = self.create_deppart(part_op, op, create, ready, start, stop)
@@ -4054,7 +4057,8 @@ class State(object):
     # ProfTaskInfo
     @typecheck
     def log_proftask_info(self, proc_id: int, op_id: int, 
-                          start: int, stop: int, fevent: int
+                          start: int, stop: int, fevent: int,
+                          creator: int
     ) -> None:
         # we don't have a unique op_id for the profiling task itself, so we don't 
         # add to self.operations

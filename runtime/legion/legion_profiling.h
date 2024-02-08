@@ -186,9 +186,7 @@ namespace Legion {
         ProcID proc_id;
         timestamp_t create, ready, start, stop;
         std::deque<WaitInfo> wait_intervals;
-#ifdef LEGION_PROF_PROVENANCE
-        LgEvent provenance;
-#endif
+        LgEvent creator;
         LgEvent finish_event;
       };
       struct GPUTaskInfo {
@@ -200,9 +198,7 @@ namespace Legion {
         timestamp_t create, ready, start, stop;
         timestamp_t gpu_start, gpu_stop;
         std::deque<WaitInfo> wait_intervals;
-#ifdef LEGION_PROF_PROVENANCE
-        LgEvent provenance;
-#endif
+        LgEvent creator;
         LgEvent finish_event;
       };
       struct IndexSpacePointDesc {
@@ -305,9 +301,7 @@ namespace Legion {
         ProcID proc_id;
         timestamp_t create, ready, start, stop;
         std::deque<WaitInfo> wait_intervals;
-#ifdef LEGION_PROF_PROVENANCE
-        LgEvent provenance;
-#endif
+        LgEvent creator;
         LgEvent finish_event;
       };
       struct CopyInstInfo {
@@ -324,9 +318,7 @@ namespace Legion {
         unsigned long long size;
         timestamp_t create, ready, start, stop;
         LgEvent fevent;
-#ifdef LEGION_PROF_PROVENANCE
-        LgEvent provenance;
-#endif
+        LgEvent creator;
         std::vector<CopyInstInfo> inst_infos;
       };
       struct FillInstInfo {
@@ -341,9 +333,7 @@ namespace Legion {
         unsigned long long size;
         timestamp_t create, ready, start, stop;
         LgEvent fevent;
-#ifdef LEGION_PROF_PROVENANCE
-        LgEvent provenance;
-#endif
+        LgEvent creator;
         std::vector<FillInstInfo> inst_infos;
       };
       struct InstTimelineInfo {
@@ -354,15 +344,14 @@ namespace Legion {
         unsigned long long size;
         UniqueID op_id; // creator op for the instance
         timestamp_t create, ready, destroy;
+        LgEvent creator;
       };
       struct PartitionInfo {
       public:
         UniqueID op_id;
         DepPartOpKind part_op;
         unsigned long long create, ready, start, stop;
-#ifdef LEGION_PROF_PROVENANCE
-        LgEvent provenance;
-#endif
+        LgEvent creator;
       };
       struct MapperCallInfo {
       public:
@@ -406,18 +395,13 @@ namespace Legion {
         ProcID proc_id;
         UniqueID op_id;
         timestamp_t start, stop;
+        LgEvent creator;
         LgEvent finish_event;
       };
 #endif
       struct ProfilingInfo : public ProfilingResponseBase {
       public:
-        ProfilingInfo(ProfilingResponseHandler *h) 
-          : ProfilingResponseBase(h) 
-#ifdef LEGION_PROF_PROVENANCE
-          , provenance(!Processor::get_executing_processor.exists() ?
-          LgEvent::NO_LG_EVENT : LgEvent(Processor::get_current_finish_event()))
-#endif
-        { }
+        ProfilingInfo(ProfilingResponseHandler *h);
       public:
         size_t id; 
         union {
@@ -425,9 +409,7 @@ namespace Legion {
           InstanceNameClosure *closure;
         } extra;
         UniqueID op_id;
-#ifdef LEGION_PROF_PROVENANCE
-        LgEvent provenance;
-#endif
+        LgEvent creator;
       };
     public:
       LegionProfInstance(LegionProfiler *owner);
@@ -521,7 +503,7 @@ namespace Legion {
 #ifdef LEGION_PROF_SELF_PROFILE
     public:
       void record_proftask(Processor p, UniqueID op_id, timestamp_t start,
-                           timestamp_t stop, LgEvent finish_event);
+          timestamp_t stop, LgEvent creator, LgEvent finish_event);
 #endif
     public:
       void dump_state(LegionProfSerializer *serializer);
