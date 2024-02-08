@@ -994,9 +994,6 @@ namespace Realm {
 	assert(0);
       }
 
-      assert(impl->metadata.is_valid() &&
-             "instance metadata must be valid before accesses are performed");
-
       if(res)
 	log_inst.info() << "instance created: inst=" << inst << " external=" << *res << " ready=" << ready_event;
       else
