@@ -734,7 +734,6 @@ namespace Legion {
     class InnerContext : public TaskContext,
                          public ResourceTracker, 
                          public InstanceDeletionSubscriber,
-                         public Murmur3Hasher::HashVerifier,
                          public LegionHeapify<InnerContext> {
     public:
       enum PipelineStage {
@@ -995,6 +994,44 @@ namespace Legion {
       };
       typedef CollectiveViewCreatorBase::CollectiveResult CollectiveResult;
     public:
+      class HashVerifier : protected Murmur3Hasher {
+      public:
+        HashVerifier(InnerContext *ctx, bool p,
+                     bool every_call, Provenance *prov = NULL)
+          : Murmur3Hasher(), context(ctx), provenance(prov), precise(p),
+            verify_every_call(every_call) { }
+        HashVerifier(const HashVerifier &rhs) = delete;
+        HashVerifier& operator=(const HashVerifier &rhs) = delete;
+      public:
+        template<typename T>
+        inline void hash(const T &value, const char *description)
+        {
+          if (precise)
+            Murmur3Hasher::hash<T,true>(value);
+          else
+            Murmur3Hasher::hash<T,false>(value);
+          if (verify_every_call)
+            verify(description, true/*verify every call*/);
+        }
+        inline void hash(const void *value, size_t size,const char *description)
+        {
+          Murmur3Hasher::hash(value, size);
+          if (verify_every_call)
+            verify(description, true/*verify every call*/);
+        }
+        inline bool verify(const char *description, bool every_call = false)
+        {
+          uint64_t hash[2];
+          finalize(hash);
+          return context->verify_hash(hash, description, provenance, every_call);
+        }
+      public:
+        InnerContext *const context;
+        Provenance *const provenance;
+        const bool precise;
+        const bool verify_every_call;
+      };
+    public:
       InnerContext(Runtime *runtime, SingleTask *owner, int depth, 
                    bool full_inner, const std::vector<RegionRequirement> &reqs,
                    const std::vector<OutputRequirement> &output_reqs,
@@ -1033,7 +1070,7 @@ namespace Legion {
               std::map<IndexPartition,unsigned> &created_partitions,
               std::vector<DeletedPartition> &deleted_partitions,
               std::set<RtEvent> &preconditions);
-    public: // Murmur3Hasher::HashVerifier method
+    public: // HashVerifier method
       virtual bool verify_hash(const uint64_t hash[2],
           const char *description, Provenance *provenance, bool every);
     public:
@@ -1986,6 +2023,7 @@ namespace Legion {
     protected: // Queues for fusing together small meta-tasks
       mutable LocalLock                               prepipeline_lock;
       std::deque<std::pair<Operation*,GenerationID> > prepipeline_queue;
+      unsigned                                  outstanding_prepipeline_tasks;
     protected:
       mutable LocalLock                               dependence_lock;
       std::deque<Operation*>                          dependence_queue;
@@ -2472,7 +2510,7 @@ namespace Legion {
               std::map<IndexPartition,unsigned> &created_partitions,
               std::vector<DeletedPartition> &deleted_partitions,
               std::set<RtEvent> &preconditions);
-    public: // Murmur3Hasher::HashVerifier method
+    public: // HashVerifier method
       virtual bool verify_hash(const uint64_t hash[2],
           const char *description, Provenance *provenance, bool every);
     protected:
@@ -3200,33 +3238,33 @@ namespace Legion {
       static void register_universal_sharding_functor(Runtime *runtime);
       ShardingFunction* get_universal_sharding_function(void);
     public:
-      void hash_future(Murmur3Hasher &hasher, const unsigned safe_level, 
+      void hash_future(HashVerifier &hasher, const unsigned safe_level, 
                        const Future &future, const char *description) const;
-      static void hash_future_map(Murmur3Hasher &hasher, const FutureMap &map,
+      static void hash_future_map(HashVerifier &hasher, const FutureMap &map,
                                   const char *description);
-      static void hash_index_space_requirements(Murmur3Hasher &hasher,
+      static void hash_index_space_requirements(HashVerifier &hasher,
           const std::vector<IndexSpaceRequirement> &index_requirements);
-      static void hash_region_requirements(Murmur3Hasher &hasher,
+      static void hash_region_requirements(HashVerifier &hasher,
           const std::vector<RegionRequirement> &region_requirements);
-      static void hash_output_requirements(Murmur3Hasher &hasher,
+      static void hash_output_requirements(HashVerifier &hasher,
           const std::vector<OutputRequirement> &output_requirements);
-      static void hash_grants(Murmur3Hasher &hasher, 
+      static void hash_grants(HashVerifier &hasher, 
           const std::vector<Grant> &grants);
-      static void hash_phase_barriers(Murmur3Hasher &hasher,
+      static void hash_phase_barriers(HashVerifier &hasher,
           const std::vector<PhaseBarrier> &phase_barriers);
-      static void hash_argument(Murmur3Hasher &hasher,const unsigned safe_level,
+      static void hash_argument(HashVerifier &hasher,const unsigned safe_level,
                              const UntypedBuffer &arg, const char *description);
-      static void hash_predicate(Murmur3Hasher &hasher, const Predicate &pred,
+      static void hash_predicate(HashVerifier &hasher, const Predicate &pred,
                                  const char *description);
-      static void hash_static_dependences(Murmur3Hasher &hasher,
+      static void hash_static_dependences(HashVerifier &hasher,
           const std::vector<StaticDependence> *dependences);
-      void hash_task_launcher(Murmur3Hasher &hasher, 
+      void hash_task_launcher(HashVerifier &hasher, 
           const unsigned safe_level, const TaskLauncher &launcher) const;
-      void hash_index_launcher(Murmur3Hasher &hasher,
+      void hash_index_launcher(HashVerifier &hasher,
           const unsigned safe_level, const IndexTaskLauncher &launcher);
-      void hash_execution_constraints(Murmur3Hasher &hasher,
+      void hash_execution_constraints(HashVerifier &hasher,
           const ExecutionConstraintSet &constraints);
-      void hash_layout_constraints(Murmur3Hasher &hasher,
+      void hash_layout_constraints(HashVerifier &hasher,
           const LayoutConstraintSet &constraints, bool hash_pointers);
     public:
       ShardTask *const owner_shard;

@@ -41,7 +41,7 @@ GASNET		?=		# Location of GASNet installation
 CUDA		?=		# Location of CUDA installation
 HDF_ROOT	?=		# Location of HDF5 installation
 HIP_TARGET	?= ROCM		# Set the default HIP target
-PREFIX		?= /usr		# Location of where to install Legion
+PREFIX		?= 		# Location of where to install Legion
 
 # Put the binary file name here
 OUTFILE		?=

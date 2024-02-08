@@ -186,7 +186,7 @@ namespace Legion {
       virtual void handle_collective_message(Deserializer &derez);
       virtual RtEvent post_gather(void) { return RtEvent::NO_RT_EVENT; }
       inline bool is_target(void) const { return (target == local_shard); }
-      inline RtEvent get_done_event(void) const { return done_event; }
+      RtEvent get_done_event(void);
       // Use this method in case we don't actually end up using the collective
       virtual void elide_collective(void);
     protected:
@@ -197,7 +197,11 @@ namespace Legion {
       const int shard_collective_radix;
       const int expected_notifications;
     private:
-      RtUserEvent done_event; // only valid on owner shard
+      union DoneEvent {
+        DoneEvent(void) : to_trigger(RtUserEvent::NO_RT_USER_EVENT) { }
+        RtUserEvent to_trigger;
+        RtEvent postcondition;
+      } done_event;
       int received_notifications;
     };
 
@@ -556,6 +560,7 @@ namespace Legion {
       virtual RtEvent post_gather(void);
     protected:
       std::vector<RtEvent> postconditions;
+      const RtEvent done;
     };
 
     /**

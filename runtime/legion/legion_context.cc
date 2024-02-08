@@ -1226,6 +1226,7 @@ namespace Legion {
         virtual_mapped(virt_mapped), total_children_count(0),
         next_future_coordinate(0), total_tunable_count(0),
         executing_children_count(0), executed_children_count(0),
+        outstanding_prepipeline_tasks(0),
         ready_comp_queue(CompletionQueue::NO_QUEUE),
         enqueue_task_comp_queue(CompletionQueue::NO_QUEUE),
         distribute_task_comp_queue(CompletionQueue::NO_QUEUE),
@@ -8260,8 +8261,20 @@ namespace Legion {
       const GenerationID gen = op->get_generation();
       {
         AutoLock p_lock(prepipeline_lock);
-        issue_task = prepipeline_queue.empty();
-        prepipeline_queue.push_back(std::pair<Operation*,GenerationID>(op,gen));
+        prepipeline_queue.emplace_back(std::make_pair(op,gen));
+        // Cap the number of outstanding prepipeline tasks as no more than
+        // the number of utility processors that we're running on
+        if (outstanding_prepipeline_tasks < runtime->num_utility_procs)
+        {
+          const unsigned max_tasks = (prepipeline_queue.size() +
+              context_configuration.meta_task_vector_width - 1) / 
+            context_configuration.meta_task_vector_width;
+          if (outstanding_prepipeline_tasks < max_tasks)
+          {
+            issue_task = true;
+            outstanding_prepipeline_tasks++;
+          }
+        }
       }
       if (issue_task)
       {
@@ -8277,7 +8290,6 @@ namespace Legion {
     {
       std::vector<std::pair<Operation*,GenerationID> > to_perform;
       to_perform.reserve(context_configuration.meta_task_vector_width);
-      Operation *launch_next_op = NULL;
       {
         AutoLock p_lock(prepipeline_lock);
         for (unsigned idx = 0; idx < 
@@ -8288,24 +8300,30 @@ namespace Legion {
           to_perform.push_back(prepipeline_queue.front());
           prepipeline_queue.pop_front();
         }
-        if (!prepipeline_queue.empty())
-          launch_next_op = prepipeline_queue.back().first;
       }
       // Perform our prepipeline tasks
       for (std::vector<std::pair<Operation*,GenerationID> >::const_iterator it =
             to_perform.begin(); it != to_perform.end(); it++)
         it->first->execute_prepipeline_stage(it->second, false/*need wait*/);
-      if (launch_next_op != NULL)
+      AutoLock p_lock(prepipeline_lock);
+#ifdef DEBUG_LEGION
+      assert(outstanding_prepipeline_tasks > 0);
+#endif
+      const unsigned max_tasks = (prepipeline_queue.size() +
+              context_configuration.meta_task_vector_width - 1) /
+            context_configuration.meta_task_vector_width;
+      if (max_tasks < outstanding_prepipeline_tasks)
       {
-        // This could maybe give a bad op ID for profiling, but it
-        // will not impact the correctness of the code
-        PrepipelineArgs args(launch_next_op, this);
+        outstanding_prepipeline_tasks--;
+        return true;
+      }
+      else
+      {
+        PrepipelineArgs args(prepipeline_queue.front().first, this);
         runtime->issue_runtime_meta_task(args, LG_THROUGHPUT_WORK_PRIORITY);
         // Reference keeps flowing with the continuation
         return false;
       }
-      else
-        return true;
     }
 
     //--------------------------------------------------------------------------
@@ -12844,7 +12862,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && (i < 2) &&
             ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,i > 0);
+        HashVerifier hasher(this, runtime->safe_control_replication > 1, i > 0);
         hasher.hash(REPLICATE_PERFORM_REGISTRATION_CALLBACK, __func__);
         hasher.hash(dso->dso_name.c_str(), dso->dso_name.size(), "dso_name");
         hasher.hash(dso->symbol_name.c_str(), dso->symbol_name.size(),
@@ -12889,7 +12907,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && !shard_local &&
         (i < 2) && ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,i > 0);
+        HashVerifier hasher(this, runtime->safe_control_replication > 1, i > 0);
         hasher.hash(REPLICATE_FUTURE_FROM_VALUE, __func__);
         hash_future(hasher, runtime->safe_control_replication, result,"future");
         hasher.hash(size, "size");
@@ -12912,7 +12930,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && !shard_local &&
         (i < 2) && ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,i > 0);
+        HashVerifier hasher(this, runtime->safe_control_replication > 1, i > 0);
         hasher.hash(REPLICATE_FUTURE_FROM_VALUE, __func__);
         hash_future(hasher, runtime->safe_control_replication, result,"future");
         hasher.hash(size, "size");
@@ -12931,7 +12949,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && (i < 2) &&
             ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,i > 0);
+        HashVerifier hasher(this, runtime->safe_control_replication > 1, i > 0);
         hasher.hash(REPLICATE_CONSENSUS_MATCH, __func__);
         if (hasher.verify(__func__))
           break;
@@ -13000,7 +13018,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && (i < 2) &&
             ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,i > 0);
+        HashVerifier hasher(this, runtime->safe_control_replication > 1, i > 0);
         hasher.hash(REPLICATE_REGISTER_TASK_VARIANT, __func__);
         hasher.hash(registrar.task_id, "task_id");
         hasher.hash(registrar.global_registration, "global_registration");
@@ -13139,7 +13157,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && (i < 2) &&
             ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,i > 0);
+        HashVerifier hasher(this, runtime->safe_control_replication > 1, i > 0);
         hasher.hash(REPLICATE_GENERATE_DYNAMIC_TRACE_ID, __func__);
         if (hasher.verify(__func__))
           break;
@@ -13173,7 +13191,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && (i < 2) &&
             ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,i > 0);
+        HashVerifier hasher(this, runtime->safe_control_replication > 1, i > 0);
         hasher.hash(REPLICATE_GENERATE_DYNAMIC_MAPPER_ID, __func__);
         if (hasher.verify(__func__))
           break;
@@ -13207,7 +13225,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && (i < 2) &&
             ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,i > 0);
+        HashVerifier hasher(this, runtime->safe_control_replication > 1, i > 0);
         hasher.hash(REPLICATE_GENERATE_DYNAMIC_PROJECTION_ID, __func__);
         if (hasher.verify(__func__))
           break;
@@ -13242,7 +13260,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && (i < 2) &&
             ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,i > 0);
+        HashVerifier hasher(this, runtime->safe_control_replication > 1, i > 0);
         hasher.hash(REPLICATE_GENERATE_DYNAMIC_SHARDING_ID, __func__);
         if (hasher.verify(__func__))
           break;
@@ -13276,7 +13294,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && (i < 2) &&
             ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,i > 0);
+        HashVerifier hasher(this, runtime->safe_control_replication > 1, i > 0);
         hasher.hash(REPLICATE_GENERATE_DYNAMIC_TASK_ID, __func__);
         if (hasher.verify(__func__))
           break;
@@ -13310,7 +13328,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && (i < 2) &&
             ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,i > 0);
+        HashVerifier hasher(this, runtime->safe_control_replication > 1, i > 0);
         hasher.hash(REPLICATE_GENERATE_DYNAMIC_REDUCTION_ID, __func__);
         if (hasher.verify(__func__))
           break;
@@ -13344,7 +13362,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && (i < 2) &&
             ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,i > 0);
+        HashVerifier hasher(this, runtime->safe_control_replication > 1, i > 0);
         hasher.hash(REPLICATE_GENERATE_DYNAMIC_SERDEZ_ID, __func__);
         if (hasher.verify(__func__))
           break;
@@ -13381,7 +13399,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && (i < 2) &&
             ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,i > 0);
+        HashVerifier hasher(this, runtime->safe_control_replication > 1, i > 0);
         hasher.hash(kind, func);
         hasher.hash(arg, arglen, 
             (kind == REPLICATE_ATTACH_TASK_INFO) ? "task_id" : "handle");
@@ -13436,7 +13454,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplicateContext::hash_future(Murmur3Hasher &hasher,
+    void ReplicateContext::hash_future(HashVerifier &hasher,
                                        const unsigned safe_level,
                                        const Future &future, 
                                        const char *description) const
@@ -13464,7 +13482,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void ReplicateContext::hash_future_map(Murmur3Hasher &hasher,
+    /*static*/ void ReplicateContext::hash_future_map(HashVerifier &hasher,
                                   const FutureMap &map, const char *description)
     //--------------------------------------------------------------------------
     {
@@ -13475,7 +13493,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void ReplicateContext::hash_index_space_requirements(
-          Murmur3Hasher &hasher, const std::vector<IndexSpaceRequirement> &reqs)
+          HashVerifier &hasher, const std::vector<IndexSpaceRequirement> &reqs)
     //--------------------------------------------------------------------------
     {
       if (reqs.empty())
@@ -13490,7 +13508,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void ReplicateContext::hash_region_requirements(
-           Murmur3Hasher &hasher, const std::vector<RegionRequirement> &regions)
+           HashVerifier &hasher, const std::vector<RegionRequirement> &regions)
     //--------------------------------------------------------------------------
     {
       if (regions.empty())
@@ -13504,7 +13522,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void ReplicateContext::hash_output_requirements(
-           Murmur3Hasher &hasher, const std::vector<OutputRequirement> &outputs)
+           HashVerifier &hasher, const std::vector<OutputRequirement> &outputs)
     //--------------------------------------------------------------------------
     {
       if (outputs.empty())
@@ -13517,7 +13535,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void ReplicateContext::hash_grants(Murmur3Hasher &hasher,
+    /*static*/ void ReplicateContext::hash_grants(HashVerifier &hasher,
                                                const std::vector<Grant> &grants)
     //--------------------------------------------------------------------------
     {
@@ -13531,7 +13549,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void ReplicateContext::hash_phase_barriers(Murmur3Hasher &hasher,
+    /*static*/ void ReplicateContext::hash_phase_barriers(HashVerifier &hasher,
                                       const std::vector<PhaseBarrier> &barriers)
     //--------------------------------------------------------------------------
     {
@@ -13550,7 +13568,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void ReplicateContext::hash_argument(Murmur3Hasher &hasher,
+    /*static*/ void ReplicateContext::hash_argument(HashVerifier &hasher,
     unsigned safe_level, const UntypedBuffer &argument, const char *description)
     //--------------------------------------------------------------------------
     {
@@ -13561,7 +13579,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void ReplicateContext::hash_predicate(Murmur3Hasher &hasher,
+    /*static*/ void ReplicateContext::hash_predicate(HashVerifier &hasher,
                                  const Predicate &pred, const char *description)
     //--------------------------------------------------------------------------
     {
@@ -13583,7 +13601,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void ReplicateContext::hash_static_dependences(
-        Murmur3Hasher &hasher, const std::vector<StaticDependence> *dependences)
+        HashVerifier &hasher, const std::vector<StaticDependence> *dependences)
     //--------------------------------------------------------------------------
     {
       if ((dependences == NULL) || dependences->empty())
@@ -13608,7 +13626,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplicateContext::hash_task_launcher(Murmur3Hasher &hasher,
+    void ReplicateContext::hash_task_launcher(HashVerifier &hasher,
                   const unsigned safe_level, const TaskLauncher &launcher) const
     //--------------------------------------------------------------------------
     {
@@ -13641,7 +13659,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplicateContext::hash_index_launcher(Murmur3Hasher &hasher,
+    void ReplicateContext::hash_index_launcher(HashVerifier &hasher,
                    const unsigned safe_level, const IndexTaskLauncher &launcher)
     //--------------------------------------------------------------------------
     {
@@ -13685,7 +13703,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplicateContext::hash_execution_constraints(Murmur3Hasher &hasher,
+    void ReplicateContext::hash_execution_constraints(HashVerifier &hasher,
                                       const ExecutionConstraintSet &constraints)
     //--------------------------------------------------------------------------
     {
@@ -13725,7 +13743,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplicateContext::hash_layout_constraints(Murmur3Hasher &hasher,
+    void ReplicateContext::hash_layout_constraints(HashVerifier &hasher,
                      const LayoutConstraintSet &constraints, bool hash_pointers)
     //--------------------------------------------------------------------------
     {
@@ -14045,7 +14063,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && (i < 2) &&
             ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,
+        HashVerifier hasher(this, runtime->safe_control_replication > 1,
                              (i > 0), provenance);
         hasher.hash(REPLICATE_CREATE_INDEX_SPACE, __func__);
         hasher.hash(domain, "domain");
@@ -14138,7 +14156,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && (i < 2) &&
             ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,
+        HashVerifier hasher(this, runtime->safe_control_replication > 1,
                              i > 0, provenance);
         hasher.hash(REPLICATE_CREATE_UNBOUND_INDEX_SPACE, __func__);
         hasher.hash(type_tag, "type_tag");
@@ -14195,7 +14213,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && (i < 2) &&
             ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,
+        HashVerifier hasher(this, runtime->safe_control_replication > 1,
                              i > 0, provenance);
         hasher.hash(REPLICATE_CREATE_INDEX_SPACE, __func__);
         hash_future(hasher, runtime->safe_control_replication, future,"future");
@@ -14289,7 +14307,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && (i < 2) &&
             ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,
+        HashVerifier hasher(this, runtime->safe_control_replication > 1,
                              i > 0, provenance);
         hasher.hash(REPLICATE_CREATE_INDEX_SPACE, __func__);
         for (unsigned idx = 0; idx < points.size(); idx++)
@@ -14329,7 +14347,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && (i < 2) &&
           ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,
+        HashVerifier hasher(this, runtime->safe_control_replication > 1,
                              i > 0, provenance);
         hasher.hash(REPLICATE_CREATE_INDEX_SPACE, __func__);
         for (unsigned idx = 0; idx < rects.size(); idx++)
@@ -14368,7 +14386,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && (i < 2) &&
             ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,
+        HashVerifier hasher(this, runtime->safe_control_replication > 1,
                              i > 0, provenance);
         hasher.hash(REPLICATE_UNION_INDEX_SPACES, __func__);
         for (std::vector<IndexSpace>::const_iterator it = 
@@ -14469,7 +14487,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && (i < 2) &&
             ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,
+        HashVerifier hasher(this, runtime->safe_control_replication > 1,
                              i > 0, provenance);
         hasher.hash(REPLICATE_INTERSECT_INDEX_SPACES, __func__);
         for (std::vector<IndexSpace>::const_iterator it = 
@@ -14570,7 +14588,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && (i < 2) &&
             ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,
+        HashVerifier hasher(this, runtime->safe_control_replication > 1,
                              i > 0, provenance);
         hasher.hash(REPLICATE_SUBTRACT_INDEX_SPACES, __func__);
         hasher.hash(left, "left");
@@ -14660,7 +14678,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && (i < 2) &&
           ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,i > 0);
+        HashVerifier hasher(this, runtime->safe_control_replication > 1, i > 0);
         hasher.hash(REPLICATE_CREATE_SHARED_OWNERSHIP, __func__);
         hasher.hash(handle, "handle");
         if (hasher.verify(__func__))
@@ -14699,7 +14717,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && !unordered && (i < 2)
            && ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,
+        HashVerifier hasher(this, runtime->safe_control_replication > 1,
                              i > 0, provenance);
         hasher.hash(REPLICATE_DESTROY_INDEX_SPACE, __func__);
         hasher.hash(handle, "handle");
@@ -14798,7 +14816,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && (i < 2) &&
             ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,i > 0);
+        HashVerifier hasher(this, runtime->safe_control_replication > 1, i > 0);
         hasher.hash(REPLICATE_CREATE_SHARED_OWNERSHIP, __func__); 
         hasher.hash(handle, "handle");
         if (hasher.verify(__func__))
@@ -14829,7 +14847,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && !unordered && (i < 2)
            && ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,
+        HashVerifier hasher(this, runtime->safe_control_replication > 1,
                              i > 0, provenance);
         hasher.hash(REPLICATE_DESTROY_INDEX_PARTITION, __func__);
         hasher.hash(handle, "handle");
@@ -15055,7 +15073,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && (i < 2) &&
             ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,
+        HashVerifier hasher(this, runtime->safe_control_replication > 1,
                               i > 0, provenance);
         hasher.hash(REPLICATE_CREATE_EQUAL_PARTITION, __func__);
         hasher.hash(parent, "parent");
@@ -15098,7 +15116,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && (i < 2) &&
             ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,
+        HashVerifier hasher(this, runtime->safe_control_replication > 1,
                               i > 0, provenance);
         hasher.hash(REPLICATE_CREATE_PARTITION_BY_WEIGHTS, __func__);
         hasher.hash(parent, "parent");
@@ -15144,7 +15162,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && (i < 2) &&
             ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,
+        HashVerifier hasher(this, runtime->safe_control_replication > 1,
                               i > 0, provenance);
         hasher.hash(REPLICATE_CREATE_PARTITION_BY_UNION, __func__);
         hasher.hash(parent, "parent");
@@ -15238,7 +15256,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && (i < 2) &&
             ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,
+        HashVerifier hasher(this, runtime->safe_control_replication > 1,
                               i > 0, provenance);
         hasher.hash(REPLICATE_CREATE_PARTITION_BY_INTERSECTION, __func__);
         hasher.hash(parent, "parent");
@@ -15330,7 +15348,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && (i < 2) &&
             ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,
+        HashVerifier hasher(this, runtime->safe_control_replication > 1,
                               i > 0, provenance);
         hasher.hash(REPLICATE_CREATE_PARTITION_BY_INTERSECTION, __func__);
         hasher.hash(parent, "parent");
@@ -15406,7 +15424,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && (i < 2) &&
             ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,
+        HashVerifier hasher(this, runtime->safe_control_replication > 1,
                               i > 0, provenance);
         hasher.hash(REPLICATE_CREATE_PARTITION_BY_DIFFERENCE, __func__);
         hasher.hash(parent, "parent");
@@ -15488,7 +15506,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && (i < 2) &&
             ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,
+        HashVerifier hasher(this, runtime->safe_control_replication > 1,
                               i > 0, provenance);
         hasher.hash(REPLICATE_CREATE_CROSS_PRODUCT_PARTITIONS, __func__);
         hasher.hash(handle1, "handle1");
@@ -15649,7 +15667,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && (i < 2) &&
             ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,
+        HashVerifier hasher(this, runtime->safe_control_replication > 1,
                               i > 0, provenance);
         hasher.hash(REPLICATE_CREATE_ASSOCIATION, __func__);
         hasher.hash(domain, "domain");
@@ -15710,7 +15728,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && (i < 2) &&
             ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,
+        HashVerifier hasher(this, runtime->safe_control_replication > 1,
                               i > 0, provenance);
         hasher.hash(REPLICATE_CREATE_RESTRICTED_PARTITION, __func__);
         hasher.hash(parent, "parent");
@@ -15762,7 +15780,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && (i < 2) &&
             ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,
+        HashVerifier hasher(this, runtime->safe_control_replication > 1,
                               i > 0, provenance);
         hasher.hash(REPLICATE_CREATE_PARTITION_BY_DOMAIN, __func__);
         hasher.hash(parent, "parent");
@@ -15813,7 +15831,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && !skip_check &&(i < 2)
            && ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,
+        HashVerifier hasher(this, runtime->safe_control_replication > 1,
                               i > 0, provenance);
         hasher.hash(REPLICATE_CREATE_PARTITION_BY_DOMAIN, __func__);
         hasher.hash(parent, "parent");
@@ -15867,7 +15885,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && (i < 2) &&
             ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,
+        HashVerifier hasher(this, runtime->safe_control_replication > 1,
                               i > 0, provenance);
         hasher.hash(REPLICATE_CREATE_PARTITION_BY_FIELD, __func__);
         hasher.hash(handle, "handle");
@@ -15949,7 +15967,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && (i < 2) &&
             ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,
+        HashVerifier hasher(this, runtime->safe_control_replication > 1,
                               i > 0, provenance);
         hasher.hash(REPLICATE_CREATE_PARTITION_BY_IMAGE, __func__);
         hasher.hash(handle, "handle");
@@ -16030,7 +16048,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && (i < 2) &&
             ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,
+        HashVerifier hasher(this, runtime->safe_control_replication > 1,
                               i > 0, provenance);
         hasher.hash(REPLICATE_CREATE_PARTITION_BY_IMAGE_RANGE, __func__);
         hasher.hash(handle, "handle");
@@ -16110,7 +16128,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && (i < 2) &&
             ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,
+        HashVerifier hasher(this, runtime->safe_control_replication > 1,
                               i > 0, provenance);
         hasher.hash(REPLICATE_CREATE_PARTITION_BY_PREIMAGE, __func__);
         hasher.hash(projection, "projection");
@@ -16208,7 +16226,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && (i < 2) &&
             ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,
+        HashVerifier hasher(this, runtime->safe_control_replication > 1,
                               i > 0, provenance);
         hasher.hash(REPLICATE_CREATE_PARTITION_BY_PREIMAGE_RANGE, __func__);
         hasher.hash(projection, "projection");
@@ -16286,7 +16304,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && !trust && (i < 2) &&
             ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,
+        HashVerifier hasher(this, runtime->safe_control_replication > 1,
                               i > 0, provenance);
         hasher.hash(REPLICATE_CREATE_PENDING_PARTITION, __func__); 
         hasher.hash(parent, "parent");
@@ -16335,7 +16353,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && (i < 2) &&
             ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,
+        HashVerifier hasher(this, runtime->safe_control_replication > 1,
                               i > 0, provenance);
         hasher.hash(REPLICATE_CREATE_INDEX_SPACE_UNION, __func__);
         hasher.hash(parent, "parent");
@@ -16375,7 +16393,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && (i < 2) &&
             ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,
+        HashVerifier hasher(this, runtime->safe_control_replication > 1,
                               i > 0, provenance);
         hasher.hash(REPLICATE_CREATE_INDEX_SPACE_UNION, __func__);
         hasher.hash(parent, "parent");
@@ -16413,7 +16431,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && (i < 2) &&
             ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,
+        HashVerifier hasher(this, runtime->safe_control_replication > 1,
                               i > 0, provenance);
         hasher.hash(REPLICATE_CREATE_INDEX_SPACE_INTERSECTION, __func__);
         hasher.hash(parent, "parent");
@@ -16454,7 +16472,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && (i < 2) &&
             ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,
+        HashVerifier hasher(this, runtime->safe_control_replication > 1,
                               i > 0, provenance);
         hasher.hash(REPLICATE_CREATE_INDEX_SPACE_INTERSECTION, __func__);
         hasher.hash(parent, "parent");
@@ -16494,7 +16512,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && (i < 2) &&
             ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,
+        HashVerifier hasher(this, runtime->safe_control_replication > 1,
                               i > 0, provenance);
         hasher.hash(REPLICATE_CREATE_INDEX_SPACE_DIFFERENCE, __func__);
         hasher.hash(parent, "parent");
@@ -16675,7 +16693,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && (i < 2) &&
             ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,
+        HashVerifier hasher(this, runtime->safe_control_replication > 1,
                               i > 0, provenance);
         hasher.hash(REPLICATE_CREATE_FIELD_SPACE, __func__);
         if (hasher.verify(__func__))
@@ -16771,7 +16789,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && (i < 2) &&
             ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,
+        HashVerifier hasher(this, runtime->safe_control_replication > 1,
                               i > 0, provenance);
         hasher.hash(REPLICATE_CREATE_FIELD_SPACE, __func__);
         for (std::vector<size_t>::const_iterator it = 
@@ -16876,7 +16894,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && (i < 2) &&
             ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,
+        HashVerifier hasher(this, runtime->safe_control_replication > 1,
                               i > 0, provenance);
         hasher.hash(REPLICATE_CREATE_FIELD_SPACE, __func__);
         for (std::vector<Future>::const_iterator it = 
@@ -17050,7 +17068,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && !unordered && (i < 2)
             && ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,
+        HashVerifier hasher(this, runtime->safe_control_replication > 1,
                               i > 0, provenance);
         hasher.hash(REPLICATE_DESTROY_FIELD_SPACE, __func__);
         hasher.hash(handle, "handle");
@@ -17147,7 +17165,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && (i < 2) &&
             ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,
+        HashVerifier hasher(this, runtime->safe_control_replication > 1,
                               i > 0, provenance);
         hasher.hash(REPLICATE_ALLOCATE_FIELD, __func__);
         hasher.hash(space, "space");
@@ -17276,7 +17294,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && (i < 2) &&
             ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,
+        HashVerifier hasher(this, runtime->safe_control_replication > 1,
                               i > 0, provenance);
         hasher.hash(REPLICATE_ALLOCATE_FIELD, __func__);
         hasher.hash(space, "space");
@@ -17388,7 +17406,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && (i < 2) &&
             ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,
+        HashVerifier hasher(this, runtime->safe_control_replication > 1,
                               i > 0, provenance);
         hasher.hash(REPLICATE_FREE_FIELD, __func__);
         hasher.hash(space, "space");
@@ -17447,7 +17465,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && (i < 2) &&
             ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,
+        HashVerifier hasher(this, runtime->safe_control_replication > 1,
                               i > 0, provenance);
         hasher.hash(REPLICATE_ALLOCATE_FIELDS, __func__);
         hasher.hash(space, "space");
@@ -17552,7 +17570,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && (i < 2) &&
             ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,
+        HashVerifier hasher(this, runtime->safe_control_replication > 1,
                               i > 0, provenance);
         hasher.hash(REPLICATE_ALLOCATE_FIELDS, __func__);
         hasher.hash(space, "space");
@@ -17676,7 +17694,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && !unordered && (i < 2)
             && ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,
+        HashVerifier hasher(this, runtime->safe_control_replication > 1,
                               i > 0, provenance);
         hasher.hash(REPLICATE_FREE_FIELDS, __func__);
         hasher.hash(space, "space");
@@ -17745,7 +17763,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && (i < 2) &&
             ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,
+        HashVerifier hasher(this, runtime->safe_control_replication > 1,
                               i > 0, provenance);
         hasher.hash(REPLICATE_CREATE_LOGICAL_REGION, __func__);
         hasher.hash(index_space, "index_space");
@@ -17885,7 +17903,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && (i < 2) &&
             ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,i > 0);
+        HashVerifier hasher(this, runtime->safe_control_replication > 1, i > 0);
         hasher.hash(REPLICATE_CREATE_SHARED_OWNERSHIP, __func__);
         hasher.hash(handle, "handle");
         if (hasher.verify("create_shared_ownership"))
@@ -17923,7 +17941,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && !unordered && (i < 2)
             && ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,
+        HashVerifier hasher(this, runtime->safe_control_replication > 1,
                               i > 0, provenance);
         hasher.hash(REPLICATE_DESTROY_LOGICAL_REGION, __func__);
         hasher.hash(handle, "handle");
@@ -18012,7 +18030,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && (i < 2) &&
             ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,i > 0);
+        HashVerifier hasher(this, runtime->safe_control_replication > 1, i > 0);
         hasher.hash(REPLICATE_RESET_EQUIVALENCE_SETS, __func__);
         hasher.hash(parent, "parent");
         hasher.hash(region, "region");
@@ -18055,7 +18073,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && !unordered && (i < 2)
             && ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,i > 0);
+        HashVerifier hasher(this, runtime->safe_control_replication > 1, i > 0);
         hasher.hash(REPLICATE_CREATE_FIELD_ALLOCATOR, __func__);
         hasher.hash(handle, "handle");
         if (hasher.verify(__func__))
@@ -18319,7 +18337,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && (i < 2) &&
             ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,
+        HashVerifier hasher(this, runtime->safe_control_replication > 1,
                               i > 0, provenance);
         hasher.hash(REPLICATE_EXECUTE_TASK, __func__);
         hash_task_launcher(hasher, runtime->safe_control_replication, launcher);
@@ -18383,7 +18401,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && (i < 2) &&
           ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,
+        HashVerifier hasher(this, runtime->safe_control_replication > 1,
                               i > 0, provenance);
         hasher.hash(REPLICATE_EXECUTE_INDEX_SPACE, __func__);
         hash_index_launcher(hasher, runtime->safe_control_replication,launcher);
@@ -18456,7 +18474,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && (i < 2) &&
             ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,
+        HashVerifier hasher(this, runtime->safe_control_replication > 1,
                               i > 0, provenance);
         hasher.hash(REPLICATE_EXECUTE_INDEX_SPACE, __func__);
         hash_index_launcher(hasher, runtime->safe_control_replication,launcher);
@@ -18526,7 +18544,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && (i < 2) &&
             ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,
+        HashVerifier hasher(this, runtime->safe_control_replication > 1,
                               i > 0, provenance);
         hasher.hash(REPLICATE_REDUCE_FUTURE_MAP, __func__);
         hash_future_map(hasher, future_map, "future_map");
@@ -18649,7 +18667,7 @@ namespace Legion {
         for (int i = 0; runtime->safe_control_replication && (i < 2) &&
               ((current_trace == NULL) || !current_trace->is_fixed()); i++)
         {
-          Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,
+          HashVerifier hasher(this, runtime->safe_control_replication > 1,
                                 i > 0, provenance);
           hasher.hash(REPLICATE_CONSTRUCT_FUTURE_MAP, __func__);
           if (check_space)
@@ -18756,7 +18774,7 @@ namespace Legion {
         for (int i = 0; runtime->safe_control_replication && (i < 2) &&
               ((current_trace == NULL) || !current_trace->is_fixed()); i++)
         {
-          Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,
+          HashVerifier hasher(this, runtime->safe_control_replication > 1,
                                 i > 0, provenance);
           hasher.hash(REPLICATE_CONSTRUCT_FUTURE_MAP, __func__);
           if (check_space)
@@ -18848,7 +18866,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && (i < 2) &&
             ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,
+        HashVerifier hasher(this, runtime->safe_control_replication > 1,
                               i > 0, provenance);
         hasher.hash(REPLICATE_MAP_REGION, __func__);
         Serializer rez;
@@ -18932,7 +18950,7 @@ namespace Legion {
         for (int i = 0; runtime->safe_control_replication && (i < 2) &&
               ((current_trace == NULL) || !current_trace->is_fixed()); i++)
         {
-          Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,
+          HashVerifier hasher(this, runtime->safe_control_replication > 1,
                                 i > 0, provenance);
           hasher.hash(REPLICATE_REMAP_REGION, __func__);
           Serializer rez;
@@ -18978,7 +18996,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && (i < 2) &&
             ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,
+        HashVerifier hasher(this, runtime->safe_control_replication > 1,
                               i > 0, provenance);
         hasher.hash(REPLICATE_FILL_FIELDS, __func__);
         hasher.hash(launcher.handle, "handle");
@@ -19055,7 +19073,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && (i < 2) &&
             ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,
+        HashVerifier hasher(this, runtime->safe_control_replication > 1,
                               i > 0, provenance);
         hasher.hash(REPLICATE_FILL_FIELDS, __func__);
         hasher.hash(launcher.launch_domain, "launch_domain");
@@ -19145,7 +19163,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && (i < 2) &&
             ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,
+        HashVerifier hasher(this, runtime->safe_control_replication > 1,
                               i > 0, provenance);
         hasher.hash(REPLICATE_DISCARD_FIELDS, __func__);
         hasher.hash(launcher.handle, "handle");
@@ -19202,7 +19220,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && (i < 2) &&
             ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,
+        HashVerifier hasher(this, runtime->safe_control_replication > 1,
                               i > 0, provenance);
         hasher.hash(REPLICATE_ISSUE_COPY, __func__);
         hash_region_requirements(hasher, launcher.src_requirements);
@@ -19280,7 +19298,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && (i < 2) &&
             ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,
+        HashVerifier hasher(this, runtime->safe_control_replication > 1,
                               i > 0, provenance);
         hasher.hash(REPLICATE_ISSUE_COPY, __func__);
         hash_region_requirements(hasher, launcher.src_requirements);
@@ -19373,7 +19391,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && (i < 2) &&
             ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,i > 0);
+        HashVerifier hasher(this, runtime->safe_control_replication > 1, i > 0);
         hasher.hash(REPLICATE_ACQUIRE, __func__);
         hasher.hash(launcher.logical_region, "logical_region");
         hasher.hash(launcher.parent_region, "parent_region");
@@ -19439,7 +19457,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && (i < 2) &&
             ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,i > 0);
+        HashVerifier hasher(this, runtime->safe_control_replication > 1, i > 0);
         hasher.hash(REPLICATE_RELEASE, __func__);
         hasher.hash(launcher.logical_region, "logical_region");
         hasher.hash(launcher.parent_region, "parent_region");
@@ -19507,7 +19525,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && (i < 2) &&
             ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,
+        HashVerifier hasher(this, runtime->safe_control_replication > 1,
                               i > 0, provenance);
         hasher.hash(REPLICATE_ATTACH_RESOURCE, __func__);
         hasher.hash(launcher.resource, "resource");
@@ -19593,7 +19611,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && (i < 2) &&
             ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,
+        HashVerifier hasher(this, runtime->safe_control_replication > 1,
                               i > 0, provenance);
         hasher.hash(REPLICATE_INDEX_ATTACH_RESOURCE, __func__);
         hasher.hash(launcher.resource, "resource");
@@ -19727,7 +19745,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && !unordered && (i < 2)
             && ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,
+        HashVerifier hasher(this, runtime->safe_control_replication > 1,
                               i > 0, provenance);
         hasher.hash(REPLICATE_DETACH_RESOURCE, __func__);
         Serializer rez;
@@ -19774,7 +19792,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && !unordered && (i < 2)
             && ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,
+        HashVerifier hasher(this, runtime->safe_control_replication > 1,
                               i > 0, provenance);
         hasher.hash(REPLICATE_INDEX_DETACH_RESOURCE, __func__);
         if (resources.impl != NULL)
@@ -19826,7 +19844,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && (i < 2) && 
             ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,
+        HashVerifier hasher(this, runtime->safe_control_replication > 1,
                               i > 0, provenance);
         hasher.hash(REPLICATE_MUST_EPOCH, __func__);
         hasher.hash(launcher.map_id, "map_id");
@@ -19887,7 +19905,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && (i < 2) &&
             ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,
+        HashVerifier hasher(this, runtime->safe_control_replication > 1,
                               i > 0, provenance);
         hasher.hash(REPLICATE_TIMING_MEASUREMENT, __func__);
         hasher.hash(launcher.measurement, "measurement");
@@ -19924,7 +19942,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && (i < 2) &&
             ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,
+        HashVerifier hasher(this, runtime->safe_control_replication > 1,
                               i > 0, provenance);
         hasher.hash(REPLICATE_TUNABLE_SELECTION, __func__);
         hasher.hash(launcher.tunable, "tunable");
@@ -19958,7 +19976,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && (i < 2) && 
             ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,
+        HashVerifier hasher(this, runtime->safe_control_replication > 1,
                               i > 0, provenance);
         hasher.hash(REPLICATE_MAPPING_FENCE, __func__);
         if (hasher.verify(__func__))
@@ -19984,7 +20002,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && (i < 2) &&
             ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,
+        HashVerifier hasher(this, runtime->safe_control_replication > 1,
                               i > 0, provenance);
         hasher.hash(REPLICATE_EXECUTION_FENCE, __func__);
         if (hasher.verify(__func__))
@@ -20011,7 +20029,7 @@ namespace Legion {
       AutoRuntimeCall call(this);
       for (int i = 0; runtime->safe_control_replication && (i < 2); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,
+        HashVerifier hasher(this, runtime->safe_control_replication > 1,
                               i > 0, provenance);
         hasher.hash(REPLICATE_BEGIN_TRACE, __func__);
         hasher.hash(tid, "tid");
@@ -20086,7 +20104,7 @@ namespace Legion {
       AutoRuntimeCall call(this);
       for (int i = 0; runtime->safe_control_replication && (i < 2); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,
+        HashVerifier hasher(this, runtime->safe_control_replication > 1,
                               i > 0, provenance);
         hasher.hash(REPLICATE_END_TRACE, __func__);
         hasher.hash(tid, "tid");
@@ -20149,7 +20167,7 @@ namespace Legion {
       // avoid that case hanging at least.
       for (int i = 0; runtime->safe_control_replication && (i < 2); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,i > 0);
+        HashVerifier hasher(this, runtime->safe_control_replication > 1, i > 0);
         hasher.hash(REPLICATE_END_TASK, __func__);
         hasher.hash(res_size, "res_size");
         hasher.hash(metadatasize, "metadatasize");
@@ -20539,7 +20557,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && (i < 2) && 
             ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,i > 0);
+        HashVerifier hasher(this, runtime->safe_control_replication > 1, i > 0);
         hasher.hash(REPLICATE_CREATE_PHASE_BARRIER, __func__);
         hasher.hash(arrivals, "arrivals");
         if (hasher.verify(__func__))
@@ -20566,7 +20584,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && (i < 2) && 
             ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,i > 0);
+        HashVerifier hasher(this, runtime->safe_control_replication > 1, i > 0);
         hasher.hash(REPLICATE_DESTROY_PHASE_BARRIER, __func__);
         hasher.hash(pb.phase_barrier, "phase_barrier");
         if (hasher.verify(__func__))
@@ -20591,7 +20609,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && (i < 2) &&
             ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,i > 0);
+        HashVerifier hasher(this, runtime->safe_control_replication > 1, i > 0);
         hasher.hash(REPLICATE_ADVANCE_PHASE_BARRIER, __func__);
         hasher.hash(bar, "bar");
         if (hasher.verify(__func__))
@@ -20683,7 +20701,7 @@ namespace Legion {
       for (int i = 0; runtime->safe_control_replication && (i < 2) && 
             ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,i > 0);
+        HashVerifier hasher(this, runtime->safe_control_replication > 1, i > 0);
         hasher.hash(REPLICATE_ADVANCE_DYNAMIC_COLLECTIVE, __func__);
         hasher.hash(dc, "dc");
         if (hasher.verify(__func__))
