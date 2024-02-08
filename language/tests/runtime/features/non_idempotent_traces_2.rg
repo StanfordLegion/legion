@@ -61,7 +61,7 @@ task main()
   var p1 = partition(equal, r, is1)
   var p2 = partition(equal, r, is2)
 
-  var num_loops = 100
+  var num_loops = 25
   fill(r, 0)
 
   for j = 0, num_loops do

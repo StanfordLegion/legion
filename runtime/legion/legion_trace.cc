@@ -1028,25 +1028,24 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(current_template != NULL);
 #endif
-        parent_ctx->update_current_fence(this, true, true);
-        // This is where we make sure that replays are done in order
-        // We need to do this because we're not registering this as
-        // a fence with the context
-        physical_trace->chain_replays(this);
         physical_trace->record_previous_template_completion(
-                                      get_completion_event());
+            get_completion_event());
         trace->initialize_tracing_state();
         replayed = true;
-        // If the template we just replayed is not idempotent, clear our
-        // cached template so that at the next replay (of this template
-        // or another) we will be forced to check preconditions and select
-        // a new template (which may or may not be this template).
-        if (!current_template->is_idempotent()) {
+        if (current_template->is_idempotent()) {
+          // This is where we make sure that replays are done in order
+          // We need to do this because we're not registering this as
+          // a fence with the context
+          physical_trace->chain_replays(this);
+          parent_ctx->update_current_fence(this, true, true);
+        } else {
+          // If the template we just replayed is not idempotent, clear our
+          // cached template so that at the next replay (of this template
+          // or another) we will be forced to check preconditions and select
+          // a new template (which may or may not be this template). Then,
+          // register this TraceCompleteOp as a fence.
           physical_trace->clear_cached_template();
-          // If our current template is not idempotent, then this
-          // TraceCompleteOp needs to act like a fence.
-          parent_ctx->perform_fence_analysis(
-              this, execution_preconditions, true, true);
+          perform_fence_analysis(true /* register */);
         }
         return;
       }
