@@ -1002,24 +1002,21 @@ namespace Legion {
     void LegionProfInstance::process_proc_mem_aff_desc(const Memory &m)
     //--------------------------------------------------------------------------
     {
-      unsigned int entry_count = 0;
       // record ALL memory<->processor affinities for consistency + if needed in the future
       std::vector<ProcessorMemoryAffinity> affinities;
       Machine::get_machine().get_proc_mem_affinity(affinities, Processor::NO_PROC, m);
       for (std::vector<ProcessorMemoryAffinity>::const_iterator it =
              affinities.begin(); it != affinities.end(); it++)
-        {
-          process_proc_desc(it->p);
-          proc_mem_aff_desc_infos.emplace_back(ProcMemDesc());
-          ProcMemDesc &info = proc_mem_aff_desc_infos.back();
-          info.proc_id = it->p.id;
-          info.mem_id = m.id;
-          info.bandwidth = it->bandwidth;
-          info.latency = it->latency;
-          entry_count++;
-        }
-      if (entry_count > 0)
-        owner->update_footprint(sizeof(ProcMemDesc)*entry_count, this);
+      {
+        process_proc_desc(it->p);
+        proc_mem_aff_desc_infos.emplace_back(ProcMemDesc());
+        ProcMemDesc &info = proc_mem_aff_desc_infos.back();
+        info.proc_id = it->p.id;
+        info.mem_id = m.id;
+        info.bandwidth = it->bandwidth;
+        info.latency = it->latency;
+        owner->update_footprint(sizeof(ProcMemDesc), this);
+      }
     }
 
     //--------------------------------------------------------------------------
