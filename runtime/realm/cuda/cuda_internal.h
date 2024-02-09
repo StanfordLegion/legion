@@ -1345,6 +1345,7 @@ namespace Realm {
     struct CudaIpcRequest {
 #ifdef REALM_ON_LINUX
       long hostid;  // POSIX hostid
+      size_t hostname_size = 0; // POSIX hostname
 #endif
 
       static void handle_message(NodeID sender, const CudaIpcRequest& args,

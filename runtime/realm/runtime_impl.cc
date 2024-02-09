@@ -1545,6 +1545,58 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
     }
 #endif
 
+    void RuntimeImpl::create_shared_peers(void)
+    {
+#if defined(REALM_USE_SHM) and defined(REALM_USE_ANONYMOUS_SHARED_MEMORY)
+      std::vector<OsHandle> handles;
+      OsHandle all_node_mailbox =
+          Realm::ipc_mailbox_create(get_mailbox_name(Network::my_node_id));
+      Network::barrier(); // Wait for everyone to create their ipc mailboxes
+      if(all_node_mailbox != Realm::INVALID_OS_HANDLE) {
+        NodeSet send_nodes;
+        for(NodeID node_id : Network::all_peers) {
+          std::string slot_name = get_mailbox_name(node_id);
+          if(!Realm::ipc_mailbox_send(all_node_mailbox, slot_name, handles,
+                                      &(Network::my_node_id), sizeof(NodeID))) {
+            log_runtime.warning("Create shared_peers using ipc mailbox, but unable to "
+                                "send msg to node %u, skipping",
+                                (unsigned)node_id);
+            continue;
+          }
+          send_nodes.add(node_id);
+        }
+        for(NodeID node_id : send_nodes) {
+          NodeID recv_data = 0;
+          size_t data_sz;
+          std::string slot_name = get_mailbox_name(node_id);
+          if(!Realm::ipc_mailbox_recv(all_node_mailbox, slot_name, handles, &recv_data,
+                                      data_sz, sizeof(NodeID))) {
+            log_runtime.warning("Create shared_peers using ipc mailbox, but unable to "
+                                "recv msg from node %u, skipping",
+                                (unsigned)node_id);
+            continue;
+          }
+          assert(send_nodes.contains(recv_data) && "Received from unexpected node");
+          Network::shared_peers.add(node_id);
+        }
+        shared_peers_use_network_module = false;
+      } else {
+        log_runtime.warning("Failed to create ipc mailbox for building shared_peers, so "
+                            "fall back to use network modules");
+      }
+
+      // Wait for everyone to complete coordinating their shared_peers
+      Network::barrier();
+      close_handle(all_node_mailbox);
+#endif
+      if(shared_peers_use_network_module) {
+        Network::shared_peers.empty();
+        for(NetworkModule *module : network_modules) {
+          module->get_shared_peers(Network::shared_peers);
+        }
+      }
+    }
+
     bool RuntimeImpl::share_memories(void)
     {
 #if defined(REALM_USE_SHM)
@@ -1877,6 +1929,21 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
       else
 	assert(config->active_msg_handler_threads > 0);
 
+        // Coordinate a job identifer across all the nodes in order to use it for
+        // generating names in the system namespace (like files or sockets).  This needs
+        // to come before the modules make their memories, but after the network is
+        // initialized.  This cannot be currently done if GASNET1 is enabled, as the
+        // broadcast function is not available until after Module::attach
+#if !defined(REALM_USE_GASNET1)
+      {
+        Config::job_id =
+            Network::broadcast(0, Clock::current_time_in_nanoseconds(true) + rand());
+      }
+#endif
+
+      // create shared_peers either using ipc mailbox or network modules
+      create_shared_peers();
+
       // initialize modules and create memories before we do network attach
       //  so that we have a chance to register these other memories for
       //  RDMA transfers
@@ -1884,18 +1951,6 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
 	  it != modules.end();
 	  it++)
 	(*it)->initialize(this);
-
-    // Coordinate a job identifer across all the nodes in order to use it for
-    // generating names in the system namespace (like files or sockets).  This needs
-    // to come before the modules make their memories, but after the network is
-    // initialized.  This cannot be currently done if GASNET1 is enabled, as the
-    // broadcast function is not available until after Module::attach
-#if !defined(REALM_USE_GASNET1)
-    {
-      Config::job_id =
-          Network::broadcast(0, Clock::current_time_in_nanoseconds(true) + rand());
-    }
-#endif
 
     for(std::vector<Module *>::const_iterator it = modules.begin(); it != modules.end();
         it++)
@@ -1985,7 +2040,6 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
 
       // network-specific memories are created after attachment
       for(NetworkModule *module : network_modules) {
-        module->get_shared_peers(Network::shared_peers);
         module->create_memories(this);
       }
       for(NodeID node_id : Network::shared_peers) {
