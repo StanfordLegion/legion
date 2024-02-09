@@ -498,8 +498,7 @@ namespace Legion {
                      FieldMask &non_dominated) const;
       void dominates(LogicalView *view, 
                      IndexSpaceExpression *expr, FieldMask mask,
-                     FieldMaskSet<IndexSpaceExpression> &non_dominated,
-                     FieldMaskSet<IndexSpaceExpression> *dominate = NULL) const;
+                     FieldMaskSet<IndexSpaceExpression> &non_dominated) const;
       void filter_independent_fields(IndexSpaceExpression *expr,
                                      FieldMask &mask) const;
       bool subsumed_by(const TraceViewSet &set, bool allow_independent,
