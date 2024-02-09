@@ -5040,9 +5040,33 @@ namespace Realm {
           cudaipc_responses_needed.fetch_add(ipc_peers.size());
           cudaipc_releases_needed.fetch_add(ipc_peers.size());
 
-          ActiveMessage<CudaIpcRequest> amsg(ipc_peers);
-          amsg->hostid = gethostid();
-          amsg.commit();
+          // If shared_peers_use_network_module == false, we can safely rely on
+          //  the Network::shared_peers created by ipc mailbox. Otherwise,
+          //  the shared_peers could be all_peers, therefore, we try to use
+          //  hostid and hostname to check if two peers are on the same physical
+          //  node. However, the hostid and hostname are likely the same on containers
+          //  that are not cuda ipc capable. This can lead to a failure when opening
+          //  the ipc handle from another physical node, or it could succeed and we
+          //  could end up getting corrupted results.
+          if(runtime->shared_peers_use_network_module) {
+            char hostname[HOST_NAME_MAX];
+            int hostname_err = gethostname(hostname, HOST_NAME_MAX);
+            size_t hostname_size = 0;
+            if(hostname_err == 0) {
+              hostname_size =
+                  sizeof(char) * strlen(hostname) + 1; // we need to copy the last \0
+            }
+            ActiveMessage<CudaIpcRequest> amsg(ipc_peers, hostname_size);
+            amsg->hostid = gethostid();
+            if(hostname_size > 0) {
+              amsg->hostname_size = hostname_size;
+              amsg.add_payload(hostname, hostname_size);
+            }
+            amsg.commit();
+          } else {
+            ActiveMessage<CudaIpcRequest> amsg(ipc_peers);
+            amsg.commit();
+          }
 
           // wait for responses
           {
@@ -5456,12 +5480,34 @@ namespace Realm {
       bool do_export = false;
       if(cuda_module_singleton->config->cfg_use_cuda_ipc) {
 #ifdef REALM_ON_LINUX
-        // host id has to match as well
-        long hostid = gethostid();
-        if(hostid == args.hostid)
+        RuntimeImpl *runtime = get_runtime();
+        if(runtime->shared_peers_use_network_module) {
+          assert(datalen == (args.hostname_size * sizeof(char)));
+          const char *remote_hostname = static_cast<const char *>(data);
+          // host id has to match as well
+          long hostid = gethostid();
+          bool hostid_match = false;
+          if(hostid == args.hostid) {
+            hostid_match = true;
+          } else {
+            log_cudaipc.info() << "hostid mismatch - us=" << hostid
+                               << " them=" << args.hostid;
+          }
+
+          // hostname has to match as well
+          char hostname[HOST_NAME_MAX];
+          int hostname_status = gethostname(hostname, HOST_NAME_MAX);
+          bool hostname_match = false;
+          if(hostname_status == 0 && strcmp(hostname, remote_hostname) == 0) {
+            hostname_match = true;
+          } else {
+            log_cudaipc.info() << "hostname mismatch - us=" << hostname
+                               << " them=" << remote_hostname;
+          }
+          do_export = hostid_match && hostname_match;
+        } else {
           do_export = true;
-        else
-          log_cudaipc.info() << "hostid mismatch - us=" << hostid << " them=" << args.hostid;
+        }
 #endif
       }
 
@@ -5533,10 +5579,10 @@ namespace Realm {
               CUresult ret = CUDA_DRIVER_FNPTR(cuIpcOpenMemHandle)(&dptr,
                                                                    entries[i].handle,
                                                                    CU_IPC_MEM_LAZY_ENABLE_PEER_ACCESS);
-              log_cudaipc.info() << "open result " << entries[i].mem
-                                 << " orig=" << std::hex << entries[i].base_ptr
-                                 << " local=" << dptr << std::dec
-                                 << " ret=" << ret;
+              log_cudaipc.info()
+                  << "open result " << entries[i].mem << " orig=" << std::hex
+                  << entries[i].base_ptr << " local=" << dptr << std::dec
+                  << " ret=" << ret << " sender=" << sender;
 
               if(ret == CUDA_SUCCESS) {
                 // take the cudaipc mutex to actually add the mapping
