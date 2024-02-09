@@ -16,7 +16,7 @@
 -- [["-ll:cpu", "4", "-ntx", "2", "-nty", "2", "-dm:memoize", "-tsteps", "2", "-tprune", "2", "-foverride-demand-cuda", "1"],
 --  ["-ll:cpu", "4", "-ntx", "2", "-nty", "2", "-dm:memoize", "-tsteps", "2", "-tprune", "2", "-ffuture", "0", "-foverride-demand-cuda", "1"],
 --  ["-ll:cpu", "4", "-fflow-spmd", "1", "-fflow-spmd-shardsize", "4", "-ftrace", "0", "-foverride-demand-cuda", "1"],
---  ["-ll:cpu", "4", "-fflow-spmd", "1", "-fflow-spmd-shardsize", "4", "-tsteps", "2", "-tprune", "2", "-dm:memoize", "-foverride-demand-cuda", "1"],
+--  ["-ll:cpu", "4", "-fflow-spmd", "1", "-fflow-spmd-shardsize", "4", "-tsteps", "2", "-tprune", "2", "-foverride-demand-cuda", "1"],
 --  ["-ll:cpu", "2", "-fflow-spmd", "1", "-fflow-spmd-shardsize", "8", "-map_locally", "-ftrace", "0", "-foverride-demand-cuda", "1"]]
 
 -- Inspired by https://github.com/ParRes/Kernels/tree/master/LEGION/Stencil
