@@ -1031,6 +1031,7 @@ fn filter_record<'a>(
 
 fn check_version(version: u32) {
     let expected_version: u32 = include_str!("../../../runtime/legion/legion_profiling_version.h")
+        .trim()
         .parse()
         .unwrap();
 
