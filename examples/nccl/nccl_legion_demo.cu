@@ -169,6 +169,7 @@ int main(int argc, char **argv) {
     TaskVariantRegistrar registrar(TID_NCCL_REDUCE, "nccl_reduce");
     registrar.set_leaf();
     registrar.set_concurrent();
+    registrar.set_concurrent_barrier();
     registrar.add_constraint(ProcessorConstraint(Processor::TOC_PROC));
     Runtime::preregister_task_variant<nccl_reduce_task>(registrar, "nccl_reduce");
   }
