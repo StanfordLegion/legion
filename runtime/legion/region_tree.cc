@@ -1840,9 +1840,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(it->first->is_instance_view());
 #endif
-        if (it->first->is_materialized_view())
+        if (it->first->is_individual_view())
         {
-          MaterializedView *view = it->first->as_materialized_view();
+          IndividualView *view = it->first->as_individual_view();
           PhysicalManager *manager = view->get_manager();
           if (manager->meets_regions(to_meet))
             targets.add_instance(InstanceRef(manager, it->second));

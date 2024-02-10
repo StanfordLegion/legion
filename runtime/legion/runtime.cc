@@ -4615,7 +4615,7 @@ namespace Legion {
 #endif
         for (int i = 0; runtime->safe_control_replication && (i < 2); i++)
         {
-          Murmur3Hasher hasher(repl_ctx, 
+          InnerContext::HashVerifier hasher(repl_ctx, 
               runtime->safe_control_replication > 1, i > 0);
           hasher.hash(
               ReplicateContext::REPLICATE_FUTURE_MAP_GET_ALL_FUTURES, __func__);
@@ -4670,7 +4670,7 @@ namespace Legion {
       context->record_blocking_call(future_coordinate);
       for (int i = 0; runtime->safe_control_replication && (i < 2); i++)
       {
-        Murmur3Hasher hasher(repl_ctx, 
+        InnerContext::HashVerifier hasher(repl_ctx, 
             runtime->safe_control_replication > 1, i > 0);
         hasher.hash(
             ReplicateContext::REPLICATE_FUTURE_MAP_WAIT_ALL_FUTURES, __func__);

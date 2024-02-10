@@ -441,18 +441,6 @@ namespace Legion {
     {
       assert(false); // TODO
     }
-    
-    //--------------------------------------------------------------------------
-    void ReplayMapper::map_close(const MapperContext       ctx,
-                                 const Close&              close,
-                                 const MapCloseInput&      input,
-                                       MapCloseOutput&     output)
-    //--------------------------------------------------------------------------
-    {
-      CloseMappingInfo *mapping = find_close_mapping(ctx, close); 
-      mapping->mapping->map_requirement(runtime, ctx, close.requirement.parent,
-                                        output.chosen_instances);
-    }
 
     //--------------------------------------------------------------------------
     void ReplayMapper::select_close_sources(const MapperContext        ctx,

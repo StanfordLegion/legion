@@ -21,8 +21,8 @@ use crate::backend::common::{
 use crate::conditional_assert;
 use crate::state::{
     ChanEntry, ChanID, ChanKind, Color, Config, Container, ContainerEntry, Copy, CopyInstInfo,
-    Fill, FillInstInfo, Inst, InstUID, MemID, MemKind, NodeID, OpID, ProcID, ProcKind, ProfUID,
-    State, TimeRange, Timestamp,
+    Fill, FillInstInfo, Inst, InstUID, MemID, MemKind, NodeID, OpID, ProcEntryKind, ProcID,
+    ProcKind, ProfUID, State, TimeRange, Timestamp,
 };
 
 impl Into<ts::Timestamp> for Timestamp {
@@ -79,7 +79,7 @@ struct ItemInfo {
 pub struct Fields {
     chan_reqs: FieldID,
     expanded_for_visibility: FieldID,
-    initiation: FieldID,
+    operation: FieldID,
     insts: FieldID,
     inst_fields: FieldID,
     inst_fspace: FieldID,
@@ -88,11 +88,14 @@ pub struct Fields {
     size: FieldID,
     interval: FieldID,
     num_items: FieldID,
-    op_id: FieldID,
     provenance: FieldID,
     status_ready: FieldID,
     status_running: FieldID,
     status_waiting: FieldID,
+    deferred_time: FieldID,
+    delayed_time: FieldID,
+    creator: FieldID,
+    caller: FieldID,
 }
 
 #[derive(Debug)]
@@ -118,20 +121,23 @@ impl StateDataSource {
             chan_reqs: field_schema.insert("Requirements".to_owned(), true),
             expanded_for_visibility: field_schema
                 .insert("(Expanded for Visibility)".to_owned(), false),
-            initiation: field_schema.insert("Initiation".to_owned(), true),
+            operation: field_schema.insert("Operation".to_owned(), true),
             insts: field_schema.insert("Instances".to_owned(), true),
             inst_fields: field_schema.insert("Fields".to_owned(), true),
             inst_fspace: field_schema.insert("Field Space".to_owned(), true),
             inst_ispace: field_schema.insert("Index Space".to_owned(), true),
             inst_layout: field_schema.insert("Layout".to_owned(), true),
-            interval: field_schema.insert("Interval".to_owned(), false),
+            interval: field_schema.insert("Lifetime".to_owned(), false),
             num_items: field_schema.insert("Number of Items".to_owned(), false),
-            op_id: field_schema.insert("Operation".to_owned(), false),
             provenance: field_schema.insert("Provenance".to_owned(), true),
             size: field_schema.insert("Size".to_owned(), true),
             status_ready: field_schema.insert("Ready".to_owned(), false),
             status_running: field_schema.insert("Running".to_owned(), false),
             status_waiting: field_schema.insert("Waiting".to_owned(), false),
+            deferred_time: field_schema.insert("Deferred".to_owned(), false),
+            delayed_time: field_schema.insert("Delayed".to_owned(), false),
+            creator: field_schema.insert("Creator".to_owned(), false),
+            caller: field_schema.insert("Caller".to_owned(), false),
         };
 
         let mut entry_map = BTreeMap::<EntryID, EntryKind>::new();
@@ -847,6 +853,21 @@ impl StateDataSource {
                 });
             }
         }
+        if let Some(task) = self.state.multi_tasks.get(&op_id) {
+            if let Some(kind) = self.state.task_kinds.get(&task.task_id) {
+                if let Some(name) = &kind.name {
+                    return Field::String(format!("Task {}<{}>", name, op_id.0));
+                }
+            }
+        }
+        if let Some(op) = self.state.find_op(op_id) {
+            if let Some(kind) = op.kind {
+                return Field::String(format!(
+                    "{} Operation<{}>",
+                    self.state.op_kinds[&kind].name, op_id.0
+                ));
+            }
+        }
         Field::U64(op_id.0)
     }
 
@@ -861,6 +882,29 @@ impl StateDataSource {
             interval: inst.time_range().into(),
             entry_id: self.mem_entries.get(mem_id).unwrap().clone(),
         }))
+    }
+
+    fn generate_creator_link(&self, prof_uid: ProfUID, create_time: Timestamp) -> Field {
+        let proc_id = self.state.prof_uid_proc.get(&prof_uid).unwrap();
+        let proc = self.state.procs.get(&proc_id).unwrap();
+        let mut entry = proc.find_entry(prof_uid).unwrap();
+        // Check to see if we need to link one of the subcalls instead
+        // of the main task that produced the this operation
+        // Subcalls are sorted from smallest to largest so the first one we hit
+        // is the one we know that that actually made this box
+        for (call_uid, start_time, stop_time) in &entry.subcalls {
+            if (*start_time <= create_time) && (create_time < *stop_time) {
+                entry = proc.find_entry(*call_uid).unwrap();
+                break;
+            }
+        }
+        let op_name = entry.name(&self.state);
+        Field::ItemLink(ItemLink {
+            item_uid: entry.base().prof_uid.into(),
+            title: op_name,
+            interval: entry.time_range().into(),
+            entry_id: self.proc_entries.get(proc_id).unwrap().clone(),
+        })
     }
 
     fn generate_proc_slot_meta_tile(
@@ -886,11 +930,13 @@ impl StateDataSource {
                 fields.push((self.fields.expanded_for_visibility, Field::Empty));
             }
             fields.push((self.fields.interval, Field::Interval(point_interval)));
-            if let Some(op_id) = entry.op_id {
-                fields.push((self.fields.op_id, Field::U64(op_id.0)));
-            }
             if let Some(initiation_op) = entry.initiation_op {
-                fields.push((self.fields.initiation, self.generate_op_link(initiation_op)));
+                // FIXME: You might think that initiation_op is None rather than
+                // needing this check with zero, but backwards compatibility is hard
+                // You can remove this check once we stop needing to be compatible with Python
+                if initiation_op.0 > 0 {
+                    fields.push((self.fields.operation, self.generate_op_link(initiation_op)));
+                }
             }
             if let Some(op_id) = entry.op_id {
                 let op = self.state.find_op(op_id).unwrap();
@@ -917,6 +963,44 @@ impl StateDataSource {
                     self.fields.provenance,
                     Field::String(provenance.to_string()),
                 ));
+            }
+            if let Some(creator) = self.state.fevents.get(&entry.creator) {
+                // Check to see if these are function calls or tasks
+                match entry.kind {
+                    ProcEntryKind::MapperCall(_) | ProcEntryKind::RuntimeCall(_) => {
+                        if let Some(start_time) = entry.time_range.start {
+                            fields.push((
+                                self.fields.caller,
+                                // Use the first tick before the start so it is outside
+                                // of our box but hopefully in the caller's box
+                                self.generate_creator_link(*creator, start_time - Timestamp(1)),
+                            ));
+                        }
+                    }
+                    _ => {
+                        // Everything else can use the create time to find the creator
+                        if let Some(create_time) = entry.time_range.create {
+                            fields.push((
+                                self.fields.creator,
+                                self.generate_creator_link(*creator, create_time),
+                            ));
+                        }
+                    }
+                }
+            }
+            if let Some(ready) = entry.time_range.ready {
+                if let Some(create) = entry.time_range.create {
+                    fields.push((
+                        self.fields.deferred_time,
+                        Field::Interval(ts::Interval::new(create.into(), ready.into())),
+                    ));
+                }
+                if let Some(start) = entry.time_range.start {
+                    fields.push((
+                        self.fields.delayed_time,
+                        Field::Interval(ts::Interval::new(ready.into(), start.into())),
+                    ));
+                }
             }
             ItemMeta {
                 item_uid: entry.base().prof_uid.into(),
@@ -1003,13 +1087,28 @@ impl StateDataSource {
             self.generate_inst_layout(entry, &mut fields);
             self.generate_inst_size(entry, &mut fields);
             if let Some(initiation_op) = entry.initiation() {
-                fields.push((self.fields.initiation, self.generate_op_link(initiation_op)));
+                // FIXME: You might think that initiation_op is None rather than
+                // needing this check with zero, but backwards compatibility is hard
+                // You can remove this check once we stop needing to be compatible with Python
+                if initiation_op.0 > 0 {
+                    fields.push((self.fields.operation, self.generate_op_link(initiation_op)));
+                }
             }
             if let Some(provenance) = provenance {
                 fields.push((
                     self.fields.provenance,
                     Field::String(provenance.to_string()),
                 ));
+            }
+            if let Some(creator_event) = entry.creator {
+                if let Some(creator) = self.state.fevents.get(&creator_event) {
+                    if let Some(create_time) = entry.time_range.create {
+                        fields.push((
+                            self.fields.creator,
+                            self.generate_creator_link(*creator, create_time),
+                        ));
+                    }
+                }
             }
             ItemMeta {
                 item_uid: entry.base().prof_uid.into(),
@@ -1212,13 +1311,28 @@ impl StateDataSource {
             self.generate_chan_reqs(entry, &mut fields);
             self.generate_chan_size(entry, &mut fields);
             if let Some(initiation_op) = entry.initiation() {
-                fields.push((self.fields.initiation, self.generate_op_link(initiation_op)));
+                // FIXME: You might think that initiation_op is None rather than
+                // needing this check with zero, but backwards compatibility is hard
+                // You can remove this check once we stop needing to be compatible with Python
+                if initiation_op.0 > 0 {
+                    fields.push((self.fields.operation, self.generate_op_link(initiation_op)));
+                }
             }
             if let Some(provenance) = provenance {
                 fields.push((
                     self.fields.provenance,
                     Field::String(provenance.to_string()),
                 ));
+            }
+            if let Some(creator) = entry.creator() {
+                if let Some(creator_uid) = self.state.fevents.get(&creator) {
+                    if let Some(create_time) = entry.time_range().create {
+                        fields.push((
+                            self.fields.creator,
+                            self.generate_creator_link(*creator_uid, create_time),
+                        ));
+                    }
+                }
             }
             ItemMeta {
                 item_uid: entry.base().prof_uid.into(),
