@@ -1512,10 +1512,15 @@ namespace Legion {
      * This class helps with the process of performing an all-reduce between
      * the shards of a concurrent index space task launch to get their 
      * maximum lamport clock and whether any inputs were poisoned
+     * Do this in order so we can count the total points we've seen and
+     * send out the results as soon as possible in the case that we can
+     * short-circuit the result when all points come from just a subset
+     * of the shards.
      */
-    class ConcurrentAllreduce : public AllGatherCollective<false> {
+    class ConcurrentAllreduce : public AllGatherCollective<true> {
     public:
-      ConcurrentAllreduce(CollectiveIndexLocation loc, ReplicateContext *ctx);
+      ConcurrentAllreduce(CollectiveIndexLocation loc, ReplicateContext *ctx,
+                          size_t expected_points);
       ConcurrentAllreduce(const ConcurrentAllreduce &rhs) = delete;
       virtual ~ConcurrentAllreduce(void);
     public:
@@ -1526,15 +1531,19 @@ namespace Legion {
       virtual void pack_collective_stage(ShardID target,
                                          Serializer &rez, int stage);
       virtual void unpack_collective_stage(Deserializer &derez, int stage);
-    protected:
-      virtual RtEvent post_complete_exchange(void);
     public:
       void exchange(std::vector<std::pair<SliceTask*,AddressSpaceID> > &slices,
-        uint64_t lamport_clock, bool poisoned, RtBarrier collective_kernel_bar);
+        uint64_t lamport_clock, bool poisoned, RtBarrier collective_kernel_bar,
+        size_t points);
+    protected:
+      void notify_concurrent_slices(void);
+    public:
+      const size_t expected_points;
     protected:
       std::vector<std::pair<SliceTask*,AddressSpaceID> > concurrent_slices;
       RtBarrier collective_kernel_barrier;
       uint64_t concurrent_lamport_clock;
+      size_t total_points;
       bool concurrent_poisoned;
     };
 

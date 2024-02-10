@@ -1238,7 +1238,7 @@ namespace Legion {
         {
           concurrent_exchange->exchange(concurrent_slices,
               concurrent_lamport_clock, concurrent_poisoned,
-              concurrent_task_barrier);
+              concurrent_task_barrier, 0/*points*/);
           if (concurrent_validator != NULL)
             concurrent_validator->perform_validation(concurrent_processors);
         }
@@ -1323,7 +1323,7 @@ namespace Legion {
 #endif
           concurrent_exchange->exchange(concurrent_slices,
               concurrent_lamport_clock, concurrent_poisoned,
-              concurrent_task_barrier);
+              concurrent_task_barrier, 0/*points*/);
           if (concurrent_validator != NULL)
             concurrent_validator->elide_collective();
         }
@@ -1621,7 +1621,8 @@ namespace Legion {
         collective_check_id = ctx->get_next_collective_index(COLLECTIVE_LOC_76);
       if (concurrent_task)
       {
-        concurrent_exchange = new ConcurrentAllreduce(COLLECTIVE_LOC_79, ctx);
+        concurrent_exchange = new ConcurrentAllreduce(COLLECTIVE_LOC_79, ctx,
+            launch_space->get_volume());
         complete_preconditions.insert(concurrent_exchange->get_done_event());
         if (!runtime->unsafe_mapper)
         {
@@ -1749,7 +1750,7 @@ namespace Legion {
         }
         concurrent_exchange->exchange(concurrent_slices, 
             concurrent_lamport_clock, concurrent_poisoned,
-            concurrent_task_barrier);
+            concurrent_task_barrier, concurrent_points);
       }
     }
 
@@ -16680,8 +16681,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ConcurrentAllreduce::ConcurrentAllreduce(CollectiveIndexLocation loc,
-                                             ReplicateContext *ctx)
-      : AllGatherCollective<false>(loc, ctx)
+                                           ReplicateContext *ctx, size_t points)
+      : AllGatherCollective<true>(loc, ctx), expected_points(points)
     //--------------------------------------------------------------------------
     {
     }
@@ -16697,9 +16698,13 @@ namespace Legion {
                                                     Serializer &rez, int stage)
     //--------------------------------------------------------------------------
     {
-      rez.serialize(collective_kernel_barrier);
-      rez.serialize(concurrent_lamport_clock);
-      rez.serialize<bool>(concurrent_poisoned);
+      rez.serialize<size_t>(total_points);
+      if (total_points > 0)
+      {
+        rez.serialize(collective_kernel_barrier);
+        rez.serialize(concurrent_lamport_clock);
+        rez.serialize<bool>(concurrent_poisoned);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -16707,22 +16712,34 @@ namespace Legion {
                                                       int stage)
     //--------------------------------------------------------------------------
     {
-      RtBarrier barrier;
-      derez.deserialize(barrier);
-      if (!collective_kernel_barrier.exists() && barrier.exists())
-        collective_kernel_barrier = barrier;
-      uint64_t lamport_clock;
-      derez.deserialize(lamport_clock);
-      if (concurrent_lamport_clock < lamport_clock)
-        concurrent_lamport_clock = lamport_clock;
-      bool poisoned;
-      derez.deserialize<bool>(poisoned);
-      if (poisoned)
-        concurrent_poisoned = true;
+      size_t points;
+      derez.deserialize(points);
+      if (points > 0)
+      {
+        RtBarrier barrier;
+        derez.deserialize(barrier);
+        if (!collective_kernel_barrier.exists() && barrier.exists())
+          collective_kernel_barrier = barrier;
+        uint64_t lamport_clock;
+        derez.deserialize(lamport_clock);
+        if (concurrent_lamport_clock < lamport_clock)
+          concurrent_lamport_clock = lamport_clock;
+        bool poisoned;
+        derez.deserialize<bool>(poisoned);
+        if (poisoned)
+          concurrent_poisoned = true;
+        total_points += points;
+#ifdef DEBUG_LEGION
+        assert(total_points <= expected_points);
+#endif
+        // this should only happen once
+        if (total_points == expected_points)
+          notify_concurrent_slices();
+      }
     }
 
     //--------------------------------------------------------------------------
-    RtEvent ConcurrentAllreduce::post_complete_exchange(void)
+    void ConcurrentAllreduce::notify_concurrent_slices(void)
     //--------------------------------------------------------------------------
     {
       Runtime *runtime = context->runtime;
@@ -16747,19 +16764,24 @@ namespace Legion {
               concurrent_lamport_clock, concurrent_poisoned,
               collective_kernel_barrier);
       }
-      return RtEvent::NO_RT_EVENT;
     }
 
     //--------------------------------------------------------------------------
     void ConcurrentAllreduce::exchange(
         std::vector<std::pair<SliceTask*,AddressSpaceID> > &slices,
-        uint64_t lamport_clock, bool poisoned, RtBarrier barrier)
+        uint64_t lamport_clock, bool poisoned, RtBarrier barrier, size_t points)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(points <= expected_points);
+#endif
       concurrent_slices.swap(slices);
       collective_kernel_barrier = barrier;
       concurrent_lamport_clock = lamport_clock;
       concurrent_poisoned = poisoned;
+      total_points = points;
+      if (total_points == expected_points)
+        notify_concurrent_slices();
       perform_collective_async();
     }
 
