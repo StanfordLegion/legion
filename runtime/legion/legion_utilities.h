@@ -36,8 +36,11 @@
   ((req).privilege & (LEGION_WRITE_PRIV | LEGION_REDUCE))
 #define IS_WRITE(req) \
   ((req).privilege & LEGION_WRITE_PRIV)
+#define IS_WRITE_ONLY(req) \
+  (((req).privilege & LEGION_READ_WRITE) == LEGION_WRITE_PRIV)
 #define IS_WRITE_DISCARD(req) \
-  (((req).privilege & LEGION_WRITE_ONLY) == LEGION_WRITE_ONLY)
+  (((req).privilege & (LEGION_WRITE_ONLY | LEGION_DISCARD_INPUT_MASK)) \
+   == (LEGION_WRITE_PRIV | LEGION_DISCARD_INPUT_MASK))
 #define IS_READ_DISCARD(req) \
   (((req).privilege & (LEGION_READ_PRIV | LEGION_DISCARD_OUTPUT_MASK)) \
    == (LEGION_READ_PRIV | LEGION_DISCARD_OUTPUT_MASK))
