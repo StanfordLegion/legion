@@ -96,20 +96,20 @@ void top_level_task(const Task *task,
   switch (ndim) {
     case 2:
       {
-        Point<2> color_lo; color_lo.x[0] = 0; color_lo.x[1] = 0;
-        Point<2> color_hi; color_hi.x[0] = color_hi.x[1] = color_hi_val;
+        Point<2> color_lo; color_lo[0] = 0; color_lo[1] = 0;
+        Point<2> color_hi; color_hi[0] = color_hi[1] = color_hi_val;
         Rect<2> color_bounds(color_lo, color_hi); 
-        color_domain = Domain::from_rect<2>(color_bounds);
+        color_domain = color_bounds;
       }
       break;
 
     case 3:
-      color_domain = Domain::from_rect<3>(Rect<3>(
-            make_point(0, 0, 0),
-            make_point(
+      color_domain = Rect<3>(
+            Point<3>(0, 0, 0),
+            Point<3>(
               color_hi_val,
               color_hi_val,
-              color_hi_val)));
+              color_hi_val));
       break;
 
     default:
@@ -137,20 +137,20 @@ void top_level_task(const Task *task,
   switch (ndim) {
     case 2:
       {
-        Point<2> elem_rect_lo; elem_rect_lo.x[0] = 0; elem_rect_lo.x[1]=0;
-        Point<2> elem_rect_hi; elem_rect_hi.x[0] = elem_rect_hi.x[1] = elem_rect_hi_val;
+        Point<2> elem_rect_lo; elem_rect_lo[0] = 0; elem_rect_lo[1] = 0;
+        Point<2> elem_rect_hi; elem_rect_hi[0] = elem_rect_hi[1] = elem_rect_hi_val;
         Rect<2> elem_rect( elem_rect_lo, elem_rect_hi );
-        elem_domain = Domain::from_rect<2>(elem_rect);
+        elem_domain = elem_rect;
       }
       break;
 
     case 3:
-      elem_domain = Domain(Rect<3>(
-            make_point(0, 0, 0),
-            make_point(
+      elem_domain = Rect<3>(
+            Point<3>(0, 0, 0),
+            Point<3>(
               elem_rect_hi_val,
               elem_rect_hi_val,
-              elem_rect_hi_val)));
+              elem_rect_hi_val));
       break;
 
     default:
@@ -167,14 +167,14 @@ void top_level_task(const Task *task,
   switch (ndim) {
     case 2:
       {
-        Point<2> patch_color; patch_color.x[0] = patch_color.x[1] = patch_val;
+        Point<2> patch_color; patch_color[0] = patch_color[1] = patch_val;
         ip = runtime->create_partition_by_blockify(ctx, is, DomainPoint(patch_color));
       }
       break;
 
     case 3:
       {
-        Point<3> patch_color = make_point(patch_val, patch_val, patch_val);
+        Point<3> patch_color(patch_val, patch_val, patch_val);
         ip = runtime->create_partition_by_blockify(ctx, is, DomainPoint(patch_color));
       }
       break;
