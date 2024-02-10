@@ -412,6 +412,7 @@ namespace Legion {
         { return profiling_reported; }
     public:
       RtEvent perform_versioning_analysis(const bool post_mapper);
+      virtual bool replicate_task(void);
       virtual void initialize_map_task_input(Mapper::MapTaskInput &input,
                                              Mapper::MapTaskOutput &output,
                                              MustEpochOp *must_epoch_owner);
@@ -432,7 +433,6 @@ namespace Legion {
     protected: // mapper helper call
       void validate_target_processors(const std::vector<Processor> &prcs) const;
     protected:
-      bool replicate_task(void);
       void invoke_mapper(MustEpochOp *must_epoch_owner);
       RtEvent map_all_regions(MustEpochOp *must_epoch_owner,
                               const DeferMappingArgs *defer_args);
@@ -795,6 +795,7 @@ namespace Legion {
       virtual void perform_inlining(VariantImpl *variant,
                     const std::deque<InstanceSet> &parent_regions);
       virtual bool is_stealable(void) const;
+      virtual bool replicate_task(void);
     public:
       virtual bool is_output_valid(unsigned idx) const;
     public:
@@ -901,6 +902,7 @@ namespace Legion {
                                       std::set<RtEvent> &applied_events);
       virtual void shard_off(RtEvent mapped_precondition);
       virtual bool is_stealable(void) const;
+      virtual bool replicate_task(void);
       virtual VersionInfo& get_version_info(unsigned idx);
       virtual const VersionInfo& get_version_info(unsigned idx) const;
       virtual bool is_output_global(unsigned idx) const; 

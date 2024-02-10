@@ -385,6 +385,7 @@ namespace Realm {
       NODE_ANNOUNCE_IB_MEM, // IB_MEM id size
       NODE_ANNOUNCE_PMA,    // PMA proc_id mem_id bw latency
       NODE_ANNOUNCE_DMA_CHANNEL,
+      NODE_ANNOUNCE_PROCESS_INFO,
     };
 
 }; // namespace Realm
