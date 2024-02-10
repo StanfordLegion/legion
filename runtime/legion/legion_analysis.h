@@ -3072,8 +3072,10 @@ namespace Legion {
           const FieldMaskSet<IndexSpaceExpression> &partial_valid_exprs);
       // This version used by TraceViewSet::dominates to find
       // non-dominating overlaps
-      void visit_leaf(const FieldMask &mask, FieldMask &allvalid_mask,
-          FieldMaskSet<IndexSpaceExpression> &non_dominated,
+      void visit_leaf(const FieldMask &mask, FieldMask &dominated_mask,
+          InnerContext *context, RegionTreeID tree_id, CollectiveView *view,
+          LegionMap<LogicalView*,
+                    FieldMaskSet<IndexSpaceExpression> > &non_dominated,
           IndexSpaceExpression *expr, RegionTreeForest *forest);
       // This version used by TraceViewSet::antialias_collective_view
       // to get the names of the new views to use for instances
