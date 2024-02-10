@@ -1313,14 +1313,6 @@ namespace Legion {
         // Still need to do any rendezvous for concurrent analysis
         if (concurrent_task)
         {
-#ifdef DEBUG_LEGION
-          ReplicateContext *repl_ctx =
-            dynamic_cast<ReplicateContext*>(parent_ctx);
-          assert(repl_ctx != NULL);
-#else
-          ReplicateContext *repl_ctx =
-            static_cast<ReplicateContext*>(parent_ctx);
-#endif
           concurrent_exchange->exchange(concurrent_slices,
               concurrent_lamport_clock, concurrent_poisoned,
               concurrent_task_barrier, 0/*points*/);
@@ -1722,15 +1714,16 @@ namespace Legion {
       }
       if (done)
       {
-#ifdef DEBUG_LEGION
-        ReplicateContext *repl_ctx =
-          dynamic_cast<ReplicateContext*>(parent_ctx);
-        assert(repl_ctx != NULL);
-#else
-        ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
-#endif
         if (concurrent_barrier)
         {
+#ifdef DEBUG_LEGION
+          ReplicateContext *repl_ctx =
+            dynamic_cast<ReplicateContext*>(parent_ctx);
+          assert(repl_ctx != NULL);
+#else
+          ReplicateContext *repl_ctx =
+            static_cast<ReplicateContext*>(parent_ctx);
+#endif
           // Check to see if we're the shard for the first point in the index
           // space, if we are, then we are the shard that will make the barrier
           Domain launch_domain, sharding_domain;
