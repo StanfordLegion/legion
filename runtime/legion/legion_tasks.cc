@@ -659,20 +659,39 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TaskOp::check_empty_field_requirements(void)
+    void TaskOp::validate_region_requirements(void)
     //--------------------------------------------------------------------------
     {
       for (unsigned idx = 0; idx < logical_regions.size(); idx++)
       {
-        if (logical_regions[idx].privilege != LEGION_NO_ACCESS && 
-            logical_regions[idx].privilege_fields.empty())
-        {
+        const RegionRequirement &req = logical_regions[idx];
+        if (req.privilege != LEGION_NO_ACCESS && req.privilege_fields.empty())
           REPORT_LEGION_WARNING(LEGION_WARNING_REGION_REQUIREMENT_TASK,
                            "REGION REQUIREMENT %d OF "
                            "TASK %s (ID %lld) HAS NO PRIVILEGE "
                            "FIELDS! DID YOU FORGET THEM?!?",
-                           idx, get_task_name(), get_unique_id());
-        }
+                           idx, get_task_name(), get_unique_id())
+        if (IS_READ_ONLY(req) && ((req.privilege & LEGION_DISCARD_INPUT_MASK)
+              == LEGION_DISCARD_INPUT_MASK))
+          REPORT_LEGION_ERROR(ERROR_INVALID_DISCARD_QUALIFIER,
+            "Region requirement %d of %s (UID %lld) combined input-discard "
+            "qualifier with read-only privilege which will result in "
+            "undefined behavior, therefore this privilege combination is "
+            "disallowed.", idx, get_task_name(), get_unique_id())
+        if (IS_WRITE_ONLY(req) && ((req.privilege & LEGION_DISCARD_OUTPUT_MASK)
+              == LEGION_DISCARD_OUTPUT_MASK))
+          REPORT_LEGION_ERROR(ERROR_INVALID_DISCARD_QUALIFIER,
+            "Region requirement %d of %s (UID %lld) combined output-discard "
+            "qualifier with write-only privilege which will result in "
+            "undefined behavior, therefore this privilege combination is "
+            "disallowed.", idx, get_task_name(), get_unique_id())
+        if (IS_REDUCE(req) && ((req.privilege & (LEGION_DISCARD_INPUT_MASK | 
+              LEGION_DISCARD_OUTPUT_MASK)) != LEGION_NO_ACCESS))
+          REPORT_LEGION_ERROR(ERROR_INVALID_DISCARD_QUALIFIER,
+            "Region requirement %d of %s (UID %lld) combined a discard "
+            "qualifier with reduction privilege which will result in "
+            "undefined behavior, therefore this privilege combination is "
+            "disallowed.", idx, get_task_name(), get_unique_id())
       }
     }
 
@@ -5992,7 +6011,7 @@ namespace Legion {
         elide_future_return = true;
       else if (!must_epoch_launch)
         result = create_future();
-      check_empty_field_requirements(); 
+      validate_region_requirements(); 
       // If this is the top-level task we can record some extra properties
       if (top_level)
         this->top_level_task = true;
@@ -8975,7 +8994,7 @@ namespace Legion {
       }
       else
         elide_future_return = true;
-      check_empty_field_requirements(); 
+      validate_region_requirements(); 
       if (concurrent_task && parent_ctx->is_concurrent_context())
         REPORT_LEGION_ERROR(ERROR_ILLEGAL_CONCURRENT_EXECUTION,
             "Illegal nested concurrent index space task launch %s (UID %lld) "
@@ -9114,7 +9133,7 @@ namespace Legion {
       if (serdez_redop_fns == NULL)
         reduction_future.impl->set_future_result_size(
             reduction_op->sizeof_rhs, runtime->address_space);
-      check_empty_field_requirements();
+      validate_region_requirements();
       if (concurrent_task && parent_ctx->is_concurrent_context())
         REPORT_LEGION_ERROR(ERROR_ILLEGAL_CONCURRENT_EXECUTION,
             "Illegal nested concurrent index space task launch %s (UID %lld) "

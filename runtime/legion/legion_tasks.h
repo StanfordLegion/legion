@@ -171,7 +171,7 @@ namespace Legion {
       void initialize_base_task(InnerContext *ctx,
             const Predicate &p, Processor::TaskFuncID tid,
             Provenance *provenance);
-      void check_empty_field_requirements(void);
+      void validate_region_requirements(void);
     public:
       bool select_task_options(bool prioritize);
     public:
