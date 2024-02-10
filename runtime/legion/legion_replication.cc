@@ -1236,13 +1236,9 @@ namespace Legion {
         }
         if (concurrent_task)
         {
-          // If we're shard 0 then we need to make the collective kernel barrier
-          if (repl_ctx->owner_shard->shard_id == 0)
-            collective_kernel_barrier = RtBarrier(
-                Realm::Barrier::create_barrier(launch_space->get_volume()));
           concurrent_exchange->exchange(concurrent_slices,
               concurrent_lamport_clock, concurrent_poisoned,
-              collective_kernel_barrier);
+              concurrent_task_barrier);
           if (concurrent_validator != NULL)
             concurrent_validator->perform_validation(concurrent_processors);
         }
@@ -1325,13 +1321,9 @@ namespace Legion {
           ReplicateContext *repl_ctx =
             static_cast<ReplicateContext*>(parent_ctx);
 #endif
-          // If we're shard 0 then we need to make the collective kernel barrier
-          if (repl_ctx->owner_shard->shard_id == 0)
-            collective_kernel_barrier = RtBarrier(
-                Realm::Barrier::create_barrier(launch_space->get_volume()));
           concurrent_exchange->exchange(concurrent_slices,
               concurrent_lamport_clock, concurrent_poisoned,
-              collective_kernel_barrier);
+              concurrent_task_barrier);
           if (concurrent_validator != NULL)
             concurrent_validator->elide_collective();
         }
@@ -1703,7 +1695,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void ReplIndexTask::concurrent_allreduce(SliceTask *slice,
         AddressSpaceID slice_space, size_t points, uint64_t lamport_clock,
-        bool poisoned)
+        bool barrier, bool poisoned)
     //--------------------------------------------------------------------------
     {
       bool done = false;
@@ -1714,6 +1706,16 @@ namespace Legion {
         if (poisoned)
           concurrent_poisoned = true;
         concurrent_slices.push_back(std::make_pair(slice, slice_space));
+        if (concurrent_points == 0)
+          concurrent_barrier = barrier;
+        else if (concurrent_barrier != barrier)
+          REPORT_LEGION_ERROR(ERROR_ILLEGAL_CONCURRENT_TASK_BARRIER,
+              "Different points tasks of concurrent task %s (UID %lld) "
+              "selected variants with different concurrent barrier "
+              "settings. All point tasks in a concurrent task launch "
+              "must be mapped to variants with the same setting for "
+              "whether concurrent barrier support is required.",
+              get_task_name(), get_unique_id())
         concurrent_points += points;
         done = (concurrent_points == total_points);
       }
@@ -1726,13 +1728,28 @@ namespace Legion {
 #else
         ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
-        // If we're shard 0 then we need to make the collective kernel barrier
-        if (repl_ctx->owner_shard->shard_id == 0)
-          collective_kernel_barrier = RtBarrier(
-              Realm::Barrier::create_barrier(launch_space->get_volume()));
+        if (concurrent_barrier)
+        {
+          // Check to see if we're the shard for the first point in the index
+          // space, if we are, then we are the shard that will make the barrier
+          Domain launch_domain, sharding_domain;
+          launch_space->get_domain(launch_domain);
+          if (sharding_space.exists())
+            runtime->forest->find_domain(sharding_space, sharding_domain);
+          else
+            sharding_domain = launch_domain;
+          for (Domain::DomainPointIterator itr(launch_domain); itr; itr++)
+          {
+            ShardID owner = sharding_function->find_owner(*itr,sharding_domain);
+            if (owner == repl_ctx->owner_shard->shard_id)
+              concurrent_task_barrier = RtBarrier(
+                  Realm::Barrier::create_barrier(launch_space->get_volume()));    
+            break;
+          }
+        }
         concurrent_exchange->exchange(concurrent_slices, 
             concurrent_lamport_clock, concurrent_poisoned,
-            collective_kernel_barrier);
+            concurrent_task_barrier);
       }
     }
 

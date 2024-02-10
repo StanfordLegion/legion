@@ -1975,7 +1975,7 @@ namespace Legion {
                                                   Processor target);
       virtual void concurrent_allreduce(SliceTask *slice,
           AddressSpaceID slice_space, size_t points, uint64_t lamport_clock,
-          bool poisoned);
+          bool barrier, bool poisoned);
       void select_sharding_function(ReplicateContext *repl_ctx);
     public:
       // Methods for supporting intra-index-space mapping dependences

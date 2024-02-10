@@ -641,8 +641,7 @@ namespace Legion {
     public:
       void yield(void);
       size_t query_available_memory(Memory target);
-      void pre_launch_collective_kernel(void);
-      void post_launch_collective_kernel(void);
+      void concurrent_task_barrier(void);
       void release_task_local_instances(void);
     public:
       void increment_inlined(void);

@@ -2617,6 +2617,7 @@ namespace Legion {
       inline void set_idempotent(bool is_idempotent = true);
       inline void set_replicable(bool is_replicable = true);
       inline void set_concurrent(bool is_concurrent = true);
+      inline void set_concurrent_barrier(bool needs_barrier = true);
     public: // Generator Task IDs
       inline void add_generator_task(TaskID tid);
     public:
@@ -2635,6 +2636,7 @@ namespace Legion {
       bool                              idempotent_variant;
       bool                              replicable_variant;
       bool                              concurrent_variant;
+      bool                              concurrent_barrier;
     };
 
     //==========================================================================
@@ -8793,28 +8795,43 @@ namespace Legion {
       void yield(Context ctx);
 
       /**
+       * This method provides a mechanism for performing a blocking barrier
+       * inside the point tasks of concurrent index space task launch. This 
+       * may seem very un-Legion-like and indeed it is. However, there is one 
+       * very important use case that we've identified where it is imperative
+       * that we have such a feature and there's really no good way to work
+       * around the issue at the moment other than to provide this feature.
+       *
        * Launching collective kernels on a GPU is currently an unsafe thing
        * to do (see this section of the CUDA programming guide:
        * https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#streams
        * "for example, inter-kernel communication is undefined") which means
        * that technically using collective kernel libraries such as NCCL is
-       * illegal in CUDA programs. To help make this safer, we provide these two 
-       * methods for users to use which should make using collective kernel 
-       * libraries such as NCCL safer. These methods can only be used inside of 
-       * concurrent index space task launches. Calling them in any other tasks
-       * will result in an error. It is the user's responsibility to make sure
-       * that these calls are matched (one before the collective kernel launch
-       * and one after the collective kernel launch). Furthermore, it is the 
-       * user's responsibility to make sure that the kernel has actually been
-       * issued to GPU driver (be very careful with non-blocking communicators).
-       * Both methods will context-switch the task out while performing a
-       * barrier across the N tasks in the concurrent index space task launch
-       * to ensure that it is safe to issue the collective kernel. The expected
-       * cost of this barrier is O(log N) in the number of tasks N in the
-       * collective index space task launch.
+       * illegal in CUDA programs. To help make this safer, we recommend putting
+       * a barrier both before and after every single collective kernel launch
+       * performed in a concurrent index space task launch. Yes, we know this
+       * sucks and it will probably hurt your performance. Please raise issues
+       * with the NVIDIA CUDA team.
+       *
+       * To use this method all variants selected by each point task must have
+       * set the 'concurrent_barrier' flag when they were registered which tells
+       * the runtime to make this barrier available. The runtime will check that
+       * all variants in the concurrent index space task launch have this set.
+       * It will raise an error if any of the selected variants do not have this
+       * set (as this probably means you have some points that are going to 
+       * expect to arrive on the barrier while others will not). This method will
+       * perform a barrier across the N tasks in the concurrent index space task 
+       * launch. The expected cost of this barrier is O(log N) in the number of
+       * tasks N in the collective index space task launch.
+       *
+       * When using this barrier to address the CUDA issue described above: it 
+       * is the user's responsibility to make sure that one barrier is 
+       * performed before the kernel is launched and one is performed after the
+       * launch in order to be avoid deadlocks. Furthermore, it is the user's
+       * responsibility to make sure that the kernel has actually been issued
+       * to GPU driver (be very careful with non-blocking communicators).
        */
-      void pre_launch_collective_kernel(Context ctx);
-      void post_launch_collective_kernel(Context ctx);
+      void concurrent_task_barrier(Context ctx);
     public:
       //------------------------------------------------------------------------
       // MPI Interoperability 

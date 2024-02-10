@@ -1007,17 +1007,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TaskContext::pre_launch_collective_kernel(void)
+    void TaskContext::concurrent_task_barrier(void)
     //--------------------------------------------------------------------------
     {
-      owner_task->pre_launch_collective_kernel();
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskContext::post_launch_collective_kernel(void)
-    //--------------------------------------------------------------------------
-    {
-      owner_task->post_launch_collective_kernel();
+      owner_task->perform_concurrent_task_barrier();
     }
 
     //--------------------------------------------------------------------------

@@ -7926,7 +7926,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ProcessorManager::order_concurrent_task_launch(SingleTask *task,
-                                        ApEvent precondition, ApUserEvent ready)
+                    ApEvent precondition, ApUserEvent ready, bool needs_barrier)
     //--------------------------------------------------------------------------
     {
       uint64_t lamport_clock = 0;
@@ -7951,7 +7951,7 @@ namespace Legion {
       assert(triggered);
 #endif
       // Tell the task to compute the max all-reduce of lamport clocks
-      task->concurrent_allreduce(this, lamport_clock, poisoned);
+      task->concurrent_allreduce(this, lamport_clock, needs_barrier, poisoned);
     }
 
     //--------------------------------------------------------------------------
@@ -14773,7 +14773,8 @@ namespace Legion {
         inner_variant(registrar.inner_variant),
         idempotent_variant(registrar.idempotent_variant),
         replicable_variant(registrar.replicable_variant),
-        concurrent_variant(registrar.concurrent_variant)
+        concurrent_variant(registrar.concurrent_variant),
+        concurrent_barrier(registrar.concurrent_barrier)
     //--------------------------------------------------------------------------
     { 
       if (udata != NULL)
@@ -26798,7 +26799,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void Runtime::order_concurrent_task_launch(Processor proc, SingleTask *task,
-                                        ApEvent precondition, ApUserEvent ready)
+                    ApEvent precondition, ApUserEvent ready, bool needs_barrier)
     //--------------------------------------------------------------------------
     {
       std::map<Processor,ProcessorManager*>::const_iterator finder =
@@ -26806,7 +26807,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(finder != proc_managers.end());
 #endif
-      finder->second->order_concurrent_task_launch(task, precondition, ready);
+      finder->second->order_concurrent_task_launch(task, precondition,
+                                                   ready, needs_barrier);
     }
 
     //--------------------------------------------------------------------------

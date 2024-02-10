@@ -2128,7 +2128,8 @@ namespace Legion {
       : task_id(0), global_registration(true), 
         task_variant_name(NULL), leaf_variant(false), 
         inner_variant(false), idempotent_variant(false),
-        replicable_variant(false), concurrent_variant(false)
+        replicable_variant(false), concurrent_variant(false),
+        concurrent_barrier(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -2139,7 +2140,8 @@ namespace Legion {
       : task_id(task_id), global_registration(global), 
         task_variant_name(variant_name), leaf_variant(false), 
         inner_variant(false), idempotent_variant(false),
-        replicable_variant(false), concurrent_variant(false)
+        replicable_variant(false), concurrent_variant(false),
+        concurrent_barrier(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -2151,7 +2153,8 @@ namespace Legion {
       : task_id(task_id), global_registration(global), 
         task_variant_name(variant_name), leaf_variant(false), 
         inner_variant(false), idempotent_variant(false),
-        replicable_variant(false), concurrent_variant(false)
+        replicable_variant(false), concurrent_variant(false),
+        concurrent_barrier(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -7167,17 +7170,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::pre_launch_collective_kernel(Context ctx)
+    void Runtime::concurrent_task_barrier(Context ctx)
     //--------------------------------------------------------------------------
     {
-      ctx->pre_launch_collective_kernel();
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::post_launch_collective_kernel(Context ctx)
-    //--------------------------------------------------------------------------
-    {
-      ctx->post_launch_collective_kernel();
+      ctx->concurrent_task_barrier();
     }
 
     //--------------------------------------------------------------------------

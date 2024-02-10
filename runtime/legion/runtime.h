@@ -1360,7 +1360,7 @@ namespace Legion {
       // index space task launches and trigger the ready event with the 
       // precondition event once it is safe to do so
       void order_concurrent_task_launch(SingleTask *task, ApEvent precondition,
-                                        ApUserEvent ready);
+                                        ApUserEvent ready, bool needs_barrier);
       // Once the concurrent index space task launch has performed its max 
       // all-reduce of the lamport clocks across all the points then it needs
       // to report the resulting clock back to the processor
@@ -2114,6 +2114,7 @@ namespace Legion {
       inline bool is_idempotent(void) const { return idempotent_variant; }
       inline bool is_replicable(void) const { return replicable_variant; }
       inline bool is_concurrent(void) const { return concurrent_variant; }
+      inline bool needs_barrier(void) const { return concurrent_barrier; }
       inline const char* get_name(void) const { return variant_name; }
       inline const ExecutionConstraintSet&
         get_execution_constraints(void) const { return execution_constraints; }
@@ -2164,6 +2165,7 @@ namespace Legion {
       const bool idempotent_variant;
       const bool replicable_variant;
       const bool concurrent_variant;
+      const bool concurrent_barrier;
     private:
       char *variant_name; 
     };
@@ -3966,7 +3968,7 @@ namespace Legion {
     public:
       // Support for concurrent index task execution 
       void order_concurrent_task_launch(Processor proc, SingleTask *task,
-          ApEvent precondition, ApUserEvent ready);
+          ApEvent precondition, ApUserEvent ready, bool needs_barrier);
       void end_concurrent_task(Processor proc);
     public:
       DistributedID get_next_static_distributed_id(uint64_t &next_did);
