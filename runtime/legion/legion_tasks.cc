@@ -2311,6 +2311,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool SingleTask::is_concurrent(void) const
+    //--------------------------------------------------------------------------
+    {
+      VariantImpl *var = runtime->find_variant_impl(task_id, selected_variant);
+      return var->is_concurrent();
+    }
+
+    //--------------------------------------------------------------------------
     bool SingleTask::is_created_region(unsigned index) const
     //--------------------------------------------------------------------------
     {
@@ -4718,6 +4726,21 @@ namespace Legion {
         wait_on_events.insert(ApEvent(true_guard));
       // Merge together all the events for the start condition 
       ApEvent start_condition = Runtime::merge_events(NULL, wait_on_events);
+      // If we're performing a concurrent index space task launch then we
+      // need to perform an extra step here to ensure a global ordering 
+      // between concurrent index space task launches on the same processor
+      if (is_concurrent())
+      {
+#ifdef DEBUG_LEGION
+        assert(target_processors.size() == 1);
+#endif
+        const OrderConcurrentLaunchArgs args(this, target_processors.front(),
+            start_condition, variant->needs_barrier()); 
+        // Give this very high priority as it is likely on the critical path
+        runtime->issue_runtime_meta_task(args, LG_RESOURCE_PRIORITY,
+            Runtime::protect_event(start_condition));
+        start_condition = args.ready;
+      }
       // Need a copy of any locks to release on the stack since the 
       // atomic_locks cannot be touched after we launch the task
       std::vector<Reservation> to_release;
@@ -5158,21 +5181,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SingleTask::perform_concurrent_analysis(Processor target,
-                                                 RtEvent precondition)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!concurrent_fence_event.exists());
-#endif
-      // Find the concurrent fence event
-      const RtEvent postcondition = runtime->find_concurrent_fence_event(target,
-          single_task_termination, concurrent_fence_event, precondition);
-      if (postcondition.exists())
-        map_applied_conditions.insert(postcondition);
-    }
-
-    //--------------------------------------------------------------------------
     void SingleTask::record_inner_termination(ApEvent termination_event)
     //--------------------------------------------------------------------------
     {
@@ -5198,6 +5206,16 @@ namespace Legion {
       const DeferTriggerTaskCompleteArgs *targs =
         (const DeferTriggerTaskCompleteArgs*)args;
       targs->task->trigger_task_complete();
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void SingleTask::order_concurrent_task_launch(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const OrderConcurrentLaunchArgs *oargs = 
+        (const OrderConcurrentLaunchArgs*)args;
+      oargs->task->runtime->order_concurrent_task_launch(oargs->processor,
+          oargs->task, oargs->start, oargs->ready, oargs->needs_barrier);
     }
 
     /////////////////////////////////////////////////////////////
@@ -5238,12 +5256,15 @@ namespace Legion {
       reduction_metasize = 0;
       reduction_instance = NULL;
       first_mapping = true;
-      concurrent_precondition = RtEvent::NO_RT_EVENT;
       concurrent_verified = RtUserEvent::NO_RT_USER_EVENT;
+      concurrent_task_barrier = RtBarrier::NO_RT_BARRIER;
       children_complete_invoked = false;
       children_commit_invoked = false;
       predicate_false_result = NULL;
       predicate_false_size = 0;
+      concurrent_lamport_clock = 0;
+      concurrent_poisoned = false;
+      concurrent_barrier = false;
     }
 
     //--------------------------------------------------------------------------
@@ -5502,7 +5523,6 @@ namespace Legion {
         this->point_futures = rhs->point_futures;
       this->output_region_options = rhs->output_region_options;
       this->output_region_extents.resize(this->output_region_options.size());
-      this->concurrent_precondition = rhs->concurrent_precondition;
       if (!elide_future_return)
       {
         this->predicate_false_future = rhs->predicate_false_future;
@@ -6574,6 +6594,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void IndividualTask::concurrent_allreduce(ProcessorManager *manager, 
+                            uint64_t lamport_clock, bool barrier, bool poisoned)
+    //--------------------------------------------------------------------------
+    {
+      manager->finalize_concurrent_task_order(this, lamport_clock, poisoned);  
+    }
+
+    //--------------------------------------------------------------------------
+    void IndividualTask::perform_concurrent_task_barrier(void)
+    //--------------------------------------------------------------------------
+    {
+      // No-op
+    }
+
+    //--------------------------------------------------------------------------
     bool IndividualTask::pack_task(Serializer &rez, AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
@@ -6998,6 +7033,7 @@ namespace Legion {
       SingleTask::activate();
       orig_task = this;
       slice_owner = NULL;
+      concurrent_task_barrier = RtBarrier::NO_RT_BARRIER;
     }
 
     //--------------------------------------------------------------------------
@@ -7040,14 +7076,6 @@ namespace Legion {
     void PointTask::trigger_replay(void)
     //--------------------------------------------------------------------------
     {
-      if (concurrent_task)
-      {
-#ifdef DEBUG_LEGION
-        assert(target_processors.size() == 1);
-#endif
-        perform_concurrent_analysis(target_processors.back(),
-                  slice_owner->get_concurrent_precondition());
-      }
       slice_owner->record_point_mapped(mapped_event);
       SingleTask::trigger_replay();
     }
@@ -7237,8 +7265,6 @@ namespace Legion {
           if (checked.exists())
             map_applied_conditions.insert(checked);
         }
-        perform_concurrent_analysis(target_proc,
-            slice_owner->get_concurrent_precondition());
       }
       // For point tasks we use the point termination event which as the
       // end event for this task since point tasks can be moved and
@@ -7498,6 +7524,48 @@ namespace Legion {
       slice_owner->set_predicate_false_result(index_point);
       // Pretend like we executed the task
       execution_context->handle_mispredication();
+    }
+
+    //--------------------------------------------------------------------------
+    void PointTask::concurrent_allreduce(ProcessorManager *manager,
+                            uint64_t lamport_clock, bool barrier, bool poisoned)
+    //--------------------------------------------------------------------------
+    {
+      slice_owner->concurrent_allreduce(this, manager, lamport_clock,
+                                        barrier, poisoned);
+    }
+
+    //--------------------------------------------------------------------------
+    void PointTask::perform_concurrent_task_barrier(void)
+    //--------------------------------------------------------------------------
+    {
+      // Check that this is a concurrent index space task launch
+      if (!is_concurrent())
+        REPORT_LEGION_ERROR(ERROR_ILLEGAL_CONCURRENT_TASK_BARRIER,
+            "Illegal concurrent task barrier in task %s (UID %lld) which is "
+            "not part of a concurrent index space task. Concurrent task "
+            "barriers are only permitted in concurrent index space tasks.",
+            get_task_name(), get_unique_id())
+      if (!concurrent_task_barrier.exists())
+      {
+        concurrent_task_barrier = slice_owner->get_concurrent_task_barrier();
+        if (!concurrent_task_barrier.exists())
+          REPORT_LEGION_ERROR(ERROR_ILLEGAL_CONCURRENT_TASK_BARRIER,
+            "Illegal concurrent task barrier in task %s (UID %lld) which is "
+            "not a task variant that requested support for concurrent "
+            "barriers. To request support you must mark the task variant "
+            "as needing 'concurrent_barrier' support in the task variant "
+            "registrar.", get_task_name(), get_unique_id())
+      }
+      Runtime::phase_barrier_arrive(concurrent_task_barrier, 1/*count*/);
+      concurrent_task_barrier.wait();
+      Runtime::advance_barrier(concurrent_task_barrier);
+#ifdef DEBUG_LEGION
+      // If you ever fail this assertion then we exhausted the number
+      // of generations in a barrier. Hopefully CUDA will fix its bug
+      // before we ever need to deal with this
+      assert(concurrent_task_barrier.exists());
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -8168,6 +8236,26 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ShardTask::concurrent_allreduce(ProcessorManager *manager,
+                            uint64_t lamport_clock, bool barrier, bool poisoned)
+    //--------------------------------------------------------------------------
+    {
+      // Should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardTask::perform_concurrent_task_barrier(void)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_ILLEGAL_CONCURRENT_TASK_BARRIER,
+          "Illegal concurrent task barrier performed in replicated task %s "
+          "(UID %lld). Concurrent task barriers are not permitted in "
+          "replicated tasks. They can only be performed in concurrent index "
+          "space tasks.", get_task_name(), get_unique_id())
+    }
+
+    //--------------------------------------------------------------------------
     RtEvent ShardTask::convert_collective_views(unsigned requirement_index,
                        unsigned analysis_index, LogicalRegion region,
                        const InstanceSet &targets, InnerContext *physical_ctx,
@@ -8553,6 +8641,7 @@ namespace Legion {
       mapped_points = 0;
       complete_points = 0;
       committed_points = 0;
+      concurrent_points = 0;
       profiling_reported = RtUserEvent::NO_RT_USER_EVENT;
       profiling_priority = LG_THROUGHPUT_WORK_PRIORITY;
       copy_fill_priority = 0;
@@ -8601,6 +8690,9 @@ namespace Legion {
       }
       interfering_requirements.clear();
       point_requirements.clear();
+      concurrent_slices.clear();
+      if (concurrent_task_barrier.exists())
+        concurrent_task_barrier.destroy_barrier();
 #ifdef DEBUG_LEGION
       assert(pending_intra_space_dependences.empty());
 #endif
@@ -9457,9 +9549,6 @@ namespace Legion {
         // Enumerate the futures in the future map
         if ((redop == 0) && !elide_future_return)
           enumerate_futures(index_domain);
-        // Prepare any setup for performing the concurrent analysis
-        if (concurrent_task)
-          initialize_concurrent_analysis(false/*replay*/);
         Operation::trigger_ready();
       }
     }
@@ -9487,20 +9576,6 @@ namespace Legion {
         Future f = future_map.impl->get_future(itr.p, true/*internal only*/);
         handles[itr.p] = f.impl->did;
       }
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexTask::initialize_concurrent_analysis(bool replay)
-    //--------------------------------------------------------------------------
-    {
-      // Ask the runtime to acquire the concurrent reservation
-      if (replay)
-        concurrent_precondition = 
-         parent_ctx->total_hack_function_for_inorder_concurrent_replay_analysis(
-                                                                  mapped_event);
-      else
-        concurrent_precondition = 
-          runtime->acquire_concurrent_reservation(mapped_event);
     }
 
     //--------------------------------------------------------------------------
@@ -9552,6 +9627,62 @@ namespace Legion {
         Runtime::trigger_event(concurrent_verified);
       }
       return concurrent_verified;
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexTask::concurrent_allreduce(SliceTask *slice,
+        AddressSpaceID slice_space, size_t points, uint64_t lamport_clock,
+        bool barrier, bool poisoned)
+    //--------------------------------------------------------------------------
+    {
+      bool done = false;
+      {
+        AutoLock o_lock(op_lock);
+        if (concurrent_lamport_clock < lamport_clock)
+          concurrent_lamport_clock = lamport_clock;
+        if (poisoned)
+          concurrent_poisoned = true;
+        concurrent_slices.push_back(std::make_pair(slice, slice_space));
+        if (concurrent_points == 0)
+          concurrent_barrier = barrier;
+        else if (concurrent_barrier != barrier)
+          REPORT_LEGION_ERROR(ERROR_ILLEGAL_CONCURRENT_TASK_BARRIER,
+              "Different points tasks of concurrent task %s (UID %lld) "
+              "selected variants with different concurrent barrier "
+              "settings. All point tasks in a concurrent task launch "
+              "must be mapped to variants with the same setting for "
+              "whether concurrent barrier support is required.",
+              get_task_name(), get_unique_id())
+        concurrent_points += points;
+        done = (concurrent_points == total_points);
+      }
+      if (done)
+      {
+        if (concurrent_barrier)
+          concurrent_task_barrier =
+            RtBarrier(Realm::Barrier::create_barrier(total_points));
+        for (std::vector<std::pair<SliceTask*,AddressSpaceID> >::const_iterator
+              it = concurrent_slices.begin(); 
+              it != concurrent_slices.end(); it++)
+        {
+          if (it->second != runtime->address_space)
+          {
+            Serializer rez;
+            {
+              RezCheck z(rez);
+              rez.serialize(it->first);
+              rez.serialize(concurrent_task_barrier);
+              rez.serialize(concurrent_lamport_clock);
+              rez.serialize(concurrent_poisoned);
+            }
+            runtime->send_slice_concurrent_allreduce_response(it->second, rez);
+          }
+          else
+            it->first->finish_concurrent_allreduce(
+                concurrent_lamport_clock, concurrent_poisoned, 
+                concurrent_task_barrier);
+        }
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -10720,9 +10851,6 @@ namespace Legion {
         runtime->forest->find_domain(internal_space, internal_domain);
         enumerate_futures(internal_domain);
       }
-      // Prepare any setup for performing the concurrent analysis
-      if (concurrent_task)
-        initialize_concurrent_analysis(true/*replay*/);
       // Mark that this is origin mapped effectively in case we
       // have any remote tasks, do this before we clone it
       map_origin = true;
@@ -10818,13 +10946,7 @@ namespace Legion {
       {
         const RegionRequirement &req = regions[idx];
         if (!IS_WRITE(req))
-        {
-          // Special case here for concurrent index task launches where
-          // atomic coherence can get us into trouble
-          if (concurrent_task && IS_ATOMIC(req))
-            local_interfering.insert(std::pair<unsigned,unsigned>(idx,idx));
           continue;
-        }
         // If the projection functions are invertible then we don't have to 
         // worry about interference because the runtime knows how to hook
         // up those kinds of dependences
@@ -11152,6 +11274,7 @@ namespace Legion {
       created_index_spaces.clear();
       created_index_partitions.clear();
       unique_intra_space_deps.clear();
+      concurrent_points.clear();
       if (freeop)
         runtime->free_slice_task(this);
     }
@@ -11420,7 +11543,6 @@ namespace Legion {
           FutureMapImpl *impl = point_futures[idx].impl;
           impl->pack_future_map(rez, target);
         }
-        rez.serialize(concurrent_precondition);
       }
       if (is_origin_mapped() && !is_remote())
       {
@@ -11510,7 +11632,6 @@ namespace Legion {
             point_futures[idx] = FutureMapImpl::unpack_future_map(runtime, 
                                                         derez, parent_ctx);
         }
-        derez.deserialize(concurrent_precondition);
       }
       else // Set the first mapping to false since we know things are mapped
         first_mapping = false;
@@ -12260,6 +12381,68 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void SliceTask::concurrent_allreduce(PointTask *task, 
+                            ProcessorManager *manager, uint64_t lamport_clock,
+                            bool barrier, bool poisoned)
+    //--------------------------------------------------------------------------
+    {
+      bool done = false;
+      {
+        AutoLock o_lock(op_lock);
+        if (concurrent_lamport_clock < lamport_clock)
+          concurrent_lamport_clock = lamport_clock;
+        if (poisoned)
+          concurrent_poisoned = true;
+        if (concurrent_points.empty())
+          concurrent_barrier = barrier;
+        else if (concurrent_barrier != barrier)
+          REPORT_LEGION_ERROR(ERROR_ILLEGAL_CONCURRENT_TASK_BARRIER,
+              "Different points tasks of concurrent task %s (UID %lld) "
+              "selected variants with different concurrent barrier "
+              "settings. All point tasks in a concurrent task launch "
+              "must be mapped to variants with the same setting for "
+              "whether concurrent barrier support is required.",
+              get_task_name(), get_unique_id())
+        concurrent_points.push_back(std::make_pair(task, manager));
+        done = (concurrent_points.size() == points.size());
+      }
+      if (done)
+      {
+        if (is_remote())
+        {
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(index_owner);
+            rez.serialize(this);
+            rez.serialize(points.size());
+            rez.serialize(concurrent_lamport_clock);
+            rez.serialize(concurrent_barrier);
+            rez.serialize(concurrent_poisoned);
+          }
+          runtime->send_slice_concurrent_allreduce_request(orig_proc, rez);
+        }
+        else
+          index_owner->concurrent_allreduce(this,runtime->address_space,
+              points.size(), concurrent_lamport_clock, concurrent_barrier,
+              concurrent_poisoned);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void SliceTask::finish_concurrent_allreduce(uint64_t lamport_clock,
+                                    bool poisoned, RtBarrier concurrent_barrier)
+    //--------------------------------------------------------------------------
+    {
+      concurrent_task_barrier = concurrent_barrier;
+      // No need for the lock, no races here
+      for (std::vector<std::pair<PointTask*,ProcessorManager*> >::const_iterator
+            it = concurrent_points.begin(); it != concurrent_points.end(); it++) 
+        it->second->finalize_concurrent_task_order(it->first,
+            lamport_clock, poisoned);
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ void SliceTask::handle_verify_concurrent_execution(
                                                             Deserializer &derez)
     //--------------------------------------------------------------------------
@@ -12281,6 +12464,44 @@ namespace Legion {
       RtUserEvent done;
       derez.deserialize(done);
       Runtime::trigger_event(done, verified);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void SliceTask::handle_concurrent_allreduce_request(
+                                     Deserializer &derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      IndexTask *owner;
+      derez.deserialize(owner);
+      SliceTask *slice;
+      derez.deserialize(slice);
+      size_t total_points;
+      derez.deserialize(total_points);
+      uint64_t lamport_clock;
+      derez.deserialize(lamport_clock);
+      bool barrier, poisoned;
+      derez.deserialize<bool>(barrier);
+      derez.deserialize<bool>(poisoned);
+      owner->concurrent_allreduce(slice, source, total_points,
+                                  lamport_clock, barrier, poisoned);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void SliceTask::handle_concurrent_allreduce_response(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      SliceTask *slice;
+      derez.deserialize(slice);
+      RtBarrier barrier;
+      derez.deserialize(barrier);
+      uint64_t lamport_clock;
+      derez.deserialize(lamport_clock);
+      bool poisoned;
+      derez.deserialize<bool>(poisoned);
+      slice->finish_concurrent_allreduce(lamport_clock, poisoned, barrier);
     }
 
     //--------------------------------------------------------------------------

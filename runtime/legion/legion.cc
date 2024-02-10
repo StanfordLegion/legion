@@ -2128,7 +2128,8 @@ namespace Legion {
       : task_id(0), global_registration(true), 
         task_variant_name(NULL), leaf_variant(false), 
         inner_variant(false), idempotent_variant(false),
-        replicable_variant(false), concurrent_variant(false)
+        replicable_variant(false), concurrent_variant(false),
+        concurrent_barrier(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -2139,7 +2140,8 @@ namespace Legion {
       : task_id(task_id), global_registration(global), 
         task_variant_name(variant_name), leaf_variant(false), 
         inner_variant(false), idempotent_variant(false),
-        replicable_variant(false), concurrent_variant(false)
+        replicable_variant(false), concurrent_variant(false),
+        concurrent_barrier(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -2151,7 +2153,8 @@ namespace Legion {
       : task_id(task_id), global_registration(global), 
         task_variant_name(variant_name), leaf_variant(false), 
         inner_variant(false), idempotent_variant(false),
-        replicable_variant(false), concurrent_variant(false)
+        replicable_variant(false), concurrent_variant(false),
+        concurrent_barrier(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -7164,6 +7167,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       ctx->yield();
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::concurrent_task_barrier(Context ctx)
+    //--------------------------------------------------------------------------
+    {
+      ctx->concurrent_task_barrier();
     }
 
     //--------------------------------------------------------------------------

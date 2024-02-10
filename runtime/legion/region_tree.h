@@ -2373,6 +2373,11 @@ namespace Legion {
                               const std::vector<DomainPoint> &shard_points,
                                         const Domain &shard_domain,
                                         std::set<ShardID> &range_shards) = 0;
+      virtual bool has_shard_participants(ShardingFunction *func,
+                                          ShardID shard,
+                                          IndexSpace shard_space,
+                              const std::vector<DomainPoint> &shard_points,
+                                          const Domain &shard_domain) = 0;
     public:
       virtual EqKDTree* create_equivalence_set_kd_tree(
                                         size_t total_shards = 1) = 0;
@@ -2684,6 +2689,11 @@ namespace Legion {
                                   const std::vector<DomainPoint> &shard_points,
                                         const Domain &shard_domain,
                                         std::set<ShardID> &range_shards);
+      virtual bool has_shard_participants(ShardingFunction *func,
+                                          ShardID shard,
+                                          IndexSpace shard_space,
+                                  const std::vector<DomainPoint> &shard_points,
+                                          const Domain &shard_domain);
     public:
       virtual EqKDTree* create_equivalence_set_kd_tree(size_t total_shards = 1);
       virtual void initialize_equivalence_set_kd_tree(EqKDTree *tree,
