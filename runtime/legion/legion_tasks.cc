@@ -6272,6 +6272,34 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool IndividualTask::replicate_task(void)
+    //--------------------------------------------------------------------------
+    {
+      if (is_remote())
+      {
+        // Pull these onto the stack since it's unsafe to read them after
+        // we call replicate task and it goes off and does stuff
+        SingleTask *original = orig_task;
+        const Processor orig = orig_proc;
+        const RtEvent event = mapped_event;
+        const bool result = SingleTask::replicate_task();
+        if (result)
+        {
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize<SingleTask*>(original);
+            rez.serialize(event);
+          }
+          runtime->send_individual_remote_mapped(orig, rez);
+        }
+        return result;
+      }
+      else
+        return SingleTask::replicate_task();
+    }
+
+    //--------------------------------------------------------------------------
     void IndividualTask::handle_future_size(size_t return_type_size,
                    bool has_return_type_size, std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
@@ -7253,6 +7281,20 @@ namespace Legion {
         return deferred;
       slice_owner->record_point_mapped(mapped_event);
       return RtEvent::NO_RT_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    bool PointTask::replicate_task(void)
+    //--------------------------------------------------------------------------
+    {
+      // Pull this onto the stack since it is unsafe to read it after we
+      // call the base class method
+      SliceTask *owner = slice_owner;
+      const RtEvent event = mapped_event;
+      const bool result = SingleTask::replicate_task();
+      if (result)
+        owner->record_point_mapped(event);
+      return result;
     }
 
     //--------------------------------------------------------------------------

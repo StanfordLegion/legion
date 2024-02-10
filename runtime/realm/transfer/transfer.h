@@ -169,12 +169,14 @@ namespace Realm {
   //  intermediate buffers
   struct TransferGraph {
     struct XDTemplate {
+      // TODO(apryakhin@): Remove target_node
       NodeID target_node;
       //XferDesKind kind;
       XferDesFactory *factory;
       int gather_control_input;
       int scatter_control_input;
       XferDesRedopInfo redop;
+      Channel *channel = nullptr;
 
       enum IOType {
 	IO_INST,
