@@ -1984,6 +1984,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void TraceViewSet::insert(LegionMap<LogicalView*,
+                  FieldMaskSet<IndexSpaceExpression> > &views, bool antialiased)
+    //--------------------------------------------------------------------------
+    {
+      for (LegionMap<LogicalView*,FieldMaskSet<IndexSpaceExpression> >::
+            const_iterator vit = views.begin(); vit != views.end(); vit++)
+      {
+        for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+              vit->second.begin(); it != vit->second.end(); it++)
+          insert(vit->first, it->first, it->second);
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void TraceViewSet::invalidate(
        LogicalView *view, IndexSpaceExpression *expr, const FieldMask &mask,
        std::map<IndexSpaceExpression*,unsigned> *expr_refs_to_remove,
@@ -2304,6 +2318,8 @@ namespace Legion {
             const FieldMask overlap = it->second & non_dominated;
             if (!overlap)
               continue;
+            // No need to be precise here since the resulting analysis
+            // on the leaves is filtering and not computing a union
             alias_analysis.traverse(inst_view, overlap, it->first);
           }
         }
@@ -2356,8 +2372,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void TraceViewSet::dominates(LogicalView *view, 
-                        IndexSpaceExpression *expr, FieldMask mask,
-                        FieldMaskSet<IndexSpaceExpression> &non_dominated) const
+                    IndexSpaceExpression *expr, FieldMask mask,
+                    LegionMap<LogicalView*,
+                      FieldMaskSet<IndexSpaceExpression> > &non_dominated) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2416,7 +2433,7 @@ namespace Legion {
             {
               IndexSpaceExpression *diff = 
                 forest->subtract_index_spaces(expr, intersection);
-              non_dominated.insert(diff, overlap);
+              non_dominated[view].insert(diff, overlap);
             }
           } 
           mask -= overlap;
@@ -2432,79 +2449,80 @@ namespace Legion {
           }
         }
         if (!!mask)
-          non_dominated.insert(expr, mask);
+          non_dominated[view].insert(expr, mask);
       }
       else
-        non_dominated.insert(expr, mask);
+        non_dominated[view].insert(expr, mask);
 #ifdef DEBUG_LEGION
       assert(!non_dominated.empty());
 #endif
+      FieldMaskSet<IndexSpaceExpression> &non_view = non_dominated[view];
       // Now do the checks for any aliasing with collective views 
       if (view->is_collective_view())
       {
-        CollectiveAntiAlias alias_analysis(view->as_collective_view());
+        CollectiveView *collective_view = view->as_collective_view();
+        CollectiveAntiAlias alias_analysis(collective_view);
         for (ViewExprs::const_iterator vit =
               conditions.begin(); vit != conditions.end(); vit++)
         {
           if (!vit->first->is_instance_view())
             continue;
-          if (vit->second.get_valid_mask() * non_dominated.get_valid_mask())
+          if (vit->second.get_valid_mask() * non_view.get_valid_mask())
             continue;
           InstanceView *inst_view = vit->first->as_instance_view();
-          for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
-                vit->second.begin(); it != vit->second.end(); it++)
+          if (!collective_view->aliases(inst_view))
+            continue;
+          // Only record expressions that are relevant
+          LegionMap<std::pair<IndexSpaceExpression*,IndexSpaceExpression*>,
+            FieldMask> join;
+          unique_join_on_field_mask_sets(non_view, vit->second, join);
+          for (LegionMap<std::pair<IndexSpaceExpression*,
+                IndexSpaceExpression*>,FieldMask>::const_iterator it =
+                join.begin(); it != join.end(); it++)
           {
-            const FieldMask overlap = 
-              it->second & non_dominated.get_valid_mask();
-            if (!overlap)
-              continue;
-            alias_analysis.traverse(inst_view, overlap, it->first);
+            if (it->first.first != it->first.second)
+            {
+              IndexSpaceExpression *overlap_expr = 
+                forest->intersect_index_spaces(it->first.first,
+                                               it->first.second);
+              if (overlap_expr->is_empty())
+                continue;
+              if (it->first.first->get_volume() == overlap_expr->get_volume())
+                alias_analysis.traverse(inst_view, it->second, it->first.first);
+              else if (it->first.second->get_volume() == 
+                        overlap_expr->get_volume())
+                alias_analysis.traverse(inst_view, it->second,it->first.second);
+              else
+                alias_analysis.traverse(inst_view, it->second, overlap_expr);
+            }
+            else
+              alias_analysis.traverse(inst_view, it->second, it->first.first);
           }
         }
         // For each of the non-dominated expressions go through the
         // alias analysis and get new expressions that are still not
         // dominated even after the alias analysis
-        FieldMaskSet<IndexSpaceExpression> to_add;
         std::vector<IndexSpaceExpression*> to_remove;
         for (FieldMaskSet<IndexSpaceExpression>::iterator it =
-              non_dominated.begin(); it != non_dominated.end(); it++)
+              non_view.begin(); it != non_view.end(); it++)
         {
-          FieldMask dominated_mask = it->second; 
+          FieldMask dominated_mask; 
           alias_analysis.visit_leaves(it->second, dominated_mask,
-                                      to_add, it->first, forest);
+              context, tree_id, collective_view, non_dominated, 
+              it->first, forest);
           // Remove any fields that were diffed
-          if (!!dominated_mask || !to_add.empty())
+          if (!!dominated_mask)
           {
-            it.filter(dominated_mask | to_add.get_valid_mask());
+            it.filter(dominated_mask);
             if (!it->second)
               to_remove.push_back(it->first);
           }
         }
         for (std::vector<IndexSpaceExpression*>::const_iterator it =
               to_remove.begin(); it != to_remove.end(); it++)
-          non_dominated.erase(*it);
-        // Group the to_add expressions across fields so there 
-        // is exactly one non-dominated expression for each field
-        if (!to_add.empty())
-        {
-#ifdef DEBUG_LEGION
-          non_dominated.tighten_valid_mask();
-#endif
-          LegionList<FieldSet<IndexSpaceExpression*> > field_sets;
-          to_add.compute_field_sets(FieldMask(), field_sets);
-          for (LegionList<FieldSet<IndexSpaceExpression*> >::const_iterator 
-                it = field_sets.begin(); it != field_sets.end(); it++)
-          {
-#ifdef DEBUG_LEGION
-            assert(!it->elements.empty());
-            assert(non_dominated.get_valid_mask() * it->set_mask);
-#endif
-            IndexSpaceExpression *non_dominated_expr =
-              (it->elements.size() == 1) ? *(it->elements.begin()) :
-              forest->union_index_spaces(it->elements);
-            non_dominated.insert(non_dominated_expr, it->set_mask);
-          }
-        }
+          non_view.erase(*it);
+        if (non_view.empty())
+          non_dominated.erase(view);
       }
       else if (has_collective_views && view->is_instance_view())
       {
@@ -2514,14 +2532,14 @@ namespace Legion {
         {
           if (!vit->first->is_collective_view())
             continue;
-          if (vit->second.get_valid_mask() * non_dominated.get_valid_mask())
+          if (vit->second.get_valid_mask() * non_view.get_valid_mask())
             continue;
           if (!individual_view->aliases(vit->first->as_collective_view()))
             continue;
           // Join on the fields to find expressions that match
           LegionMap<std::pair<IndexSpaceExpression*,
             IndexSpaceExpression*>,FieldMask> join;
-          unique_join_on_field_mask_sets(non_dominated, vit->second, join);
+          unique_join_on_field_mask_sets(non_view, vit->second, join);
           for (LegionMap<std::pair<IndexSpaceExpression*,IndexSpaceExpression*>,
                 FieldMask>::const_iterator it = join.begin(); 
                 it != join.end(); it++)
@@ -2531,12 +2549,12 @@ namespace Legion {
             if (difference->get_volume() < it->first.first->get_volume())
             {
               FieldMaskSet<IndexSpaceExpression>::iterator finder =
-                non_dominated.find(it->first.first);
+                non_view.find(it->first.first);
               finder.filter(it->second);
               if (!finder->second)
-                non_dominated.erase(finder);
+                non_view.erase(finder);
               if (!difference->is_empty())
-                non_dominated.insert(difference, it->second);
+                non_view.insert(difference, it->second);
             }
           }
         }
@@ -2595,25 +2613,31 @@ namespace Legion {
             // This allows us to handle the read-only precondition case
             // where we have read-only views that show up in the preconditions
             // but do not appear logically anywhere in the postconditions
-            FieldMaskSet<IndexSpaceExpression> non_dominated;
+            LegionMap<LogicalView*,
+                      FieldMaskSet<IndexSpaceExpression> > non_dominated;
             set.dominates(vit->first, it->first, it->second, non_dominated);
-            for (FieldMaskSet<IndexSpaceExpression>::const_iterator nit =
-                  non_dominated.begin(); nit != non_dominated.end(); nit++)
+            for (LegionMap<LogicalView*,
+                  FieldMaskSet<IndexSpaceExpression> >::const_iterator dit =
+                  non_dominated.begin(); dit != non_dominated.end(); dit++)
             {
-              // If all the fields are independent from anything that was
-              // written in the postcondition then we know this is a
-              // read-only precondition that does not need to be subsumed
-              FieldMask mask = nit->second;
-              set.filter_independent_fields(nit->first, mask);
-              if (!mask)
-                continue;
-              if (condition != NULL)
+              for (FieldMaskSet<IndexSpaceExpression>::const_iterator nit =
+                    dit->second.begin(); nit != dit->second.end(); nit++)
               {
-                condition->view = vit->first;
-                condition->expr = nit->first;
-                condition->mask = mask;
+                // If all the fields are independent from anything that was
+                // written in the postcondition then we know this is a
+                // read-only precondition that does not need to be subsumed
+                FieldMask mask = nit->second;
+                set.filter_independent_fields(nit->first, mask);
+                if (!mask)
+                  continue;
+                if (condition != NULL)
+                {
+                  condition->view = vit->first;
+                  condition->expr = nit->first;
+                  condition->mask = mask;
+                }
+                return false;
               }
-              return false;
             }
           }
           else

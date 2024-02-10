@@ -11878,20 +11878,36 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void CollectiveAntiAlias::visit_leaf(const FieldMask &mask, 
-                                           FieldMask &allvalid_mask,
-                           FieldMaskSet<IndexSpaceExpression> &non_dominated,
+                                         FieldMask &dominated_mask,
+                                         InnerContext *context,
+                                         RegionTreeID tree_id,
+                                         CollectiveView *view,
+                           LegionMap<LogicalView*,
+                            FieldMaskSet<IndexSpaceExpression> > &non_dominated,
                            IndexSpaceExpression *expr, RegionTreeForest *forest)
     //--------------------------------------------------------------------------
     {
-      if (!valid_exprs.empty())
+      if (!valid_exprs.empty() && !(mask * valid_exprs.get_valid_mask()))
       {
+#ifdef DEBUG_LEGION
+        assert(collective != view);
+#endif
+        // We need to remove the entry for these fields since we'll be recording
+        // new subfield entries along them
+        dominated_mask |= mask;
         // Sort into field sets, union, and then compare to the expression
         LegionList<FieldSet<IndexSpaceExpression*> > field_sets;
-        valid_exprs.compute_field_sets(allvalid_mask, field_sets);
+        valid_exprs.compute_field_sets(mask, field_sets);
         for (LegionList<FieldSet<IndexSpaceExpression*> >::const_iterator it =
               field_sets.begin(); it != field_sets.end(); it++)
         {
-          if (!it->elements.empty())
+          if (it->elements.empty())
+          {
+            // Record that all point-fields are non-dominated
+            InstanceView *view = get_instance_view(context, tree_id);
+            non_dominated[view].insert(expr, it->set_mask);
+          }
+          else
           {
             IndexSpaceExpression *valid_expr =
                 (it->elements.size() == 1) ? *(it->elements.begin()) :
@@ -11900,16 +11916,24 @@ namespace Legion {
                 forest->subtract_index_spaces(expr, valid_expr);
             if (!diff_expr->is_empty())
             {
-              non_dominated.insert(diff_expr, it->set_mask);
-              allvalid_mask -= it->set_mask;
+              // Dominated some of the points but not all of them
+              InstanceView *view = get_instance_view(context, tree_id);
+              non_dominated[view].insert(diff_expr, it->set_mask);
             }
           }
-          else
-            allvalid_mask -= it->set_mask;
         }
       }
-      else
-        allvalid_mask.clear();
+      // If we're still at the root (collective == view) and we don't have
+      // any overlaps then we don't need to record it because it has already
+      // been recorded and we don't need to update the dominated mask
+      else if (collective != view)
+      {
+        // Record that all point-fields are non-dominated for these instances
+        InstanceView *view = get_instance_view(context, tree_id);
+        non_dominated[view].insert(expr, mask);
+        // These fields have been dominated
+        dominated_mask |= mask;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -19024,20 +19048,18 @@ namespace Legion {
       assert(!view->is_reduction_kind());
 #endif
       // Check to see if this instance has already been made by the trace
-      FieldMaskSet<IndexSpaceExpression> not_dominated;
+      LegionMap<LogicalView*,FieldMaskSet<IndexSpaceExpression> > not_dominated;
       if (tracing_postconditions != NULL)
         tracing_postconditions->dominates(view, expr, view_mask, not_dominated);
       else
-        not_dominated.insert(expr, view_mask);
+        not_dominated[view].insert(expr, view_mask);
       // Record everything not dominated as a precondition
       if (!not_dominated.empty())
       {
         if (tracing_preconditions == NULL)
           tracing_preconditions =
             new TraceViewSet(context, did, set_expr, tree_id);
-        for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
-              not_dominated.begin(); it != not_dominated.end(); it++)
-          tracing_preconditions->insert(view, it->first, it->second);
+        tracing_preconditions->insert(not_dominated);
       }
     }
 
@@ -19075,20 +19097,18 @@ namespace Legion {
       assert(view->is_reduction_kind());
 #endif
       // Check to see if we initialized the view in this trace
-      FieldMaskSet<IndexSpaceExpression> not_dominated;
+      LegionMap<LogicalView*,FieldMaskSet<IndexSpaceExpression> > not_dominated;
       if (tracing_anticonditions != NULL)
         tracing_anticonditions->dominates(view, expr, view_mask, not_dominated);
       else
-        not_dominated.insert(expr, view_mask);
+        not_dominated[view].insert(expr, view_mask);
       // Record everything not dominated as a precondition
       if (!not_dominated.empty())
       {
         if (tracing_preconditions == NULL)
           tracing_preconditions =
             new TraceViewSet(context, did, set_expr, tree_id);
-        for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
-              not_dominated.begin(); it != not_dominated.end(); it++)
-          tracing_preconditions->insert(view, it->first, it->second);
+        tracing_preconditions->insert(not_dominated);
       }
       // Then record this in the postconditions
       // Note that you can keep all the non-reduction views in the 
@@ -19121,20 +19141,19 @@ namespace Legion {
         // we don't need to add the equivalence set to the anti-conditions,
         // as the reduction data has already been consumed, and can be read
         // out from the resulting instance.
-        FieldMaskSet<IndexSpaceExpression> not_dominated;
+        LegionMap<LogicalView*,
+          FieldMaskSet<IndexSpaceExpression> > not_dominated;
         if (tracing_preconditions != NULL)
           tracing_preconditions->dominates(dst_view, expr,
                                            view_mask, not_dominated);
         else
-          not_dominated.insert(expr, view_mask);
+          not_dominated[dst_view].insert(expr, view_mask);
         if (!not_dominated.empty())
         {
           if (tracing_anticonditions == NULL)
             tracing_anticonditions =
               new TraceViewSet(context, did, set_expr, tree_id);
-          for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
-                not_dominated.begin(); it != not_dominated.end(); it++)
-            tracing_anticonditions->insert(dst_view, it->first, it->second);
+          tracing_anticonditions->insert(not_dominated);
         }
       }
       else // this is the same as the copy case
@@ -19153,20 +19172,18 @@ namespace Legion {
       assert(!dst_view->is_reduction_kind());
 #endif
       // record src view in the preconditions if not dominated by post
-      FieldMaskSet<IndexSpaceExpression> not_dominated;
+      LegionMap<LogicalView*,FieldMaskSet<IndexSpaceExpression> > not_dominated;
       if (tracing_postconditions != NULL)
         tracing_postconditions->dominates(src_view, expr,
                                           view_mask, not_dominated);
       else
-        not_dominated.insert(expr, view_mask);
+        not_dominated[src_view].insert(expr, view_mask);
       if (!not_dominated.empty())
       {
         if (tracing_preconditions == NULL)
           tracing_preconditions =
             new TraceViewSet(context, did, set_expr, tree_id);
-        for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
-              not_dominated.begin(); it != not_dominated.end(); it++)
-          tracing_preconditions->insert(src_view, it->first, it->second);
+        tracing_preconditions->insert(not_dominated);
       }
       // record the destination view
       if (tracing_postconditions == NULL)
@@ -19188,20 +19205,18 @@ namespace Legion {
       assert(src_view->is_reduction_kind());
 #endif
       // Check to see if we made the reduction instance in the trace
-      FieldMaskSet<IndexSpaceExpression> not_dominated;
+      LegionMap<LogicalView*,FieldMaskSet<IndexSpaceExpression> > not_dominated;
       if (tracing_anticonditions != NULL)
         tracing_anticonditions->dominates(src_view, expr, 
                                           view_mask, not_dominated);
       else
-        not_dominated.insert(expr, view_mask);
+        not_dominated[src_view].insert(expr, view_mask);
       if (!not_dominated.empty())
       {
         if (tracing_preconditions == NULL)
           tracing_preconditions =
             new TraceViewSet(context, did, set_expr, tree_id);
-        for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
-              not_dominated.begin(); it != not_dominated.end(); it++)
-          tracing_preconditions->insert(src_view, it->first, it->second);
+        tracing_preconditions->insert(not_dominated);
         not_dominated.clear();
       }
       // Also need to check to see if the destination was produced in the 
@@ -19213,7 +19228,7 @@ namespace Legion {
           tracing_anticonditions->dominates(dst_view, expr, 
                                             view_mask, not_dominated);
         else
-          not_dominated.insert(expr, view_mask);
+          not_dominated[dst_view].insert(expr, view_mask);
       }
       else
       {
@@ -19221,16 +19236,14 @@ namespace Legion {
           tracing_postconditions->dominates(dst_view, expr, 
                                             view_mask, not_dominated);
         else
-          not_dominated.insert(expr, view_mask);
+          not_dominated[dst_view].insert(expr, view_mask);
       }
       if (!not_dominated.empty())
       {
         if (tracing_preconditions == NULL)
           tracing_preconditions =
             new TraceViewSet(context, did, set_expr, tree_id);
-        for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
-              not_dominated.begin(); it != not_dominated.end(); it++)
-          tracing_preconditions->insert(dst_view, it->first, it->second);
+        tracing_preconditions->insert(not_dominated);
       }
       if (tracing_postconditions != NULL)
       {
