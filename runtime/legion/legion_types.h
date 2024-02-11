@@ -39,7 +39,6 @@
 #include <unordered_map>
 
 #include "legion/legion_config.h"
-#include "legion/legion_template_help.h"
 
 // Make sure we have the appropriate defines in place for including realm
 #include "realm.h"

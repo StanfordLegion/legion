@@ -5059,7 +5059,7 @@ namespace Legion {
                                  const Processor target, RtEvent precondition)
     //--------------------------------------------------------------------------
     {
-      LEGION_STATIC_ASSERT(T::TASK_ID < LG_BEGIN_SHUTDOWN_TASK_IDS,
+      static_assert(T::TASK_ID < LG_BEGIN_SHUTDOWN_TASK_IDS,
           "Shutdown tasks should never be run directly on application procs");
       // If this is not a task directly related to shutdown or is a message, 
       // to a remote node then increment the number of outstanding tasks

@@ -17986,7 +17986,7 @@ namespace Legion {
                                            bool replace/*= false*/)
     //--------------------------------------------------------------------------
     {
-      LEGION_STATIC_ASSERT(DIM <= DomainPoint::MAX_POINT_DIM,
+      static_assert(DIM <= DomainPoint::MAX_POINT_DIM,
           "ArgumentMap DIM is larger than LEGION_MAX_DIM");  
       DomainPoint dp;
       dp.dim = DIM;
@@ -18000,7 +18000,7 @@ namespace Legion {
     inline bool ArgumentMap::remove_point(const PT point[DIM])
     //--------------------------------------------------------------------------
     {
-      LEGION_STATIC_ASSERT(DIM <= DomainPoint::MAX_POINT_DIM,
+      static_assert(DIM <= DomainPoint::MAX_POINT_DIM,
           "ArgumentMap DIM is larger than LEGION_MAX_DIM");
       DomainPoint dp;
       dp.dim = DIM;
@@ -19496,7 +19496,7 @@ namespace Legion {
     inline RT FutureMap::get_result(const PT point[DIM]) const
     //--------------------------------------------------------------------------
     {
-      LEGION_STATIC_ASSERT(DIM <= DomainPoint::MAX_POINT_DIM,
+      static_assert(DIM <= DomainPoint::MAX_POINT_DIM,
           "FutureMap DIM is larger than LEGION_MAX_DIM");
       DomainPoint dp;
       dp.dim = DIM;
@@ -19511,7 +19511,7 @@ namespace Legion {
     inline Future FutureMap::get_future(const PT point[DIM]) const
     //--------------------------------------------------------------------------
     {
-      LEGION_STATIC_ASSERT(DIM <= DomainPoint::MAX_POINT_DIM,
+      static_assert(DIM <= DomainPoint::MAX_POINT_DIM,
           "FutureMap DIM is larger than LEGION_MAX_DIM");
       DomainPoint dp;
       dp.dim = DIM;
@@ -19525,7 +19525,7 @@ namespace Legion {
     inline void FutureMap::get_void_result(const PT point[DIM]) const
     //--------------------------------------------------------------------------
     {
-      LEGION_STATIC_ASSERT(DIM <= DomainPoint::MAX_POINT_DIM,
+      static_assert(DIM <= DomainPoint::MAX_POINT_DIM,
           "FutureMap DIM is larger than LEGION_MAX_DIM");
       DomainPoint dp;
       dp.dim = DIM;
@@ -21058,9 +21058,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Assert that we are returning Futures or FutureMaps
-      LEGION_STATIC_ASSERT((LegionTypeInequality<T,Future>::value),
+      static_assert(std::is_same<T,Future>::value,
           "Future types are not permitted as return types for Legion tasks");
-      LEGION_STATIC_ASSERT((LegionTypeInequality<T,FutureMap>::value),
+      static_assert(std::is_same<T,FutureMap>::value,
           "FutureMap types are not permitted as return types for Legion tasks");
       const Task *task; Context ctx; Runtime *rt;
       const std::vector<PhysicalRegion> *regions;
@@ -21105,9 +21105,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Assert that we are returning Futures or FutureMaps
-      LEGION_STATIC_ASSERT((LegionTypeInequality<T,Future>::value),
+      static_assert(std::is_same<T,Future>::value,
           "Future types are not permitted as return types for Legion tasks");
-      LEGION_STATIC_ASSERT((LegionTypeInequality<T,FutureMap>::value),
+      static_assert(std::is_same<T,FutureMap>::value,
           "FutureMap types are not permitted as return types for Legion tasks");
 
       const Task *task; Context ctx; Runtime *rt;
