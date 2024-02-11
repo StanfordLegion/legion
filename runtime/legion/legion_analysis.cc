@@ -9104,8 +9104,10 @@ namespace Legion {
       : CollectiveCopyFillAnalysis(rt, o, idx, rn, true/*on heap*/,
                                    t_info, IS_WRITE(req)),
         usage(req), precondition(pre), term_event(term),
-        check_initialized(check && !IS_DISCARD(usage) && !IS_SIMULT(usage)), 
-        record_valid(record), output_aggregator(NULL)
+        // Don't support checking initialized for simultaneous because of
+        // must epoch operations which need a total order on mapping points
+        check_initialized(check && !IS_WRITE_DISCARD(usage) &&
+            !IS_SIMULT(usage)), record_valid(record), output_aggregator(NULL)
     //--------------------------------------------------------------------------
     {
     }
@@ -13405,7 +13407,7 @@ namespace Legion {
           }
         }
       }
-      else if (IS_WRITE(analysis.usage) && IS_DISCARD(analysis.usage))
+      else if (IS_WRITE_DISCARD(analysis.usage))
       {
         // Write-only
         // Update the initialized data before messing with the user mask
@@ -13652,6 +13654,9 @@ namespace Legion {
           }
         }
       }
+      // If we're doing a read-discard then we can invalidate the state
+      if (IS_READ_DISCARD(analysis.usage))
+        invalidate_state(expr, expr_covers, user_mask, false/*record*/);
     }
 
     //--------------------------------------------------------------------------

@@ -1389,10 +1389,10 @@ namespace Legion {
       r.prop = LEGION_EXCLUSIVE;
       // If we're doing a write discard, then we can add read privileges
       // inside our task since it is safe to read what we wrote
-      if (HAS_WRITE_DISCARD(r))
+      if (IS_WRITE_DISCARD(r))
         r.privilege |= (LEGION_READ_PRIV | LEGION_REDUCE_PRIV);
       // Then remove any discard and collective masks from the privileges
-      r.privilege &= ~LEGION_DISCARD_MASK;
+      r.privilege = FILTER_DISCARD(r);
     }
 
     //--------------------------------------------------------------------------
@@ -4699,10 +4699,8 @@ namespace Legion {
       initialize_operation(ctx, provenance, 1/*regions*/);
       parent_task = ctx->get_task();
       requirement = reg.impl->get_requirement();
-      // If this was a write-discard privilege, change it to read-write
-      // so that we don't lose any data
-      if (HAS_WRITE_DISCARD(requirement))
-        requirement.privilege = LEGION_READ_WRITE;
+      // Remove any discard masks we might have had
+      requirement.privilege = FILTER_DISCARD(requirement);
       map_id = reg.impl->map_id;
       tag = reg.impl->tag;
       region = reg;
