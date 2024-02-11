@@ -21065,9 +21065,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Assert that we are returning Futures or FutureMaps
-      static_assert(std::is_same<T,Future>::value,
+      static_assert(!std::is_same<T,Future>::value,
           "Future types are not permitted as return types for Legion tasks");
-      static_assert(std::is_same<T,FutureMap>::value,
+      static_assert(!std::is_same<T,FutureMap>::value,
           "FutureMap types are not permitted as return types for Legion tasks");
       const Task *task; Context ctx; Runtime *rt;
       const std::vector<PhysicalRegion> *regions;
@@ -21112,9 +21112,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Assert that we are returning Futures or FutureMaps
-      static_assert(std::is_same<T,Future>::value,
+      static_assert(!std::is_same<T,Future>::value,
           "Future types are not permitted as return types for Legion tasks");
-      static_assert(std::is_same<T,FutureMap>::value,
+      static_assert(!std::is_same<T,FutureMap>::value,
           "FutureMap types are not permitted as return types for Legion tasks");
 
       const Task *task; Context ctx; Runtime *rt;
