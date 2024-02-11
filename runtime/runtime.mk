@@ -1152,7 +1152,6 @@ INSTALL_HEADERS += legion.h \
 		   legion/legion_mapping.inl \
 		   legion/legion_redop.h \
 		   legion/legion_redop.inl \
-		   legion/legion_template_help.h \
 		   legion/legion_types.h \
 		   legion/legion_utilities.h \
 		   mappers/debug_mapper.h \
