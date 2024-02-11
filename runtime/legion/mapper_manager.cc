@@ -602,6 +602,39 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void MapperManager::invoke_handle_instance_collection(
+                                                      MappingInstance &instance)
+    //--------------------------------------------------------------------------
+    {
+      MappingCallInfo ctx(this, HANDLE_INSTANCE_COLLECTION_CALL, NULL);
+      mapper->handle_instance_collection(&ctx, instance);
+    }
+
+    //--------------------------------------------------------------------------
+    void MapperManager::notify_instance_deletion(PhysicalManager *manager)
+    //--------------------------------------------------------------------------
+    {
+      // Get a reference in case we need to defer this
+      MappingInstance instance(manager); 
+      invoke_handle_instance_collection(instance);
+    }
+
+    //--------------------------------------------------------------------------
+    void MapperManager::add_subscriber_reference(PhysicalManager *manager)
+    //--------------------------------------------------------------------------
+    {
+      // Nothing to do currently
+    }
+
+    //--------------------------------------------------------------------------
+    bool MapperManager::remove_subscriber_reference(PhysicalManager *manager)
+    //--------------------------------------------------------------------------
+    {
+      // Nothing to do, make sure we don't get deleted
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
     void MapperManager::update_mappable_tag(MappingCallInfo *ctx,
                                  const Mappable &mappable, MappingTagID new_tag)
     //--------------------------------------------------------------------------
@@ -1703,6 +1736,99 @@ namespace Legion {
           release_acquired_instance(ctx, (*it)[idx].impl);
       }
       resume_mapper_call(ctx, MAPPER_RELEASE_INSTANCES_CALL);
+    }
+
+    //--------------------------------------------------------------------------
+    bool MapperManager::subscribe(MappingCallInfo *ctx,
+                                  const MappingInstance &instance)
+    //--------------------------------------------------------------------------
+    {
+      if ((instance.impl == NULL) || instance.impl->is_virtual_manager())
+        return false;
+      pause_mapper_call(ctx);
+      PhysicalManager *manager = instance.impl->as_physical_manager();
+      const bool result = manager->register_deletion_subscriber(this);
+      resume_mapper_call(ctx, MAPPER_SUBSCRIBE_INSTANCE_CALL);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    void MapperManager::unsubscribe(MappingCallInfo *ctx,
+                                    const MappingInstance &instance)
+    //--------------------------------------------------------------------------
+    {
+      if ((instance.impl == NULL) || instance.impl->is_virtual_manager())
+        return;
+      pause_mapper_call(ctx);
+      PhysicalManager *manager = instance.impl->as_physical_manager();
+      manager->unregister_deletion_subscriber(this);
+      resume_mapper_call(ctx, MAPPER_UNSUBSCRIBE_INSTANCE_CALL);
+    }
+
+    //--------------------------------------------------------------------------
+    bool MapperManager::collect_instance(MappingCallInfo *ctx, 
+                                         const MappingInstance &instance)
+    //--------------------------------------------------------------------------
+    {
+      if ((instance.impl == NULL) || instance.impl->is_virtual_manager() ||
+          instance.impl->is_external_instance())
+        return false;
+      pause_mapper_call(ctx);
+      PhysicalManager *manager = instance.impl->as_physical_manager();
+      RtEvent collected;
+      const bool result = manager->collect(collected);
+      if (result)
+      {
+        // Tell the memory that the instance has been collected
+        std::vector<PhysicalManager*> collected_instance(1, manager);
+        manager->memory_manager->notify_collected_instances(collected_instance);
+        // Wait for the collection to be done 
+        collected.wait();
+      }
+      resume_mapper_call(ctx, MAPPER_COLLECT_INSTANCE_CALL);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    void MapperManager::collect_instances(MappingCallInfo *ctx,
+                                  const std::vector<MappingInstance> &instances,
+                                  std::vector<bool> &collected)
+    //--------------------------------------------------------------------------
+    {
+      collected.resize(instances.size(), false);
+      if (instances.empty())
+        return;
+      pause_mapper_call(ctx);
+      std::vector<RtEvent> wait_for;
+      std::map<MemoryManager*,std::vector<PhysicalManager*> > to_notify;
+      for (unsigned idx = 0; idx < instances.size(); idx++)
+      {
+        collected[idx] = false;
+        InstanceManager *inst = instances[idx].impl;
+        if ((inst == NULL) || inst->is_virtual_manager() || 
+            inst->is_external_instance())
+          continue;
+        RtEvent instance_collected;
+        PhysicalManager *manager = inst->as_physical_manager();
+        if (manager->collect(instance_collected))
+        {
+          collected[idx] = true;
+          to_notify[manager->memory_manager].push_back(manager);
+          if (instance_collected.exists())
+            wait_for.push_back(instance_collected);
+        }
+      }
+      // Notify all the memory managers of the collection
+      for (std::map<MemoryManager*,
+                    std::vector<PhysicalManager*> >::const_iterator it =
+            to_notify.begin(); it != to_notify.end(); it++)
+        it->first->notify_collected_instances(it->second);
+      if (!wait_for.empty())
+      {
+        const RtEvent wait_on = Runtime::merge_events(wait_for);
+        wait_on.wait();
+      }
+      resume_mapper_call(ctx, MAPPER_COLLECT_INSTANCES_CALL);
     }
 
     //--------------------------------------------------------------------------

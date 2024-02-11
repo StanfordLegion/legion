@@ -230,6 +230,8 @@ namespace Legion {
                           const MapperMessage&          message) override;
       void handle_task_result(const MapperContext           ctx,
                               const MapperTaskResult&       result) override;
+      void handle_instance_collection(const MapperContext ctx,
+                                      const PhysicalInstance& inst) override;
     protected:
       const Machine machine;
     };

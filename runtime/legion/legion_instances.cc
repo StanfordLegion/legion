@@ -1360,16 +1360,25 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalManager::register_deletion_subscriber(
+    bool PhysicalManager::register_deletion_subscriber(
                                          InstanceDeletionSubscriber *subscriber)
     //--------------------------------------------------------------------------
     {
       subscriber->add_subscriber_reference(this);
-      AutoLock inst(inst_lock);
+      {
+        AutoLock inst(inst_lock);
+        if (gc_state != COLLECTED_GC_STATE)
+        {
 #ifdef DEBUG_LEGION
-      assert(subscribers.find(subscriber) == subscribers.end());
+          assert(subscribers.find(subscriber) == subscribers.end());
 #endif
-      subscribers.insert(subscriber);
+          subscribers.insert(subscriber);
+          return true;
+        }
+      }
+      if (subscriber->remove_subscriber_reference(this))
+        delete subscriber;
+      return false;
     }
 
     //--------------------------------------------------------------------------

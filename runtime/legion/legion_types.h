@@ -643,6 +643,7 @@ namespace Legion {
       PERMIT_STEAL_REQUEST_CALL,
       HANDLE_MESSAGE_CALL,
       HANDLE_TASK_RESULT_CALL,
+      HANDLE_INSTANCE_COLLECTION_CALL,
       APPLICATION_MAPPER_CALL,
       LAST_MAPPER_CALL,
     };
@@ -700,6 +701,7 @@ namespace Legion {
       "permit_steal_request",                       \
       "handle_message",                             \
       "handle_task_result",                         \
+      "handle_instance_collection",                 \
       "application mapper call",                    \
     }
 
@@ -1032,6 +1034,7 @@ namespace Legion {
       SEND_REMOTE_TRACE_UPDATE,
       SEND_REMOTE_TRACE_RESPONSE,
       SEND_FREE_EXTERNAL_ALLOCATION,
+      SEND_NOTIFY_COLLECTED_INSTANCES,
       SEND_CREATE_FUTURE_INSTANCE_REQUEST,
       SEND_CREATE_FUTURE_INSTANCE_RESPONSE,
       SEND_FREE_FUTURE_INSTANCE,
@@ -1354,6 +1357,7 @@ namespace Legion {
         "Send Remote Trace Update",                                   \
         "Send Remote Trace Response",                                 \
         "Send Free External Allocation",                              \
+        "Send Notify Collected Instances",                            \
         "Send Create Future Instance Request",                        \
         "Send Create Future Instance Response",                       \
         "Send Free Future Instance",                                  \
@@ -1461,6 +1465,10 @@ namespace Legion {
       MAPPER_ACQUIRE_AND_FILTER_INSTANCES_CALL,
       MAPPER_RELEASE_INSTANCE_CALL,
       MAPPER_RELEASE_INSTANCES_CALL,
+      MAPPER_SUBSCRIBE_INSTANCE_CALL,
+      MAPPER_UNSUBSCRIBE_INSTANCE_CALL,
+      MAPPER_COLLECT_INSTANCE_CALL,
+      MAPPER_COLLECT_INSTANCES_CALL,
       MAPPER_ACQUIRE_FUTURE_CALL,
       MAPPER_CREATE_INDEX_SPACE_CALL,
       MAPPER_UNION_INDEX_SPACES_CALL,
@@ -1685,6 +1693,10 @@ namespace Legion {
       "MapperRuntime::acquire_and_filter_instances",                  \
       "MapperRuntime::release_instance",                              \
       "MapperRuntime::release_instances",                             \
+      "MapperRuntime::subscribe",                                     \
+      "MapperRuntime::unsubscribe",                                   \
+      "MapperRuntime::collect_instance",                              \
+      "MapperRuntime::collect_instances",                             \
       "MapperRuntime::acquire_future",                                \
       "MapperRuntime::create_index_space",                            \
       "MapperRuntime::union_index_spaces",                            \
