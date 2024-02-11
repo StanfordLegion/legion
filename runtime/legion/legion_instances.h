@@ -428,7 +428,7 @@ namespace Legion {
       IndividualView* construct_top_view(AddressSpaceID logical_owner,
                                          DistributedID did, InnerContext *ctx,
                                          CollectiveMapping *mapping);
-      void register_deletion_subscriber(InstanceDeletionSubscriber *subscriber);
+      bool register_deletion_subscriber(InstanceDeletionSubscriber *subscriber);
       void unregister_deletion_subscriber(InstanceDeletionSubscriber *subscrib);
       void unregister_active_context(InnerContext *context); 
     public:
