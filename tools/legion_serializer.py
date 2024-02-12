@@ -112,22 +112,23 @@ class LegionDeserializer(ABC):
     
     def check_version(self, version: int) -> None:
         current_path = os.path.dirname(os.path.realpath(__file__))
-        # guess legion_profiling.h is in ../runtime/legion
-        legion_prof_h_path = os.path.abspath(os.path.join(*[current_path, os.pardir, "runtime", "legion", "legion_profiling.h"]))
-        if Path(legion_prof_h_path).is_file() == False:
+        # guess legion_profiling_version.h is in ../runtime/legion
+        legion_prof_version_h_path = os.path.abspath(os.path.join(*[current_path, os.pardir, "runtime", "legion", "legion_profiling_version.h"]))
+        if Path(legion_prof_version_h_path).is_file() == False:
             # guess legion_profiling.h is in ../include/legion (legion is installed)
-            legion_prof_h_path = os.path.abspath(os.path.join(*[current_path, os.pardir, "include", "legion", "legion_profiling.h"]))
-            if Path(legion_prof_h_path).is_file() == False:
-               print("Warning: can not find legion_profiling.h, so legion_prof can not verify the version, the current version of the log is:", version)
-        with open(legion_prof_h_path, "r") as legion_prof_file:
-            version_regex = re.compile(r'#define LEGION_PROF_VERSION (?P<version>[0-9]+)')
+            legion_prof_version_h_path = os.path.abspath(os.path.join(*[current_path, os.pardir, "include", "legion", "legion_profiling_version.h"]))
+            if Path(legion_prof_version_h_path).is_file() == False:
+               print("Warning: can not find legion_profiling_version.h, so legion_prof can not verify the version, the current version of the log is:", version)
+        with open(legion_prof_version_h_path, "r") as legion_prof_file:
+            version_regex = re.compile(r'(?P<version>[0-9]+)')
             for line in legion_prof_file:
                 m = version_regex.match(line)
                 if m is not None:
                     legion_version = int(m.groupdict()["version"])
                     assert legion_version == version, "Can not match the version number of legion_prof:%d with the log:%d" %(legion_version, version)
+                    print(legion_version, version)
                     return
-        print("Warning: can not find the version number in legion_profiling.h, so legion_prof can not verify the version, the current version of the log is:", version)
+        print("Warning: can not find the version number in legion_profiling_version.h, so legion_prof can not verify the version, the current version of the log is:", version)
 
 
 @typecheck
