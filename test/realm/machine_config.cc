@@ -319,6 +319,12 @@ void top_level_task(const void *args, size_t arglen,
     for(Machine::ProcessorQuery::iterator it = Machine::ProcessorQuery(machine).begin(); it; ++it) {
       Processor proc = *it;
       Processor::Kind kind = proc.kind();
+      Machine::ProcessInfo process_info;
+      bool ret_value = machine.get_process_info(proc, &process_info);
+      assert(ret_value);
+      log_app.print() << "Process " << proc << ", process_id:" << process_info.processid
+                      << ", host_id:" << process_info.hostid
+                      << ", hostname:" << process_info.hostname;
       switch (kind)
       {
         case Processor::LOC_PROC:
@@ -652,20 +658,6 @@ int main(int argc, char **argv)
   rt.start();
 
   rt.register_task(TOP_LEVEL_TASK, top_level_task);
-
-  Machine machine = Machine::get_machine();
-  // iterate all processors within the machine to print the process info.
-  for(Machine::ProcessorQuery::iterator it = Machine::ProcessorQuery(machine).begin(); it;
-      ++it) {
-    Processor proc = *it;
-    Machine::ProcessInfo process_info;
-    bool ret_value = machine.get_process_info(proc, &process_info);
-    if(ret_value) {
-      log_app.print() << "Process " << proc << ", process_id:" << process_info.processid
-                      << ", host_id:" << process_info.hostid
-                      << ", hostname:" << process_info.hostname;
-    }
-  }
 
   // select a processor to run the top level task on
   Processor p = Machine::ProcessorQuery(Machine::get_machine())

@@ -6713,13 +6713,8 @@ namespace Legion {
       else
         sources[dst_view].insert(update, helper->convert_src_to_dst(fill_mask));
       if (tracing_eq != NULL)
-      {
-        if (dst_view->is_reduction_kind())
-          tracing_eq->update_tracing_anti_views(dst_view, expr, fill_mask);
-        else
-          update_tracing_valid_views(tracing_eq, src_view, dst_view,
-                                     fill_mask, expr, 0/*redop*/);
-      }
+        tracing_eq->update_tracing_fill_views(src_view, dst_view, expr,
+            fill_mask, (src_index != dst_index));
     }
 
     //--------------------------------------------------------------------------
@@ -6973,29 +6968,19 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void CopyFillAggregator::update_tracing_valid_views(
-                          EquivalenceSet *tracing_eq, LogicalView *src, 
-                          LogicalView *dst, const FieldMask &mask, 
+                          EquivalenceSet *tracing_eq, InstanceView *src, 
+                          InstanceView *dst, const FieldMask &mask, 
                           IndexSpaceExpression *expr, ReductionOpID redop) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(tracing_eq != NULL);
 #endif
-      const RegionUsage read_usage(LEGION_READ_PRIV, LEGION_EXCLUSIVE, 0);
-      tracing_eq->update_tracing_valid_views(src, expr, read_usage, mask, 
-                                             false/*invalidates*/);
-      // Only record the destination if this is not a copy across
-      if (src_index == dst_index)
-      {
-        const RegionUsage write_usage((redop > 0) ? LEGION_REDUCE_PRIV : 
-            LEGION_WRITE_PRIV, LEGION_EXCLUSIVE, redop);
-        // If we're doing a reduction, that does need to invalidate 
-        // everything that is not being reduced to since it is a kind
-        // of a write and this instance has dirty state, otherwise normal
-        // copies are just making another copy of the same data
-        tracing_eq->update_tracing_valid_views(dst, expr, write_usage, mask,
-                                               (redop > 0)/*invalidates*/);
-      }
+      if (redop > 0)
+        tracing_eq->update_tracing_reduction_views(src, dst, expr, mask);
+      else
+        tracing_eq->update_tracing_copy_views(src, dst, expr, mask,
+                                              (src_index != dst_index));
     }
 
     //--------------------------------------------------------------------------
@@ -9119,8 +9104,10 @@ namespace Legion {
       : CollectiveCopyFillAnalysis(rt, o, idx, rn, true/*on heap*/,
                                    t_info, IS_WRITE(req)),
         usage(req), precondition(pre), term_event(term),
-        check_initialized(check && !IS_DISCARD(usage) && !IS_SIMULT(usage)), 
-        record_valid(record), output_aggregator(NULL)
+        // Don't support checking initialized for simultaneous because of
+        // must epoch operations which need a total order on mapping points
+        check_initialized(check && !IS_WRITE_DISCARD(usage) &&
+            !IS_SIMULT(usage)), record_valid(record), output_aggregator(NULL)
     //--------------------------------------------------------------------------
     {
     }
@@ -11893,20 +11880,36 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void CollectiveAntiAlias::visit_leaf(const FieldMask &mask, 
-                                           FieldMask &allvalid_mask,
-                           FieldMaskSet<IndexSpaceExpression> &non_dominated,
+                                         FieldMask &dominated_mask,
+                                         InnerContext *context,
+                                         RegionTreeID tree_id,
+                                         CollectiveView *view,
+                           LegionMap<LogicalView*,
+                            FieldMaskSet<IndexSpaceExpression> > &non_dominated,
                            IndexSpaceExpression *expr, RegionTreeForest *forest)
     //--------------------------------------------------------------------------
     {
-      if (!valid_exprs.empty())
+      if (!valid_exprs.empty() && !(mask * valid_exprs.get_valid_mask()))
       {
+#ifdef DEBUG_LEGION
+        assert(collective != view);
+#endif
+        // We need to remove the entry for these fields since we'll be recording
+        // new subfield entries along them
+        dominated_mask |= mask;
         // Sort into field sets, union, and then compare to the expression
         LegionList<FieldSet<IndexSpaceExpression*> > field_sets;
-        valid_exprs.compute_field_sets(allvalid_mask, field_sets);
+        valid_exprs.compute_field_sets(mask, field_sets);
         for (LegionList<FieldSet<IndexSpaceExpression*> >::const_iterator it =
               field_sets.begin(); it != field_sets.end(); it++)
         {
-          if (!it->elements.empty())
+          if (it->elements.empty())
+          {
+            // Record that all point-fields are non-dominated
+            InstanceView *view = get_instance_view(context, tree_id);
+            non_dominated[view].insert(expr, it->set_mask);
+          }
+          else
           {
             IndexSpaceExpression *valid_expr =
                 (it->elements.size() == 1) ? *(it->elements.begin()) :
@@ -11915,16 +11918,24 @@ namespace Legion {
                 forest->subtract_index_spaces(expr, valid_expr);
             if (!diff_expr->is_empty())
             {
-              non_dominated.insert(diff_expr, it->set_mask);
-              allvalid_mask -= it->set_mask;
+              // Dominated some of the points but not all of them
+              InstanceView *view = get_instance_view(context, tree_id);
+              non_dominated[view].insert(diff_expr, it->set_mask);
             }
           }
-          else
-            allvalid_mask -= it->set_mask;
         }
       }
-      else
-        allvalid_mask.clear();
+      // If we're still at the root (collective == view) and we don't have
+      // any overlaps then we don't need to record it because it has already
+      // been recorded and we don't need to update the dominated mask
+      else if (collective != view)
+      {
+        // Record that all point-fields are non-dominated for these instances
+        InstanceView *view = get_instance_view(context, tree_id);
+        non_dominated[view].insert(expr, mask);
+        // These fields have been dominated
+        dominated_mask |= mask;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -13396,7 +13407,7 @@ namespace Legion {
           }
         }
       }
-      else if (IS_WRITE(analysis.usage) && IS_DISCARD(analysis.usage))
+      else if (IS_WRITE_DISCARD(analysis.usage))
       {
         // Write-only
         // Update the initialized data before messing with the user mask
@@ -13429,6 +13440,17 @@ namespace Legion {
           // Record any non-restricted instances
           record_instances(expr, expr_covers, non_restricted,
                            new_instances);
+        }
+        // Update any tracing views
+        if (analysis.trace_info.recording)
+        {
+          for (unsigned idx = 0; idx < analysis.target_views.size(); idx++)
+          {
+            for (FieldMaskSet<InstanceView>::const_iterator it =
+                  analysis.target_views[idx].begin(); it !=
+                  analysis.target_views[idx].end(); it++)
+              update_tracing_write_discard_view(it->first, expr, it->second);
+          }
         }
         // Issue copy-out copies for any restricted fields
         if (!restricted_instances.empty())
@@ -13553,6 +13575,17 @@ namespace Legion {
 #endif
           }
         }
+        // Record tracing views
+        if (analysis.trace_info.recording)
+        {
+          for (unsigned idx = 0; idx < analysis.target_views.size(); idx++)
+          {
+            for (FieldMaskSet<InstanceView>::const_iterator it =
+                  analysis.target_views[idx].begin(); it !=
+                  analysis.target_views[idx].end(); it++)
+              update_tracing_read_only_view(it->first, expr, it->second);
+          }
+        }
       }
       else
       {
@@ -13607,22 +13640,23 @@ namespace Legion {
 #endif
           }
         }
-      }
-      // Update the post conditions for these views if we're recording 
-      if (analysis.trace_info.recording)
-      {
-        if (tracing_postconditions == NULL)
-          tracing_postconditions =
-            new TraceViewSet(context, did, set_expr, tree_id);
-        for (unsigned idx = 0; idx < analysis.target_views.size(); idx++)
+        if (analysis.trace_info.recording)
         {
-          for (FieldMaskSet<InstanceView>::const_iterator it =
-                analysis.target_views[idx].begin(); it !=
-                analysis.target_views[idx].end(); it++)
-            update_tracing_valid_views(it->first, expr, analysis.usage,
-                                       it->second, IS_WRITE(analysis.usage));
+          for (unsigned idx = 0; idx < analysis.target_views.size(); idx++)
+          {
+            for (FieldMaskSet<InstanceView>::const_iterator it =
+                  analysis.target_views[idx].begin(); it !=
+                  analysis.target_views[idx].end(); it++)
+              if (IS_READ_ONLY(analysis.usage))
+                update_tracing_read_only_view(it->first, expr, it->second);
+              else
+                update_tracing_read_write_view(it->first, expr, it->second);
+          }
         }
       }
+      // If we're doing a read-discard then we can invalidate the state
+      if (IS_READ_DISCARD(analysis.usage))
+        invalidate_state(expr, expr_covers, user_mask, false/*record*/);
     }
 
     //--------------------------------------------------------------------------
@@ -16338,6 +16372,17 @@ namespace Legion {
 #endif
         }
       }
+      // Record any reduction views here
+      if (analysis.trace_info.recording)
+      {
+        for (unsigned idx = 0; idx < analysis.target_views.size(); idx++)
+        {
+          for (FieldMaskSet<InstanceView>::const_iterator it =
+                analysis.target_views[idx].begin(); it !=
+                analysis.target_views[idx].end(); it++)
+            update_tracing_reduced_view(it->first, expr, it->second);
+        }
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -18313,23 +18358,18 @@ namespace Legion {
 #endif
           InstanceView *inst_view = log_view->as_instance_view();
           record_restriction(expr, expr_covers, overwrite_mask, inst_view);
-          if (tracing_postconditions != NULL)
-            tracing_postconditions->invalidate_all_but(inst_view, expr,
-                                                       overwrite_mask);
         }
       }
       // Record that there is initialized data for this equivalence set
       update_initialized_data(expr, expr_covers, overwrite_mask);
       if (analysis.trace_info.recording)
       {
-        if (tracing_postconditions == NULL)
-          tracing_postconditions =
-            new TraceViewSet(context, did, set_expr, tree_id);
-        const RegionUsage usage(LEGION_WRITE_PRIV, LEGION_EXCLUSIVE, 0);
+#ifdef DEBUG_LEGION
+        assert(analysis.reduction_views.empty());
+#endif
         for (FieldMaskSet<LogicalView>::const_iterator it =
               analysis.views.begin(); it != analysis.views.end(); it++)
-          update_tracing_valid_views(it->first, expr, usage,
-                                     it->second, true/*invalidates*/);
+          update_tracing_write_discard_view(it->first, expr, it->second);
       }
     }
 
@@ -19004,93 +19044,226 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void EquivalenceSet::update_tracing_valid_views(LogicalView *view,
+    void EquivalenceSet::update_tracing_read_only_view(InstanceView *view,
                                                     IndexSpaceExpression *expr,
-                                                    const RegionUsage &usage,
-                                                    const FieldMask &user_mask,
-                                                    const bool invalidates)
+                                                    const FieldMask &view_mask)
     //--------------------------------------------------------------------------
     {
-      // No need for the lock here since we should be called from a copy
-      // fill aggregator that is being built while already holding the lock
-      if (HAS_READ(usage) && !IS_DISCARD(usage))
+#ifdef DEBUG_LEGION
+      assert(!view->is_reduction_kind());
+#endif
+      // Check to see if this instance has already been made by the trace
+      LegionMap<LogicalView*,FieldMaskSet<IndexSpaceExpression> > not_dominated;
+      if (tracing_postconditions != NULL)
+        tracing_postconditions->dominates(view, expr, view_mask, not_dominated);
+      else
+        not_dominated[view].insert(expr, view_mask);
+      // Record everything not dominated as a precondition
+      if (!not_dominated.empty())
       {
-        FieldMaskSet<IndexSpaceExpression> not_dominated;
-        if (view->is_reduction_kind())
-        {
-          if (tracing_anticonditions != NULL)
-            tracing_anticonditions->dominates(view, expr,
-                                              user_mask, not_dominated);
-          else
-            not_dominated.insert(expr, user_mask);
-        }
-        else
-        {
-          if (tracing_postconditions != NULL)
-            tracing_postconditions->dominates(view, expr,
-                                              user_mask, not_dominated);
-          else
-            not_dominated.insert(expr, user_mask);
-        }
-        if ((tracing_preconditions == NULL) && !not_dominated.empty())
+        if (tracing_preconditions == NULL)
           tracing_preconditions =
             new TraceViewSet(context, did, set_expr, tree_id);
-        for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
-              not_dominated.begin(); it != not_dominated.end(); it++)
-          tracing_preconditions->insert(view, it->first, it->second);
-        if (view->is_reduction_kind() && !IS_REDUCE(usage))
-        {
-          // Invalidate this reduction view since we read it. We need
-          // to check !IS_REDUCE(usage) as both reads and reductions
-          // fall through to this code path. If we actually performed
-          // a reduction, then we don't want to be removing it from the
-          // postcondition, as the reduction buffers are now valid.
-          if (tracing_postconditions != NULL)
-            tracing_postconditions->invalidate(view, expr, user_mask);
-          return;
-        }
-        // Do not record read-only postconditions
-        if (IS_READ_ONLY(usage))
-          return;
+        tracing_preconditions->insert(not_dominated);
       }
-#ifdef DEBUG_LEGION
-      assert(HAS_WRITE(usage));
-#endif
-      if (tracing_postconditions != NULL)
-      {
-        if (invalidates)
-          tracing_postconditions->invalidate_all_but(view, expr, user_mask);
-      }
-      else
-        tracing_postconditions =
-          new TraceViewSet(context, did, set_expr, tree_id);
-      tracing_postconditions->insert(view, expr, user_mask);
     }
 
     //--------------------------------------------------------------------------
-    void EquivalenceSet::update_tracing_anti_views(LogicalView *view,
-                                                   IndexSpaceExpression *expr, 
-                                                   const FieldMask &mask) 
+    void EquivalenceSet::update_tracing_write_discard_view(LogicalView *view,
+                                                    IndexSpaceExpression *expr,
+                                                    const FieldMask &view_mask)
     //--------------------------------------------------------------------------
     {
-      // Here, we have to do the converse of the anticondition
-      // check in update_tracing_valid_views. In particular, if the
-      // trace has already read this particular equivalence set, then
-      // we don't need to add the equivalence set to the anti-conditions,
-      // as the reduction data has already been consumed, and can be read
-      // out from the resulting instance.
-      FieldMaskSet<IndexSpaceExpression> not_dominated;
-      if (tracing_preconditions != NULL)
-        tracing_preconditions->dominates(view, expr, mask, not_dominated);
+      if (tracing_postconditions != NULL)
+        tracing_postconditions->invalidate_all_but(view, expr, view_mask);
       else
-        not_dominated.insert(expr, mask);
+        tracing_postconditions =
+          new TraceViewSet(context, did, set_expr, tree_id); 
+      tracing_postconditions->insert(view, expr, view_mask);
+    }
 
-      if ((tracing_anticonditions == NULL) && !not_dominated.empty())
-        tracing_anticonditions =
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::update_tracing_read_write_view(InstanceView *view,
+                                                    IndexSpaceExpression *expr,
+                                                    const FieldMask &view_mask)
+    //--------------------------------------------------------------------------
+    {
+      update_tracing_read_only_view(view, expr, view_mask);
+      update_tracing_write_discard_view(view, expr, view_mask);
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::update_tracing_reduced_view(InstanceView *view,
+                                                    IndexSpaceExpression *expr,
+                                                    const FieldMask &view_mask)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(view->is_reduction_kind());
+#endif
+      // Check to see if we initialized the view in this trace
+      LegionMap<LogicalView*,FieldMaskSet<IndexSpaceExpression> > not_dominated;
+      if (tracing_anticonditions != NULL)
+        tracing_anticonditions->dominates(view, expr, view_mask, not_dominated);
+      else
+        not_dominated[view].insert(expr, view_mask);
+      // Record everything not dominated as a precondition
+      if (!not_dominated.empty())
+      {
+        if (tracing_preconditions == NULL)
+          tracing_preconditions =
+            new TraceViewSet(context, did, set_expr, tree_id);
+        tracing_preconditions->insert(not_dominated);
+      }
+      // Then record this in the postconditions
+      // Note that you can keep all the non-reduction views in the 
+      // postconditions here since we still need them as postcondition in
+      // case we don't end up applying the reductions before the end of
+      // capturing the trace
+      if (tracing_postconditions == NULL)
+        tracing_postconditions =
           new TraceViewSet(context, did, set_expr, tree_id);
-      for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
-            not_dominated.begin(); it != not_dominated.end(); it++)
-        tracing_anticonditions->insert(view, it->first, it->second);
+      tracing_postconditions->insert(view, expr, view_mask);
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::update_tracing_fill_views(FillView *src_view,
+                                                   InstanceView *dst_view,
+                                                   IndexSpaceExpression *expr,
+                                                   const FieldMask &view_mask,
+                                                   bool across)
+    //--------------------------------------------------------------------------
+    {
+      if (dst_view->is_reduction_kind())
+      {
+#ifdef DEBUG_LEGION
+        assert(!across);
+#endif
+        // Initializing a reduction view
+        // Here, we have to do the converse of the anticondition
+        // check in update_tracing_valid_views. In particular, if the
+        // trace has already read this particular equivalence set, then
+        // we don't need to add the equivalence set to the anti-conditions,
+        // as the reduction data has already been consumed, and can be read
+        // out from the resulting instance.
+        LegionMap<LogicalView*,
+          FieldMaskSet<IndexSpaceExpression> > not_dominated;
+        if (tracing_preconditions != NULL)
+          tracing_preconditions->dominates(dst_view, expr,
+                                           view_mask, not_dominated);
+        else
+          not_dominated[dst_view].insert(expr, view_mask);
+        if (!not_dominated.empty())
+        {
+          if (tracing_anticonditions == NULL)
+            tracing_anticonditions =
+              new TraceViewSet(context, did, set_expr, tree_id);
+          tracing_anticonditions->insert(not_dominated);
+        }
+      }
+      else // this is the same as the copy case
+        update_tracing_copy_views(src_view, dst_view, expr, view_mask, across);
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::update_tracing_copy_views(LogicalView *src_view,
+                                                   InstanceView *dst_view,
+                                                   IndexSpaceExpression *expr,
+                                                   const FieldMask &view_mask,
+                                                   bool across)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!dst_view->is_reduction_kind());
+#endif
+      // record src view in the preconditions if not dominated by post
+      LegionMap<LogicalView*,FieldMaskSet<IndexSpaceExpression> > not_dominated;
+      if (tracing_postconditions != NULL)
+        tracing_postconditions->dominates(src_view, expr,
+                                          view_mask, not_dominated);
+      else
+        not_dominated[src_view].insert(expr, view_mask);
+      if (!not_dominated.empty())
+      {
+        if (tracing_preconditions == NULL)
+          tracing_preconditions =
+            new TraceViewSet(context, did, set_expr, tree_id);
+        tracing_preconditions->insert(not_dominated);
+      }
+      // record the destination view
+      if (tracing_postconditions == NULL)
+        tracing_postconditions =
+          new TraceViewSet(context, did, set_expr, tree_id);
+      else if (across) // Invalidate only in the across case
+        tracing_postconditions->invalidate_all_but(dst_view, expr, view_mask);
+      tracing_postconditions->insert(dst_view, expr, view_mask);
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::update_tracing_reduction_views(InstanceView *src_view,
+                                                     InstanceView *dst_view,
+                                                     IndexSpaceExpression *expr,
+                                                     const FieldMask &view_mask)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(src_view->is_reduction_kind());
+#endif
+      // Check to see if we made the reduction instance in the trace
+      LegionMap<LogicalView*,FieldMaskSet<IndexSpaceExpression> > not_dominated;
+      if (tracing_anticonditions != NULL)
+        tracing_anticonditions->dominates(src_view, expr, 
+                                          view_mask, not_dominated);
+      else
+        not_dominated[src_view].insert(expr, view_mask);
+      if (!not_dominated.empty())
+      {
+        if (tracing_preconditions == NULL)
+          tracing_preconditions =
+            new TraceViewSet(context, did, set_expr, tree_id);
+        tracing_preconditions->insert(not_dominated);
+        not_dominated.clear();
+      }
+      // Also need to check to see if the destination was produced in the 
+      // trace or whether we need to record it as a precondition as well
+      // since we're applying reductions to it
+      if (dst_view->is_reduction_kind())
+      {
+        if (tracing_anticonditions != NULL)
+          tracing_anticonditions->dominates(dst_view, expr, 
+                                            view_mask, not_dominated);
+        else
+          not_dominated[dst_view].insert(expr, view_mask);
+      }
+      else
+      {
+        if (tracing_postconditions != NULL)
+          tracing_postconditions->dominates(dst_view, expr, 
+                                            view_mask, not_dominated);
+        else
+          not_dominated[dst_view].insert(expr, view_mask);
+      }
+      if (!not_dominated.empty())
+      {
+        if (tracing_preconditions == NULL)
+          tracing_preconditions =
+            new TraceViewSet(context, did, set_expr, tree_id);
+        tracing_preconditions->insert(not_dominated);
+      }
+      if (tracing_postconditions != NULL)
+      {
+        // This is only safe because Legion will never do partial reductions
+        // of reduction views. If we're folding reduction views then we're 
+        // going to end up going all the way down to a normal instance
+        if (dst_view->is_reduction_kind())
+          tracing_postconditions->invalidate(src_view, expr, view_mask);
+        else
+          tracing_postconditions->invalidate_all_but(dst_view, expr, view_mask);
+      }
+      else
+        tracing_postconditions =
+          new TraceViewSet(context, did, set_expr, tree_id); 
+      tracing_postconditions->insert(dst_view, expr, view_mask);
     }
 
     //--------------------------------------------------------------------------

@@ -6321,7 +6321,15 @@ namespace Legion {
         // Record ourselves with each of our local views so they can 
         // notify us when they are deleted
         PhysicalManager *manager = (*it)->get_manager();
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+        const bool subscribed =
+#endif
+#endif
         manager->register_deletion_subscriber(this);
+#ifdef DEBUG_LEGION
+        assert(subscribed);
+#endif
       }
     }
 

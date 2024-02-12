@@ -74,6 +74,23 @@ namespace Realm {
     bool exists(void) const;
 
     /**
+     * Destroy the sparsity map.
+     * @param wait_on a precondition event
+     */
+    void destroy(Event wait_on = Event::NO_EVENT);
+
+    /**
+     * Add one reference to the sparsity map.
+     */
+    void add_references(unsigned count = 1);
+
+    /**
+     * Remove references from the sparsity map.
+     * @param count a number of references to remove
+     */
+    void remove_references(unsigned count = 1);
+
+    /**
      * Lookup the public implementation object for this sparsity map.
      * @return the public implementation object for this sparsity map
      */

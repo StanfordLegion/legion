@@ -111,128 +111,124 @@ namespace Legion {
 	std::string Serialize(const std::vector<std::string> &print_tasks, 
 	    const std::vector<std::string> &stop_tasks,
 	    const std::map<int, int> &procs_map);
-	const char* get_mapper_name(void) const;
-	MapperSyncModel get_mapper_sync_model(void) const;
+	const char* get_mapper_name(void) const override;
+	MapperSyncModel get_mapper_sync_model(void) const override;
 
         using Mapper::report_profiling;
       public: // Task mapping calls
 	void select_task_options(const MapperContext    ctx,
 	    const Task&            task,
-	    TaskOptions&     output);
+	    TaskOptions&     output) override;
 	void premap_task(const MapperContext      ctx,
 	    const Task&              task, 
 	    const PremapTaskInput&   input,
-	    PremapTaskOutput&        output);
+	    PremapTaskOutput&        output) override;
 	void slice_task(const MapperContext      ctx,
 	    const Task&              task, 
 	    const SliceTaskInput&    input,
-	    SliceTaskOutput&   output);
+	    SliceTaskOutput&   output) override;
 	void map_task(const MapperContext      ctx,
 	    const Task&              task,
 	    const MapTaskInput&      input,
-	    MapTaskOutput&     output);
+	    MapTaskOutput&     output) override;
 	void select_task_variant(const MapperContext          ctx,
 	    const Task&                  task,
 	    const SelectVariantInput&    input,
-	    SelectVariantOutput&   output);
+	    SelectVariantOutput&   output) override;
 	void postmap_task(const MapperContext      ctx,
 	    const Task&              task,
 	    const PostMapInput&      input,
-	    PostMapOutput&     output);
+	    PostMapOutput&     output) override;
 	void select_task_sources(const MapperContext        ctx,
 	    const Task&                task,
 	    const SelectTaskSrcInput&  input,
-	    SelectTaskSrcOutput& output);
+	    SelectTaskSrcOutput& output) override;
 	void report_profiling(const MapperContext      ctx,
 	    const Task&              task,
-	    const TaskProfilingInfo& input);
+	    const TaskProfilingInfo& input) override;
       public: // Inline mapping calls
 	void map_inline(const MapperContext        ctx,
 	    const InlineMapping&       inline_op,
 	    const MapInlineInput&      input,
-	    MapInlineOutput&     output);
+	    MapInlineOutput&     output) override;
 	void select_inline_sources(const MapperContext        ctx,
 	    const InlineMapping&         inline_op,
 	    const SelectInlineSrcInput&  input,
-	    SelectInlineSrcOutput& output);
+	    SelectInlineSrcOutput& output) override;
 	void report_profiling(const MapperContext         ctx,
 	    const InlineMapping&        inline_op,
-	    const InlineProfilingInfo&  input);
+	    const InlineProfilingInfo&  input) override;
       public: // Copy mapping calls
 	void map_copy(const MapperContext      ctx,
 	    const Copy&              copy,
 	    const MapCopyInput&      input,
-	    MapCopyOutput&     output);
+	    MapCopyOutput&     output) override;
 	void select_copy_sources(const MapperContext          ctx,
 	    const Copy&                  copy,
 	    const SelectCopySrcInput&    input,
-	    SelectCopySrcOutput&   output);
+	    SelectCopySrcOutput&   output) override;
 	void report_profiling(const MapperContext      ctx,
 	    const Copy&              copy,
-	    const CopyProfilingInfo& input);
+	    const CopyProfilingInfo& input) override;
       public: // Close mapping calls
-	void map_close(const MapperContext       ctx,
-	    const Close&              close,
-	    const MapCloseInput&      input,
-	    MapCloseOutput&     output);
 	void select_close_sources(const MapperContext        ctx,
 	    const Close&               close,
 	    const SelectCloseSrcInput&  input,
-	    SelectCloseSrcOutput& output);
+	    SelectCloseSrcOutput& output) override;
 	void report_profiling(const MapperContext       ctx,
 	    const Close&              close,
-	    const CloseProfilingInfo& input);
+	    const CloseProfilingInfo& input) override;
       public: // Acquire mapping calls
 	void map_acquire(const MapperContext         ctx,
 	    const Acquire&              acquire,
 	    const MapAcquireInput&      input,
-	    MapAcquireOutput&     output);
+	    MapAcquireOutput&     output) override;
 	void report_profiling(const MapperContext         ctx,
 	    const Acquire&              acquire,
-	    const AcquireProfilingInfo& input);
+	    const AcquireProfilingInfo& input) override;
       public: // Release mapping calls
 	void map_release(const MapperContext         ctx,
 	    const Release&              release,
 	    const MapReleaseInput&      input,
-	    MapReleaseOutput&     output);
+	    MapReleaseOutput&     output) override;
 	void select_release_sources(const MapperContext       ctx,
 	    const Release&                 release,
 	    const SelectReleaseSrcInput&   input,
-	    SelectReleaseSrcOutput&  output);
+	    SelectReleaseSrcOutput&  output) override;
 	void report_profiling(const MapperContext         ctx,
 	    const Release&              release,
-	    const ReleaseProfilingInfo& input);
+	    const ReleaseProfilingInfo& input) override;
       public: // Task execution mapping calls
 	void configure_context(const MapperContext         ctx,
 	    const Task&                 task,
-	    ContextConfigOutput&  output);
+	    ContextConfigOutput&  output) override;
 	void select_tunable_value(const MapperContext         ctx,
 	    const Task&                 task,
 	    const SelectTunableInput&   input,
-	    SelectTunableOutput&  output);
+	    SelectTunableOutput&  output) override;
       public: // Must epoch mapping
 	void map_must_epoch(const MapperContext           ctx,
 	    const MapMustEpochInput&      input,
-	    MapMustEpochOutput&     output);
+	    MapMustEpochOutput&     output) override;
       public: // Dataflow graph mapping
 	void map_dataflow_graph(const MapperContext           ctx,
 	    const MapDataflowGraphInput&  input,
-	    MapDataflowGraphOutput& output);
+	    MapDataflowGraphOutput& output) override;
       public: // Mapping control and stealing
 	void select_tasks_to_map(const MapperContext          ctx,
 	    const SelectMappingInput&    input,
-	    SelectMappingOutput&   output);
+	    SelectMappingOutput&   output) override;
 	void select_steal_targets(const MapperContext         ctx,
 	    const SelectStealingInput&  input,
-	    SelectStealingOutput& output);
+	    SelectStealingOutput& output) override;
 	void permit_steal_request(const MapperContext         ctx,
 	    const StealRequestInput&    input,
-	    StealRequestOutput&   output);
+	    StealRequestOutput&   output) override;
       public: // handling
 	void handle_message(const MapperContext           ctx,
-	    const MapperMessage&          message);
+	    const MapperMessage&          message) override;
 	void handle_task_result(const MapperContext           ctx,
-	    const MapperTaskResult&       result);
+	    const MapperTaskResult&       result) override;
 
       protected:
 	MapperRuntime *const mrt;

@@ -25,6 +25,8 @@ list(APPEND REALM_TESTS
   path_cache_test.cc
   transfer_utils_test.cc
   address_list_test.cc
+  index_space_iterator_test.cc
+  sparsity_map_test.cc
  )
 
 include(FetchContent)

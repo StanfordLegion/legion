@@ -2865,8 +2865,6 @@ namespace Legion {
       // Another virtual method to override for control replication
       virtual void instantiate_tasks(InnerContext *ctx,
                                      const MustEpochLauncher &launcher);
-      // Also virtual for control replication override
-      virtual RtEvent get_concurrent_analysis_precondition(void);
       void find_conflicted_regions(
           std::vector<PhysicalRegion> &unmapped); 
     public:

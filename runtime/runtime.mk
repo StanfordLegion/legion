@@ -90,6 +90,7 @@ $(error Neither LG_RT_DIR variable nor LG_INSTALL_DIR is not defined, at least o
 endif
 endif
 
+PREFIX ?=
 # generate libraries for Legion and Realm
 SHARED_OBJECTS ?= 0
 ifdef LG_INSTALL_DIR
@@ -126,7 +127,7 @@ SLIB_REALM_DEPS  =
 ifeq ($(strip $(DARWIN)),1)
 SO_FLAGS += -dynamiclib -single_module -undefined dynamic_lookup -fPIC
 LD_FLAGS += -Wl,-all_load
-ifdef PREFIX
+ifneq ($(strip $(PREFIX)),)
 SLIB_LEGION_DEPS += -install_name $(PREFIX)/lib/liblegion.dylib
 SLIB_REALM_DEPS	+= -install_name $(PREFIX)/lib/librealm.dylib
 endif
@@ -1338,7 +1339,7 @@ all: $(OUTFILE) $(SLIB_LEGION) $(SLIB_REALM) $(SLIB_REALM_CUHOOK)
 endif
 # Provide support for installing legion with the make build system
 .PHONY: install COPY_FILES_AFTER_BUILD
-ifdef PREFIX
+ifneq ($(strip $(PREFIX)),)
 INSTALL_BIN_FILES += $(OUTFILE)
 INSTALL_INC_FILES += legion_defines.h realm_defines.h
 INSTALL_LIB_FILES += $(SLIB_REALM) $(SLIB_LEGION) $(SLIB_REALM_CUHOOK)

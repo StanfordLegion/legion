@@ -1007,6 +1007,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void TaskContext::concurrent_task_barrier(void)
+    //--------------------------------------------------------------------------
+    {
+      owner_task->perform_concurrent_task_barrier();
+    }
+
+    //--------------------------------------------------------------------------
     void TaskContext::increment_inlined(void)
     //--------------------------------------------------------------------------
     {
@@ -12001,6 +12008,8 @@ namespace Legion {
         assert(!effects.exists());
 #endif
         effects = realm_done_event;
+        if (owner_task->is_concurrent())
+          runtime->end_concurrent_task(executing_processor);
       }
       else // implicit task
         realm_done_event = effects;
@@ -12670,18 +12679,6 @@ namespace Legion {
     }
 #endif
 
-    //--------------------------------------------------------------------------
-    RtEvent 
-      InnerContext::total_hack_function_for_inorder_concurrent_replay_analysis(
-                                                           RtEvent mapped_event)
-    //--------------------------------------------------------------------------
-    {
-      inorder_concurrent_replay_analysis =
-        runtime->acquire_concurrent_reservation(mapped_event,
-            inorder_concurrent_replay_analysis);
-      return inorder_concurrent_replay_analysis;
-    }
-
     void InnerContext::initialize_async_trace_analysis(size_t max_in_flight) {
       this->trace_analysis_comp_queue = CompletionQueue::create_completion_queue(max_in_flight);
     }
@@ -12709,14 +12706,14 @@ namespace Legion {
       return finish_event;
     }
 
-
     /////////////////////////////////////////////////////////////
     // Top Level Context 
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    TopLevelContext::TopLevelContext(Runtime *rt, Processor p, DistributedID id,
-                                     CollectiveMapping *mapping)
+    TopLevelContext::TopLevelContext(Runtime *rt, Processor p, 
+        coord_t normal_id, coord_t implicit_id, 
+        DistributedID id, CollectiveMapping *mapping)
       : InnerContext(rt, NULL, -1, false/*full inner*/,
                      dummy_requirements, dummy_output_requirements,
                      dummy_indexes, dummy_mapped, ApEvent::NO_AP_EVENT,
@@ -12728,6 +12725,10 @@ namespace Legion {
       assert(p.exists());
 #endif
       set_executing_processor(p);
+      // This coordinate represents the name of the unique top-level task
+      // launched by this instance of the Legion runtime
+      context_coordinates.push_back(ContextCoordinate(0/*context index*/,
+            DomainPoint(Point<2>(normal_id, implicit_id))));
     }
 
     //--------------------------------------------------------------------------
@@ -25178,6 +25179,8 @@ namespace Legion {
         assert(!effects.exists());
 #endif
         effects = ApEvent(Processor::get_current_finish_event());
+        if (owner_task->is_concurrent())
+          runtime->end_concurrent_task(executing_processor);
       }
       // No need to unmap the physical regions, they never had events
       TaskContext::end_task(res, res_size, owned, deferred_result_instance,

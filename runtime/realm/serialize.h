@@ -113,7 +113,6 @@ namespace Realm {
 
       ptrdiff_t bytes_left(void) const;
 
-      bool enforce_alignment(size_t granularity);
       bool append_bytes(const void *data, size_t datalen);
       template <typename T> bool append_serializable(const T& data);
 
@@ -137,7 +136,6 @@ namespace Realm {
       void *detach_buffer(ptrdiff_t max_wasted_bytes = 0);
       ByteArray detach_bytearray(ptrdiff_t max_wasted_bytes = 0);
 
-      bool enforce_alignment(size_t granularity);
       bool append_bytes(const void *data, size_t datalen);
       template <typename T> bool append_serializable(const T& data);
 
@@ -157,7 +155,6 @@ namespace Realm {
 
       size_t bytes_used(void) const;
 
-      bool enforce_alignment(size_t granularity);
       bool append_bytes(const void *data, size_t datalen);
       template <typename T> bool append_serializable(const T& data);
 
@@ -176,7 +173,6 @@ namespace Realm {
 
       ptrdiff_t bytes_left(void) const;
 
-      bool enforce_alignment(size_t granularity);
       bool extract_bytes(void *data, size_t datalen);
       const void *peek_bytes(size_t datalen);
       template <typename T> bool extract_serializable(T& data);

@@ -36,10 +36,16 @@
   ((req).privilege & (LEGION_WRITE_PRIV | LEGION_REDUCE))
 #define IS_WRITE(req) \
   ((req).privilege & LEGION_WRITE_PRIV)
-#define HAS_WRITE_DISCARD(req) \
-  (((req).privilege & LEGION_WRITE_ONLY) == LEGION_WRITE_ONLY)
-#define IS_DISCARD(req) \
-  (((req).privilege & LEGION_DISCARD_MASK) == LEGION_DISCARD_MASK)
+#define IS_WRITE_ONLY(req) \
+  (((req).privilege & LEGION_READ_WRITE) == LEGION_WRITE_PRIV)
+#define IS_WRITE_DISCARD(req) \
+  (((req).privilege & (LEGION_WRITE_ONLY | LEGION_DISCARD_INPUT_MASK)) \
+   == (LEGION_WRITE_PRIV | LEGION_DISCARD_INPUT_MASK))
+#define IS_READ_DISCARD(req) \
+  (((req).privilege & (LEGION_READ_PRIV | LEGION_DISCARD_OUTPUT_MASK)) \
+   == (LEGION_READ_PRIV | LEGION_DISCARD_OUTPUT_MASK))
+#define FILTER_DISCARD(req) \
+  ((req).privilege & ~(LEGION_DISCARD_INPUT_MASK | LEGION_DISCARD_OUTPUT_MASK))
 #define IS_COLLECTIVE(req) \
   (((req).prop & LEGION_COLLECTIVE_MASK) == LEGION_COLLECTIVE_MASK)
 #define PRIV_ONLY(req) \
@@ -272,7 +278,7 @@ namespace Legion {
       }
       else
       {
-        if (HAS_WRITE_DISCARD(u2))
+        if (IS_WRITE_DISCARD(u2))
         {
           // WAW with a write-only
           return LEGION_ANTI_DEPENDENCE;
@@ -603,8 +609,8 @@ namespace Legion {
       Murmur3Hasher(const Murmur3Hasher&) = delete;
       Murmur3Hasher& operator=(const Murmur3Hasher&) = delete;
     public:
-      template<typename T>
-      inline void hash(const T &value, bool precise = true);
+      template<typename T, bool PRECISE = true>
+      inline void hash(const T &value);
       inline void hash(const void *value, size_t size);
       inline void finalize(uint64_t hash[2]);
       struct Hash {
@@ -1842,11 +1848,11 @@ namespace Legion {
     }
 
     //-------------------------------------------------------------------------
-    template<typename T>
-    inline void Murmur3Hasher::hash(const T &value, bool precise)
+    template<typename T, bool PRECISE>
+    inline void Murmur3Hasher::hash(const T &value)
     //-------------------------------------------------------------------------
     {
-      static_assert(std::is_trivially_copyable<T>::value, "unserializable");
+      static_assert(std::is_trivially_copyable<T>::value, "unhashable");
       const T *ptr = &value;
       const uint8_t *data = NULL;
       static_assert(sizeof(ptr) == sizeof(data), "Fuck c++");
@@ -1873,12 +1879,12 @@ namespace Legion {
 
     //-------------------------------------------------------------------------
     template<>
-    inline void Murmur3Hasher::hash<Domain>(const Domain &value, bool precise)
+    inline void Murmur3Hasher::hash<Domain, true>(const Domain &value)
     //-------------------------------------------------------------------------
     {
       for (int i = 0; i < 2*value.dim; i++)
         hash(value.rect_data[i]);
-      if (!value.dense() && precise)
+      if (!value.dense())
       {
         IndexSpaceHasher functor(value, *this);
         Internal::NT_TemplateHelper::demux<IndexSpaceHasher>(value.is_type,
@@ -1888,8 +1894,25 @@ namespace Legion {
 
     //-------------------------------------------------------------------------
     template<>
-    inline void Murmur3Hasher::hash<DomainPoint>(const DomainPoint &value, 
-                                                 bool precise)
+    inline void Murmur3Hasher::hash<Domain, false>(const Domain &value)
+    //-------------------------------------------------------------------------
+    {
+      for (int i = 0; i < 2*value.dim; i++)
+        hash(value.rect_data[i]);
+    }
+
+    //-------------------------------------------------------------------------
+    template<>
+    inline void Murmur3Hasher::hash<DomainPoint,true>(const DomainPoint &value)
+    //-------------------------------------------------------------------------
+    {
+      for (int i = 0; i < value.dim; i++)
+        hash(value.point_data[i]);
+    }
+
+    //-------------------------------------------------------------------------
+    template<>
+    inline void Murmur3Hasher::hash<DomainPoint,false>(const DomainPoint &value)
     //-------------------------------------------------------------------------
     {
       for (int i = 0; i < value.dim; i++)
