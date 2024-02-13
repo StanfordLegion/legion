@@ -29,6 +29,12 @@ namespace Realm {
   bool next_subrect(const Rect<N, T> &domain, const Point<N, T> &start,
                     const Rect<N, T> &restriction, const int *dim_order,
                     Rect<N, T> &subrect, Point<N, T> &next_start);
+
+  template <int N, typename T>
+  bool next_target_subrect(const Rect<N, T> &layout_bounds, Rect<N, T> &cur_rect,
+                           Point<N, T> &cur_point, Rect<N, T> &target_subrect,
+                           const int dim_order[N]);
+
 } // namespace Realm
 
 #include "realm/transfer/transfer_utils.inl"
