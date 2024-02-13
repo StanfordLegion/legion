@@ -7,7 +7,7 @@ namespace Internal {
 IndexSpaceValue::IndexSpaceValue(IndexSpaceExpression *expr_in)
   :type_tag(expr_in->type_tag), expr(nullptr)
 {
-  if (expr_in->is_sparse())
+  if (true) // TODO: restore domain path once perf issues are resolved
   {
     expr = expr_in;
     expr->add_base_expression_reference(INDEX_SPACE_VALUE_REF);
