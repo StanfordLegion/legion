@@ -82,9 +82,9 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  bool next_target_subrect(const Rect<N, T> &layout_bounds, Rect<N, T> &cur_rect,
-                           Point<N, T> &cur_point, Rect<N, T> &target_subrect,
-                           const int dim_order[N])
+  bool compute_target_subrect(const Rect<N, T> &layout_bounds, Rect<N, T> &cur_rect,
+                              Point<N, T> &cur_point, Rect<N, T> &target_subrect,
+                              const int dim_order[N])
   {
     target_subrect.lo = cur_point;
     target_subrect.hi = cur_point;

@@ -88,7 +88,8 @@ TEST(TransferUtilsTest, NextTargetSubrectEmpty)
     dim_order[i] = i;
 
   Rect<2> next_subrect;
-  EXPECT_FALSE(next_target_subrect(bounds, cur_rect, cur_point, next_subrect, dim_order));
+  EXPECT_FALSE(
+      compute_target_subrect(bounds, cur_rect, cur_point, next_subrect, dim_order));
   EXPECT_EQ(next_subrect.lo, Point<2>(0, 0));
   EXPECT_EQ(next_subrect.hi, Point<2>(0, 0));
 }
@@ -103,7 +104,8 @@ TEST(TransferUtilsTest, NextTargetSubrectFullCover2D)
     dim_order[i] = i;
 
   Rect<2> next_subrect;
-  EXPECT_FALSE(next_target_subrect(bounds, cur_rect, cur_point, next_subrect, dim_order));
+  EXPECT_FALSE(
+      compute_target_subrect(bounds, cur_rect, cur_point, next_subrect, dim_order));
   EXPECT_EQ(next_subrect.lo, Point<2>(0, 0));
   EXPECT_EQ(next_subrect.hi, Point<2>(10, 5));
 }
@@ -118,12 +120,14 @@ TEST(TransferUtilsTest, NextTargetSubrectMiddleStart2D)
     dim_order[i] = i;
 
   Rect<2> next_subrect;
-  EXPECT_TRUE(next_target_subrect(bounds, cur_rect, cur_point, next_subrect, dim_order));
+  EXPECT_TRUE(
+      compute_target_subrect(bounds, cur_rect, cur_point, next_subrect, dim_order));
   EXPECT_EQ(next_subrect.lo, Point<2>(4, 4));
   EXPECT_EQ(next_subrect.hi, Point<2>(10, 4));
   EXPECT_EQ(cur_point, Point<2>(0, 5));
 
-  EXPECT_FALSE(next_target_subrect(bounds, cur_rect, cur_point, next_subrect, dim_order));
+  EXPECT_FALSE(
+      compute_target_subrect(bounds, cur_rect, cur_point, next_subrect, dim_order));
   EXPECT_EQ(next_subrect.lo, Point<2>(0, 5));
   EXPECT_EQ(next_subrect.hi, Point<2>(10, 5));
 }
@@ -138,7 +142,8 @@ TEST(TransferUtilsTest, NextTargetSubrectStopShort2D)
     dim_order[i] = i;
 
   Rect<2> next_subrect;
-  EXPECT_TRUE(next_target_subrect(bounds, cur_rect, cur_point, next_subrect, dim_order));
+  EXPECT_TRUE(
+      compute_target_subrect(bounds, cur_rect, cur_point, next_subrect, dim_order));
   EXPECT_EQ(next_subrect.lo, Point<2>(0, 0));
   EXPECT_EQ(next_subrect.hi, Point<2>(10, 0));
   EXPECT_EQ(cur_point, Point<2>(11, 0));
