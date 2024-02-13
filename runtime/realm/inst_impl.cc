@@ -475,12 +475,15 @@ namespace Realm {
 
       auto alloc_status = m_impl->remap_allocated_range(this, insts);
       if(alloc_status != MemoryImpl::ALLOC_INSTANT_SUCCESS) {
+        for (size_t i = 0; i < num_layouts; i++)
+          m_impl->release_instance(insts[i]->me);
         GenEventImpl::trigger(event, /*poisoned=*/true);
         return event;
       }
 
       size_t offset = 0;
       for(size_t i = 0; i < num_layouts; i++) {
+        assert(insts[i]);
         instances[i] = insts[i]->me;
         insts[i]->metadata.layout->compile_lookup_program(
             insts[i]->metadata.lookup_program);
