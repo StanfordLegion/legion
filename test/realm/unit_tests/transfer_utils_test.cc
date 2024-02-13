@@ -76,3 +76,18 @@ TEST(TransferUtilsTest, HigherDomainBounds)
     EXPECT_EQ(next_start, Point<2>(11, next_y));
   }
 }
+
+TEST(TransferUtilsTest, NextTargetSubrect1D)
+{
+  Rect<2> bounds = Rect<2>(Point<2>(0, 0), Point<2>(10, 10));
+  Rect<2> cur_rect = Rect<2>(Point<2>(0, 0), Point<2>(10, 5));
+  Point<2> cur_point = Point<2>::ZEROES();
+  int dim_order[2];
+  for(int i = 0; i < 2; i++)
+    dim_order[i] = i;
+
+  Rect<2> next_subrect;
+  EXPECT_FALSE(next_target_subrect(bounds, cur_rect, cur_point, next_subrect, dim_order));
+  EXPECT_EQ(next_subrect.lo, Point<2>(0, 0));
+  EXPECT_EQ(next_subrect.hi, Point<2>(10, 5));
+}
