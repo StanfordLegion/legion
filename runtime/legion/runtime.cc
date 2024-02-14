@@ -6348,9 +6348,7 @@ namespace Legion {
 #endif
         // Finally we set the instance to the physical manager
         const bool delete_now = manager->update_physical_instance(instance,
-                                          PhysicalManager::EAGER_INSTANCE_KIND,
-                                          bytes_used,
-                                          info.ptr);
+                                          bytes_used, info.ptr);
         if (delete_now)
           delete manager;
       }
