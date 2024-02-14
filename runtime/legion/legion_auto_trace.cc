@@ -457,7 +457,7 @@ namespace Legion {
       if (this->operation_start_idx > opidx) {
         return;
       }
-      log_auto_trace.debug() << "Replaying trace " << tid
+      log_auto_trace.info() << "Replaying trace " << tid
                              << " of length "
                              << (opidx - this->operation_start_idx)
                              << " at opidx: " << opidx;

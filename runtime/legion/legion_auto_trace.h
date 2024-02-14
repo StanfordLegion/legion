@@ -356,6 +356,13 @@ namespace Legion {
           // Perform any initialization for async trace analysis needed.
           T::initialize_async_trace_analysis(this->runtime->auto_trace_in_flight_jobs);
         }
+        virtual ~AutomaticTracingContext() {
+          // Report some statistics about the efficiency of the auto-tracer.
+          double pct = double(this->traced_ops) / double(this->executed_ops);
+          log_auto_trace.info() << "Traced " << this->traced_ops << "/"
+                                << this->executed_ops << " = "
+                                << (100.0 * pct) << " percent.";
+        }
     public:
       bool add_to_dependence_queue(Operation *op,
                                    const std::vector<StaticDependence>* dependences = NULL,
@@ -396,6 +403,9 @@ namespace Legion {
       uint64_t unique_hash_idx_counter = 0;
       // Maintain whether or not we are currently replaying a trace.
       bool started_auto_trace = false;
+      // Counters for statistics about tracing efficiency.
+      uint64_t traced_ops = 0;
+      uint64_t executed_ops = 0;
     };
 
     void auto_trace_process_repeats(const void* args);
@@ -532,6 +542,11 @@ namespace Legion {
       // If we're tracing and this operation is a trace no-op, then no-op.
       if (this->started_auto_trace && is_operation_ignorable_in_traces(op) && !unordered) {
         return true;
+      }
+      // Update counters for issued operations.
+      if (!unordered) {
+        this->executed_ops++;
+        if (this->started_auto_trace) this->traced_ops++;
       }
       return T::add_to_dependence_queue(op, dependences, unordered, outermost);
     }
