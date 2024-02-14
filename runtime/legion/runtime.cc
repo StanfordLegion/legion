@@ -12624,6 +12624,11 @@ namespace Legion {
               runtime->handle_did_downgrade_update(derez);
               break;
             }
+          case DISTRIBUTED_DOWNGRADE_RESTART:
+            {
+              runtime->handle_did_downgrade_restart(derez,remote_address_space);
+              break;
+            }
           case DISTRIBUTED_GLOBAL_ACQUIRE_REQUEST:
             {
               runtime->handle_did_global_acquire_request(derez); 
@@ -22284,6 +22289,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_did_downgrade_restart(AddressSpaceID target,
+                                             Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(DISTRIBUTED_DOWNGRADE_RESTART, rez,
+                                            true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_did_acquire_global_request(AddressSpaceID target,
                                                   Serializer &rez)
     //--------------------------------------------------------------------------
@@ -24988,6 +25002,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DistributedCollectable::handle_downgrade_update(this, derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_did_downgrade_restart(Deserializer &derez,
+                                               AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DistributedCollectable::handle_downgrade_restart(this, derez, source);
     }
 
     //--------------------------------------------------------------------------
