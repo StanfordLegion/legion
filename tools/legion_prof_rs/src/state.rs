@@ -1442,9 +1442,8 @@ impl FSpace {
         }
     }
     fn set_name(&mut self, name: &str) -> &mut Self {
-        let new_name = Some(name.to_owned());
-        assert!(self.name.is_none() || self.name == new_name);
-        self.name = new_name;
+        assert!(self.name.as_ref().map_or(true, |n| n == name));
+        self.name = Some(name.to_owned());
         self
     }
 }
@@ -1605,18 +1604,22 @@ impl Inst {
         }
     }
     fn set_inst_id(&mut self, inst_id: InstID) -> &mut Self {
+        assert!(self.inst_id.map_or(true, |i| i == inst_id));
         self.inst_id = Some(inst_id);
         self
     }
     fn set_op_id(&mut self, op_id: OpID) -> &mut Self {
+        assert!(self.op_id.map_or(true, |i| i == op_id));
         self.op_id = Some(op_id);
         self
     }
     fn set_mem(&mut self, mem_id: MemID) -> &mut Self {
+        assert!(self.mem_id.map_or(true, |i| i == mem_id));
         self.mem_id = Some(mem_id);
         self
     }
     fn set_size(&mut self, size: u64) -> &mut Self {
+        assert!(self.size.map_or(true, |s| s == size));
         self.size = Some(size);
         self
     }
@@ -1660,6 +1663,7 @@ impl Inst {
         self
     }
     fn set_tree(&mut self, tree_id: TreeID) -> &mut Self {
+        assert!(self.tree_id.map_or(true, |t| t == tree_id));
         self.tree_id = Some(tree_id);
         self
     }
@@ -1667,6 +1671,7 @@ impl Inst {
         self.time_range.trim_time_range(start, stop)
     }
     fn set_creator(&mut self, creator: EventID) -> &mut Self {
+        assert!(self.creator.map_or(true, |c| c == creator));
         self.creator = Some(creator);
         self
     }
@@ -1859,9 +1864,7 @@ impl Variant {
         }
     }
     fn set_task(&mut self, task_id: TaskID) -> &mut Self {
-        if let Some(id) = self.task_id {
-            assert_eq!(id, task_id);
-        }
+        assert!(self.task_id.map_or(true, |t| t == task_id));
         self.task_id = Some(task_id);
         self
     }
@@ -1889,12 +1892,12 @@ impl Base {
         }
     }
     fn set_level(&mut self, level: u32) -> &mut Self {
-        assert_eq!(self.level, None);
+        assert!(self.level.is_none());
         self.level = Some(level);
         self
     }
     fn set_level_ready(&mut self, level_ready: u32) -> &mut Self {
-        assert_eq!(self.level_ready, None);
+        assert!(self.level_ready.is_none());
         self.level_ready = Some(level_ready);
         self
     }
@@ -2075,15 +2078,17 @@ impl Operation {
         }
     }
     fn set_parent_id(&mut self, parent_id: OpID) -> &mut Self {
-        if parent_id == OpID(std::u64::MAX) {
-            self.parent_id = None;
+        let parent = if parent_id == OpID(std::u64::MAX) {
+            None
         } else {
-            self.parent_id = Some(parent_id);
-        }
+            Some(parent_id)
+        };
+        assert!(self.parent_id.is_none() || self.parent_id == parent);
+        self.parent_id = parent;
         self
     }
     fn set_kind(&mut self, kind: OpKindID) -> &mut Self {
-        assert_eq!(self.kind, None);
+        assert!(self.kind.is_none());
         self.kind = Some(kind);
         self
     }
@@ -2322,7 +2327,7 @@ impl Fill {
 
     fn add_channel(&mut self) {
         // sanity check
-        assert_eq!(self.chan_id, None);
+        assert!(self.chan_id.is_none());
         assert!(!self.fill_inst_infos.is_empty());
         let chan_dst = self.fill_inst_infos[0]._dst;
         for fill_inst_info in &self.fill_inst_infos {
@@ -2700,7 +2705,7 @@ impl State {
         copies: &'a mut BTreeMap<EventID, Copy>,
     ) -> &'a mut Copy {
         let alloc = &mut self.prof_uid_allocator;
-        assert_eq!(copies.contains_key(&fevent), false);
+        assert!(!copies.contains_key(&fevent));
         copies.entry(fevent).or_insert_with(|| {
             Copy::new(Base::new(alloc), time_range, op_id, size, creator, fevent)
         })
@@ -2716,7 +2721,7 @@ impl State {
         fills: &'a mut BTreeMap<EventID, Fill>,
     ) -> &'a mut Fill {
         let alloc = &mut self.prof_uid_allocator;
-        assert_eq!(fills.contains_key(&fevent), false);
+        assert!(!fills.contains_key(&fevent));
         fills.entry(fevent).or_insert_with(|| {
             Fill::new(Base::new(alloc), time_range, op_id, size, creator, fevent)
         })
