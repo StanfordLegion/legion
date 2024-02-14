@@ -3202,6 +3202,7 @@ namespace Legion {
       void send_did_downgrade_response(AddressSpaceID target, Serializer &rez);
       void send_did_downgrade_success(AddressSpaceID target, Serializer &rez);
       void send_did_downgrade_update(AddressSpaceID target, Serializer &rez);
+      void send_did_downgrade_restart(AddressSpaceID target, Serializer &rez);
       void send_did_acquire_global_request(AddressSpaceID target, 
                                            Serializer &rez);
       void send_did_acquire_global_response(AddressSpaceID target,
@@ -3623,6 +3624,8 @@ namespace Legion {
       void handle_did_downgrade_response(Deserializer &derez);
       void handle_did_downgrade_success(Deserializer &derez);
       void handle_did_downgrade_update(Deserializer &derez);
+      void handle_did_downgrade_restart(Deserializer &derez,
+                                        AddressSpaceID source);
       void handle_did_global_acquire_request(Deserializer &derez);
       void handle_did_global_acquire_response(Deserializer &derez);
       void handle_did_valid_acquire_request(Deserializer &derez);
@@ -5912,6 +5915,8 @@ namespace Legion {
         // around and around
         case DISTRIBUTED_DOWNGRADE_UPDATE:
           return REFERENCE_VIRTUAL_CHANNEL;
+        case DISTRIBUTED_DOWNGRADE_RESTART:
+          break;
         case DISTRIBUTED_GLOBAL_ACQUIRE_REQUEST:
           return REFERENCE_VIRTUAL_CHANNEL;
         case DISTRIBUTED_GLOBAL_ACQUIRE_RESPONSE:
