@@ -19,6 +19,7 @@
 
 #include <string>
 #include <climits>
+#include <cstdint>
 #include <unordered_map>
 
 /* A chunk looks like this:

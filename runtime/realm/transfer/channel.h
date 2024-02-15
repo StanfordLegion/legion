@@ -53,7 +53,8 @@ namespace Realm {
 
     typedef unsigned long long XferDesID;
 
-    enum XferDesKind {
+    enum XferDesKind
+    {
       XFER_NONE,
       XFER_DISK_READ,
       XFER_DISK_WRITE,
@@ -73,6 +74,8 @@ namespace Realm {
       XFER_FILE_WRITE,
       XFER_ADDR_SPLIT,
       XFER_MEM_FILL,
+      XFER_GPU_SC_IN_FB,
+      XFER_GPU_SC_PEER_FB,
     };
 
     class Request {
@@ -690,13 +693,27 @@ namespace Realm {
     class RemoteChannel;
 
     struct ChannelCopyInfo {
+      ChannelCopyInfo(Memory _src_mem, Memory _dst_mem,
+                      Memory _ind_mem = Memory::NO_MEMORY, size_t _num_spaces = 1,
+                      bool _is_scatter = false, bool _is_ranges = false,
+                      bool _is_direct = true, size_t _addr_size = 0)
+        : src_mem(_src_mem)
+        , dst_mem(_dst_mem)
+        , ind_mem(_ind_mem)
+        , num_spaces(_num_spaces)
+        , is_scatter(_is_scatter)
+        , is_ranges(_is_ranges)
+        , is_direct(_is_direct)
+        , addr_size(_addr_size)
+      {}
       Memory src_mem;
       Memory dst_mem;
-      // TODO(apryrkahin@): Uncomment when used in gather/scatter path.
-      // Memory ind_mem = Memory::NO_MEMORY;
-      // bool is_scatter = false;
-      // bool is_ranges = false;
-      // size_t addr_size = 0;
+      Memory ind_mem;
+      size_t num_spaces;
+      bool is_scatter;
+      bool is_ranges;
+      bool is_direct;
+      size_t addr_size;
     };
 
     class Channel {
@@ -803,6 +820,10 @@ namespace Realm {
                                      XferDesKind *kind_ret = 0,
                                      unsigned *bw_ret = 0,
                                      unsigned *lat_ret = 0);
+
+      virtual Memory suggest_ib_memories(Memory memory) const;
+
+      virtual bool needs_wrapping_iterator() const { return false; }
 
       virtual RemoteChannelInfo *construct_remote_info() const;
 

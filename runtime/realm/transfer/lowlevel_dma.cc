@@ -828,6 +828,8 @@ namespace Realm {
     return false;
   }
 
+  size_t WrappingFIFOIterator::get_base_offset(void) const { return 0; }
+
   size_t WrappingFIFOIterator::step(size_t max_bytes, AddressInfo &info,
 				    unsigned flags,
 				    bool tentative /*= false*/)

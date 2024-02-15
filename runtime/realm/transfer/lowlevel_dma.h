@@ -155,6 +155,8 @@ namespace Realm {
     virtual void reset(void);
     virtual bool done(void);
 
+    virtual size_t get_base_offset(void) const;
+
     virtual size_t step(size_t max_bytes, AddressInfo& info,
 			unsigned flags,
 			bool tentative = false);

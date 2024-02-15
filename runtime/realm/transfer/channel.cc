@@ -1259,6 +1259,12 @@ namespace Realm {
 	bool flush = out_port->iter->get_addresses(out_port->addrlist,
                                                    out_nonaffine);
 	write_bytes_avail = out_port->addrlist.bytes_pending();
+        // TODO(apryakhin@): We add this to handle scatter when both
+        // indirection and source are coming from IB and this needs
+        // good testing.
+        if(out_port->indirect_port_idx >= 0 && write_bytes_avail) {
+          min_xfer_size = std::min(write_bytes_avail, min_xfer_size);
+        }
         if(flush) {
           if(write_bytes_avail > 0) {
             // ignore a nonaffine piece as we still have some affine bytes
@@ -4349,6 +4355,26 @@ namespace Realm {
 	}
 
 	return 0;
+      }
+
+      Memory Channel::suggest_ib_memories(Memory memory) const
+      {
+        Node &n = get_runtime()->nodes[node];
+        for(std::vector<IBMemory *>::const_iterator it = n.ib_memories.begin();
+            it != n.ib_memories.end(); ++it) {
+          switch((*it)->lowlevel_kind) {
+          case Memory::SYSTEM_MEM:
+          case Memory::REGDMA_MEM:
+          case Memory::SOCKET_MEM:
+          case Memory::Z_COPY_MEM:
+            return (*it)->me;
+          default:
+            break;
+          }
+        }
+        log_new_dma.fatal() << "no sysmem ib memory on node:" << node;
+        abort();
+        return Memory::NO_MEMORY;
       }
 
       // sometimes we need to return a reference to a SupportedPath that won't

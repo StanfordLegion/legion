@@ -82,6 +82,7 @@ TESTS += task_stream
 TESTS += test_cuhook
 TESTS += cuda_memcpy_test
 TESTS += cuda_transpose_test
+TESTS += cuda_scatter_test
 endif
 
 ifeq ($(strip $(USE_HIP)),1)

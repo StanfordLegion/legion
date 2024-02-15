@@ -20,6 +20,7 @@
 
 #include <string>
 #include <cmath>
+#include <cstdint>
 
 namespace Realm {
   Logger log_ucp_mp("ucpmp");
