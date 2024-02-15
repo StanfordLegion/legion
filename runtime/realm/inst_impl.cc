@@ -447,58 +447,6 @@ namespace Realm {
       return inst_impl->redistrict(instances, layouts, num_layouts, prs, wait_on);
     }
 
-    Event RegionInstanceImpl::redistrict(RegionInstance *instances,
-                                         InstanceLayoutGeneric **layouts,
-                                         size_t num_layouts,
-                                         const ProfilingRequestSet &prs, Event wait_on)
-    {
-      assert(num_layouts > 0 || (layouts == nullptr && instances == nullptr));
-
-      size_t bytes_needed = 0;
-      for(size_t i = 0; i < num_layouts; i++) {
-        bytes_needed += layouts[i]->bytes_used;
-      }
-
-      Event event = GenEventImpl::create_genevent()->current_event();
-
-      if(num_layouts == 0 || bytes_needed > metadata.layout->bytes_used) {
-        GenEventImpl::trigger(event, /*poisoned=*/true);
-        return event;
-      }
-
-      std::vector<RegionInstanceImpl *> insts(num_layouts);
-      MemoryImpl *m_impl = get_runtime()->get_memory_impl(memory);
-      for(size_t i = 0; i < num_layouts; i++) {
-        insts[i] = m_impl->new_instance();
-        insts[i]->metadata.layout = layouts[i];
-      }
-
-      auto alloc_status = m_impl->remap_allocated_range(this, insts);
-      if(alloc_status != MemoryImpl::ALLOC_INSTANT_SUCCESS) {
-        for(size_t i = 0; i < num_layouts; i++)
-          m_impl->release_instance(insts[i]->me);
-        GenEventImpl::trigger(event, /*poisoned=*/true);
-        return event;
-      }
-
-      size_t offset = 0;
-      for(size_t i = 0; i < num_layouts; i++) {
-        assert(insts[i]);
-        instances[i] = insts[i]->me;
-        insts[i]->metadata.layout->compile_lookup_program(
-            insts[i]->metadata.lookup_program);
-        insts[i]->metadata.inst_offset = metadata.inst_offset + offset;
-        NodeSet early_reqs;
-        insts[i]->metadata.mark_valid(early_reqs);
-        if(!early_reqs.empty()) {
-          send_metadata(early_reqs);
-        }
-        offset += layouts[i]->bytes_used;
-      }
-
-      return Event::NO_EVENT;
-    }
-
     /*static*/ Event RegionInstance::create_instance(RegionInstance& inst,
 						     Memory memory,
 						     InstanceLayoutGeneric *ilg,
@@ -1001,6 +949,58 @@ namespace Realm {
       else
 	log_inst.info() << "instance created: inst=" << inst << " bytes=" << ilg->bytes_used << " ready=" << ready_event;
       return ready_event;
+    }
+
+    Event RegionInstanceImpl::redistrict(RegionInstance *instances,
+                                         InstanceLayoutGeneric **layouts,
+                                         size_t num_layouts,
+                                         const ProfilingRequestSet &prs, Event wait_on)
+    {
+      assert(num_layouts > 0 || (layouts == nullptr && instances == nullptr));
+
+      size_t bytes_needed = 0;
+      for(size_t i = 0; i < num_layouts; i++) {
+        bytes_needed += layouts[i]->bytes_used;
+      }
+
+      Event event = GenEventImpl::create_genevent()->current_event();
+
+      if(num_layouts == 0 || bytes_needed > metadata.layout->bytes_used) {
+        GenEventImpl::trigger(event, /*poisoned=*/true);
+        return event;
+      }
+
+      std::vector<RegionInstanceImpl *> insts(num_layouts);
+      MemoryImpl *m_impl = get_runtime()->get_memory_impl(memory);
+      for(size_t i = 0; i < num_layouts; i++) {
+        insts[i] = m_impl->new_instance();
+        insts[i]->metadata.layout = layouts[i];
+      }
+
+      auto alloc_status = m_impl->remap_allocated_range(this, insts);
+      if(alloc_status != MemoryImpl::ALLOC_INSTANT_SUCCESS) {
+        for(size_t i = 0; i < num_layouts; i++)
+          m_impl->release_instance(insts[i]->me);
+        GenEventImpl::trigger(event, /*poisoned=*/true);
+        return event;
+      }
+
+      size_t offset = 0;
+      for(size_t i = 0; i < num_layouts; i++) {
+        assert(insts[i]);
+        instances[i] = insts[i]->me;
+        insts[i]->metadata.layout->compile_lookup_program(
+            insts[i]->metadata.lookup_program);
+        insts[i]->metadata.inst_offset = metadata.inst_offset + offset;
+        NodeSet early_reqs;
+        insts[i]->metadata.mark_valid(early_reqs);
+        if(!early_reqs.empty()) {
+          send_metadata(early_reqs);
+        }
+        offset += layouts[i]->bytes_used;
+      }
+
+      return Event::NO_EVENT;
     }
 
     void RegionInstanceImpl::send_metadata(const NodeSet& early_reqs)
