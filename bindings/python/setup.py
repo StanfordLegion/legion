@@ -36,7 +36,7 @@ class my_build_py(build_py):
         if not self.dry_run:
             self.mkpath(self.build_lib)
             legion_cffi_build.build_cffi(None, cmake_source_dir, cmake_build_dir, self.build_lib, ['legion.h'], ['runtime'], 'legion_builtin_cffi.py')
-            legion_cffi_build.build_cffi(cmake_install_prefix + '/lib/' + canonical_python_lib, cmake_source_dir, cmake_build_dir, self.build_lib, ['canonical_python.h', 'legion.h'], [os.path.join('bindings', 'python'), 'runtime'], 'legion_canonical_cffi.py')
+            legion_cffi_build.build_cffi(os.path.join(cmake_install_prefix, 'lib', canonical_python_lib), cmake_source_dir, cmake_build_dir, self.build_lib, ['canonical_python.h', 'legion.h'], [os.path.join('bindings', 'python'), 'runtime'], 'legion_canonical_cffi.py')
             legion_info_build.build_legion_info()
         build_py.run(self)
 
