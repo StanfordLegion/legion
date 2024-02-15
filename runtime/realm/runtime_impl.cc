@@ -1558,9 +1558,9 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
           std::string slot_name = get_mailbox_name(node_id);
           if(!Realm::ipc_mailbox_send(all_node_mailbox, slot_name, handles,
                                       &(Network::my_node_id), sizeof(NodeID))) {
-            log_runtime.warning("Create shared_peers using ipc mailbox, but unable to "
-                                "send msg to node %u, skipping",
-                                (unsigned)node_id);
+            log_runtime.info("Create shared_peers using ipc mailbox, but unable to "
+                             "send msg to node %u, skipping",
+                             (unsigned)node_id);
             continue;
           }
           send_nodes.add(node_id);
