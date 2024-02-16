@@ -1210,6 +1210,7 @@ namespace Realm {
       static void send_request(NodeID target, TransferOperation *op, XferDesID xd_id);
     };
 
+#if 0 // TODO: DELETE
     struct XferDesRemoteWriteMessage {
       RemoteWriteRequest *req;
       XferDesID next_xd_guid;
@@ -1284,6 +1285,7 @@ namespace Realm {
 	amsg.commit();
       }
     };
+#endif
 
     struct XferDesDestroyMessage {
       XferDesID guid;

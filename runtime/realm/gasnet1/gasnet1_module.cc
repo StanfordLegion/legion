@@ -674,6 +674,9 @@ namespace Realm {
       if((*it)->base != 0) continue;
       // must be host memory
       if((*it)->memtype != NetworkSegmentInfo::HostMem) continue;
+      // must not be asking for ODR
+      if(((*it)->flags & NetworkSegmentInfo::OptionFlags::OnDemandRegistration) != 0)
+        continue;
       // TODO: consider alignment
       inseg_bytes += (*it)->bytes;
     }
@@ -857,28 +860,32 @@ namespace Realm {
     return impl;
   }
 
-  ActiveMessageImpl *GASNet1Module::create_active_message_impl(NodeID target,
-							       unsigned short msgid,
-							       size_t header_size,
-							       size_t max_payload_size,
-							       const void *src_payload_addr,
-							       size_t src_payload_lines,
-							       size_t src_payload_line_stride,
-							       const RemoteAddress& dest_payload_addr,
-							       void *storage_base,
-							       size_t storage_size)
+  ActiveMessageImpl *GASNet1Module::create_active_message_impl(
+      NodeID target, unsigned short msgid, size_t header_size, size_t max_payload_size,
+      const LocalAddress &src_payload_addr, size_t src_payload_lines,
+      size_t src_payload_line_stride, const RemoteAddress &dest_payload_addr,
+      void *storage_base, size_t storage_size)
+  {
+    assert(storage_size >= sizeof(GASNet1MessageImpl));
+    char *src_ptr =
+        (static_cast<char *>(src_payload_addr.segment->base) + src_payload_addr.offset);
+    void *dest_ptr = reinterpret_cast<void *>(dest_payload_addr.ptr);
+    assert(dest_ptr != 0);
+    GASNet1MessageImpl *impl = new(storage_base)
+        GASNet1MessageImpl(target, msgid, header_size, max_payload_size, src_ptr,
+                           src_payload_lines, src_payload_line_stride, dest_ptr);
+    return impl;
+  }
+
+  ActiveMessageImpl *GASNet1Module::create_active_message_impl(
+      NodeID target, unsigned short msgid, size_t header_size, size_t max_payload_size,
+      const RemoteAddress &dest_payload_addr, void *storage_base, size_t storage_size)
   {
     assert(storage_size >= sizeof(GASNet1MessageImpl));
     void *dest_ptr = reinterpret_cast<void *>(dest_payload_addr.ptr);
     assert(dest_ptr != 0);
-    GASNet1MessageImpl *impl = new(storage_base) GASNet1MessageImpl(target,
-								    msgid,
-								    header_size,
-								    max_payload_size,
-								    src_payload_addr,
-								    src_payload_lines,
-								    src_payload_line_stride,
-								    dest_ptr);
+    GASNet1MessageImpl *impl = new(storage_base) GASNet1MessageImpl(
+        target, msgid, header_size, max_payload_size, 0, 0, 0, dest_ptr);
     return impl;
   }
 
@@ -946,11 +953,11 @@ namespace Realm {
   }
 
   size_t GASNet1Module::recommended_max_payload(NodeID target,
-						const void *data, size_t bytes_per_line,
-						size_t lines, size_t line_stride,
-						const RemoteAddress& dest_payload_addr,
-						bool with_congestion,
-						size_t header_size)
+                                                const LocalAddress &src_payload_addr,
+                                                size_t bytes_per_line, size_t lines,
+                                                size_t line_stride,
+                                                const RemoteAddress &dest_payload_addr,
+                                                bool with_congestion, size_t header_size)
   {
     // RDMA uses long, but don't go above 4MB per packet for responsiveness
     // we also need the source to be contiguous, so clamp at a single

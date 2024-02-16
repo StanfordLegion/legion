@@ -1355,7 +1355,8 @@ namespace Realm {
         xdq.ordered_mode = false;
 
       std::vector<Memory> local_gpu_mems;
-      local_gpu_mems.push_back(src_gpu->fbmem->me);
+      if(src_gpu->fbmem)
+        local_gpu_mems.push_back(src_gpu->fbmem->me);
       if (src_gpu->fb_ibmem)
         local_gpu_mems.push_back(src_gpu->fb_ibmem->me);
 
@@ -2045,7 +2046,8 @@ namespace Realm {
       , gpu(_gpu)
     {
       std::vector<Memory> local_gpu_mems;
-      local_gpu_mems.push_back(gpu->fbmem->me);
+      if(gpu->fbmem)
+        local_gpu_mems.push_back(gpu->fbmem->me);
 
       // look for any other local memories that belong to our context
       const Node& n = get_runtime()->nodes[Network::my_node_id];
@@ -2387,7 +2389,8 @@ namespace Realm {
       , gpu(_gpu)
     {
       std::vector<Memory> local_gpu_mems;
-      local_gpu_mems.push_back(gpu->fbmem->me);
+      if(gpu->fbmem)
+        local_gpu_mems.push_back(gpu->fbmem->me);
       if(gpu->fb_ibmem)
         local_gpu_mems.push_back(gpu->fb_ibmem->me);
 

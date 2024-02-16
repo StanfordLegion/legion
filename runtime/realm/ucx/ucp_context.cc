@@ -561,7 +561,6 @@ err:
   {
     ucp_config_t *ucp_config;
     ucp_params_t ucp_params;
-    ucp_context_attr_t context_attr;
     ucs_status_t status;
 
 #ifdef REALM_USE_CUDA
@@ -609,12 +608,10 @@ err:
 
     CHKERR_JUMP(status != UCS_OK, "ucp_init failed", log_ucp, err_rel_config);
 
-    context_attr.field_mask = UCP_ATTR_FIELD_REQUEST_SIZE;
+    context_attr.field_mask = UCP_ATTR_FIELD_REQUEST_SIZE | UCP_ATTR_FIELD_MEMORY_TYPES;
     status = UCP_FNPTR(ucp_context_query)(context, &context_attr);
     CHKERR_JUMP(status != UCS_OK, "ucp_context_query failed",
         log_ucp, err_cleanup_context);
-
-    ucp_req_size = context_attr.request_size;
 
     UCP_FNPTR(ucp_config_release)(ucp_config);
 

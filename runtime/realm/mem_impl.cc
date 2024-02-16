@@ -514,6 +514,15 @@ namespace Realm {
       return segment;
     }
 
+    bool MemoryImpl::get_local_addr(off_t offset, LocalAddress &local_addr)
+    {
+      if(segment) {
+        local_addr.segment = segment;
+        local_addr.offset = offset;
+        return true;
+      } else
+        return false;
+    }
 
   ////////////////////////////////////////////////////////////////////////
   //

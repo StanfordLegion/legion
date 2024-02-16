@@ -1115,9 +1115,9 @@ namespace Realm {
 
     void GPU::create_dma_channels(Realm::RuntimeImpl *r)
     {
-      // if we don't have any framebuffer memory, we can't do any DMAs
-      if(!fbmem)
-        return;
+      // we used to skip gpu dma channels when there was no fbmem, but in
+      //  theory nvlink'd gpus can help move sysmem data even, so let's just
+      //  always create the channels
 
       r->add_dma_channel(new GPUChannel(this, XFER_GPU_IN_FB, &r->bgwork));
       r->add_dma_channel(new GPUIndirectChannel(this, XFER_GPU_SC_IN_FB, &r->bgwork));
@@ -2683,6 +2683,12 @@ namespace Realm {
     {
       // mark what context we belong to
       add_module_specific(new CudaDeviceMemoryInfo(gpu->context));
+
+      // advertise for potential (on-demand) gpudirect support
+      local_segment.assign(NetworkSegmentInfo::CudaDeviceMem, 0 /*base*/, 0 /*size*/,
+                           reinterpret_cast<uintptr_t>(gpu),
+                           NetworkSegmentInfo::OptionFlags::OnDemandRegistration);
+      segment = &local_segment;
     }
 
     GPUDynamicFBMemory::~GPUDynamicFBMemory(void)

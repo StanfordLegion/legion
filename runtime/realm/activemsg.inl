@@ -81,7 +81,6 @@ namespace Realm {
 					       msgid,
 					       sizeof(T),
 					       _max_payload_size,
-					       0, 0, 0,
 					       _dest_payload_addr,
 					       &inline_capacity,
 					       sizeof(inline_capacity));
@@ -139,16 +138,18 @@ namespace Realm {
   }
     
   template <typename T, size_t INLINE_STORAGE>
-  ActiveMessage<T, INLINE_STORAGE>::ActiveMessage(NodeID _target, const void *_data,
+  ActiveMessage<T, INLINE_STORAGE>::ActiveMessage(NodeID _target,
+                                                  const LocalAddress& _src_payload_addr,
 						  size_t _datalen,
 						  const RemoteAddress& _dest_payload_addr)
     : impl(0)
   {
-    init(_target, _data, _datalen, _dest_payload_addr);
+    init(_target, _src_payload_addr, _datalen, _dest_payload_addr);
   }
     
   template <typename T, size_t INLINE_STORAGE>
-  void ActiveMessage<T, INLINE_STORAGE>::init(NodeID _target, const void *_data,
+  void ActiveMessage<T, INLINE_STORAGE>::init(NodeID _target,
+                                              const LocalAddress& _src_payload_addr,
 					      size_t _datalen,
 					      const RemoteAddress& _dest_payload_addr)
   {
@@ -158,7 +159,7 @@ namespace Realm {
 					       msgid,
 					       sizeof(T),
 					       _datalen,
-					       _data, 0, 0,
+					       _src_payload_addr, 0, 0,
 					       _dest_payload_addr,
 					       &inline_capacity,
 					       sizeof(inline_capacity));
@@ -216,17 +217,19 @@ namespace Realm {
   }
 
   template <typename T, size_t INLINE_STORAGE>
-  ActiveMessage<T, INLINE_STORAGE>::ActiveMessage(NodeID _target, const void *_data,
+  ActiveMessage<T, INLINE_STORAGE>::ActiveMessage(NodeID _target,
+                                                  const LocalAddress& _src_payload_addr,
 						  size_t _bytes_per_line, size_t _lines,
 						  size_t _line_stride,
 						  const RemoteAddress& _dest_payload_addr)
     : impl(0)
   {
-    init(_target, _data, _bytes_per_line, _lines, _line_stride, _dest_payload_addr);
+    init(_target, _src_payload_addr, _bytes_per_line, _lines, _line_stride, _dest_payload_addr);
   }
 
   template <typename T, size_t INLINE_STORAGE>
-  void ActiveMessage<T, INLINE_STORAGE>::init(NodeID _target, const void *_data,
+  void ActiveMessage<T, INLINE_STORAGE>::init(NodeID _target,
+                                              const LocalAddress& _src_payload_addr,
 					      size_t _bytes_per_line, size_t _lines,
 					      size_t _line_stride,
 					      const RemoteAddress& _dest_payload_addr)
@@ -237,7 +240,8 @@ namespace Realm {
 					       msgid,
 					       sizeof(T),
 					       _bytes_per_line * _lines,
-					       _data, _lines, _line_stride,
+					       _src_payload_addr,
+                                               _lines, _line_stride,
 					       _dest_payload_addr,
 					       &inline_capacity,
 					       sizeof(inline_capacity));
@@ -333,13 +337,15 @@ namespace Realm {
 
   template <typename T, size_t INLINE_STORAGE>
   /*static*/ size_t ActiveMessage<T, INLINE_STORAGE>::recommended_max_payload(NodeID target,
-									      const void *data, size_t bytes_per_line,
+									      const LocalAddress& src_payload_addr,
+                                                                              size_t bytes_per_line,
 									      size_t lines, size_t line_stride,
 									      const RemoteAddress &dest_payload_addr,
 									      bool with_congestion)
   {
     return Network::recommended_max_payload(target,
-					    data, bytes_per_line,
+					    src_payload_addr,
+                                            bytes_per_line,
 					    lines, line_stride,
 					    dest_payload_addr,
 					    with_congestion,

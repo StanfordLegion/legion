@@ -931,6 +931,7 @@ namespace Realm {
       Mutex mutex;
       size_t cur_size;
       std::map<RegionInstance, std::pair<CUdeviceptr, size_t> > alloc_bases;
+      NetworkSegment local_segment;
     };
 
     class GPUZCMemory : public LocalManagedMemory {
