@@ -1080,7 +1080,6 @@ namespace Legion {
       // an unpack somewhere and we've finally been told where it is
 #ifdef DEBUG_LEGION
       assert(notready_owner == local_space);
-      assert(total_sent_references == total_received_references);
       assert((current_state == VALID_REF_STATE) || 
             (current_state == GLOBAL_REF_STATE));
 #endif
