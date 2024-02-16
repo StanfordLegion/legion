@@ -7965,6 +7965,8 @@ namespace Legion {
       assert(!finder->second.max);
       assert(finder->second.lamport_clock <= lamport_clock);
 #endif
+      if (concurrent_lamport_clock <= lamport_clock)
+        concurrent_lamport_clock = lamport_clock + 1;
       if (poisoned)
       {
         Runtime::poison_event(finder->second.ready);
