@@ -158,7 +158,8 @@ namespace UCP {
     bool mem_map(const ucp_mem_map_params_t *params, ucp_mem_h *mem_h_ptr) const;
     bool mem_unmap(ucp_mem_h mem_h) const;
     ucp_context_h get_ucp_context() const { return context; }
-    size_t get_ucp_req_size() const { return ucp_req_size; }
+    size_t get_ucp_req_size() const { return context_attr.request_size; }
+    uint64_t supported_memtypes() const { return context_attr.memory_types; }
 
 #ifdef REALM_USE_CUDA
     Cuda::GPU *gpu{nullptr};
@@ -166,9 +167,9 @@ namespace UCP {
   private:
     bool initialized{false};
     ucp_context_h context;
+    ucp_context_attr_t context_attr;
     std::unordered_map<int, std::unordered_map<int, ucp_ep_h>> eps;
-    int  ep_nums_est;
-    size_t ucp_req_size;
+    int ep_nums_est;
   };
 
 }; // namespace UCP

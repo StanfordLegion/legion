@@ -3656,19 +3656,19 @@ namespace Realm {
 		  assert(ok);
 
 		  // now look at the input
-		  const void *src_buf = in_port->mem->get_direct_ptr(in_alc.get_offset(), icount);
-		  size_t src_1d_maxbytes = 0;
-		  if(in_dim > 0) {
-		    size_t rec_bytes = ActiveMessage<Write1DMessage>::recommended_max_payload(dst_node,
-											      src_buf, icount, 1, 0,
-											      dst_buf,
-											      true /*w/ congestion*/);
-		    src_1d_maxbytes = std::min({ dst_1d_maxbytes,
-					         icount,
-					         rec_bytes });
-		  }
+                  LocalAddress src_buf;
+                  ok = in_port->mem->get_local_addr(in_alc.get_offset(), src_buf);
+                  assert(ok);
+                  size_t src_1d_maxbytes = 0;
+                  if(in_dim > 0) {
+                    size_t rec_bytes =
+                        ActiveMessage<Write1DMessage>::recommended_max_payload(
+                            dst_node, src_buf, icount, 1, 0, dst_buf,
+                            true /*w/ congestion*/);
+                    src_1d_maxbytes = std::min({dst_1d_maxbytes, icount, rec_bytes});
+                  }
 
-		  size_t src_2d_maxbytes = 0;
+                  size_t src_2d_maxbytes = 0;
                   // TODO: permit if source memory is cpu-accessible?
 #ifdef ALLOW_RDMA_SOURCE_2D
 		  if(in_dim > 1) {
@@ -5770,6 +5770,9 @@ namespace Realm {
 
       long RemoteWriteChannel::submit(Request** requests, long nr)
       {
+        // should not be reached
+        assert(0);
+#if 0 // TODO: DELETE
         for (long i = 0; i < nr; i ++) {
           RemoteWriteRequest* req = (RemoteWriteRequest*) requests[i];
 	  XferDes::XferPort *in_port = &req->xd->input_ports[req->src_port_idx];
@@ -5829,9 +5832,11 @@ namespace Realm {
                                                       PAYLOAD_KEEPREG,
                                                       req->dst_buf);*/
         }
+#endif
         return nr;
       }
 
+#if 0 // TODO: DELETE
       /*static*/
       void XferDesRemoteWriteMessage::handle_message(NodeID sender,
 						     const XferDesRemoteWriteMessage &args,
@@ -5875,6 +5880,7 @@ namespace Realm {
         req->xd->notify_request_read_done(req);
         req->xd->notify_request_write_done(req);
       }
+#endif
 
       /*static*/ void XferDesDestroyMessage::handle_message(NodeID sender,
 							    const XferDesDestroyMessage &args,
@@ -6314,8 +6320,10 @@ namespace Realm {
 
 ActiveMessageHandlerReg<SimpleXferDesCreateMessage> simple_xfer_des_create_message_handler;
 ActiveMessageHandlerReg<NotifyXferDesCompleteMessage> notify_xfer_des_complete_handler;
+#if 0 // TODO: DELETE
 ActiveMessageHandlerReg<XferDesRemoteWriteMessage> xfer_des_remote_write_handler;
 ActiveMessageHandlerReg<XferDesRemoteWriteAckMessage> xfer_des_remote_write_ack_handler;
+#endif
 ActiveMessageHandlerReg<XferDesDestroyMessage> xfer_des_destroy_message_handler;
 ActiveMessageHandlerReg<UpdateBytesTotalMessage> update_bytes_total_message_handler;
 ActiveMessageHandlerReg<UpdateBytesWriteMessage> update_bytes_write_message_handler;

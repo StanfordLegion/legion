@@ -139,7 +139,10 @@ namespace Realm {
 
     // gets info related to rdma access from other nodes
     const ByteArray *get_rdma_info(NetworkModule *network) const;
-    
+
+    // rdma transfers need to use LocalAddress and RemoteAddress helper objects
+    //  rather than raw pointers
+    virtual bool get_local_addr(off_t offset, LocalAddress &local_addr);
     virtual bool get_remote_addr(off_t offset, RemoteAddress& remote_addr);
 
     // gets the network segment info for potential registration

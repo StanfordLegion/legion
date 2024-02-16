@@ -112,10 +112,8 @@ namespace UCP {
   struct UCPRDMAInfo {
     uint64_t reg_base;
     int dev_index;
+    bool has_rkey;
     char rkey[0];
-
-    UCPRDMAInfo() = delete;
-    ~UCPRDMAInfo() = delete;
   } __attribute__ ((packed)); // gcc-specific
 
   struct MCDesc {
@@ -696,6 +694,8 @@ err:
 
     CHKERR_JUMP(!string_to_val_units(config.ib_seg_size, &ib_seg_size),
         "failed to read ib_seg_size value", log_ucp, err);
+    CHKERR_JUMP(!string_to_val_units(config.zcopy_thresh_host, &zcopy_thresh_host),
+                "failed to read zcopy_thresh_host value", log_ucp, err);
 
     // create the host context
     ucp_contexts.emplace_back(ep_nums_est);
@@ -1253,38 +1253,18 @@ err:
     return UCS_OK;
   }
 
-  const SegmentInfo* UCPInternal::find_segment(const void *srcptr) const
+  static void set_rdma_info_common(const NetworkSegment *segment, UCPRDMAInfo *rdma_info)
   {
-    uintptr_t ptr = reinterpret_cast<uintptr_t>(srcptr);
-    // binary search
-    unsigned lo = 0;
-    unsigned hi = segments_by_addr.size();
-    while(lo < hi) {
-      unsigned mid = (lo + hi) >> 1;
-      if(ptr < segments_by_addr[mid].base) {
-        hi = mid;
-      } else if(ptr >= segments_by_addr[mid].limit) {
-        lo = mid + 1;
-      } else {
+    rdma_info->reg_base = reinterpret_cast<uint64_t>(segment->base);
+    rdma_info->dev_index = -1;
+
 #if defined(REALM_USE_CUDA)
-        Cuda::GPU *gpu = reinterpret_cast<Cuda::GPU*>(segments_by_addr[mid].memextra);
-        assert(gpu);
-        log_ucp_seg.debug() << "found segment info for src ptr " << srcptr
-                            << " device index " << gpu->info->index;
+    if(segment->memtype == NetworkSegmentInfo::CudaDeviceMem) {
+      Cuda::GPU *gpu = reinterpret_cast<Cuda::GPU *>(segment->memextra);
+      rdma_info->dev_index = gpu->info->index;
+    }
 #endif
-        return &segments_by_addr[mid];
-      }
-    }
-
-    return nullptr;
   }
-
-  struct UCPInternal::SegmentInfoSorter {
-    bool operator()(const SegmentInfo& lhs, const SegmentInfo& rhs) const
-    {
-      return lhs.base < rhs.base;
-    }
-  };
 
   bool UCPInternal::add_rdma_info(NetworkSegment *segment,
       const UCPContext *context, ucp_mem_h mem_h)
@@ -1309,17 +1289,11 @@ err:
     CHKERR_JUMP(rdma_info == nullptr,
         "failed to malloc rdma info", log_ucp, err_rkey_rel);
 
-    rdma_info->reg_base  = reinterpret_cast<uint64_t>(segment->base);
-    rdma_info->dev_index = -1;
-
-#if defined(REALM_USE_CUDA)
-    if (segment->memtype == NetworkSegmentInfo::CudaDeviceMem) {
-      Cuda::GPU *gpu = reinterpret_cast<Cuda::GPU *>(segment->memextra);
-      rdma_info->dev_index = gpu->info->index;
-    }
-#endif
-
     memcpy(rdma_info->rkey, rkey_buf, rkey_buf_size);
+
+    set_rdma_info_common(segment, rdma_info);
+    rdma_info->has_rkey = true;
+
     segment->add_rdma_info(module, rdma_info,
         sizeof(*rdma_info) + rkey_buf_size);
     free(rdma_info);
@@ -1331,6 +1305,14 @@ err_rkey_rel:
     UCP_FNPTR(ucp_rkey_buffer_release)(rkey_buf);
 err:
     return false;
+  }
+
+  void UCPInternal::add_rdma_info_odr(NetworkSegment *segment, const UCPContext *context)
+  {
+    UCPRDMAInfo rdma_info;
+    set_rdma_info_common(segment, &rdma_info);
+    rdma_info.has_rkey = false;
+    segment->add_rdma_info(module, &rdma_info, sizeof(rdma_info));
   }
 
   void UCPInternal::attach(std::vector<NetworkSegment *>& segments)
@@ -1345,34 +1327,21 @@ err:
     ByteArray alloc_rdma_info;
 
 #if defined(REALM_USE_CUDA)
+    // Find the GPUs
     std::unordered_set<Cuda::GPU*> gpus;
-    for (NetworkSegment *segment : segments) {
-      if (segment->base == nullptr) continue;
+    for(const NetworkSegment *segment : segments) {
+      const bool is_odr =
+          segment->flags & NetworkSegmentInfo::OptionFlags::OnDemandRegistration;
       if (segment->memtype == NetworkSegmentInfo::CudaDeviceMem) {
-        uintptr_t base_as_uint = reinterpret_cast<uintptr_t>(segment->base);
-        segments_by_addr.push_back({
-            base_as_uint,
-            base_as_uint + segment->bytes,
-            segment->memtype,
-            segment->memextra});
+        // Must have a base or be ODR (or both)
+        assert(segment->base || is_odr);
         Cuda::GPU *gpu = reinterpret_cast<Cuda::GPU *>(segment->memextra);
         gpus.insert(gpu);
-        log_ucp_seg.debug()
-          << "tracking pre-allocated gpu segment " << segment
-          << " (base " << segment->base << " length " << segment->bytes
-          << " with device index " << gpu->info->index;
       } else if (segment->memtype == NetworkSegmentInfo::CudaManagedMem) {
         log_ucp_seg.debug() << "cuda managed memory passed to attach."
-                            << " seg " << segment << " size " << segment->bytes;
+                            << " segment " << segment << " size " << segment->bytes;
       }
     }
-
-    // sort the by_addr list
-    std::sort(segments_by_addr.begin(), segments_by_addr.end(),
-          SegmentInfoSorter());
-    // sanity-check that there's no overlap
-    for(size_t i = 1; i < segments_by_addr.size(); i++)
-      assert(segments_by_addr[i-1].limit <= segments_by_addr[i].base);
 
     bool ok = init_ucp_contexts(gpus);
 #else
@@ -1385,14 +1354,17 @@ err:
 
     // Try to register allocation requests first
     // The bind_hostmem option does not apply to allocation requests
-    for (NetworkSegment *segment : segments) {
-      if (segment->bytes == 0) continue;
-      if (segment->base != nullptr) continue;
+    for(const NetworkSegment *segment : segments) {
+      if(segment->bytes == 0 || segment->base)
+        continue;
+      // Skip ODR segments
+      if(segment->flags & NetworkSegmentInfo::OptionFlags::OnDemandRegistration)
+        continue;
       // Must be host memory
       // TODO: Have two separate allocations: one for host and one for device
       if (segment->memtype != NetworkSegmentInfo::HostMem) {
-        log_ucp.info() << "non-host-memory allocation not supported in attach"
-                       << " seg " << segment;
+        log_ucp.info() << "non-host memory allocation not supported in attach"
+                       << " segment " << segment;
         continue;
       }
       total_alloc_size += segment->bytes;
@@ -1410,54 +1382,60 @@ err:
         "ucp_mem_map failed for allocation segments", log_ucp, err);
     attach_mem_hs[context].push_back(alloc_mem_h);
 
-    // Now try to register non-allocation requests
-    mem_map_params.field_mask = UCP_MEM_MAP_PARAM_FIELD_LENGTH |
-                                UCP_MEM_MAP_PARAM_FIELD_ADDRESS;
-
+    // Now try to register non-allocation requests (includes ODR)
     for (NetworkSegment *segment : segments) {
-      if(segment->base == nullptr) continue;
+      const bool is_odr =
+          (segment->flags & NetworkSegmentInfo::OptionFlags::OnDemandRegistration);
+      // Skip allocation segments
+      if(!segment->base && !is_odr)
+        continue;
 #if defined(REALM_USE_CUDA)
       if (segment->memtype == NetworkSegmentInfo::CudaManagedMem) {
         log_ucp_seg.debug() << "cuda managed memory attach not supported"
-                            << " seg " << segment;
+                            << " segment " << segment;
         continue;
       } else if (segment->memtype == NetworkSegmentInfo::CudaDeviceMem) {
         if (!config.bind_cudamem) continue;
         Cuda::GPU *gpu = reinterpret_cast<Cuda::GPU *>(segment->memextra);
         context = get_context_device(gpu->info->index);
-        log_ucp_seg.info()
-          << "attaching pre-allocated segment " << segment
-          << " (base " << segment->base << " length " << segment->bytes
-          << ") in gpu context " << context
-          << " device index " << gpu->info->index;
-      } else {
+        if(!(context->supported_memtypes() & UCS_MEMORY_TYPE_CUDA))
+          continue;
+        log_ucp_seg.info() << "attaching" << (segment->base ? " pre-allocated" : "")
+                           << (is_odr ? " ODR" : "") << " gpu segment " << segment
+                           << " base " << segment->base << " length " << segment->bytes
+                           << " device index " << gpu->info->index << " gpu context "
+                           << context;
+      } else
+#endif
+      {
         assert(segment->memtype == NetworkSegmentInfo::HostMem);
+        if(!config.bind_hostmem)
+          continue;
         context = get_context_host();
-        log_ucp_seg.info()
-          << "attaching pre-allocated segment " << segment
-          << " (base " << segment->base << " length " << segment->bytes
-          << ") in host context " << context;
+        log_ucp_seg.info() << "attaching" << (segment->base ? " pre-allocated" : "")
+                           << (is_odr ? " ODR" : "") << " segment " << segment << " base "
+                           << segment->base << " length " << segment->bytes
+                           << " host context " << context;
       }
       assert(context);
-#endif
 
-      if (!config.bind_hostmem &&
-          segment->memtype == NetworkSegmentInfo::HostMem) {
-        continue;
-      }
+      if(is_odr) {
+        add_rdma_info_odr(segment, context);
+      } else {
+        mem_map_params.field_mask =
+            UCP_MEM_MAP_PARAM_FIELD_LENGTH | UCP_MEM_MAP_PARAM_FIELD_ADDRESS;
+        mem_map_params.address = segment->base;
+        mem_map_params.length = segment->bytes;
+        if(!context->mem_map(&mem_map_params, &mem_h)) {
+          log_ucp.info() << "ucp_mem_map failed for pre-allocated segment " << segment;
+          continue;
+        }
+        attach_mem_hs[context].push_back(mem_h);
 
-      mem_map_params.address = segment->base;
-      mem_map_params.length  = segment->bytes;
-      if (!context->mem_map(&mem_map_params, &mem_h)) {
-        log_ucp.info() << "ucp_mem_map failed for pre-allocated segment "
-                       << segment;
-        continue;
-      }
-      attach_mem_hs[context].push_back(mem_h);
-
-      if (!add_rdma_info(segment, context, mem_h)) {
-        log_ucp.info() << "failed to add rdma info for pre-allocated segment "
-                       << segment;
+        if(!add_rdma_info(segment, context, mem_h)) {
+          log_ucp.info() << "failed to add rdma info for pre-allocated segment "
+                         << segment;
+        }
       }
     }
 
@@ -1469,9 +1447,12 @@ err:
     alloc_base = reinterpret_cast<uintptr_t>(mem_attr.address);
     offset     = 0;
     for (NetworkSegment *segment : segments) {
-      if (segment->bytes == 0) continue;
-      if (segment->base != nullptr) continue;
-      // Must be host memory (for now at least)
+      if(segment->bytes == 0 || segment->base)
+        continue;
+      // Skip ODR segments
+      if(segment->flags & NetworkSegmentInfo::OptionFlags::OnDemandRegistration)
+        continue;
+      // Must be host memory
       if (segment->memtype != NetworkSegmentInfo::HostMem) continue;
 
       segment->base = reinterpret_cast<void *>(alloc_base + offset);
@@ -1672,57 +1653,64 @@ err:
     return (outstanding_reqs.load() > config.outstanding_reqs_limit);
   }
 
-  size_t UCPInternal::recommended_max_payload(
-      const RemoteAddress *dest_payload_addr,
-      bool with_congestion,
-      size_t header_size)
+  size_t UCPInternal::recommended_max_payload(const void *data,
+                                              const NetworkSegment *src_segment,
+                                              const RemoteAddress *dest_payload_addr,
+                                              bool with_congestion, size_t header_size)
   {
-    size_t ret;
+    size_t ret = 0;
 
-    if (with_congestion && is_congested()) {
+    if(with_congestion && is_congested())
       return 0;
-    }
-    if (dest_payload_addr) {
-      ret = GET_ZCOPY_MAX;
+
+    /* Things to consider
+     * 1. if the source buffer is not pre-registered, then we
+     *    should avoid zcopy, unless source buffer is ODR.
+     * 2. if rndv is not enforced, eager may be used. Thus, the
+     *    payload size must be smaller than ib_seg_size to avoid fragmentation.
+     * 3. if the network module must provide the source buffer, then
+     *    the payload must be smaller than pre-registered mpool objects.
+     */
+    size_t bcopy_max = zcopy_thresh_host ? zcopy_thresh_host - 1 : 0;
+    size_t eager_max = (ib_seg_size > header_size) ? ib_seg_size - header_size : 0;
+    if(data) {
+      // source buffer is given
+      if(src_segment) {
+        assert(dest_payload_addr);
+        // remote address is given. So, rndv will be enforced.
+        // source buffer is pre-registered or ODR. So, zcopy is ok.
+        ret = GET_ZCOPY_MAX;
+      } else {
+        // source buffer is neither pre-registered nor ODR. So, avoid zcopy.
+        // can only be host memory.
+        if(dest_payload_addr) {
+          // rndv is enforced
+          ret = bcopy_max;
+        } else {
+          // eager may be used
+          ret = std::min(eager_max, bcopy_max);
+        }
+      }
     } else {
-      ret = std::min(ib_seg_size - header_size, config.pbuf_max_size);
+      // source buffer is not given
+      if(dest_payload_addr) {
+        // rndv is enforced
+        ret = config.pbuf_max_size;
+      } else {
+        // eager may be used
+        ret = std::min(eager_max, config.pbuf_max_size);
+      }
+    }
+
+    if(!ret) {
+      log_ucp.warning() << "recommended max payload 0 without congestion"
+                        << " zcopy_thresh_host " << zcopy_thresh_host << " ib_seg_size "
+                        << ib_seg_size << " header_size " << header_size
+                        << " GET_ZCOPY_MAX " << GET_ZCOPY_MAX << " pbuf_max_size "
+                        << config.pbuf_max_size;
     }
 
     return ret;
-  }
-
-  size_t UCPInternal::recommended_max_payload(NodeID target,
-      const RemoteAddress *dest_payload_addr,
-      bool with_congestion,
-      size_t header_size)
-  {
-    // don't have a target-specific version yet
-    return recommended_max_payload(dest_payload_addr,
-        with_congestion, header_size);
-  }
-
-  size_t UCPInternal::recommended_max_payload(
-      const RemoteAddress *dest_payload_addr,
-      const void *data, size_t bytes_per_line,
-      size_t lines, size_t line_stride,
-      bool with_congestion,
-      size_t header_size)
-  {
-    return recommended_max_payload(dest_payload_addr,
-        with_congestion, header_size);
-  }
-
-  size_t UCPInternal::recommended_max_payload(NodeID target,
-      const RemoteAddress *dest_payload_addr,
-      const void *data, size_t bytes_per_line,
-      size_t lines, size_t line_stride,
-      bool with_congestion,
-      size_t header_size)
-  {
-    // don't have a target-specific version yet
-    return recommended_max_payload(dest_payload_addr,
-        data, bytes_per_line, lines, line_stride,
-        with_congestion, header_size);
   }
 
   const UCPContext *UCPInternal::get_context_host() const
@@ -1739,16 +1727,17 @@ err:
   }
 #endif
 
-  const UCPContext *UCPInternal::get_context(const SegmentInfo *seg_info) const
+  const UCPContext *UCPInternal::get_context(const NetworkSegment *segment) const
   {
 #if defined(REALM_USE_CUDA)
     // see if we should use the device ucp context
-    if (seg_info) {
-      Cuda::GPU *gpu = reinterpret_cast<Cuda::GPU*>(seg_info->memextra);
+    if((segment) && (segment->memtype == NetworkSegmentInfo::CudaDeviceMem)) {
+      const Cuda::GPU *gpu = reinterpret_cast<Cuda::GPU *>(segment->memextra);
       assert(gpu);
       return get_context_device(gpu->info->index);
     }
 #endif
+    assert((!segment) || (segment->memtype == NetworkSegmentInfo::HostMem));
     return get_context_host();
   }
 
@@ -1896,79 +1885,83 @@ err:
   //
 
   UCPMessageImpl::UCPMessageImpl(
-      UCPInternal *_internal,
-      NodeID _target,
-      unsigned short _msgid,
-      size_t _header_size,
-      size_t _max_payload_size,
-      const void *_src_payload_addr,
-      size_t _src_payload_lines,
-      size_t _src_payload_line_stride,
-      size_t _storage_size)
+      UCPInternal *_internal, NodeID _target, unsigned short _msgid, size_t _header_size,
+      size_t _max_payload_size, const void *_src_payload_addr, size_t _src_payload_lines,
+      size_t _src_payload_line_stride, const NetworkSegment *_src_segment,
+      const RemoteAddress *_dest_payload_addr, size_t _storage_size)
     : internal(_internal)
     , target(_target)
     , src_payload_addr(_src_payload_addr)
     , src_payload_lines(_src_payload_lines)
     , src_payload_line_stride(_src_payload_line_stride)
   {
-    constructor_common(_msgid, _header_size, _max_payload_size, _storage_size);
-    ucp_msg_hdr.rdma_payload_addr = nullptr;
-  }
+    const UCPContext *context = internal->get_context(_src_segment);
+    uint8_t priority =
+        (_header_size + _max_payload_size <= internal->config.priority_size_max)
+            ? internal->config.num_priorities - 1
+            : 0;
 
-  UCPMessageImpl::UCPMessageImpl(
-      UCPInternal *_internal,
-      NodeID _target,
-      unsigned short _msgid,
-      size_t _header_size,
-      size_t _max_payload_size,
-      const void *_src_payload_addr,
-      size_t _src_payload_lines,
-      size_t _src_payload_line_stride,
-      const RemoteAddress& _dest_payload_addr,
-      size_t _storage_size)
-    : internal(_internal)
-    , target(_target)
-    , src_payload_addr(_src_payload_addr)
-    , src_payload_lines(_src_payload_lines)
-    , src_payload_line_stride(_src_payload_line_stride)
-  {
-    constructor_common(_msgid, _header_size, _max_payload_size, _storage_size);
+    worker = internal->get_tx_worker(context, priority);
+    memtype =
+        _src_segment ? realm2ucs_memtype(_src_segment->memtype) : UCS_MEMORY_TYPE_HOST;
 
-    dest_payload_rdma_info = reinterpret_cast<UCPRDMAInfo*>(
-        malloc(sizeof(_dest_payload_addr)));
-    assert(dest_payload_rdma_info != nullptr);
+    size_t max_header_size = _storage_size - sizeof(*this);
+    max_header_size = std::min(max_header_size, worker->get_max_am_header());
+    assert(_header_size <= max_header_size);
+    header_size = _header_size;
+    header_base = reinterpret_cast<void *>(&ucp_msg_hdr.realm_hdr[0]);
+    ucp_msg_hdr.src = Network::my_node_id;
+    ucp_msg_hdr.msgid = _msgid;
+#ifdef REALM_USE_CUDA
+    ucp_msg_hdr.src_dev_index = context->gpu ? context->gpu->info->index : -1;
+#endif
+    payload_size = _max_payload_size;
 
-    memcpy(dest_payload_rdma_info, _dest_payload_addr.raw_bytes,
-        sizeof(_dest_payload_addr));
-
-    ucp_msg_hdr.rdma_payload_addr = reinterpret_cast<void*>(
-        dest_payload_rdma_info->reg_base);
-  }
-
-  UCPMessageImpl::UCPMessageImpl(
-      UCPInternal *_internal,
-      const NodeSet &_targets,
-      unsigned short _msgid,
-      size_t _header_size,
-      size_t _max_payload_size,
-      const void *_src_payload_addr,
-      size_t _src_payload_lines,
-      size_t _src_payload_line_stride,
-      size_t _storage_size)
-    : internal(_internal)
-    , targets(_targets)
-    , src_payload_addr(_src_payload_addr)
-    , src_payload_lines(_src_payload_lines)
-    , src_payload_line_stride(_src_payload_line_stride)
-  {
-    constructor_common(_msgid, _header_size, _max_payload_size, _storage_size);
-    ucp_msg_hdr.rdma_payload_addr = nullptr;
-
-    // treat single-target multicast messages as unicast
-    if (targets.size() > 1) {
-      is_multicast = true;
+    payload_base_type = PAYLOAD_BASE_LAST;
+    if(payload_size > 0) {
+      if((src_payload_addr != nullptr) && (src_payload_lines <= 1)) {
+        // contiguous source data can be used directly
+        payload_base = const_cast<void *>(src_payload_addr);
+        payload_base_type = PAYLOAD_BASE_EXTERNAL;
+      } else if(!set_inline_payload_base()) {
+        payload_base = internal->pbuf_get(worker, payload_size);
+        assert(payload_base != nullptr);
+        payload_base_type = PAYLOAD_BASE_INTERNAL;
+      }
     } else {
-      target = *targets.begin();
+      payload_base = nullptr; // no payload
+    }
+
+    // Set remote address info if available
+    if(_dest_payload_addr) {
+      dest_payload_rdma_info =
+          reinterpret_cast<UCPRDMAInfo *>(malloc(sizeof(*_dest_payload_addr)));
+      assert(dest_payload_rdma_info);
+
+      memcpy(dest_payload_rdma_info, _dest_payload_addr->raw_bytes,
+             sizeof(*_dest_payload_addr));
+
+      ucp_msg_hdr.rdma_payload_addr =
+          reinterpret_cast<void *>(dest_payload_rdma_info->reg_base);
+    } else {
+      dest_payload_rdma_info = nullptr;
+      ucp_msg_hdr.rdma_payload_addr = nullptr;
+    }
+  }
+
+  UCPMessageImpl::UCPMessageImpl(UCPInternal *_internal, const NodeSet &_targets,
+                                 unsigned short _msgid, size_t _header_size,
+                                 size_t _max_payload_size, const void *_src_payload_addr,
+                                 size_t _src_payload_lines,
+                                 size_t _src_payload_line_stride, size_t _storage_size)
+    : UCPMessageImpl(_internal, *_targets.begin(), _msgid, _header_size,
+                     _max_payload_size, _src_payload_addr, _src_payload_lines,
+                     _src_payload_line_stride, nullptr, nullptr, _storage_size)
+  {
+    // treat as multicast if only number of targets is greater than 1
+    if(_targets.size() > 1) {
+      targets = _targets;
+      is_multicast = true;
     }
   }
 
@@ -1991,51 +1984,6 @@ err:
     payload_base      = reinterpret_cast<void*>(addr_aligned);
     payload_base_type = PAYLOAD_BASE_INLINE;
     return true;
-  }
-
-  void UCPMessageImpl::constructor_common(
-      unsigned short _msgid,
-      size_t _header_size,
-      size_t _max_payload_size,
-      size_t _storage_size)
-  {
-    const SegmentInfo *segment_info = internal->find_segment(src_payload_addr);
-    const UCPContext *context       = internal->get_context(segment_info);
-    uint8_t priority                = (_header_size + _max_payload_size <=
-                                       internal->config.priority_size_max) ?
-                                      internal->config.num_priorities - 1 : 0;
-
-    worker  = internal->get_tx_worker(context, priority);
-    memtype = segment_info ? realm2ucs_memtype(segment_info->memtype)
-                           : UCS_MEMORY_TYPE_HOST;
-
-
-    size_t max_header_size    = _storage_size - sizeof(*this);
-    max_header_size           = std::min(max_header_size, worker->get_max_am_header());
-    assert(_header_size      <= max_header_size);
-    header_size               = _header_size;
-    header_base               = reinterpret_cast<void*>(&ucp_msg_hdr.realm_hdr[0]);
-    ucp_msg_hdr.src           = Network::my_node_id;
-    ucp_msg_hdr.msgid         = _msgid;
-#ifdef REALM_USE_CUDA
-    ucp_msg_hdr.src_dev_index = context->gpu ? context->gpu->info->index : -1;
-#endif
-    payload_size              = _max_payload_size;
-
-    payload_base_type = PAYLOAD_BASE_LAST;
-    if (payload_size > 0) {
-      if ((src_payload_addr != nullptr) && (src_payload_lines <= 1)) {
-        // contiguous source data can be used directly
-        payload_base = const_cast<void *>(src_payload_addr);
-        payload_base_type = PAYLOAD_BASE_EXTERNAL;
-      } else if (!set_inline_payload_base()) {
-        payload_base = internal->pbuf_get(worker, payload_size);
-        assert(payload_base != nullptr);
-        payload_base_type = PAYLOAD_BASE_INTERNAL;
-      }
-    } else {
-      payload_base = nullptr;  // no payload
-    }
   }
 
   void *UCPMessageImpl::add_local_completion(size_t size)
@@ -2184,12 +2132,6 @@ err:
 
   bool UCPMessageImpl::send_request(Request *req, unsigned am_id)
   {
-    if (req->am_send.payload_base_type == PAYLOAD_BASE_INTERNAL) {
-      // should not have enforced rndv with an internal payload buffer
-      assert(!(req->ucp.flags & UCP_AM_SEND_FLAG_RNDV));
-      req->ucp.flags |= UCP_AM_SEND_FLAG_EAGER;
-    }
-
     req->ucp.op_type = UCPWorker::OpType::AM_SEND;
     req->ucp.args    = req;
     req->ucp.cb      = &UCPMessageImpl::am_local_comp_handler;
