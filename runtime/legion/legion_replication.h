@@ -1506,6 +1506,46 @@ namespace Legion {
     protected:
       std::map<DomainPoint,Processor> concurrent_processors;
     };
+    
+    /**
+     * \class ConcurrentAllreduce
+     * This class helps with the process of performing an all-reduce between
+     * the shards of a concurrent index space task launch to get their 
+     * maximum lamport clock and whether any inputs were poisoned
+     * Do this in order so we can count the total points we've seen and
+     * send out the results as soon as possible in the case that we can
+     * short-circuit the result when all points come from just a subset
+     * of the shards.
+     */
+    class ConcurrentAllreduce : public AllGatherCollective<true> {
+    public:
+      ConcurrentAllreduce(CollectiveIndexLocation loc, ReplicateContext *ctx,
+                          size_t expected_points);
+      ConcurrentAllreduce(const ConcurrentAllreduce &rhs) = delete;
+      virtual ~ConcurrentAllreduce(void);
+    public:
+      ConcurrentAllreduce& operator=(const ConcurrentAllreduce &rhs) = delete;
+    public:
+      virtual MessageKind get_message_kind(void) const
+        { return SEND_CONTROL_REPLICATION_CONCURRENT_ALLREDUCE; }
+      virtual void pack_collective_stage(ShardID target,
+                                         Serializer &rez, int stage);
+      virtual void unpack_collective_stage(Deserializer &derez, int stage);
+    public:
+      void exchange(std::vector<std::pair<SliceTask*,AddressSpaceID> > &slices,
+        uint64_t lamport_clock, bool poisoned, RtBarrier collective_kernel_bar,
+        size_t points);
+    protected:
+      void notify_concurrent_slices(void);
+    public:
+      const size_t expected_points;
+    protected:
+      std::vector<std::pair<SliceTask*,AddressSpaceID> > concurrent_slices;
+      RtBarrier collective_kernel_barrier;
+      uint64_t concurrent_lamport_clock;
+      size_t total_points;
+      bool concurrent_poisoned;
+    };
 
     /**
      * \class ProjectionTreeExchange
@@ -1940,9 +1980,11 @@ namespace Legion {
       void set_sharding_function(ShardingID functor,ShardingFunction *function);
       virtual FutureMap create_future_map(TaskContext *ctx,
                     IndexSpace launch_space, IndexSpace shard_space);
-      virtual void initialize_concurrent_analysis(bool replay);
       virtual RtEvent verify_concurrent_execution(const DomainPoint &point,
                                                   Processor target);
+      virtual void concurrent_allreduce(SliceTask *slice,
+          AddressSpaceID slice_space, size_t points, uint64_t lamport_clock,
+          bool barrier, bool poisoned);
       void select_sharding_function(ReplicateContext *repl_ctx);
     public:
       // Methods for supporting intra-index-space mapping dependences
@@ -1974,8 +2016,8 @@ namespace Legion {
       std::set<std::pair<DomainPoint,ShardID> > unique_intra_space_deps;
     protected:
       // For setting up concurrent execution
-      RtBarrier concurrent_prebar, concurrent_postbar;
       ConcurrentExecutionValidator *concurrent_validator;
+      ConcurrentAllreduce *concurrent_exchange;
 #ifdef DEBUG_LEGION
     public:
       inline void set_sharding_collective(ShardingGatherCollective *collective)
@@ -2445,7 +2487,6 @@ namespace Legion {
       virtual void deactivate(bool free = true);
       virtual FutureMap create_future_map(TaskContext *ctx,
                       IndexSpace domain, IndexSpace shard_space);
-      virtual RtEvent get_concurrent_analysis_precondition(void);
       virtual void instantiate_tasks(InnerContext *ctx,
                                      const MustEpochLauncher &launcher);
       virtual MapperManager* invoke_mapper(void);
@@ -2487,7 +2528,6 @@ namespace Legion {
       MustEpochCompletionExchange *completion_exchange;
       std::set<SingleTask*> shard_single_tasks;
       RtBarrier resource_return_barrier;
-      RtBarrier concurrent_prebar, concurrent_postbar;
 #ifdef DEBUG_LEGION
     public:
       inline void set_sharding_collective(ShardingGatherCollective *collective)
@@ -3180,7 +3220,7 @@ namespace Legion {
                                std::vector<VariantID> &leaf_variants);
       void distribute_implicit(TaskID top_task_id, MapperID mapper_id,
                                Processor::Kind kind, unsigned shards_per_space,
-                               InnerContext *top_context);
+                               TopLevelContext *top_context);
       void pack_shard_manager(Serializer &rez) const;
       void set_shard_mapping(std::vector<Processor> &shard_mapping);
       ShardTask* create_shard(ShardID id, Processor target,
@@ -3291,6 +3331,10 @@ namespace Legion {
                                         std::set<RtEvent> &applied_events);
       void handle_created_region_contexts(Deserializer &derez,
                                           std::set<RtEvent> &applied_events);
+    public:
+      bool has_empty_shard_subtree(AddressSpaceID space, 
+          ShardingFunction *sharding, IndexSpaceNode *full_space,
+          IndexSpace sharding_space);
     protected:
       void broadcast_message(ShardTask *source, Serializer &rez,
                 BroadcastMessageKind kind, std::set<RtEvent> &applied_events);

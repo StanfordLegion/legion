@@ -75,9 +75,9 @@ void nccl_reduce_task(const Task *task,
   int *dev_buf;
   CUDA_CHECK(cudaMalloc(&dev_buf, 42 * sizeof(int)));
   CUDA_CHECK(cudaMemcpyAsync(dev_buf, host_buf, 42 * sizeof(int), cudaMemcpyHostToDevice, task_stream));
-  CUDA_CHECK(cudaStreamSynchronize(task_stream));
+  runtime->concurrent_task_barrier(ctx);
   NCCL_CHECK(ncclAllReduce(dev_buf, dev_buf, 42, ncclInt, ncclSum, nccl_comm, task_stream));
-  CUDA_CHECK(cudaStreamSynchronize(task_stream));
+  runtime->concurrent_task_barrier(ctx);
   CUDA_CHECK(cudaMemcpyAsync(host_buf, dev_buf, 42 * sizeof(int), cudaMemcpyDeviceToHost, task_stream));
   CUDA_CHECK(cudaStreamSynchronize(task_stream));
   if (gpu_idx == 0) {
@@ -169,6 +169,7 @@ int main(int argc, char **argv) {
     TaskVariantRegistrar registrar(TID_NCCL_REDUCE, "nccl_reduce");
     registrar.set_leaf();
     registrar.set_concurrent();
+    registrar.set_concurrent_barrier();
     registrar.add_constraint(ProcessorConstraint(Processor::TOC_PROC));
     Runtime::preregister_task_variant<nccl_reduce_task>(registrar, "nccl_reduce");
   }

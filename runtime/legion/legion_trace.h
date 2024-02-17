@@ -483,6 +483,9 @@ namespace Legion {
       void insert(LogicalView *view,
                   IndexSpaceExpression *expr,
                   const FieldMask &mask, bool antialiased = false);
+      void insert(LegionMap<LogicalView*,
+                    FieldMaskSet<IndexSpaceExpression> > &views,
+                    bool antialiased = false);
       void invalidate(LogicalView *view,
                       IndexSpaceExpression *expr,
                       const FieldMask &mask,
@@ -500,8 +503,8 @@ namespace Legion {
                      FieldMask &non_dominated) const;
       void dominates(LogicalView *view, 
                      IndexSpaceExpression *expr, FieldMask mask,
-                     FieldMaskSet<IndexSpaceExpression> &non_dominated,
-                     FieldMaskSet<IndexSpaceExpression> *dominate = NULL) const;
+                     LegionMap<LogicalView*,
+                     FieldMaskSet<IndexSpaceExpression> > &non_dominated) const;
       void filter_independent_fields(IndexSpaceExpression *expr,
                                      FieldMask &mask) const;
       bool subsumed_by(const TraceViewSet &set, bool allow_independent,

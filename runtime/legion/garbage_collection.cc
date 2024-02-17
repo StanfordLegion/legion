@@ -715,6 +715,31 @@ namespace Legion {
       assert(is_global<false/*need lock*/>());
 #endif
       received_global_references += cnt;
+      // No need to send any notifications if a downgrade is in process
+      if (remaining_responses == 0)
+      {
+        if (downgrade_owner == local_space)
+        {
+          // We're the downgrade owner so check to see if we can resume
+          // doing collections or we can wait for the next removal
+          check_for_downgrade_restart(local_space);
+        }
+        else if (current_state == PENDING_LOCAL_REF_STATE)
+        {
+          // Send a notification to the downgrade owner to check if it
+          // needs to resume collections now that this reference has 
+          // been unpacked. This is not just a performance optimization.
+          // It is vital to forward progress as it removes the necessity
+          // to poll on downgrades while we are waiting for references
+          // to be unpacked from whatever message they are in. Note that
+          // you can't even check whether it is safe to downgrade this
+          // node or not since we're not the downgrade owner so we have
+          // to notify the downgrade owner about the unpacked references
+          Serializer rez;
+          rez.serialize(did);
+          runtime->send_did_downgrade_restart(downgrade_owner, rez);
+        }
+      }
     }
     
     //--------------------------------------------------------------------------
@@ -1038,6 +1063,40 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void DistributedCollectable::check_for_downgrade_restart(
+                                                       AddressSpaceID new_owner)
+    //--------------------------------------------------------------------------
+    {
+      // If we're no longer the downgrade owner there is nothing to do
+      if (downgrade_owner != local_space)
+        return;
+      // If there is a downgrade in progress there's nothing for us to do
+      if (remaining_responses > 0)
+        return;
+      // If we can't downgrade then we'll restart the downgrade proces
+      if ((current_state == LOCAL_REF_STATE) || !can_downgrade())
+        return;
+      // If we get here then it should be because we were just waiting for
+      // an unpack somewhere and we've finally been told where it is
+#ifdef DEBUG_LEGION
+      assert(notready_owner == local_space);
+      assert((current_state == VALID_REF_STATE) || 
+            (current_state == GLOBAL_REF_STATE));
+#endif
+      // Restart the downgrade process
+      if (new_owner != local_space)
+      {
+        downgrade_owner = new_owner;
+        Serializer rez;
+        rez.serialize(did);
+        rez.serialize(current_state);
+        runtime->send_did_downgrade_update(new_owner, rez);
+      }
+      else
+        check_for_downgrade(new_owner);
+    }
+
+    //--------------------------------------------------------------------------
     void DistributedCollectable::accumulate_local_references(void)
     //--------------------------------------------------------------------------
     {
@@ -1178,14 +1237,22 @@ namespace Legion {
               rez.serialize(current_state);
               runtime->send_did_downgrade_update(notready_owner, rez);
             }
-            else
-            {
+            // else: we used to do this, but the polling aspect of continuing
+            // to check for downgrades can cause priority inversions in the
+            // network traffic (despite setting low priorities because the
+            // networking hardware ignores our priorities). Therefore we stopped
+            // doing this and now we instead send notifications whenever we
+            // do an unpack that might need to restart this process. The first
+            // one to get here will restart the downgrade process.
+            // See the calls to check_for_downgrade_restart to see where
+            // progress comes from now
+            //{
               // This is a strange case: all the nodes are ready to downgrade
               // but there are still packed references in flight so we need
               // to keep trying to perform the downgrade until we find one
               // of these nodes and find the reference
-              check_for_downgrade(downgrade_owner);
-            }
+              //check_for_downgrade(downgrade_owner);
+            //}
           }
         }
         else
@@ -1314,6 +1381,30 @@ namespace Legion {
       DistributedCollectable *dc = runtime->find_distributed_collectable(did);
       AutoLock gc(dc->gc_lock);
       dc->process_downgrade_update(gc, state);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void DistributedCollectable::handle_downgrade_restart(
+                   Runtime *runtime, Deserializer &derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DistributedID did;
+      derez.deserialize(did);
+      // It's possible for these messages to race with actual downgrades and
+      // destruction of the collectable object so we have to check to see if
+      // it is still here, if it's not then it's already been cleaned up and
+      // there is nothing more for us to do
+      DistributedCollectable *dc =
+        runtime->weak_find_distributed_collectable(did);
+      if (dc != NULL)
+      {
+        {
+          AutoLock gc(dc->gc_lock);
+          dc->check_for_downgrade_restart(source);
+        }
+        if (dc->remove_base_resource_ref(RUNTIME_REF))
+          delete dc;
+      }
     }
 
     /////////////////////////////////////////////////////////////
@@ -1744,6 +1835,31 @@ namespace Legion {
       assert(is_valid<false/*need lock*/>());
 #endif
       received_valid_references += cnt;
+      // No need to send any notifications if a downgrade is in process
+      if (remaining_responses == 0)
+      {
+        if (downgrade_owner == local_space)
+        {
+          // We're the downgrade owner so check to see if we can resume
+          // doing collections or we can wait for the next removal
+          check_for_downgrade_restart(local_space);
+        }
+        else if (current_state == PENDING_GLOBAL_REF_STATE)
+        {
+          // Send a notification to the downgrade owner to check if it
+          // needs to resume collections now that this reference has 
+          // been unpacked. This is not just a performance optimization.
+          // It is vital to forward progress as it removes the necessity
+          // to poll on downgrades while we are waiting for references
+          // to be unpacked from whatever message they are in. Note that
+          // you can't even check whether it is safe to downgrade this
+          // node or not since we're not the downgrade owner so we have
+          // to notify the downgrade owner about the unpacked references
+          Serializer rez;
+          rez.serialize(did);
+          runtime->send_did_downgrade_restart(downgrade_owner, rez);
+        }
+      }
     }
 
     //--------------------------------------------------------------------------

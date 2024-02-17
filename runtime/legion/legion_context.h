@@ -641,6 +641,8 @@ namespace Legion {
     public:
       void yield(void);
       size_t query_available_memory(Memory target);
+      void concurrent_task_barrier(void);
+      void release_task_local_instances(void);
     public:
       void increment_inlined(void);
       void decrement_inlined(void);
@@ -2173,11 +2175,6 @@ namespace Legion {
       // Only valid on the onwer context node
       std::map<RegionTreeID,
                std::vector<CollectiveResult*> >         collective_results;
-    public:
-      // TODO: delete this once we properly replay mapping dependences
-      RtEvent inorder_concurrent_replay_analysis;
-      RtEvent total_hack_function_for_inorder_concurrent_replay_analysis(
-                                                            RtEvent mapped);
     };
 
     /**
@@ -2192,6 +2189,7 @@ namespace Legion {
     class TopLevelContext : public InnerContext {
     public:
       TopLevelContext(Runtime *runtime, Processor executing,
+          coord_t normal_id, coord_t implicit_id,
           DistributedID id = 0, CollectiveMapping *mapping = NULL);
       TopLevelContext(const TopLevelContext &rhs) = delete;
       virtual ~TopLevelContext(void);
@@ -3123,10 +3121,6 @@ namespace Legion {
         { return dependent_partition_execution_barrier.next(this); }
       inline RtBarrier get_next_attach_resource_barrier(void)
         { return attach_resource_barrier.next(this); }
-      inline RtBarrier get_next_concurrent_precondition_barrier(void)
-        { return concurrent_precondition_barrier.next(this); }
-      inline RtBarrier get_next_concurrent_postcondition_barrier(void)
-        { return concurrent_postcondition_barrier.next(this); }
       inline RtBarrier get_next_output_regions_barrier(void)
         { return output_regions_barrier.next(this); }
       inline RtBarrier get_next_close_mapped_barrier(void)
@@ -3324,8 +3318,6 @@ namespace Legion {
       RtReplBar semantic_attach_barrier;
       ApReplBar future_map_wait_barrier;
       ApReplBar inorder_barrier;
-      RtReplSingleBar concurrent_precondition_barrier;
-      RtReplBar concurrent_postcondition_barrier;
       RtReplBar output_regions_barrier;
 #ifdef DEBUG_LEGION_COLLECTIVES
     protected:

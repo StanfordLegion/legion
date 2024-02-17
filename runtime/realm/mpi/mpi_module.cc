@@ -730,6 +730,8 @@ namespace Realm {
         if((*it)->bytes == 0) continue;
         if((*it)->base != 0) continue;
 	if((*it)->memtype != NetworkSegmentInfo::HostMem) continue;
+        if(((*it)->flags & NetworkSegmentInfo::OptionFlags::OnDemandRegistration) != 0)
+          continue;
         attach_size += (*it)->bytes;
     }
 
@@ -920,26 +922,28 @@ namespace Realm {
     return impl;
   }
 
-  ActiveMessageImpl *MPIModule::create_active_message_impl(NodeID target,
-							    unsigned short msgid,
-							    size_t header_size,
-							    size_t max_payload_size,
-							    const void *src_payload_addr,
-							    size_t src_payload_lines,
-							    size_t src_payload_line_stride,
-							    const RemoteAddress& dest_payload_addr,
-							    void *storage_base,
-							    size_t storage_size)
+  ActiveMessageImpl *MPIModule::create_active_message_impl(
+      NodeID target, unsigned short msgid, size_t header_size, size_t max_payload_size,
+      const LocalAddress &src_payload_addr, size_t src_payload_lines,
+      size_t src_payload_line_stride, const RemoteAddress &dest_payload_addr,
+      void *storage_base, size_t storage_size)
   {
     assert(storage_size >= sizeof(MPIMessageImpl));
-    MPIMessageImpl *impl = new(storage_base) MPIMessageImpl(target,
-						              msgid,
-							      header_size,
-							      max_payload_size,
-							      src_payload_addr,
-							      src_payload_lines,
-							      src_payload_line_stride,
-							      dest_payload_addr);
+    char *src_ptr =
+        (static_cast<char *>(src_payload_addr.segment->base) + src_payload_addr.offset);
+    MPIMessageImpl *impl = new(storage_base)
+        MPIMessageImpl(target, msgid, header_size, max_payload_size, src_ptr,
+                       src_payload_lines, src_payload_line_stride, dest_payload_addr);
+    return impl;
+  }
+
+  ActiveMessageImpl *MPIModule::create_active_message_impl(
+      NodeID target, unsigned short msgid, size_t header_size, size_t max_payload_size,
+      const RemoteAddress &dest_payload_addr, void *storage_base, size_t storage_size)
+  {
+    assert(storage_size >= sizeof(MPIMessageImpl));
+    MPIMessageImpl *impl = new(storage_base) MPIMessageImpl(
+        target, msgid, header_size, max_payload_size, 0, 0, 0, dest_payload_addr);
     return impl;
   }
 
@@ -1010,11 +1014,11 @@ namespace Realm {
   }
 
   size_t MPIModule::recommended_max_payload(NodeID target,
-					    const void *data, size_t bytes_per_line,
-					    size_t lines, size_t line_stride,
-					    const RemoteAddress& dest_payload_addr,
-					    bool with_congestion,
-					    size_t header_size)
+                                            const LocalAddress &src_payload_addr,
+                                            size_t bytes_per_line, size_t lines,
+                                            size_t line_stride,
+                                            const RemoteAddress &dest_payload_addr,
+                                            bool with_congestion, size_t header_size)
   {
     // we don't care about source data location
     return recommended_max_payload(target, dest_payload_addr,

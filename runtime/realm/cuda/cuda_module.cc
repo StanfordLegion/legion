@@ -1115,11 +1115,12 @@ namespace Realm {
 
     void GPU::create_dma_channels(Realm::RuntimeImpl *r)
     {
-      // if we don't have any framebuffer memory, we can't do any DMAs
-      if(!fbmem)
-        return;
+      // we used to skip gpu dma channels when there was no fbmem, but in
+      //  theory nvlink'd gpus can help move sysmem data even, so let's just
+      //  always create the channels
 
       r->add_dma_channel(new GPUChannel(this, XFER_GPU_IN_FB, &r->bgwork));
+      r->add_dma_channel(new GPUIndirectChannel(this, XFER_GPU_SC_IN_FB, &r->bgwork));
       r->add_dma_channel(new GPUfillChannel(this, &r->bgwork));
       r->add_dma_channel(new GPUreduceChannel(this, &r->bgwork));
 
@@ -1135,6 +1136,7 @@ namespace Realm {
       // only create a p2p channel if we have peers (and an fb)
       if(!peer_fbs.empty() || !cudaipc_mappings.empty()) {
         r->add_dma_channel(new GPUChannel(this, XFER_GPU_PEER_FB, &r->bgwork));
+        r->add_dma_channel(new GPUIndirectChannel(this, XFER_GPU_SC_PEER_FB, &r->bgwork));
       }
     }
 
@@ -2148,6 +2150,24 @@ namespace Realm {
                                                  stream->get_stream(), args, NULL));
     }
 
+    void GPU::launch_indirect_copy_kernel(void *copy_info, size_t dim, size_t addr_size,
+                                          size_t field_size, size_t volume,
+                                          GPUStream *stream)
+    {
+      size_t log_addr_size = std::min(static_cast<size_t>(ctz(addr_size)),
+                                      CUDA_MEMCPY_KERNEL_MAX2_LOG2_BYTES - 1);
+      size_t log_field_size = std::min(static_cast<size_t>(ctz(field_size)),
+                                       CUDA_MEMCPY_KERNEL_MAX2_LOG2_BYTES - 1);
+
+      assert((1ULL << log_field_size) <= field_size);
+      assert(dim <= CUDA_MAX_DIM);
+      assert(dim >= 1);
+
+      GPUFuncInfo &func_info =
+          indirect_copy_kernels[dim - 1][log_addr_size][log_field_size];
+      launch_kernel(func_info, copy_info, volume, stream);
+    }
+
     void GPU::launch_batch_affine_kernel(void *copy_info, size_t dim,
                                          size_t elem_size, size_t volume,
                                          GPUStream *stream) {
@@ -2663,6 +2683,12 @@ namespace Realm {
     {
       // mark what context we belong to
       add_module_specific(new CudaDeviceMemoryInfo(gpu->context));
+
+      // advertise for potential (on-demand) gpudirect support
+      local_segment.assign(NetworkSegmentInfo::CudaDeviceMem, 0 /*base*/, 0 /*size*/,
+                           reinterpret_cast<uintptr_t>(gpu),
+                           NetworkSegmentInfo::OptionFlags::OnDemandRegistration);
+      segment = &local_segment;
     }
 
     GPUDynamicFBMemory::~GPUDynamicFBMemory(void)
@@ -3474,16 +3500,20 @@ namespace Realm {
               0));
           batch_fill_affine_kernels[d - 1][log_bit_sz] = func_info;
 
-          std::snprintf(name, sizeof(name), "memcpy_indirect%uD_%u", d, bit_sz);
+          for(unsigned int log_addr_bit_sz = 2; log_addr_bit_sz < 4; log_addr_bit_sz++) {
+            const unsigned int addr_bit_sz = 8U << log_addr_bit_sz;
+            std::snprintf(name, sizeof(name), "memcpy_indirect%uD_%u%u", d, bit_sz,
+                          addr_bit_sz);
 
-          CHECK_CU(CUDA_DRIVER_FNPTR(cuModuleGetFunction)(&func_info.func, device_module,
-                                                          name));
+            CHECK_CU(CUDA_DRIVER_FNPTR(cuModuleGetFunction)(&func_info.func,
+                                                            device_module, name));
 
-          CHECK_CU(CUDA_DRIVER_FNPTR(cuOccupancyMaxPotentialBlockSize)(
-              &func_info.occ_num_blocks, &func_info.occ_num_threads, func_info.func, 0, 0,
-              0));
+            CHECK_CU(CUDA_DRIVER_FNPTR(cuOccupancyMaxPotentialBlockSize)(
+                &func_info.occ_num_blocks, &func_info.occ_num_threads, func_info.func, 0,
+                0, 0));
 
-          indirect_copy_kernels[d - 1][log_bit_sz] = func_info;
+            indirect_copy_kernels[d - 1][log_addr_bit_sz][log_bit_sz] = func_info;
+          }
         }
       }
 
@@ -5016,9 +5046,33 @@ namespace Realm {
           cudaipc_responses_needed.fetch_add(ipc_peers.size());
           cudaipc_releases_needed.fetch_add(ipc_peers.size());
 
-          ActiveMessage<CudaIpcRequest> amsg(ipc_peers);
-          amsg->hostid = gethostid();
-          amsg.commit();
+          // If shared_peers_use_network_module == false, we can safely rely on
+          //  the Network::shared_peers created by ipc mailbox. Otherwise,
+          //  the shared_peers could be all_peers, therefore, we try to use
+          //  hostid and hostname to check if two peers are on the same physical
+          //  node. However, the hostid and hostname are likely the same on containers
+          //  that are not cuda ipc capable. This can lead to a failure when opening
+          //  the ipc handle from another physical node, or it could succeed and we
+          //  could end up getting corrupted results.
+          if(runtime->shared_peers_use_network_module) {
+            char hostname[HOST_NAME_MAX];
+            int hostname_err = gethostname(hostname, HOST_NAME_MAX);
+            size_t hostname_size = 0;
+            if(hostname_err == 0) {
+              hostname_size =
+                  sizeof(char) * strlen(hostname) + 1; // we need to copy the last \0
+            }
+            ActiveMessage<CudaIpcRequest> amsg(ipc_peers, hostname_size);
+            amsg->hostid = gethostid();
+            if(hostname_size > 0) {
+              amsg->hostname_size = hostname_size;
+              amsg.add_payload(hostname, hostname_size);
+            }
+            amsg.commit();
+          } else {
+            ActiveMessage<CudaIpcRequest> amsg(ipc_peers);
+            amsg.commit();
+          }
 
           // wait for responses
           {
@@ -5432,12 +5486,34 @@ namespace Realm {
       bool do_export = false;
       if(cuda_module_singleton->config->cfg_use_cuda_ipc) {
 #ifdef REALM_ON_LINUX
-        // host id has to match as well
-        long hostid = gethostid();
-        if(hostid == args.hostid)
+        RuntimeImpl *runtime = get_runtime();
+        if(runtime->shared_peers_use_network_module) {
+          assert(datalen == (args.hostname_size * sizeof(char)));
+          const char *remote_hostname = static_cast<const char *>(data);
+          // host id has to match as well
+          long hostid = gethostid();
+          bool hostid_match = false;
+          if(hostid == args.hostid) {
+            hostid_match = true;
+          } else {
+            log_cudaipc.info() << "hostid mismatch - us=" << hostid
+                               << " them=" << args.hostid;
+          }
+
+          // hostname has to match as well
+          char hostname[HOST_NAME_MAX];
+          int hostname_status = gethostname(hostname, HOST_NAME_MAX);
+          bool hostname_match = false;
+          if(hostname_status == 0 && strcmp(hostname, remote_hostname) == 0) {
+            hostname_match = true;
+          } else {
+            log_cudaipc.info() << "hostname mismatch - us=" << hostname
+                               << " them=" << remote_hostname;
+          }
+          do_export = hostid_match && hostname_match;
+        } else {
           do_export = true;
-        else
-          log_cudaipc.info() << "hostid mismatch - us=" << hostid << " them=" << args.hostid;
+        }
 #endif
       }
 
@@ -5509,10 +5585,10 @@ namespace Realm {
               CUresult ret = CUDA_DRIVER_FNPTR(cuIpcOpenMemHandle)(&dptr,
                                                                    entries[i].handle,
                                                                    CU_IPC_MEM_LAZY_ENABLE_PEER_ACCESS);
-              log_cudaipc.info() << "open result " << entries[i].mem
-                                 << " orig=" << std::hex << entries[i].base_ptr
-                                 << " local=" << dptr << std::dec
-                                 << " ret=" << ret;
+              log_cudaipc.info()
+                  << "open result " << entries[i].mem << " orig=" << std::hex
+                  << entries[i].base_ptr << " local=" << dptr << std::dec
+                  << " ret=" << ret << " sender=" << sender;
 
               if(ret == CUDA_SUCCESS) {
                 // take the cudaipc mutex to actually add the mapping

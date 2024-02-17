@@ -75,12 +75,6 @@ namespace UCP {
     char           realm_hdr[0];
   } __attribute__ ((packed)); // gcc-specific
 
-  struct SegmentInfo {
-    uintptr_t base, limit;
-    NetworkSegmentInfo::MemoryType memtype;
-    NetworkSegmentInfo::MemoryTypeExtraData memextra;
-  };
-
   class UCPPoller : public BackgroundWorkItem {
   public:
     UCPPoller();
@@ -157,20 +151,9 @@ namespace UCP {
                     std::vector<size_t> &lengths);
     size_t sample_messages_received_count();
     bool check_for_quiescence(size_t sampled_receive_count);
-    size_t recommended_max_payload(const RemoteAddress *dest_payload_addr,
-        bool with_congestion, size_t header_size);
-    size_t recommended_max_payload(NodeID target,
-        const RemoteAddress *dest_payload_addr,
-        bool with_congestion, size_t header_size);
-    size_t recommended_max_payload(const RemoteAddress *dest_payload_addr,
-        const void *data, size_t bytes_per_line,
-        size_t lines, size_t line_stride,
-        bool with_congestion, size_t header_size);
-    size_t recommended_max_payload(NodeID target,
-        const RemoteAddress *dest_payload_addr,
-        const void *data, size_t bytes_per_line,
-        size_t lines, size_t line_stride,
-        bool with_congestion, size_t header_size);
+    size_t recommended_max_payload(const void *data, const NetworkSegment *src_segment,
+                                   const RemoteAddress *dest_payload_addr,
+                                   bool with_congestion, size_t header_size);
 
     bool get_ucp_ep(const UCPWorker *worker,
         NodeID target, const UCPRDMAInfo *rdma_info, ucp_ep_h *ep) const;
@@ -186,9 +169,7 @@ namespace UCP {
 
     void notify_msg_sent(uint64_t count);
 
-    const SegmentInfo *find_segment(const void *srcptr) const;
-
-    const UCPContext *get_context(const SegmentInfo *seg_info) const;
+    const UCPContext *get_context(const NetworkSegment *segment) const;
     // the public interface exposes the tx worker only
     UCPWorker *get_tx_worker(const UCPContext *context, uint8_t priority) const;
 
@@ -199,8 +180,6 @@ namespace UCP {
     RuntimeImpl *runtime;
 
   private:
-    struct SegmentInfoSorter;
-
     struct AmHandlersArgs {
       UCPInternal *internal;
       UCPWorker   *worker;
@@ -240,6 +219,7 @@ namespace UCP {
     bool is_congested();
     bool add_rdma_info(NetworkSegment *segment,
         const UCPContext *context, ucp_mem_h mem_h);
+    void add_rdma_info_odr(NetworkSegment *segment, const UCPContext *context);
     bool am_msg_recv_data_ready(UCPInternal *internal,
         UCPWorker *worker, const UCPMsgHdr *ucp_msg_hdr, size_t header_size,
         void *payload, size_t payload_size, int payload_mode);
@@ -289,34 +269,16 @@ namespace UCP {
     MPool                                   *rcba_mp;
     SpinLock                                rcba_mp_spinlock;
     size_t                                  ib_seg_size;
-    // this list is sorted by address to enable quick address lookup
-    std::vector<SegmentInfo>                segments_by_addr;
+    size_t zcopy_thresh_host;
   };
 
   class UCPMessageImpl : public ActiveMessageImpl {
   public:
-    UCPMessageImpl(
-      UCPInternal *internal,
-      NodeID target,
-      unsigned short msgid,
-      size_t header_size,
-      size_t max_payload_size,
-      const void *src_payload_addr,
-      size_t src_payload_lines,
-      size_t src_payload_line_stride,
-      size_t storage_size);
-
-    UCPMessageImpl(
-      UCPInternal *internal,
-      NodeID target,
-      unsigned short msgid,
-      size_t header_size,
-      size_t max_payload_size,
-      const void *src_payload_addr,
-      size_t src_payload_lines,
-      size_t src_payload_line_stride,
-      const RemoteAddress& dest_payload_addr,
-      size_t storage_size);
+    UCPMessageImpl(UCPInternal *internal, NodeID target, unsigned short msgid,
+                   size_t header_size, size_t max_payload_size,
+                   const void *src_payload_addr, size_t src_payload_lines,
+                   size_t src_payload_line_stride, const NetworkSegment *_src_segment,
+                   const RemoteAddress *_dest_payload_addr, size_t storage_size);
 
     UCPMessageImpl(
       UCPInternal *internal,
@@ -338,11 +300,6 @@ namespace UCP {
     virtual void cancel();
 
   private:
-    void constructor_common(
-      unsigned short _msgid,
-      size_t _header_size,
-      size_t _max_payload_size,
-      size_t _storage_size);
     bool set_inline_payload_base();
     bool commit_with_rma(ucp_ep_h ep);
     bool commit_unicast(size_t act_payload_size);
