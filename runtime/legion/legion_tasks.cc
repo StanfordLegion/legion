@@ -12454,9 +12454,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       concurrent_task_barrier = concurrent_barrier;
-      // No need for the lock, no races here
+      // Swap this vector onto the stack in case the slice task gets deleted
+      // out from under us while we are finalizing things
+      std::vector<std::pair<PointTask*,ProcessorManager*> > local_copy;
+      local_copy.swap(concurrent_points);
       for (std::vector<std::pair<PointTask*,ProcessorManager*> >::const_iterator
-            it = concurrent_points.begin(); it != concurrent_points.end(); it++) 
+            it = local_copy.begin(); it != local_copy.end(); it++)
         it->second->finalize_concurrent_task_order(it->first,
             lamport_clock, poisoned);
     }

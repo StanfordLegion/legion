@@ -8005,8 +8005,8 @@ namespace Legion {
       assert(ready_concurrent_tasks > 0);
 #endif
       // See if we can prove that there is a task that is safe to start
-      uint64_t min_next = (uint64_t)-1;
-      uint64_t min_pending = (uint64_t)-1;
+      uint64_t min_next = std::numeric_limits<uint64_t>::max();
+      uint64_t min_pending = std::numeric_limits<uint64_t>::max();
       SingleTask *next = NULL;
       TaskTreeCoordinates next_coords;
       for (std::map<SingleTask*,ConcurrentState>::const_iterator it =
@@ -8020,6 +8020,7 @@ namespace Legion {
             if (it->second.lamport_clock < min_next)
             {
               next = it->first;
+              next_coords.clear();
               min_next = it->second.lamport_clock;
             }
             else if (min_next == it->second.lamport_clock)
