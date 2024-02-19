@@ -29,7 +29,11 @@ namespace Legion {
     class TrieNode {
     public:
       TrieNode(T token_, TrieNode<T, V>* parent_) : token(token_), end(false), parent(parent_) {}
-      // TODO (rohany): Implement a recursive destructor.
+      ~TrieNode() {
+        for (auto it : this->children) {
+          delete it.second;
+        }
+      }
       const std::unordered_map<T, TrieNode<T, V>*>& get_children() const { return this->children; }
       TrieNode<T, V>* get_parent() const { return this->parent; }
       V& get_value() { return this->value; }
@@ -49,11 +53,11 @@ namespace Legion {
     class Trie {
     public:
       // Initialize the root with an arbitrary token.
-      Trie() : root(new TrieNode<T, V>(T{}, nullptr)) {}
+      Trie() : root(T{}, nullptr) {}
 
       template<typename ITER>
       void insert(ITER start, ITER end, V value) {
-        TrieNode<T, V>* node = this->root;
+        TrieNode<T, V>* node = &this->root;
 
         for (auto tokitr = start; tokitr != end; tokitr++) {
           auto token = *tokitr;
@@ -75,7 +79,7 @@ namespace Legion {
 
       template<typename ITER>
       bool contains(ITER start, ITER end) {
-        TrieNode<T, V>* node = this->root;
+        TrieNode<T, V>* node = &this->root;
         for (auto tokitr = start; tokitr != end; tokitr++) {
           auto token = *tokitr;
           auto it = node->children.find(token);
@@ -91,7 +95,7 @@ namespace Legion {
 
       template<typename ITER>
       bool prefix(ITER start, ITER end) {
-        TrieNode<T, V>* node = this->root;
+        TrieNode<T, V>* node = &this->root;
 
         for (auto tokitr = start; tokitr != end; tokitr++) {
           auto token = *tokitr;
@@ -108,10 +112,9 @@ namespace Legion {
 
       // TODO (rohany): Implement remove and superstring.
 
-      TrieNode<T, V>* get_root() { return root; }
+      TrieNode<T, V>* get_root() { return &root; }
     private:
-      // TODO (rohany): Does this actually need to be a pointer?
-      TrieNode<T, V>* root;
+      TrieNode<T, V> root;
     };
   };
 };
