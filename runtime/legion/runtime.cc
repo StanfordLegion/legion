@@ -6350,9 +6350,7 @@ namespace Legion {
 #endif
         // Finally we set the instance to the physical manager
         const bool delete_now = manager->update_physical_instance(instance,
-                                          PhysicalManager::EAGER_INSTANCE_KIND,
-                                          bytes_used,
-                                          info.ptr);
+                                          bytes_used, info.ptr);
         if (delete_now)
           delete manager;
       }
@@ -7969,6 +7967,8 @@ namespace Legion {
       assert(!finder->second.max);
       assert(finder->second.lamport_clock <= lamport_clock);
 #endif
+      if (concurrent_lamport_clock <= lamport_clock)
+        concurrent_lamport_clock = lamport_clock + 1;
       if (poisoned)
       {
         Runtime::poison_event(finder->second.ready);
@@ -8007,8 +8007,8 @@ namespace Legion {
       assert(ready_concurrent_tasks > 0);
 #endif
       // See if we can prove that there is a task that is safe to start
-      uint64_t min_next = (uint64_t)-1;
-      uint64_t min_pending = (uint64_t)-1;
+      uint64_t min_next = std::numeric_limits<uint64_t>::max();
+      uint64_t min_pending = std::numeric_limits<uint64_t>::max();
       SingleTask *next = NULL;
       TaskTreeCoordinates next_coords;
       for (std::map<SingleTask*,ConcurrentState>::const_iterator it =
@@ -8022,6 +8022,7 @@ namespace Legion {
             if (it->second.lamport_clock < min_next)
             {
               next = it->first;
+              next_coords.clear();
               min_next = it->second.lamport_clock;
             }
             else if (min_next == it->second.lamport_clock)
@@ -12626,6 +12627,11 @@ namespace Legion {
           case DISTRIBUTED_DOWNGRADE_UPDATE:
             {
               runtime->handle_did_downgrade_update(derez);
+              break;
+            }
+          case DISTRIBUTED_DOWNGRADE_RESTART:
+            {
+              runtime->handle_did_downgrade_restart(derez,remote_address_space);
               break;
             }
           case DISTRIBUTED_GLOBAL_ACQUIRE_REQUEST:
@@ -22304,6 +22310,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_did_downgrade_restart(AddressSpaceID target,
+                                             Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(DISTRIBUTED_DOWNGRADE_RESTART, rez,
+                                            true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_did_acquire_global_request(AddressSpaceID target,
                                                   Serializer &rez)
     //--------------------------------------------------------------------------
@@ -25008,6 +25023,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DistributedCollectable::handle_downgrade_update(this, derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_did_downgrade_restart(Deserializer &derez,
+                                               AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DistributedCollectable::handle_downgrade_restart(this, derez, source);
     }
 
     //--------------------------------------------------------------------------

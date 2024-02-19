@@ -9720,9 +9720,12 @@ namespace Legion {
         if (concurrent_barrier)
           concurrent_task_barrier =
             RtBarrier(Realm::Barrier::create_barrier(total_points));
+        // Swap this vector onto the stack in case the slice task gets deleted
+        // out from under us while we are finalizing things
+        std::vector<std::pair<SliceTask*,AddressSpaceID> > local_copy;
+        local_copy.swap(concurrent_slices);
         for (std::vector<std::pair<SliceTask*,AddressSpaceID> >::const_iterator
-              it = concurrent_slices.begin(); 
-              it != concurrent_slices.end(); it++)
+              it = local_copy.begin(); it != local_copy.end(); it++)
         {
           if (it->second != runtime->address_space)
           {
@@ -12494,9 +12497,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       concurrent_task_barrier = concurrent_barrier;
-      // No need for the lock, no races here
+      // Swap this vector onto the stack in case the slice task gets deleted
+      // out from under us while we are finalizing things
+      std::vector<std::pair<PointTask*,ProcessorManager*> > local_copy;
+      local_copy.swap(concurrent_points);
       for (std::vector<std::pair<PointTask*,ProcessorManager*> >::const_iterator
-            it = concurrent_points.begin(); it != concurrent_points.end(); it++) 
+            it = local_copy.begin(); it != local_copy.end(); it++)
         it->second->finalize_concurrent_task_order(it->first,
             lamport_clock, poisoned);
     }

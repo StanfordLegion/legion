@@ -498,6 +498,7 @@ namespace Realm {
       // should be good here for most purposes)
       // TODO: make controllable
       const size_t flow_control_bytes = 4ULL * 1024ULL * 1024ULL * 1024ULL;
+
       ReadSequenceCache rseqcache(this, 2 << 20);
       WriteSequenceCache wseqcache(this, 2 << 20);
       GPUStream *stream = 0;
@@ -789,7 +790,8 @@ namespace Realm {
           cuda_copy.dstDevice = copy_info.dst.addr;
           cuda_copy.srcDevice = copy_info.src.addr;
 
-          log_gpudma.info() << "\tLaunching 3D CE bytes="
+          log_gpudma.info() << "\tLaunching 3D CE "
+                            << "xd=" << std::hex << guid << std::dec << " bytes="
                             << copy_info.extents[0] * copy_info.extents[1] *
                                    copy_info.extents[2]
                             << " srcPitch=" << cuda_copy.srcPitch
@@ -827,6 +829,517 @@ namespace Realm {
 
     ////////////////////////////////////////////////////////////////////////
     //
+    // class GPUIndirectXferDes
+
+    static void launch_indirect_kernel(GPU *gpu, GPUStream *stream, size_t num_dims,
+                                       size_t addr_type_size, size_t field_size,
+                                       size_t bytes, const std::vector<size_t> &strides,
+                                       uintptr_t in_base, uintptr_t out_base,
+                                       uintptr_t src_ind_base, uintptr_t dst_ind_base)
+    {
+      MemcpyIndirectInfo<3, size_t> memcpy_info;
+      memset(&memcpy_info, 0, sizeof(MemcpyIndirectInfo<3, size_t>));
+      memcpy_info.src_ind_addr = src_ind_base;
+      memcpy_info.dst_ind_addr = dst_ind_base;
+      memcpy_info.src_addr = in_base;
+      memcpy_info.dst_addr = out_base;
+      memcpy_info.field_size = field_size;
+      assert(memcpy_info.field_size > 0);
+      memcpy_info.volume = bytes / field_size;
+      assert(memcpy_info.volume > 0);
+      for(size_t i = 0; i < num_dims; i++) {
+        memcpy_info.src_strides[i] = strides[i] / field_size;
+        memcpy_info.dst_strides[i] = strides[i] / field_size;
+      }
+      gpu->launch_indirect_copy_kernel(&memcpy_info, num_dims, addr_type_size,
+                                       memcpy_info.field_size, memcpy_info.volume,
+                                       stream);
+    }
+
+    GPUIndirectXferDes::GPUIndirectXferDes(
+        uintptr_t _dma_op, Channel *_channel, NodeID _launch_node, XferDesID _guid,
+        const std::vector<XferDesPortInfo> &inputs_info,
+        const std::vector<XferDesPortInfo> &outputs_info, int _priority,
+        XferDesRedopInfo _redop_info)
+      : XferDes(_dma_op, _channel, _launch_node, _guid, inputs_info, outputs_info,
+                _priority, 0, 0)
+    {
+      kind = XFER_GPU_IN_FB;
+
+      src_gpus.resize(inputs_info.size(), 0);
+      for(size_t i = 0; i < input_ports.size(); i++) {
+        src_gpus[i] = mem_to_gpu(input_ports[i].mem);
+        if(input_ports[i].mem->kind == MemoryImpl::MKIND_GPUFB)
+          assert(src_gpus[i]);
+      }
+
+      dst_gpus.resize(outputs_info.size(), 0);
+      dst_is_ipc.resize(outputs_info.size(), false);
+      for(size_t i = 0; i < output_ports.size(); i++) {
+        dst_gpus[i] = mem_to_gpu(output_ports[i].mem);
+        if(output_ports[i].mem->kind == MemoryImpl::MKIND_GPUFB) {
+          assert(dst_gpus[i]);
+        } else {
+          if(NodeID(ID(output_ports[i].mem->me).memory_owner_node()) !=
+             Network::my_node_id)
+            dst_is_ipc[i] = true;
+        }
+      }
+    }
+
+    long GPUIndirectXferDes::get_requests(Request **requests, long nr)
+    {
+      // unused
+      assert(0);
+      return 0;
+    }
+
+    bool GPUIndirectXferDes::progress_xd(GPUIndirectChannel *channel,
+                                         TimeLimit work_until)
+    {
+      bool did_work = false;
+      // TODO: add span
+      ReadSequenceCache rseqcache(this, 2 << 20);
+
+      while(true) {
+        size_t min_xfer_size = 4 << 20;
+        const InstanceLayoutPieceBase *in_nonaffine, *out_nonaffine;
+
+        size_t in_span_start = 0, out_span_start = 0;
+        XferPort *in_port = 0, *out_port = 0;
+        GPU *in_gpu = 0, *out_gpu = 0;
+        bool out_is_ipc = false;
+
+        if(input_control.current_io_port >= 0) {
+          in_port = &input_ports[input_control.current_io_port];
+          in_gpu = this->src_gpus[input_control.current_io_port];
+          in_span_start = in_port->local_bytes_total;
+        }
+
+        if(output_control.current_io_port >= 0) {
+          out_port = &output_ports[output_control.current_io_port];
+          out_gpu = this->dst_gpus[output_control.current_io_port];
+          out_is_ipc = this->dst_is_ipc[output_control.current_io_port];
+          out_span_start = out_port->local_bytes_total;
+        }
+
+        assert(in_port != nullptr);
+        assert(out_port != nullptr);
+
+        size_t max_bytes =
+            get_addresses(min_xfer_size, &rseqcache, in_nonaffine, out_nonaffine);
+        log_gpudma.info() << "cuda gather/scatter copy"
+                          << " xd=" << std::hex << guid << std::dec
+                          << " min_xfer_size=" << min_xfer_size
+                          << " max_bytes=" << max_bytes << " xd=" << std::hex
+                          << out_port->peer_guid << std::dec;
+
+        if(max_bytes == 0) {
+          break;
+        }
+
+        size_t total_bytes = 0;
+
+        uintptr_t in_base = 0;
+        if(!in_nonaffine) {
+          in_base = reinterpret_cast<uintptr_t>(in_port->mem->get_direct_ptr(0, 0));
+        }
+
+        uintptr_t out_base = 0;
+        const GPU::CudaIpcMapping *out_mapping = 0;
+        if(!out_nonaffine) {
+          if(out_is_ipc) {
+            out_mapping = in_gpu->find_ipc_mapping(out_port->mem->me);
+            assert(out_mapping);
+            out_base = out_mapping->local_base;
+          } else {
+            out_base = reinterpret_cast<uintptr_t>(out_port->mem->get_direct_ptr(0, 0));
+          }
+        }
+
+        TransferIterator::AddressInfo addr_info;
+        memset(&addr_info, 0, sizeof(TransferIterator::AddressInfo));
+
+        size_t addr_size = 0;
+
+        AddressListCursor &in_alc = in_port->addrcursor;
+        AddressListCursor &out_alc = out_port->addrcursor;
+
+        size_t write_ind_bytes = 0;
+        uintptr_t dst_ind_base = 0;
+        if(out_port->indirect_port_idx >= 0) {
+          // scatter
+          out_port->iter->step(max_bytes, addr_info, 0, 0);
+          addr_size = out_port->iter->get_address_size();
+
+          dst_ind_base = reinterpret_cast<uintptr_t>(
+              input_ports[out_port->indirect_port_idx].mem->get_direct_ptr(
+                  out_port->iter->get_base_offset(), 0));
+
+          out_base += addr_info.base_offset;
+          dst_ind_base += (out_alc.get_offset() / addr_info.bytes_per_chunk) * addr_size;
+        } else {
+          out_base += out_alc.get_offset();
+        }
+
+        size_t read_ind_bytes = 0;
+        uintptr_t src_ind_base = 0;
+        if(in_port->indirect_port_idx >= 0) {
+          // gather
+          in_port->iter->step(max_bytes, addr_info, 0, 0);
+          addr_size = in_port->iter->get_address_size();
+
+          src_ind_base = reinterpret_cast<uintptr_t>(
+              input_ports[in_port->indirect_port_idx].mem->get_direct_ptr(
+                  in_port->iter->get_base_offset(), 0));
+
+          in_base += addr_info.base_offset;
+          src_ind_base += (in_alc.get_offset() / addr_info.bytes_per_chunk) * addr_size;
+        } else {
+          in_base += in_alc.get_offset();
+        }
+
+        log_gpudma.info() << "cuda gathe/scatter bytes_per_chunk="
+                          << addr_info.bytes_per_chunk
+                          << " num_lines=" << addr_info.num_lines
+                          << " line_stride=" << addr_info.line_stride
+                          << " num_planes=" << addr_info.num_planes
+                          << " plane_stride=" << addr_info.plane_stride
+                          << " base_offset=" << in_port->iter->get_base_offset();
+
+        std::vector<size_t> strides{addr_info.bytes_per_chunk, addr_info.line_stride,
+                                    addr_info.plane_stride};
+        size_t field_size = strides[0];
+        size_t num_dims =
+            addr_info.num_planes > 0 ? 3 : (addr_info.num_lines > 0 ? 2 : 1);
+        for(size_t i = 1; i < num_dims; i++) {
+          if(strides[i] > 0 && field_size >= strides[i]) {
+            field_size = strides[i];
+          }
+        }
+
+        size_t addr_type_size = addr_size / num_dims;
+
+        if(in_port->indirect_port_idx >= 0)
+          read_ind_bytes = (max_bytes / field_size) * addr_size;
+        else
+          write_ind_bytes = (max_bytes / field_size) * addr_size;
+
+        auto stream = select_stream(out_gpu, in_gpu, out_mapping);
+        AutoGPUContext agc(stream->get_gpu());
+
+        // We can't do gather-scatter yet.
+        assert(!(out_port->indirect_port_idx >= 0 && in_port->indirect_port_idx >= 0));
+        assert(!in_nonaffine && !out_nonaffine);
+
+        log_gpudma.info() << "\t launching cuda gather/scatter "
+                          << "xd:" << std::hex << guid << std::dec
+                          << " bytes:" << max_bytes << " addr_size:" << addr_size
+                          << " num_dims:" << num_dims
+                          << " addr_type_size:" << addr_type_size;
+
+        launch_indirect_kernel(in_gpu, stream, num_dims, addr_type_size, field_size,
+                               max_bytes, strides, in_base, out_base, src_ind_base,
+                               dst_ind_base);
+
+        in_alc.advance(0, max_bytes);
+        out_alc.advance(0, max_bytes);
+
+        // TODO(apryakhin@): Add control flow
+        total_bytes += max_bytes;
+        size_t bytes_to_fence = total_bytes;
+        if((total_bytes >= min_xfer_size) && work_until.is_expired()) {
+          break;
+        }
+
+        if(bytes_to_fence > 0) {
+          add_reference();
+          log_gpudma.info() << "cuda gather/scatter fence: stream=" << stream << " "
+                            << " xd=" << std::hex << guid << std::dec
+                            << " bytes:" << bytes_to_fence
+                            << " in_spart_start:" << in_span_start
+                            << " out_span_start:" << out_span_start
+                            << " read_ind_bytes:" << read_ind_bytes
+                            << " write_ind_bytes:" << write_ind_bytes;
+
+          stream->add_notification(new GPUIndirectTransferCompletion(
+              this, input_control.current_io_port, in_span_start, total_bytes,
+              output_control.current_io_port, out_span_start, bytes_to_fence,
+              in_port->indirect_port_idx, 0, read_ind_bytes, out_port->indirect_port_idx,
+              0, write_ind_bytes));
+        }
+
+        if(total_bytes > 0) {
+          did_work = true;
+          bool done = record_address_consumption(total_bytes, total_bytes);
+          if(done || work_until.is_expired()) {
+            break;
+          }
+        }
+      }
+
+      rseqcache.flush();
+      return did_work;
+    }
+
+    ////////////////////////////////////////////////////////////////////////
+    //
+    // class GPUIndirectChannel
+
+    static bool supports_scatter_gather_path(ChannelCopyInfo channel_copy_info,
+                                             NodeID node)
+    {
+      // TODO(apryakhin): remove this condition when it's supported.
+      // is_directt=false means we gather/scatter to the buffer which
+      // won't be correct if ib smaller that overall size of
+      // gather/scatter
+      if(channel_copy_info.addr_size > sizeof(size_t) ||
+         channel_copy_info.is_ranges == true || channel_copy_info.num_spaces > 1) {
+        return false;
+      }
+
+      if(channel_copy_info.ind_mem == Memory::NO_MEMORY) {
+        return false;
+      }
+
+      if(channel_copy_info.src_mem.kind() != Memory::GPU_FB_MEM ||
+         channel_copy_info.dst_mem.kind() != Memory::GPU_FB_MEM) {
+        return false;
+      }
+      // TODO(apryakhin@): Consider checking for gpu access
+      return true;
+    }
+
+    GPUIndirectChannel::GPUIndirectChannel(GPU *_src_gpu, XferDesKind _kind,
+                                           BackgroundWorkManager *bgwork)
+      : SingleXDQChannel<GPUIndirectChannel, GPUIndirectXferDes>(
+            bgwork, _kind,
+            stringbuilder() << "cuda channel (gpu=" << _src_gpu->info->index
+                            << " kind=" << (int)_kind << ")")
+    {
+      src_gpu = _src_gpu;
+
+      // switch out of ordered mode if multi-threaded dma is requested
+      if(_src_gpu->module->config->cfg_multithread_dma)
+        xdq.ordered_mode = false;
+
+      std::vector<Memory> local_gpu_mems;
+      local_gpu_mems.push_back(src_gpu->fbmem->me);
+      if(src_gpu->fb_ibmem)
+        local_gpu_mems.push_back(src_gpu->fb_ibmem->me);
+
+      std::vector<Memory> peer_gpu_mems;
+      peer_gpu_mems.insert(peer_gpu_mems.end(), src_gpu->peer_fbs.begin(),
+                           src_gpu->peer_fbs.end());
+      for(std::vector<GPU::CudaIpcMapping>::const_iterator it =
+              src_gpu->cudaipc_mappings.begin();
+          it != src_gpu->cudaipc_mappings.end(); ++it)
+        peer_gpu_mems.push_back(it->mem);
+
+      // look for any other local memories that belong to our context or
+      //  peer-able contexts
+      const Node &n = get_runtime()->nodes[Network::my_node_id];
+      for(std::vector<MemoryImpl *>::const_iterator it = n.memories.begin();
+          it != n.memories.end(); ++it) {
+        CudaDeviceMemoryInfo *cdm = (*it)->find_module_specific<CudaDeviceMemoryInfo>();
+        if(!cdm)
+          continue;
+        if(cdm->context == src_gpu->context) {
+          local_gpu_mems.push_back((*it)->me);
+        } else {
+          // if the other context is associated with a gpu and we've got peer
+          //  access, use it
+          // TODO: add option to enable peer access at this point?  might be
+          //  expensive...
+          if(cdm->gpu && (src_gpu->info->peers.count(cdm->gpu->info->device) > 0))
+            peer_gpu_mems.push_back((*it)->me);
+        }
+      }
+
+      switch(_kind) {
+      case XFER_GPU_SC_IN_FB:
+      {
+        // self-path
+        unsigned bw = 200000;   // HACK - estimate at 200 GB/s
+        unsigned latency = 250; // HACK - estimate at 250 ns
+        // TODO(apriakhin): Consider tweaking this value.
+        unsigned frag_overhead = 200; // HACK - estimate at 2 us
+
+        add_path(local_gpu_mems, local_gpu_mems, bw, latency, frag_overhead,
+                 XFER_GPU_SC_IN_FB)
+            .allow_redops()
+            .set_max_dim(3);
+
+        break;
+      }
+
+      case XFER_GPU_SC_PEER_FB:
+      {
+        // just do paths to peers - they'll do the other side
+        unsigned bw = 50000;          // HACK - estimate at 50 GB/s
+        unsigned latency = 1000;      // HACK - estimate at 1 us
+        unsigned frag_overhead = 200; // HACK - estimate at 2 us
+
+        add_path(local_gpu_mems, peer_gpu_mems, bw, latency, frag_overhead,
+                 XFER_GPU_SC_PEER_FB)
+            .set_max_dim(3);
+
+        break;
+      }
+
+      default:
+        assert(0);
+      }
+    }
+
+    GPUIndirectChannel::~GPUIndirectChannel() {}
+
+    Memory GPUIndirectChannel::suggest_ib_memories(Memory memory) const
+    {
+      if(memory.kind() != Memory::GPU_FB_MEM ||
+         node != NodeID(ID(memory).memory_owner_node())) {
+        Node &n = get_runtime()->nodes[node];
+        for(std::vector<IBMemory *>::const_iterator it = n.ib_memories.begin();
+            it != n.ib_memories.end(); ++it) {
+          if((*it)->lowlevel_kind == Memory::GPU_FB_MEM) {
+            return (*it)->me;
+          }
+        }
+      }
+      return Memory::NO_MEMORY;
+    }
+
+    bool GPUIndirectChannel::needs_wrapping_iterator() const { return true; }
+
+    uint64_t GPUIndirectChannel::supports_path(
+        ChannelCopyInfo channel_copy_info, CustomSerdezID src_serdez_id,
+        CustomSerdezID dst_serdez_id, ReductionOpID redop_id, size_t total_bytes,
+        const std::vector<size_t> *src_frags, const std::vector<size_t> *dst_frags,
+        XferDesKind *kind_ret /*= 0*/, unsigned *bw_ret /*= 0*/,
+        unsigned *lat_ret /*= 0*/)
+    {
+      if(!supports_scatter_gather_path(channel_copy_info, node))
+        return 0;
+      return Channel::supports_path(channel_copy_info, src_serdez_id, dst_serdez_id,
+                                    redop_id, total_bytes, src_frags, dst_frags, kind_ret,
+                                    bw_ret, lat_ret);
+    }
+
+    XferDes *GPUIndirectChannel::create_xfer_des(
+        uintptr_t dma_op, NodeID launch_node, XferDesID guid,
+        const std::vector<XferDesPortInfo> &inputs_info,
+        const std::vector<XferDesPortInfo> &outputs_info, int priority,
+        XferDesRedopInfo redop_info, const void *fill_data, size_t fill_size,
+        size_t fill_total)
+    {
+      // assert(redop_info.id == 0);
+      assert(fill_size == 0);
+      return new GPUIndirectXferDes(dma_op, this, launch_node, guid, inputs_info,
+                                    outputs_info, priority, redop_info);
+    }
+
+    long GPUIndirectChannel::submit(Request **requests, long nr)
+    {
+      // unused
+      assert(0);
+      return 0;
+    }
+
+    ////////////////////////////////////////////////////////////////////////
+    //
+    // class GPUIndirectRemoteChannelInfo
+    //
+
+    GPUIndirectRemoteChannelInfo::GPUIndirectRemoteChannelInfo(
+        NodeID _owner, XferDesKind _kind, uintptr_t _remote_ptr,
+        const std::vector<Channel::SupportedPath> &_paths)
+      : SimpleRemoteChannelInfo(_owner, _kind, _remote_ptr, _paths)
+    {}
+
+    RemoteChannel *GPUIndirectRemoteChannelInfo::create_remote_channel()
+    {
+      GPUIndirectRemoteChannel *rc = new GPUIndirectRemoteChannel(remote_ptr);
+      rc->node = owner;
+      rc->kind = kind;
+      rc->paths.swap(paths);
+      return rc;
+    }
+
+    template <typename S>
+    bool GPUIndirectRemoteChannelInfo::serialize(S &serializer) const
+    {
+      return ((serializer << owner) && (serializer << kind) &&
+              (serializer << remote_ptr) && (serializer << paths));
+    }
+
+    template <typename S>
+    /*static*/ RemoteChannelInfo *
+    GPUIndirectRemoteChannelInfo::deserialize_new(S &deserializer)
+    {
+      NodeID owner;
+      XferDesKind kind;
+      uintptr_t remote_ptr;
+      std::vector<Channel::SupportedPath> paths;
+
+      if((deserializer >> owner) && (deserializer >> kind) &&
+         (deserializer >> remote_ptr) && (deserializer >> paths)) {
+        return new GPUIndirectRemoteChannelInfo(owner, kind, remote_ptr, paths);
+      } else {
+        return 0;
+      }
+    }
+
+    /*static*/ Serialization::PolymorphicSerdezSubclass<RemoteChannelInfo,
+                                                        GPUIndirectRemoteChannelInfo>
+        GPUIndirectRemoteChannelInfo::serdez_subclass;
+
+    RemoteChannelInfo *GPUIndirectChannel::construct_remote_info() const
+    {
+      return new GPUIndirectRemoteChannelInfo(node, kind,
+                                              reinterpret_cast<uintptr_t>(this), paths);
+    }
+    ////////////////////////////////////////////////////////////////////////
+    //
+    // class GPUIndirectRemoteChannel
+    //
+
+    GPUIndirectRemoteChannel::GPUIndirectRemoteChannel(uintptr_t _remote_ptr)
+      : RemoteChannel(_remote_ptr)
+    {}
+
+    Memory GPUIndirectRemoteChannel::suggest_ib_memories(Memory memory) const
+    {
+      if(memory.kind() != Memory::GPU_FB_MEM ||
+         node != NodeID(ID(memory).memory_owner_node())) {
+        Node &n = get_runtime()->nodes[node];
+        for(std::vector<IBMemory *>::const_iterator it = n.ib_memories.begin();
+            it != n.ib_memories.end(); ++it) {
+          if((*it)->lowlevel_kind == Memory::GPU_FB_MEM) {
+            return (*it)->me;
+          }
+        }
+      }
+      return Memory::NO_MEMORY;
+    }
+
+    uint64_t GPUIndirectRemoteChannel::supports_path(
+        ChannelCopyInfo channel_copy_info, CustomSerdezID src_serdez_id,
+        CustomSerdezID dst_serdez_id, ReductionOpID redop_id, size_t total_bytes,
+        const std::vector<size_t> *src_frags, const std::vector<size_t> *dst_frags,
+        XferDesKind *kind_ret /*= 0*/, unsigned *bw_ret /*= 0*/,
+        unsigned *lat_ret /*= 0*/)
+    {
+      if(!supports_scatter_gather_path(channel_copy_info, node))
+        return 0;
+      return Channel::supports_path(channel_copy_info, src_serdez_id, dst_serdez_id,
+                                    redop_id, total_bytes, src_frags, dst_frags, kind_ret,
+                                    bw_ret, lat_ret);
+    }
+
+    bool GPUIndirectRemoteChannel::needs_wrapping_iterator() const { return true; }
+
+    ////////////////////////////////////////////////////////////////////////
+    //
     // class GPUChannel
 
     GPUChannel::GPUChannel(GPU *_src_gpu, XferDesKind _kind,
@@ -842,7 +1355,8 @@ namespace Realm {
         xdq.ordered_mode = false;
 
       std::vector<Memory> local_gpu_mems;
-      local_gpu_mems.push_back(src_gpu->fbmem->me);
+      if(src_gpu->fbmem)
+        local_gpu_mems.push_back(src_gpu->fbmem->me);
       if (src_gpu->fb_ibmem)
         local_gpu_mems.push_back(src_gpu->fb_ibmem->me);
 
@@ -1032,6 +1546,64 @@ namespace Realm {
       {
 	req->xd->notify_request_read_done(req);
 	req->xd->notify_request_write_done(req);
+      }
+
+      ////////////////////////////////////////////////////////////////////////
+      //
+      // class GPUIndirectTransferCompletion
+
+      GPUIndirectTransferCompletion::GPUIndirectTransferCompletion(
+          XferDes *_xd, int _read_port_idx, size_t _read_offset, size_t _read_size,
+          int _write_port_idx, size_t _write_offset, size_t _write_size,
+          int _read_ind_port_idx, size_t _read_ind_offset, size_t _read_ind_size,
+          int _write_ind_port_idx, size_t _write_ind_offset, size_t _write_ind_size)
+        : xd(_xd)
+        , read_port_idx(_read_port_idx)
+        , read_offset(_read_offset)
+        , read_size(_read_size)
+        , read_ind_port_idx(_read_ind_port_idx)
+        , read_ind_offset(_read_ind_offset)
+        , read_ind_size(_read_ind_size)
+        , write_port_idx(_write_port_idx)
+        , write_offset(_write_offset)
+        , write_size(_write_size)
+        , write_ind_port_idx(_write_ind_port_idx)
+        , write_ind_offset(_write_ind_offset)
+        , write_ind_size(_write_ind_size)
+      {}
+
+      void GPUIndirectTransferCompletion::request_completed(void)
+      {
+
+        log_gpudma.info() << "gpu gather complete: xd=" << std::hex << xd->guid
+                          << std::dec << " read=" << read_port_idx << "/" << read_offset
+                          << " write=" << write_port_idx << "/" << write_offset
+                          << " bytes=" << write_size;
+
+        if(read_ind_port_idx >= 0) {
+          XferDes::XferPort &iip = xd->input_ports[read_ind_port_idx];
+          xd->update_bytes_read(read_ind_port_idx, iip.local_bytes_total, read_ind_size);
+          iip.local_bytes_total += read_ind_size;
+        }
+
+        if(write_ind_port_idx >= 0) {
+          XferDes::XferPort &iip = xd->input_ports[write_ind_port_idx];
+          xd->update_bytes_read(write_ind_port_idx, iip.local_bytes_total,
+                                write_ind_size);
+          iip.local_bytes_total += write_ind_size;
+        }
+
+        if(read_port_idx >= 0) {
+          xd->update_bytes_read(read_port_idx, read_offset, read_size);
+        }
+        if(write_port_idx >= 0) {
+          xd->update_bytes_write(write_port_idx, write_offset, write_size);
+        }
+
+        xd->update_progress();
+        xd->remove_reference();
+        // TODO(apryakhin@): Do we need to update this?
+        delete this;
       }
 
     ////////////////////////////////////////////////////////////////////////
@@ -1474,7 +2046,8 @@ namespace Realm {
       , gpu(_gpu)
     {
       std::vector<Memory> local_gpu_mems;
-      local_gpu_mems.push_back(gpu->fbmem->me);
+      if(gpu->fbmem)
+        local_gpu_mems.push_back(gpu->fbmem->me);
 
       // look for any other local memories that belong to our context
       const Node& n = get_runtime()->nodes[Network::my_node_id];
@@ -1816,7 +2389,8 @@ namespace Realm {
       , gpu(_gpu)
     {
       std::vector<Memory> local_gpu_mems;
-      local_gpu_mems.push_back(gpu->fbmem->me);
+      if(gpu->fbmem)
+        local_gpu_mems.push_back(gpu->fbmem->me);
       if(gpu->fb_ibmem)
         local_gpu_mems.push_back(gpu->fb_ibmem->me);
 

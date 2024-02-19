@@ -319,6 +319,7 @@ namespace Legion {
       virtual void accumulate_local_references(void);
       virtual void record_pending_downgrade(void);
       void check_for_downgrade(AddressSpaceID downgrade_owner); 
+      void check_for_downgrade_restart(AddressSpaceID new_owner);
       void process_downgrade_request(AddressSpaceID owner, State to_check);
       bool process_downgrade_response(AddressSpaceID notready,
                                               uint64_t total_sent,
@@ -335,6 +336,8 @@ namespace Legion {
                                            Deserializer &derez);
       static void handle_downgrade_update(Runtime *runtime,
                                           Deserializer &derez);
+      static void handle_downgrade_restart(Runtime *runtime,
+                         Deserializer &derez, AddressSpaceID source);
       static void handle_global_acquire_request(Runtime *runtime,
                                                 Deserializer &derez);
       static void handle_global_acquire_response(Deserializer &derez);

@@ -52,6 +52,8 @@ namespace Realm {
 
     virtual void reset(void) = 0;
     virtual bool done(void) = 0;
+    virtual size_t get_base_offset(void) const;
+    virtual size_t get_address_size(void) const;
 
     // flag bits to control iterators
     enum {
@@ -334,11 +336,10 @@ namespace Realm {
 
     virtual TransferIterator *create_address_iterator(RegionInstance peer) const = 0;
 
-    virtual TransferIterator *create_indirect_iterator(Memory addrs_mem,
-						       RegionInstance inst,
-						       const std::vector<FieldID>& fields,
-						       const std::vector<size_t>& fld_offsets,
-						       const std::vector<size_t>& fld_sizes) const = 0;
+    virtual TransferIterator *create_indirect_iterator(
+        Memory addrs_mem, RegionInstance inst, const std::vector<FieldID> &fields,
+        const std::vector<size_t> &fld_offsets, const std::vector<size_t> &fld_sizes,
+        Channel *channel = nullptr) const = 0;
 
     virtual void print(std::ostream& os) const = 0;
   };
