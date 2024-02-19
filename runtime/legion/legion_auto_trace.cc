@@ -64,6 +64,14 @@ namespace Legion {
           this->hash(dynamic_cast<AllReduceOp*>(op));
           break;
         }
+        case Operation::OpKind::ACQUIRE_OP_KIND: {
+          this->hash(dynamic_cast<AcquireOp*>(op));
+          break;
+        }
+        case Operation::OpKind::RELEASE_OP_KIND: {
+          this->hash(dynamic_cast<ReleaseOp*>(op));
+          break;
+        }
         default: {
           std::cout << "Attempting to hash an unsupported operation kind:"
                     << std::string(Operation::get_string_rep(kind))
@@ -138,6 +146,24 @@ namespace Legion {
     void TraceHashHelper::hash(AllReduceOp* op) {
       // TODO (rohany): I'm not sure if anything else needs to
       //  go into the hash other than just the operation kind.
+    }
+
+    void TraceHashHelper::hash(AcquireOp* op) {
+      hasher.hash(op->logical_region);
+      hasher.hash(op->parent_region);
+      for (std::set<FieldID>::const_iterator it = op->fields.begin();
+           it != op->fields.end(); it++) {
+        hasher.hash(*it);
+      }
+    }
+
+    void TraceHashHelper::hash(ReleaseOp* op) {
+      hasher.hash(op->logical_region);
+      hasher.hash(op->parent_region);
+      for (std::set<FieldID>::const_iterator it = op->fields.begin();
+           it != op->fields.end(); it++) {
+        hasher.hash(*it);
+      }
     }
 
     void TraceHashHelper::hash(const RegionRequirement& req) {

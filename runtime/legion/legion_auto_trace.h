@@ -63,6 +63,8 @@ namespace Legion {
       void hash(FenceOp* op);
       void hash(CopyOp* op);
       void hash(AllReduceOp* op);
+      void hash(AcquireOp* op);
+      void hash(ReleaseOp* op);
       void hash(const RegionRequirement& req);
       void hash(const LogicalRegion& region);
     private:
