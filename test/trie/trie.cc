@@ -60,6 +60,14 @@ void random_test() {
     assert(trie.contains(string.begin(), string.end()));
     int len = rand() % string.size();
     assert(trie.prefix(string.begin(), string.begin() + len));
+
+    // Also test the query API.
+    auto result = trie.query(string.begin(), string.end());
+    assert(result.contains && result.prefix);
+    result = trie.query(string.begin(), string.begin() + len);
+    // assert(!result.contains && result.prefix);
+    assert(result.contains == trie.contains(string.begin(), string.begin() + len));
+    assert(result.prefix);
   }
 
   // A bunch of random strings should not be in the trie.
@@ -69,15 +77,38 @@ void random_test() {
       auto string = random_string(strlen);
       if (strings.find(string) == strings.end()) {
         assert(!trie.contains(string.begin(), string.end()));
+        // Also test the query API.
+        auto result = trie.query(string.begin(), string.end());
+        assert(!result.contains);
         break;
       }
     }
   }
 }
 
+void test_superstring() {
+  Trie<char, empty> trie;
+  std::vector<std::vector<char>> strings = {
+      {'a', 'b', 'c'},
+      {'d', 'e'},
+      {'f', 'g', 'h', 'i'}
+  };
+  for (auto& s : strings) {
+    trie.insert(s.begin(), s.end(), empty{});
+  }
+  std::vector<char> q1 = {'a', 'b', 'c', 'd', 'e'};
+  assert(trie.query(q1.begin(), q1.end()).superstring);
+  std::vector<char> q2 = {'b', 'c', 'd', 'e'};
+  assert(!trie.query(q2.begin(), q2.end()).superstring);
+  std::vector<char> q3 = {'k', 'l', 'm', 'n'};
+  assert(!trie.query(q3.begin(), q3.end()).superstring);
+  std::vector<char> q4 = {'d', 'e', 'f'};
+  assert(trie.query(q4.begin(), q4.end()).superstring);
+}
 
 int main(int argc, char **argv) {
   random_test();
+  test_superstring();
   std::cout << "Passed all tests!" << std::endl;
   return 0;
 }

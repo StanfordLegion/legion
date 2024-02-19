@@ -77,6 +77,41 @@ namespace Legion {
         node->value = value;
       }
 
+      // query is a method that performs a prefix, containment and
+      // superstring query on the trie in a single traversal.
+      struct QueryResult {
+        bool prefix = false;
+        bool contains = false;
+        bool superstring = false;
+      };
+      template<typename ITER>
+      QueryResult query(ITER start, ITER end) {
+        TrieNode<T, V>* node = &this->root;
+        size_t matched_toks = 0;
+        for (auto tokitr = start; tokitr != end; tokitr++) {
+          auto token = *tokitr;
+          auto it = node->children.find(token);
+          if (it != node->children.end()) {
+            node = it->second;
+            matched_toks++;
+          } else {
+            break;
+          }
+        }
+        QueryResult result;
+        // If we matched all of our input string, then we're
+        // a prefix of some string in the trie.
+        result.prefix = matched_toks == (end - start);
+        // If we matched all of the input string and ended on an
+        // end node, then we found an exact match.
+        result.contains = result.prefix && node->end;
+        // If we've ended at a string in the trie but still have
+        // tokens left to process in the input string, then our
+        // input string is a super-string of a string in the trie.
+        result.superstring = node->end && (matched_toks < (end - start));
+        return result;
+      }
+
       template<typename ITER>
       bool contains(ITER start, ITER end) {
         TrieNode<T, V>* node = &this->root;
