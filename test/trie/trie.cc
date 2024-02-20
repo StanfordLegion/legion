@@ -97,13 +97,15 @@ void test_superstring() {
     trie.insert(s.begin(), s.end(), empty{});
   }
   std::vector<char> q1 = {'a', 'b', 'c', 'd', 'e'};
-  assert(trie.query(q1.begin(), q1.end()).superstring);
+  assert(trie.query(q1.begin(), q1.end()).superstring &&
+         trie.query(q1.begin(), q1.end()).superstring_match == 3);
   std::vector<char> q2 = {'b', 'c', 'd', 'e'};
   assert(!trie.query(q2.begin(), q2.end()).superstring);
   std::vector<char> q3 = {'k', 'l', 'm', 'n'};
   assert(!trie.query(q3.begin(), q3.end()).superstring);
   std::vector<char> q4 = {'d', 'e', 'f'};
-  assert(trie.query(q4.begin(), q4.end()).superstring);
+  assert(trie.query(q4.begin(), q4.end()).superstring &&
+         trie.query(q4.begin(), q4.end()).superstring_match == 2);
 }
 
 int main(int argc, char **argv) {

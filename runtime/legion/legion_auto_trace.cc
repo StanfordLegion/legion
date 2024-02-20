@@ -311,11 +311,7 @@ namespace Legion {
           uint64_t count = 0;
           for (auto trace : finished.result) {
             // TODO (rohany): Deal with the maximum number of traces permitted in the trie.
-            // TODO (rohany): Do we need to consider superstrings here?
-            auto start = finished.hashes.begin() + trace.start;
-            auto end = finished.hashes.begin() + trace.end;
-            if (!this->watcher.prefix(start, end)) {
-              this->watcher.insert(start, end, opidx);
+            if (this->maybe_add_trace(finished.hashes, opidx, trace.start, trace.end)) {
               count++;
               // Only insert max_add traces at a time.
               if (count == this->max_add) {
@@ -326,6 +322,34 @@ namespace Legion {
           this->jobs_in_flight.pop_front();
         }
       }
+    }
+
+    bool BatchedTraceIdentifier::maybe_add_trace(
+      const std::vector<Murmur3Hasher::Hash> &hashes,
+      uint64_t opidx,
+      uint64_t start,
+      uint64_t end
+    ) {
+      if (end - start < this->min_trace_length) return false;
+      auto istart = hashes.begin() + start;
+      auto iend = hashes.begin() + end;
+      TrieQueryResult query = this->watcher.query(istart, iend);
+      // If we're trying to insert a trace that is either a prefix
+      // of another recorded trace, or is already inside the set of
+      // recorded traces, then there's nothing to do.
+      if (query.prefix || query.contains) return false;
+      // If the trace we're trying to insert is also not a superstring
+      // of an existing trace, then this is the easy case where we can
+      // just insert it and move on.
+      if (!query.superstring) {
+        this->watcher.insert(istart, iend, opidx);
+        return true;
+      }
+      assert(query.superstring);
+      // If the trace we're inserting is a superstring of another
+      // string in the recorded set of traces, then splice out the
+      // contained prefix and try to insert the rest of the trace.
+      return this->maybe_add_trace(hashes, opidx, start + query.superstring_match, end);
     }
 
     TraceOccurrenceWatcher::TraceOccurrenceWatcher(

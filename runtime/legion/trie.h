@@ -48,6 +48,18 @@ namespace Legion {
       std::unordered_map<T, TrieNode<T, V>*> children;
     };
 
+    // TrieQueryResult is a non-template struct that contains
+    // return information for the Trie::query method.
+    struct TrieQueryResult {
+      bool prefix = false;
+      bool contains = false;
+      bool superstring = false;
+      // superstring_match is set only when superstring=true. It
+      // returns the length of the matched prefix that the queried
+      // string is a superstring of.
+      uint64_t superstring_match = 0;
+    };
+
     // Trie is a mapping of strings of tokens T to values V.
     template <typename T, typename V>
     class Trie {
@@ -79,13 +91,8 @@ namespace Legion {
 
       // query is a method that performs a prefix, containment and
       // superstring query on the trie in a single traversal.
-      struct QueryResult {
-        bool prefix = false;
-        bool contains = false;
-        bool superstring = false;
-      };
       template<typename ITER>
-      QueryResult query(ITER start, ITER end) {
+      TrieQueryResult query(ITER start, ITER end) {
         TrieNode<T, V>* node = &this->root;
         size_t matched_toks = 0;
         for (auto tokitr = start; tokitr != end; tokitr++) {
@@ -98,7 +105,7 @@ namespace Legion {
             break;
           }
         }
-        QueryResult result;
+        TrieQueryResult result;
         // If we matched all of our input string, then we're
         // a prefix of some string in the trie.
         result.prefix = matched_toks == (end - start);
@@ -109,6 +116,7 @@ namespace Legion {
         // tokens left to process in the input string, then our
         // input string is a super-string of a string in the trie.
         result.superstring = node->end && (matched_toks < (end - start));
+        result.superstring_match = matched_toks;
         return result;
       }
 

@@ -105,6 +105,16 @@ namespace Legion {
       );
       void process(Murmur3Hasher::Hash hash, uint64_t opidx);
     private:
+      // maybe_add_trace maybe adds a recorded trace into the
+      // TraceOccurrenceWatcher's trie. It returns a boolean as
+      // to whether or not a trace was successfully added.
+      bool maybe_add_trace(
+        const std::vector<Murmur3Hasher::Hash>& hashes,
+        uint64_t opidx,
+        uint64_t start,
+        uint64_t end
+      );
+
       // We need a runtime here in order to launch meta tasks.
       TraceProcessingJobExecutor* executor;
       std::vector<Murmur3Hasher::Hash> hashes;
@@ -141,7 +151,7 @@ namespace Legion {
       template<typename T>
       void insert(T start, T end, uint64_t opidx);
       template<typename T>
-      bool prefix(T start, T end);
+      TrieQueryResult query(T start, T end);
 
       // Clear invalidates all active pointers in the watcher.
       void clear() { this->active_pointers.clear(); }
@@ -607,8 +617,8 @@ namespace Legion {
     }
 
     template <typename T>
-    bool TraceOccurrenceWatcher::prefix(T start, T end) {
-      return this->trie.prefix(start, end);
+    TrieQueryResult TraceOccurrenceWatcher::query(T start, T end) {
+      return this->trie.query(start, end);
     }
 
     template <typename T>
