@@ -7924,7 +7924,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ProcessorManager::order_concurrent_task_launch(SingleTask *task,
-                    ApEvent precondition, ApUserEvent ready, bool needs_barrier)
+                    ApEvent precondition, ApUserEvent ready, VariantID vid)
     //--------------------------------------------------------------------------
     {
       uint64_t lamport_clock = 0;
@@ -7949,7 +7949,7 @@ namespace Legion {
       assert(triggered);
 #endif
       // Tell the task to compute the max all-reduce of lamport clocks
-      task->concurrent_allreduce(this, lamport_clock, needs_barrier, poisoned);
+      task->concurrent_allreduce(this, lamport_clock, vid, poisoned);
     }
 
     //--------------------------------------------------------------------------
@@ -26919,7 +26919,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void Runtime::order_concurrent_task_launch(Processor proc, SingleTask *task,
-                    ApEvent precondition, ApUserEvent ready, bool needs_barrier)
+                    ApEvent precondition, ApUserEvent ready, VariantID vid)
     //--------------------------------------------------------------------------
     {
       std::map<Processor,ProcessorManager*>::const_iterator finder =
@@ -26928,7 +26928,7 @@ namespace Legion {
       assert(finder != proc_managers.end());
 #endif
       finder->second->order_concurrent_task_launch(task, precondition,
-                                                   ready, needs_barrier);
+                                                   ready, vid);
     }
 
     //--------------------------------------------------------------------------
