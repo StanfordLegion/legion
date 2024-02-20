@@ -1329,12 +1329,7 @@ namespace Legion {
       if (deferred_commit_comp_queue.exists())
         deferred_commit_comp_queue.destroy();
       if (post_task_comp_queue.exists())
-        post_task_comp_queue.destroy();
-      for (std::map<TraceID,LogicalTrace*>::const_iterator it = 
-            traces.begin(); it != traces.end(); it++)
-        if (it->second->remove_reference())
-          delete (it->second);
-      traces.clear();
+        post_task_comp_queue.destroy(); 
       // Clean up any locks and barriers that the user
       // asked us to destroy
       while (!context_locks.empty())
@@ -1430,6 +1425,13 @@ namespace Legion {
         if (next->remove_nested_valid_ref(did))
           delete next;
       }
+      // Traces can refer back to us so make sure we remove our references
+      // to them here so they can clean up their resource referenes to us
+      for (std::map<TraceID,LogicalTrace*>::const_iterator it = 
+            traces.begin(); it != traces.end(); it++)
+        if (it->second->remove_reference())
+          delete (it->second);
+      traces.clear();
     }
 
     //--------------------------------------------------------------------------
