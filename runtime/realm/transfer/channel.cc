@@ -4938,8 +4938,8 @@ namespace Realm {
 							"memcpy channel")
       {
         //cbs = (MemcpyRequest**) calloc(max_nr, sizeof(MemcpyRequest*));
-	unsigned bw = 5000; // HACK - estimate at 5 GB/s
-	unsigned latency = 100; // HACK - estimate at 100ns
+        unsigned bw = 128000;         // HACK - estimate at 128 GB/s
+        unsigned latency = 100;       // HACK - estimate at 100ns
         unsigned frag_overhead = 100; // HACK - estimate at 100ns
 
         // all local cpu memories are valid sources and dests
