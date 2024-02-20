@@ -557,6 +557,14 @@ namespace Legion {
     }
 
     bool TraceReplayer::CommitPointer::complete() {
+      // By ensuring that we don't insert traces that are superstrings
+      // of existing traces in the TraceOccurrenceWatcher, this property
+      // should be preserved as traces migrate into the TraceReplayer,
+      // which relies on a completed pointer as not having any more
+      // pending operations to be waiting for.
+      if (this->node->get_end()) {
+        assert(this->node->get_children().size() == 0);
+      }
       return this->node->get_end() && this->opidx >= this->node->get_value().opidx;
     }
 
