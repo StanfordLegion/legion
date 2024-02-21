@@ -16948,6 +16948,7 @@ namespace Legion {
         auto_trace_commit_threshold(config.auto_trace_commit_threshold),
         auto_trace_max_start_watch(config.auto_trace_max_start_watch),
         auto_trace_min_trace_length(config.auto_trace_min_trace_length),
+        auto_trace_max_trace_length(config.auto_trace_max_trace_length),
         auto_trace_repeats_alg(config.auto_trace_repeats_alg),
         no_tracing(config.no_tracing),
         no_physical_tracing(config.no_physical_tracing),
@@ -17178,6 +17179,7 @@ namespace Legion {
         auto_trace_commit_threshold(rhs.auto_trace_commit_threshold),
         auto_trace_max_start_watch(rhs.auto_trace_max_start_watch),
         auto_trace_min_trace_length(rhs.auto_trace_min_trace_length),
+        auto_trace_max_trace_length(rhs.auto_trace_max_trace_length),
         auto_trace_repeats_alg(rhs.auto_trace_repeats_alg),
         no_tracing(rhs.no_tracing),
         no_physical_tracing(rhs.no_physical_tracing),
@@ -30534,6 +30536,8 @@ namespace Legion {
                         config.auto_trace_max_start_watch, !filter)
         .add_option_int("-lg:auto_trace:min_trace_length",
                         config.auto_trace_min_trace_length, !filter)
+        .add_option_int("-lg:auto_trace:max_trace_length",
+                        config.auto_trace_max_trace_length, !filter)
         .add_option_method("-lg:auto_trace:repeats_algorithm",
                            &config,
                            &LegionConfiguration::parse_auto_trace_repeats_algorithm_argument,

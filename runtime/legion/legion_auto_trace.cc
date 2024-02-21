@@ -243,7 +243,8 @@ namespace Legion {
         uint64_t max_add_,
         uint64_t max_inflight_requests_,
         bool wait_on_async_job_,
-        uint64_t min_trace_length_
+        uint64_t min_trace_length_,
+        uint64_t max_trace_length_
         )
         : executor(executor_),
           watcher(watcher_),
@@ -251,6 +252,7 @@ namespace Legion {
           batchsize(batchsize_),
           max_add(max_add_),
           min_trace_length(min_trace_length_),
+          max_trace_length(max_trace_length_),
           max_in_flight_requests(max_inflight_requests_),
           wait_on_async_job(wait_on_async_job_) {
       // Reserve one extra place so that we can insert the sentinel
@@ -330,7 +332,19 @@ namespace Legion {
       uint64_t start,
       uint64_t end
     ) {
-      if (end - start < this->min_trace_length) return false;
+      if ((end - start) < this->min_trace_length) return false;
+      // Check that we aren't uint64_t max before attempting to do
+      // some arithmetic that will overflow.
+      if (this->max_trace_length != -1 &&
+          (end - start) > (this->max_trace_length + this->min_trace_length)) {
+        // If we're larger than the max trace length (plus a little slack),
+        // then break up this trace into smaller pieces that we'll insert
+        // into our watched data structures. First, insert a trace of the
+        // maximum length, then insert the rest of the trace.
+        bool first = maybe_add_trace(hashes, opidx, start, start + this->max_trace_length);
+        bool second = maybe_add_trace(hashes, opidx, start + this->max_trace_length, end);
+        return first || second;
+      }
       auto istart = hashes.begin() + start;
       auto iend = hashes.begin() + end;
       TrieQueryResult query = this->watcher.query(istart, iend);

@@ -2508,6 +2508,7 @@ namespace Legion {
             auto_trace_commit_threshold(15),
             auto_trace_max_start_watch(10),
             auto_trace_min_trace_length(5),
+            auto_trace_max_trace_length(-1),
             auto_trace_repeats_alg(NonOverlappingAlgorithm::SUFFIX_TREE_WALK),
             no_tracing(false),
             no_physical_tracing(false),
@@ -2574,6 +2575,7 @@ namespace Legion {
         unsigned auto_trace_commit_threshold;
         unsigned auto_trace_max_start_watch;
         unsigned auto_trace_min_trace_length;
+        uint64_t auto_trace_max_trace_length;
         NonOverlappingAlgorithm auto_trace_repeats_alg;
         bool no_tracing;
         bool no_physical_tracing;
@@ -2719,6 +2721,8 @@ namespace Legion {
       const unsigned auto_trace_max_start_watch;
       // The minimum trace length that we are willing to record (default 5).
       const unsigned auto_trace_min_trace_length;
+      // The maximum trace length that we are willing to replay (default uint64_t max).
+      const uint64_t auto_trace_max_trace_length;
       // The algorithm we will use to identify repeated sequences of
       // tasks issued by the program.
       const NonOverlappingAlgorithm auto_trace_repeats_alg;

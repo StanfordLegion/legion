@@ -101,7 +101,8 @@ namespace Legion {
         uint64_t max_add, // Maximum number of traces to add to the watcher at once.
         uint64_t max_inflight_requests, // Maximum number of async jobs in flight
         bool wait_on_async_job, // Whether to wait on concurrent meta tasks
-        uint64_t min_trace_length // Minimum trace length to identify.
+        uint64_t min_trace_length, // Minimum trace length to identify.
+        uint64_t max_trace_length // Maximum trace length to replay.
       );
       void process(Murmur3Hasher::Hash hash, uint64_t opidx);
     private:
@@ -123,6 +124,13 @@ namespace Legion {
       uint64_t batchsize;
       uint64_t max_add;
       uint64_t min_trace_length;
+      // max_trace_length is the maximum length trace that we
+      // will attempt to replay. We may still _identify_ traces that
+      // have length longer than max_trace_length (as those are the actual
+      // loops in the source program), but in order to not require buffering
+      // too many tasks in the source application, we may want to limit the
+      // amount of tasks in traces we replay.
+      uint64_t max_trace_length;
 
       // InFlightProcessingRequest represents a currently executing
       // offline string processing request. When the BatchedTraceIdentifier
@@ -361,7 +369,8 @@ namespace Legion {
                      this->runtime->auto_trace_max_start_watch,
                      this->runtime->auto_trace_in_flight_jobs,
                      this->runtime->auto_trace_wait_async_jobs,
-                     this->runtime->auto_trace_min_trace_length),
+                     this->runtime->auto_trace_min_trace_length,
+                     this->runtime->auto_trace_max_trace_length),
           watcher(this->replayer, this->runtime->auto_trace_commit_threshold),
           replayer(this)
         {
