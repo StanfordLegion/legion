@@ -378,11 +378,16 @@ namespace Legion {
           T::initialize_async_trace_analysis(this->runtime->auto_trace_in_flight_jobs);
         }
         virtual ~AutomaticTracingContext() {
-          // Report some statistics about the efficiency of the auto-tracer.
-          double pct = double(this->traced_ops) / double(this->executed_ops);
-          log_auto_trace.info() << "Traced " << this->traced_ops << "/"
-                                << this->executed_ops << " = "
-                                << (100.0 * pct) << " percent.";
+          // Report some statistics about the efficiency of the auto-tracer if
+          // we've seen enough operations.
+          if (this->executed_ops >= this->runtime->auto_trace_batchsize) {
+            double pct = double(this->traced_ops) / double(this->executed_ops);
+            log_auto_trace.info() << "Traced " << this->traced_ops << "/"
+                                  << this->executed_ops << " = "
+                                  << (100.0 * pct) << " percent.";
+          } else {
+            log_auto_trace.info() << "Context didn't execute enough operations.";
+          }
         }
     public:
       bool add_to_dependence_queue(Operation *op,

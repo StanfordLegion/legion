@@ -5194,9 +5194,9 @@ namespace Legion {
       if (!leaf_task)
       {
         InnerContext *inner_ctx;
-        // Use the automatic tracing context if it is enabled and this is the
-        // top level task. Otherwise, use a normal inner context.
-        if (runtime->enable_automatic_tracing && this->task_id == Runtime::legion_main_id) {
+        // Use the automatic tracing context if it is enabled. Otherwise,
+        // use a normal inner context.
+        if (runtime->enable_automatic_tracing) {
           log_auto_trace.info() << "Initializing AutomaticTracingContext<InnerContext>.";
           inner_ctx = new AutomaticTracingContext<InnerContext>(runtime, this,
             get_depth(), v->is_inner(), regions, output_regions,
@@ -8335,7 +8335,7 @@ namespace Legion {
         // If we have a control replication context then we do the special path.
         // Also, see if we need to create an AutomaticTracingContext.
         ReplicateContext* repl_ctx;
-        if (this->runtime->enable_automatic_tracing && this->task_id == Runtime::legion_main_id) {
+        if (this->runtime->enable_automatic_tracing) {
           log_auto_trace.info() << "Initializing AutomaticTracingContext<ReplicateContext>.";
           repl_ctx = new AutomaticTracingContext<ReplicateContext>(runtime, this,
             get_depth(), v->is_inner(), regions, output_regions,
