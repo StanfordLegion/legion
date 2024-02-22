@@ -532,8 +532,9 @@ namespace Realm {
       if(!argc) argc = &my_argc;
       if(!argv) argv = &my_argv;
 
-      if(!create_configs(*argc, *argv)) return false;
       if(!network_init(argc, argv)) return false;
+      if(!create_configs(*argc, *argv))
+        return false;
       if(!configure_from_command_line(*argc, *argv)) return false;
       start();
       return true;
