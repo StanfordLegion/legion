@@ -8344,6 +8344,28 @@ namespace Legion {
       // and determine if we need to perform a window wait or not
       if (!unordered)
       {
+        // Update any previous trace with state of the new operation
+        if (previous_trace != NULL)
+        {
+          bool execution_fence = false;
+          if (op->invalidates_physical_trace_template(execution_fence))
+          {
+            if (!execution_fence)
+            {
+              // Issue a trace invalidation operation to free up 
+              // resources associated with the template
+              Operation *invalidator =
+                initialize_trace_invalidation(op->get_provenance());
+              // The previous trace is no longer valid
+              previous_trace = NULL;
+              // We can safely recurse here since cleared the previous
+              InnerContext::add_to_dependence_queue(invalidator, NULL/*deps*/,
+                  false/*unordered*/, false/*outermost*/);
+            }
+            else
+              previous_trace->record_intermediate_fence();
+          }
+        }
         // Get the context index for this new operation
         const size_t context_index = total_children_count++;
         op->set_context_index(context_index, true/*track*/);
@@ -8437,6 +8459,18 @@ namespace Legion {
         insert_unordered_ops(d_lock);
       }
       return true;
+    }
+
+    //--------------------------------------------------------------------------
+    Operation* InnerContext::initialize_trace_invalidation(Provenance *prov)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(previous_trace != NULL);
+#endif
+      TraceInvalidationOp *op = runtime->get_available_invalidation_op();
+      op->initialize_invalidation(this, previous_trace, prov);
+      return op;
     }
 
     //--------------------------------------------------------------------------
@@ -9149,6 +9183,15 @@ namespace Legion {
                                       std::vector<Operation*> &ready_operations)
     //--------------------------------------------------------------------------
     {
+      if ((previous_trace != NULL) && !ready_operations.empty())
+      {
+        // Make an invalidation operation and add it to the list of 
+        // operations to add to the queue
+        Operation *invalidator = initialize_trace_invalidation(
+            ready_operations.front()->get_provenance());
+        ready_operations.push_back(invalidator);
+        previous_trace = NULL;
+      }
       if (runtime->program_order_execution)
       {
         while (!ready_operations.empty())
@@ -9914,9 +9957,7 @@ namespace Legion {
                (op_kind == Operation::DELETION_OP_KIND) ||
                (op_kind == Operation::TRACE_BEGIN_OP_KIND) ||
                (op_kind == Operation::TRACE_COMPLETE_OP_KIND) ||
-               (op_kind == Operation::TRACE_CAPTURE_OP_KIND) ||
-               (op_kind == Operation::TRACE_REPLAY_OP_KIND) ||
-               (op_kind == Operation::TRACE_SUMMARY_OP_KIND));
+               (op_kind == Operation::TRACE_INVALIDATION_OP_KIND));
       }
 #endif
       std::vector<std::pair<Operation*,GenerationID> > previous_operations;
@@ -10130,40 +10171,34 @@ namespace Legion {
       }
       else
         trace = finder->second;
-
 #ifdef DEBUG_LEGION
       assert(trace != NULL);
 #endif
-      trace->clear_blocking_call();
-
       // Issue a begin op
       TraceBeginOp *begin = runtime->get_available_begin_op();
-      begin->initialize_begin(this, trace, provenance);
-      add_to_dependence_queue(begin);
-
-      if (!logical_only)
+      begin->initialize_begin(this, trace, previous_trace, provenance);
+      previous_trace = NULL;
+      if (trace->is_fixed() && trace->has_physical_trace())
       {
-        // Issue a replay op
-        TraceReplayOp *replay = runtime->get_available_replay_op();
-        replay->initialize_replay(this, trace, provenance);
         // Record the event for when the trace replay is ready
-        physical_trace_replay_status.store(replay->get_mapped_event().id);
+        physical_trace_replay_status.store(begin->get_mapped_event().id);
 #ifdef LEGION_SPY
-        tracing_replay_event = replay->get_completion_event();
+        tracing_replay_event = begin->get_completion_event();
 #endif
-        add_to_dependence_queue(replay);
       }
+      add_to_dependence_queue(begin);
       // Now mark that we are starting a trace
       current_trace = trace;
       current_trace_future_coordinate = next_future_coordinate;
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::record_physical_trace_replay(RtEvent ready, bool replay)
+    void InnerContext::record_physical_trace_replay(RtEvent ready, bool replay,
+                                                    bool idempotent)
     //--------------------------------------------------------------------------
     {
       physical_trace_replay_status.compare_exchange_strong(ready.id, 
-                                                           replay ? 1 : 0);
+          replay ? (idempotent ? 2 : 1) : 0);
     }
 
     //--------------------------------------------------------------------------
@@ -10175,7 +10210,7 @@ namespace Legion {
       if (!current_trace->is_fixed())
         return false;
       realm_id_t status = physical_trace_replay_status.load();
-      if (status > 1)
+      if (status > 2)
       {
         // Result is not ready yet so wait until it is
         RtEvent ready;
@@ -10186,10 +10221,36 @@ namespace Legion {
         // No need to spin again because there won't be anymore outstanding
         // trace capture ops to be setting this
 #ifdef DEBUG_LEGION
-        assert((status == 0) || (status == 1));
+        assert((status == 0) || (status == 1) || (status == 2));
 #endif
       }
-      return (status == 1);
+      return (status != 0);
+    }
+
+    //--------------------------------------------------------------------------
+    bool InnerContext::is_replaying_idempotent_trace(void)
+    //--------------------------------------------------------------------------
+    {
+      if (current_trace == NULL)
+        return false;
+      if (!current_trace->is_fixed())
+        return false;
+      realm_id_t status = physical_trace_replay_status.load();
+      if (status > 2)
+      {
+        // Result is not ready yet so wait until it is
+        RtEvent ready;
+        ready.id = status;
+        if (!ready.has_triggered())
+          ready.wait();
+        status = physical_trace_replay_status.load();
+        // No need to spin again because there won't be anymore outstanding
+        // trace capture ops to be setting this
+#ifdef DEBUG_LEGION
+        assert((status == 0) || (status == 1) || (status == 2));
+#endif
+      }
+      return (status == 2);
     }
 
     //--------------------------------------------------------------------------
@@ -10214,45 +10275,26 @@ namespace Legion {
           "Illegal end trace call on trace ID %d that does not match "
           "the current trace ID %d in task %s (UID %lld)", tid,
           current_trace->tid, get_task_name(), get_unique_id())
-      bool has_blocking_call = current_trace->has_blocking_call();
-      if (current_trace->is_fixed())
-      {
-        // Already fixed, dump a complete trace op into the stream
-        TraceCompleteOp *complete_op = runtime->get_available_trace_op();
-        complete_op->initialize_complete(this, has_blocking_call, provenance);
-        add_to_dependence_queue(complete_op);
-      }
-      else
-      {
-        // Not fixed yet, dump a capture trace op into the stream
-        TraceCaptureOp *capture_op = runtime->get_available_capture_op(); 
-        capture_op->initialize_capture(this, has_blocking_call,
-                                       deprecated, provenance);
-        add_to_dependence_queue(capture_op);
-        // Mark that the current trace is now fixed
+      TraceCompleteOp *complete_op = runtime->get_available_trace_op();
+      complete_op->initialize_complete(this, current_trace,
+          deprecated && !current_trace->is_fixed(), provenance);
+      // Mark that the current trace is now fixed
+      LogicalTrace *previous = NULL;
+      if (!current_trace->is_fixed())
         current_trace->fix_trace(provenance);
-      }
+      else if (current_trace->has_physical_trace() &&
+          is_replaying_idempotent_trace())
+        previous = current_trace;
       current_trace = NULL;
+      add_to_dependence_queue(complete_op);
+      if (previous != NULL)
+      {
+        previous_trace = previous;
+        previous_trace->reset_intermediate_fence();
+      }
 #ifdef LEGION_SPY
       tracing_replay_event = ApEvent::NO_AP_EVENT;
 #endif
-    }
-
-    //--------------------------------------------------------------------------
-    void InnerContext::record_previous_trace(LogicalTrace *trace)
-    //--------------------------------------------------------------------------
-    {
-      previous_trace = trace;
-    }
-
-    //--------------------------------------------------------------------------
-    void InnerContext::invalidate_trace_cache(
-                                    LogicalTrace *trace, Operation *invalidator)
-    //--------------------------------------------------------------------------
-    {
-      if (!invalidator->is_internal_op() &&
-          (previous_trace != NULL) && (previous_trace != trace))
-        previous_trace->invalidate_trace_cache(invalidator);
     }
 
     //--------------------------------------------------------------------------
@@ -10267,7 +10309,17 @@ namespace Legion {
       if ((current_trace != NULL) && 
           (future_coordinate != NO_FUTURE_COORDINATE) &&
           (current_trace_future_coordinate <= future_coordinate))
-        current_trace->record_blocking_call();
+      {
+        if (is_replaying_physical_trace())
+          REPORT_LEGION_ERROR(ERROR_INVALID_PHYSICAL_TRACING,
+                "Physical tracing violation! Trace %d in task %s (UID %lld) "
+                "encountered a blocking API call that was unseen when it was "
+                "recorded. It is required that traces do not change their "
+                "behavior.", current_trace->get_trace_id(),
+                get_task_name(), get_unique_id())
+        else
+          current_trace->record_blocking_call();
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -20070,29 +20122,23 @@ namespace Legion {
       }
       else
         trace = finder->second;
-
 #ifdef DEBUG_LEGION
       assert(trace != NULL);
 #endif
-      trace->clear_blocking_call();
-
       // Issue a begin op
       ReplTraceBeginOp *begin = runtime->get_available_repl_begin_op();
-      begin->initialize_begin(this, trace, provenance);
+      begin->initialize_begin(this, trace, previous_trace, provenance);
+      previous_trace = NULL;
       add_to_dependence_queue(begin);
-
-      if (!logical_only)
+      if (trace->is_fixed() && trace->has_physical_trace())
       {
-        // Issue a replay op
-        ReplTraceReplayOp *replay = runtime->get_available_repl_replay_op();
-        replay->initialize_replay(this, trace, provenance);
         // Record the event for when the trace replay is ready
-        physical_trace_replay_status.store(replay->get_mapped_event().id);
+        physical_trace_replay_status.store(begin->get_mapped_event().id);
 #ifdef LEGION_SPY
-        tracing_replay_event = replay->get_completion_event();
+        tracing_replay_event = begin->get_completion_event();
 #endif
-        add_to_dependence_queue(replay);
       }
+      add_to_dependence_queue(begin);
       // Now mark that we are starting a trace
       current_trace = trace;
       current_trace_future_coordinate = next_future_coordinate;
@@ -20128,28 +20174,23 @@ namespace Legion {
           "Illegal end trace call on trace ID %d that does not match "
           "the current trace ID %d in task %s (UID %lld)", tid,
           current_trace->tid, get_task_name(), get_unique_id())
-      const bool has_blocking_call = current_trace->has_blocking_call();
-      if (current_trace->is_fixed())
-      {
-        // Already fixed, dump a complete trace op into the stream
-        ReplTraceCompleteOp *complete_op = 
-          runtime->get_available_repl_trace_op();
-        complete_op->initialize_complete(this, provenance, has_blocking_call);
-        add_to_dependence_queue(complete_op);
-      }
-      else
-      {
-        // Not fixed yet, dump a capture trace op into the stream
-        ReplTraceCaptureOp *capture_op = 
-          runtime->get_available_repl_capture_op();
-        capture_op->initialize_capture(this, provenance,
-                                       has_blocking_call, deprecated);
-        // Mark that the current trace is now fixed
+      ReplTraceCompleteOp *complete_op = 
+        runtime->get_available_repl_trace_op();
+      complete_op->initialize_complete(this, current_trace,
+          deprecated && !current_trace->is_fixed(), provenance);
+      LogicalTrace *previous = NULL;
+      if (!current_trace->is_fixed())
         current_trace->fix_trace(provenance);
-        add_to_dependence_queue(capture_op);
-      }
-      // We no longer have a trace that we're executing 
+      else if (current_trace->has_physical_trace() &&
+          is_replaying_idempotent_trace())
+        previous = current_trace;
       current_trace = NULL;
+      add_to_dependence_queue(complete_op);
+      if (previous != NULL)
+      {
+        previous_trace = previous;
+        previous_trace->reset_intermediate_fence();
+      }
 #ifdef LEGION_SPY
       tracing_replay_event = ApEvent::NO_AP_EVENT;
 #endif
@@ -20354,6 +20395,19 @@ namespace Legion {
       else
         return InnerContext::add_to_dependence_queue(op, dependences,
                                                      unordered, outermost);
+    }
+
+    //--------------------------------------------------------------------------
+    Operation* ReplicateContext::initialize_trace_invalidation(Provenance *prov)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(previous_trace != NULL);
+#endif
+      ReplTraceInvalidationOp *op = 
+        runtime->get_available_repl_invalidation_op();
+      op->initialize_invalidation(this, previous_trace, prov);
+      return op;
     }
 
     //--------------------------------------------------------------------------
@@ -24918,27 +24972,6 @@ namespace Legion {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_LEGION_END_TRACE,
         "Illegal Legion end trace call in leaf task %s (ID %lld)",
                      get_task_name(), get_unique_id())
-    }
-
-    //--------------------------------------------------------------------------
-    void LeafContext::record_previous_trace(LogicalTrace *trace)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(false);
-#endif
-      exit(ERROR_LEAF_TASK_VIOLATION);
-    }
-
-    //--------------------------------------------------------------------------
-    void LeafContext::invalidate_trace_cache(
-                                    LogicalTrace *trace, Operation *invalidator)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(false);
-#endif
-      exit(ERROR_LEAF_TASK_VIOLATION);
     }
 
     //--------------------------------------------------------------------------

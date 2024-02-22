@@ -4082,11 +4082,9 @@ namespace Legion {
       OrPredOp*             get_available_or_pred_op(void);
       AcquireOp*            get_available_acquire_op(void);
       ReleaseOp*            get_available_release_op(void);
-      TraceCaptureOp*       get_available_capture_op(void);
       TraceCompleteOp*      get_available_trace_op(void);
-      TraceReplayOp*        get_available_replay_op(void);
       TraceBeginOp*         get_available_begin_op(void);
-      TraceSummaryOp*       get_available_summary_op(void);
+      TraceInvalidationOp*  get_available_invalidation_op(void);
       MustEpochOp*          get_available_epoch_op(void);
       PendingPartitionOp*   get_available_pending_partition_op(void);
       DependentPartitionOp* get_available_dependent_partition_op(void);
@@ -4131,11 +4129,9 @@ namespace Legion {
       ReplIndexDetachOp*    get_available_repl_index_detach_op(void);
       ReplAcquireOp*        get_available_repl_acquire_op(void);
       ReplReleaseOp*        get_available_repl_release_op(void);
-      ReplTraceCaptureOp*   get_available_repl_capture_op(void);
       ReplTraceCompleteOp*  get_available_repl_trace_op(void);
-      ReplTraceReplayOp*    get_available_repl_replay_op(void);
       ReplTraceBeginOp*     get_available_repl_begin_op(void);
-      ReplTraceSummaryOp*   get_available_repl_summary_op(void);
+      ReplTraceInvalidationOp* get_available_repl_invalidation_op(void);
     public:
       void free_individual_task(IndividualTask *task);
       void free_point_task(PointTask *task);
@@ -4161,11 +4157,9 @@ namespace Legion {
       void free_or_predicate_op(OrPredOp *op);
       void free_acquire_op(AcquireOp *op);
       void free_release_op(ReleaseOp *op);
-      void free_capture_op(TraceCaptureOp *op);
       void free_trace_op(TraceCompleteOp *op);
-      void free_replay_op(TraceReplayOp *op);
       void free_begin_op(TraceBeginOp *op);
-      void free_summary_op(TraceSummaryOp *op);
+      void free_invalidation_op(TraceInvalidationOp *op);
       void free_epoch_op(MustEpochOp *op);
       void free_pending_partition_op(PendingPartitionOp *op);
       void free_dependent_partition_op(DependentPartitionOp* op);
@@ -4210,11 +4204,9 @@ namespace Legion {
       void free_repl_index_detach_op(ReplIndexDetachOp *op);
       void free_repl_acquire_op(ReplAcquireOp *op);
       void free_repl_release_op(ReplReleaseOp *op);
-      void free_repl_capture_op(ReplTraceCaptureOp *op);
       void free_repl_trace_op(ReplTraceCompleteOp *op);
-      void free_repl_replay_op(ReplTraceReplayOp *op);
       void free_repl_begin_op(ReplTraceBeginOp *op);
-      void free_repl_summary_op(ReplTraceSummaryOp *op);
+      void free_repl_invalidation_op(ReplTraceInvalidationOp *op);
     public:
       ContextID allocate_region_tree_context(void);
       void free_region_tree_context(ContextID tree_ctx); 
@@ -4569,11 +4561,9 @@ namespace Legion {
       mutable LocalLock or_pred_op_lock;
       mutable LocalLock acquire_op_lock;
       mutable LocalLock release_op_lock;
-      mutable LocalLock capture_op_lock;
       mutable LocalLock trace_op_lock;
-      mutable LocalLock replay_op_lock;
       mutable LocalLock begin_op_lock;
-      mutable LocalLock summary_op_lock;
+      mutable LocalLock invalidation_op_lock;
       mutable LocalLock epoch_op_lock;
       mutable LocalLock pending_partition_op_lock;
       mutable LocalLock dependent_partition_op_lock;
@@ -4609,11 +4599,9 @@ namespace Legion {
       std::deque<OrPredOp*>             available_or_pred_ops;
       std::deque<AcquireOp*>            available_acquire_ops;
       std::deque<ReleaseOp*>            available_release_ops;
-      std::deque<TraceCaptureOp*>       available_capture_ops;
       std::deque<TraceCompleteOp*>      available_trace_ops;
-      std::deque<TraceReplayOp*>        available_replay_ops;
       std::deque<TraceBeginOp*>         available_begin_ops;
-      std::deque<TraceSummaryOp*>       available_summary_ops;
+      std::deque<TraceInvalidationOp*>  available_invalidation_ops;
       std::deque<MustEpochOp*>          available_epoch_ops;
       std::deque<PendingPartitionOp*>   available_pending_partition_ops;
       std::deque<DependentPartitionOp*> available_dependent_partition_ops;
@@ -4660,11 +4648,9 @@ namespace Legion {
       std::deque<ReplIndexDetachOp*>    available_repl_index_detach_ops;
       std::deque<ReplAcquireOp*>        available_repl_acquire_ops;
       std::deque<ReplReleaseOp*>        available_repl_release_ops;
-      std::deque<ReplTraceCaptureOp*>   available_repl_capture_ops;
       std::deque<ReplTraceCompleteOp*>  available_repl_trace_ops;
-      std::deque<ReplTraceReplayOp*>    available_repl_replay_ops;
       std::deque<ReplTraceBeginOp*>     available_repl_begin_ops;
-      std::deque<ReplTraceSummaryOp*>   available_repl_summary_ops;
+      std::deque<ReplTraceInvalidationOp*> available_repl_invalidation_ops;
 #ifdef DEBUG_LEGION
       TreeStateLogger *tree_state_logger;
       // For debugging purposes keep track of

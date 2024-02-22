@@ -462,8 +462,6 @@ namespace Legion {
       LG_FREE_EAGER_INSTANCE_TASK_ID,
       LG_MALLOC_INSTANCE_TASK_ID,
       LG_FREE_INSTANCE_TASK_ID,
-      LG_DEFER_TRACE_PRECONDITION_TASK_ID,
-      LG_DEFER_TRACE_POSTCONDITION_TASK_ID,
       LG_DEFER_TRACE_UPDATE_TASK_ID,
       LG_FINALIZE_OUTPUT_ID,
       LG_DEFER_DELETE_FUTURE_INSTANCE_TASK_ID,
@@ -575,8 +573,6 @@ namespace Legion {
         "Free Eager Instance",                                    \
         "Malloc Instance",                                        \
         "Free Instance",                                          \
-        "Defer Trace Precondition Test",                          \
-        "Defer Trace Postcondition Test",                         \
         "Defer Trace Update",                                     \
         "Finalize Output Region Instance",                        \
         "Defer Delete Future Instance",                           \
@@ -1996,7 +1992,7 @@ namespace Legion {
       COLLECTIVE_LOC_92 = 92,
       COLLECTIVE_LOC_93 = 93,
       COLLECTIVE_LOC_94 = 94,
-      COLLECTIVE_LOC_95 = 95,
+      //COLLECTIVE_LOC_95 = 95,
       COLLECTIVE_LOC_96 = 96,
       COLLECTIVE_LOC_97 = 97,
       COLLECTIVE_LOC_98 = 98,
@@ -2154,11 +2150,9 @@ namespace Legion {
 
     // legion_trace.h
     class LogicalTrace;
-    class TraceCaptureOp;
     class TraceCompleteOp;
-    class TraceReplayOp;
     class TraceBeginOp;
-    class TraceSummaryOp;
+    class TraceInvalidationOp;
     class PhysicalTrace;
     class TraceViewSet;
     class TraceConditionSet;
@@ -2316,11 +2310,9 @@ namespace Legion {
     class ReplAcquireOp;
     class ReplReleaseOp;
     class ReplTraceOp;
-    class ReplTraceCaptureOp;
     class ReplTraceCompleteOp;
-    class ReplTraceReplayOp;
     class ReplTraceBeginOp;
-    class ReplTraceSummaryOp;
+    class ReplTraceInvalidationOp;
     class ShardMapping;
     class CollectiveMapping;
     class ShardManager;
@@ -2456,7 +2448,7 @@ namespace Legion {
     friend class Internal::TimingOp;                        \
     friend class Internal::TunableOp;                       \
     friend class Internal::AllReduceOp;                     \
-    friend class Internal::TraceSummaryOp;                  \
+    friend class Internal::TraceInvalidationOp;             \
     friend class Internal::ExternalMappable;                \
     friend class Internal::ExternalTask;                    \
     friend class Internal::TaskOp;                          \

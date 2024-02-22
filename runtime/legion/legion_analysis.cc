@@ -19354,17 +19354,8 @@ namespace Legion {
       }
       else
       {
-        std::set<RtEvent> ready_events;
-        target->receive_capture(previews, antiviews, postviews, ready_events);
-        if (!ready_events.empty())
-        {
-          if (ready_event.exists())
-            Runtime::trigger_event(ready_event, 
-                Runtime::merge_events(ready_events));
-          else
-            result = Runtime::merge_events(ready_events);
-        }
-        else if (ready_event.exists())
+        target->receive_capture(previews, antiviews, postviews);
+        if (ready_event.exists())
           Runtime::trigger_event(ready_event);
       }
       if (tracing_preconditions != NULL)
@@ -21276,21 +21267,17 @@ namespace Legion {
       if (!ready_events.empty())
       {
         const RtEvent wait_on = Runtime::merge_events(ready_events);
-        ready_events.clear();
         if (wait_on.exists() && !wait_on.has_triggered())
           wait_on.wait();
       }
-      target->receive_capture(previews, antiviews, postviews, ready_events); 
+      target->receive_capture(previews, antiviews, postviews); 
       if (previews != NULL)
         previews->unpack_references();
       if (antiviews != NULL)
         antiviews->unpack_references();
       if (postviews != NULL)
         postviews->unpack_references();
-      if (!ready_events.empty())
-        Runtime::trigger_event(done_event, Runtime::merge_events(ready_events));
-      else
-        Runtime::trigger_event(done_event);
+      Runtime::trigger_event(done_event);
     }
 
     /////////////////////////////////////////////////////////////

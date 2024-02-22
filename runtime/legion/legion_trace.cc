@@ -49,14 +49,67 @@ namespace Legion {
       return out;
     }
 
-    std::ostream& operator<<(std::ostream &out,
-                             const PhysicalTemplate::DetailedBoolean &r)
+    std::ostream& operator<<(std::ostream &out, ReplayableStatus status)
     {
-      if (r.result)
-        out << "True";
-      else
+      switch (status)
       {
-        out << "False (" << r.message << ")";
+        case REPLAYABLE:
+          {
+            out << "Replayable";
+            break;
+          }
+        case NOT_REPLAYABLE_BLOCKING:
+          {
+            out << "Not Replayabe (Blocking Call)";
+            break;
+          }
+        case NOT_REPLAYABLE_CONSENSUS:
+          {
+            out << "Not Replayable (Mapper Consensus)";
+            break;
+          }
+        case NOT_REPLAYABLE_VIRTUAL:
+          {
+            out << "Not Replayable (Virtual Mapping)";
+            break;
+          }
+        case NOT_REPLAYABLE_REMOTE_SHARD:
+          {
+            out << "Not Replayable (Remote Shard)";
+            break;
+          }
+        default:
+          assert(false);
+      }
+      return out;
+    }
+
+    std::ostream& operator<<(std::ostream &out, IdempotencyStatus status)
+    {
+      switch (status)
+      {
+        case IDEMPOTENT:
+          {
+            out << "Idempotent";
+            break;
+          }
+        case NOT_IDEMPOTENT_SUBSUMPTION:
+          {
+            out << "Not Idempotent (Preconditions Not Subsumed by Postconditions)";
+            break;
+          }
+        case NOT_IDEMPOTENT_ANTIDEPENDENT:
+          {
+            out << "Not Idempotent (Postcondition Anti Dependent)";
+            break;
+          }
+        case NOT_IDEMPOTENT_REMOTE_SHARD:
+          {
+            out << "Not Idempotent (Remote Shard)";
+            break;
+          }
+        default:
+          assert(false);
       }
       return out;
     }
@@ -70,15 +123,13 @@ namespace Legion {
                                bool static_trace, Provenance *p,
                                const std::set<RegionTreeID> *trees)
       : context(c), tid(t), begin_provenance(p), end_provenance(NULL),
-        blocking_call_observed(false),
-        has_intermediate_ops(false), fixed(false),
+        physical_trace(logical_only ? NULL :
+            new PhysicalTrace(c->owner_task->runtime, this)),
+        blocking_call_observed(false), fixed(false), intermediate_fence(false),
         recording(true), trace_fence(NULL),
         static_translator(static_trace ? new StaticTranslator(trees) : NULL)
     //--------------------------------------------------------------------------
     {
-      state.store(LOGICAL_ONLY);
-      physical_trace = logical_only ? NULL : 
-        new PhysicalTrace(c->owner_task->runtime, this);
       if (begin_provenance != NULL)
         begin_provenance->add_reference();
     }
@@ -538,7 +589,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LogicalTrace::begin_trace_execution(FenceOp *fence_op)
+    void LogicalTrace::begin_logical_trace(FenceOp *fence_op)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -554,7 +605,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LogicalTrace::end_trace_execution(FenceOp *op)
+    void LogicalTrace::end_logical_trace(FenceOp *op)
     //--------------------------------------------------------------------------
     {
       if (!recording)
@@ -617,8 +668,6 @@ namespace Legion {
         }
       }
       operations.clear();
-      if (physical_trace != NULL)
-        physical_trace->reset_last_memoized();
       frontiers.clear();
 #ifdef LEGION_SPY
       current_uids.clear();
@@ -639,51 +688,6 @@ namespace Legion {
       return finder->second;
     }
 #endif
-
-    //--------------------------------------------------------------------------
-    void LogicalTrace::invalidate_trace_cache(Operation *invalidator)
-    //--------------------------------------------------------------------------
-    {
-      if (physical_trace == NULL)
-        return;
-      PhysicalTemplate *current_template = 
-        physical_trace->get_current_template();
-      if (current_template == NULL)
-        return;
-      bool execution_fence = false;
-      if (invalidator->invalidates_physical_trace_template(execution_fence))
-      {
-        // Check to see if this is an execution fence or not
-        if (execution_fence)
-        {
-          // If it is an execution fence we need to record the previous
-          // templates completion event as a precondition for the fence
-#ifdef DEBUG_LEGION
-          FenceOp *fence_op = dynamic_cast<FenceOp*>(invalidator);
-          assert(fence_op != NULL);
-#else
-          FenceOp *fence_op = static_cast<FenceOp*>(invalidator);
-#endif
-          // Record that we had an intermediate execution fence between replays
-          // Update the execution event for the trace to be this fence event
-          physical_trace->record_intermediate_execution_fence(fence_op);
-        }
-        else
-        {
-          // Non-idempotent traces have already applied their post-conditions
-          // and cleared the template cache eagerly once the traces have
-          // completed. So only perform this logic for idempotent traces.
-          if (current_template->is_idempotent()) {
-            physical_trace->clear_cached_template();
-            current_template->issue_summary_operations(context, invalidator,
-                                                       end_provenance);
-          }
-          has_intermediate_ops = false;
-        }
-      }
-      else
-        has_intermediate_ops = true;
-    }
 
     //--------------------------------------------------------------------------
     void LogicalTrace::translate_dependence_records(Operation *op,
@@ -785,6 +789,15 @@ namespace Legion {
       return *this;
     }
 
+    //--------------------------------------------------------------------------
+    void TraceOp::pack_remote_operation(Serializer &rez, 
+                 AddressSpaceID target, std::set<RtEvent> &applied_events) const
+    //--------------------------------------------------------------------------
+    {
+      pack_local_remote_operation(rez);
+    }
+
+#if 0
     /////////////////////////////////////////////////////////////
     // TraceCaptureOp 
     /////////////////////////////////////////////////////////////
@@ -925,6 +938,7 @@ namespace Legion {
         delete trace;
       FenceOp::trigger_mapping();
     }
+#endif
 
     /////////////////////////////////////////////////////////////
     // TraceCompleteOp 
@@ -962,12 +976,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TraceCompleteOp::initialize_complete(InnerContext *ctx, bool has_block,
-                                              Provenance *provenance)
+    void TraceCompleteOp::initialize_complete(InnerContext *ctx,
+                      LogicalTrace *tr, bool remove_ref, Provenance *provenance)
     //--------------------------------------------------------------------------
     {
-      initialize(ctx, EXECUTION_FENCE, false/*need future*/, provenance);
-      has_blocking_call = has_block;
+      initialize(ctx,tr->has_physical_trace() ? EXECUTION_FENCE : MAPPING_FENCE,
+          false/*need future*/, provenance);
+      trace = tr;
+      tracing = false;
+      has_blocking_call = trace->get_and_clear_blocking_call();
+      remove_trace_reference = remove_ref;
     }
 
     //--------------------------------------------------------------------------
@@ -1004,81 +1022,27 @@ namespace Legion {
     void TraceCompleteOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-      tracing = false;
-      current_template = NULL;
-      replayed = false;
-      is_recording = false;
-      trace->end_trace_execution(this);
-      parent_ctx->record_previous_trace(trace);
-
-      if (trace->is_replaying())
-      {
-        if (has_blocking_call)
-          REPORT_LEGION_ERROR(ERROR_INVALID_PHYSICAL_TRACING,
-            "Physical tracing violation! Trace %d in task %s (UID %lld) "
-            "encountered a blocking API call that was unseen when it was "
-            "recorded. It is required that traces do not change their "
-            "behavior.", trace->get_trace_id(),
-            parent_ctx->get_task_name(), parent_ctx->get_unique_id())
-        PhysicalTrace *physical_trace = trace->get_physical_trace();
-#ifdef DEBUG_LEGION
-        assert(physical_trace != NULL);
-#endif 
-        current_template = physical_trace->get_current_template();
-#ifdef DEBUG_LEGION
-        assert(current_template != NULL);
-#endif
-        physical_trace->record_previous_template_completion(
-            get_completion_event());
-        trace->initialize_tracing_state();
-        replayed = true;
-        if (current_template->is_idempotent()) {
-          // This is where we make sure that replays are done in order
-          // We need to do this because we're not registering this as
-          // a fence with the context
-          physical_trace->chain_replays(this);
-          parent_ctx->update_current_fence(this, true, true);
-        } else {
-          // If the template we just replayed is not idempotent, clear our
-          // cached template so that at the next replay (of this template
-          // or another) we will be forced to check preconditions and select
-          // a new template (which may or may not be this template). Then,
-          // register this TraceCompleteOp as a fence.
-          physical_trace->clear_cached_template();
-          perform_fence_analysis(true /* register */);
-        }
-        return;
-      }
-      else if (trace->is_recording())
-      {
-        PhysicalTrace *physical_trace = trace->get_physical_trace();
-#ifdef DEBUG_LEGION
-        assert(physical_trace != NULL);
-#endif
-        physical_trace->record_previous_template_completion(
-                                      get_completion_event());
-        current_template = physical_trace->get_current_template();
-        physical_trace->clear_cached_template();
-        // Save this for later since we can't read it safely in mapping stage
-        is_recording = true;
-      }
-      FenceOp::trigger_dependence_analysis();
+      trace->end_logical_trace(this);
+      TraceOp::trigger_dependence_analysis();
     }
 
     //--------------------------------------------------------------------------
     void TraceCompleteOp::trigger_ready(void)
     //--------------------------------------------------------------------------
     {
-      if (replayed)
+      if (trace->has_physical_trace())
       {
-        // Having all our mapping dependences satisfied means that the previous 
-        // replay of this template is done so we can start ours now
-        std::set<RtEvent> replayed_events;
-        current_template->perform_replay(runtime, replayed_events);
-        if (!replayed_events.empty())
+        PhysicalTrace *physical = trace->get_physical_trace();
+        if (physical->is_replaying())
         {
-          enqueue_ready_operation(Runtime::merge_events(replayed_events));
-          return;
+          std::vector<RtEvent> ready_events;
+          PhysicalTemplate *current_template = physical->get_current_template();
+          current_template->perform_replay(runtime, ready_events);
+          if (!ready_events.empty())
+          {
+            enqueue_ready_operation(Runtime::merge_events(ready_events));
+            return;
+          }
         }
       }
       enqueue_ready_operation();
@@ -1088,69 +1052,34 @@ namespace Legion {
     void TraceCompleteOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
-      // Now finish capturing the physical trace
-      if (is_recording)
+      if (trace->has_physical_trace())
       {
-#ifdef DEBUG_LEGION
-        assert(current_template != NULL);
-        assert(trace->get_physical_trace() != NULL);
-        assert(current_template->is_recording());
-#endif
-        current_template->finalize(parent_ctx, this, has_blocking_call);
-        PhysicalTrace *physical_trace = trace->get_physical_trace();
-        if (!current_template->is_replayable())
+        PhysicalTrace *physical = trace->get_physical_trace();
+        if (physical->is_recording())
         {
-          physical_trace->record_failed_capture(current_template);
-          ApEvent pending_deletion;
-          if (!current_template->defer_template_deletion(pending_deletion,
-                                                  map_applied_conditions))
-            delete current_template;
+          // Complete the recording and see if we have a new pending
+          // deletion event that we need to capture
+          ApEvent pending_deletion = physical->complete_recording(this,
+              map_applied_conditions, has_blocking_call);
           if (pending_deletion.exists())
             execution_preconditions.insert(pending_deletion);
         }
         else
         {
-          ApEvent pending_deletion = physical_trace->record_capture(
-              current_template, map_applied_conditions);
-          if (pending_deletion.exists())
-            execution_preconditions.insert(pending_deletion);
+          // If this isn't a recurrent replay then we need to apply the
+          // postconditions to the equivalence sets, if it is recurrent
+          // then we know that the postconditions have already been applied
+          if (!physical->is_recurrent())
+            physical->apply_postconditions(this, map_applied_conditions);
+          physical->complete_replay(execution_preconditions);
         }
-        trace->initialize_tracing_state();
       }
-      else if (replayed)
-      {
-#ifdef DEBUG_LEGION
-        assert(current_template != NULL);
-#endif
-        std::set<ApEvent> template_postconditions;
-        current_template->finish_replay(template_postconditions);
-        // If this template is idempotent, then we don't need to act
-        // as a fence right now and apply any post-conditions, as the
-        // invalidate_trace_cache operation will do that for us. If we
-        // aren't an idempotent trace, then we need to eagerly apply
-        // the trace post-conditions and act like a fence.
-        if (current_template->is_idempotent()) {
-          complete_mapping();
-          record_completion_effects(template_postconditions);
-          complete_execution();
-        } else {
-          current_template->apply_postcondition(this, map_applied_conditions);
-          record_completion_effects(template_postconditions);
-          FenceOp::trigger_mapping();
-        }
-        return;
-      }
-      FenceOp::trigger_mapping();
+      if (remove_trace_reference && trace->remove_reference())
+        delete trace;
+      TraceOp::trigger_mapping();
     }
 
-    //--------------------------------------------------------------------------
-    void TraceCompleteOp::pack_remote_operation(Serializer &rez,
-            AddressSpaceID target, std::set<RtEvent> &applied_events) const
-    //--------------------------------------------------------------------------
-    {
-      pack_local_remote_operation(rez);
-    }
-
+#if 0
     /////////////////////////////////////////////////////////////
     // TraceReplayOp
     /////////////////////////////////////////////////////////////
@@ -1313,6 +1242,7 @@ namespace Legion {
     {
       pack_local_remote_operation(rez);
     }
+#endif
 
     /////////////////////////////////////////////////////////////
     // TraceBeginOp
@@ -1351,12 +1281,19 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void TraceBeginOp::initialize_begin(InnerContext *ctx, LogicalTrace *tr,
-                                        Provenance *provenance)
+                                 LogicalTrace *previous, Provenance *provenance)
     //--------------------------------------------------------------------------
     {
-      initialize(ctx, MAPPING_FENCE, false/*need future*/, provenance);
+      initialize(ctx,tr->has_physical_trace() ? EXECUTION_FENCE : MAPPING_FENCE,
+                  false/*need future*/, provenance);
       trace = tr;
       tracing = false;
+      if (trace == previous)
+        recurrent = true;
+      else if (previous != NULL)
+        to_invalidate = previous->get_physical_trace();
+      if (recurrent && (previous != NULL))
+        has_intermediate_fence = previous->has_intermediate_fence();
     }
 
     //--------------------------------------------------------------------------
@@ -1364,6 +1301,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       TraceOp::activate();
+      to_invalidate = NULL;
+      recurrent = false;
+      has_intermediate_fence = false;
     }
 
     //--------------------------------------------------------------------------
@@ -1393,131 +1333,151 @@ namespace Legion {
     void TraceBeginOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-      trace->begin_trace_execution(this);
+      trace->begin_logical_trace(this);
       TraceOp::trigger_dependence_analysis();
     }
 
+    //--------------------------------------------------------------------------
+    void TraceBeginOp::trigger_ready(void)
+    //--------------------------------------------------------------------------
+    {
+      // All our mapping dependences are satisfied, check to see if we're
+      // doing a physical replay, if we are then we need to refresh the 
+      // equivalence sets for all the templates
+      if (trace->has_physical_trace())
+      {
+        PhysicalTrace *physical = trace->get_physical_trace();
+        if (!physical->has_current_template())
+        {
+          std::vector<RtEvent> refresh_ready;
+          physical->refresh_condition_sets(this, refresh_ready);
+          if (!refresh_ready.empty())
+          {
+            enqueue_ready_operation(Runtime::merge_events(refresh_ready));
+            return;
+          }
+        }
+      }
+      enqueue_ready_operation();
+    }
+
+    //--------------------------------------------------------------------------
+    void TraceBeginOp::trigger_mapping(void)
+    //--------------------------------------------------------------------------
+    {
+      if (to_invalidate != NULL)
+        to_invalidate->invalidate_current_template();
+      if (trace->has_physical_trace())
+      {
+        PhysicalTrace *physical = trace->get_physical_trace();
+#ifdef DEBUG_LEGION
+        assert(recurrent == physical->has_current_template());
+#endif
+        bool replaying = recurrent;
+        if (!replaying)
+          // Don't have a recurrent template so check to see if we can find
+          // a template with valid preconditions
+          replaying = physical->find_replay_template(this,
+              map_applied_conditions, execution_preconditions);
+        if (replaying)
+        {
+          // Tell the parent context we are replaying
+          parent_ctx->record_physical_trace_replay(mapped_event, true/*replay*/,
+              physical->get_current_template()->is_idempotent());
+          physical->begin_replay(get_completion_event(), recurrent, 
+                                 has_intermediate_fence);
+        }
+        else // Start recording a new template
+        {
+          // Tell the parent context we are not replaying
+          parent_ctx->record_physical_trace_replay(mapped_event, false, false);
+          physical->begin_recording(
+              new PhysicalTemplate(physical, get_completion_event()));
+        }
+      }
+      TraceOp::trigger_mapping();
+    }
+
+    //--------------------------------------------------------------------------
+    bool TraceBeginOp::allreduce_template_status(bool &valid, bool acquired)
+    //--------------------------------------------------------------------------
+    {
+      if (!acquired)
+      {
+        valid = false;
+        return true;
+      }
+      else
+        return false;
+    }
+
     /////////////////////////////////////////////////////////////
-    // TraceSummaryOp
+    // TraceInvalidationOp
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    TraceSummaryOp::TraceSummaryOp(Runtime *rt)
+    TraceInvalidationOp::TraceInvalidationOp(Runtime *rt)
       : TraceOp(rt)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    TraceSummaryOp::TraceSummaryOp(const TraceSummaryOp &rhs)
-      : TraceOp(NULL)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    TraceSummaryOp::~TraceSummaryOp(void)
+    TraceInvalidationOp::~TraceInvalidationOp(void)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    TraceSummaryOp& TraceSummaryOp::operator=(const TraceSummaryOp &rhs)
+    void TraceInvalidationOp::initialize_invalidation(InnerContext *ctx,
+                                             LogicalTrace *tr, Provenance *prov)
     //--------------------------------------------------------------------------
     {
-      // should never be called
-      assert(false);
-      return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    void TraceSummaryOp::initialize_summary(InnerContext *ctx,
-                                            PhysicalTemplate *tpl,
-                                            Operation *invalidator,
-                                            Provenance *provenance)
-    //--------------------------------------------------------------------------
-    {
-      initialize_operation(ctx, provenance);
-      fence_kind = MAPPING_FENCE;
-      context_index = invalidator->get_context_index();
-      if (runtime->legion_spy_enabled)
-      {
-        LegionSpy::log_fence_operation(parent_ctx->get_unique_id(),
-            unique_op_id, false/*execution fence*/);
-        LegionSpy::log_child_operation_index(parent_ctx->get_unique_id(),
-            context_index, unique_op_id);
-      }
-      current_template = tpl;
-      // The summary could have been marked as being traced,
-      // so here we forcibly clear them out.
-      trace = NULL;
+#ifdef DEBUG_LEGION
+      assert(tr->has_physical_trace());
+#endif
+      TraceOp::initialize(ctx, MAPPING_FENCE, false/*need future*/, prov);
+      trace = tr;
       tracing = false;
     }
 
     //--------------------------------------------------------------------------
-    void TraceSummaryOp::activate(void)
+    void TraceInvalidationOp::activate(void)
     //--------------------------------------------------------------------------
     {
       TraceOp::activate();
-      current_template = NULL;
     }
 
     //--------------------------------------------------------------------------
-    void TraceSummaryOp::deactivate(bool freeop)
+    void TraceInvalidationOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
       TraceOp::deactivate(false/*free*/);
       if (freeop)
-        runtime->free_summary_op(this);
+        runtime->free_invalidation_op(this);
     }
 
     //--------------------------------------------------------------------------
-    const char* TraceSummaryOp::get_logging_name(void) const
+    const char* TraceInvalidationOp::get_logging_name(void) const
     //--------------------------------------------------------------------------
     {
-      return op_names[TRACE_SUMMARY_OP_KIND];
+      return op_names[TRACE_INVALIDATION_OP_KIND];
     }
 
     //--------------------------------------------------------------------------
-    Operation::OpKind TraceSummaryOp::get_operation_kind(void) const
+    Operation::OpKind TraceInvalidationOp::get_operation_kind(void) const
     //--------------------------------------------------------------------------
     {
-      return TRACE_SUMMARY_OP_KIND;
+      return TRACE_INVALIDATION_OP_KIND;
     }
 
     //--------------------------------------------------------------------------
-    void TraceSummaryOp::trigger_dependence_analysis(void)
+    void TraceInvalidationOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
-      perform_fence_analysis(true/*register fence also*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void TraceSummaryOp::trigger_ready(void)
-    //--------------------------------------------------------------------------
-    {
-      enqueue_ready_operation();
-    }
-
-    //--------------------------------------------------------------------------
-    void TraceSummaryOp::trigger_mapping(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(current_template->is_replayable());
-#endif
-      current_template->apply_postcondition(this, map_applied_conditions);
-      FenceOp::trigger_mapping();
-    }
-
-    //--------------------------------------------------------------------------
-    void TraceSummaryOp::pack_remote_operation(Serializer &rez,
-                 AddressSpaceID target, std::set<RtEvent> &applied_events) const
-    //--------------------------------------------------------------------------
-    {
-      pack_local_remote_operation(rez);
+      PhysicalTrace *physical = trace->get_physical_trace();
+      physical->invalidate_current_template();
+      TraceOp::trigger_mapping();
     }
 
     /////////////////////////////////////////////////////////////
@@ -1528,12 +1488,8 @@ namespace Legion {
     PhysicalTrace::PhysicalTrace(Runtime *rt, LogicalTrace *lt)
       : runtime(rt), logical_trace(lt), perform_fence_elision(
           !(runtime->no_trace_optimization || runtime->no_fence_elision)),
-        repl_ctx(dynamic_cast<ReplicateContext*>(lt->context)),
-        previous_replay(NULL), current_template(NULL), nonreplayable_count(0),
-        new_template_count(0), last_memoized(0),
-        previous_template_completion(ApEvent::NO_AP_EVENT),
-        execution_fence_event(ApEvent::NO_AP_EVENT),
-        intermediate_execution_fence(false)
+        current_template(NULL), nonreplayable_count(0),
+        new_template_count(0), recording(false), recurrent(false)
     //--------------------------------------------------------------------------
     {
       if (runtime->replay_on_cpus)
@@ -1567,6 +1523,7 @@ namespace Legion {
       }
     }
 
+#if 0
     //--------------------------------------------------------------------------
     ApEvent PhysicalTrace::record_capture(PhysicalTemplate *tpl,
                                       std::set<RtEvent> &map_applied_conditions)
@@ -1613,60 +1570,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTrace::record_failed_capture(PhysicalTemplate *tpl)
-    //--------------------------------------------------------------------------
-    {
-      // We won't consider failure from mappers refusing to memoize
-      // as a warning that gets bubbled up to end users.
-      if (!tpl->get_no_consensus() &&
-          ++nonreplayable_count > LEGION_NON_REPLAYABLE_WARNING)
-      {
-        const std::string &message = tpl->get_replayable_message();
-        const char *message_buffer = message.c_str();
-        InnerContext *ctx = logical_trace->context;
-        REPORT_LEGION_WARNING(LEGION_WARNING_NON_REPLAYABLE_COUNT_EXCEEDED,
-            "WARNING: The runtime has failed to memoize the trace more than "
-            "%u times, due to the absence of a replayable template. It is "
-            "highly likely that trace %u in task %s (UID %lld) will not be "
-            "memoized for the rest of execution. The most recent template was "
-            "not replayable for the following reason: %s. Please change the "
-            "mapper to stop making memoization requests.",
-            LEGION_NON_REPLAYABLE_WARNING, logical_trace->get_trace_id(),
-            ctx->get_task_name(), ctx->get_unique_id(), message_buffer)
-        nonreplayable_count = 0;
-      }
-      current_template = NULL;
-    }
-
-    //--------------------------------------------------------------------------
-    bool PhysicalTrace::check_memoize_consensus(size_t index)
-    //--------------------------------------------------------------------------
-    {
-      if (index == last_memoized)
-      {
-        last_memoized = index + 1;
-        return true;
-      }
-      else
-      {
-        last_memoized = 0;
-        return false;
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void PhysicalTrace::reset_last_memoized(void)
-    //--------------------------------------------------------------------------
-    {
-      last_memoized = 0;
-    }
-
-    //--------------------------------------------------------------------------
-    void PhysicalTrace::check_template_preconditions(TraceReplayOp *op,
+    bool PhysicalTrace::check_template_preconditions(TraceBeginOp *op,
                                               std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
-      current_template = NULL;
+#ifdef DEBUG_LEGION
+      assert(current_template == NULL);
+#endif
       // Scan backwards since more recently used templates are likely
       // to be the ones that best match what we are executing
       for (int idx = templates.size() - 1; idx >= 0; idx--)
@@ -1738,65 +1648,248 @@ namespace Legion {
         std::rotate(templates.begin()+index, 
                     templates.begin()+index+1, templates.end());
     }
-
-    //--------------------------------------------------------------------------
-    PhysicalTemplate* PhysicalTrace::start_new_template(void)
-    //--------------------------------------------------------------------------
-    {
-      // If we have a replicated context then we are making sharded templates
-      if (repl_ctx != NULL)
-        current_template = 
-          new ShardedPhysicalTemplate(this, execution_fence_event, repl_ctx);
-      else
-        current_template = new PhysicalTemplate(this, execution_fence_event);
-      return current_template;
-    }
-
-    //--------------------------------------------------------------------------
-    void PhysicalTrace::record_intermediate_execution_fence(FenceOp *fence)
-    //--------------------------------------------------------------------------
-    {
-      if (!intermediate_execution_fence)
-        fence->record_execution_precondition(previous_template_completion);
-      previous_template_completion = fence->get_completion_event();
-      intermediate_execution_fence = true;
-    }
-
-    //--------------------------------------------------------------------------
-    void PhysicalTrace::chain_replays(FenceOp *replay_op)
-    //--------------------------------------------------------------------------
-    {
-      if (previous_replay != NULL)
-      {
-#ifdef LEGION_SPY
-        // Can't prune when doing legion spy
-        replay_op->register_dependence(previous_replay, previous_replay_gen);
-#else
-        if (replay_op->register_dependence(previous_replay,previous_replay_gen))
-          previous_replay = NULL;
 #endif
-      }
-      previous_replay = replay_op;
-      previous_replay_gen = replay_op->get_generation();
+
+    //--------------------------------------------------------------------------
+    void PhysicalTrace::refresh_condition_sets(FenceOp *op,
+                                       std::vector<RtEvent> &ready_events) const
+    //--------------------------------------------------------------------------
+    {
+      // Make sure all the templates have up-to-date equivalence sets for
+      // performing any kind of tests on preconditions/postconditions
+      for (std::vector<PhysicalTemplate*>::const_iterator it =
+            templates.begin(); it != templates.end(); it++)
+        (*it)->refresh_condition_sets(op, ready_events);
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTrace::initialize_template(
-                                       ApEvent fence_completion, bool recurrent)
+    bool PhysicalTrace::find_replay_template(BeginOp *op,
+                                     std::set<RtEvent> &map_applied_events,
+                                     std::set<ApEvent> &execution_preconditions)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(current_template == NULL);
+#endif
+      if (templates.empty())
+        return false;
+      // Start the first batch of precondition tests
+      RtEvent next_ready;
+      RtEvent current_ready = templates.back()->test_preconditions(
+          op->get_operation(), map_applied_events);
+      // Scan backwards since more recently used templates are likely
+      // to be the ones that best match what we are executing
+      for (int idx = templates.size() - 1; idx >= 0; idx--)
+      {
+        if (idx > 0) // Prefetch the next set of condition checks
+          next_ready = templates[idx-1]->test_preconditions(
+              op->get_operation(), map_applied_events); 
+        PhysicalTemplate *current = templates[idx];
+        // Wait for the preconditions to be ready
+        if (current_ready.exists() && !current_ready.has_triggered())
+          current_ready.wait();
+        bool valid = current->check_preconditions();
+        bool acquired = valid ? current->acquire_instance_references() : false;
+        // Now do the exchange between the operations to handle the case
+        // of control replication to see if all the shards agree on what
+        // to do with the template
+        bool delete_now = op->allreduce_template_status(valid, acquired);
+        if (valid)
+        {
+#ifdef DEBUG_LEGION
+          assert(acquired);
+#endif
+          if (idx > 0)
+          {
+            // Wait for the prefetched analyses to finish and clean them up
+            if (next_ready.exists() && !next_ready.has_triggered())
+              next_ready.wait();
+            templates[idx-1]->check_preconditions();
+          }
+          // Everybody agreed to reuse this template so make it the
+          // new current template and shuffle it to the front
+          current_template = current;
+          // Move the template to the end of the vector as most-recently used
+          if (idx < int(templates.size() - 1))
+            std::rotate(templates.begin()+idx, 
+                        templates.begin()+idx+1, templates.end());
+          return true;
+        }
+        else if (delete_now)
+        {
+          if (acquired)
+            current->release_instance_references();
+          // Now delete this template from the entry since at least one of its
+          // instances have been deleted and therefore we'll never be able to
+          // replay it
+          ApEvent pending_deletion;
+          if (!current->defer_template_deletion(pending_deletion,
+                                                map_applied_events))
+            delete current;
+          if (pending_deletion.exists())
+            execution_preconditions.insert(pending_deletion);
+          templates.erase(templates.begin()+idx);
+        }
+        else if (acquired)
+          current->release_instance_references();
+        // Shuffle the ready events
+        current_ready = next_ready;
+      }
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTrace::begin_recording(PhysicalTemplate *fresh_template) 
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(current_template == NULL);
+#endif
+      current_template = fresh_template;
+      recording = true;
+      recurrent = false;
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent PhysicalTrace::complete_recording(CompleteOp *op,
+              std::set<RtEvent> &map_applied_conditions, bool has_blocking_call)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(recording);
+      assert(current_template != NULL);
+#endif
+      ReplayableStatus status =
+        current_template->finalize(op, has_blocking_call);
+      ApEvent pending_deletion;
+      if (status == REPLAYABLE)
+      {
+        // See if we're going to exceed the maximum number of templates
+        if (templates.size() == 
+            logical_trace->context->get_max_trace_templates())
+        {
+#ifdef DEBUG_LEGION
+          assert(!templates.empty());
+#endif
+          PhysicalTemplate *to_delete = templates.front();
+          if (!to_delete->defer_template_deletion(pending_deletion, 
+                                            map_applied_conditions))
+            delete to_delete;
+          // Remove the least recently used (first) one from the vector
+          // shift it to the back first though, should be fast
+          if (templates.size() > 1)
+            std::rotate(templates.begin(),templates.begin()+1,templates.end());
+          templates.pop_back();
+        }
+        templates.push_back(current_template);
+        if (++new_template_count > LEGION_NEW_TEMPLATE_WARNING_COUNT)
+        {
+          InnerContext *ctx = logical_trace->context;
+          REPORT_LEGION_WARNING(LEGION_WARNING_NEW_TEMPLATE_COUNT_EXCEEDED,
+              "WARNING: The runtime has created %d new replayable templates "
+              "for trace %u in task %s (UID %lld) without replaying any "
+              "existing templates. This may mean that your mapper is not "
+              "making mapper decisions conducive to replaying templates. Please "
+              "check that your mapper is making decisions that align with prior "
+              "templates. If you believe that this number of templates is "
+              "reasonable please adjust the settings for "
+              "LEGION_NEW_TEMPLATE_WARNING_COUNT in legion_config.h.",
+              LEGION_NEW_TEMPLATE_WARNING_COUNT, logical_trace->get_trace_id(),
+              ctx->get_task_name(), ctx->get_unique_id())
+          new_template_count = 0;
+        }
+        // Reset the nonreplayable count when we find a replayable template
+        nonreplayable_count = 0;
+      }
+      else
+      {
+        // Record failed capture
+        // We won't consider failure from mappers refusing to memoize
+        // as a warning that gets bubbled up to end users.
+        if ((status != NOT_REPLAYABLE_CONSENSUS) &&
+            (status != NOT_REPLAYABLE_REMOTE_SHARD) &&
+            (++nonreplayable_count > LEGION_NON_REPLAYABLE_WARNING))
+        {
+          InnerContext *ctx = logical_trace->context;
+          REPORT_LEGION_WARNING(LEGION_WARNING_NON_REPLAYABLE_COUNT_EXCEEDED,
+              "WARNING: The runtime has failed to memoize the trace more than "
+              "%u times, due to the absence of a replayable template. It is "
+              "highly likely that trace %u in task %s (UID %lld) will not be "
+              "memoized for the rest of execution. The most recent template was "
+              "not replayable for the following reason: %s. Please change the "
+              "mapper to stop making memoization requests.",
+              LEGION_NON_REPLAYABLE_WARNING, logical_trace->get_trace_id(),
+              ctx->get_task_name(), ctx->get_unique_id(), 
+              (status == NOT_REPLAYABLE_BLOCKING) ?
+              "blocking call" : "virtual mapping")
+          nonreplayable_count = 0;
+        }
+        // Defer template deletion
+        if (!current_template->defer_template_deletion(pending_deletion,
+                                                  map_applied_conditions))
+          delete current_template;
+      }
+      // Reset the tracing state for the next time
+      recording = false;
+      current_template = NULL;
+      return pending_deletion;
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTrace::begin_replay(ApEvent fence_completion, bool recur,
+                                     bool has_intermediate_fence)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(current_template != NULL);
 #endif
+      recording = false;
+      recurrent = recur;
+      new_template_count = 0;
       // If we had an intermeidate execution fence between replays then
       // we should no longer be considered recurrent when we replay the trace
       // We're also not going to be considered recurrent here if we didn't
       // do fence elision since since we'll still need to track the fence
-      current_template->initialize_replay(fence_completion, 
-          recurrent && perform_fence_elision && !intermediate_execution_fence
-                    && current_template->is_idempotent());
-      // Reset this for the next replay
-      intermediate_execution_fence = false;
+      current_template->initialize_replay(fence_completion,
+          recurrent && perform_fence_elision && !has_intermediate_fence);
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTrace::apply_postconditions(FenceOp *op,
+                                          std::set<RtEvent> &map_applied_events)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(current_template != NULL);
+#endif
+      current_template->apply_postconditions(op, map_applied_events);
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTrace::complete_replay(std::set<ApEvent> &completion_events)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(current_template != NULL);
+#endif
+      current_template->finish_replay(completion_events);
+      if (!current_template->is_idempotent())
+      {
+        current_template->release_instance_references();
+        current_template = NULL;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTrace::invalidate_current_template(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(current_template != NULL);
+      assert(current_template->is_idempotent());
+#endif
+      current_template->release_instance_references();
+      current_template = NULL;
     }
 
     /////////////////////////////////////////////////////////////
@@ -1887,7 +1980,7 @@ namespace Legion {
               vit->second.begin(); it != vit->second.end(); it++)
           if (it->first->remove_nested_expression_reference(owner_did))
             delete it->first;
-        if (vit->first->remove_nested_valid_ref(owner_did))
+        if (vit->first->remove_nested_gc_ref(owner_did))
           delete vit->first;
       }
       if (owner_did == context->did)
@@ -2010,7 +2103,7 @@ namespace Legion {
           else if (has_collective_views && view->is_instance_view())
             antialias_individual_view(view->as_individual_view(), mask);
         }
-        view->add_nested_valid_ref(owner_did);
+        view->add_nested_gc_ref(owner_did);
         expr->add_nested_expression_reference(owner_did);
         conditions[view].insert(expr, mask);
         if (view->is_collective_view())
@@ -2102,7 +2195,7 @@ namespace Legion {
             else
               finder->second += 1;
           }
-          else if (view->remove_nested_valid_ref(owner_did))
+          else if (view->remove_nested_gc_ref(owner_did))
             delete view;
           conditions.erase(finder);
         }
@@ -2144,7 +2237,7 @@ namespace Legion {
               else
                 finder->second += 1;
             }
-            else if (view->remove_nested_valid_ref(owner_did))
+            else if (view->remove_nested_gc_ref(owner_did))
               delete view;
             conditions.erase(finder);
           }
@@ -2221,7 +2314,7 @@ namespace Legion {
             else
               finder->second += 1;
           }
-          else if (view->remove_nested_valid_ref(owner_did))
+          else if (view->remove_nested_gc_ref(owner_did))
             delete view;
           conditions.erase(finder);
         }
@@ -3068,7 +3161,7 @@ namespace Legion {
           rez.serialize(it->second);
         }
         if (pack_references)
-          vit->first->pack_valid_ref();
+          vit->first->pack_global_ref();
       }
     }
 
@@ -3111,8 +3204,8 @@ namespace Legion {
       for (ViewExprs::const_iterator vit = 
             conditions.begin(); vit != conditions.end(); vit++)
       {
-        vit->first->add_nested_valid_ref(owner_did);
-        vit->first->unpack_valid_ref();
+        vit->first->add_nested_gc_ref(owner_did);
+        vit->first->unpack_global_ref();
       }
     }
 
@@ -3272,7 +3365,7 @@ namespace Legion {
           // Can just swap expressions over in this particular case
           conditions[view].swap(finder->second);
           // Remove the reference if we have one
-          if (finder->first->remove_nested_valid_ref(owner_did))
+          if (finder->first->remove_nested_gc_ref(owner_did))
             delete finder->first;
           conditions.erase(finder);
         }
@@ -3301,7 +3394,7 @@ namespace Legion {
         }
         if (ready.exists() && !ready.has_triggered())
           ready.wait();
-        view->add_nested_valid_ref(owner_did);
+        view->add_nested_gc_ref(owner_did);
       }
     }
 
@@ -3397,14 +3490,14 @@ namespace Legion {
                 difference.push_back(*it);
             InstanceView *diff_view = find_instance_view(difference);
             if (to_add.find(diff_view) == to_add.end())
-              diff_view->add_nested_valid_ref(owner_did);
+              diff_view->add_nested_gc_ref(owner_did);
             // 2. Make a new instance for the intersection, analyze it
             //    and record any overlapping expressions in to_add
             InstanceView *inter_view = 
               (intersection.size() == collective->instances.size()) ?
               collective : find_instance_view(intersection);
             if (to_add.find(inter_view) == to_add.end())
-              inter_view->add_nested_valid_ref(owner_did);
+              inter_view->add_nested_gc_ref(owner_did);
             std::vector<IndexSpaceExpression*> to_delete;
             for (FieldMaskSet<IndexSpaceExpression>::iterator it =
                   vit->second.begin(); it != vit->second.end(); it++)
@@ -3432,7 +3525,7 @@ namespace Legion {
             else
             {
               vit->second.clear();
-              if (vit->first->remove_nested_valid_ref(owner_did))
+              if (vit->first->remove_nested_gc_ref(owner_did))
                 delete vit->first;
               ViewExprs::iterator to_delete = vit++;
               conditions.erase(to_delete);
@@ -3471,7 +3564,7 @@ namespace Legion {
           if (finder != conditions.end())
           {
             // Remove duplicate view reference
-            vit->first->remove_nested_valid_ref(owner_did);
+            vit->first->remove_nested_gc_ref(owner_did);
             for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
                   vit->second.begin(); it != vit->second.end(); it++)
               // Remove duplicate references
@@ -3560,7 +3653,7 @@ namespace Legion {
       {
         for (FieldMaskSet<LogicalView>::const_iterator it = 
               eit->second.begin(); it != eit->second.end(); it++)
-          if (it->first->remove_base_valid_ref(TRACE_REF))
+          if (it->first->remove_base_gc_ref(TRACE_REF))
             delete it->first;
         if (eit->first->remove_base_expression_reference(TRACE_REF))
           delete eit->first;
@@ -3571,7 +3664,7 @@ namespace Legion {
       {
         for (FieldMaskSet<LogicalView>::const_iterator it = 
               eit->second.begin(); it != eit->second.end(); it++)
-          if (it->first->remove_base_valid_ref(TRACE_REF))
+          if (it->first->remove_base_gc_ref(TRACE_REF))
             delete it->first;
         if (eit->first->remove_base_expression_reference(TRACE_REF))
           delete eit->first;
@@ -3582,7 +3675,7 @@ namespace Legion {
       {
         for (FieldMaskSet<LogicalView>::const_iterator it = 
               eit->second.begin(); it != eit->second.end(); it++)
-          if (it->first->remove_base_valid_ref(TRACE_REF))
+          if (it->first->remove_base_gc_ref(TRACE_REF))
             delete it->first;
         if (eit->first->remove_base_expression_reference(TRACE_REF))
           delete eit->first;
@@ -3639,7 +3732,7 @@ namespace Legion {
       assert(anticondition_views == NULL);
       assert(postcondition_views == NULL);
 #endif
-      const RtEvent ready_event = 
+      const RtEvent ready_event =
         set->capture_trace_conditions(this, set->local_space,
             condition_expr, mask, RtUserEvent::NO_RT_USER_EVENT);
       if (ready_event.exists() && !ready_event.has_triggered())
@@ -3648,7 +3741,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void TraceConditionSet::receive_capture(TraceViewSet *pre, 
-               TraceViewSet *anti, TraceViewSet *post, std::set<RtEvent> &ready)
+                                         TraceViewSet *anti, TraceViewSet *post)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3670,7 +3763,7 @@ namespace Legion {
           eit->first->add_base_expression_reference(TRACE_REF);
           for (FieldMaskSet<LogicalView>::const_iterator it = 
                 eit->second.begin(); it != eit->second.end(); it++)
-            it->first->add_base_valid_ref(TRACE_REF);
+            it->first->add_base_gc_ref(TRACE_REF);
         }
       }
       if (anticondition_views != NULL)
@@ -3684,7 +3777,7 @@ namespace Legion {
           eit->first->add_base_expression_reference(TRACE_REF);
           for (FieldMaskSet<LogicalView>::const_iterator it = 
                 eit->second.begin(); it != eit->second.end(); it++)
-            it->first->add_base_valid_ref(TRACE_REF);
+            it->first->add_base_gc_ref(TRACE_REF);
         }
       }
       if (postcondition_views != NULL)
@@ -3698,7 +3791,7 @@ namespace Legion {
           eit->first->add_base_expression_reference(TRACE_REF);
           for (FieldMaskSet<LogicalView>::const_iterator it = 
                 eit->second.begin(); it != eit->second.end(); it++)
-            it->first->add_base_valid_ref(TRACE_REF);
+            it->first->add_base_gc_ref(TRACE_REF);
         }
       }
     }
@@ -3740,95 +3833,77 @@ namespace Legion {
         idempotent = false;
         not_subsumed = false;
       }
-      // Clean up our view objects since we no longer need them
-      if (precondition_views != NULL)
+      // clean up our views here unless we're dumping the template
+      // in which case we'll clean them up then
+      if (!context->runtime->dump_physical_traces)
       {
-        delete precondition_views;
-        precondition_views = NULL;
-      }
-      if (anticondition_views != NULL)
-      {
-        delete anticondition_views;
-        anticondition_views = NULL;
-      }
-      if (postcondition_views != NULL)
-      {
-        delete postcondition_views;
-        postcondition_views = NULL;
+        if (precondition_views != NULL)
+        {
+          delete precondition_views;
+          precondition_views = NULL;
+        }
+        if (anticondition_views != NULL)
+        {
+          delete anticondition_views;
+          anticondition_views = NULL;
+        }
+        if (postcondition_views != NULL)
+        {
+          delete postcondition_views;
+          postcondition_views = NULL;
+        }
       }
       return idempotent;
     }
 
     //--------------------------------------------------------------------------
-    void TraceConditionSet::dump_preconditions(void) const
+    void TraceConditionSet::dump_preconditions(void)
     //--------------------------------------------------------------------------
     {
-      TraceViewSet dump_view_set(context, 0/*owner did*/,
-                                 condition_expr, tree_id);
-      for (ExprViews::const_iterator eit = 
-            preconditions.begin(); eit != preconditions.end(); eit++)
-        for (FieldMaskSet<LogicalView>::const_iterator it =
-              eit->second.begin(); it != eit->second.end(); it++)
-          dump_view_set.insert(it->first, eit->first, it->second);
-      dump_view_set.dump();
+      if (precondition_views != NULL)
+      {
+        precondition_views->dump();
+        delete precondition_views;
+        precondition_views = NULL;
+      }
     }
 
     //--------------------------------------------------------------------------
-    void TraceConditionSet::dump_anticonditions(void) const
+    void TraceConditionSet::dump_anticonditions(void)
     //--------------------------------------------------------------------------
     {
-      TraceViewSet dump_view_set(context, 0/*owner did*/,
-                                 condition_expr, tree_id);
-      for (ExprViews::const_iterator eit = 
-            anticonditions.begin(); eit != anticonditions.end(); eit++)
-        for (FieldMaskSet<LogicalView>::const_iterator it =
-              eit->second.begin(); it != eit->second.end(); it++)
-          dump_view_set.insert(it->first, eit->first, it->second);
-      dump_view_set.dump();
+      if (anticondition_views != NULL)
+      {
+        anticondition_views->dump();
+        delete anticondition_views;
+        anticondition_views = NULL;
+      }
     }
 
     //--------------------------------------------------------------------------
-    void TraceConditionSet::dump_postconditions(void) const
+    void TraceConditionSet::dump_postconditions(void)
     //--------------------------------------------------------------------------
     {
-      TraceViewSet dump_view_set(context, 0/*owner did*/,
-                                 condition_expr, tree_id);
-      for (ExprViews::const_iterator eit = 
-            postconditions.begin(); eit != postconditions.end(); eit++)
-        for (FieldMaskSet<LogicalView>::const_iterator it =
-              eit->second.begin(); it != eit->second.end(); it++)
-          dump_view_set.insert(it->first, eit->first, it->second);
-      dump_view_set.dump();
+      if (postcondition_views != NULL)
+      {
+        postcondition_views->dump();
+        delete postcondition_views;
+        postcondition_views = NULL;
+      }
     }
 
     //--------------------------------------------------------------------------
-    void TraceConditionSet::test_require(Operation *op, 
-             std::set<RtEvent> &ready_events, std::set<RtEvent> &applied_events)
+    void TraceConditionSet::test_preconditions(FenceOp *op, unsigned index, 
+          std::vector<RtEvent> &ready_events, std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
-      // We should not need the lock here because the trace should be 
+      // We should not need the lock here because the fence op should be 
       // blocking all other operations from running and changing the 
       // equivalence sets while we are here
-      // First check to see if we need to recompute our equivalence sets
-      const FieldMask invalid_mask = 
-        condition_mask - equivalence_sets.get_valid_mask();
-      if (!!invalid_mask)
-      {
-        const UniqueID opid = op->get_unique_op_id();
-        const RtEvent ready = recompute_equivalence_sets(opid, invalid_mask);
-        if (ready.exists() && !ready.has_triggered())
-        {
-          const RtUserEvent tested = Runtime::create_rt_user_event();
-          const RtUserEvent applied = Runtime::create_rt_user_event();
-          DeferTracePreconditionTestArgs args(this, op, tested, applied);
-          forest->runtime->issue_runtime_meta_task(args, 
-              LG_LATENCY_DEFERRED_PRIORITY, ready);
-          ready_events.insert(tested);
-          applied_events.insert(applied);
-          return;
-        }
-      }
 #ifdef DEBUG_LEGION
+      // We should already have refreshed the equivalence sets before we
+      // get here so that they should all be up to date
+      assert(!(condition_mask - equivalence_sets.get_valid_mask()));
       assert(precondition_analyses.empty());
       assert(anticondition_analyses.empty());
 #endif
@@ -3837,7 +3912,7 @@ namespace Legion {
             preconditions.begin(); eit != preconditions.end(); eit++)
       {
         InvalidInstAnalysis *analysis = new InvalidInstAnalysis(forest->runtime,  
-            op, precondition_analyses.size(), eit->first, eit->second);
+            op, index, eit->first, eit->second);
         analysis->add_reference();
         precondition_analyses.push_back(analysis);
         std::set<RtEvent> deferral_events;
@@ -3856,15 +3931,15 @@ namespace Legion {
           const RtEvent ready = 
             analysis->perform_remote(traversal_done, applied_events);
           if (ready.exists() && !ready.has_triggered())
-            ready_events.insert(ready);
+            ready_events.push_back(ready);
         }
       }
       for (ExprViews::const_iterator eit =
             anticonditions.begin(); eit != anticonditions.end(); eit++)
       {
         AntivalidInstAnalysis *analysis = 
-          new AntivalidInstAnalysis(forest->runtime, op, 
-              anticondition_analyses.size(), eit->first, eit->second);
+          new AntivalidInstAnalysis(forest->runtime, op, index, 
+                                    eit->first, eit->second);
         analysis->add_reference();
         anticondition_analyses.push_back(analysis);
         std::set<RtEvent> deferral_events;
@@ -3883,34 +3958,13 @@ namespace Legion {
           const RtEvent ready = 
             analysis->perform_remote(traversal_done, applied_events);
           if (ready.exists() && !ready.has_triggered())
-            ready_events.insert(ready);
+            ready_events.push_back(ready);
         }
       }
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void TraceConditionSet::handle_precondition_test(
-                                                               const void *args)
-    //--------------------------------------------------------------------------
-    {
-      const DeferTracePreconditionTestArgs *dargs = 
-        (const DeferTracePreconditionTestArgs*)args;
-      std::set<RtEvent> ready_events, applied_events;
-      dargs->set->test_require(dargs->op, ready_events, applied_events);
-      if (!ready_events.empty())
-        Runtime::trigger_event(dargs->done_event, 
-            Runtime::merge_events(ready_events));
-      else
-        Runtime::trigger_event(dargs->done_event);
-      if (!applied_events.empty())
-        Runtime::trigger_event(dargs->applied_event,
-            Runtime::merge_events(applied_events));
-      else
-        Runtime::trigger_event(dargs->applied_event);
-    }
-
-    //--------------------------------------------------------------------------
-    bool TraceConditionSet::check_require(void)
+    bool TraceConditionSet::check_preconditions(void)
     //--------------------------------------------------------------------------
     {
       bool satisfied = true;
@@ -3938,36 +3992,23 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TraceConditionSet::ensure(Operation *op, 
-                                   std::set<RtEvent> &applied_events)
+    void TraceConditionSet::apply_postconditions(FenceOp *op, unsigned index, 
+                                              std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
       // We should not need the lock here because the trace should be 
       // blocking all other operations from running and changing the 
       // equivalence sets while we are here
-      // First check to see if we need to recompute our equivalence sets
-      const FieldMask invalid_mask = 
-        condition_mask - equivalence_sets.get_valid_mask();
-      if (!!invalid_mask)
-      {
-        const UniqueID opid = op->get_unique_op_id();
-        const RtEvent ready = recompute_equivalence_sets(opid, invalid_mask);
-        if (ready.exists() && !ready.has_triggered())
-        {
-          const RtUserEvent applied= Runtime::create_rt_user_event();
-          DeferTracePostconditionTestArgs args(this, op, applied);
-          forest->runtime->issue_runtime_meta_task(args, 
-              LG_LATENCY_DEFERRED_PRIORITY, ready);
-          applied_events.insert(applied);
-          return;
-        }
-      }
+#ifdef DEBUG_LEGION
+      // We should already have refreshed the equivalence sets before we
+      // get here so that they should all be up to date
+      assert(!(condition_mask - equivalence_sets.get_valid_mask()));
+#endif
       // Perform an overwrite analysis for each of the postconditions
-      unsigned index = 0;
       const TraceInfo trace_info(op);
       const RegionUsage usage(LEGION_READ_WRITE, LEGION_EXCLUSIVE, 0);
-      for (ExprViews::const_iterator eit = 
-            postconditions.begin(); eit != postconditions.end(); eit++, index++)
+      for (ExprViews::const_iterator eit = postconditions.begin();
+            eit != postconditions.end(); eit++)
       {
         OverwriteAnalysis *analysis = new OverwriteAnalysis(forest->runtime,
             op, index, usage, eit->first, eit->second, 
@@ -3992,19 +4033,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void TraceConditionSet::handle_postcondition_test(
-                                                               const void *args)
+    void TraceConditionSet::refresh_equivalence_sets(FenceOp *op,
+                                             std::vector<RtEvent> &ready_events)
     //--------------------------------------------------------------------------
     {
-      const DeferTracePostconditionTestArgs *dargs = 
-        (const DeferTracePostconditionTestArgs*)args;
-      std::set<RtEvent> ready_events;
-      dargs->set->ensure(dargs->op, ready_events);
-      if (!ready_events.empty())
-        Runtime::trigger_event(dargs->done_event, 
-            Runtime::merge_events(ready_events));
-      else
-        Runtime::trigger_event(dargs->done_event);
+      // We should not need the lock here because the fence op should be 
+      // blocking all other operations from running and changing the 
+      // equivalence sets while we are here
+      const FieldMask invalid_mask = 
+        condition_mask - equivalence_sets.get_valid_mask();
+      if (!!invalid_mask)
+      {
+        const RtEvent ready = recompute_equivalence_sets(
+            op->get_unique_op_id(), invalid_mask);
+        if (ready.exists())
+          ready_events.push_back(ready);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -4051,13 +4095,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhysicalTemplate::PhysicalTemplate(PhysicalTrace *t, ApEvent fence_event)
-      : trace(t), total_replays(1), replayable(false, "uninitialized"),
-        idempotent(false, "uninitialized"), fence_completion_id(0),
+      : trace(t), total_replays(1), replayable(REPLAYABLE), 
+        idempotency(IDEMPOTENT), fence_completion_id(0),
         replay_parallelism(t->runtime->max_replay_parallelism),
         has_virtual_mapping(false), has_no_consensus(false), last_fence(NULL)
     //--------------------------------------------------------------------------
     {
-      recording.store(true);
       events.push_back(fence_event);
       event_map[fence_event] = fence_completion_id;
       finished_transitive_reduction.store(NULL);
@@ -4070,7 +4113,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       {
-        AutoLock tpl_lock(template_lock);
+        AutoLock tpl_lock(template_lock); 
         for (std::vector<TraceConditionSet*>::const_iterator it =
               conditions.begin(); it != conditions.end(); it++)
         {
@@ -4081,23 +4124,6 @@ namespace Legion {
         for (std::vector<Instruction*>::iterator it = instructions.begin();
              it != instructions.end(); ++it)
           delete *it;
-        // Relesae references to instances
-        for (CachedMappings::iterator it = cached_mappings.begin();
-            it != cached_mappings.end(); ++it)
-        {
-          for (std::deque<InstanceSet>::iterator pit =
-              it->second.physical_instances.begin(); pit !=
-              it->second.physical_instances.end(); pit++)
-          {
-            for (unsigned idx = 0; idx < pit->size(); idx++)
-            {
-              const InstanceRef &ref = (*pit)[idx];
-              if (!ref.is_virtual_ref())
-                ref.remove_valid_reference(MAPPING_ACQUIRE_REF);
-            }
-            pit->clear();
-          }
-        }
         cached_mappings.clear();
       }
       TransitiveReductionState *state = finished_transitive_reduction.load();
@@ -4105,11 +4131,15 @@ namespace Legion {
         delete state;
       for (std::map<DistributedID,IndividualView*>::const_iterator it =
             recorded_views.begin(); it != recorded_views.end(); it++)
-        if (it->second->remove_base_valid_ref(TRACE_REF))
+        if (it->second->remove_base_gc_ref(TRACE_REF))
           delete it->second;
       for (std::set<IndexSpaceExpression*>::const_iterator it =
            recorded_expressions.begin(); it != recorded_expressions.end(); it++)
         if ((*it)->remove_base_expression_reference(TRACE_REF))
+          delete (*it);
+      for (std::vector<PhysicalManager*>::const_iterator it =
+            all_instances.begin(); it != all_instances.end(); it++)
+        if ((*it)->remove_base_gc_ref(TRACE_REF))
           delete (*it);
     }
 
@@ -4152,38 +4182,41 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool PhysicalTemplate::check_preconditions(TraceReplayOp *op,
+    RtEvent PhysicalTemplate::test_preconditions(FenceOp *op,
                                               std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
-      std::set<RtEvent> ready_events;
-      for (std::vector<TraceConditionSet*>::const_iterator it = 
-            conditions.begin(); it != conditions.end(); it++)
-        (*it)->test_require(op, ready_events, applied_events);
+      std::vector<RtEvent> ready_events;
+      for (unsigned idx = 0; idx < conditions.size(); idx++)
+        conditions[idx]->test_preconditions(op,idx,ready_events,applied_events);
       if (!ready_events.empty())
-      {
-        const RtEvent wait_on = Runtime::merge_events(ready_events);
-        if (wait_on.exists() && !wait_on.has_triggered())
-          wait_on.wait();
-      }
+        return Runtime::merge_events(ready_events);
+      else
+        return RtEvent::NO_RT_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    bool PhysicalTemplate::check_preconditions(void)
+    //--------------------------------------------------------------------------
+    {
       bool result = true;
       for (std::vector<TraceConditionSet*>::const_iterator it = 
             conditions.begin(); it != conditions.end(); it++)
-        if (!(*it)->check_require())
+        if (!(*it)->check_preconditions())
           result = false;
       return result;
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::apply_postcondition(Operation *op,
+    void PhysicalTemplate::apply_postconditions(FenceOp *op,
                                               std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
-      for (std::vector<TraceConditionSet*>::const_iterator it = 
-            conditions.begin(); it != conditions.end(); it++)
-        (*it)->ensure(op, applied_events);
+      for (unsigned idx = 0; idx < conditions.size(); idx++)
+        conditions[idx]->apply_postconditions(op, idx, applied_events);
     }
 
+#if 0
     //--------------------------------------------------------------------------
     bool PhysicalTemplate::check_preconditions(ReplTraceReplayOp *op,
                                               std::set<RtEvent> &applied_events)
@@ -4206,23 +4239,6 @@ namespace Legion {
           result = false;
       return result;
     } 
-
-    //--------------------------------------------------------------------------
-    PhysicalTemplate::DetailedBoolean PhysicalTemplate::check_replayable(
-                   Operation *op, InnerContext *context, bool has_blocking_call)
-    //--------------------------------------------------------------------------
-    {
-      if (has_blocking_call)
-        return DetailedBoolean(false, "blocking call");
-
-      if (has_virtual_mapping)
-        return DetailedBoolean(false, "virtual mapping");
-
-      if (has_no_consensus)
-        return DetailedBoolean(false, "no recording consensus");
-
-      return DetailedBoolean(true);
-    }
 
     //--------------------------------------------------------------------------
     PhysicalTemplate::DetailedBoolean PhysicalTemplate::check_idempotent(
@@ -4372,6 +4388,7 @@ namespace Legion {
       }
       return DetailedBoolean(true);
     }
+#endif
 
     //--------------------------------------------------------------------------
     void PhysicalTemplate::register_operation(MemoizableOp *memoizable)
@@ -4382,11 +4399,10 @@ namespace Legion {
 #endif
       const TraceLocalID tid = memoizable->get_trace_local_id();
       AutoLock tpl_lock(template_lock);
-      std::map<TraceLocalID,MemoizableOp*> &ops = operations.back();
 #ifdef DEBUG_LEGION
-      assert(ops.find(tid) == ops.end());
+      assert(operations.find(tid) == operations.end());
 #endif
-      ops[tid] = memoizable;
+      operations[tid] = memoizable;
     }
 
     //--------------------------------------------------------------------------
@@ -4397,69 +4413,236 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(slice_idx < slices.size());
 #endif
-      // should be able to read front() even while new maps for operations 
-      // are begin appended to the back of 'operations'
-      std::map<TraceLocalID,MemoizableOp*> &ops = operations.front();
       std::vector<Instruction*> &instructions = slices[slice_idx];
       for (std::vector<Instruction*>::const_iterator it = instructions.begin();
            it != instructions.end(); ++it)
-        (*it)->execute(events, user_events, ops, recurrent_replay);
+        (*it)->execute(events, user_events, operations, recurrent_replay);
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::issue_summary_operations(
-          InnerContext* context, Operation *invalidator, Provenance *provenance)
+    ReplayableStatus PhysicalTemplate::finalize(CompleteOp *op,
+                                                bool has_blocking_call)
     //--------------------------------------------------------------------------
     {
-      TraceSummaryOp *op = trace->runtime->get_available_summary_op();
-      op->initialize_summary(context, this, invalidator, provenance);
-#ifdef LEGION_SPY
-      LegionSpy::log_summary_op_creator(op->get_unique_op_id(),
-                                        invalidator->get_unique_op_id());
-#endif
-      op->execute_dependence_analysis();
-    }
-
-    //--------------------------------------------------------------------------
-    void PhysicalTemplate::finalize(InnerContext *context, Operation *op,
-                                    bool has_blocking_call)
-    //--------------------------------------------------------------------------
-    {
-      recording = false;
-      replayable = check_replayable(op, context, has_blocking_call);
-      if (!replayable) {
-        return;
-      }
-      idempotent = check_idempotent(op, context);
-      optimize(op, false/*do transitive reduction inline*/);
-      // TODO (rohany): Should we dump traces before and after the transitive
-      //  reduction, or just do it once the transitive reduction is done?
-      if (trace->runtime->dump_physical_traces) {
-        dump_template();
-      }
-      std::fill(events.begin(), events.end(), ApEvent::NO_AP_EVENT);
-      event_map.clear();
-      // Defer performing the transitive reduction because it might
-      // be expensive (see comment above). Note you can only kick off
-      // the transitive reduction in the background once all the other
-      // optimizations are done so that they don't race on mutating
-      // the instruction and event data structures
-      if (!trace->runtime->no_trace_optimization &&
-          !trace->runtime->no_transitive_reduction)
+      if (has_no_consensus.load())
+        replayable = NOT_REPLAYABLE_CONSENSUS;
+      else if (has_blocking_call)
+        replayable = NOT_REPLAYABLE_BLOCKING;
+      else if (has_virtual_mapping)
+        replayable = NOT_REPLAYABLE_VIRTUAL;
+      op->begin_replayable_exchange(replayable);
+      idempotency = capture_conditions(op); 
+      op->begin_idempotent_exchange(idempotency);
+      op->end_replayable_exchange(replayable);
+      if (is_replayable())
       {
-        TransitiveReductionState *state = 
-          new TransitiveReductionState(Runtime::create_rt_user_event());
-        transitive_reduction_done = state->done;
-        TransitiveReductionArgs args(this, state);
-        trace->runtime->issue_runtime_meta_task(args, LG_LOW_PRIORITY);
+        // Optimize will sync the idempotency computation
+        optimize(op, false/*do transitive reduction inline*/);
+        std::fill(events.begin(), events.end(), ApEvent::NO_AP_EVENT);
+        event_map.clear();
+        // Defer performing the transitive reduction because it might
+        // be expensive (see comment above). Note you can only kick off
+        // the transitive reduction in the background once all the other
+        // optimizations are done so that they don't race on mutating
+        // the instruction and event data structures
+        if (!trace->runtime->no_trace_optimization &&
+            !trace->runtime->no_transitive_reduction)
+        {
+          TransitiveReductionState *state = 
+            new TransitiveReductionState(Runtime::create_rt_user_event());
+          transitive_reduction_done = state->done;
+          TransitiveReductionArgs args(this, state);
+          trace->runtime->issue_runtime_meta_task(args, LG_LOW_PRIORITY);
+        }
+        // Can dump now if we're not deferring the transitive reduction
+        else if (trace->runtime->dump_physical_traces)
+          dump_template();
       }
-      // Can dump now if we're not deferring the transitive reduction
-      else if (trace->runtime->dump_physical_traces)
-        dump_template();
+      else
+      {
+        if (trace->runtime->dump_physical_traces)
+        {
+          // Optimize will sync the idempotency computation
+          optimize(op, !trace->runtime->no_transitive_reduction);
+          dump_template();
+        }
+        else
+          op->end_idempotent_exchange(idempotency);
+      }
+      return replayable;
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::optimize(Operation *op, bool do_transitive_reduction)
+    IdempotencyStatus PhysicalTemplate::capture_conditions(CompleteOp *op)
+    //--------------------------------------------------------------------------
+    {
+      // First let's get the equivalence sets with data for these regions
+      // We'll use the result to get guide the creation of the trace condition
+      // sets. Note we're going to end up recomputing the equivalence sets
+      // inside the trace condition sets but that is a small price to pay to
+      // minimize the number of conditions that we need to do the capture
+      // Next we need to compute the equivalence sets for all these regions
+      FieldMaskSet<EquivalenceSet> current_sets;
+      Operation *operation = op->get_operation();
+      InnerContext *context = trace->logical_trace->context;
+      std::map<EquivalenceSet*,unsigned> parent_req_indexes;
+      {
+        std::set<RtEvent> eq_events;
+        const ContextID ctx = context->get_physical_tree_context();
+        // Need to count how many version infos there are before we
+        // start since we can't resize the vector once we start
+        // compute the equivalence sets for any of them
+        unsigned index = 0;
+        for (LegionVector<FieldMaskSet<RegionNode> >::const_iterator it =
+              trace_regions.begin(); it != trace_regions.end(); it++)
+          index += it->size();
+        LegionVector<VersionInfo> version_infos(index);
+        index = 0;
+        for (unsigned idx = 0; idx < trace_regions.size(); idx++)
+        {
+          for (FieldMaskSet<RegionNode>::const_iterator it = 
+                trace_regions[idx].begin(); it !=
+                trace_regions[idx].end(); it++)
+          {
+            it->first->perform_versioning_analysis(ctx, context,
+                &version_infos[index++], it->second, operation,
+                0/*index*/, idx, eq_events);
+          }
+        }
+        index = 0;
+        if (!eq_events.empty())
+        {
+          const RtEvent wait_on = Runtime::merge_events(eq_events);
+          if (wait_on.exists() && !wait_on.has_triggered())
+            wait_on.wait();
+        }
+        // Transpose over to equivalence sets
+        for (unsigned idx = 0; idx < trace_regions.size(); idx++)
+        {
+          for (FieldMaskSet<RegionNode>::const_iterator rit = 
+                trace_regions[idx].begin(); rit !=
+                trace_regions[idx].end(); rit++)
+          {
+            const FieldMaskSet<EquivalenceSet> &region_sets = 
+                version_infos[index++].get_equivalence_sets();
+            for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
+                  region_sets.begin(); it != region_sets.end(); it++)
+            {
+              if (current_sets.insert(it->first, it->second))
+                parent_req_indexes[it->first] = idx; 
+#ifdef DEBUG_LEGION
+              else
+                assert(parent_req_indexes[it->first] == idx);
+#endif
+            }
+            if (rit->first->remove_base_resource_ref(TRACE_REF))
+              delete rit->first;
+          }
+        }
+        trace_regions.clear();
+      }
+      // Make a trace condition set for each one of them
+      std::vector<RtEvent> ready_events;
+      conditions.reserve(current_sets.size());
+      RegionTreeForest *forest = trace->runtime->forest;
+      for (FieldMaskSet<EquivalenceSet>::const_iterator it =
+            current_sets.begin(); it != current_sets.end(); it++)
+      {
+        std::map<EquivalenceSet*,unsigned>::const_iterator finder =
+          parent_req_indexes.find(it->first);
+#ifdef DEBUG_LEGION
+        assert(finder != parent_req_indexes.end());
+#endif
+        TraceConditionSet *condition = new TraceConditionSet(trace, forest,
+           finder->second, it->first->set_expr, it->second, it->first->tree_id);
+        condition->add_reference();
+        // This looks redundant because it is a bit since we're just going
+        // to compute the single equivalence set we already have here but
+        // really what we're doing here is registering the condition with
+        // the VersionManager that owns this equivalence set which is a
+        // necessary thing for us to do
+        const RtEvent ready = condition->recompute_equivalence_sets(
+            operation->get_unique_op_id(), it->second);
+        if (ready.exists())
+          ready_events.push_back(ready);
+        condition->capture(it->first, it->second, ready_events);
+        conditions.push_back(condition);
+      }
+      if (!ready_events.empty())
+      {
+        const RtEvent wait_on = Runtime::merge_events(ready_events);
+        ready_events.clear();
+        if (wait_on.exists() && !wait_on.has_triggered())
+          wait_on.wait();
+      }
+      IdempotencyStatus status = IDEMPOTENT;
+      for (std::vector<TraceConditionSet*>::iterator it =
+            conditions.begin(); it != conditions.end(); /*nothing*/)
+      {
+        if ((*it)->is_empty())
+        {
+          (*it)->invalidate_equivalence_sets();
+          if ((*it)->remove_reference())
+            delete (*it);
+          it = conditions.erase(it);
+          continue;
+        }
+        bool not_subsumed = false;
+        // Check all of them so that they each set their states
+        if (!(*it)->is_idempotent(not_subsumed))
+        {
+          if (not_subsumed)
+            status = NOT_IDEMPOTENT_SUBSUMPTION;
+          else
+            status = NOT_IDEMPOTENT_ANTIDEPENDENT;
+        }
+        it++;
+      }
+      return status;
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::refresh_condition_sets(FenceOp *op,
+                                       std::vector<RtEvent> &ready_events) const
+    //--------------------------------------------------------------------------
+    {
+      for (std::vector<TraceConditionSet*>::const_iterator it =
+            conditions.begin(); it != conditions.end(); it++)
+        (*it)->refresh_equivalence_sets(op, ready_events);
+    }
+
+    //--------------------------------------------------------------------------
+    bool PhysicalTemplate::acquire_instance_references(void) const
+    //--------------------------------------------------------------------------
+    {
+      for (std::vector<PhysicalManager*>::const_iterator it =
+            all_instances.begin(); it != all_instances.end(); it++)
+      {
+        if (!(*it)->acquire_instance(TRACE_REF))
+        {
+          // Remove all the references we already added up to now
+          // No need to check for deletion, we stil have gc references
+          for (std::vector<PhysicalManager*>::const_iterator it2 =
+                all_instances.begin(); it2 != it; it2++)
+            (*it2)->remove_base_valid_ref(TRACE_REF);
+          return false;
+        }
+      }
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::release_instance_references(void) const
+    //--------------------------------------------------------------------------
+    {
+      // No need to check for deletions, we stil hold gc references
+      for (std::vector<PhysicalManager*>::const_iterator it =
+            all_instances.begin(); it != all_instances.end(); it++)
+        (*it)->remove_base_valid_ref(TRACE_REF);
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::optimize(CompleteOp *op,bool do_transitive_reduction)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -4467,17 +4650,7 @@ namespace Legion {
 #endif
       std::vector<RtEvent> frontier_events;
       find_all_last_instance_user_events(frontier_events);
-      std::vector<unsigned> gen;
-      // Fence elision can only be performed if the template is idempotent.
-      if (!trace->perform_fence_elision || !idempotent)
-      {
-        compute_frontiers(frontier_events);
-        gen.resize(events.size(), 0/*fence instruction*/);
-        for (unsigned idx = 0; idx < instructions.size(); ++idx)
-          gen[idx] = idx;
-      }
-      else
-        elide_fences(gen, frontier_events);
+      compute_frontiers(frontier_events);
       // Check to see if the indirection fields for any across copies are
       // mutated during the execution of the trace. If they aren't then we
       // know that we don't need to recompute preimages on back-to-back replays
@@ -4500,6 +4673,18 @@ namespace Legion {
         }
         across_copies.clear();
       }
+      std::vector<unsigned> gen;
+      // Sync the idempotency computation 
+      op->end_idempotent_exchange(idempotency);
+      // Fence elision can only be performed if the template is idempotent.
+      if (!is_idempotent() || !trace->perform_fence_elision)
+      {
+        gen.resize(events.size(), 0/*fence instruction*/);
+        for (unsigned idx = 0; idx < instructions.size(); ++idx)
+          gen[idx] = idx;
+      }
+      else
+        elide_fences(gen, frontier_events);
       // Sync the frontier computation so we know that all our frontier data
       // structures such as 'local_frontiers' and 'remote_frontiers' are ready
       sync_compute_frontiers(op, frontier_events);
@@ -4524,10 +4709,18 @@ namespace Legion {
       dst_indirect_insts.clear();
       instance_last_users.clear();
       // We don't need the expression or view references anymore
+      // We do need to translate the recorded views into a vector of instances
+      // that need to be acquired in order for the template to be replayed
+      all_instances.reserve(recorded_views.size());
       for (std::map<DistributedID,IndividualView*>::const_iterator it =
             recorded_views.begin(); it != recorded_views.end(); it++)
-        if (it->second->remove_base_valid_ref(TRACE_REF))
+      {
+        PhysicalManager *manager = it->second->get_manager();
+        manager->add_base_gc_ref(TRACE_REF);
+        all_instances.push_back(manager);
+        if (it->second->remove_base_gc_ref(TRACE_REF))
           delete it->second;
+      }
       recorded_views.clear();
       for (std::set<IndexSpaceExpression*>::const_iterator it =
            recorded_expressions.begin(); it != recorded_expressions.end(); it++)
@@ -4582,15 +4775,13 @@ namespace Legion {
           LastUserResult &result = results.back();
           std::map<DistributedID,IndividualView*>::const_iterator finder =
             recorded_views.find(uit->instance.view_did);
-          RtEvent ready;
-          PhysicalManager *manager = 
-            trace->runtime->find_or_request_instance_manager(
-                                uit->instance.inst_did, ready);
 #ifdef DEBUG_LEGION
           assert(finder != recorded_views.end());
 #endif
-          if (ready.exists() && !ready.has_triggered())
-            ready.wait();
+          PhysicalManager *manager = finder->second->get_manager();
+#ifdef DEBUG_LEGION
+          assert(manager->did == uit->instance.inst_did);
+#endif
           const RegionUsage usage(LEGION_READ_WRITE, LEGION_EXCLUSIVE, 0);
           finder->second->find_last_users(manager, result.events, usage,
               uit->mask, uit->expr, frontier_events);
@@ -4734,8 +4925,6 @@ namespace Legion {
 
       unsigned merge_starts = events.size();
       events.resize(events.size() + num_merges);
-
-      compute_frontiers(ready_events);
 
       // We are now going to break the invariant that
       // the generator of events[idx] is instructions[idx].
@@ -5001,7 +5190,7 @@ namespace Legion {
           Instruction *inst = instructions[idx];
           // Fence elision-style operations can only be performed if the
           // trace is idempotent.
-          if (trace->perform_fence_elision && idempotent)
+          if (trace->perform_fence_elision && is_idempotent())
           {
             if (inst->get_kind() == MERGE_EVENT)
             {
@@ -5037,7 +5226,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::sync_compute_frontiers(Operation *op,
+    void PhysicalTemplate::sync_compute_frontiers(CompleteOp *op,
                                     const std::vector<RtEvent> &frontier_events)
     //--------------------------------------------------------------------------
     {
@@ -6334,21 +6523,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::dump_template(void)
+    void PhysicalTemplate::dump_template(void) const
     //--------------------------------------------------------------------------
     {
       InnerContext *ctx = trace->logical_trace->context;
-      log_tracing.info() << "#### Replayable:" << replayable << ", Idempotent:"
-        << idempotent << " " << this << " Trace "
-        << trace->logical_trace->tid << " for " << ctx->get_task_name()
+      log_tracing.info() << "#### Replayable:" << replayable 
+        << ", Idempotent:" << idempotency << " " 
+        << this << " Trace " << trace->logical_trace->tid << " for " 
+        << ctx->get_task_name()
         << " (UID " << ctx->get_unique_id() << ") ####";
       for (unsigned sidx = 0; sidx < replay_parallelism; ++sidx)
       {
         log_tracing.info() << "[Slice " << sidx << "]";
         dump_instructions(slices[sidx]);
       }
-      for (std::map<unsigned, unsigned>::iterator it = frontiers.begin();
-           it != frontiers.end(); ++it)
+      for (std::map<unsigned, unsigned>::const_iterator it = 
+            frontiers.begin(); it != frontiers.end(); ++it)
         log_tracing.info() << "  events[" << it->second << "] = events["
                            << it->first << "]";
       dump_sharded_template();
@@ -6371,7 +6561,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PhysicalTemplate::dump_instructions(
-                                  const std::vector<Instruction*> &instructions)
+                            const std::vector<Instruction*> &instructions) const
     //--------------------------------------------------------------------------
     {
       for (std::vector<Instruction*>::const_iterator it = instructions.begin();
@@ -6456,8 +6646,6 @@ namespace Legion {
           const InstanceRef &ref = (*it)[idx];
           if (ref.is_virtual_ref())
             has_virtual_mapping = true;
-          else
-            ref.add_valid_reference(MAPPING_ACQUIRE_REF);
         }
       }
     }
@@ -6949,7 +7137,7 @@ namespace Legion {
         recorded_views[instance.view_did] = view;
         if (ready.exists() && !ready.has_triggered())
           ready.wait();
-        view->add_base_valid_ref(TRACE_REF);
+        view->add_base_gc_ref(TRACE_REF);
       }
       if (recorded_expressions.insert(expr).second)
         expr->add_base_expression_reference(TRACE_REF);
@@ -6971,7 +7159,7 @@ namespace Legion {
         recorded_views[inst.view_did] = view;
         if (ready.exists() && !ready.has_triggered())
           ready.wait();
-        view->add_base_valid_ref(TRACE_REF);
+        view->add_base_gc_ref(TRACE_REF);
       }
       if (insts.insert(expr,mask) && recorded_expressions.insert(expr).second)
         expr->add_base_expression_reference(TRACE_REF);
@@ -7203,43 +7391,20 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::initialize_replay(ApEvent completion, 
-                                             bool recurrent, bool need_lock)
+    void PhysicalTemplate::initialize_replay(ApEvent completion, bool recurrent)
     //--------------------------------------------------------------------------
     {
-      if (need_lock)
-      {
-        AutoLock t_lock(template_lock);
-        initialize_replay(completion, recurrent, false/*need lock*/);
-        return;
-      }
-      operations.emplace_back(std::map<TraceLocalID,MemoizableOp*>());
-      pending_replays.emplace_back(std::make_pair(completion, recurrent));
-    }
-
-    //--------------------------------------------------------------------------
-    void PhysicalTemplate::perform_replay(Runtime *runtime, 
-                                          std::set<RtEvent> &replayed_events)
-    //--------------------------------------------------------------------------
-    {
-      RtEvent replay_precondition;
+#ifdef DEBUG_LEGION
+      assert(operations.empty());
+#endif
       if (total_replays++ == Realm::Barrier::MAX_PHASES)
       {
         replay_precondition = refresh_managed_barriers();
         // Reset it back to one after updating our barriers
         total_replays = 1;
       }
-      ApEvent completion;
-      bool recurrent;
-      {
-        AutoLock t_lock(template_lock);
-#ifdef DEBUG_LEGION
-        assert(!pending_replays.empty());
-#endif
-        completion = pending_replays.front().first;
-        recurrent = pending_replays.front().second;
-        pending_replays.pop_front();
-      }
+      else
+        replay_precondition = RtEvent::NO_RT_EVENT;
       // Check to see if we have a finished transitive reduction result
       TransitiveReductionState *state = finished_transitive_reduction.load();
       if (state != NULL)
@@ -7251,29 +7416,25 @@ namespace Legion {
         // We also need to rerun the propagate copies analysis to
         // remove any mergers which contain only a single input
         propagate_copies(NULL/*don't need the gen out*/);
-        if (runtime->dump_physical_traces)
+        if (trace->runtime->dump_physical_traces)
           dump_template();
       }
 
       if (recurrent)
       {
-        if (last_fence == NULL)
-          fence_completion = ApEvent::NO_AP_EVENT;
-        else
-          fence_completion = completion;
+        if (last_fence != NULL)
+          events[fence_completion_id] = events[last_fence->lhs];
         for (std::map<unsigned, unsigned>::iterator it = frontiers.begin();
             it != frontiers.end(); ++it)
           events[it->second] = events[it->first];
       }
       else
       {
-        fence_completion = completion;
+        events[fence_completion_id] = completion;
         for (std::map<unsigned, unsigned>::iterator it = frontiers.begin();
             it != frontiers.end(); ++it)
           events[it->second] = completion;
       }
-
-      events[fence_completion_id] = fence_completion;
 
       for (std::map<unsigned, unsigned>::iterator it =
             crossing_events.begin(); it != crossing_events.end(); ++it)
@@ -7282,18 +7443,24 @@ namespace Legion {
         events[it->first] = ev;
         user_events[it->first] = ev;
       }
+    }
 
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::perform_replay(Runtime *runtime, 
+                                          std::vector<RtEvent> &replayed_events)
+    //--------------------------------------------------------------------------
+    {
       const std::vector<Processor> &replay_targets = 
         trace->get_replay_targets();
       for (unsigned idx = 0; idx < replay_parallelism; ++idx)
       {
-        ReplaySliceArgs args(this, idx, recurrent);
+        ReplaySliceArgs args(this, idx, trace->is_recurrent());
         const RtEvent done = runtime->replay_on_cpus ?
           runtime->issue_application_processor_task(args, LG_LOW_PRIORITY,
             replay_targets[idx % replay_targets.size()], replay_precondition) :
           runtime->issue_runtime_meta_task(args, LG_THROUGHPUT_WORK_PRIORITY,
             replay_precondition, replay_targets[idx % replay_targets.size()]);
-        replayed_events.insert(done);
+        replayed_events.push_back(done);
       }
     }
 
@@ -7340,12 +7507,7 @@ namespace Legion {
         postconditions.insert(events[it->first]);
       if (last_fence != NULL)
         postconditions.insert(events[last_fence->lhs]);
-      // Now we can remove the operations as well
-      AutoLock t_lock(template_lock);
-#ifdef DEBUG_LEGION
-      assert(!operations.empty());
-#endif
-      operations.pop_front();
+      operations.clear();
     }
 
     //--------------------------------------------------------------------------
@@ -8537,40 +8699,7 @@ namespace Legion {
       return id.event_creator_node();
     }
 
-    //--------------------------------------------------------------------------
-    PhysicalTemplate::DetailedBoolean ShardedPhysicalTemplate::check_replayable(
-                   Operation *op, InnerContext *context, bool has_blocking_call)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(op != NULL);
-      ReplTraceOp *repl_op = dynamic_cast<ReplTraceOp*>(op);
-      assert(repl_op != NULL);
-#else
-      ReplTraceOp *repl_op = static_cast<ReplTraceOp*>(op);
-#endif
-      // We need everyone else to be done capturing their traces
-      // before we can do our own replayable check
-      repl_op->sync_for_replayable_check();
-      // Do the base call first to determine if our local shard is replayable
-      const DetailedBoolean result =
-       PhysicalTemplate::check_replayable(op, context, has_blocking_call);
-      if (result)
-      {
-        // Now we can do the exchange
-        if (repl_op->exchange_replayable(repl_ctx, true/*replayable*/))
-          return result;
-        else
-          return DetailedBoolean(false, "Remote shard not replyable");
-      }
-      else
-      {
-        // Still need to do the exchange
-        repl_op->exchange_replayable(repl_ctx, false/*replayable*/);
-        return result;
-      }
-    }
-
+#if 0
     //--------------------------------------------------------------------------
     PhysicalTemplate::DetailedBoolean ShardedPhysicalTemplate::check_idempotent(
         Operation *op, InnerContext *context)
@@ -8604,43 +8733,17 @@ namespace Legion {
         return result;
       }
     }
-
-
-    //--------------------------------------------------------------------------
-    void ShardedPhysicalTemplate::initialize_replay(
-                       ApEvent fence_completion, bool recurrent, bool need_lock)
-    //--------------------------------------------------------------------------
-    {
-      if (need_lock)
-      {
-        AutoLock t_lock(template_lock);
-        initialize_replay(fence_completion, recurrent, false/*need lock*/);
-        return;
-      }
-      PhysicalTemplate::initialize_replay(fence_completion, recurrent, false);
-      pending_collectives.emplace_back(
-          std::map<std::pair<size_t,size_t>,ApBarrier>());
-    }
-
-    //--------------------------------------------------------------------------
-    void ShardedPhysicalTemplate::perform_replay(Runtime *runtime,
-                                             std::set<RtEvent> &replayed_events)
-    //--------------------------------------------------------------------------
-    {
-      ApEvent completion; bool recurrent;
-      std::map<std::pair<size_t,size_t>,ApBarrier> collective_updates;
-      {
-        AutoLock t_lock(template_lock);
-#ifdef DEBUG_LEGION
-        assert(!pending_replays.empty());
-        assert(!pending_collectives.empty());
 #endif
-        const std::pair<ApEvent,bool> &pending = pending_replays.front();
-        completion = pending.first;
-        recurrent = pending.second;
-        collective_updates.swap(pending_collectives.front());
-        pending_collectives.pop_front();
-      }
+
+    //--------------------------------------------------------------------------
+    void ShardedPhysicalTemplate::initialize_replay(ApEvent completion,
+                                                    bool recurrent)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(pending_collectives.empty());
+#endif
+      PhysicalTemplate::initialize_replay(completion, recurrent);
       // Now update all of our barrier information
       if (recurrent)
       {
@@ -8767,10 +8870,17 @@ namespace Legion {
               remote_frontiers.begin(); it != remote_frontiers.end(); it++)
           events[it->second] = completion;
       }
-      if (!collective_updates.empty())
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardedPhysicalTemplate::perform_replay(Runtime *runtime,
+                                          std::vector<RtEvent> &replayed_events)
+    //--------------------------------------------------------------------------
+    {
+      if (!pending_collectives.empty())
       {
         for (std::map<std::pair<size_t,size_t>,ApBarrier>::const_iterator it =
-              collective_updates.begin(); it != collective_updates.end(); it++)
+             pending_collectives.begin(); it != pending_collectives.end(); it++)
         {
           // This data structure should be read-only at this point
           // so we shouldn't need the lock to access it
@@ -8781,6 +8891,7 @@ namespace Legion {
 #endif
           finder->second->set_managed_barrier(it->second);
         }
+        pending_collectives.clear();
       }
       // Now call the base version of this
       PhysicalTemplate::perform_replay(runtime, replayed_events); 
@@ -8897,12 +9008,7 @@ namespace Legion {
         postconditions.insert(events[it->first]);
       if (last_fence != NULL)
         postconditions.insert(events[last_fence->lhs]);
-      // Now we can remove the operations as well
-      AutoLock t_lock(template_lock);
-#ifdef DEBUG_LEGION
-      assert(!operations.empty());
-#endif
-      operations.pop_front(); 
+      operations.clear();
     }
 
     //--------------------------------------------------------------------------
@@ -9063,27 +9169,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ShardedPhysicalTemplate::issue_summary_operations(
-          InnerContext *context, Operation *invalidator, Provenance *provenance)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(context);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(context); 
-#endif
-      ReplTraceSummaryOp *op = trace->runtime->get_available_repl_summary_op();
-      op->initialize_summary(repl_ctx, this, invalidator, provenance);
-#ifdef LEGION_SPY
-      LegionSpy::log_summary_op_creator(op->get_unique_op_id(),
-                                        invalidator->get_unique_op_id());
-#endif
-      op->execute_dependence_analysis();
-    }
-
-    //--------------------------------------------------------------------------
-    void ShardedPhysicalTemplate::dump_sharded_template(void)
+    void ShardedPhysicalTemplate::dump_sharded_template(void) const
     //--------------------------------------------------------------------------
     {
       for (std::vector<std::pair<ApBarrier,unsigned> >::const_iterator it =
@@ -9150,11 +9236,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock t_lock(template_lock);
-#ifdef DEBUG_LEGION
-      assert(!pending_collectives.empty());
-#endif
       // Save the barrier until it's safe to update the instruction
-      pending_collectives.back()[key] = newbar;
+      pending_collectives[key] = newbar;
     }
 
     //--------------------------------------------------------------------------
@@ -9242,20 +9325,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ShardedPhysicalTemplate::sync_compute_frontiers(Operation *op,
+    void ShardedPhysicalTemplate::sync_compute_frontiers(CompleteOp *op,
                                     const std::vector<RtEvent> &frontier_events)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(op != NULL);
-      ReplTraceOp *repl_op = dynamic_cast<ReplTraceOp*>(op);
-#else
-      ReplTraceOp *repl_op = static_cast<ReplTraceOp*>(op);
-#endif
       if (!frontier_events.empty())
-        repl_op->sync_compute_frontiers(Runtime::merge_events(frontier_events));
+        op->sync_compute_frontiers(Runtime::merge_events(frontier_events));
       else
-        repl_op->sync_compute_frontiers(RtEvent::NO_RT_EVENT);
+        op->sync_compute_frontiers(RtEvent::NO_RT_EVENT);
       // Check for any empty remote frontiers which were not actually
       // contained in the trace and therefore need to be pruned out of
       // any event mergers
@@ -9653,7 +9730,7 @@ namespace Legion {
                                const bool recurrent_replay)
     //--------------------------------------------------------------------------
     {
-      events[lhs] = tpl.get_fence_completion();
+      // This is a no-op since it gets assigned during initialize replay
     }
 
     //--------------------------------------------------------------------------

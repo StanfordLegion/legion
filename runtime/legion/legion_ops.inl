@@ -28,84 +28,17 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename OP>
-    void Memoizable<OP>::initialize_memoizable(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!this->is_memoizing()); // should always be no memo here
-#endif
-      PhysicalTrace *const physical_trace = (this->trace == NULL) ? NULL :
-          this->trace->get_physical_trace();
-      // Only invoke memoization if we are doing physical tracing
-      if (physical_trace != NULL)
-      {
-        this->tpl = physical_trace->get_current_template();
-        if ((this->tpl == NULL) || !this->tpl->is_replaying())
-          this->invoke_memoize_operation();
-        else
-          this->memo_state = OP::MEMO_REQ; // replaying so memoization required
-      }
-#ifdef DEBUG_LEGION
-      assert(!this->is_memoizing() || (this->memo_state == OP::MEMO_REQ));
-#endif
-      if (this->memo_state == OP::MEMO_REQ)
-      {
-        if (this->tpl == NULL)
-        {
-          this->trace->set_state_record();
-          this->tpl = physical_trace->start_new_template();
-#ifdef DEBUG_LEGION
-          assert(this->tpl != NULL);
-#endif
-        }
-        if (this->tpl->is_replaying())
-        {
-#ifdef DEBUG_LEGION
-          assert(this->trace->is_replaying());
-          assert(this->tpl->is_replaying());
-#endif
-          this->memo_state = OP::MEMO_REPLAY;
-          this->trigger_replay();
-        }
-        // Check that all the recorders agree on recording
-        else if (physical_trace->check_memoize_consensus(this->trace_local_id))
-        {
-#ifdef DEBUG_LEGION
-          assert(this->trace->is_recording());
-          assert(this->tpl->is_recording());
-#endif
-          this->memo_state = OP::MEMO_RECORD;
-        }
-        else
-          this->memo_state = OP::NO_MEMO;
-      }
-      else if (this->tpl != NULL)
-      {
-#ifdef DEBUG_LEGION
-        assert(this->tpl->is_recording());
-#endif
-        this->tpl->record_no_consensus();
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename OP>
-    void Memoizable<OP>::trigger_dependence_analysis(void)
-    //--------------------------------------------------------------------------
-    {
-      if (!this->is_replaying())
-        OP::trigger_dependence_analysis();
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename OP>
     void Memoizable<OP>::trigger_ready(void)
     //--------------------------------------------------------------------------
     {
-      if (this->is_recording())
-        this->tpl->record_completion_event(this->get_completion_event(),
-              this->get_operation_kind(), this->get_trace_local_id());
-      OP::trigger_ready();
+      this->set_memoizable_state();
+      if (this->is_replaying())
+      {
+        this->tpl->register_operation(this);
+        OP::trigger_replay();
+      }
+      else
+        OP::trigger_ready();
     }
 
     //--------------------------------------------------------------------------
@@ -155,20 +88,12 @@ namespace Legion {
     void Predicated<OP>::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-      if (!this->is_replaying())
-      {
-        // Record a mapping dependence on our predicate
-        if (this->predicate != NULL)
-        {
-          if (this->is_recording())
-            REPORT_LEGION_FATAL(LEGION_FATAL_UNIMPLEMENTED_FEATURE,
-                "Recording of predicated operations is not yet supported")
-          this->register_dependence(this->predicate->creator, 
-                                    this->predicate->creator_gen);
-        }
-        // Then we can do the base initialization
-        OP::trigger_dependence_analysis();
-      }
+      // Record a mapping dependence on our predicate
+      if (this->predicate != NULL)
+        this->register_dependence(this->predicate->creator, 
+                                  this->predicate->creator_gen);
+      // Then we can do the base initialization
+      OP::trigger_dependence_analysis();
     }
 
     //--------------------------------------------------------------------------
@@ -179,8 +104,12 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!this->true_guard.exists() && !this->false_guard.exists());
 #endif
+      this->set_memoizable_state();
       if (this->predication_state == OP::PENDING_PREDICATE_STATE)
       {
+        if (this->is_recording())
+          REPORT_LEGION_FATAL(LEGION_FATAL_UNIMPLEMENTED_FEATURE,
+                "Recording of predicated operations is not yet supported")
 #ifdef DEBUG_LEGION
         assert(this->predicate != NULL);
 #endif
@@ -207,6 +136,9 @@ namespace Legion {
       }
       if (this->predication_state == OP::PREDICATED_FALSE_STATE)
       {
+        if (this->is_recording())
+          REPORT_LEGION_FATAL(LEGION_FATAL_UNIMPLEMENTED_FEATURE,
+                "Recording of predicated operations is not yet supported")
         if (this->runtime->legion_spy_enabled)
           LegionSpy::log_predicated_false_op(this->unique_op_id);
         this->predicate_false();

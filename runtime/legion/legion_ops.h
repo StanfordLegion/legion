@@ -288,11 +288,9 @@ namespace Legion {
         TIMING_OP_KIND,
         TUNABLE_OP_KIND,
         ALL_REDUCE_OP_KIND,
-        TRACE_CAPTURE_OP_KIND,
         TRACE_COMPLETE_OP_KIND,
-        TRACE_REPLAY_OP_KIND,
         TRACE_BEGIN_OP_KIND,
-        TRACE_SUMMARY_OP_KIND,
+        TRACE_INVALIDATION_OP_KIND,
         TASK_OP_KIND,
         LAST_OP_KIND,
       };
@@ -327,11 +325,9 @@ namespace Legion {
         "Timing",                   \
         "Tunable",                  \
         "All Reduce Op",            \
-        "Trace Capture",            \
         "Trace Complete",           \
-        "Trace Replay",             \
         "Trace Begin",              \
-        "Trace Summary",            \
+        "Trace Invalidation",       \
         "Task",                     \
       } 
     public:
@@ -1113,7 +1109,6 @@ namespace Legion {
     public:
       enum MemoizableState {
         NO_MEMO,   // The operation is not subject to memoization
-        MEMO_REQ,  // The mapper requested memoization on this operation
         MEMO_RECORD,    // The runtime is recording analysis for this operation
         MEMO_REPLAY,    // The runtime is replaying analysis for this opeartion
       };
@@ -1139,15 +1134,12 @@ namespace Legion {
       virtual void deactivate(bool free = true);
     public:
       inline PhysicalTemplate* get_template(void) const { return tpl; }
-      inline bool is_memoizing(void) const { return memo_state != NO_MEMO; }
       inline bool is_recording(void) const { return memo_state == MEMO_RECORD;}
       inline bool is_replaying(void) const { return memo_state == MEMO_REPLAY; }
       inline MemoizableState get_memoizable_state(void) const 
         { return memo_state; }
     public:
       virtual void trigger_replay(void) = 0;
-      virtual void initialize_memoizable(void) 
-        { /* do nothing unless override by a base class */ }
       virtual TraceLocalID get_trace_local_id(void) const
         { return TraceLocalID(trace_local_id, DomainPoint()); }
       virtual ApEvent compute_sync_precondition(const TraceInfo &info) const
@@ -1159,7 +1151,8 @@ namespace Legion {
         { assert(false); return ApEvent::NO_AP_EVENT; }
       virtual MemoizableOp* get_memoizable(void) { return this; }
     protected:
-      void invoke_memoize_operation(void);
+      void set_memoizable_state(void);
+      bool can_memoize_operation(void);
       RtEvent record_complete_replay(const TraceInfo &trace_info,
                     RtEvent ready = RtEvent::NO_RT_EVENT,
                     ApEvent precondition = ApEvent::NO_AP_EVENT);
@@ -1188,11 +1181,9 @@ namespace Legion {
         : OP(rt, std::forward<Args>(args) ...) { }
       virtual ~Memoizable(void) { }
     public:
-      virtual void trigger_dependence_analysis(void) override;
       virtual void trigger_ready(void) override;
       virtual ApEvent compute_sync_precondition(
                         const TraceInfo &info) const override;
-      virtual void initialize_memoizable(void) override;
     };
 
     /**
@@ -4839,48 +4830,20 @@ namespace Legion {
     };
 
     /**
-     * \class RemoteReplayOp
-     * This is a remote copy of a trace replay op, it really doesn't
-     * have to do very much at all other than implement the interface
-     * for remote ops as it will only be used for checking equivalence
-     * sets for valid physical template replay conditions
-     */
-    class RemoteReplayOp : public RemoteOp,
-                           public LegionHeapify<RemoteReplayOp> {
-    public:
-      RemoteReplayOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
-      RemoteReplayOp(const RemoteReplayOp &rhs);
-      virtual ~RemoteReplayOp(void);
-    public:
-      RemoteReplayOp& operator=(const RemoteReplayOp &rhs);
-    public:
-      virtual UniqueID get_unique_id(void) const;
-      virtual uint64_t get_context_index(void) const;
-      virtual void set_context_index(uint64_t index);
-      virtual int get_depth(void) const;
-    public:
-      virtual const char* get_logging_name(void) const;
-      virtual OpKind get_operation_kind(void) const;
-      virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
-                                         std::set<RtEvent> &applied) const;
-      virtual void unpack(Deserializer &derez);
-    };
-
-    /**
-     * \class RemoteSummaryOp
-     * This is a remote copy of a trace summary op, it really doesn't
+     * \class RemoteBeginOp
+     * This is a remote copy of a trace begin op, it really doesn't
      * have to do very much at all other than implement the interface
      * for remote ops as it will only be used for updating state for
      * physical template replays
      */
-    class RemoteSummaryOp : public RemoteOp,
-                            public LegionHeapify<RemoteSummaryOp> {
+    class RemoteBeginOp : public RemoteOp,
+                          public LegionHeapify<RemoteBeginOp> {
     public:
-      RemoteSummaryOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
-      RemoteSummaryOp(const RemoteSummaryOp &rhs);
-      virtual ~RemoteSummaryOp(void);
+      RemoteBeginOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
+      RemoteBeginOp(const RemoteBeginOp &rhs) = delete;
+      virtual ~RemoteBeginOp(void);
     public:
-      RemoteSummaryOp& operator=(const RemoteSummaryOp &rhs);
+      RemoteBeginOp& operator=(const RemoteBeginOp &rhs) = delete;
     public:
       virtual UniqueID get_unique_id(void) const;
       virtual uint64_t get_context_index(void) const;
@@ -4905,10 +4868,10 @@ namespace Legion {
                              public LegionHeapify<RemoteCompleteOp> {
     public:
       RemoteCompleteOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
-      RemoteCompleteOp(const RemoteCompleteOp &rhs);
+      RemoteCompleteOp(const RemoteCompleteOp &rhs) = delete;
       virtual ~RemoteCompleteOp(void);
     public:
-      RemoteCompleteOp& operator=(const RemoteCompleteOp &rhs);
+      RemoteCompleteOp& operator=(const RemoteCompleteOp &rhs) = delete;
     public:
       virtual UniqueID get_unique_id(void) const;
       virtual uint64_t get_context_index(void) const;

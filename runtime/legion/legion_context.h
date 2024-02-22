@@ -519,9 +519,6 @@ namespace Legion {
         Provenance *provenance) = 0;
       virtual void end_trace(TraceID tid, bool deprecated,
                              Provenance *provenance) = 0;
-      virtual void record_previous_trace(LogicalTrace *trace) = 0;
-      virtual void invalidate_trace_cache(LogicalTrace *trace,
-                                          Operation *invalidator) = 0;
       virtual void record_blocking_call(uint64_t future_coordinate) = 0;
     public:
       virtual void issue_frame(FrameOp *frame, ApEvent frame_termination) = 0;
@@ -1052,8 +1049,10 @@ namespace Legion {
         { return total_tunable_count++; }
       inline unsigned get_max_trace_templates(void) const
         { return context_configuration.max_templates_per_trace; }
-      void record_physical_trace_replay(RtEvent ready, bool replay);
+      void record_physical_trace_replay(RtEvent ready, 
+                                        bool replay, bool idempotent);
       bool is_replaying_physical_trace(void); 
+      bool is_replaying_idempotent_trace(void);
       inline bool is_concurrent_context(void) const
         { return concurrent_context; }
     public: // Garbage collection methods
@@ -1638,6 +1637,7 @@ namespace Legion {
       virtual bool add_to_dependence_queue(Operation *op, 
           const std::vector<StaticDependence> *dependences = NULL,
           bool unordered = false, bool outermost = true);
+      virtual Operation* initialize_trace_invalidation(Provenance *prov);
       void process_dependence_stage(void);
       void add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
                                   FutureInstance *instance,
@@ -1716,9 +1716,6 @@ namespace Legion {
           Provenance *provenance);
       virtual void end_trace(TraceID tid, bool deprecated,
                              Provenance *provenance);
-      virtual void record_previous_trace(LogicalTrace *trace);
-      virtual void invalidate_trace_cache(LogicalTrace *trace,
-                                          Operation *invalidator);
       virtual void record_blocking_call(uint64_t future_coordinate);
     public:
       virtual void issue_frame(FrameOp *frame, ApEvent frame_termination);
@@ -2084,8 +2081,9 @@ namespace Legion {
       LogicalTrace *current_trace;
       LogicalTrace *previous_trace;
       uint64_t current_trace_future_coordinate;
-      // ID is either 0 for not replaying, 1 for replaying, or
-      // the event id for signaling that the status isn't ready 
+      // ID is either 0 for not replaying, 1 for replaying not idempotent, 
+      // 2 for replaying idempotent or the event id for signaling that 
+      // the status isn't ready 
       std::atomic<realm_id_t> physical_trace_replay_status;
       RtUserEvent window_wait;
       std::deque<ApEvent> frame_events;
@@ -2984,6 +2982,7 @@ namespace Legion {
       virtual bool add_to_dependence_queue(Operation *op, 
           const std::vector<StaticDependence> *dependences = NULL,
           bool unordered = false, bool outermost = true);
+      virtual Operation* initialize_trace_invalidation(Provenance *prov);
       virtual PredicateImpl* create_predicate_impl(Operation *op);
       virtual CollectiveResult* find_or_create_collective_view(
           RegionTreeID tid, const std::vector<DistributedID> &instances, 
@@ -3960,9 +3959,6 @@ namespace Legion {
           Provenance *provenance);
       virtual void end_trace(TraceID tid, bool deprecated,
                              Provenance *provenance);
-      virtual void record_previous_trace(LogicalTrace *trace);
-      virtual void invalidate_trace_cache(LogicalTrace *trace,
-                                          Operation *invalidator);
       virtual void record_blocking_call(uint64_t future_coordinate);
     public:
       virtual void issue_frame(FrameOp *frame, ApEvent frame_termination);

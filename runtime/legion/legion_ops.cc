@@ -1286,6 +1286,11 @@ namespace Legion {
       ShardingFunction *func,
       IndexSpace shard_space)
     {
+      // We can skip doing the analysis for logical regions if we
+      // are replaying a logical trace
+      if ((trace != NULL) && !trace->is_recording())
+        return;
+
       LogicalAnalysis logical_analysis(this, get_output_offset());
 
       unsigned req_count = get_region_count();
@@ -2382,16 +2387,6 @@ namespace Legion {
       // This will also add any necessary dependences
       if ((trace != NULL) && !is_tracing_fence())
         trace_local_id = trace->register_operation(this, gen);
-      // TODO: this is a hack until we can properly move tracing 
-      // into the mapping stage from the dependence analysis stage
-      MemoizableOp *memo = get_memoizable();
-      if (memo != NULL)
-      {
-        memo->initialize_memoizable();
-        if (memo->is_replaying())
-          return;
-      }
-      parent_ctx->invalidate_trace_cache(trace, this);
       // See if we have any fence dependences
       RtEvent mapping_fence_event;
       execution_fence_event =
@@ -2404,25 +2399,13 @@ namespace Legion {
     void Operation::end_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-      // There are some cases right now where we can shard off a task that
-      // is being replayed and it will clean everything up before we even
-      // get to call this function, so handle that case for now, although
-      // this should go away as we move to making replay decisions in the
-      // mapping stage of the pipeline
-      if (mapping_tracker == NULL)
-        return;
 #ifdef DEBUG_LEGION
       assert(mapping_tracker != NULL);
 #endif
       // Cannot touch anything not on our stack after this call
       MappingDependenceTracker *tracker = mapping_tracker;
       mapping_tracker = NULL;
-      // TODO: this is a hack until we can properly move tracing 
-      // into the mapping stage from the dependence analysis stage
-      MemoizableOp *memo = get_memoizable();
-      // Skip all the triggers for things that are replaying
-      if ((memo == NULL) || !memo->is_replaying())
-        tracker->issue_stage_triggers(this, runtime, must_epoch);
+      tracker->issue_stage_triggers(this, runtime, must_epoch);
       delete tracker;
     }
 
@@ -4370,7 +4353,37 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MemoizableOp::invoke_memoize_operation(void)
+    void MemoizableOp::set_memoizable_state(void)
+    //--------------------------------------------------------------------------
+    {
+      // Can be called multiple times so handle that case
+      if (memo_state != NO_MEMO)
+        return;
+      if ((trace != NULL) && trace->has_physical_trace() && !is_tracing_fence())
+      {
+        PhysicalTrace *physical = trace->get_physical_trace();
+        tpl = physical->get_current_template();
+#ifdef DEBUG_LEGION
+        assert(tpl != NULL);
+#endif
+        if (physical->is_recording())
+        {
+          memo_state = MEMO_RECORD;
+          tpl->record_completion_event(get_completion_event(),
+              get_operation_kind(), get_trace_local_id());
+          // Check to see if the mapper is going to allow us to memoize
+          // the result of this or not, if not inform the trace that
+          // this recording needs to be invalidated
+          if (!can_memoize_operation())
+            tpl->record_no_consensus();
+        }
+        else
+          memo_state = MEMO_REPLAY;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    bool MemoizableOp::can_memoize_operation(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -4392,11 +4405,10 @@ namespace Legion {
         assert(mappable != NULL);
 #endif
         mapper->invoke_memoize_operation(mappable, input, output);
-        if (output.memoize)
-          memo_state = MEMO_REQ;
+        return output.memoize;
       }
-      else // Assume that all operations which are not mappable can be memoized
-        memo_state = MEMO_REQ;
+      else
+        return true;
     }
 
     //--------------------------------------------------------------------------
@@ -7971,7 +7983,6 @@ namespace Legion {
 #ifdef LEGION_SPY
       LegionSpy::log_replay_operation(unique_op_id);
 #endif
-      tpl->register_operation(this);
       complete_mapping();
     }
 
@@ -10007,9 +10018,7 @@ namespace Legion {
 #ifdef LEGION_SPY
       LegionSpy::log_replay_operation(unique_op_id);
 #endif
-      if (fence_kind == EXECUTION_FENCE)
-        tpl->register_operation(this);
-      else
+      if (fence_kind != EXECUTION_FENCE)
         complete_execution();
       complete_mapping();
     }
@@ -12772,7 +12781,6 @@ namespace Legion {
 #ifdef LEGION_SPY
       LegionSpy::log_replay_operation(unique_op_id);
 #endif
-      tpl->register_operation(this);
       complete_mapping(finalize_complete_mapping(RtEvent::NO_RT_EVENT));
     }
 
@@ -13616,7 +13624,6 @@ namespace Legion {
 #ifdef LEGION_SPY
       LegionSpy::log_replay_operation(unique_op_id);
 #endif
-      tpl->register_operation(this);
       complete_mapping(finalize_complete_mapping(RtEvent::NO_RT_EVENT));
     }
 
@@ -19117,7 +19124,6 @@ namespace Legion {
 #ifdef LEGION_SPY
       LegionSpy::log_replay_operation(unique_op_id);
 #endif
-      tpl->register_operation(this);
       complete_mapping(finalize_complete_mapping(RtEvent::NO_RT_EVENT));
     }
 
@@ -23119,7 +23125,6 @@ namespace Legion {
 #ifdef LEGION_SPY
       LegionSpy::log_replay_operation(unique_op_id);
 #endif
-      tpl->register_operation(this);
       tpl->get_allreduce_mapping(this, target_memories, future_result_size);
       perform_allreduce();
     }
@@ -23734,15 +23739,10 @@ namespace Legion {
             result = new RemoteDeletionOp(runtime, remote_ptr, source);
             break;
           }
-        case TRACE_REPLAY_OP_KIND:
+        case TRACE_BEGIN_OP_KIND:
           {
-            result = new RemoteReplayOp(runtime, remote_ptr, source);
-            break;
-          }
-        case TRACE_SUMMARY_OP_KIND:
-          {
-            result = new RemoteSummaryOp(runtime, remote_ptr, source);
-            break;
+            result = new RemoteBeginOp(runtime, remote_ptr, source);
+	    break;
           }
 	case TRACE_COMPLETE_OP_KIND:
 	  {
@@ -25175,85 +25175,66 @@ namespace Legion {
     }
 
     ///////////////////////////////////////////////////////////// 
-    // Remote Replay Op 
+    // Remote Begin Op 
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    RemoteReplayOp::RemoteReplayOp(Runtime *rt,
-                                   Operation *ptr, AddressSpaceID src)
+    RemoteBeginOp::RemoteBeginOp(Runtime *rt, Operation *ptr,AddressSpaceID src)
       : RemoteOp(rt, ptr, src)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    RemoteReplayOp::RemoteReplayOp(const RemoteReplayOp &rhs)
-      : RemoteOp(rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    RemoteReplayOp::~RemoteReplayOp(void)
+    RemoteBeginOp::~RemoteBeginOp(void)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    RemoteReplayOp& RemoteReplayOp::operator=(const RemoteReplayOp &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    UniqueID RemoteReplayOp::get_unique_id(void) const
+    UniqueID RemoteBeginOp::get_unique_id(void) const
     //--------------------------------------------------------------------------
     {
       return unique_op_id;
     }
 
     //--------------------------------------------------------------------------
-    uint64_t RemoteReplayOp::get_context_index(void) const
+    uint64_t RemoteBeginOp::get_context_index(void) const
     //--------------------------------------------------------------------------
     {
       return context_index;
     }
 
     //--------------------------------------------------------------------------
-    void RemoteReplayOp::set_context_index(uint64_t index)
+    void RemoteBeginOp::set_context_index(uint64_t index)
     //--------------------------------------------------------------------------
     {
       context_index = index;
     }
 
     //--------------------------------------------------------------------------
-    int RemoteReplayOp::get_depth(void) const
+    int RemoteBeginOp::get_depth(void) const
     //--------------------------------------------------------------------------
     {
       return (parent_ctx->get_depth() + 1);
     }
 
     //--------------------------------------------------------------------------
-    const char* RemoteReplayOp::get_logging_name(void) const
+    const char* RemoteBeginOp::get_logging_name(void) const
     //--------------------------------------------------------------------------
     {
-      return op_names[TRACE_REPLAY_OP_KIND];
+      return op_names[TRACE_BEGIN_OP_KIND];
     }
 
     //--------------------------------------------------------------------------
-    Operation::OpKind RemoteReplayOp::get_operation_kind(void) const
+    Operation::OpKind RemoteBeginOp::get_operation_kind(void) const
     //--------------------------------------------------------------------------
     {
-      return TRACE_REPLAY_OP_KIND;
+      return TRACE_BEGIN_OP_KIND;
     }
 
     //--------------------------------------------------------------------------
-    void RemoteReplayOp::pack_remote_operation(Serializer &rez,
+    void RemoteBeginOp::pack_remote_operation(Serializer &rez,
                  AddressSpaceID target, std::set<RtEvent> &applied_events) const
     //--------------------------------------------------------------------------
     {
@@ -25261,100 +25242,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RemoteReplayOp::unpack(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      // Nothing for the moment
-    }
-
-    ///////////////////////////////////////////////////////////// 
-    // Remote Summary Op 
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    RemoteSummaryOp::RemoteSummaryOp(Runtime *rt,
-                                     Operation *ptr, AddressSpaceID src)
-      : RemoteOp(rt, ptr, src)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    RemoteSummaryOp::RemoteSummaryOp(const RemoteSummaryOp &rhs)
-      : RemoteOp(rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    RemoteSummaryOp::~RemoteSummaryOp(void)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    RemoteSummaryOp& RemoteSummaryOp::operator=(const RemoteSummaryOp &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    UniqueID RemoteSummaryOp::get_unique_id(void) const
-    //--------------------------------------------------------------------------
-    {
-      return unique_op_id;
-    }
-
-    //--------------------------------------------------------------------------
-    uint64_t RemoteSummaryOp::get_context_index(void) const
-    //--------------------------------------------------------------------------
-    {
-      return context_index;
-    }
-
-    //--------------------------------------------------------------------------
-    void RemoteSummaryOp::set_context_index(uint64_t index)
-    //--------------------------------------------------------------------------
-    {
-      context_index = index;
-    }
-
-    //--------------------------------------------------------------------------
-    int RemoteSummaryOp::get_depth(void) const
-    //--------------------------------------------------------------------------
-    {
-      return (parent_ctx->get_depth() + 1);
-    }
-
-    //--------------------------------------------------------------------------
-    const char* RemoteSummaryOp::get_logging_name(void) const
-    //--------------------------------------------------------------------------
-    {
-      return op_names[TRACE_SUMMARY_OP_KIND];
-    }
-
-    //--------------------------------------------------------------------------
-    Operation::OpKind RemoteSummaryOp::get_operation_kind(void) const
-    //--------------------------------------------------------------------------
-    {
-      return TRACE_SUMMARY_OP_KIND;
-    }
-
-    //--------------------------------------------------------------------------
-    void RemoteSummaryOp::pack_remote_operation(Serializer &rez,
-                 AddressSpaceID target, std::set<RtEvent> &applied_events) const
-    //--------------------------------------------------------------------------
-    {
-      pack_remote_base(rez);
-    }
-
-    //--------------------------------------------------------------------------
-    void RemoteSummaryOp::unpack(Deserializer &derez)
+    void RemoteBeginOp::unpack(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       // Nothing for the moment
@@ -25373,27 +25261,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RemoteCompleteOp::RemoteCompleteOp(const RemoteCompleteOp &rhs)
-      : RemoteOp(rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
     RemoteCompleteOp::~RemoteCompleteOp(void)
     //--------------------------------------------------------------------------
     {
-    }
-
-    //--------------------------------------------------------------------------
-    RemoteCompleteOp& RemoteCompleteOp::operator=(const RemoteCompleteOp &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
     }
 
     //--------------------------------------------------------------------------
