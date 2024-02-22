@@ -585,7 +585,12 @@ namespace Legion {
       // data for this future instance of a given size, if the needed size
       // does not match the base size then a fresh instance will be returned
       // which will be the responsibility of the caller to destroy
+#ifndef LEGION_UNDO_FUTURE_INSTANCE_HACK
+      PhysicalInstance get_instance(size_t needed_size, 
+          LgEvent &inst_event, bool &own_inst);
+#else
       PhysicalInstance get_instance(size_t needed_size, bool &own_inst);
+#endif
       bool defer_deletion(ApEvent precondition);
     public:
       bool can_pack_by_value(void) const;
