@@ -9715,12 +9715,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     AssignFenceCompletion::AssignFenceCompletion(
                        PhysicalTemplate& t, unsigned l, const TraceLocalID &o)
-      : Instruction(t, o), tpl(t), lhs(l)
+      : Instruction(t, o), lhs(l)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(lhs < tpl.events.size());
-#endif
     }
 
     //--------------------------------------------------------------------------

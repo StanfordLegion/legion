@@ -1625,7 +1625,6 @@ namespace Legion {
         { return this; }
     private:
       friend class PhysicalTemplate;
-      PhysicalTemplate &tpl;
       unsigned lhs;
     };
 
