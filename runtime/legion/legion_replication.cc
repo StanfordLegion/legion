@@ -8324,9 +8324,9 @@ namespace Legion {
       idempotent_collective = new AllReduceCollective<ProdReduction<bool> >(
           repl_ctx, idempotent_collective_id);
       if (status == IDEMPOTENT)
-        replayable_collective->async_all_reduce(true);
+        idempotent_collective->async_all_reduce(true);
       else
-        replayable_collective->async_all_reduce(false);
+        idempotent_collective->async_all_reduce(false);
     }
 
     //--------------------------------------------------------------------------

@@ -20129,7 +20129,6 @@ namespace Legion {
       ReplTraceBeginOp *begin = runtime->get_available_repl_begin_op();
       begin->initialize_begin(this, trace, previous_trace, provenance);
       previous_trace = NULL;
-      add_to_dependence_queue(begin);
       if (trace->is_fixed() && trace->has_physical_trace())
       {
         // Record the event for when the trace replay is ready
