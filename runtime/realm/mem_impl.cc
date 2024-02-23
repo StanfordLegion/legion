@@ -567,32 +567,28 @@ namespace Realm {
 #endif
     }
 
-    MemoryImpl::AllocationResult LocalManagedMemory::remap_allocated_range(
+    MemoryImpl::AllocationResult LocalManagedMemory::reuse_allocated_range(
         RegionInstanceImpl *old_inst, std::vector<RegionInstanceImpl *> &new_insts)
     {
       AutoLock<> al(allocator_mutex);
+
       assert(pending_allocs.empty());
       assert(pending_releases.empty());
-      current_allocator.deallocate(old_inst->me);
 
-      for(size_t i = 0; i < new_insts.size(); i++) {
-        if(!current_allocator.can_allocate(
-               new_insts[i]->me, new_insts[i]->metadata.layout->bytes_used,
-               new_insts[i]->metadata.layout->alignment_reqd)) {
-          log_malloc.debug() << "Failed remapping on inst:" << new_insts[i]->me
-                             << " bytes:" << new_insts[i]->metadata.layout->bytes_used;
-          return AllocationResult::ALLOC_INSTANT_FAILURE;
-        }
+      size_t num_insts = new_insts.size();
+      std::vector<RegionInstance> tags(num_insts);
+      std::vector<size_t> sizes(num_insts);
+      std::vector<size_t> alignments(num_insts);
+      for(size_t i = 0; i < num_insts; i++) {
+        sizes[i] = new_insts[i]->metadata.layout->bytes_used;
+        alignments[i] = new_insts[i]->metadata.layout->alignment_reqd;
+        tags[i] = new_insts[i]->me;
       }
 
-      for(size_t i = 0; i < new_insts.size(); i++) {
-        size_t inst_offset = 0;
-        // we don't handle any partial states for now
-        assert(current_allocator.allocate(
-            new_insts[i]->me, new_insts[i]->metadata.layout->bytes_used,
-            new_insts[i]->metadata.layout->alignment_reqd, inst_offset));
-        // return AllocationResult::ALLOC_INSTANT_FAILURE;
+      if(!current_allocator.split_range(old_inst->me, tags, sizes, alignments)) {
+        return AllocationResult::ALLOC_INSTANT_FAILURE;
       }
+
       return AllocationResult::ALLOC_INSTANT_SUCCESS;
     }
 
@@ -1079,7 +1075,7 @@ namespace Realm {
 	  // special case: if we're the oldest pending item (and we're not
 	  //  poisoned), we unclog things in the order we planned
 	  if(it->inst == inst) {
-	    if(!pending_allocs.empty())
+	   if(!pending_allocs.empty())
 	      release_allocator.deallocate(it->inst->me);
 
 	    // catch up the current state

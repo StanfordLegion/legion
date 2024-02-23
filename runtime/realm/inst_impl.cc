@@ -958,14 +958,9 @@ namespace Realm {
     {
       assert(num_layouts > 0 || (layouts == nullptr && instances == nullptr));
 
-      size_t bytes_needed = 0;
-      for(size_t i = 0; i < num_layouts; i++) {
-        bytes_needed += layouts[i]->bytes_used;
-      }
-
       Event event = GenEventImpl::create_genevent()->current_event();
 
-      if(num_layouts == 0 || bytes_needed > metadata.layout->bytes_used) {
+      if(num_layouts == 0) {
         GenEventImpl::trigger(event, /*poisoned=*/true);
         return event;
       }
@@ -977,7 +972,7 @@ namespace Realm {
         insts[i]->metadata.layout = layouts[i];
       }
 
-      auto alloc_status = m_impl->remap_allocated_range(this, insts);
+      auto alloc_status = m_impl->reuse_allocated_range(this, insts);
       if(alloc_status != MemoryImpl::ALLOC_INSTANT_SUCCESS) {
         for(size_t i = 0; i < num_layouts; i++)
           m_impl->release_instance(insts[i]->me);
