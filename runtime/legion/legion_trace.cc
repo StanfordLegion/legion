@@ -1001,7 +1001,7 @@ namespace Legion {
     {
       TraceOp::deactivate(false/*free*/);
       if (freeop)
-        runtime->free_trace_op(this);
+        runtime->free_complete_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -1878,6 +1878,12 @@ namespace Legion {
         current_template->release_instance_references();
         current_template = NULL;
       }
+      // If the template is idempotent then it will be cleaned up by the
+      // call to 'invalidate_current_template' when necessary made by a
+      // (Repl)TraceInvalidationOp or a (Repl)TraceBeginOp if we start
+      // replaying a different trace, otherwise it will the current template
+      // will remain here for the next replay to see if we can replay it
+      // recurrently
     }
 
     //--------------------------------------------------------------------------

@@ -33,10 +33,7 @@ namespace Legion {
     {
       this->set_memoizable_state();
       if (this->is_replaying())
-      {
-        this->tpl->register_operation(this);
         OP::trigger_replay();
-      }
       else
         OP::trigger_ready();
     }

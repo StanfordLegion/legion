@@ -8207,7 +8207,7 @@ namespace Legion {
       if (idempotent_collective != NULL)
         delete idempotent_collective;
       if (freeop)
-        runtime->free_repl_trace_op(this);
+        runtime->free_repl_complete_op(this);
     }
 
     //--------------------------------------------------------------------------

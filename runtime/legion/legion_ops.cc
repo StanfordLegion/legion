@@ -4378,7 +4378,10 @@ namespace Legion {
             tpl->record_no_consensus();
         }
         else
+        {
           memo_state = MEMO_REPLAY;
+          tpl->register_operation(this);
+        }
       }
     }
 

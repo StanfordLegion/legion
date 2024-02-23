@@ -735,6 +735,11 @@ namespace Legion {
                          public InstanceDeletionSubscriber,
                          public LegionHeapify<InnerContext> {
     public:
+      enum ReplayStatus {
+        NOT_REPLAYING = 0,
+        NON_IDEMPOTENT_REPLAY = 1,
+        IDEMPOTENT_REPLAY = 2,
+      };
       enum PipelineStage {
         EXECUTING_STAGE,
         EXECUTED_STAGE,

@@ -10197,8 +10197,8 @@ namespace Legion {
                                                     bool idempotent)
     //--------------------------------------------------------------------------
     {
-      physical_trace_replay_status.compare_exchange_strong(ready.id, 
-          replay ? (idempotent ? 2 : 1) : 0);
+      physical_trace_replay_status.compare_exchange_strong(ready.id, replay ?
+      (idempotent ? IDEMPOTENT_REPLAY : NON_IDEMPOTENT_REPLAY) : NOT_REPLAYING);
     }
 
     //--------------------------------------------------------------------------
@@ -10210,7 +10210,7 @@ namespace Legion {
       if (!current_trace->is_fixed())
         return false;
       realm_id_t status = physical_trace_replay_status.load();
-      if (status > 2)
+      if (status > IDEMPOTENT_REPLAY)
       {
         // Result is not ready yet so wait until it is
         RtEvent ready;
@@ -10221,10 +10221,10 @@ namespace Legion {
         // No need to spin again because there won't be anymore outstanding
         // trace capture ops to be setting this
 #ifdef DEBUG_LEGION
-        assert((status == 0) || (status == 1) || (status == 2));
+        assert(status <= IDEMPOTENT_REPLAY);
 #endif
       }
-      return (status != 0);
+      return (status != NOT_REPLAYING);
     }
 
     //--------------------------------------------------------------------------
@@ -10236,7 +10236,7 @@ namespace Legion {
       if (!current_trace->is_fixed())
         return false;
       realm_id_t status = physical_trace_replay_status.load();
-      if (status > 2)
+      if (status > IDEMPOTENT_REPLAY)
       {
         // Result is not ready yet so wait until it is
         RtEvent ready;
@@ -10247,10 +10247,10 @@ namespace Legion {
         // No need to spin again because there won't be anymore outstanding
         // trace capture ops to be setting this
 #ifdef DEBUG_LEGION
-        assert((status == 0) || (status == 1) || (status == 2));
+        assert(status <= IDEMPOTENT_REPLAY);
 #endif
       }
-      return (status == 2);
+      return (status == IDEMPOTENT_REPLAY);
     }
 
     //--------------------------------------------------------------------------
@@ -10275,7 +10275,7 @@ namespace Legion {
           "Illegal end trace call on trace ID %d that does not match "
           "the current trace ID %d in task %s (UID %lld)", tid,
           current_trace->tid, get_task_name(), get_unique_id())
-      TraceCompleteOp *complete_op = runtime->get_available_trace_op();
+      TraceCompleteOp *complete_op = runtime->get_available_complete_op();
       complete_op->initialize_complete(this, current_trace,
           deprecated && !current_trace->is_fixed(), provenance);
       // Mark that the current trace is now fixed
@@ -20174,7 +20174,7 @@ namespace Legion {
           "the current trace ID %d in task %s (UID %lld)", tid,
           current_trace->tid, get_task_name(), get_unique_id())
       ReplTraceCompleteOp *complete_op = 
-        runtime->get_available_repl_trace_op();
+        runtime->get_available_repl_complete_op();
       complete_op->initialize_complete(this, current_trace,
           deprecated && !current_trace->is_fixed(), provenance);
       LogicalTrace *previous = NULL;
