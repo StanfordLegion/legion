@@ -1681,7 +1681,11 @@ namespace Legion {
       // to be the ones that best match what we are executing
       for (int idx = templates.size() - 1; idx >= 0; idx--)
       {
-        if (idx > 0) // Prefetch the next set of condition checks
+        // If it's not the first or the last iteration then we prefetch
+        // the following iteration. On the first iteration we hope that
+        // template will be ready right away. On the last iteration then
+        // there is nothing to prefetch.
+        if ((idx > 0) && (idx < (int(templates.size())-1)))
           next_ready = templates[idx-1]->test_preconditions(
               op->get_operation(), map_applied_events); 
         PhysicalTemplate *current = templates[idx];
@@ -1699,7 +1703,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(acquired);
 #endif
-          if (idx > 0)
+          if ((idx > 0) && (idx < (int(templates.size()) - 1)))
           {
             // Wait for the prefetched analyses to finish and clean them up
             if (next_ready.exists() && !next_ready.has_triggered())
@@ -1732,8 +1736,16 @@ namespace Legion {
         }
         else if (acquired)
           current->release_instance_references();
-        // Shuffle the ready events
-        current_ready = next_ready;
+        if (idx > 0)
+        {
+          // If this is the first iteration then we start testing the
+          // preconditions for the next iteration now too
+          if (idx == (int(templates.size() - 1)))
+            current_ready = templates[idx-1]->test_preconditions(
+                op->get_operation(), map_applied_events);
+          else // Shuffle the ready events
+            current_ready = next_ready;
+        }
       }
       return false;
     }
