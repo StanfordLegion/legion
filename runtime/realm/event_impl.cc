@@ -1624,7 +1624,7 @@ namespace Realm {
       AutoLock<> a(mutex);
       // In order to avoid cases where has_triggered gives non-monotonic results
       // you also have to retest the generation condition above while holding the lock
-      if (needed_gen <= generation.load()) {
+      if(needed_gen <= generation.load()) {
         poisoned = is_generation_poisoned(needed_gen);
         return true;
       }
