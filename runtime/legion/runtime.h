@@ -585,7 +585,12 @@ namespace Legion {
       // data for this future instance of a given size, if the needed size
       // does not match the base size then a fresh instance will be returned
       // which will be the responsibility of the caller to destroy
+#ifndef LEGION_UNDO_FUTURE_INSTANCE_HACK
+      PhysicalInstance get_instance(size_t needed_size, 
+          LgEvent &inst_event, bool &own_inst);
+#else
       PhysicalInstance get_instance(size_t needed_size, bool &own_inst);
+#endif
       bool defer_deletion(ApEvent precondition);
     public:
       bool can_pack_by_value(void) const;
@@ -1359,7 +1364,7 @@ namespace Legion {
       // index space task launches and trigger the ready event with the 
       // precondition event once it is safe to do so
       void order_concurrent_task_launch(SingleTask *task, ApEvent precondition,
-                                        ApUserEvent ready, bool needs_barrier);
+                                        ApUserEvent ready, VariantID vid);
       // Once the concurrent index space task launch has performed its max 
       // all-reduce of the lamport clocks across all the points then it needs
       // to report the resulting clock back to the processor
@@ -3977,7 +3982,7 @@ namespace Legion {
     public:
       // Support for concurrent index task execution 
       void order_concurrent_task_launch(Processor proc, SingleTask *task,
-          ApEvent precondition, ApUserEvent ready, bool needs_barrier);
+          ApEvent precondition, ApUserEvent ready, VariantID vid);
       void end_concurrent_task(Processor proc);
     public:
       DistributedID get_next_static_distributed_id(uint64_t &next_did);
