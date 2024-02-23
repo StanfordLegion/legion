@@ -3095,7 +3095,7 @@ namespace Legion {
           if (!rhs2.all_valid)
             rhs1.all_valid = false;
           if (rhs2.any_not_acquired)
-            rhs2.any_not_acquired = true;
+            rhs1.any_not_acquired = true;
         }
       };
     protected:

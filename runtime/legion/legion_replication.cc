@@ -1285,6 +1285,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(tpl != NULL);
 #endif
+      elide_collective_rendezvous();
       internal_space = tpl->find_local_space(trace_local_id);
       if ((redop == 0) && !elide_future_return)
       {
@@ -2427,9 +2428,6 @@ namespace Legion {
 #else
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
-      // If we get here then we're not doing a physical trace replay
-      // so we're going to need a collective fill barrier to sync
-      // execution of our physical analysis before and after
       collective_map_barrier = repl_ctx->get_next_collective_map_barriers();
       create_collective_rendezvous(0/*requirement index*/);
       // Then do the base class analysis
@@ -2540,6 +2538,16 @@ namespace Legion {
     void ReplFillOp::trigger_replay(void)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(collective_map_barrier.exists());
+#endif
+      // Trigger both generations of the barrier and move on
+      Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/);
+      // Advance the first generation of the barrier for trigger_ready
+      Runtime::advance_barrier(collective_map_barrier);
+      // Trigger the second generation
+      Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/);
+      collective_map_barrier = RtBarrier::NO_RT_BARRIER;
       elide_collective_rendezvous();
       // Second generation triggered by callback to finalize_complete_mapping
       FillOp::trigger_replay();
@@ -6187,17 +6195,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(!mapping_fence_barrier.exists());
-      assert(!execution_fence_barrier.exists());
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+      assert(mapping_fence_barrier.exists());
+      assert(execution_fence_barrier.exists());
 #endif
-      // Get ourselves an execution fence barrier
-      // No need for a mapping fence since we're just replaying
-      if (fence_kind == EXECUTION_FENCE)
-        execution_fence_barrier = repl_ctx->get_next_execution_fence_barrier();
+      // We don't need the mapping fence barrier
+      Runtime::phase_barrier_arrive(mapping_fence_barrier, 1/*count*/);
       FenceOp::trigger_replay();
     }
 
@@ -7493,9 +7495,6 @@ namespace Legion {
 #else
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
-      // If we get here then we're not doing a physical trace replay
-      // so we're going to need a collective fill barrier to sync
-      // execution of our physical analysis before and after
       collective_map_barrier = repl_ctx->get_next_collective_map_barriers();
       // See if we need to make a collective view rendezvous
       if (restricted_region.impl->collective)
@@ -7585,6 +7584,11 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(collective_map_barrier.exists());
 #endif
+      // Elide both generations of the mapping fence barrier
+      Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/);
+      Runtime::advance_barrier(collective_map_barrier);
+      Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/);
+      collective_map_barrier = RtBarrier::NO_RT_BARRIER;
       elide_collective_rendezvous();
       AcquireOp::trigger_replay();
     }
@@ -7688,9 +7692,6 @@ namespace Legion {
 #else
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
-      // If we get here then we're not doing a physical trace replay
-      // so we're going to need a collective fill barrier to sync
-      // execution of our physical analysis before and after
       collective_map_barrier = repl_ctx->get_next_collective_map_barriers();
       // See if we need to make a collective view rendezvous
       if (restricted_region.impl->collective)
@@ -7780,6 +7781,11 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(collective_map_barrier.exists());
 #endif
+      // Elide both generations of the mapping fence barrier
+      Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/);
+      Runtime::advance_barrier(collective_map_barrier);
+      Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/);
+      collective_map_barrier = RtBarrier::NO_RT_BARRIER;
       elide_collective_rendezvous();
       ReleaseOp::trigger_replay();
     }
