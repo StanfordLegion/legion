@@ -1654,6 +1654,18 @@ namespace Legion {
               "in concurrent index space task launches or must epoch launches.",
               local_mapper->get_mapper_name(),
               get_task_name(), get_unique_id(), impl->get_name())
+      else if (concurrent_task && !impl->is_concurrent() && is_index_space &&
+          (index_domain.get_volume() > 1))
+        REPORT_LEGION_WARNING(LEGION_WARNING_UNUSED_CONCURRENCY,
+            "Mapper %s selected non-concurrent task variant %s for "
+            "task %s (UID %lld) which was launched as a concurrent index "
+            "space task launch. Concurrent index space task launches have "
+            "additional overhead associated with them so you should really "
+            "only use them if you intend to use concurrent task variants. "
+            "Also note this warning may turn into an error if any of the "
+            "point tasks of this index task selected a concurrent variant.",
+            local_mapper->get_mapper_name(), impl->get_name(),
+            get_task_name(), get_unique_id())
       // Check the layout constraints first
       const TaskLayoutConstraintSet &layout_constraints = 
         impl->get_layout_constraints();
@@ -2328,14 +2340,6 @@ namespace Legion {
         inner_cached = true;
       }
       return is_inner_result;
-    }
-
-    //--------------------------------------------------------------------------
-    bool SingleTask::is_concurrent(void) const
-    //--------------------------------------------------------------------------
-    {
-      VariantImpl *var = runtime->find_variant_impl(task_id, selected_variant);
-      return var->is_concurrent();
     }
 
     //--------------------------------------------------------------------------
@@ -4764,7 +4768,7 @@ namespace Legion {
         assert(target_processors.size() == 1);
 #endif
         const OrderConcurrentLaunchArgs args(this, target_processors.front(),
-            start_condition, variant->needs_barrier()); 
+            start_condition, variant->is_concurrent() ? selected_variant : 0);
         // Give this very high priority as it is likely on the critical path
         runtime->issue_runtime_meta_task(args, LG_RESOURCE_PRIORITY,
             Runtime::protect_event(start_condition));
@@ -5255,7 +5259,7 @@ namespace Legion {
       const OrderConcurrentLaunchArgs *oargs = 
         (const OrderConcurrentLaunchArgs*)args;
       oargs->task->runtime->order_concurrent_task_launch(oargs->processor,
-          oargs->task, oargs->start, oargs->ready, oargs->needs_barrier);
+          oargs->task, oargs->start, oargs->ready, oargs->vid); 
     }
 
     /////////////////////////////////////////////////////////////
@@ -5303,8 +5307,8 @@ namespace Legion {
       predicate_false_result = NULL;
       predicate_false_size = 0;
       concurrent_lamport_clock = 0;
+      concurrent_variant = 0;
       concurrent_poisoned = false;
-      concurrent_barrier = false;
     }
 
     //--------------------------------------------------------------------------
@@ -6635,7 +6639,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void IndividualTask::concurrent_allreduce(ProcessorManager *manager, 
-                            uint64_t lamport_clock, bool barrier, bool poisoned)
+                           uint64_t lamport_clock, VariantID vid, bool poisoned)
     //--------------------------------------------------------------------------
     {
       manager->finalize_concurrent_task_order(this, lamport_clock, poisoned);  
@@ -7568,11 +7572,41 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PointTask::concurrent_allreduce(ProcessorManager *manager,
-                            uint64_t lamport_clock, bool barrier, bool poisoned)
+                           uint64_t lamport_clock, VariantID vid, bool poisoned)
     //--------------------------------------------------------------------------
     {
       slice_owner->concurrent_allreduce(this, manager, lamport_clock,
-                                        barrier, poisoned);
+                                        vid, poisoned);
+    }
+
+    //--------------------------------------------------------------------------
+    bool PointTask::check_concurrent_variant(VariantID vid)
+    //--------------------------------------------------------------------------
+    {
+      if (vid == 0)
+      {
+        VariantImpl *impl = 
+          runtime->find_variant_impl(task_id, selected_variant); 
+        if (!impl->is_concurrent())
+          return true;
+        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+          "Mapper %s selected a concurrent variant %d for point task %s "
+          "(UID %lld) of a concurrent task launch but selected a "
+          "non-concurrent variant for a different point task. All point "
+          "tasks in a concurrent index task launch must be the same if "
+          "any of them are going to be a concurrent variant.",
+          mapper->get_mapper_name(), selected_variant, get_task_name(), 
+          get_unique_id())
+      }
+      else if (vid != selected_variant)
+        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+          "Mapper %s selected a concurrent variant %d for point task %s "
+          "(UID %lld) of a concurrent task launch but selected a different "
+          "concurrent variant %d for a different point task. All point "
+          "tasks in a concurrent index task launch must use the same "
+          "concurrent task variant.", mapper->get_mapper_name(),
+          selected_variant, get_task_name(), get_unique_id(), vid)
+      return true;
     }
 
     //--------------------------------------------------------------------------
@@ -8277,7 +8311,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ShardTask::concurrent_allreduce(ProcessorManager *manager,
-                            uint64_t lamport_clock, bool barrier, bool poisoned)
+                           uint64_t lamport_clock, VariantID vid, bool poisoned)
     //--------------------------------------------------------------------------
     {
       // Should never be called
@@ -9691,7 +9725,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void IndexTask::concurrent_allreduce(SliceTask *slice,
         AddressSpaceID slice_space, size_t points, uint64_t lamport_clock,
-        bool barrier, bool poisoned)
+        VariantID vid, bool poisoned)
     //--------------------------------------------------------------------------
     {
       bool done = false;
@@ -9703,23 +9737,22 @@ namespace Legion {
           concurrent_poisoned = true;
         concurrent_slices.push_back(std::make_pair(slice, slice_space));
         if (concurrent_points == 0)
-          concurrent_barrier = barrier;
-        else if (concurrent_barrier != barrier)
-          REPORT_LEGION_ERROR(ERROR_ILLEGAL_CONCURRENT_TASK_BARRIER,
-              "Different points tasks of concurrent task %s (UID %lld) "
-              "selected variants with different concurrent barrier "
-              "settings. All point tasks in a concurrent task launch "
-              "must be mapped to variants with the same setting for "
-              "whether concurrent barrier support is required.",
-              get_task_name(), get_unique_id())
+          concurrent_variant = vid;
+        else if (concurrent_variant != vid)
+          concurrent_variant = std::min(concurrent_variant, vid);
         concurrent_points += points;
         done = (concurrent_points == total_points);
       }
       if (done)
       {
-        if (concurrent_barrier)
-          concurrent_task_barrier =
-            RtBarrier(Realm::Barrier::create_barrier(total_points));
+        if (concurrent_variant > 0)
+        {
+          VariantImpl *variant = 
+            runtime->find_variant_impl(task_id, concurrent_variant);
+          if (variant->needs_barrier())
+            concurrent_task_barrier =
+              RtBarrier(Realm::Barrier::create_barrier(total_points));
+        }
         // Swap this vector onto the stack in case the slice task gets deleted
         // out from under us while we are finalizing things
         std::vector<std::pair<SliceTask*,AddressSpaceID> > local_copy;
@@ -9735,6 +9768,7 @@ namespace Legion {
               rez.serialize(it->first);
               rez.serialize(concurrent_task_barrier);
               rez.serialize(concurrent_lamport_clock);
+              rez.serialize(concurrent_variant);
               rez.serialize(concurrent_poisoned);
             }
             runtime->send_slice_concurrent_allreduce_response(it->second, rez);
@@ -9742,7 +9776,7 @@ namespace Legion {
           else
             it->first->finish_concurrent_allreduce(
                 concurrent_lamport_clock, concurrent_poisoned, 
-                concurrent_task_barrier);
+                concurrent_variant, concurrent_task_barrier);
         }
       }
     }
@@ -12445,7 +12479,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void SliceTask::concurrent_allreduce(PointTask *task, 
                             ProcessorManager *manager, uint64_t lamport_clock,
-                            bool barrier, bool poisoned)
+                            VariantID vid, bool poisoned)
     //--------------------------------------------------------------------------
     {
       bool done = false;
@@ -12456,15 +12490,9 @@ namespace Legion {
         if (poisoned)
           concurrent_poisoned = true;
         if (concurrent_points.empty())
-          concurrent_barrier = barrier;
-        else if (concurrent_barrier != barrier)
-          REPORT_LEGION_ERROR(ERROR_ILLEGAL_CONCURRENT_TASK_BARRIER,
-              "Different points tasks of concurrent task %s (UID %lld) "
-              "selected variants with different concurrent barrier "
-              "settings. All point tasks in a concurrent task launch "
-              "must be mapped to variants with the same setting for "
-              "whether concurrent barrier support is required.",
-              get_task_name(), get_unique_id())
+          concurrent_variant = vid;
+        else if (concurrent_variant != vid)
+          concurrent_variant = std::min(concurrent_variant, vid);
         concurrent_points.push_back(std::make_pair(task, manager));
         done = (concurrent_points.size() == points.size());
       }
@@ -12479,21 +12507,21 @@ namespace Legion {
             rez.serialize(this);
             rez.serialize(points.size());
             rez.serialize(concurrent_lamport_clock);
-            rez.serialize(concurrent_barrier);
+            rez.serialize(concurrent_variant);
             rez.serialize(concurrent_poisoned);
           }
           runtime->send_slice_concurrent_allreduce_request(orig_proc, rez);
         }
         else
           index_owner->concurrent_allreduce(this,runtime->address_space,
-              points.size(), concurrent_lamport_clock, concurrent_barrier,
+              points.size(), concurrent_lamport_clock, concurrent_variant,
               concurrent_poisoned);
       }
     }
 
     //--------------------------------------------------------------------------
     void SliceTask::finish_concurrent_allreduce(uint64_t lamport_clock,
-                                    bool poisoned, RtBarrier concurrent_barrier)
+                     bool poisoned, VariantID vid, RtBarrier concurrent_barrier)
     //--------------------------------------------------------------------------
     {
       concurrent_task_barrier = concurrent_barrier;
@@ -12503,8 +12531,9 @@ namespace Legion {
       local_copy.swap(concurrent_points);
       for (std::vector<std::pair<PointTask*,ProcessorManager*> >::const_iterator
             it = local_copy.begin(); it != local_copy.end(); it++)
-        it->second->finalize_concurrent_task_order(it->first,
-            lamport_clock, poisoned);
+        if (it->first->check_concurrent_variant(vid))
+          it->second->finalize_concurrent_task_order(it->first,
+              lamport_clock, poisoned);
     }
 
     //--------------------------------------------------------------------------
@@ -12545,11 +12574,12 @@ namespace Legion {
       derez.deserialize(total_points);
       uint64_t lamport_clock;
       derez.deserialize(lamport_clock);
-      bool barrier, poisoned;
-      derez.deserialize<bool>(barrier);
+      VariantID variant;
+      derez.deserialize(variant);
+      bool poisoned;
       derez.deserialize<bool>(poisoned);
       owner->concurrent_allreduce(slice, source, total_points,
-                                  lamport_clock, barrier, poisoned);
+                                  lamport_clock, variant, poisoned);
     }
 
     //--------------------------------------------------------------------------
@@ -12564,9 +12594,11 @@ namespace Legion {
       derez.deserialize(barrier);
       uint64_t lamport_clock;
       derez.deserialize(lamport_clock);
+      VariantID vid;
+      derez.deserialize(vid);
       bool poisoned;
       derez.deserialize<bool>(poisoned);
-      slice->finish_concurrent_allreduce(lamport_clock, poisoned, barrier);
+      slice->finish_concurrent_allreduce(lamport_clock, poisoned, vid, barrier);
     }
 
     //--------------------------------------------------------------------------
