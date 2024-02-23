@@ -3089,7 +3089,7 @@ namespace Realm {
     // see which of the ib memories we can get to from the original srcmem
     std::set<size_t> active_ibs;
     for(size_t i = 0; i < total_ibs; i++) {
-      uint64_t cost;
+      uint64_t cost = 0;
       Channel *channel;
       XferDesKind kind;
       ChannelCopyInfo copy_info = channel_copy_info;

@@ -387,16 +387,17 @@ namespace Legion {
       public:
         static const LgTaskID TASK_ID = LG_ORDER_CONCURRENT_LAUNCH_TASK_ID;
       public:
-        OrderConcurrentLaunchArgs(SingleTask *t, Processor p, ApEvent s, bool b)
+        OrderConcurrentLaunchArgs(SingleTask *t, Processor p, ApEvent s, 
+                                  VariantID v)
           : LgTaskArgs<OrderConcurrentLaunchArgs>(t->get_unique_op_id()),
-            task(t), processor(p), start(s),
-            ready(Runtime::create_ap_user_event(NULL)), needs_barrier(b) { }
+            task(t), processor(p), vid(v), start(s),
+            ready(Runtime::create_ap_user_event(NULL)) { }
       public:
         SingleTask *const task;
         const Processor processor;
+        const VariantID vid;
         const ApEvent start;
         const ApUserEvent ready;
-        const bool needs_barrier;
       };
     public:
       SingleTask(Runtime *rt);
@@ -408,7 +409,7 @@ namespace Legion {
       // the task has had its variant selected
       bool is_leaf(void) const;
       bool is_inner(void) const;
-      bool is_concurrent(void) const;
+      inline bool is_concurrent(void) const { return concurrent_task; }
       bool is_created_region(unsigned index) const;
       void update_no_access_regions(void);
       void clone_single_from(SingleTask *task);
@@ -539,7 +540,7 @@ namespace Legion {
       static void process_remote_profiling_response(Deserializer &derez);
     public:
       virtual void concurrent_allreduce(ProcessorManager *manager, 
-          uint64_t lamport_clock, bool barrier, bool poisoned) = 0;
+          uint64_t lamport_clock, VariantID vid, bool poisoned) = 0;
       void record_inner_termination(ApEvent termination_event);
     protected:
       virtual TaskContext* create_execution_context(VariantImpl *v,
@@ -742,8 +743,8 @@ namespace Legion {
       RtUserEvent concurrent_verified;
       std::map<DomainPoint,Processor> concurrent_processors;
       uint64_t concurrent_lamport_clock;
+      VariantID concurrent_variant;
       bool concurrent_poisoned;
-      bool concurrent_barrier;
     protected:
       bool children_complete_invoked;
       bool children_commit_invoked;
@@ -844,7 +845,7 @@ namespace Legion {
       virtual bool is_top_level_task(void) const { return top_level_task; }
     public:
       virtual void concurrent_allreduce(ProcessorManager *manager, 
-          uint64_t lamport_clock, bool barrier, bool poisoned);
+          uint64_t lamport_clock, VariantID vid, bool poisoned);
       virtual void perform_concurrent_task_barrier(void);
     public:
       virtual void record_completion_effect(ApEvent effect);
@@ -959,8 +960,9 @@ namespace Legion {
       virtual void handle_mispredication(void);
     public:
       virtual void concurrent_allreduce(ProcessorManager *manager,
-          uint64_t lamport_clock, bool barrier, bool poisoned);
+          uint64_t lamport_clock, VariantID vid, bool poisoned);
       virtual void perform_concurrent_task_barrier(void);
+      bool check_concurrent_variant(VariantID vid);
     public:
       // ProjectionPoint methods
       virtual const DomainPoint& get_domain_point(void) const;
@@ -1097,7 +1099,7 @@ namespace Legion {
       virtual void handle_mispredication(void);
     public:
       virtual void concurrent_allreduce(ProcessorManager *manager,
-          uint64_t lamport_clock, bool barrier, bool poisoned);
+          uint64_t lamport_clock, VariantID vid, bool poisoned);
       virtual void perform_concurrent_task_barrier(void);
     public:
       virtual RtEvent convert_collective_views(unsigned requirement_index,
@@ -1284,7 +1286,7 @@ namespace Legion {
                                                   Processor target);
       virtual void concurrent_allreduce(SliceTask *slice,
           AddressSpaceID slice_space, size_t points, uint64_t lamport_clock,
-          bool barrier, bool poisoned);
+          VariantID vid, bool poisoned);
     public:
       // Methods for supporting intra-index-space mapping dependences
       virtual RtEvent find_intra_space_dependence(const DomainPoint &point);
@@ -1462,9 +1464,9 @@ namespace Legion {
       RtEvent verify_concurrent_execution(const DomainPoint &point,
                                           Processor target);
       void concurrent_allreduce(PointTask *point, ProcessorManager *manager,
-          uint64_t lamport_clock, bool barrier, bool poisoned);
+          uint64_t lamport_clock, VariantID vid, bool poisoned);
       void finish_concurrent_allreduce(uint64_t lamport_clock, bool poisoned,
-                                       RtBarrier concurrent_task_barrier);
+                            VariantID vid, RtBarrier concurrent_task_barrier);
     protected:
       void trigger_slice_mapped(void);
       void trigger_slice_complete(void);

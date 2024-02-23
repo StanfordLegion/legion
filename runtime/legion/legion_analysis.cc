@@ -10982,7 +10982,7 @@ namespace Legion {
           ready_events.insert(ready);
         FieldMask mask;
         derez.deserialize(mask);
-        views.insert(static_cast<InstanceView*>(view), mask);
+        reductions.insert(static_cast<InstanceView*>(view), mask);
       }
       const PhysicalTraceInfo trace_info = 
         PhysicalTraceInfo::unpack_trace_info(derez, runtime);
