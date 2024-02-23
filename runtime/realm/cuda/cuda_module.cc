@@ -3421,12 +3421,11 @@ namespace Realm {
     //
     // class GPU
 
-    GPU::GPU(CudaModule *_module, GPUInfo *_info, GPUWorker *_worker,
-	     CUcontext _context)
-      : module(_module), info(_info), worker(_worker)
-      , proc(0), fbmem(0), fb_ibmem(0)
-      , context(_context), device_module(0), fbmem_base(0), fb_ibmem_base(0)
-      , next_task_stream(0), next_d2d_stream(0)
+    GPU::GPU(CudaModule *_module, GPUInfo *_info, GPUWorker *_worker, CUcontext _context)
+      : module(_module)
+      , info(_info)
+      , worker(_worker)
+      , context(_context)
     {
       push_context();
 
