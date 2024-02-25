@@ -1408,7 +1408,7 @@ namespace Legion {
     void TraceRecurrentOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-      // We don't both optimizing for recurrent replays of logical analysis
+      // We don't optimize for recurrent replays of logical analysis
       // at the moment as it doesn't really seem worth it in most cases
       previous->end_logical_trace(this);
       trace->begin_logical_trace(this);
@@ -4179,7 +4179,8 @@ namespace Legion {
     PhysicalTemplate::PhysicalTemplate(PhysicalTrace *t, ApEvent fence_event)
       : trace(t), total_replays(1), replayable(REPLAYABLE), 
         idempotency(IDEMPOTENT), fence_completion_id(0),
-        has_virtual_mapping(false), has_no_consensus(false), last_fence(NULL)
+        has_virtual_mapping(false), has_no_consensus(false), last_fence(NULL),
+        remaining_replays(0), total_logical(0)
     //--------------------------------------------------------------------------
     {
       events.push_back(fence_event);
@@ -4516,6 +4517,16 @@ namespace Legion {
       for (std::vector<Instruction*>::const_iterator it = instructions.begin();
            it != instructions.end(); ++it)
         (*it)->execute(events, user_events, operations, recurrent_replay);
+      unsigned remaining = remaining_replays.fetch_sub(1);
+#ifdef DEBUG_LEGION
+      assert(remaining > 0);
+#endif
+      if (remaining == 1)
+      {
+        AutoLock tpl_lock(template_lock);
+        if (replay_postcondition.exists())
+          Runtime::trigger_event(replay_postcondition);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -7497,6 +7508,7 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(operations.empty());
+      assert(remaining_replays.load() == 0);
       assert(!replay_postcondition.exists());
 #endif
       if (total_replays++ == Realm::Barrier::MAX_PHASES)
@@ -7507,7 +7519,7 @@ namespace Legion {
       }
       else
         replay_precondition = RtEvent::NO_RT_EVENT;
-      replay_postcondition = Runtime::create_rt_user_event();
+      remaining_replays.store(trace->get_replay_targets().size());
       total_logical.store(0);
       // Check to see if we have a finished transitive reduction result
       TransitiveReductionState *state = finished_transitive_reduction.load();
@@ -7553,24 +7565,22 @@ namespace Legion {
     void PhysicalTemplate::perform_replay(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(replay_postcondition.exists());
-#endif
       Runtime *runtime = trace->runtime;
       const std::vector<Processor> &replay_targets = 
         trace->get_replay_targets();
-      std::vector<RtEvent> postconditions(replay_targets.size());
+#ifdef DEBUG_LEGION
+      assert(remaining_replays.load() == replay_targets.size());
+#endif
       for (unsigned idx = 0; idx < replay_targets.size(); ++idx)
       {
         ReplaySliceArgs args(this, idx, trace->is_recurrent());
-        postconditions[idx] = runtime->replay_on_cpus ?
+        if (runtime->replay_on_cpus)
           runtime->issue_application_processor_task(args, LG_LOW_PRIORITY,
-            replay_targets[idx % replay_targets.size()], replay_precondition) :
+            replay_targets[idx % replay_targets.size()], replay_precondition);
+        else
           runtime->issue_runtime_meta_task(args, LG_THROUGHPUT_WORK_PRIORITY,
             replay_precondition, replay_targets[idx % replay_targets.size()]);
       }
-      Runtime::trigger_event(replay_postcondition,
-          Runtime::merge_events(postconditions));
     }
 
     //--------------------------------------------------------------------------
@@ -7611,20 +7621,32 @@ namespace Legion {
     void PhysicalTemplate::finish_replay(std::set<ApEvent> &postconditions)
     //--------------------------------------------------------------------------
     {
+      if (remaining_replays.load() > 0)
+      {
+        RtEvent wait_on;
+        {
+          AutoLock tpl_lock(template_lock);
+          if (remaining_replays.load() > 0)
+          {
 #ifdef DEBUG_LEGION
-      assert(replay_postcondition.exists());
+            assert(!replay_postcondition.exists());
 #endif
-      if (!replay_postcondition.has_triggered())
-        replay_postcondition.wait();
+            replay_postcondition = Runtime::create_rt_user_event();
+            wait_on = replay_postcondition;
+          }
+        }
+        if (wait_on.exists())
+        {
+          wait_on.wait();
+          replay_postcondition = RtUserEvent::NO_RT_USER_EVENT;
+        }
+      }
       for (std::map<unsigned,unsigned>::const_iterator it =
             frontiers.begin(); it != frontiers.end(); it++)
         postconditions.insert(events[it->first]);
       if (last_fence != NULL)
         postconditions.insert(events[last_fence->lhs]);
       operations.clear();
-#ifdef DEBUG_LEGION
-      replay_postcondition = RtUserEvent::NO_RT_USER_EVENT;
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -9115,16 +9137,11 @@ namespace Legion {
                                               std::set<ApEvent> &postconditions)
     //--------------------------------------------------------------------------
     {
-      for (std::map<unsigned,unsigned>::const_iterator it =
-            frontiers.begin(); it != frontiers.end(); it++)
-        postconditions.insert(events[it->first]);
+      PhysicalTemplate::finish_replay(postconditions);
       // Also need to do any local frontiers that we have here as well
       for (std::map<unsigned,ApBarrier>::const_iterator it = 
             local_frontiers.begin(); it != local_frontiers.end(); it++)
         postconditions.insert(events[it->first]);
-      if (last_fence != NULL)
-        postconditions.insert(events[last_fence->lhs]);
-      operations.clear();
     }
 
     //--------------------------------------------------------------------------

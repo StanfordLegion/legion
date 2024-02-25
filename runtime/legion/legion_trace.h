@@ -1153,6 +1153,7 @@ namespace Legion {
     protected:
       RtEvent                         replay_precondition;
       RtUserEvent                     replay_postcondition;
+      std::atomic<unsigned>           remaining_replays;
       std::atomic<unsigned>           total_logical;
       std::vector<ApEvent>            events;
       std::map<unsigned,ApUserEvent>  user_events;
