@@ -8123,52 +8123,22 @@ namespace Legion {
 #endif
 
     /////////////////////////////////////////////////////////////
-    // ReplTraceCompleteOp 
+    // ReplTraceComplete
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    ReplTraceCompleteOp::ReplTraceCompleteOp(Runtime *rt)
-      : ReplTraceOp(rt)
+    template<typename OP>
+    ReplTraceComplete<OP>::ReplTraceComplete(Runtime *rt)
+      : OP(rt)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    ReplTraceCompleteOp::ReplTraceCompleteOp(const ReplTraceCompleteOp &rhs)
-      : ReplTraceOp(NULL)
+    template<typename OP>
+    void ReplTraceComplete<OP>::initialize_complete(ReplicateContext *ctx)
     //--------------------------------------------------------------------------
     {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    ReplTraceCompleteOp::~ReplTraceCompleteOp(void)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    ReplTraceCompleteOp& ReplTraceCompleteOp::operator=(
-                                                 const ReplTraceCompleteOp &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplTraceCompleteOp::initialize_complete(ReplicateContext *ctx, 
-                      LogicalTrace *tr, bool remove_ref, Provenance *provenance)
-    //--------------------------------------------------------------------------
-    {
-      initialize(ctx,tr->has_physical_trace() ? EXECUTION_FENCE : MAPPING_FENCE,
-          false/*need future*/, provenance);
-      trace = tr;
-      tracing = false;
-      has_blocking_call = trace->get_and_clear_blocking_call();
-      remove_trace_reference = remove_ref;
       // Get a collective ID to use for check all replayable
       replayable_collective_id = 
         ctx->get_next_collective_index(COLLECTIVE_LOC_86);
@@ -8179,14 +8149,162 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplTraceCompleteOp::activate(void)
+    template<typename OP>
+    void ReplTraceComplete<OP>::activate(void)
     //--------------------------------------------------------------------------
     {
-      ReplTraceOp::activate();
+      OP::activate();
       replayable_collective_id = 0;
       replayable_collective = NULL;
       idempotent_collective_id = 0;
       idempotent_collective = NULL;
+      sync_compute_frontiers_collective_id = 0;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void ReplTraceComplete<OP>::deactivate(bool free)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!free);
+#endif
+      OP::deactivate(free);
+      if (replayable_collective != NULL)
+        delete replayable_collective;
+      if (idempotent_collective != NULL)
+        delete idempotent_collective;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void ReplTraceComplete<OP>::begin_replayable_exchange(
+                                                        ReplayableStatus status)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(replayable_collective == NULL);
+      ReplicateContext *repl_ctx =
+        dynamic_cast<ReplicateContext*>(this->parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = 
+        static_cast<ReplicateContext*>(this->parent_ctx);
+#endif
+      replayable_collective = new AllReduceCollective<ProdReduction<bool> >(
+          repl_ctx, replayable_collective_id);
+      if (status == REPLAYABLE)
+        replayable_collective->async_all_reduce(true);
+      else
+        replayable_collective->async_all_reduce(false);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void ReplTraceComplete<OP>::end_replayable_exchange(
+                                                       ReplayableStatus &status)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(replayable_collective != NULL);
+#endif
+      if (!replayable_collective->get_result() && (status == REPLAYABLE))
+        status = NOT_REPLAYABLE_REMOTE_SHARD;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void ReplTraceComplete<OP>::begin_idempotent_exchange(
+                                                       IdempotencyStatus status)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(idempotent_collective == NULL);
+      ReplicateContext *repl_ctx =
+        dynamic_cast<ReplicateContext*>(this->parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = 
+        static_cast<ReplicateContext*>(this->parent_ctx);
+#endif
+      idempotent_collective = new AllReduceCollective<ProdReduction<bool> >(
+          repl_ctx, idempotent_collective_id);
+      if (status == IDEMPOTENT)
+        idempotent_collective->async_all_reduce(true);
+      else
+        idempotent_collective->async_all_reduce(false);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void ReplTraceComplete<OP>::end_idempotent_exchange(
+                                                      IdempotencyStatus &status)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(idempotent_collective != NULL);
+#endif
+      if (!idempotent_collective->get_result() && (status == IDEMPOTENT))
+        status = NOT_IDEMPOTENT_REMOTE_SHARD;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void ReplTraceComplete<OP>::sync_compute_frontiers(RtEvent precondition)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx =
+        dynamic_cast<ReplicateContext*>(this->parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx =
+        static_cast<ReplicateContext*>(this->parent_ctx);
+#endif
+      SlowBarrier pre_sync_barrier(repl_ctx,
+          sync_compute_frontiers_collective_id);
+      pre_sync_barrier.perform_collective_sync(precondition);
+    }
+
+    template class ReplTraceComplete<ReplCompleteOp>;
+    template class ReplTraceComplete<ReplRecurrentOp>;
+
+    /////////////////////////////////////////////////////////////
+    // ReplTraceCompleteOp 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ReplTraceCompleteOp::ReplTraceCompleteOp(Runtime *rt)
+      : ReplTraceComplete<ReplCompleteOp>(rt)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ReplTraceCompleteOp::~ReplTraceCompleteOp(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplTraceCompleteOp::initialize_complete(ReplicateContext *ctx, 
+                LogicalTrace *tr, Provenance *provenance, bool remove_reference)
+    //--------------------------------------------------------------------------
+    {
+      initialize(ctx,tr->has_physical_trace() ? EXECUTION_FENCE : MAPPING_FENCE,
+          false/*need future*/, provenance);
+      trace = tr;
+      tracing = false;
+      has_blocking_call = trace->get_and_clear_blocking_call();
+      remove_trace_reference = remove_reference;
+      ReplTraceComplete<ReplCompleteOp>::initialize_complete(ctx);  
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplTraceCompleteOp::activate(void)
+    //--------------------------------------------------------------------------
+    {
+      ReplTraceComplete<ReplCompleteOp>::activate();
       has_blocking_call = false;
       remove_trace_reference = false;
     }
@@ -8195,11 +8313,7 @@ namespace Legion {
     void ReplTraceCompleteOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      ReplTraceOp::deactivate(false/*free*/);
-      if (replayable_collective != NULL)
-        delete replayable_collective;
-      if (idempotent_collective != NULL)
-        delete idempotent_collective;
+      ReplTraceComplete<ReplCompleteOp>::deactivate(false/*free*/);
       if (freeop)
         runtime->free_repl_complete_op(this);
     }
@@ -8227,133 +8341,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplTraceCompleteOp::trigger_ready(void)
-    //--------------------------------------------------------------------------
-    {
-      if (trace->has_physical_trace())
-      {
-        PhysicalTrace *physical = trace->get_physical_trace();
-        if (physical->is_replaying())
-        {
-          std::vector<RtEvent> ready_events;
-          PhysicalTemplate *current_template = physical->get_current_template();
-          current_template->perform_replay(runtime, ready_events);
-          if (!ready_events.empty())
-          {
-            enqueue_ready_operation(Runtime::merge_events(ready_events));
-            return;
-          }
-        }
-      }
-      enqueue_ready_operation();
-    }
-
-    //--------------------------------------------------------------------------
     void ReplTraceCompleteOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
       if (trace->has_physical_trace())
       {
         PhysicalTrace *physical = trace->get_physical_trace();
-        if (physical->is_recording())
-        {
-          // Complete the recording and see if we have a new pending
-          // deletion event that we need to capture
-          ApEvent pending_deletion = physical->complete_recording(this,
-              map_applied_conditions, has_blocking_call);
-          if (pending_deletion.exists())
-            execution_preconditions.insert(pending_deletion);
-        }
-        else
-        {
-          // If this isn't a recurrent replay then we need to apply the
-          // postconditions to the equivalence sets, if it is recurrent
-          // then we know that the postconditions have already been applied
-          if (!physical->is_recurrent())
-            physical->apply_postconditions(this, map_applied_conditions);
-          physical->complete_replay(execution_preconditions);
-        }
+        physical->complete_physical_trace(this, map_applied_conditions,
+            execution_preconditions, has_blocking_call);
       }
       if (remove_trace_reference && trace->remove_reference())
         delete trace;
       ReplTraceOp::trigger_mapping();
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplTraceCompleteOp::begin_replayable_exchange(ReplayableStatus status)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(replayable_collective == NULL);
-      ReplicateContext *repl_ctx =dynamic_cast<ReplicateContext*>(parent_ctx);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
-#endif
-      replayable_collective = new AllReduceCollective<ProdReduction<bool> >(
-          repl_ctx, replayable_collective_id);
-      if (status == REPLAYABLE)
-        replayable_collective->async_all_reduce(true);
-      else
-        replayable_collective->async_all_reduce(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplTraceCompleteOp::end_replayable_exchange(ReplayableStatus &status)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(replayable_collective != NULL);
-#endif
-      if (!replayable_collective->get_result() && (status == REPLAYABLE))
-        status = NOT_REPLAYABLE_REMOTE_SHARD;
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplTraceCompleteOp::begin_idempotent_exchange(
-                                                       IdempotencyStatus status)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(idempotent_collective == NULL);
-      ReplicateContext *repl_ctx =dynamic_cast<ReplicateContext*>(parent_ctx);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
-#endif
-      idempotent_collective = new AllReduceCollective<ProdReduction<bool> >(
-          repl_ctx, idempotent_collective_id);
-      if (status == IDEMPOTENT)
-        idempotent_collective->async_all_reduce(true);
-      else
-        idempotent_collective->async_all_reduce(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplTraceCompleteOp::end_idempotent_exchange(IdempotencyStatus &status)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(idempotent_collective != NULL);
-#endif
-      if (!idempotent_collective->get_result() && (status == IDEMPOTENT))
-        status = NOT_IDEMPOTENT_REMOTE_SHARD;
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplTraceCompleteOp::sync_compute_frontiers(RtEvent precondition)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx =dynamic_cast<ReplicateContext*>(parent_ctx);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
-#endif
-      SlowBarrier pre_sync_barrier(repl_ctx,
-          sync_compute_frontiers_collective_id);
-      pre_sync_barrier.perform_collective_sync(precondition);
-    }
+    } 
 
 #if 0
     /////////////////////////////////////////////////////////////
@@ -8593,23 +8593,108 @@ namespace Legion {
 #endif
 
     /////////////////////////////////////////////////////////////
-    // ReplTraceBeginOp
+    // ReplTraceBegin
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    ReplTraceBeginOp::ReplTraceBeginOp(Runtime *rt)
-      : ReplTraceOp(rt)
+    template<typename OP>
+    ReplTraceBegin<OP>::ReplTraceBegin(Runtime *rt)
+      : OP(rt)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    ReplTraceBeginOp::ReplTraceBeginOp(const ReplTraceBeginOp &rhs)
-      : ReplTraceOp(NULL)
+    template<typename OP>
+    void ReplTraceBegin<OP>::initialize_begin(ReplicateContext *ctx,
+                                              LogicalTrace *trace)
     //--------------------------------------------------------------------------
     {
-      // should never be called
-      assert(false);
+      // Allocate template status collective IDs if we might be checking
+      if (trace->has_physical_trace())
+      {
+        for (unsigned idx = 0; idx < ctx->get_max_trace_templates(); idx++)
+          status_collective_ids.push_back(
+              ctx->get_next_collective_index(COLLECTIVE_LOC_91));
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void ReplTraceBegin<OP>::activate(void)
+    //--------------------------------------------------------------------------
+    {
+      OP::activate();
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void ReplTraceBegin<OP>::deactivate(bool free)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!free);
+#endif
+      OP::deactivate(free);
+      status_collective_ids.clear();
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    PhysicalTemplate* ReplTraceBegin<OP>::create_fresh_template(
+                                                        PhysicalTrace *physical)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx =
+        dynamic_cast<ReplicateContext*>(this->parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx =
+        static_cast<ReplicateContext*>(this->parent_ctx);
+#endif
+      return new ShardedPhysicalTemplate(physical, 
+          this->execution_fence_event, repl_ctx);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    bool ReplTraceBegin<OP>::allreduce_template_status(bool &valid,
+                                                       bool acquired)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!status_collective_ids.empty());
+      ReplicateContext *repl_ctx =
+        dynamic_cast<ReplicateContext*>(this->parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx =
+        static_cast<ReplicateContext*>(this->parent_ctx);
+#endif
+      AllReduceCollective<typename OP::StatusReduction> allreduce(repl_ctx, 
+          status_collective_ids.back());  
+      if (!acquired)
+        valid = false;
+      typename OP::TemplateStatus status = { valid, !acquired };
+      status = allreduce.sync_all_reduce(status);
+      valid = status.all_valid;
+      status_collective_ids.pop_back();
+      return status.any_not_acquired;
+    }
+
+    template class ReplTraceBegin<ReplBeginOp>;
+    template class ReplTraceBegin<ReplTraceComplete<ReplRecurrentOp> >;
+
+    /////////////////////////////////////////////////////////////
+    // ReplTraceBeginOp
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ReplTraceBeginOp::ReplTraceBeginOp(Runtime *rt)
+      : ReplTraceBegin<ReplBeginOp>(rt)
+    //--------------------------------------------------------------------------
+    {
     }
 
     //--------------------------------------------------------------------------
@@ -8619,59 +8704,29 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ReplTraceBeginOp& ReplTraceBeginOp::operator=(const ReplTraceBeginOp &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
-    }
-
-    //--------------------------------------------------------------------------
     void ReplTraceBeginOp::initialize_begin(ReplicateContext *ctx, 
-               LogicalTrace *tr, LogicalTrace *previous, Provenance *provenance)
+                                       LogicalTrace *tr, Provenance *provenance)
     //--------------------------------------------------------------------------
     {
       initialize(ctx,tr->has_physical_trace() ? EXECUTION_FENCE : MAPPING_FENCE,
                   false/*need future*/, provenance);
       trace = tr;
       tracing = false;
-      if (trace == previous)
-      {
-        recurrent = true;
-        if (previous != NULL)
-          has_intermediate_fence = previous->has_intermediate_fence();
-      }
-      else 
-      {
-        if (previous != NULL)
-          to_invalidate = previous->get_physical_trace();
-        // Allocate template status collective IDs if we might be checking
-        if (trace->has_physical_trace())
-        {
-          for (unsigned idx = 0; idx < ctx->get_max_trace_templates(); idx++)
-            status_collective_ids.push_back(
-                ctx->get_next_collective_index(COLLECTIVE_LOC_91));
-        }
-      }
+      ReplTraceBegin<ReplBeginOp>::initialize_begin(ctx, trace); 
     }
 
     //--------------------------------------------------------------------------
     void ReplTraceBeginOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      ReplTraceOp::activate();
-      to_invalidate = NULL;
-      recurrent = false;
-      has_intermediate_fence = false;
+      ReplTraceBegin<ReplBeginOp>::activate();
     }
 
     //--------------------------------------------------------------------------
     void ReplTraceBeginOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      ReplTraceOp::deactivate(false/*free*/);
-      status_collective_ids.clear();
+      ReplTraceBegin<ReplBeginOp>::deactivate(false/*free*/);
       if (freeop)
         runtime->free_repl_begin_op(this);
     }
@@ -8708,15 +8763,15 @@ namespace Legion {
       if (trace->has_physical_trace())
       {
         PhysicalTrace *physical = trace->get_physical_trace();
-        if (!physical->has_current_template())
+#ifdef DEBUG_LEGION
+        assert(!physical->has_current_template());
+#endif
+        std::vector<RtEvent> refresh_ready;
+        physical->refresh_condition_sets(this, refresh_ready);
+        if (!refresh_ready.empty())
         {
-          std::vector<RtEvent> refresh_ready;
-          physical->refresh_condition_sets(this, refresh_ready);
-          if (!refresh_ready.empty())
-          {
-            enqueue_ready_operation(Runtime::merge_events(refresh_ready));
-            return;
-          }
+          enqueue_ready_operation(Runtime::merge_events(refresh_ready));
+          return;
         }
       }
       enqueue_ready_operation();
@@ -8726,135 +8781,132 @@ namespace Legion {
     void ReplTraceBeginOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
-      if (to_invalidate != NULL)
-        to_invalidate->invalidate_current_template();
       if (trace->has_physical_trace())
       {
         PhysicalTrace *physical = trace->get_physical_trace();
-#ifdef DEBUG_LEGION
-        assert(recurrent == physical->has_current_template());
-#endif
-        bool replaying = recurrent;
-        if (!replaying)
-          // Don't have a recurrent template so check to see if we can find
-          // a template with valid preconditions
-          replaying = physical->find_replay_template(this,
-              map_applied_conditions, execution_preconditions);
-        if (replaying)
-        {
-          // Tell the parent context we are replaying
-          parent_ctx->record_physical_trace_replay(mapped_event, true/*replay*/,
-              physical->get_current_template()->is_idempotent());
-          physical->begin_replay(get_completion_event(), recurrent, 
-                                 has_intermediate_fence);
-        }
-        else // Start recording a new template
-        {
-          // Tell the parent context we are not replaying
-          parent_ctx->record_physical_trace_replay(mapped_event, false, false);
-#ifdef DEBUG_LEGION
-          ReplicateContext *repl_ctx =
-            dynamic_cast<ReplicateContext*>(parent_ctx);
-          assert(repl_ctx != NULL);
-#else
-          ReplicateContext *repl_ctx =
-            static_cast<ReplicateContext*>(parent_ctx);
-#endif
-          physical->begin_recording(new ShardedPhysicalTemplate(physical,
-                get_completion_event(), repl_ctx));
-        }
+        const bool replaying = physical->begin_physical_trace(this,
+            map_applied_conditions, execution_preconditions);
+        // Tell the parent context whether we are replaying
+        parent_ctx->record_physical_trace_replay(mapped_event, replaying);
       }
       ReplTraceOp::trigger_mapping();
-    }
-
-    //--------------------------------------------------------------------------
-    bool ReplTraceBeginOp::allreduce_template_status(bool &valid, bool acquired)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!status_collective_ids.empty());
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
-#endif
-      AllReduceCollective<StatusReduction> allreduce(repl_ctx, 
-          status_collective_ids.back());  
-      if (!acquired)
-        valid = false;
-      TemplateStatus status = { valid, !acquired };
-      status = allreduce.sync_all_reduce(status);
-      valid = status.all_valid;
-      status_collective_ids.pop_back();
-      return status.any_not_acquired;
-    }
+    } 
 
     /////////////////////////////////////////////////////////////
-    // Repl Trace Invalidation
+    // ReplTraceRecurrentOp
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    ReplTraceInvalidationOp::ReplTraceInvalidationOp(Runtime *rt)
-      : ReplTraceOp(rt)
+    ReplTraceRecurrentOp::ReplTraceRecurrentOp(Runtime *rt)
+      : ReplTraceBegin<ReplTraceComplete<ReplRecurrentOp> >(rt)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    ReplTraceInvalidationOp::~ReplTraceInvalidationOp(void)
+    ReplTraceRecurrentOp::~ReplTraceRecurrentOp(void)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    void ReplTraceInvalidationOp::initialize_invalidation(ReplicateContext *ctx,
-                                             LogicalTrace *tr, Provenance *prov)
+    void ReplTraceRecurrentOp::initialize_recurrent(ReplicateContext *ctx,
+        LogicalTrace *tr, LogicalTrace *prev, Provenance *prov, bool remove_ref)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(tr->has_physical_trace());
-#endif
-      ReplTraceOp::initialize(ctx, MAPPING_FENCE, false/*need future*/, prov);
+      ReplTraceOp::initialize(ctx, tr->has_physical_trace() ? EXECUTION_FENCE :
+          MAPPING_FENCE, false/*need future*/, prov);
       trace = tr;
       tracing = false;
+      previous = prev;
+      has_blocking_call = previous->get_and_clear_blocking_call();
+      if (trace == previous)
+        has_intermediate_fence = trace->has_intermediate_fence();
+      remove_trace_reference = remove_ref;
+      initialize_begin(ctx, trace);
+      initialize_complete(ctx);
     }
 
     //--------------------------------------------------------------------------
-    void ReplTraceInvalidationOp::activate(void)
+    void ReplTraceRecurrentOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      ReplTraceOp::activate();
+      ReplTraceBegin<ReplTraceComplete<ReplRecurrentOp> >::activate();
+      previous = NULL;
+      has_blocking_call = false;
+      has_intermediate_fence = false;
+      remove_trace_reference = false;
     }
 
     //--------------------------------------------------------------------------
-    void ReplTraceInvalidationOp::deactivate(bool freeop)
+    void ReplTraceRecurrentOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      ReplTraceOp::deactivate(false/*free*/);
+      ReplTraceBegin<ReplTraceComplete<ReplRecurrentOp> >::deactivate(false);
       if (freeop)
-        runtime->free_repl_invalidation_op(this);
+        runtime->free_repl_recurrent_op(this);
     }
 
     //--------------------------------------------------------------------------
-    const char* ReplTraceInvalidationOp::get_logging_name(void) const
+    const char* ReplTraceRecurrentOp::get_logging_name(void) const
     //--------------------------------------------------------------------------
     {
-      return op_names[TRACE_INVALIDATION_OP_KIND];
+      return op_names[TRACE_RECURRENT_OP_KIND];
     }
 
     //--------------------------------------------------------------------------
-    Operation::OpKind ReplTraceInvalidationOp::get_operation_kind(void) const
+    Operation::OpKind ReplTraceRecurrentOp::get_operation_kind(void) const
     //--------------------------------------------------------------------------
     {
-      return TRACE_INVALIDATION_OP_KIND;
+      return TRACE_RECURRENT_OP_KIND;
     }
 
     //--------------------------------------------------------------------------
-    void ReplTraceInvalidationOp::trigger_mapping(void)
+    void ReplTraceRecurrentOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-      PhysicalTrace *physical = trace->get_physical_trace();
-      physical->invalidate_current_template();
+      // We don't both optimizing for recurrent replays of logical analysis
+      // at the moment as it doesn't really seem worth it in most cases
+      previous->end_logical_trace(this);
+      trace->begin_logical_trace(this);
+      ReplTraceOp::trigger_dependence_analysis();
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplTraceRecurrentOp::trigger_mapping(void)
+    //--------------------------------------------------------------------------
+    {
+      // Check to see if this is a true recurrent replay or not
+      if (trace != previous)
+      {
+        // Not recurrent so complete the previous trace and begin the new one
+        if (previous->has_physical_trace())
+        {
+          PhysicalTrace *physical = previous->get_physical_trace();
+          physical->complete_physical_trace(this, map_applied_conditions,
+              execution_preconditions, has_blocking_call);
+        }
+        if (trace->has_physical_trace())
+        {
+          PhysicalTrace *physical = trace->get_physical_trace();
+          const bool replaying = physical->begin_physical_trace(this,
+              map_applied_conditions, execution_preconditions);
+          // Tell the parent whether we are replaying
+          parent_ctx->record_physical_trace_replay(mapped_event, replaying);
+        }
+      }
+      else if (trace->has_physical_trace())
+      {
+        // This is recurrent, so try to do the recurrent replay
+        PhysicalTrace *physical = trace->get_physical_trace();
+        const bool replaying = physical->replay_physical_trace(this,
+            map_applied_conditions, execution_preconditions,
+            has_blocking_call, has_intermediate_fence);
+        // Tell the parent whether we are replaying
+        parent_ctx->record_physical_trace_replay(mapped_event, replaying);
+      }
+      if (remove_trace_reference && previous->remove_reference())
+        delete previous;
       ReplTraceOp::trigger_mapping();
     }
 

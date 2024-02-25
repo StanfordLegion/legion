@@ -2150,9 +2150,9 @@ namespace Legion {
 
     // legion_trace.h
     class LogicalTrace;
-    class TraceCompleteOp;
     class TraceBeginOp;
-    class TraceInvalidationOp;
+    class TraceRecurrentOp;
+    class TraceCompleteOp;
     class PhysicalTrace;
     class TraceViewSet;
     class TraceConditionSet;
@@ -2310,9 +2310,9 @@ namespace Legion {
     class ReplAcquireOp;
     class ReplReleaseOp;
     class ReplTraceOp;
-    class ReplTraceCompleteOp;
     class ReplTraceBeginOp;
-    class ReplTraceInvalidationOp;
+    class ReplTraceRecurrentOp;
+    class ReplTraceCompleteOp;
     class ShardMapping;
     class CollectiveMapping;
     class ShardManager;
@@ -2448,7 +2448,7 @@ namespace Legion {
     friend class Internal::TimingOp;                        \
     friend class Internal::TunableOp;                       \
     friend class Internal::AllReduceOp;                     \
-    friend class Internal::TraceInvalidationOp;             \
+    friend class Internal::TraceRecurrentOp;                \
     friend class Internal::ExternalMappable;                \
     friend class Internal::ExternalTask;                    \
     friend class Internal::TaskOp;                          \

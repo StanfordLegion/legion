@@ -2931,6 +2931,22 @@ namespace Legion {
       virtual bool is_tracing_fence(void) const override { return true; }
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                      std::set<RtEvent> &applied) const override;
+    protected:
+      struct TemplateStatus {
+        bool all_valid;
+        bool any_not_acquired;
+      };
+      struct StatusReduction {
+        typedef TemplateStatus RHS;
+        template<bool EXCLUSIVE>
+        static inline void fold(RHS &rhs1, RHS rhs2) 
+        {
+          if (!rhs2.all_valid)
+            rhs1.all_valid = false;
+          if (rhs2.any_not_acquired)
+            rhs1.any_not_acquired = true;
+        }
+      };
     };
     
 #if 0
@@ -2977,43 +2993,62 @@ namespace Legion {
     };
 #endif
 
+    class ReplCompleteOp : public ReplTraceOp, public CompleteOp {
+    public:
+      ReplCompleteOp(Runtime *rt) : ReplTraceOp(rt) { }
+      virtual ~ReplCompleteOp(void) { }
+    };
+
+    // Mixin class for adding support for replicated complete interfaces
+    template<typename OP>
+    class ReplTraceComplete : public OP {
+    public:
+      ReplTraceComplete(Runtime *rt);
+      virtual ~ReplTraceComplete(void) { }
+    protected:
+      void initialize_complete(ReplicateContext *ctx);
+    public:
+      virtual void activate(void);
+      virtual void deactivate(bool free = true);
+    public:
+      virtual FenceOp* get_complete_operation(void) { return this; }
+      virtual void begin_replayable_exchange(ReplayableStatus status);
+      virtual void end_replayable_exchange(ReplayableStatus &status);
+      virtual void begin_idempotent_exchange(IdempotencyStatus idempotent);
+      virtual void end_idempotent_exchange(IdempotencyStatus &idempotent);
+      virtual void sync_compute_frontiers(RtEvent event);
+    private:
+      CollectiveID replayable_collective_id;
+      CollectiveID idempotent_collective_id;
+      CollectiveID sync_compute_frontiers_collective_id;
+      AllReduceCollective<ProdReduction<bool> > *replayable_collective;
+      AllReduceCollective<ProdReduction<bool> > *idempotent_collective;
+    };
+
     /**
      * \class ReplTraceCompleteOp
      * Control replicated version of TraceCompleteOp
      */
-    class ReplTraceCompleteOp : public ReplTraceOp, public CompleteOp {
+    class ReplTraceCompleteOp : public ReplTraceComplete<ReplCompleteOp> {
     public:
       static const AllocationType alloc_type = TRACE_COMPLETE_OP_ALLOC;
     public:
       ReplTraceCompleteOp(Runtime *rt);
-      ReplTraceCompleteOp(const ReplTraceCompleteOp &rhs);
+      ReplTraceCompleteOp(const ReplTraceCompleteOp &rhs) = delete;
       virtual ~ReplTraceCompleteOp(void);
     public:
-      ReplTraceCompleteOp& operator=(const ReplTraceCompleteOp &rhs);
+      ReplTraceCompleteOp& operator=(const ReplTraceCompleteOp &rhs) = delete;
     public:
       void initialize_complete(ReplicateContext *ctx, LogicalTrace *trace,
-                               bool remove_trace_ref, Provenance *provenance);
+                               Provenance *provenance, bool remove_reference);
     public:
       virtual void activate(void);
       virtual void deactivate(bool free = true);
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
       virtual void trigger_dependence_analysis(void);
-      virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
-    public:
-      virtual FenceOp* get_operation(void) { return this; }
-      virtual void begin_replayable_exchange(ReplayableStatus status);
-      virtual void end_replayable_exchange(ReplayableStatus &status);
-      virtual void begin_idempotent_exchange(IdempotencyStatus idempotent);
-      virtual void end_idempotent_exchange(IdempotencyStatus &idempotent);
-      virtual void sync_compute_frontiers(RtEvent event);
     protected:
-      CollectiveID replayable_collective_id;
-      CollectiveID idempotent_collective_id;
-      CollectiveID sync_compute_frontiers_collective_id;
-      AllReduceCollective<ProdReduction<bool> > *replayable_collective;
-      AllReduceCollective<ProdReduction<bool> > *idempotent_collective;
       bool has_blocking_call;
       bool remove_trace_reference;
     };
@@ -3056,22 +3091,52 @@ namespace Legion {
     };
 #endif
 
+    class ReplBeginOp : public ReplTraceOp, public BeginOp {
+    public:
+      ReplBeginOp(Runtime *rt) : ReplTraceOp(rt) { }
+      virtual ~ReplBeginOp(void) { }
+    };
+
+    // Mixin class for adding support for replicated complete interfaces
+    template<typename OP>
+    class ReplTraceBegin : public OP {
+    public:
+      ReplTraceBegin(Runtime *rt);
+      virtual ~ReplTraceBegin(void) { }
+    protected:
+      void initialize_begin(ReplicateContext *ctx, LogicalTrace *trace);
+    public:
+      virtual void activate(void);
+      virtual void deactivate(bool free = true);
+    public:
+      virtual ApEvent get_begin_completion(void) 
+        { return this->get_completion_event(); }
+      virtual FenceOp* get_begin_operation(void) { return this; }
+      virtual PhysicalTemplate* create_fresh_template(PhysicalTrace *trace);
+      virtual bool allreduce_template_status(bool &valid, bool acquired);
+    private:
+      // If we do back-to-back executions of different traces
+      // then we fuse the invalidation of the previous trace into the
+      // begin operation of the next trace
+      std::vector<CollectiveID> status_collective_ids;
+    };
+
     /**
      * \class ReplTraceBeginOp
      * Control replicated version of trace begin op
      */
-    class ReplTraceBeginOp : public ReplTraceOp, public BeginOp {
+    class ReplTraceBeginOp : public ReplTraceBegin<ReplBeginOp> {
     public:
       static const AllocationType alloc_type = TRACE_BEGIN_OP_ALLOC;
     public:
       ReplTraceBeginOp(Runtime *rt);
-      ReplTraceBeginOp(const ReplTraceBeginOp &rhs);
+      ReplTraceBeginOp(const ReplTraceBeginOp &rhs) = delete;
       virtual ~ReplTraceBeginOp(void);
     public:
-      ReplTraceBeginOp& operator=(const ReplTraceBeginOp &rhs);
+      ReplTraceBeginOp& operator=(const ReplTraceBeginOp &rhs) = delete;
     public:
       void initialize_begin(ReplicateContext *ctx, LogicalTrace *trace,
-                            LogicalTrace *previous, Provenance *provenance);
+                            Provenance *provenance);
     public:
       virtual void activate(void);
       virtual void deactivate(bool free = true);
@@ -3080,52 +3145,32 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
+    };
+
+    class ReplRecurrentOp : public ReplTraceOp, public RecurrentOp {
     public:
-      virtual FenceOp* get_operation(void) { return this; }
-      virtual bool allreduce_template_status(bool &valid, bool acquired);
-    private:
-      struct TemplateStatus {
-        bool all_valid;
-        bool any_not_acquired;
-      };
-      struct StatusReduction {
-        typedef TemplateStatus RHS;
-        template<bool EXCLUSIVE>
-        static inline void fold(RHS &rhs1, RHS rhs2) 
-        {
-          if (!rhs2.all_valid)
-            rhs1.all_valid = false;
-          if (rhs2.any_not_acquired)
-            rhs1.any_not_acquired = true;
-        }
-      };
-    protected:
-      // If we do back-to-back executions of different traces
-      // then we fuse the invalidation of the previous trace into the
-      // begin operation of the next trace
-      std::vector<CollectiveID> status_collective_ids;
-      PhysicalTrace *to_invalidate;
-      bool recurrent;
-      bool has_intermediate_fence;
+      ReplRecurrentOp(Runtime *rt) : ReplTraceOp(rt) { }
+      virtual ~ReplRecurrentOp(void) { }
     };
 
     /**
-     * \class ReplTraceInvalidationOp
-     * Control replicated version of TraceInvalidationOp
+     * \class ReplTraceRecurrentOp
+     * Control replicated version of TraceRecurrentOp
      */
-    class ReplTraceInvalidationOp : public ReplTraceOp {
+    class ReplTraceRecurrentOp : 
+      public ReplTraceBegin<ReplTraceComplete<ReplRecurrentOp> > {
     public:
-      static const AllocationType alloc_type = TRACE_INVALIDATION_OP_ALLOC;
+      static const AllocationType alloc_type = TRACE_RECURRENT_OP_ALLOC;
     public:
-      ReplTraceInvalidationOp(Runtime *rt);
-      ReplTraceInvalidationOp(const ReplTraceInvalidationOp &rhs) = delete;
-      virtual ~ReplTraceInvalidationOp(void);
+      ReplTraceRecurrentOp(Runtime *rt);
+      ReplTraceRecurrentOp(const ReplTraceRecurrentOp &rhs) = delete;
+      virtual ~ReplTraceRecurrentOp(void);
     public:
-      ReplTraceInvalidationOp& operator=(
-          const ReplTraceInvalidationOp &rhs) = delete;
+      ReplTraceRecurrentOp& operator=(
+          const ReplTraceRecurrentOp &rhs) = delete;
     public:
-      void initialize_invalidation(ReplicateContext *ctx,
-          LogicalTrace *trace, Provenance *provenance);
+      void initialize_recurrent(ReplicateContext *ctx, LogicalTrace *trace,
+         LogicalTrace *previous, Provenance *provenance, bool remove_reference);
       void perform_logging(void);
     public:
       virtual void activate(void);
@@ -3133,7 +3178,13 @@ namespace Legion {
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
     public:
+      virtual void trigger_dependence_analysis(void);
       virtual void trigger_mapping(void);
+    protected:
+      LogicalTrace *previous;
+      bool has_blocking_call;
+      bool has_intermediate_fence;
+      bool remove_trace_reference;
     };
 
     /**

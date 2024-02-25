@@ -288,9 +288,9 @@ namespace Legion {
         TIMING_OP_KIND,
         TUNABLE_OP_KIND,
         ALL_REDUCE_OP_KIND,
-        TRACE_COMPLETE_OP_KIND,
         TRACE_BEGIN_OP_KIND,
-        TRACE_INVALIDATION_OP_KIND,
+        TRACE_RECURRENT_OP_KIND,
+        TRACE_COMPLETE_OP_KIND,
         TASK_OP_KIND,
         LAST_OP_KIND,
       };
@@ -325,9 +325,9 @@ namespace Legion {
         "Timing",                   \
         "Tunable",                  \
         "All Reduce Op",            \
-        "Trace Complete",           \
         "Trace Begin",              \
-        "Trace Invalidation",       \
+        "Trace Recurrent",          \
+        "Trace Complete",           \
         "Task",                     \
       } 
     public:

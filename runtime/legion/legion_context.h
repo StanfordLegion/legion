@@ -736,9 +736,8 @@ namespace Legion {
                          public LegionHeapify<InnerContext> {
     public:
       enum ReplayStatus {
-        NOT_REPLAYING = 0,
-        NON_IDEMPOTENT_REPLAY = 1,
-        IDEMPOTENT_REPLAY = 2,
+        TRACE_NOT_REPLAYING = 0,
+        TRACE_REPLAYING = 1,
       };
       enum PipelineStage {
         EXECUTING_STAGE,
@@ -1054,10 +1053,8 @@ namespace Legion {
         { return total_tunable_count++; }
       inline unsigned get_max_trace_templates(void) const
         { return context_configuration.max_templates_per_trace; }
-      void record_physical_trace_replay(RtEvent ready, 
-                                        bool replay, bool idempotent);
+      void record_physical_trace_replay(RtEvent ready, bool replay); 
       bool is_replaying_physical_trace(void); 
-      bool is_replaying_idempotent_trace(void);
       inline bool is_concurrent_context(void) const
         { return concurrent_context; }
     public: // Garbage collection methods
@@ -1642,7 +1639,7 @@ namespace Legion {
       virtual bool add_to_dependence_queue(Operation *op, 
           const std::vector<StaticDependence> *dependences = NULL,
           bool unordered = false, bool outermost = true);
-      virtual Operation* initialize_trace_invalidation(Provenance *prov);
+      virtual FenceOp* initialize_trace_completion(Provenance *prov);
       void process_dependence_stage(void);
       void add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
                                   FutureInstance *instance,
@@ -2987,7 +2984,7 @@ namespace Legion {
       virtual bool add_to_dependence_queue(Operation *op, 
           const std::vector<StaticDependence> *dependences = NULL,
           bool unordered = false, bool outermost = true);
-      virtual Operation* initialize_trace_invalidation(Provenance *prov);
+      virtual FenceOp* initialize_trace_completion(Provenance *prov);
       virtual PredicateImpl* create_predicate_impl(Operation *op);
       virtual CollectiveResult* find_or_create_collective_view(
           RegionTreeID tid, const std::vector<DistributedID> &instances, 

@@ -17345,9 +17345,9 @@ namespace Legion {
       free_available(available_or_pred_ops);
       free_available(available_acquire_ops);
       free_available(available_release_ops);
-      free_available(available_trace_ops);
       free_available(available_begin_ops);
-      free_available(available_invalidation_ops);
+      free_available(available_recurrent_ops);
+      free_available(available_complete_ops);
       free_available(available_epoch_ops);
       free_available(available_pending_partition_ops);
       free_available(available_dependent_partition_ops);
@@ -17388,9 +17388,9 @@ namespace Legion {
       free_available(available_repl_index_detach_ops);
       free_available(available_repl_acquire_ops);
       free_available(available_repl_release_ops);
-      free_available(available_repl_trace_ops);
       free_available(available_repl_begin_ops);
-      free_available(available_repl_invalidation_ops);
+      free_available(available_repl_recurrent_ops);
+      free_available(available_repl_complete_ops);
       for (std::map<TaskID,TaskImpl*>::const_iterator it = 
             task_table.begin(); it != task_table.end(); it++)
       {
@@ -28079,14 +28079,14 @@ namespace Legion {
     TraceCompleteOp* Runtime::get_available_complete_op(void)
     //--------------------------------------------------------------------------
     {
-      return get_available(trace_op_lock, available_trace_ops);
+      return get_available(complete_op_lock, available_complete_ops);
     }
 
     //--------------------------------------------------------------------------
-    TraceInvalidationOp* Runtime::get_available_invalidation_op(void)
+    TraceRecurrentOp* Runtime::get_available_recurrent_op(void)
     //--------------------------------------------------------------------------
     {
-      return get_available(invalidation_op_lock, available_invalidation_ops);
+      return get_available(recurrent_op_lock, available_recurrent_ops);
     }
 
     //--------------------------------------------------------------------------
@@ -28455,15 +28455,14 @@ namespace Legion {
     ReplTraceCompleteOp* Runtime::get_available_repl_complete_op(void)
     //--------------------------------------------------------------------------
     {
-      return get_available(trace_op_lock, available_repl_trace_ops);
+      return get_available(complete_op_lock, available_repl_complete_ops);
     }
 
     //--------------------------------------------------------------------------
-    ReplTraceInvalidationOp* Runtime::get_available_repl_invalidation_op(void)
+    ReplTraceRecurrentOp* Runtime::get_available_repl_recurrent_op(void)
     //--------------------------------------------------------------------------
     {
-      return get_available(invalidation_op_lock,
-          available_repl_invalidation_ops);
+      return get_available(recurrent_op_lock, available_repl_recurrent_ops);
     }
 
     //--------------------------------------------------------------------------
@@ -28690,16 +28689,16 @@ namespace Legion {
     void Runtime::free_complete_op(TraceCompleteOp *op)
     //--------------------------------------------------------------------------
     {
-      AutoLock t_lock(trace_op_lock);
-      release_operation<false>(available_trace_ops, op);
+      AutoLock t_lock(complete_op_lock);
+      release_operation<false>(available_complete_ops, op);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::free_invalidation_op(TraceInvalidationOp *op)
+    void Runtime::free_recurrent_op(TraceRecurrentOp *op)
     //--------------------------------------------------------------------------
     {
-      AutoLock t_lock(invalidation_op_lock);
-      release_operation<false>(available_invalidation_ops, op);
+      AutoLock t_lock(recurrent_op_lock);
+      release_operation<false>(available_recurrent_ops, op);
     }
 
     //--------------------------------------------------------------------------
@@ -29042,16 +29041,16 @@ namespace Legion {
     void Runtime::free_repl_complete_op(ReplTraceCompleteOp *op)
     //--------------------------------------------------------------------------
     {
-      AutoLock t_lock(trace_op_lock);
-      release_operation<false>(available_repl_trace_ops, op);
+      AutoLock t_lock(complete_op_lock);
+      release_operation<false>(available_repl_complete_ops, op);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::free_repl_invalidation_op(ReplTraceInvalidationOp *op)
+    void Runtime::free_repl_recurrent_op(ReplTraceRecurrentOp *op)
     //--------------------------------------------------------------------------
     {
-      AutoLock t_lock(invalidation_op_lock);
-      release_operation<false>(available_repl_invalidation_ops, op);
+      AutoLock t_lock(recurrent_op_lock);
+      release_operation<false>(available_repl_recurrent_ops, op);
     }
 
     //--------------------------------------------------------------------------
@@ -29651,12 +29650,12 @@ namespace Legion {
           return "Acquire Op";
         case RELEASE_OP_ALLOC:
           return "Release Op";
-        case TRACE_COMPLETE_OP_ALLOC:
-          return "Trace Complete Op";
         case TRACE_BEGIN_OP_ALLOC:
           return "Trace Begin";
-        case TRACE_INVALIDATION_OP_ALLOC:
-          return "Trace Invalidation";
+        case TRACE_RECURRENT_OP_ALLOC:
+          return "Trace Recurrent";
+        case TRACE_COMPLETE_OP_ALLOC:
+          return "Trace Complete Op";
         case MUST_EPOCH_OP_ALLOC:
           return "Must Epoch Op";
         case PENDING_PARTITION_OP_ALLOC:

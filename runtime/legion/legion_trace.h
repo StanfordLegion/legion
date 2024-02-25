@@ -134,6 +134,8 @@ namespace Legion {
       ~LogicalTrace(void);
     public:
       inline TraceID get_trace_id(void) const { return tid; }
+      inline size_t get_operation_count(void) const 
+        { return replay_info.size(); }
     public:
       bool initialize_op_tracing(Operation *op,
                      const std::vector<StaticDependence> *dependences = NULL);
@@ -289,7 +291,7 @@ namespace Legion {
      */
     class CompleteOp {
     public:
-      virtual FenceOp* get_operation(void) = 0;
+      virtual FenceOp* get_complete_operation(void) = 0;
       virtual void begin_replayable_exchange(ReplayableStatus status) { }
       virtual void end_replayable_exchange(ReplayableStatus &status) { }
       virtual void begin_idempotent_exchange(IdempotencyStatus idempotent) { }
@@ -316,16 +318,16 @@ namespace Legion {
       TraceCompleteOp& operator=(const TraceCompleteOp &rhs);
     public:
       void initialize_complete(InnerContext *ctx, LogicalTrace *trace,
-                               bool remove_trace_ref, Provenance *provenance);
+                               Provenance *provenance, bool remove_reference);
     public:
       virtual void activate(void);
       virtual void deactivate(bool free = true);
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
       virtual void trigger_dependence_analysis(void);
-      virtual void trigger_ready(void);
       virtual void trigger_mapping(void); 
-      virtual FenceOp* get_operation(void) { return this; }
+    protected:
+      virtual FenceOp* get_complete_operation(void) { return this; }
     protected:
       bool has_blocking_call;
       bool remove_trace_reference;
@@ -368,8 +370,16 @@ namespace Legion {
      */
     class BeginOp {
     public:
-      virtual FenceOp* get_operation(void) = 0;
-      virtual bool allreduce_template_status(bool &valid, bool acquired) = 0;
+      virtual bool allreduce_template_status(bool &valid, bool acquired)
+      {
+        if (acquired)
+          return false;
+        valid = false;
+        return true;
+      }
+      virtual ApEvent get_begin_completion(void) = 0;
+      virtual FenceOp* get_begin_operation(void) = 0;
+      virtual PhysicalTemplate* create_fresh_template(PhysicalTrace *trace) = 0;
     };
 
     /**
@@ -389,7 +399,7 @@ namespace Legion {
       TraceBeginOp& operator=(const TraceBeginOp &rhs);
     public:
       void initialize_begin(InnerContext *ctx, LogicalTrace *trace,
-                            LogicalTrace *previous, Provenance *provenance);
+                            Provenance *provenance);
     public:
       virtual void activate(void);
       virtual void deactivate(bool free = true);
@@ -399,44 +409,58 @@ namespace Legion {
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
     public:
-      virtual FenceOp* get_operation(void) { return this; }
-      virtual bool allreduce_template_status(bool &valid, bool acquired);
-    protected:
-      // If we do back-to-back executions of different traces
-      // then we fuse the invalidation of the previous trace into the
-      // begin operation of the next trace
-      PhysicalTrace *to_invalidate;
-      bool recurrent;
-      bool has_intermediate_fence;
+      virtual ApEvent get_begin_completion(void) 
+        { return get_completion_event(); }
+      virtual FenceOp* get_begin_operation(void) { return this; }
+      virtual PhysicalTemplate* create_fresh_template(PhysicalTrace *trace);
     };
 
     /**
-     * \class TraceInvalidationOp
+     * \class RecurrentOp
+     * A recurrent op supports both the begin and complete interfaces
+     */
+    class RecurrentOp : public BeginOp, public CompleteOp { };
+
+    /**
+     * \class TraceRecurrentOp
      * This is a tracing operation that is inserted to invalidate an idempotent
      * trace replay once an invalidating operation is detected in the stream
      * of operations in the parent context. We make this a mapping fence so
      * we ensure that the resources from the template are freed up before
      * any other downstream operations attempt to map.
      */
-    class TraceInvalidationOp : public TraceOp {
+    class TraceRecurrentOp : public TraceOp, public RecurrentOp {
     public:
-      static const AllocationType alloc_type = TRACE_INVALIDATION_OP_ALLOC;
+      static const AllocationType alloc_type = TRACE_RECURRENT_OP_ALLOC;
     public:
-      TraceInvalidationOp(Runtime *rt);
-      TraceInvalidationOp(const TraceInvalidationOp &rhs) = delete;
-      virtual ~TraceInvalidationOp(void);
+      TraceRecurrentOp(Runtime *rt);
+      TraceRecurrentOp(const TraceRecurrentOp &rhs) = delete;
+      virtual ~TraceRecurrentOp(void);
     public:
-      TraceInvalidationOp& operator=(const TraceInvalidationOp &rhs) = delete;
+      TraceRecurrentOp& operator=(const TraceRecurrentOp &rhs) = delete;
     public:
-      void initialize_invalidation(InnerContext *ctx, LogicalTrace *trace,
-                                   Provenance *provenance);
+      void initialize_recurrent(InnerContext *ctx, LogicalTrace *trace,
+         LogicalTrace *previous, Provenance *provenance, bool remove_reference);
     public:
       virtual void activate(void);
       virtual void deactivate(bool free = true);
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
     public:
+      virtual void trigger_dependence_analysis(void);
       virtual void trigger_mapping(void);
+    public:
+      virtual FenceOp* get_begin_operation(void) { return this; }
+      virtual ApEvent get_begin_completion(void) 
+        { return get_completion_event(); }
+      virtual PhysicalTemplate* create_fresh_template(PhysicalTrace *trace);
+    public:
+      virtual FenceOp* get_complete_operation(void) { return this; }
+    protected:
+      LogicalTrace *previous;
+      bool has_blocking_call;
+      bool has_intermediate_fence;
+      bool remove_trace_reference;
     };
 
     /**
@@ -473,21 +497,31 @@ namespace Legion {
       inline bool is_recording(void) const { return recording; }
       inline bool is_replaying(void) const { return !recording; }
       inline bool is_recurrent(void) const { return recurrent; }
+      size_t get_expected_operation_count(void) const;
     public:
       void refresh_condition_sets(FenceOp *op,
           std::vector<RtEvent> &refresh_ready) const;
+      bool begin_physical_trace(BeginOp *op,
+          std::set<RtEvent> &map_applied_conditions,
+          std::set<ApEvent> &execution_preconditions);
+      void complete_physical_trace(CompleteOp *op,
+          std::set<RtEvent> &map_applied_conditions,
+          std::set<ApEvent> &execution_preconditions,
+          bool has_blocking_call);
+      bool replay_physical_trace(RecurrentOp *op,
+          std::set<RtEvent> &map_applied_events,
+          std::set<ApEvent> &execution_preconditions,
+          bool has_blocking_call, bool has_intermediate_fence);
+    protected:
       bool find_replay_template(BeginOp *op,
-            std::set<RtEvent> &map_applied_events,
+            std::set<RtEvent> &map_applied_conditions,
             std::set<ApEvent> &execution_preconditions);
-      void begin_recording(PhysicalTemplate *fresh_template);
-      void begin_replay(ApEvent fence_completion, bool recurrent,
+      void begin_replay(BeginOp *op, bool recurrent,
                         bool has_intermediate_fence);
-      ApEvent complete_recording(CompleteOp *op,
-          std::set<RtEvent> &map_applied_conditions, bool has_blocking_call);
-      void apply_postconditions(FenceOp *op,
-                                std::set<RtEvent> &map_applied_events);
+      bool complete_recording(CompleteOp *op,
+          std::set<RtEvent> &map_applied_conditions,
+          std::set<ApEvent> &execution_preconditions, bool has_blocking_call);
       void complete_replay(std::set<ApEvent> &completion_events);
-      void invalidate_current_template(void);
     public:
       Runtime *const runtime;
       const LogicalTrace *const logical_trace;
@@ -803,8 +837,7 @@ namespace Legion {
     public:
       virtual size_t get_sharded_template_index(void) const { return 0; }
       virtual void initialize_replay(ApEvent fence_completion, bool recurrent);
-      virtual void perform_replay(Runtime *rt, 
-                                  std::vector<RtEvent> &replayed_events);
+      virtual void perform_replay(void);
       virtual RtEvent refresh_managed_barriers(void);
       virtual void finish_replay(std::set<ApEvent> &postconditions);
       virtual ApEvent get_completion_for_deletion(void) const;
@@ -862,8 +895,9 @@ namespace Legion {
                                  std::set<RtEvent> &applied_events);
       bool check_preconditions(void);
       void apply_postconditions(FenceOp *op,
-                               std::set<RtEvent> &applied_events);
+                                std::set<RtEvent> &applied_events);
     public:
+      bool start_replay(void);
       void register_operation(MemoizableOp *op);
       void execute_slice(unsigned slice_idx, bool recurrent_replay);
     public:
@@ -1099,8 +1133,6 @@ namespace Legion {
     protected:
       mutable LocalLock template_lock;
       const unsigned fence_completion_id;
-    private:
-      const unsigned replay_parallelism;
     protected:
       static constexpr unsigned NO_INDEX = UINT_MAX;
     protected:
@@ -1120,6 +1152,8 @@ namespace Legion {
       GetTermEvent                    *last_fence;
     protected:
       RtEvent                         replay_precondition;
+      RtUserEvent                     replay_postcondition;
+      std::atomic<unsigned>           total_logical;
       std::vector<ApEvent>            events;
       std::map<unsigned,ApUserEvent>  user_events;
     protected:
@@ -1267,8 +1301,7 @@ namespace Legion {
       virtual size_t get_sharded_template_index(void) const
         { return template_index; }
       virtual void initialize_replay(ApEvent fence_completion, bool recurrent);
-      virtual void perform_replay(Runtime *runtime, 
-                                  std::vector<RtEvent> &replayed_events);
+      virtual void perform_replay(void);
       virtual RtEvent refresh_managed_barriers(void);
       virtual void finish_replay(std::set<ApEvent> &postconditions);
       virtual ApEvent get_completion_for_deletion(void) const;
