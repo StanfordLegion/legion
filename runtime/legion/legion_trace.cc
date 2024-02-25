@@ -4078,7 +4078,7 @@ namespace Legion {
                                               std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
-      // We should not need the lock here because the trace should be 
+      // We should not need the lock here because the fence should be 
       // blocking all other operations from running and changing the 
       // equivalence sets while we are here
 #ifdef DEBUG_LEGION
@@ -4473,7 +4473,7 @@ namespace Legion {
 #endif
 
     //--------------------------------------------------------------------------
-    bool PhysicalTemplate::start_replay(void)
+    bool PhysicalTemplate::can_start_replay(void)
     //--------------------------------------------------------------------------
     {
       // This might look racy but its not. We only call this method when we
@@ -7562,7 +7562,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::perform_replay(void)
+    void PhysicalTemplate::start_replay(void)
     //--------------------------------------------------------------------------
     {
       Runtime *runtime = trace->runtime;
@@ -9012,7 +9012,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ShardedPhysicalTemplate::perform_replay(void)
+    void ShardedPhysicalTemplate::start_replay(void)
     //--------------------------------------------------------------------------
     {
       if (!pending_collectives.empty())
@@ -9032,7 +9032,7 @@ namespace Legion {
         pending_collectives.clear();
       }
       // Now call the base version of this
-      PhysicalTemplate::perform_replay();
+      PhysicalTemplate::start_replay();
     }
 
     //--------------------------------------------------------------------------

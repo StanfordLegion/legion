@@ -837,7 +837,7 @@ namespace Legion {
     public:
       virtual size_t get_sharded_template_index(void) const { return 0; }
       virtual void initialize_replay(ApEvent fence_completion, bool recurrent);
-      virtual void perform_replay(void);
+      virtual void start_replay(void);
       virtual RtEvent refresh_managed_barriers(void);
       virtual void finish_replay(std::set<ApEvent> &postconditions);
       virtual ApEvent get_completion_for_deletion(void) const;
@@ -897,7 +897,7 @@ namespace Legion {
       void apply_postconditions(FenceOp *op,
                                 std::set<RtEvent> &applied_events);
     public:
-      bool start_replay(void);
+      bool can_start_replay(void);
       void register_operation(MemoizableOp *op);
       void execute_slice(unsigned slice_idx, bool recurrent_replay);
     public:
@@ -1302,7 +1302,7 @@ namespace Legion {
       virtual size_t get_sharded_template_index(void) const
         { return template_index; }
       virtual void initialize_replay(ApEvent fence_completion, bool recurrent);
-      virtual void perform_replay(void);
+      virtual void start_replay(void);
       virtual RtEvent refresh_managed_barriers(void);
       virtual void finish_replay(std::set<ApEvent> &postconditions);
       virtual ApEvent get_completion_for_deletion(void) const;

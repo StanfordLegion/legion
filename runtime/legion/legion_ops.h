@@ -4830,20 +4830,20 @@ namespace Legion {
     };
 
     /**
-     * \class RemoteBeginOp
-     * This is a remote copy of a trace begin op, it really doesn't
+     * \class RemoteTraceOp
+     * This is a remote copy of a trace op, it really doesn't
      * have to do very much at all other than implement the interface
      * for remote ops as it will only be used for updating state for
      * physical template replays
      */
-    class RemoteBeginOp : public RemoteOp,
-                          public LegionHeapify<RemoteBeginOp> {
+    class RemoteTraceOp : public RemoteOp,
+                          public LegionHeapify<RemoteTraceOp> {
     public:
-      RemoteBeginOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
-      RemoteBeginOp(const RemoteBeginOp &rhs) = delete;
-      virtual ~RemoteBeginOp(void);
+      RemoteTraceOp(Runtime *rt, Operation *ptr, AddressSpaceID src, OpKind k);
+      RemoteTraceOp(const RemoteTraceOp &rhs) = delete;
+      virtual ~RemoteTraceOp(void);
     public:
-      RemoteBeginOp& operator=(const RemoteBeginOp &rhs) = delete;
+      RemoteTraceOp& operator=(const RemoteTraceOp &rhs) = delete;
     public:
       virtual UniqueID get_unique_id(void) const;
       virtual uint64_t get_context_index(void) const;
@@ -4855,34 +4855,8 @@ namespace Legion {
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const;
       virtual void unpack(Deserializer &derez);
-    };
-
-    /**
-     * \class RemoteCompleteOp
-     * This is a remote copy of a trace complete op, it really doesn't
-     * have to do very much at all other than implement the interface
-     * for remote ops as it will only be used for updating state for
-     * physical template replays
-     */
-    class RemoteCompleteOp : public RemoteOp,
-                             public LegionHeapify<RemoteCompleteOp> {
     public:
-      RemoteCompleteOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
-      RemoteCompleteOp(const RemoteCompleteOp &rhs) = delete;
-      virtual ~RemoteCompleteOp(void);
-    public:
-      RemoteCompleteOp& operator=(const RemoteCompleteOp &rhs) = delete;
-    public:
-      virtual UniqueID get_unique_id(void) const;
-      virtual uint64_t get_context_index(void) const;
-      virtual void set_context_index(uint64_t index);
-      virtual int get_depth(void) const;
-    public:
-      virtual const char* get_logging_name(void) const;
-      virtual OpKind get_operation_kind(void) const;
-      virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
-                                         std::set<RtEvent> &applied) const;
-      virtual void unpack(Deserializer &derez);
+      const OpKind kind;
     };
 
   }; //namespace Internal 

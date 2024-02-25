@@ -35,8 +35,8 @@ namespace Legion {
       if (this->is_replaying())
       {
         OP::trigger_replay();
-        if (this->tpl->start_replay())
-          this->tpl->perform_replay();
+        if (this->tpl->can_start_replay())
+          this->tpl->start_replay();
       }
       else
         OP::trigger_ready();

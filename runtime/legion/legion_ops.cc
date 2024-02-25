@@ -23743,15 +23743,12 @@ namespace Legion {
             break;
           }
         case TRACE_BEGIN_OP_KIND:
+        case TRACE_RECURRENT_OP_KIND:
+	case TRACE_COMPLETE_OP_KIND:
           {
-            result = new RemoteBeginOp(runtime, remote_ptr, source);
+            result = new RemoteTraceOp(runtime, remote_ptr, source, kind);
 	    break;
           }
-	case TRACE_COMPLETE_OP_KIND:
-	  {
-	    result = new RemoteCompleteOp(runtime, remote_ptr, source);
-	    break;
-	  }
         default:
           assert(false);
       }
@@ -25178,66 +25175,67 @@ namespace Legion {
     }
 
     ///////////////////////////////////////////////////////////// 
-    // Remote Begin Op 
+    // Remote Trace Op 
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    RemoteBeginOp::RemoteBeginOp(Runtime *rt, Operation *ptr,AddressSpaceID src)
-      : RemoteOp(rt, ptr, src)
+    RemoteTraceOp::RemoteTraceOp(Runtime *rt, Operation *ptr,
+                                 AddressSpaceID src, OpKind k)
+      : RemoteOp(rt, ptr, src), kind(k)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    RemoteBeginOp::~RemoteBeginOp(void)
+    RemoteTraceOp::~RemoteTraceOp(void)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    UniqueID RemoteBeginOp::get_unique_id(void) const
+    UniqueID RemoteTraceOp::get_unique_id(void) const
     //--------------------------------------------------------------------------
     {
       return unique_op_id;
     }
 
     //--------------------------------------------------------------------------
-    uint64_t RemoteBeginOp::get_context_index(void) const
+    uint64_t RemoteTraceOp::get_context_index(void) const
     //--------------------------------------------------------------------------
     {
       return context_index;
     }
 
     //--------------------------------------------------------------------------
-    void RemoteBeginOp::set_context_index(uint64_t index)
+    void RemoteTraceOp::set_context_index(uint64_t index)
     //--------------------------------------------------------------------------
     {
       context_index = index;
     }
 
     //--------------------------------------------------------------------------
-    int RemoteBeginOp::get_depth(void) const
+    int RemoteTraceOp::get_depth(void) const
     //--------------------------------------------------------------------------
     {
       return (parent_ctx->get_depth() + 1);
     }
 
     //--------------------------------------------------------------------------
-    const char* RemoteBeginOp::get_logging_name(void) const
+    const char* RemoteTraceOp::get_logging_name(void) const
     //--------------------------------------------------------------------------
     {
-      return op_names[TRACE_BEGIN_OP_KIND];
+      return op_names[kind];
     }
 
     //--------------------------------------------------------------------------
-    Operation::OpKind RemoteBeginOp::get_operation_kind(void) const
+    Operation::OpKind RemoteTraceOp::get_operation_kind(void) const
     //--------------------------------------------------------------------------
     {
-      return TRACE_BEGIN_OP_KIND;
+      return kind;
     }
 
     //--------------------------------------------------------------------------
-    void RemoteBeginOp::pack_remote_operation(Serializer &rez,
+    void RemoteTraceOp::pack_remote_operation(Serializer &rez,
                  AddressSpaceID target, std::set<RtEvent> &applied_events) const
     //--------------------------------------------------------------------------
     {
@@ -25245,87 +25243,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RemoteBeginOp::unpack(Deserializer &derez)
+    void RemoteTraceOp::unpack(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       // Nothing for the moment
     }
 
-    ///////////////////////////////////////////////////////////// 
-    // Remote Complete Op 
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    RemoteCompleteOp::RemoteCompleteOp(Runtime *rt,
-                                       Operation *ptr, AddressSpaceID src)
-      : RemoteOp(rt, ptr, src)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    RemoteCompleteOp::~RemoteCompleteOp(void)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    UniqueID RemoteCompleteOp::get_unique_id(void) const
-    //--------------------------------------------------------------------------
-    {
-      return unique_op_id;
-    }
-
-    //--------------------------------------------------------------------------
-    uint64_t RemoteCompleteOp::get_context_index(void) const
-    //--------------------------------------------------------------------------
-    {
-      return context_index;
-    }
-
-    //--------------------------------------------------------------------------
-    void RemoteCompleteOp::set_context_index(uint64_t index)
-    //--------------------------------------------------------------------------
-    {
-      context_index = index;
-    }
-
-    //--------------------------------------------------------------------------
-    int RemoteCompleteOp::get_depth(void) const
-    //--------------------------------------------------------------------------
-    {
-      return (parent_ctx->get_depth() + 1);
-    }
-
-    //--------------------------------------------------------------------------
-    const char* RemoteCompleteOp::get_logging_name(void) const
-    //--------------------------------------------------------------------------
-    {
-      return op_names[TRACE_COMPLETE_OP_KIND];
-    }
-
-    //--------------------------------------------------------------------------
-    Operation::OpKind RemoteCompleteOp::get_operation_kind(void) const
-    //--------------------------------------------------------------------------
-    {
-      return TRACE_COMPLETE_OP_KIND;
-    }
-
-    //--------------------------------------------------------------------------
-    void RemoteCompleteOp::pack_remote_operation(Serializer &rez,
-                 AddressSpaceID target, std::set<RtEvent> &applied_events) const
-    //--------------------------------------------------------------------------
-    {
-      pack_remote_base(rez);
-    }
-
-    //--------------------------------------------------------------------------
-    void RemoteCompleteOp::unpack(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      // Nothing for the moment
-    }
- 
   }; // namespace Internal 
 }; // namespace Legion 
 
