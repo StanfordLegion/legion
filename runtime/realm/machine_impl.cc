@@ -3000,27 +3000,27 @@ namespace Realm {
 
       if(plist) {
         // if predicates is empty then increment count by size of plist
-        if (!predicates.size()) {
+        if(!predicates.size() && restricted_min_capacity == 0) {
           count =  count + plist->size();
         }
         // else iterate over all relevant memories on this node and match the predicates
-        else  {
-	std::map<Memory, MachineMemInfo *>::const_iterator it2 = plist->begin();
-	while(it2 != plist->end()) {
-          bool ok = ((restricted_min_capacity == 0) ||
-                     (it2->first.capacity() >= restricted_min_capacity));
-	  for(std::vector<MemoryQueryPredicate *>::const_iterator it3 = predicates.begin();
-	      ok && (it3 != predicates.end());
-	      it3++)
-	    ok = (*it3)->matches_predicate(machine, it2->first, it2->second);
-	  if(ok)
-	    count += 1;
+        else {
+          std::map<Memory, MachineMemInfo *>::const_iterator it2 = plist->begin();
+          while(it2 != plist->end()) {
+            bool ok = ((restricted_min_capacity == 0) ||
+                       (it2->first.capacity() >= restricted_min_capacity));
+            for(std::vector<MemoryQueryPredicate *>::const_iterator it3 =
+                    predicates.begin();
+                ok && (it3 != predicates.end()); it3++)
+              ok = (*it3)->matches_predicate(machine, it2->first, it2->second);
+            if(ok)
+              count += 1;
 
-	  // continue to next memory (if it exists)
-	  ++it2;
-	}
-	  }
-	  }
+            // continue to next memory (if it exists)
+            ++it2;
+          }
+        }
+      }
 
       // continue to the next node (if it exists)
       ++it;
