@@ -28,3 +28,10 @@ target_compile_options(allreduce PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_W
 if(Legion_ENABLE_TESTING)
   add_test(NAME allreduce COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:allreduce> ${Legion_TEST_ARGS})
 endif()
+
+add_executable(intra_task_ordering intra_task_ordering.cc)
+target_link_libraries(intra_task_ordering Legion::Legion)
+target_compile_options(intra_task_ordering PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
+if(Legion_ENABLE_TESTING)
+  add_test(NAME intra_task_ordering COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:allreduce> ${Legion_TEST_ARGS})
+endif()
