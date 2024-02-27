@@ -80,7 +80,8 @@ namespace Legion {
       virtual RtEvent enqueue_task(
         const InnerContext::AutoTraceProcessRepeatsArgs& args,
         uint64_t opidx,
-        bool wait
+        bool wait,
+        RtEvent precondition = RtEvent::NO_RT_EVENT
       ) = 0;
       virtual RtEvent poll_pending_tasks(
         uint64_t opidx,
@@ -88,40 +89,53 @@ namespace Legion {
       ) = 0;
     };
 
-    // BatchedTraceIdentifier batches up operations until a given
-    // size is hit, and then computes repeated substrings within
-    // the batch of operations.
-    class BatchedTraceIdentifier {
+    // TraceIdentifier is a virtual class for implementing trace
+    // identification algorithms.
+    class TraceIdentifier {
     public:
-      BatchedTraceIdentifier(
-        TraceProcessingJobExecutor* executor,
-        TraceOccurrenceWatcher& watcher,
-        NonOverlappingAlgorithm repeats_alg,
-        uint64_t batchsize,  // Number of operations batched at once.
-        uint64_t max_add, // Maximum number of traces to add to the watcher at once.
-        uint64_t max_inflight_requests, // Maximum number of async jobs in flight
-        bool wait_on_async_job, // Whether to wait on concurrent meta tasks
-        uint64_t min_trace_length, // Minimum trace length to identify.
-        uint64_t max_trace_length // Maximum trace length to replay.
-      );
+       TraceIdentifier(
+         TraceProcessingJobExecutor* executor,
+         TraceOccurrenceWatcher& watcher,
+         NonOverlappingAlgorithm repeats_alg,
+         uint64_t max_add, // Maximum number of traces to add to the watcher at once.
+         uint64_t max_inflight_requests, // Maximum number of async jobs in flight
+         bool wait_on_async_job, // Whether to wait on concurrent meta tasks
+         uint64_t min_trace_length, // Minimum trace length to identify.
+         uint64_t max_trace_length // Maximum trace length to replay.
+       );
       void process(Murmur3Hasher::Hash hash, uint64_t opidx);
+      virtual ~TraceIdentifier() = default;
+      static constexpr Murmur3Hasher::Hash SENTINEL = {};
+      enum Algorithm {
+        BATCHED = 0,
+        MULTI_SCALE = 1,
+        NO_ALG = 2,
+      };
+      static Algorithm parse_algorithm(const std::string& str);
+      static const char* algorithm_to_string(Algorithm alg);
     private:
       // maybe_add_trace maybe adds a recorded trace into the
       // TraceOccurrenceWatcher's trie. It returns a boolean as
       // to whether or not a trace was successfully added.
       bool maybe_add_trace(
-        const std::vector<Murmur3Hasher::Hash>& hashes,
-        uint64_t opidx,
-        uint64_t start,
-        uint64_t end
+          const std::vector<Murmur3Hasher::Hash>& hashes,
+          uint64_t opidx,
+          uint64_t start,
+          uint64_t end
       );
-
-      // We need a runtime here in order to launch meta tasks.
+    protected:
+      // issue_repeats_job performs the logic of actually launching
+      // an asynchronous string processing job and updating the internal
+      // state of the identifier to reflect the submitted job. Implementers
+      // of this method must the jobs_in_flight data structure with the
+      // issued job. Implementers of the TraceIdentifier interface should
+      // override this method.
+      virtual void maybe_issue_repeats_job(uint64_t opidx) = 0;
+    protected:
       TraceProcessingJobExecutor* executor;
       std::vector<Murmur3Hasher::Hash> hashes;
       TraceOccurrenceWatcher& watcher;
       NonOverlappingAlgorithm repeats_alg;
-      uint64_t batchsize;
       uint64_t max_add;
       uint64_t min_trace_length;
       // max_trace_length is the maximum length trace that we
@@ -131,9 +145,8 @@ namespace Legion {
       // too many tasks in the source application, we may want to limit the
       // amount of tasks in traces we replay.
       uint64_t max_trace_length;
-
       // InFlightProcessingRequest represents a currently executing
-      // offline string processing request. When the BatchedTraceIdentifier
+      // offline string processing request. When the TraceIdentifier
       // launches a new meta task, it will register it inside the
       // in_flight_requests queue.
       struct InFlightProcessingRequest {
@@ -147,6 +160,61 @@ namespace Legion {
       std::list<InFlightProcessingRequest> jobs_in_flight;
       uint64_t max_in_flight_requests;
       bool wait_on_async_job;
+    };
+
+    // BatchedTraceIdentifier batches up operations until a given
+    // size is hit, and then computes repeated substrings within
+    // the batch of operations.
+    class BatchedTraceIdentifier : public TraceIdentifier {
+    public:
+      BatchedTraceIdentifier(
+        uint64_t batchsize,  // Number of operations batched at once.
+        // Remaining arguments are for the TraceIdentifier.
+        TraceProcessingJobExecutor* executor,
+        TraceOccurrenceWatcher& watcher,
+        NonOverlappingAlgorithm repeats_alg,
+        uint64_t max_add,
+        uint64_t max_inflight_requests,
+        bool wait_on_async_job,
+        uint64_t min_trace_length,
+        uint64_t max_trace_length
+      );
+      ~BatchedTraceIdentifier() override = default;
+    protected:
+      void maybe_issue_repeats_job(uint64_t opidx) override;
+      uint64_t batchsize;
+    };
+
+    // MultiScaleBatchedTraceIdentifier implements a multi-scale version
+    // of the BatchedTraceIdentifier that uses the ruler function to adaptively
+    // issue analysis on increasing pieces of the buffered stream of operations.
+    // In particular, for a buffer of size 16 and scale of 1, it would perform
+    // analyses at the following intervals:
+    // 1 2 1 4 1 2 8 1 2 1 4 1 2 16
+    // Different values of scale increase the minimum analysis size. It can be
+    // shown that with an O(nlog(n)) string processing algorithm, the total
+    // runtime increases with a log(n) factor.
+    class MultiScaleBatchedTraceIdentifier : public BatchedTraceIdentifier {
+    public:
+      MultiScaleBatchedTraceIdentifier(
+        uint64_t batchsize,  // Number of operations batched at once.
+        uint64_t scale, // Minimum size of the analysis.
+        // Remaining arguments are for the TraceIdentifier.
+        TraceProcessingJobExecutor* executor,
+        TraceOccurrenceWatcher& watcher,
+        NonOverlappingAlgorithm repeats_alg,
+        uint64_t max_add,
+        uint64_t max_inflight_requests,
+        bool wait_on_async_job,
+        uint64_t min_trace_length,
+        uint64_t max_trace_length
+      );
+      ~MultiScaleBatchedTraceIdentifier() override = default;
+    protected:
+      void maybe_issue_repeats_job(uint64_t opidx) override;
+    private:
+      uint64_t scale;
+      RtEvent prev_job_completion = RtEvent::NO_RT_EVENT;
     };
 
     // TraceOccurrenceWatcher tracks how many times inserted traces
@@ -362,18 +430,43 @@ namespace Legion {
       AutomaticTracingContext(Args&& ... args)
         : T(std::forward<Args>(args) ... ),
           opidx(0),
-          identifier(this,
-                     this->watcher,
-                     this->runtime->auto_trace_repeats_alg,
-                     this->runtime->auto_trace_batchsize,
-                     this->runtime->auto_trace_max_start_watch,
-                     this->runtime->auto_trace_in_flight_jobs,
-                     this->runtime->auto_trace_wait_async_jobs,
-                     this->runtime->auto_trace_min_trace_length,
-                     this->runtime->auto_trace_max_trace_length),
+          identifier(),
           watcher(this->replayer, this->runtime->auto_trace_commit_threshold),
           replayer(this)
         {
+          switch (TraceIdentifier::Algorithm(this->runtime->auto_trace_identifier_alg)) {
+            case TraceIdentifier::Algorithm::BATCHED: {
+              identifier = std::unique_ptr<TraceIdentifier>(new BatchedTraceIdentifier(
+                this->runtime->auto_trace_batchsize,
+                this,
+                this->watcher,
+                this->runtime->auto_trace_repeats_alg,
+                this->runtime->auto_trace_max_start_watch,
+                this->runtime->auto_trace_in_flight_jobs,
+                this->runtime->auto_trace_wait_async_jobs,
+                this->runtime->auto_trace_min_trace_length,
+                this->runtime->auto_trace_max_trace_length
+              ));
+              break;
+            }
+            case TraceIdentifier::Algorithm::MULTI_SCALE: {
+              identifier = std::unique_ptr<TraceIdentifier>(new MultiScaleBatchedTraceIdentifier(
+                  this->runtime->auto_trace_batchsize,
+                  this->runtime->auto_trace_multi_scale_factor,
+                  this,
+                  this->watcher,
+                  this->runtime->auto_trace_repeats_alg,
+                  this->runtime->auto_trace_max_start_watch,
+                  this->runtime->auto_trace_in_flight_jobs,
+                  this->runtime->auto_trace_wait_async_jobs,
+                  this->runtime->auto_trace_min_trace_length,
+                  this->runtime->auto_trace_max_trace_length
+              ));
+              break;
+            }
+            default:
+              assert(false);
+          }
           // Perform any initialization for async trace analysis needed.
           T::initialize_async_trace_analysis(this->runtime->auto_trace_in_flight_jobs);
         }
@@ -416,11 +509,16 @@ namespace Legion {
       ) override;
     public:
       // Overrides for TraceJobProcessingExecutor.
-      RtEvent enqueue_task(const InnerContext::AutoTraceProcessRepeatsArgs& args, uint64_t opidx, bool wait) override;
+      RtEvent enqueue_task(
+        const InnerContext::AutoTraceProcessRepeatsArgs& args,
+        uint64_t opidx,
+        bool wait,
+        RtEvent precondition = RtEvent::NO_RT_EVENT
+      ) override;
       RtEvent poll_pending_tasks(uint64_t opidx, bool must_pop) override;
     private:
       uint64_t opidx;
-      BatchedTraceIdentifier identifier;
+      std::unique_ptr<TraceIdentifier> identifier = nullptr;
       TraceOccurrenceWatcher watcher;
       TraceReplayer replayer;
       // unique_hash_idx_counter maintains a counter of non-traceable
@@ -495,7 +593,7 @@ namespace Legion {
         // TODO (rohany): Have to have a hash value that can be used as the sentinel $
         //  token for the suffix tree processing algorithms.
         assert(!(hash.x == 0 && hash.y == 0));
-        this->identifier.process(hash, this->opidx);
+        this->identifier->process(hash, this->opidx);
         this->watcher.process(hash, this->opidx);
         this->replayer.process(op, dependences, hash, this->opidx);
         this->opidx++;
@@ -514,7 +612,7 @@ namespace Legion {
         // When encountering a non-traceable operation, insert a
         // dummy hash value into the trace identifier so that the
         // traces it finds don't span across these operations.
-        this->identifier.process(this->get_new_unique_hash(), this->opidx);
+        this->identifier->process(this->get_new_unique_hash(), this->opidx);
 
         // When encountering a non-traceable operation, invalidate
         // all active pointers from the TraceOccurrenceWatcher, as
@@ -588,7 +686,7 @@ namespace Legion {
         // future being waited on has a valid coordinate.
         // TODO (rohany): I think that this is a little busted right now for
         //  inline mappings.
-        this->identifier.process(this->get_new_unique_hash(), this->opidx);
+        this->identifier->process(this->get_new_unique_hash(), this->opidx);
         this->watcher.clear();
         this->replayer.flush(this->opidx);
       }
@@ -612,9 +710,10 @@ namespace Legion {
     RtEvent AutomaticTracingContext<T>::enqueue_task(
         const InnerContext::AutoTraceProcessRepeatsArgs& args,
         uint64_t opidx,
-        bool wait
+        bool wait,
+        RtEvent precondition
     ) {
-      return T::enqueue_trace_analysis_meta_task(args, opidx, wait);
+      return T::enqueue_trace_analysis_meta_task(args, opidx, wait, precondition);
     }
 
     template <typename T>

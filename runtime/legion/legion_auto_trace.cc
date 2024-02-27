@@ -228,18 +228,35 @@ namespace Legion {
     }
 
     void auto_trace_process_repeats(const void* args_) {
-      log_auto_trace.debug() << "Executing processing repeats meta task.";
       const InnerContext::AutoTraceProcessRepeatsArgs* args = (const InnerContext::AutoTraceProcessRepeatsArgs*)args_;
-      std::vector<NonOverlappingRepeatsResult> result =
-          compute_longest_nonoverlapping_repeats(*args->operations, args->min_trace_length, args->alg);
+      std::vector<NonOverlappingRepeatsResult> result;
+      if (args->raw_operations != nullptr) {
+        log_auto_trace.debug() << "Executing processing repeats meta task on "
+                               << args->raw_operations_len << " operations.";
+        // If raw_operations is not null, then we have to copy out the contents
+        // of raw_operations into a vector and append the sentinel.
+        std::vector<Murmur3Hasher::Hash> hashes(args->raw_operations_len + 1);
+        for (uint64_t i = 0; i < args->raw_operations_len; i++) {
+          hashes[i] = args->raw_operations[i];
+        }
+        hashes[args->raw_operations_len] = TraceIdentifier::SENTINEL;
+        result = compute_longest_nonoverlapping_repeats(
+            hashes, args->min_trace_length, args->alg);
+        *args->operations_dest = std::move(hashes);
+      } else {
+        log_auto_trace.debug() << "Executing processing repeats meta task on "
+                               << args->operations->size() << " operations.";
+        // Otherwise, we have all the information to call the analysis directly.
+        result = compute_longest_nonoverlapping_repeats(
+            *args->operations, args->min_trace_length, args->alg);
+      }
       *args->result = std::move(result);
     }
 
-    BatchedTraceIdentifier::BatchedTraceIdentifier(
+    TraceIdentifier::TraceIdentifier(
         TraceProcessingJobExecutor* executor_,
         TraceOccurrenceWatcher& watcher_,
         NonOverlappingAlgorithm repeats_alg_,
-        uint64_t batchsize_,
         uint64_t max_add_,
         uint64_t max_inflight_requests_,
         bool wait_on_async_job_,
@@ -249,42 +266,42 @@ namespace Legion {
         : executor(executor_),
           watcher(watcher_),
           repeats_alg(repeats_alg_),
-          batchsize(batchsize_),
           max_add(max_add_),
           min_trace_length(min_trace_length_),
           max_trace_length(max_trace_length_),
           max_in_flight_requests(max_inflight_requests_),
-          wait_on_async_job(wait_on_async_job_) {
-      // Reserve one extra place so that we can insert the sentinel
-      // character at the end of the string.
-      this->hashes.reserve(this->batchsize + 1);
+          wait_on_async_job(wait_on_async_job_) {}
+
+    TraceIdentifier::Algorithm TraceIdentifier::parse_algorithm(const std::string &str) {
+      if (str == "batched") {
+        return TraceIdentifier::Algorithm::BATCHED;
+      } else if (str == "multi-scale") {
+        return TraceIdentifier::Algorithm::MULTI_SCALE;
+      }
+      return TraceIdentifier::Algorithm::NO_ALG;
     }
 
-    void BatchedTraceIdentifier::process(Murmur3Hasher::Hash hash, uint64_t opidx) {
-      this->hashes.push_back(hash);
-      if (this->hashes.size() == this->batchsize) {
-        // TODO (rohany): Define this sentinel somewhere else.
-        // Insert the sentinel token before sending the string off to the meta task.
-        this->hashes.push_back(Murmur3Hasher::Hash{});
-        // Initialize a descriptor for the pending result.
-        this->jobs_in_flight.push_back(InFlightProcessingRequest{});
-        InFlightProcessingRequest& request = this->jobs_in_flight.back();
-        // Move the existing vector of hashes into the descriptor, and
-        // allocate a result space for the meta task to write into.
-        request.hashes = std::move(this->hashes);
-        InnerContext::AutoTraceProcessRepeatsArgs args(
-          &request.hashes,
-          &request.result,
-          this->min_trace_length,
-          this->repeats_alg
-        );
-        // Launch the meta task and record the finish event.
-        request.finish_event = this->executor->enqueue_task(args, opidx, this->wait_on_async_job);
-        // Finally, allocate a new vector to accumulate hashes into. As before,
-        // allocate one extra spot for the sentinel hash.
-        this->hashes = std::vector<Murmur3Hasher::Hash>();
-        this->hashes.reserve(this->batchsize + 1);
+    const char *TraceIdentifier::algorithm_to_string(Algorithm alg) {
+      switch (alg) {
+        case TraceIdentifier::Algorithm::BATCHED: {
+          return "batched";
+        }
+        case TraceIdentifier::Algorithm::MULTI_SCALE: {
+          return "multi-scale";
+        }
+        default:
+          return "NO_ALG";
       }
+    }
+
+    void TraceIdentifier::process(Murmur3Hasher::Hash hash, uint64_t opidx) {
+      this->hashes.push_back(hash);
+      // Dispatch to specializations of this class for actually launching
+      // async jobs and managing the hashes vector.
+      this->maybe_issue_repeats_job(opidx);
+
+      // If there are no pending jobs, early exit.
+      if (this->jobs_in_flight.size() == 0) return;
 
       // If we've hit the maximum number of inflight requests, then wait
       // on one of them to make sure that it gets processed.
@@ -326,7 +343,7 @@ namespace Legion {
       }
     }
 
-    bool BatchedTraceIdentifier::maybe_add_trace(
+    bool TraceIdentifier::maybe_add_trace(
       const std::vector<Murmur3Hasher::Hash> &hashes,
       uint64_t opidx,
       uint64_t start,
@@ -364,6 +381,126 @@ namespace Legion {
       // string in the recorded set of traces, then splice out the
       // contained prefix and try to insert the rest of the trace.
       return this->maybe_add_trace(hashes, opidx, start + query.superstring_match, end);
+    }
+
+    BatchedTraceIdentifier::BatchedTraceIdentifier(
+      uint64_t batchsize,
+      TraceProcessingJobExecutor *executor,
+      TraceOccurrenceWatcher &watcher,
+      NonOverlappingAlgorithm repeats_alg,
+      uint64_t max_add,
+      uint64_t max_inflight_requests,
+      bool wait_on_async_job,
+      uint64_t min_trace_length,
+      uint64_t max_trace_length
+    ) : batchsize(batchsize),
+        TraceIdentifier(
+          executor,
+          watcher,
+          repeats_alg,
+          max_add,
+          max_inflight_requests,
+          wait_on_async_job,
+          min_trace_length,
+          max_trace_length
+        )
+    {
+      // Reserve one extra place so that we can insert the sentinel
+      // character at the end of the string.
+      this->hashes.reserve(this->batchsize + 1);
+    }
+
+    void BatchedTraceIdentifier::maybe_issue_repeats_job(uint64_t opidx) {
+      if (this->hashes.size() != this->batchsize) return;
+      // Insert the sentinel token before sending the string off to the meta task.
+      this->hashes.push_back(TraceIdentifier::SENTINEL);
+      // Initialize a descriptor for the pending result.
+      this->jobs_in_flight.push_back(InFlightProcessingRequest{});
+      InFlightProcessingRequest& request = this->jobs_in_flight.back();
+      // Move the existing vector of hashes into the descriptor, and
+      // allocate a result space for the meta task to write into.
+      request.hashes = std::move(this->hashes);
+      InnerContext::AutoTraceProcessRepeatsArgs args(
+          &request.hashes,
+          &request.result,
+          this->min_trace_length,
+          this->repeats_alg
+      );
+      // Launch the meta task and record the finish event.
+      request.finish_event = this->executor->enqueue_task(args, opidx, this->wait_on_async_job);
+      // Finally, allocate a new vector to accumulate hashes into. As before,
+      // allocate one extra spot for the sentinel hash.
+      this->hashes = std::vector<Murmur3Hasher::Hash>();
+      this->hashes.reserve(this->batchsize + 1);
+    }
+
+    MultiScaleBatchedTraceIdentifier::MultiScaleBatchedTraceIdentifier(
+      uint64_t batchsize,
+      uint64_t scale,
+      TraceProcessingJobExecutor *executor,
+      TraceOccurrenceWatcher &watcher,
+      NonOverlappingAlgorithm repeats_alg,
+      uint64_t max_add,
+      uint64_t max_inflight_requests,
+      bool wait_on_async_job,
+      uint64_t min_trace_length,
+      uint64_t max_trace_length
+    ) : scale(scale),
+        BatchedTraceIdentifier(
+          batchsize,
+          executor,
+          watcher,
+          repeats_alg,
+          max_add,
+          max_inflight_requests,
+          wait_on_async_job,
+          min_trace_length,
+          max_trace_length
+        )
+    { }
+
+    void MultiScaleBatchedTraceIdentifier::maybe_issue_repeats_job(uint64_t opidx) {
+      if (this->hashes.size() == this->batchsize) {
+        // If we're launching an analysis on the entire buffer of operations,
+        // then we'll do pretty much the same thing as the BatchedTraceIdentifier.
+        BatchedTraceIdentifier::maybe_issue_repeats_job(opidx);
+      } else if ((this->hashes.size() > 0) && (this->hashes.size() % this->scale == 0)) {
+        // Otherwise, we are launching an analysis job on a portion of the
+        // buffer, given by 2^(ruler function) of the current buffer size.
+        // We can conveniently find this value by using the value of the
+        // right-most set bit in the index.
+        uint64_t index = this->hashes.size() / this->scale;
+        uint64_t window_size = (index & ~(index - 1)) * this->scale;
+        uint64_t start = this->hashes.size() - window_size;
+
+        // Initialize a descriptor for the pending result.
+        this->jobs_in_flight.push_back(InFlightProcessingRequest{});
+        InFlightProcessingRequest& request = this->jobs_in_flight.back();
+        // We construct the analysis arguments out of a pointer to the hashes
+        // vector's data. We do this instead of passing a pointer to the vector
+        // itself because in the hashes.size() == this->batchsize case, we will
+        // move the vector out of `this` into another request, so the pointer
+        // will be invalid. However, the pointer to the underlying data will not
+        // be affected, and will remain live until the final job completes, Since
+        // we are going to require that jobs occur in-order with the previous
+        // completion event as a precondition, the memory will not get collected
+        // out from underneath us.
+        InnerContext::AutoTraceProcessRepeatsArgs args(
+            this->hashes.data() + start,
+            window_size,
+            &request.hashes,
+            &request.result,
+            this->min_trace_length,
+            this->repeats_alg
+        );
+        // We're going to be a little sneaky around re-using memory for the
+        // async jobs, so we're going to make sure that our processing jobs
+        // execute in order, because we'll have earlier jobs point to the
+        // same memory that later jobs will also use.
+        request.finish_event = this->executor->enqueue_task(
+            args, opidx, this->wait_on_async_job, this->prev_job_completion);
+        this->prev_job_completion = request.finish_event;
+      }
     }
 
     TraceOccurrenceWatcher::TraceOccurrenceWatcher(
@@ -438,6 +575,7 @@ namespace Legion {
     }
 
     // Have to also provide declarations of the static variables.
+    constexpr Murmur3Hasher::Hash TraceIdentifier::SENTINEL;
     constexpr double TraceReplayer::TraceMeta::R;
     constexpr double TraceReplayer::TraceMeta::SCORE_CAP_MULT;
     constexpr uint64_t TraceReplayer::TraceMeta::REPLAY_SCALE;

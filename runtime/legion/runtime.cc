@@ -17017,7 +17017,9 @@ namespace Legion {
         auto_trace_max_start_watch(config.auto_trace_max_start_watch),
         auto_trace_min_trace_length(config.auto_trace_min_trace_length),
         auto_trace_max_trace_length(config.auto_trace_max_trace_length),
+        auto_trace_multi_scale_factor(config.auto_trace_multi_scale_factor),
         auto_trace_repeats_alg(config.auto_trace_repeats_alg),
+        auto_trace_identifier_alg(config.auto_trace_identifier_alg),
         no_tracing(config.no_tracing),
         no_physical_tracing(config.no_physical_tracing),
         no_trace_optimization(config.no_trace_optimization),
@@ -17248,7 +17250,9 @@ namespace Legion {
         auto_trace_max_start_watch(rhs.auto_trace_max_start_watch),
         auto_trace_min_trace_length(rhs.auto_trace_min_trace_length),
         auto_trace_max_trace_length(rhs.auto_trace_max_trace_length),
+        auto_trace_multi_scale_factor(rhs.auto_trace_multi_scale_factor),
         auto_trace_repeats_alg(rhs.auto_trace_repeats_alg),
+        auto_trace_identifier_alg(rhs.auto_trace_identifier_alg),
         no_tracing(rhs.no_tracing),
         no_physical_tracing(rhs.no_physical_tracing),
         no_trace_optimization(rhs.no_trace_optimization),
@@ -30606,9 +30610,15 @@ namespace Legion {
                         config.auto_trace_min_trace_length, !filter)
         .add_option_int("-lg:auto_trace:max_trace_length",
                         config.auto_trace_max_trace_length, !filter)
+        .add_option_int("-lg:auto_trace:multi_scale_factor",
+                        config.auto_trace_multi_scale_factor, !filter)
         .add_option_method("-lg:auto_trace:repeats_algorithm",
                            &config,
                            &LegionConfiguration::parse_auto_trace_repeats_algorithm_argument,
+                           !filter)
+        .add_option_method("-lg:auto_trace:identifier_algorithm",
+                           &config,
+                           &LegionConfiguration::parse_auto_trace_identifier_algorithm_argument,
                            !filter)
         .add_option_bool("-lg:no_tracing",config.no_tracing, !filter)
         .add_option_bool("-lg:no_physical_tracing",
@@ -30888,6 +30898,24 @@ namespace Legion {
         return false;
       }
       this->auto_trace_repeats_alg = alg;
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    bool Runtime::LegionConfiguration::parse_auto_trace_identifier_algorithm_argument(
+        const std::string &s)
+    //--------------------------------------------------------------------------
+    {
+      TraceIdentifier::Algorithm alg = TraceIdentifier::parse_algorithm(s);
+      if (alg == TraceIdentifier::NO_ALG) {
+        fprintf(
+          stderr,
+          "ERROR: unable to parse identifier algorithm, falling back to %s.\n",
+          TraceIdentifier::algorithm_to_string(TraceIdentifier::Algorithm(this->auto_trace_identifier_alg))
+        );
+        return false;
+      }
+      this->auto_trace_identifier_alg = alg;
       return true;
     }
 

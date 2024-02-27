@@ -956,6 +956,9 @@ namespace Legion {
       public:
         static const LgTaskID TASK_ID = LG_AUTO_TRACE_PROCESS_REPEATS_TASK_ID;
       public:
+        // A constructor for when the entire operations_ vector is being
+        // consumed by this analysis. In this case, the sentinel is assumed
+        // to be at the end of operations_.
         AutoTraceProcessRepeatsArgs(
             std::vector<Murmur3Hasher::Hash>* operations_,
             std::vector<NonOverlappingRepeatsResult>* result_,
@@ -965,12 +968,38 @@ namespace Legion {
             operations(operations_),
             result(result_),
             min_trace_length(min_trace_length_),
-            alg(alg_) {}
+            alg(alg_),
+            raw_operations(nullptr),
+            raw_operations_len(0),
+            operations_dest(nullptr) {}
+        // A constructor for when a slice of an existing vector is being used,
+        // and the sentinel is not present. In this case, the analysis must make
+        // a copy of the input data, and write this copy out to the desired location.
+        AutoTraceProcessRepeatsArgs(
+            Murmur3Hasher::Hash* raw_operations_,
+            uint64_t raw_operations_len_,
+            std::vector<Murmur3Hasher::Hash>* operations_dest_,
+            std::vector<NonOverlappingRepeatsResult>* result_,
+            size_t min_trace_length_,
+            NonOverlappingAlgorithm alg_
+        ) : LgTaskArgs<AutoTraceProcessRepeatsArgs>(implicit_provenance),
+            operations(nullptr),
+            result(result_),
+            min_trace_length(min_trace_length_),
+            alg(alg_),
+            raw_operations(raw_operations_),
+            raw_operations_len(raw_operations_len_),
+            operations_dest(operations_dest_) {}
       public:
         std::vector<Murmur3Hasher::Hash>* operations;
         std::vector<NonOverlappingRepeatsResult>* result;
         size_t min_trace_length;
         NonOverlappingAlgorithm alg;
+      public:
+        // Fields used in the slice case.
+        Murmur3Hasher::Hash* raw_operations;
+        uint64_t raw_operations_len;
+        std::vector<Murmur3Hasher::Hash>* operations_dest;
       };
 
       template<typename T>
@@ -2217,7 +2246,8 @@ namespace Legion {
       RtEvent enqueue_trace_analysis_meta_task(
         const AutoTraceProcessRepeatsArgs& args,
         size_t opidx,
-        bool wait
+        bool wait,
+        RtEvent precondition = RtEvent::NO_RT_EVENT
       );
       // poll_pending_trace_analysis_tasks returns the finish event
       // of a meta task if one has completed, or NO_RT_EVENT if no
@@ -3478,7 +3508,8 @@ namespace Legion {
       RtEvent enqueue_trace_analysis_meta_task(
           const AutoTraceProcessRepeatsArgs& args,
           size_t opidx,
-          bool wait
+          bool wait,
+          RtEvent precondition = RtEvent::NO_RT_EVENT
       );
       RtEvent poll_pending_trace_analysis_tasks(
           size_t opidx,

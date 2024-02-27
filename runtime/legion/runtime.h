@@ -2514,7 +2514,9 @@ namespace Legion {
             auto_trace_max_start_watch(10),
             auto_trace_min_trace_length(5),
             auto_trace_max_trace_length(-1),
+            auto_trace_multi_scale_factor(100),
             auto_trace_repeats_alg(NonOverlappingAlgorithm::SUFFIX_TREE_WALK),
+            auto_trace_identifier_alg(0),
             no_tracing(false),
             no_physical_tracing(false),
             no_trace_optimization(false),
@@ -2581,7 +2583,9 @@ namespace Legion {
         unsigned auto_trace_max_start_watch;
         unsigned auto_trace_min_trace_length;
         uint64_t auto_trace_max_trace_length;
+        uint64_t auto_trace_multi_scale_factor;
         NonOverlappingAlgorithm auto_trace_repeats_alg;
+        uint64_t auto_trace_identifier_alg;
         bool no_tracing;
         bool no_physical_tracing;
         bool no_trace_optimization;
@@ -2623,6 +2627,7 @@ namespace Legion {
       public:
         bool parse_alloc_percentage_override_argument(const std::string& s);
         bool parse_auto_trace_repeats_algorithm_argument(const std::string& s);
+        bool parse_auto_trace_identifier_algorithm_argument(const std::string& s);
       };
     public:
       struct TopFinishArgs : public LgTaskArgs<TopFinishArgs> {
@@ -2728,9 +2733,16 @@ namespace Legion {
       const unsigned auto_trace_min_trace_length;
       // The maximum trace length that we are willing to replay (default uint64_t max).
       const uint64_t auto_trace_max_trace_length;
+      // The scale factor size for the multi-scale identification algorithm.
+      // The multi-scale algorithm will use this value as the minimum buffer
+      // size to run partial analyses over (default 100).
+      const uint64_t auto_trace_multi_scale_factor;
       // The algorithm we will use to identify repeated sequences of
       // tasks issued by the program.
       const NonOverlappingAlgorithm auto_trace_repeats_alg;
+      // The algorithm we will use to decide when to run repeats
+      // processing jobs on task buffers.
+      const uint64_t auto_trace_identifier_alg;
       const bool no_tracing;
       const bool no_physical_tracing;
       const bool no_trace_optimization;

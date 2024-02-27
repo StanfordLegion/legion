@@ -12686,10 +12686,11 @@ namespace Legion {
     RtEvent InnerContext::enqueue_trace_analysis_meta_task(
       const AutoTraceProcessRepeatsArgs &args,
       size_t opidx,
-      bool wait
+      bool wait,
+      RtEvent precondition
     ) {
       // TODO (rohany): Not sure of the priority to use here.
-      RtEvent event = this->runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY);
+      RtEvent event = this->runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY, precondition);
       this->trace_analysis_comp_queue.add_event(event);
       if (wait) { event.wait(); }
       return event;
@@ -22683,10 +22684,11 @@ namespace Legion {
     RtEvent ReplicateContext::enqueue_trace_analysis_meta_task(
       const AutoTraceProcessRepeatsArgs &args,
       size_t opidx,
-      bool wait
+      bool wait,
+      RtEvent precondition
     ) {
       // TODO (rohany): What priority to use here?
-      RtEvent result = this->runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY);
+      RtEvent result = this->runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY, precondition);
       this->trace_analysis_inflight_tasks.emplace_back(result, opidx);
       if (wait) { result.wait(); }
       return result;
