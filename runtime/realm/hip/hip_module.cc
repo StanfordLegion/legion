@@ -2469,15 +2469,19 @@ namespace Realm {
       add_module_specific(new HipDeviceMemoryInfo(gpu->device_id));
     }
 
-    GPUDynamicFBMemory::~GPUDynamicFBMemory(void)
+    GPUDynamicFBMemory::~GPUDynamicFBMemory(void) { cleanup(); }
+
+    void GPUDynamicFBMemory::cleanup(void)
     {
+      AutoLock<> al(mutex);
+      if(alloc_bases.empty())
+        return;
       // free any remaining allocations
       AutoGPUContext agc(gpu);
-      AutoLock<> al(mutex);
-      for(std::map<RegionInstance, void*>::const_iterator it = alloc_bases.begin();
-          it != alloc_bases.end();
-          ++it)
-        CHECK_HIP( hipFree(it->second) );
+      for(std::map<RegionInstance, std::pair<void *, size_t>>::const_iterator it =
+              alloc_bases.begin();
+          it != alloc_bases.end(); ++it)
+        CHECK_HIP(hipFree(it->second.first));
       alloc_bases.clear();
     }
 
@@ -2495,9 +2499,31 @@ namespace Realm {
       }
 
       // attempt hipMalloc, except for size=0 allocations
-      size_t size = inst->metadata.layout->bytes_used;
+      size_t bytes = inst->metadata.layout->bytes_used;
       void* base = NULL;
-      if(size > 0) {
+      if(bytes > 0) {
+        // before we attempt an allocation with cuda, make sure we're not
+        //  going over our usage limit
+        bool limit_ok;
+        size_t cur_snapshot;
+        {
+          AutoLock<> al(mutex);
+          cur_snapshot = cur_size;
+          limit_ok = (cur_size + bytes) <= size;
+          if(limit_ok) {
+            cur_size += bytes;
+          }
+        }
+
+        if(!limit_ok) {
+          log_gpu.warning() << "dynamic allocation limit reached: mem=" << me
+                            << " cur_size=" << cur_snapshot << " bytes=" << bytes
+                            << " limit=" << size;
+          inst->notify_allocation(ALLOC_INSTANT_FAILURE,
+                                  RegionInstanceImpl::INSTOFFSET_FAILED, work_until);
+          return ALLOC_INSTANT_FAILURE;
+        }
+
         hipError_t ret;
         {
           AutoGPUContext agc(gpu);
@@ -2518,7 +2544,7 @@ namespace Realm {
       // insert entry into our alloc_bases map
       {
         AutoLock<> al(mutex);
-        alloc_bases[inst->me] = base;
+        alloc_bases[inst->me] = std::make_pair(base, bytes);
       }
 
       inst->notify_allocation(ALLOC_INSTANT_SUCCESS, reinterpret_cast<size_t>(base), work_until);
@@ -2543,12 +2569,15 @@ namespace Realm {
       void* base;
       {
         AutoLock<> al(mutex);
-        std::map<RegionInstance, void*>::iterator it = alloc_bases.find(inst->me);
+        std::map<RegionInstance, std::pair<void *, size_t>>::iterator it =
+            alloc_bases.find(inst->me);
         if(it == alloc_bases.end()) {
           log_gpu.fatal() << "attempt to release unknown instance: inst=" << inst->me;
           abort();
         }
-        base = it->second;
+        base = it->second.first;
+        assert(cur_size >= it->second.second);
+        cur_size -= it->second.second;
         alloc_bases.erase(it);
       }
 
@@ -3116,12 +3145,11 @@ namespace Realm {
     //
     // class GPU
 
-    GPU::GPU(HipModule *_module, GPUInfo *_info, GPUWorker *_worker,
-             int _device_id)
-      : module(_module), info(_info), worker(_worker)
-      , proc(0), fbmem(0), fb_ibmem(0)
-      , device_id(_device_id), fbmem_base(0), fb_ibmem_base(0)
-      , next_task_stream(0), next_d2d_stream(0)
+    GPU::GPU(HipModule *_module, GPUInfo *_info, GPUWorker *_worker, int _device_id)
+      : module(_module)
+      , info(_info)
+      , worker(_worker)
+      , device_id(_device_id)
     {
       push_context();
 
@@ -3186,7 +3214,11 @@ namespace Realm {
       // free memory
       if(fbmem_base)
         CHECK_HIP( hipFree((void *)fbmem_base) );
-      
+
+      if(fb_dmem) {
+        fb_dmem->cleanup();
+      }
+
       if(fb_ibmem_base)
         CHECK_HIP( hipFree((void *)fb_ibmem_base) );
 
@@ -3379,8 +3411,8 @@ namespace Realm {
       }
 
       Memory m = runtime->next_local_memory_id();
-      GPUDynamicFBMemory *dfb = new GPUDynamicFBMemory(m, this, max_size);
-      runtime->add_memory(dfb);
+      fb_dmem = new GPUDynamicFBMemory(m, this, max_size);
+      runtime->add_memory(fb_dmem);
     }
 
 #ifdef REALM_USE_HIP_HIJACK
