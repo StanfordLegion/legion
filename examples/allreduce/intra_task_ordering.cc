@@ -47,7 +47,7 @@ public:
   {
     return upper_bound;
   }
-  virtual void invert(Legion::LogicalRegion region, Legion::LogicalPartition upper,
+  virtual void invert(Legion::LogicalRegion region, Legion::LogicalRegion upper,
                       const Legion::Domain &launch_domain,
                       std::vector<Legion::DomainPoint> &ordered_points) override
   {
@@ -56,9 +56,9 @@ public:
      ordered_points.push_back(itr.p);
     }
   }
-  virtual unsigned get_depth(void) const { return 0; }
-  virtual bool is_functional(void) const { return true; }
-  virtual bool is_invertible(void) const { return true; }
+  virtual unsigned get_depth(void) const override { return 0; }
+  virtual bool is_functional(void) const override { return true; }
+  virtual bool is_invertible(void) const override { return true; }
 };
 
 void top_level_task(const Task *task,
@@ -102,7 +102,7 @@ void top_level_task(const Task *task,
                                 TaskArgument(NULL, 0), arg_map);
   intra_is_ordering_task_launcher.add_region_requirement(
       RegionRequirement(lr, PID_INTRA_IS_TASK_ORDERING/*projection ID*/,
-                        LEGION_READ_ONLY, LEGION_EXCLUSIVE, lr));
+                        LEGION_READ_WRITE, LEGION_EXCLUSIVE, lr));
   intra_is_ordering_task_launcher.add_field(0, FID_DATA);
 
   for (int idx = 1; idx <= num_iterations; idx++)
