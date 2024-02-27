@@ -233,13 +233,16 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    LogicalTraceInfo::LogicalTraceInfo(Operation *op, unsigned idx, 
-                                       const RegionRequirement &r)
+    LogicalTraceInfo::LogicalTraceInfo(Operation *op, unsigned idx,
+        const RegionRequirement &r, const FieldMask &mask)
       : trace(op->get_trace()), req_idx(idx), req(r),
         skip_analysis((trace != NULL) && 
                        trace->skip_analysis(r.parent.get_tree_id()))
     //--------------------------------------------------------------------------
     {
+      if ((trace != NULL) && trace->has_physical_trace())
+        trace->get_physical_trace()->record_parent_req_fields(
+            op->find_parent_index(idx), mask);
     }
 
     /////////////////////////////////////////////////////////////
@@ -19267,9 +19270,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent EquivalenceSet::capture_trace_conditions(TraceConditionSet *target,
-                        AddressSpaceID target_space, IndexSpaceExpression *expr,
-                        const FieldMask &mask, RtUserEvent ready_event)
+    RtEvent EquivalenceSet::capture_trace_conditions(PhysicalTemplate *target,
+                         AddressSpaceID target_space, unsigned parent_req_index,
+                         std::atomic<unsigned> *result, RtUserEvent ready_event)
     //--------------------------------------------------------------------------
     {
       AutoLock eq(eq_lock);    
@@ -19286,106 +19289,91 @@ namespace Legion {
           rez.serialize(did);
           rez.serialize(target);
           rez.serialize(target_space);
-          expr->pack_expression(rez, logical_owner_space);
-          rez.serialize(mask);
+          rez.serialize(parent_req_index);
+          rez.serialize(result);
           rez.serialize(ready_event);
         }
         runtime->send_equivalence_set_capture_request(logical_owner_space, rez);
         return ready_event;
       }
-      // If we get here then we are the ones to do the analysis
-      TraceViewSet *previews = NULL;
-      TraceViewSet *antiviews = NULL;
-      TraceViewSet *postviews = NULL;
-      // Compute the views to send back
-      if (tracing_preconditions != NULL)
-      {
-        previews = new TraceViewSet(context, 0/*no owner*/, set_expr, tree_id);
-        tracing_preconditions->find_overlaps(*previews, expr, 
-                                             (expr == set_expr), mask);
-      }
-      if (tracing_anticonditions != NULL)
-      {
-        antiviews = new TraceViewSet(context, 0/*no owner*/, set_expr, tree_id);
-        tracing_anticonditions->find_overlaps(*antiviews, expr,
-                                             (expr == set_expr), mask);
-      }
-      if (tracing_postconditions != NULL)
-      {
-        postviews = new TraceViewSet(context, 0/*no owner*/, set_expr, tree_id);
-        tracing_postconditions->find_overlaps(*postviews, expr,
-                                             (expr == set_expr), mask);
-      }
-      // Return the results
-      RtEvent result = ready_event;
+      // Now either pack up the state to send back to the target or do
+      // the analysis here to create the trace condition sets
       if (target_space != local_space)
       {
 #ifdef DEBUG_LEGION
         assert(ready_event.exists());
 #endif
-        // Send back the results to the target node
         Serializer rez;
         {
-          RezCheck z(rez);
+          rez.serialize(did);
           rez.serialize(target);
-          set_expr->pack_expression(rez, target_space);
+          rez.serialize(parent_req_index);
           rez.serialize(tree_id);
-          if (previews != NULL)
-            previews->pack(rez, target_space, true/*pack references*/);
+          rez.serialize(result);
+          if (tracing_preconditions != NULL)
+            tracing_preconditions->pack(rez, target_space, true/*pack refs*/);
           else
             rez.serialize<size_t>(0);
-          if (antiviews != NULL)
-            antiviews->pack(rez, target_space, true/*pack references*/);
+          if (tracing_anticonditions != NULL)
+            tracing_anticonditions->pack(rez, target_space, true/*pack refs*/);
           else
             rez.serialize<size_t>(0);
-          if (postviews != NULL)
-            postviews->pack(rez, target_space, true/*pack references*/);
+          if (tracing_postconditions != NULL)
+            tracing_postconditions->pack(rez, target_space, true/*pack refs*/);
           else
             rez.serialize<size_t>(0);
           rez.serialize(ready_event);
         }
         runtime->send_equivalence_set_capture_response(target_space, rez);
-        if (previews != NULL)
-          delete previews;
-        if (antiviews != NULL)
-          delete antiviews;
-        if (postviews != NULL)
-          delete postviews;
       }
       else
       {
-        target->receive_capture(previews, antiviews, postviews);
+        target->receive_trace_conditions(tracing_preconditions,
+            tracing_anticonditions, tracing_postconditions,
+            parent_req_index, tree_id, result);
         if (ready_event.exists())
           Runtime::trigger_event(ready_event);
       }
       if (tracing_preconditions != NULL)
       {
-        tracing_preconditions->invalidate_all_but(NULL, expr, mask);
-        if (tracing_preconditions->empty())
-        {
-          delete tracing_preconditions;
-          tracing_preconditions = NULL;
-        }
+        delete tracing_preconditions;
+        tracing_preconditions = NULL;
       }
       if (tracing_anticonditions != NULL)
       {
-        tracing_anticonditions->invalidate_all_but(NULL, expr, mask);
-        if (tracing_anticonditions->empty())
-        {
-          delete tracing_anticonditions;
-          tracing_anticonditions = NULL;
-        }
+        delete tracing_anticonditions;
+        tracing_anticonditions = NULL;
       }
       if (tracing_postconditions != NULL)
       {
-        tracing_postconditions->invalidate_all_but(NULL, expr, mask);
-        if (tracing_postconditions->empty())
-        {
-          delete tracing_postconditions;
-          tracing_postconditions = NULL;
-        }
+        delete tracing_postconditions;
+        tracing_postconditions = NULL;
       }
-      return result;
+      return ready_event;
+    }
+
+    //--------------------------------------------------------------------------
+    AddressSpaceID EquivalenceSet::select_collective_trace_capture_space(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(collective_mapping != NULL);
+#endif
+      AutoLock eq(eq_lock);
+      if (!replicate_logical_owner_space(local_space, collective_mapping,false))
+      {
+#ifdef DEBUG_LEGION
+        assert(replicated_owner_state->ready.exists());
+#endif
+        const RtEvent wait_on = replicated_owner_state->ready;
+        eq.release();
+        wait_on.wait();
+        eq.reacquire();
+      }
+      if (collective_mapping->contains(logical_owner_space))
+        return logical_owner_space;
+      else
+        return collective_mapping->find_nearest(logical_owner_space);
     }
 
     //--------------------------------------------------------------------------
@@ -21206,19 +21194,20 @@ namespace Legion {
       derez.deserialize(did);
       RtEvent ready;
       EquivalenceSet *set = runtime->find_or_request_equivalence_set(did,ready);
-      TraceConditionSet *target;
+      PhysicalTemplate *target;
       derez.deserialize(target);
       AddressSpaceID target_space;
       derez.deserialize(target_space);
-      IndexSpaceExpression *expr = 
-        IndexSpaceExpression::unpack_expression(derez, runtime->forest, source);
-      FieldMask mask;
-      derez.deserialize(mask);
+      unsigned parent_req_index;
+      derez.deserialize(parent_req_index);
+      std::atomic<unsigned> *result;
+      derez.deserialize(result);
       RtUserEvent ready_event;
       derez.deserialize(ready_event);
       if (ready.exists() && !ready.has_triggered())
         ready.wait();
-      set->capture_trace_conditions(target,target_space,expr,mask,ready_event);
+      set->capture_trace_conditions(target, target_space, parent_req_index,
+                                    result, ready_event);
     }
 
     //--------------------------------------------------------------------------
@@ -21227,35 +21216,46 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
-      TraceConditionSet *target;
+      DistributedID did;
+      derez.deserialize(did);
+      RtEvent ready;
+      EquivalenceSet *set = runtime->find_or_request_equivalence_set(did,ready);
+      PhysicalTemplate *target;
       derez.deserialize(target);
-      IndexSpaceExpression *expr =
-        IndexSpaceExpression::unpack_expression(derez, runtime->forest, source);
-      RegionTreeID tid;
-      derez.deserialize(tid);
+      unsigned parent_req_index;
+      derez.deserialize(parent_req_index);
+      RegionTreeID tree_id;
+      derez.deserialize(tree_id);
+      std::atomic<unsigned> *result;
+      derez.deserialize(result);
       TraceViewSet *previews = NULL;
       TraceViewSet *antiviews = NULL;
       TraceViewSet *postviews = NULL;
+      std::set<RtEvent> ready_events;
       size_t num_previews;
       derez.deserialize(num_previews);
-      std::set<RtEvent> ready_events;
+      if (ready.exists() && !ready.has_triggered())
+        ready.wait();
       if (num_previews > 0)
       {
-        previews = new TraceViewSet(target->context, 0/*no owner*/, expr, tid);
+        previews =
+          new TraceViewSet(set->context, set->did, set->set_expr, set->tree_id);
         previews->unpack(derez, num_previews, source, ready_events); 
       }
       size_t num_antiviews;
       derez.deserialize(num_antiviews);
       if (num_antiviews > 0)
       {
-        antiviews = new TraceViewSet(target->context, 0/*no owner*/, expr, tid);
+        antiviews =
+          new TraceViewSet(set->context, set->did, set->set_expr, set->tree_id);
         antiviews->unpack(derez, num_antiviews, source, ready_events);
       }
       size_t num_postviews;
       derez.deserialize(num_postviews);
       if (num_postviews > 0)
       {
-        postviews = new TraceViewSet(target->context, 0/*no owner*/, expr, tid);
+        postviews =
+          new TraceViewSet(set->context, set->did, set->set_expr, set->tree_id);
         postviews->unpack(derez, num_postviews, source, ready_events);
       }
       RtUserEvent done_event;
@@ -21270,14 +21270,21 @@ namespace Legion {
         if (wait_on.exists() && !wait_on.has_triggered())
           wait_on.wait();
       }
-      target->receive_capture(previews, antiviews, postviews); 
       if (previews != NULL)
         previews->unpack_references();
       if (antiviews != NULL)
         antiviews->unpack_references();
       if (postviews != NULL)
         postviews->unpack_references();
+      target->receive_trace_conditions(previews, antiviews, postviews,
+                                       parent_req_index, tree_id, result);
       Runtime::trigger_event(done_event);
+      if (previews != NULL)
+        delete previews;
+      if (antiviews != NULL)
+        delete antiviews;
+      if (postviews != NULL)
+        delete postviews;
     }
 
     /////////////////////////////////////////////////////////////

@@ -13768,6 +13768,7 @@ namespace Legion {
           case SEND_CONTROL_REPLICATION_MASK_EXCHANGE:
           case SEND_CONTROL_REPLICATION_PREDICATE_EXCHANGE:
           case SEND_CONTROL_REPLICATION_CROSS_PRODUCT_EXCHANGE:
+          case SEND_CONTROL_REPLICATION_TRACING_SET_DEDUPLICATION:
           case SEND_CONTROL_REPLICATION_SLOW_BARRIER:
             {
               ShardManager::handle_collective_message(derez, runtime);

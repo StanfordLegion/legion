@@ -1205,6 +1205,8 @@ namespace Legion {
                       EquivalenceSet *set, const FieldMask &mask);
       EqKDTree* find_equivalence_set_kd_tree(unsigned req_index,
           LocalLock *&tree_lock, bool return_null_if_doesnt_exist = false);
+      void find_trace_local_sets(unsigned req_index, const FieldMask &mask,
+          std::map<EquivalenceSet*,unsigned> &current_sets);
       EqKDTree* find_or_create_output_set_kd_tree(unsigned req_index,
                                                   LocalLock *&tree_lock);
       void finalize_output_eqkd_tree(unsigned req_index);

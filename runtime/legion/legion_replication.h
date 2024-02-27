@@ -1690,6 +1690,34 @@ namespace Legion {
     };
 
     /**
+     * \class TracingSetDeduplication
+     * This class performs an all-gather on the names of equivalence sets
+     * which might be replicated across the shards and therefore we want 
+     * to efficiently deduplicate which of them will be captured by 
+     * different nodes for establishing tracing pre/post-conditions
+     */
+    class TracingSetDeduplication : public AllGatherCollective<false> {
+    public:
+      TracingSetDeduplication(ReplicateContext *ctx, CollectiveID id);
+      TracingSetDeduplication(const TracingSetDeduplication &rhs) = delete;
+      virtual ~TracingSetDeduplication(void);
+    public:
+      TracingSetDeduplication& operator=(
+          const TracingSetDeduplication &rhs) = delete;
+    public:
+       virtual MessageKind get_message_kind(void) const
+        { return SEND_CONTROL_REPLICATION_TRACING_SET_DEDUPLICATION; }
+      virtual void pack_collective_stage(ShardID target,
+                                         Serializer &rez, int stage);
+      virtual void unpack_collective_stage(Deserializer &derez, int stage);
+    public:
+      void record_set(DistributedID did, unsigned parent_req_index);
+      const std::map<DistributedID,unsigned>& all_gather_collective_sets(void);
+    private:
+      std::map<DistributedID,unsigned> collective_sets;
+    };
+
+    /**
      * \class SlowBarrier
      * This class creates a collective that behaves like a barrier, but is
      * probably slower than Realm phase barriers. It's useful for cases
@@ -3017,10 +3045,13 @@ namespace Legion {
       virtual void begin_idempotent_exchange(IdempotencyStatus idempotent);
       virtual void end_idempotent_exchange(IdempotencyStatus &idempotent);
       virtual void sync_compute_frontiers(RtEvent event);
+      virtual void deduplicate_condition_sets(
+          std::map<EquivalenceSet*,unsigned> &condition_sets);
     private:
       CollectiveID replayable_collective_id;
       CollectiveID idempotent_collective_id;
       CollectiveID sync_compute_frontiers_collective_id;
+      CollectiveID deduplication_collective_id;
       AllReduceCollective<ProdReduction<bool> > *replayable_collective;
       AllReduceCollective<ProdReduction<bool> > *idempotent_collective;
     };

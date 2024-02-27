@@ -1081,6 +1081,7 @@ namespace Legion {
       SEND_CONTROL_REPLICATION_MASK_EXCHANGE,
       SEND_CONTROL_REPLICATION_PREDICATE_EXCHANGE,
       SEND_CONTROL_REPLICATION_CROSS_PRODUCT_EXCHANGE,
+      SEND_CONTROL_REPLICATION_TRACING_SET_DEDUPLICATION,
       SEND_CONTROL_REPLICATION_SLOW_BARRIER,
       SEND_SHUTDOWN_NOTIFICATION,
       SEND_SHUTDOWN_RESPONSE,
@@ -1405,6 +1406,7 @@ namespace Legion {
         "Control Replication Collective Mask Exchange",               \
         "Control Replication Collective Predicate Exchange",          \
         "Control Replication Collective Cross Product Exchange",      \
+        "Control Replication Collective Tracing Set Deduplication",   \
         "Control Replication Collective Slow Barrier",                \
         "Send Shutdown Notification",                                 \
         "Send Shutdown Response",                                     \
@@ -1964,7 +1966,7 @@ namespace Legion {
       COLLECTIVE_LOC_64 = 64,
       COLLECTIVE_LOC_65 = 65,
       COLLECTIVE_LOC_66 = 66,
-      //COLLECTIVE_LOC_67 = 67,
+      COLLECTIVE_LOC_67 = 67,
       //COLLECTIVE_LOC_68 = 68,
       //COLLECTIVE_LOC_69 = 69,
       COLLECTIVE_LOC_70 = 70,

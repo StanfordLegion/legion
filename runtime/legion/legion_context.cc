@@ -2942,6 +2942,23 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void InnerContext::find_trace_local_sets(unsigned req_index,
+        const FieldMask &mask, std::map<EquivalenceSet*,unsigned> &current_sets)
+    //--------------------------------------------------------------------------
+    {
+      // Find the equivalence set tree for this region requirement
+      LocalLock *tree_lock = NULL;
+      EqKDTree *tree = find_equivalence_set_kd_tree(req_index, tree_lock);
+      const ShardID local_shard = get_shard_id();
+      // Need non-exclusive access to the tree for reading
+      // Technically this shouldn't be necessary since we're in a mapping
+      // fence when we run this function, but we put it here just so that
+      // nobody gets confused
+      AutoLock t_lock(*tree_lock,1,false/*exclusive*/);
+      tree->find_trace_local_sets(req_index, local_shard, mask, current_sets);
+    }
+
+    //--------------------------------------------------------------------------
     EqKDTree* InnerContext::find_or_create_output_set_kd_tree(
                                       unsigned req_index, LocalLock *&tree_lock)
     //--------------------------------------------------------------------------

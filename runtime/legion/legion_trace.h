@@ -297,6 +297,8 @@ namespace Legion {
       virtual void begin_idempotent_exchange(IdempotencyStatus idempotent) { }
       virtual void end_idempotent_exchange(IdempotencyStatus &idempotent) { }
       virtual void sync_compute_frontiers(RtEvent event) { assert(false); }
+      virtual void deduplicate_condition_sets(
+          std::map<EquivalenceSet*,unsigned> &condition_sets) { }
     };
 
     /**
@@ -448,6 +450,7 @@ namespace Legion {
       virtual OpKind get_operation_kind(void) const;
     public:
       virtual void trigger_dependence_analysis(void);
+      virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
     public:
       virtual FenceOp* get_begin_operation(void) { return this; }
@@ -499,6 +502,8 @@ namespace Legion {
       inline bool is_recurrent(void) const { return recurrent; }
       size_t get_expected_operation_count(void) const;
     public:
+      void record_parent_req_fields(unsigned index, const FieldMask &mask);
+      void find_condition_sets(std::map<EquivalenceSet*,unsigned> &sets) const;
       void refresh_condition_sets(FenceOp *op,
           std::vector<RtEvent> &refresh_ready) const;
       bool begin_physical_trace(BeginOp *op,
@@ -528,8 +533,12 @@ namespace Legion {
       const bool perform_fence_elision;
     private:
       mutable LocalLock trace_lock;
-      PhysicalTemplate* current_template;
+      // This is a mapping from the parent region requirements
+      // to the sets of fields referred to in the trace. We use
+      // this to find the equivalence sets for a template
+      LegionMap<unsigned,FieldMask> parent_req_fields;
       std::vector<PhysicalTemplate*> templates;
+      PhysicalTemplate* current_template;
       unsigned nonreplayable_count;
       unsigned new_template_count; 
     private:
@@ -588,13 +597,13 @@ namespace Legion {
       void filter_independent_fields(IndexSpaceExpression *expr,
                                      FieldMask &mask) const;
       bool subsumed_by(const TraceViewSet &set, bool allow_independent,
+                       bool &has_independent,
                        FailedPrecondition *condition = NULL) const;
       bool independent_of(const TraceViewSet &set,
                        FailedPrecondition *condition = NULL) const; 
       void record_first_failed(FailedPrecondition *condition = NULL) const;
       void transpose_uniquely(LegionMap<IndexSpaceExpression*,
-                                        FieldMaskSet<LogicalView> > &target,
-                          std::set<IndexSpaceExpression*> &unique_exprs) const;
+                                  FieldMaskSet<LogicalView> > &target) const;
       void find_overlaps(TraceViewSet &target, IndexSpaceExpression *expr,
                          const bool expr_covers, const FieldMask &mask) const;
       bool empty(void) const;
@@ -637,9 +646,9 @@ namespace Legion {
     class TraceConditionSet : public EqSetTracker, public Collectable,
                               public LegionHeapify<TraceConditionSet> {
     public:
-      TraceConditionSet(PhysicalTrace *trace, RegionTreeForest *forest, 
-                        unsigned parent_req_index, IndexSpaceExpression *expr,
-                        const FieldMask &mask, RegionTreeID tree_id);
+      TraceConditionSet(PhysicalTemplate *tpl, unsigned parent_req_index,
+                        RegionTreeID tree_id, IndexSpaceExpression *expr,
+                        FieldMaskSet<LogicalView> &&views, bool shared = false);
       TraceConditionSet(const TraceConditionSet &rhs) = delete;
       virtual ~TraceConditionSet(void);
     public:
@@ -657,54 +666,36 @@ namespace Legion {
         { return TRACE_REF; }
     public:
       void invalidate_equivalence_sets(void);
-      void capture(EquivalenceSet *set, const FieldMask &mask,
-                   std::vector<RtEvent> &ready_events);
-      void receive_capture(TraceViewSet *pre, TraceViewSet *anti,
-                           TraceViewSet *post);
-      bool is_empty(void) const;
-      bool is_idempotent(bool &not_subsumed,
-                         TraceViewSet::FailedPrecondition *failed = NULL);
-      void dump_preconditions(void);
-      void dump_anticonditions(void);
-      void dump_postconditions(void);
+      void refresh_equivalence_sets(FenceOp *op,
+          std::vector<RtEvent> &ready_events);
+      RtEvent recompute_equivalence_sets(UniqueID opid, 
+                        const FieldMask &invalid_mask);
+      void dump_conditions(void) const;
     public:
       void test_preconditions(FenceOp *op, unsigned index,
                               std::vector<RtEvent> &ready_events,
                               std::set<RtEvent> &applied_events);
       bool check_preconditions(void);
+      void test_anticonditions(FenceOp *op, unsigned index,
+                               std::vector<RtEvent> &ready_events,
+                               std::set<RtEvent> &applied_events);
+      bool check_anticonditions(void);
       void apply_postconditions(FenceOp *op, unsigned index,
                                 std::set<RtEvent> &applied_events);
     public:
-      void refresh_equivalence_sets(FenceOp *op,
-          std::vector<RtEvent> &ready_events);
-      RtEvent recompute_equivalence_sets(UniqueID opid, 
-                        const FieldMask &invalid_mask);
-    public:
-      InnerContext *const context;
-      RegionTreeForest *const forest;
+      PhysicalTemplate *const owner;
       IndexSpaceExpression *const condition_expr;
-      const FieldMask condition_mask;
+      const FieldMaskSet<LogicalView> views;
       const RegionTreeID tree_id;
       const unsigned parent_req_index;
+      const bool shared;
     private:
       mutable LocalLock set_lock;
     private:
-      TraceViewSet *precondition_views;
-      TraceViewSet *anticondition_views;
-      TraceViewSet *postcondition_views; 
-      // Transpose of conditions for testing
-      typedef LegionMap<IndexSpaceExpression*,
-                        FieldMaskSet<LogicalView> > ExprViews;
-      ExprViews preconditions;
-      ExprViews anticonditions;
-      ExprViews postconditions;
-      // A unique set of index space expressions from the *_ views
-      // This is needed because transpose_uniquely might not capture
-      // all the needed expression references
-      std::set<IndexSpaceExpression*> unique_view_expressions;
-    private:
-      std::vector<InvalidInstAnalysis*> precondition_analyses;
-      std::vector<AntivalidInstAnalysis*> anticondition_analyses;
+      union {
+        InvalidInstAnalysis *invalid;
+        AntivalidInstAnalysis *antivalid;
+      } analysis;
     };
 
     /**
@@ -845,6 +836,10 @@ namespace Legion {
       void find_execution_fence_preconditions(std::set<ApEvent> &preconditions);
       ReplayableStatus finalize(CompleteOp *op, bool has_blocking_call);
       IdempotencyStatus capture_conditions(CompleteOp *op);
+      void receive_trace_conditions(TraceViewSet *preconditions,
+          TraceViewSet *anticonditions, TraceViewSet *postconditions,
+          unsigned parent_req_index, RegionTreeID tree_id,
+          std::atomic<unsigned> *result);
       void refresh_condition_sets(FenceOp *op,
           std::vector<RtEvent> &ready_events) const;
       bool acquire_instance_references(void) const;
@@ -1195,12 +1190,12 @@ namespace Legion {
       // THIS IS SHARDED FOR CONTROL REPLICATION!!!
       LegionMap<UniqueInst,FieldMaskSet<IndexSpaceExpression> > mutated_insts; 
     private:
-      // Capture the set of regions that we saw operations for, we'll use this
-      // at the end of the trace capture to compute the equivalence sets for
-      // this trace and then extract the different condition sets for this trace
       // THESE ARE SHARDED FOR CONTROL REPLICATION!!!
-      LegionVector<FieldMaskSet<RegionNode> > trace_regions;
-      std::vector<TraceConditionSet*> conditions;
+      // Each share has a disjoint set of trace conditions that they are
+      // responsible for handling checking
+      std::vector<TraceConditionSet*> preconditions; 
+      std::vector<TraceConditionSet*> anticonditions;
+      std::vector<TraceConditionSet*> postconditions;
 #ifdef LEGION_SPY
     private:
       UniqueID prev_fence_uid;

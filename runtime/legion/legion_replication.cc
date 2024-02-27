@@ -8146,6 +8146,8 @@ namespace Legion {
         ctx->get_next_collective_index(COLLECTIVE_LOC_94);
       sync_compute_frontiers_collective_id =
         ctx->get_next_collective_index(COLLECTIVE_LOC_92);
+      deduplication_collective_id =
+        ctx->get_next_collective_index(COLLECTIVE_LOC_67);
     }
 
     //--------------------------------------------------------------------------
@@ -8159,6 +8161,7 @@ namespace Legion {
       idempotent_collective_id = 0;
       idempotent_collective = NULL;
       sync_compute_frontiers_collective_id = 0;
+      deduplication_collective_id = 0;
     }
 
     //--------------------------------------------------------------------------
@@ -8264,6 +8267,83 @@ namespace Legion {
       SlowBarrier pre_sync_barrier(repl_ctx,
           sync_compute_frontiers_collective_id);
       pre_sync_barrier.perform_collective_sync(precondition);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void ReplTraceComplete<OP>::deduplicate_condition_sets(
+                             std::map<EquivalenceSet*,unsigned> &condition_sets)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx =
+        dynamic_cast<ReplicateContext*>(this->parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx =
+        static_cast<ReplicateContext*>(this->parent_ctx);
+#endif
+      // If this replication doesn't span multiple nodes we don't care
+      if (repl_ctx->shard_manager->collective_mapping == NULL)
+        return;
+      // If the equivalence set doesn't have a collective map then we know
+      // that by definition we're the only ones who can know about it so we
+      // don't need to exchange it. If it has a collective mapping then try
+      // to exchange so the some shard on each node in the replicate context
+      // that is in the collective mapping finds it. Note we don't need to 
+      // worry about deduplicating between several shards on the same node
+      // trying to record the condition. They can race and the first one to
+      // record the condition will win. We mainly need to get the asymptotic
+      // benefits of deduplicating across lots of nodes here.
+      TracingSetDeduplication exchange(repl_ctx, deduplication_collective_id);
+      for (std::map<EquivalenceSet*,unsigned>::iterator it =
+            condition_sets.begin(); it != condition_sets.end(); /*nothing*/)
+      {
+        if (it->first->collective_mapping != NULL)
+        {
+          exchange.record_set(it->first->did, it->second);
+          std::map<EquivalenceSet*,unsigned>::iterator delete_it = it++;
+          condition_sets.erase(delete_it);
+        }
+        else
+          it++;
+      }
+      // Do the exchange
+      const std::map<DistributedID,unsigned> &collective_sets = 
+        exchange.all_gather_collective_sets();
+      // No need to bother if we're not the first local shard on each node
+      // for this next part since we just want one shard doing this part
+      if (repl_ctx->shard_manager->is_first_local_shard(repl_ctx->owner_shard))
+      {
+        // For each of the sets set if there is a copy on this node and we are
+        // contained in the collective mapping for the equivalence sets then
+        // we're going to participate in the 
+        const AddressSpaceID local_space = this->runtime->address_space;
+        for (std::map<DistributedID,unsigned>::const_iterator it =
+              collective_sets.begin(); it != collective_sets.end(); it++)
+        {
+          // See if we can find the equivalence set on this node
+          EquivalenceSet *set = static_cast<EquivalenceSet*>(
+              this->runtime->weak_find_distributed_collectable(it->first));
+          if (set == NULL)
+            continue;
+#ifdef DEBUG_LEGION
+          assert(set->collective_mapping != NULL);
+#endif
+          if (set->collective_mapping->contains(local_space))
+          {
+            // All the nodes in the collective mapping will be represented
+            // by at least one shard because this collective mapping had
+            // to have been made in this context
+            AddressSpaceID capture_space = 
+              set->select_collective_trace_capture_space();
+            if (capture_space == local_space)
+              condition_sets[set] = it->second;
+          }
+          if (set->remove_base_resource_ref(RUNTIME_REF))
+            delete set;
+        }
+      }
     }
 
     template class ReplTraceComplete<ReplCompleteOp>;
@@ -17218,6 +17298,69 @@ namespace Legion {
 #endif
       pid = finder->second.first;
       did = finder->second.second;
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Tracing Set Deduplication
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    TracingSetDeduplication::TracingSetDeduplication(ReplicateContext *ctx,
+                                                     CollectiveID id)
+      : AllGatherCollective<false>(ctx, id)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    TracingSetDeduplication::~TracingSetDeduplication(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    void TracingSetDeduplication::pack_collective_stage(ShardID target,
+                                                     Serializer &rez, int stage)
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize<size_t>(collective_sets.size());
+      for (std::map<DistributedID,unsigned>::const_iterator it =
+            collective_sets.begin(); it != collective_sets.end(); it++)
+      {
+        rez.serialize(it->first);
+        rez.serialize(it->second);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void TracingSetDeduplication::unpack_collective_stage(Deserializer &derez,
+                                                          int stage)
+    //--------------------------------------------------------------------------
+    {
+      size_t num_sets;
+      derez.deserialize(num_sets);
+      for (unsigned idx = 0; idx < num_sets; idx++)
+      {
+        DistributedID did;
+        derez.deserialize(did);
+        derez.deserialize(collective_sets[did]);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void TracingSetDeduplication::record_set(DistributedID did, unsigned index)
+    //--------------------------------------------------------------------------
+    {
+      collective_sets[did] = index;
+    }
+
+    //--------------------------------------------------------------------------
+    const std::map<DistributedID,unsigned>& 
+      TracingSetDeduplication::all_gather_collective_sets(void)
+    //--------------------------------------------------------------------------
+    {
+      perform_collective_sync();
+      return collective_sets;
     }
 
     /////////////////////////////////////////////////////////////
