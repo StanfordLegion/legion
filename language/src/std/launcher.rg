@@ -66,7 +66,7 @@ function launcher.build_library(library_name, source_files, cxx, additional_cxx_
   local cmd = (cxx .. " " .. cxx_flags .. " " .. include_path .. " " ..
                  table.concat(source_files, " ") .. " -o " .. library_so)
   if os.execute(cmd) ~= 0 then
-    print("Error: failed to compile " .. library_cc)
+    print("Error: command failed: " .. cmd)
     assert(false)
   end
   regentlib.linklibrary(library_so)
