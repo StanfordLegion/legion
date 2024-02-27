@@ -8953,6 +8953,28 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ReplTraceRecurrentOp::trigger_ready(void)
+    //--------------------------------------------------------------------------
+    {
+      if (trace->has_physical_trace())
+      {
+        PhysicalTrace *physical = trace->get_physical_trace();
+        if ((trace != previous) || physical->is_recording() ||
+            !physical->get_current_template()->is_idempotent())
+        {
+          std::vector<RtEvent> refresh_ready;
+          physical->refresh_condition_sets(this, refresh_ready);
+          if (!refresh_ready.empty())
+          {
+            enqueue_ready_operation(Runtime::merge_events(refresh_ready));
+            return;
+          }
+        }
+      }
+      enqueue_ready_operation();
+    }
+
+    //--------------------------------------------------------------------------
     void ReplTraceRecurrentOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
