@@ -24,9 +24,9 @@
 import "regent"
 
 local format = require("std/format")
+local launcher = require("std/launcher")
 
 local common = require("stencil_common")
-local launcher = require("launcher")
 
 local gpuhelper = require("regent/gpu/helper")
 local default_foreign = gpuhelper.check_gpu_available() and '0' or '1'

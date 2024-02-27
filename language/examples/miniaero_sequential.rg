@@ -46,7 +46,7 @@ local sqrt = regentlib.sqrt(double)
 -- build mapper
 -------------------------------------------------------------------------------
 
-local launcher = require("launcher")
+local launcher = require("std/launcher")
 local cmapper = launcher.build_library("miniaero_sequential")
 
 -------------------------------------------------------------------------------

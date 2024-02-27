@@ -24,11 +24,11 @@
 import "regent"
 
 local format = require("std/format")
+local launcher = require("std/launcher")
 
 local use_python_main = rawget(_G, "circuit_use_python_main") == true
 
 -- Compile and link circuit_mapper.cc
-local launcher = require("launcher")
 local cmapper = launcher.build_library("circuit_mapper")
 
 local cconfig

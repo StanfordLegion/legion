@@ -1299,5 +1299,5 @@ task toplevel()
   -- write_output(conf, rz, rp, rs)
 end
 
-local launcher = require("launcher")
+local launcher = require("std/launcher")
 launcher.launch(toplevel, "pennant", cpennant.register_mappers, {"-lpennant", "-lm"})
