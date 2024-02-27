@@ -89,6 +89,7 @@ namespace Realm {
     class GPUWorker;
     class GPUStream;
     class GPUFBMemory;
+    class GPUDynamicFBMemory;
     class GPUZCMemory;
     class GPUFBIBMemory;
     class GPU;
@@ -595,16 +596,20 @@ namespace Realm {
       hipModule_t load_hip_module(const void *data);
 
     public:
-      HipModule *module;
-      GPUInfo *info;
-      GPUWorker *worker;
-      GPUProcessor *proc;
-      GPUFBMemory *fbmem;
-      GPUFBIBMemory *fb_ibmem;
+      HipModule *module = nullptr;
+      GPUInfo *info = nullptr;
+      GPUWorker *worker = nullptr;
+      GPUProcessor *proc = nullptr;
+      GPUFBMemory *fbmem = nullptr;
+      GPUDynamicFBMemory *fb_dmem = nullptr;
+      GPUFBIBMemory *fb_ibmem = nullptr;
 
       //hipCtx_t context;
-      int device_id;
-      char *fbmem_base, *fb_ibmem_base;
+      int device_id = -1;
+
+      char *fbmem_base = nullptr;
+
+      char *fb_ibmem_base = nullptr;
 
       // which system memories have been registered and can be used for cuMemcpyAsync
       std::set<Memory> pinned_sysmems;
@@ -613,13 +618,14 @@ namespace Realm {
       std::set<Memory> peer_fbs;
 
       // streams for different copy types and a pile for actual tasks
-      GPUStream *host_to_device_stream;
-      GPUStream *device_to_host_stream;
-      GPUStream *device_to_device_stream;
+      GPUStream *host_to_device_stream = nullptr;
+      GPUStream *device_to_host_stream = nullptr;
+      GPUStream *device_to_device_stream = nullptr;
       std::vector<GPUStream *> device_to_device_streams;
       std::vector<GPUStream *> peer_to_peer_streams; // indexed by target
       std::vector<GPUStream *> task_streams;
-      atomic<unsigned> next_task_stream, next_d2d_stream;
+      atomic<unsigned> next_task_stream = atomic<unsigned>(0);
+      atomic<unsigned> next_d2d_stream = atomic<unsigned>(0);
 
       GPUEventPool event_pool;
 
@@ -804,6 +810,7 @@ namespace Realm {
       GPUDynamicFBMemory(Memory _me, GPU *_gpu, size_t _max_size);
 
       virtual ~GPUDynamicFBMemory(void);
+      void cleanup(void);
 
       // deferred allocation not supported
       virtual AllocationResult allocate_storage_immediate(RegionInstanceImpl *inst,
@@ -838,7 +845,7 @@ namespace Realm {
       GPU *gpu;
       Mutex mutex;
       size_t cur_size;
-      std::map<RegionInstance, void*> alloc_bases;
+      std::map<RegionInstance, std::pair<void *, size_t>> alloc_bases;
     };
 
     class GPUZCMemory : public LocalManagedMemory {
