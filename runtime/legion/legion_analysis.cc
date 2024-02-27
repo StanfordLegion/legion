@@ -19305,6 +19305,7 @@ namespace Legion {
 #endif
         Serializer rez;
         {
+          RezCheck z(rez);
           rez.serialize(did);
           rez.serialize(target);
           rez.serialize(parent_req_index);
