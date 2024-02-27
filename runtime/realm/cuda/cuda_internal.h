@@ -654,17 +654,17 @@ namespace Realm {
       CUmodule load_cuda_module(const void *data);
 
     public:
-      CudaModule *module;
-      GPUInfo *info;
-      GPUWorker *worker;
-      GPUProcessor *proc;
-      GPUFBMemory *fbmem;
-      GPUDynamicFBMemory *fb_dmem;
-      GPUFBIBMemory *fb_ibmem;
+      CudaModule *module = nullptr;
+      GPUInfo *info = nullptr;
+      GPUWorker *worker = nullptr;
+      GPUProcessor *proc = nullptr;
+      GPUFBMemory *fbmem = nullptr;
+      GPUDynamicFBMemory *fb_dmem = nullptr;
+      GPUFBIBMemory *fb_ibmem = nullptr;
 
-      CUcontext context;
+      CUcontext context = nullptr;
 
-      CUmodule device_module;
+      CUmodule device_module = nullptr;
 
       struct GPUFuncInfo {
         CUfunction func;
@@ -689,7 +689,9 @@ namespace Realm {
                                            [CUDA_MEMCPY_KERNEL_MAX2_LOG2_BYTES];
       GPUFuncInfo transpose_kernels[CUDA_MEMCPY_KERNEL_MAX2_LOG2_BYTES];
 
-      CUdeviceptr fbmem_base, fb_ibmem_base;
+      CUdeviceptr fbmem_base = 0;
+
+      CUdeviceptr fb_ibmem_base = 0;
 
       // which system memories have been registered and can be used for cuMemcpyAsync
       std::set<Memory> pinned_sysmems;
@@ -701,13 +703,14 @@ namespace Realm {
       std::set<Memory> peer_fbs;
 
       // streams for different copy types and a pile for actual tasks
-      GPUStream *host_to_device_stream;
-      GPUStream *device_to_host_stream;
-      GPUStream *device_to_device_stream;
+      GPUStream *host_to_device_stream = nullptr;
+      GPUStream *device_to_host_stream = nullptr;
+      GPUStream *device_to_device_stream = nullptr;
       std::vector<GPUStream *> device_to_device_streams;
       std::vector<GPUStream *> peer_to_peer_streams; // indexed by target
       std::vector<GPUStream *> task_streams;
-      atomic<unsigned> next_task_stream, next_d2d_stream;
+      atomic<unsigned> next_task_stream = atomic<unsigned>(0);
+      atomic<unsigned> next_d2d_stream = atomic<unsigned>(0);
 
       GPUEventPool event_pool;
 
