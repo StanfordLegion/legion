@@ -21,48 +21,8 @@
 
 import "regent"
 
-do
-  local root_dir = arg[0]:match(".*/") or "./"
-
-  local include_path = ""
-  local include_dirs = terralib.newlist()
-  include_dirs:insert("-I")
-  include_dirs:insert(root_dir)
-  for path in string.gmatch(os.getenv("INCLUDE_PATH"), "[^;]+") do
-    include_path = include_path .. " -I " .. path
-    include_dirs:insert("-I")
-    include_dirs:insert(path)
-  end
-
-  local mapper_cc = root_dir .. "optimize_tracing_invalidate1.cc"
-  if os.getenv('SAVEOBJ') == '1' then
-    mapper_so = root_dir .. "liboptimize_tracing_invalidate1.so"
-  else
-    mapper_so = os.tmpname() .. ".so" -- root_dir .. "optimize_tracing_invalidate1.so"
-  end
-  local cxx = os.getenv('CXX') or 'c++'
-
-  local cxx_flags = os.getenv('CXXFLAGS') or ''
-  cxx_flags = cxx_flags .. " -O2 -Wall -Werror"
-  local ffi = require("ffi")
-  if ffi.os == "OSX" then
-    cxx_flags =
-      (cxx_flags ..
-         " -dynamiclib -single_module -undefined dynamic_lookup -fPIC")
-  else
-    cxx_flags = cxx_flags .. " -shared -fPIC"
-  end
-
-  local cmd = (cxx .. " " .. cxx_flags .. " " .. include_path .. " " ..
-                 mapper_cc .. " -o " .. mapper_so)
-  if os.execute(cmd) ~= 0 then
-    print(cmd)
-    print("Error: failed to compile " .. mapper_cc)
-    assert(false)
-  end
-  regentlib.linklibrary(mapper_so)
-  cmapper = terralib.includec("optimize_tracing_invalidate1.h", include_dirs)
-end
+local launcher = require("std/launcher")
+local cmapper = launcher.build_library("optimize_tracing_invalidate1")
 
 fspace fs
 {
@@ -145,4 +105,4 @@ task main()
   end
   for color in cs do check(p[color], 1) end
 end
-regentlib.start(main, cmapper.register_mappers)
+launcher.launch(toplevel, "optimize_tracing_invalidate1", cmapper.register_mappers, {"-loptimize_tracing_invalidate1"})
