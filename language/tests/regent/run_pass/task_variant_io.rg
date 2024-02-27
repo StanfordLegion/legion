@@ -37,4 +37,4 @@ f:get_primary_variant():set_variant_id(123)
 task main()
   f()
 end
-launcher.launch(toplevel, "task_variant_io", clayout_test.register_mappers, {"-ltask_variant_io"})
+launcher.launch(main, "task_variant_io", clayout_test.register_mappers, {"-ltask_variant_io"})

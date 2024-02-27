@@ -18,7 +18,7 @@ local clayout_test
 do
   local root_dir = arg[0]:match(".*/") or "./"
   local layout_test_cc = root_dir .. "layout_test_colocation.cc"
-  clayout_test = launcher.build_library("layout_test", nil, {layout_test_cc})
+  clayout_test = launcher.build_library("layout_test", {layout_test_cc})
 end
 
 import "regent"
