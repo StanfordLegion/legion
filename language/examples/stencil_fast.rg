@@ -60,7 +60,7 @@ if USE_FOREIGN then
   flags:insertall(march_flags)
   flags:insertall(include_flags)
 
-  cstencil = launcher.build_library("stencil", flags, include_flags)
+  cstencil = launcher.build_library("stencil", nil, nil, flags, include_flags)
 end
 
 local cmapper = launcher.build_library("stencil_mapper")

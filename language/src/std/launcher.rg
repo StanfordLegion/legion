@@ -16,7 +16,7 @@ local launcher = {}
 
 local root_dir = arg[0]:match(".*/") or "./"
 
-function launcher.build_library(library_name, additional_cxx_flags, additional_include_flags)
+function launcher.build_library(library_name, cxx, source_files, additional_cxx_flags, additional_include_flags)
   local include_path = ""
   local include_dirs = terralib.newlist()
   include_dirs:insert("-I")
@@ -30,7 +30,10 @@ function launcher.build_library(library_name, additional_cxx_flags, additional_i
     include_dirs:insertall(additional_include_flags)
   end
 
-  local library_cc = root_dir .. library_name .. ".cc"
+  if source_files == nil then
+    source_files = terralib.newlist({root_dir .. library_name .. ".cc"})
+  end
+
   local library_so
   if os.getenv('OBJNAME') then
     local out_dir = os.getenv('OBJNAME'):match('.*/') or './'
@@ -41,7 +44,10 @@ function launcher.build_library(library_name, additional_cxx_flags, additional_i
     -- Make sure we don't collide if we're running this concurrently.
     library_so = os.tmpname() .. ".so"
   end
-  local cxx = os.getenv('CXX') or 'c++'
+
+  if cxx == nil then
+    cxx = os.getenv('CXX') or 'c++'
+  end
 
   local cxx_flags = os.getenv('CXXFLAGS') or ''
   cxx_flags = cxx_flags .. " -O2 -Wall -Werror"
@@ -58,7 +64,7 @@ function launcher.build_library(library_name, additional_cxx_flags, additional_i
   end
 
   local cmd = (cxx .. " " .. cxx_flags .. " " .. include_path .. " " ..
-                 library_cc .. " -o " .. library_so)
+                 table.concat(source_files, " ") .. " -o " .. library_so)
   if os.execute(cmd) ~= 0 then
     print("Error: failed to compile " .. library_cc)
     assert(false)
