@@ -16,7 +16,7 @@ local launcher = {}
 
 local root_dir = arg[0]:match(".*/") or "./"
 
-function launcher.build_library(library_name)
+function launcher.build_library(library_name, additional_cxx_flags, additional_include_flags)
   local include_path = ""
   local include_dirs = terralib.newlist()
   include_dirs:insert("-I")
@@ -25,6 +25,9 @@ function launcher.build_library(library_name)
     include_path = include_path .. " -I " .. path
     include_dirs:insert("-I")
     include_dirs:insert(path)
+  end
+  if additional_include_flags then
+    include_dirs:insertall(additional_include_flags)
   end
 
   local library_cc = root_dir .. library_name .. ".cc"
@@ -49,6 +52,9 @@ function launcher.build_library(library_name)
          " -dynamiclib -single_module -undefined dynamic_lookup -fPIC")
   else
     cxx_flags = cxx_flags .. " -shared -fPIC"
+  end
+  if additional_cxx_flags then
+    cxx_flags = cxx_flags .. " " .. table.concat(additional_cxx_flags, " ")
   end
 
   local cmd = (cxx .. " " .. cxx_flags .. " " .. include_path .. " " ..
