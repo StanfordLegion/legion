@@ -96,7 +96,7 @@ do
   nvcc_flags:insertall(include_flags)
 
   local launcher = require("std/launcher")
-  clegion_interop = launcher.build_library("legion_interop", nvcc, {legion_interop_cu}, nvcc_flags, include_flags)
+  clegion_interop = launcher.build_library("legion_interop", {legion_interop_cu}, nvcc, nvcc_flags, include_flags)
 end
 
 terra parse_input_args(conf : Config)

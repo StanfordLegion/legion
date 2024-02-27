@@ -16,7 +16,7 @@ local launcher = {}
 
 local root_dir = arg[0]:match(".*/") or "./"
 
-function launcher.build_library(library_name, cxx, source_files, additional_cxx_flags, additional_include_flags)
+function launcher.build_library(library_name, source_files, cxx, additional_cxx_flags, additional_include_flags)
   local include_path = ""
   local include_dirs = terralib.newlist()
   include_dirs:insert("-I")

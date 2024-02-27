@@ -105,4 +105,4 @@ task main()
   end
   for color in cs do check(p[color], 1) end
 end
-launcher.launch(toplevel, "optimize_tracing_invalidate1", cmapper.register_mappers, {"-loptimize_tracing_invalidate1"})
+launcher.launch(main, "optimize_tracing_invalidate1", cmapper.register_mappers, {"-loptimize_tracing_invalidate1"})

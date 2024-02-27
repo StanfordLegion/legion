@@ -126,4 +126,4 @@ task main()
   end
 end
 
-launcher.launch(toplevel, "optimize_tracing_phase_barriers1", cmapper.register_mappers, {"-loptimize_tracing_phase_barriers"})
+launcher.launch(main, "optimize_tracing_phase_barriers1", cmapper.register_mappers, {"-loptimize_tracing_phase_barriers"})
