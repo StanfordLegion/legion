@@ -542,21 +542,19 @@ namespace Legion {
       static inline void log_individual_task(UniqueID context,
                                              UniqueID unique_id,
                                              Processor::TaskFuncID task_id,
-                                             size_t context_index,
                                              const char *name)
       {
-        log_spy.print("Individual Task %llu %u %llu %zd %s", 
-		      context, task_id, unique_id, context_index, name);
+        log_spy.print("Individual Task %llu %u %llu %s", 
+		      context, task_id, unique_id, name);
       }
 
       static inline void log_index_task(UniqueID context,
                                         UniqueID unique_id,
                                         Processor::TaskFuncID task_id,
-                                        size_t context_index,
                                         const char *name)
       {
-        log_spy.print("Index Task %llu %u %llu %zd %s",
-		      context, task_id, unique_id, context_index, name);
+        log_spy.print("Index Task %llu %u %llu %s",
+		      context, task_id, unique_id, name);
       }
 
       static inline void log_inline_task(UniqueID unique_id)
@@ -565,28 +563,41 @@ namespace Legion {
       }
 
       static inline void log_mapping_operation(UniqueID context,
-                                               UniqueID unique_id,
-                                               size_t context_index)
+                                               UniqueID unique_id)
       {
-        log_spy.print("Mapping Operation %llu %llu %zd",
-                      context, unique_id, context_index);
+        log_spy.print("Mapping Operation %llu %llu", context, unique_id);
       }
 
       static inline void log_fill_operation(UniqueID context,
-                                            UniqueID unique_id,
-                                            size_t context_index)
+                                            UniqueID unique_id)
       {
-        log_spy.print("Fill Operation %llu %llu %zd",
-                      context, unique_id, context_index);
+        log_spy.print("Fill Operation %llu %llu", context, unique_id);
+      }
+
+      static inline void log_discard_operation(UniqueID context,
+                                               UniqueID unique_id)
+      {
+        log_spy.print("Discard Operation %llu %llu", context, unique_id);
       }
 
       static inline void log_close_operation(UniqueID context,
                                              UniqueID unique_id,
-                                             size_t context_index,
                                              bool is_intermediate_close_op)
       {
-        log_spy.print("Close Operation %llu %llu %zd %u",
-          context, unique_id, context_index, is_intermediate_close_op ? 1 : 0);
+        log_spy.print("Close Operation %llu %llu %u",
+          context, unique_id, is_intermediate_close_op ? 1 : 0);
+      }
+
+      static inline void log_refinement_operation(UniqueID context,
+                                                  UniqueID unique_id)
+      {
+        log_spy.print("Refinement Operation %llu %llu", context, unique_id);
+      }
+
+      static inline void log_reset_operation(UniqueID context,
+                                             UniqueID unique_id)
+      {
+        log_spy.print("Reset Operation %llu %llu", context, unique_id);
       }
 
       static inline void log_internal_op_creator(UniqueID internal_op_id,
@@ -599,115 +610,88 @@ namespace Legion {
 
       static inline void log_fence_operation(UniqueID context,
                                              UniqueID unique_id,
-                                             size_t context_index,
                                              bool execution)
       {
-        log_spy.print("Fence Operation %llu %llu %zd %d",
-		      context, unique_id, context_index, execution ? 1 : 0);
+        log_spy.print("Fence Operation %llu %llu %d",
+		      context, unique_id, execution ? 1 : 0);
       }
 
       static inline void log_copy_operation(UniqueID context,
                                             UniqueID unique_id,
                                             unsigned copy_kind,
-                                            size_t context_index,
                                             bool couple_src_indirect,
                                             bool couple_dst_indirect)
       {
-        log_spy.print("Copy Operation %llu %llu %u %zd %d %d",
-		      context, unique_id, copy_kind, context_index,
+        log_spy.print("Copy Operation %llu %llu %u %d %d",
+		      context, unique_id, copy_kind,
                       couple_src_indirect ? 1 : 0,
                       couple_dst_indirect ? 1 : 0);
       }
 
       static inline void log_acquire_operation(UniqueID context,
-                                               UniqueID unique_id,
-                                               size_t context_index)
+                                               UniqueID unique_id)
       {
-        log_spy.print("Acquire Operation %llu %llu %zd",
-		      context, unique_id, context_index);
+        log_spy.print("Acquire Operation %llu %llu", context, unique_id);
       }
 
       static inline void log_release_operation(UniqueID context,
-                                               UniqueID unique_id,
-                                               size_t context_index)
+                                               UniqueID unique_id)
       {
-        log_spy.print("Release Operation %llu %llu %zd",
-		      context, unique_id, context_index);
+        log_spy.print("Release Operation %llu %llu", context, unique_id);
       }
 
       static inline void log_creation_operation(UniqueID context,
-                                                UniqueID creation,
-                                                size_t context_index)
+                                                UniqueID creation)
       {
-        log_spy.print("Creation Operation %llu %llu %zd",
-                      context, creation, context_index);
+        log_spy.print("Creation Operation %llu %llu", context, creation);
       }
 
       static inline void log_deletion_operation(UniqueID context,
                                                 UniqueID deletion,
-                                                size_t context_index,
                                                 bool unordered)
       {
-        log_spy.print("Deletion Operation %llu %llu %zd %u",
-		      context, deletion, context_index, unordered ? 1 : 0);
+        log_spy.print("Deletion Operation %llu %llu %u",
+		      context, deletion, unordered ? 1 : 0);
       }
 
       static inline void log_attach_operation(UniqueID context,
                                               UniqueID attach,
-                                              size_t context_index,
                                               bool restricted)
       {
-        log_spy.print("Attach Operation %llu %llu %zd %u", 
-                      context, attach, context_index, restricted ? 1 : 0);
+        log_spy.print("Attach Operation %llu %llu %u", 
+                      context, attach, restricted ? 1 : 0);
       }
 
       static inline void log_detach_operation(UniqueID context,
                                               UniqueID detach,
-                                              size_t context_index,
                                               bool unordered)
       {
-        log_spy.print("Detach Operation %llu %llu %zd %u",
-                      context, detach, context_index, unordered ? 1 : 0);
-      }
-
-      static inline void log_unordered_operation(UniqueID context,
-                                                 UniqueID opid,
-                                                 size_t context_index)
-      {
-        log_spy.print("Unordered Operation %llu %llu %zd",
-                      context, opid, context_index);
+        log_spy.print("Detach Operation %llu %llu %u",
+                      context, detach, unordered ? 1 : 0);
       }
 
       static inline void log_dynamic_collective(UniqueID context, 
-                                                UniqueID collective,
-                                                size_t context_index)
+                                                UniqueID collective)
       {
-        log_spy.print("Dynamic Collective %llu %llu %zd",
-                      context, collective, context_index);
+        log_spy.print("Dynamic Collective %llu %llu", context, collective);
       }
 
       static inline void log_timing_operation(UniqueID context,
-                                              UniqueID timing,
-                                              size_t context_index)
+                                              UniqueID timing)
       {
-        log_spy.print("Timing Operation %llu %llu %zd",
-                      context, timing, context_index);
+        log_spy.print("Timing Operation %llu %llu", context, timing);
       }
 
       static inline void log_tunable_operation(UniqueID context,
-                                               UniqueID timing,
-                                               size_t context_index)
+                                               UniqueID tunable)
       {
-        log_spy.print("Tunable Operation %llu %llu %zd",
-                      context, timing, context_index);
+        log_spy.print("Tunable Operation %llu %llu", context, tunable);
       }
 
       static inline void log_all_reduce_operation(UniqueID context, 
-                                                  UniqueID reduce,
-                                                  size_t context_index)
+                                                  UniqueID reduce)
       {
-        log_spy.print("All Reduce Operation %llu %llu %zd",
-                      context, reduce, context_index);
+        log_spy.print("All Reduce Operation %llu %llu", context, reduce);
       }
 
       static inline void log_predicate_operation(UniqueID context, 
@@ -732,19 +716,17 @@ namespace Legion {
       static inline void log_dependent_partition_operation(UniqueID context,
                                                            UniqueID unique_id,
                                                            IDType pid,
-                                                           int kind,
-                                                           size_t context_index)
+                                                           int kind)
       {
-        log_spy.print("Dependent Partition Operation %llu %llu " IDFMT
-                      " %d %zd", context, unique_id, pid, kind, context_index);
+        log_spy.print("Dependent Partition Operation %llu %llu " IDFMT " %d",
+                      context, unique_id, pid, kind);
       }
 
       static inline void log_pending_partition_operation(UniqueID context,
-                                                         UniqueID unique_id,
-                                                         size_t context_index)
+                                                         UniqueID unique_id)
       {
-        log_spy.print("Pending Partition Operation %llu %llu %zd",
-		      context, unique_id, context_index);
+        log_spy.print("Pending Partition Operation %llu %llu",
+		      context, unique_id);
       }
 
       static inline void log_target_pending_partition(UniqueID unique_id,
@@ -930,6 +912,24 @@ namespace Legion {
 #endif
       }
 
+      static inline void log_replication(UniqueID uid, DistributedID repl_id,
+                                         bool control_replicated)
+      {
+        log_spy.print("Replicate Task %llu %llu %d", uid, repl_id,
+                                    (control_replicated ? 1 : 0));
+      }
+
+      static inline void log_shard(DistributedID repl_id, 
+                                   ShardID sid, UniqueID uid)
+      {
+        log_spy.print("Replicate Shard %llu %d %llu", repl_id, sid, uid);
+      }
+
+      static inline void log_owner_shard(UniqueID uid, ShardID sid)
+      {
+        log_spy.print("Owner Shard %llu %d", uid, sid);
+      }
+
       static inline void log_intra_space_dependence(UniqueID point_id,
                                                     const DomainPoint &point)
       {
@@ -1019,13 +1019,8 @@ namespace Legion {
       static inline void log_child_operation_index(UniqueID parent_id, 
                                        size_t index, UniqueID child_id)
       {
-        log_spy.print("Operation Index %llu %zd %llu",parent_id,index,child_id);
-      }
-
-      static inline void log_close_operation_index(UniqueID parent_id,
-                                        size_t index, UniqueID child_id)
-      {
-        log_spy.print("Close Index %llu %zd %llu", parent_id, index, child_id);
+        log_spy.print("Operation Index %llu %zd %llu",
+            parent_id, index, child_id);
       }
 
       static inline void log_predicated_false_op(UniqueID unique_id)
@@ -1194,42 +1189,42 @@ namespace Legion {
 
       // Logger calls for futures
       static inline void log_future_creation(UniqueID creator_id,
-                                             ApEvent future_event, 
+                                             DistributedID future_did,
                                              const DomainPoint &point)
       {
 #if LEGION_MAX_DIM == 1
-        log_spy.print("Future Creation %llu " IDFMT " %u %lld",
-                      creator_id, future_event.id, point.dim,
+        log_spy.print("Future Creation %llu %llu %u %lld",
+                      creator_id, future_did, point.dim,
                       (long long)point.point_data[0]); 
 #elif LEGION_MAX_DIM == 2
-        log_spy.print("Future Creation %llu " IDFMT " %u %lld %lld",
-                      creator_id, future_event.id, point.dim,
+        log_spy.print("Future Creation %llu %llu %u %lld %lld",
+                      creator_id, future_did, point.dim,
                                         (long long)point.point_data[0], 
                       (point.dim > 1) ? (long long)point.point_data[1] : 0);
 #elif LEGION_MAX_DIM == 3
-        log_spy.print("Future Creation %llu " IDFMT " %u %lld %lld %lld",
-                      creator_id, future_event.id, point.dim,
+        log_spy.print("Future Creation %llu %llu %u %lld %lld %lld",
+                      creator_id, future_did, point.dim,
                                         (long long)point.point_data[0], 
                       (point.dim > 1) ? (long long)point.point_data[1] : 0,
                       (point.dim > 2) ? (long long)point.point_data[2] : 0);
 #elif LEGION_MAX_DIM == 4
-        log_spy.print("Future Creation %llu " IDFMT " %u %lld %lld %lld %lld",
-                      creator_id, future_event.id, point.dim,
+        log_spy.print("Future Creation %llu %llu %u %lld %lld %lld %lld",
+                      creator_id, future_did, point.dim,
                                         (long long)point.point_data[0], 
                       (point.dim > 1) ? (long long)point.point_data[1] : 0,
                       (point.dim > 2) ? (long long)point.point_data[2] : 0,
                       (point.dim > 3) ? (long long)point.point_data[3] : 0);
 #elif LEGION_MAX_DIM == 5
-        log_spy.print("Future Creation %llu " IDFMT " %u %lld %lld %lld %lld "
-                      "%lld", creator_id, future_event.id, point.dim,
+        log_spy.print("Future Creation %llu %llu %u %lld %lld %lld %lld "
+                      "%lld", creator_id, future_did, point.dim,
                                         (long long)point.point_data[0], 
                       (point.dim > 1) ? (long long)point.point_data[1] : 0,
                       (point.dim > 2) ? (long long)point.point_data[2] : 0,
                       (point.dim > 3) ? (long long)point.point_data[3] : 0,
                       (point.dim > 4) ? (long long)point.point_data[4] : 0);
 #elif LEGION_MAX_DIM == 6
-        log_spy.print("Future Creation %llu " IDFMT " %u %lld %lld %lld %lld "
-                      "%lld %lld", creator_id, future_event.id, point.dim,
+        log_spy.print("Future Creation %llu %llu %u %lld %lld %lld %lld "
+                      "%lld %lld", creator_id, future_did, point.dim,
                                         (long long)point.point_data[0], 
                       (point.dim > 1) ? (long long)point.point_data[1] : 0,
                       (point.dim > 2) ? (long long)point.point_data[2] : 0,
@@ -1237,8 +1232,8 @@ namespace Legion {
                       (point.dim > 4) ? (long long)point.point_data[4] : 0,
                       (point.dim > 5) ? (long long)point.point_data[5] : 0);
 #elif LEGION_MAX_DIM == 7
-        log_spy.print("Future Creation %llu " IDFMT " %u %lld %lld %lld %lld "
-                      "%lld %lld %lld", creator_id, future_event.id, point.dim,
+        log_spy.print("Future Creation %llu %llu %u %lld %lld %lld %lld "
+                      "%lld %lld %lld", creator_id, future_did, point.dim,
                                         (long long)point.point_data[0], 
                       (point.dim > 1) ? (long long)point.point_data[1] : 0,
                       (point.dim > 2) ? (long long)point.point_data[2] : 0,
@@ -1247,8 +1242,8 @@ namespace Legion {
                       (point.dim > 5) ? (long long)point.point_data[5] : 0,
                       (point.dim > 6) ? (long long)point.point_data[6] : 0);
 #elif LEGION_MAX_DIM == 8
-        log_spy.print("Future Creation %llu " IDFMT " %u %lld %lld %lld %lld "
-                      "%lld %lld %lld %lld", creator_id, future_event.id, 
+        log_spy.print("Future Creation %llu %llu %u %lld %lld %lld %lld "
+                      "%lld %lld %lld %lld", creator_id, future_did,
                        point.dim,       (long long)point.point_data[0], 
                       (point.dim > 1) ? (long long)point.point_data[1] : 0,
                       (point.dim > 2) ? (long long)point.point_data[2] : 0,
@@ -1258,8 +1253,8 @@ namespace Legion {
                       (point.dim > 6) ? (long long)point.point_data[6] : 0,
                       (point.dim > 7) ? (long long)point.point_data[7] : 0);
 #elif LEGION_MAX_DIM == 9
-        log_spy.print("Future Creation %llu " IDFMT " %u %lld %lld %lld %lld "
-                      "%lld %lld %lld %lld %lld", creator_id, future_event.id, 
+        log_spy.print("Future Creation %llu %llu %u %lld %lld %lld %lld "
+                      "%lld %lld %lld %lld %lld", creator_id, future_did,
                        point.dim,       (long long)point.point_data[0], 
                       (point.dim > 1) ? (long long)point.point_data[1] : 0,
                       (point.dim > 2) ? (long long)point.point_data[2] : 0,
@@ -1274,10 +1269,10 @@ namespace Legion {
 #endif
       }
 
-      static inline void log_future_use(UniqueID user_id, 
-                                        ApEvent future_event)
+      static inline void log_future_use(UniqueID user_id,
+                                        DistributedID future_did)
       {
-        log_spy.print("Future Usage %llu " IDFMT "", user_id, future_event.id);
+        log_spy.print("Future Usage %llu %llu", user_id, future_did);
       }
 
       static inline void log_predicate_use(UniqueID pred_id,
@@ -1482,6 +1477,13 @@ namespace Legion {
                       unique_id, previous.id);
       }
 
+      static inline void log_collective_rendezvous(UniqueID unique_id,
+                  unsigned requirement_index, unsigned analysis_index)
+      {
+        log_spy.print("Collective Rendezvous %llu %u %u", unique_id, 
+                                  requirement_index, analysis_index);
+      }
+
       // The calls above this ifdef record the basic information about
       // the execution of an application. It is sufficient to show how
       // an application executed, but is insufficient to actually 
@@ -1561,11 +1563,12 @@ namespace Legion {
                                          IndexSpaceExprID expr_id,
                                          RegionTreeID src_tree_id,
                                          RegionTreeID dst_tree_id,
-                                         LgEvent pre, LgEvent post)
+                                         LgEvent pre, LgEvent post,
+                                         CollectiveKind collective)
       {
-        log_spy.print("Copy Events %llu %lld %d %d " IDFMT " " IDFMT,
+        log_spy.print("Copy Events %llu %lld %d %d " IDFMT " " IDFMT " %d",
                       op_unique_id, expr_id, src_tree_id,
-                      dst_tree_id, pre.id, post.id);
+                      dst_tree_id, pre.id, post.id, collective);
       }
 
       static inline void log_copy_field(LgEvent post, FieldID src_fid,
@@ -1614,11 +1617,12 @@ namespace Legion {
                                          FieldSpace handle,
                                          RegionTreeID tree_id,
                                          LgEvent pre, LgEvent post,
-                                         UniqueID fill_unique_id)
+                                         UniqueID fill_unique_id,
+                                         CollectiveKind collective)
       {
-        log_spy.print("Fill Events %llu %lld %d %d " IDFMT " " IDFMT " %llu",
+        log_spy.print("Fill Events %llu %lld %d %d " IDFMT " " IDFMT " %llu %d",
 		      op_unique_id, expr_id, handle.get_id(), tree_id,
-		      pre.id, post.id, fill_unique_id);
+		      pre.id, post.id, fill_unique_id, collective);
       }
 
       static inline void log_fill_field(LgEvent post, 
@@ -1650,6 +1654,22 @@ namespace Legion {
       {
         log_spy.print("Replay Operation %llu", op_unique_id);
       } 
+
+      // Logging for equivalence set creation
+      static inline void log_equivalence_set(DistributedID did,
+                                             IndexSpaceExprID expr_id,
+                                             RegionTreeID tid,
+                                             UniqueID creator_uid)
+      {
+        log_spy.print("Equivalence Set %llx %lld %d %llu",
+            did, expr_id, tid, creator_uid);
+      }
+
+      static inline void log_equivalence_set_use(DistributedID did,
+                                                 UniqueID uid, unsigned index)
+      {
+        log_spy.print("Equivalence Use %llx %llu %d", did, uid, index);
+      }
 #endif
     }; // namespace LegionSpy
 

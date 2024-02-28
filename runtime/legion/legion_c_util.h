@@ -112,6 +112,7 @@ namespace Legion {
       NEW_OPAQUE_WRAPPER(legion_index_copy_launcher_t, IndexCopyLauncher *);
       NEW_OPAQUE_WRAPPER(legion_fill_launcher_t, FillLauncher *);
       NEW_OPAQUE_WRAPPER(legion_index_fill_launcher_t, IndexFillLauncher *);
+      NEW_OPAQUE_WRAPPER(legion_discard_launcher_t, DiscardLauncher *);
       NEW_OPAQUE_WRAPPER(legion_acquire_launcher_t, AcquireLauncher *);
       NEW_OPAQUE_WRAPPER(legion_release_launcher_t, ReleaseLauncher *);
       NEW_OPAQUE_WRAPPER(legion_attach_launcher_t, AttachLauncher *);
@@ -130,6 +131,7 @@ namespace Legion {
       NEW_OPAQUE_WRAPPER(legion_inline_t, InlineMapping *);
       NEW_OPAQUE_WRAPPER(legion_mappable_t, Mappable *);
       NEW_OPAQUE_WRAPPER(legion_region_requirement_t , RegionRequirement *);
+      NEW_OPAQUE_WRAPPER(legion_output_requirement_t , OutputRequirement *);
       NEW_OPAQUE_WRAPPER(legion_machine_t, Machine *);
       NEW_OPAQUE_WRAPPER(legion_logger_t, Realm::Logger *);
       NEW_OPAQUE_WRAPPER(legion_mapper_t, Mapping::Mapper *);
@@ -152,6 +154,7 @@ namespace Legion {
       NEW_OPAQUE_WRAPPER(legion_mapper_context_t, Internal::MappingCallInfo *);
       typedef std::map<FieldID, const char *> FieldMap;
       NEW_OPAQUE_WRAPPER(legion_field_map_t, FieldMap *);
+      NEW_OPAQUE_WRAPPER(legion_point_transform_functor_t, PointTransformFunctor *);
 #undef NEW_OPAQUE_WRAPPER
 #ifdef __ICC
 // icpc complains about "error #858: type qualifier on return type is meaningless"
@@ -705,7 +708,7 @@ namespace Legion {
         assert(false);
         return 0;
       }
-      virtual size_t get_context_index(void) const {
+      virtual uint64_t get_context_index(void) const {
         assert(false);
         return 0;
       }
@@ -732,6 +735,22 @@ namespace Legion {
       virtual Domain get_slice_domain(void) const {
         assert(false);
         return Domain::NO_DOMAIN;
+      }
+      virtual ShardID get_shard_id(void) const {
+        assert(false);
+        return 0;
+      }
+      virtual size_t get_total_shards(void) const {
+        assert(false);
+        return 1;
+      };
+      virtual DomainPoint get_shard_point(void) const {
+        assert(false);
+        return DomainPoint();
+      };
+      virtual Domain get_shard_domain(void) const {
+        assert(false);
+        return Domain();
       }
     };
 };

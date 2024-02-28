@@ -2173,6 +2173,7 @@ pub struct Copy {
     chan_id: Option<ChanID>,
     pub op_id: OpID,
     pub size: u64,
+    pub collective: u32,
     pub copy_kind: Option<CopyKind>,
     pub copy_inst_infos: Vec<CopyInstInfo>,
 }
@@ -2185,6 +2186,7 @@ impl Copy {
         size: u64,
         creator: EventID,
         fevent: EventID,
+        collective: u32,
     ) -> Self {
         Copy {
             base,
@@ -2194,6 +2196,7 @@ impl Copy {
             chan_id: None,
             op_id,
             size,
+            collective,
             copy_kind: None,
             copy_inst_infos: Vec::new(),
         }
@@ -2702,12 +2705,21 @@ impl State {
         size: u64,
         creator: EventID,
         fevent: EventID,
+        collective: u32,
         copies: &'a mut BTreeMap<EventID, Copy>,
     ) -> &'a mut Copy {
         let alloc = &mut self.prof_uid_allocator;
         assert!(!copies.contains_key(&fevent));
         copies.entry(fevent).or_insert_with(|| {
-            Copy::new(Base::new(alloc), time_range, op_id, size, creator, fevent)
+            Copy::new(
+                Base::new(alloc),
+                time_range,
+                op_id,
+                size,
+                creator,
+                fevent,
+                collective,
+            )
         })
     }
 
@@ -3823,10 +3835,19 @@ fn process_record(
             stop,
             creator,
             fevent,
+            collective,
         } => {
             let time_range = TimeRange::new_full(*create, *ready, *start, *stop);
             state.create_op(*op_id);
-            state.create_copy(time_range, *op_id, *size, *creator, *fevent, copies);
+            state.create_copy(
+                time_range,
+                *op_id,
+                *size,
+                *creator,
+                *fevent,
+                *collective,
+                copies,
+            );
             state.update_last_time(*stop);
         }
         Record::CopyInstInfo {

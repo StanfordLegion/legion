@@ -84,7 +84,7 @@ void wrapped_cpp_task(const void *data, size_t datalen,
 					  runtime);
   printf("hello from wrapped_cpp_task (msg='%.*s')\n",
 	 (int)userlen, (const char *)userdata);
-  LegionTaskWrapper::legion_task_postamble(runtime, ctx);
+  LegionTaskWrapper::legion_task_postamble(ctx);
 }
 
 void wrapped_c_task(const void *data, size_t datalen,

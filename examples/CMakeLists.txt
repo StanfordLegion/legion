@@ -20,6 +20,7 @@ if(NOT Legion_SOURCE_DIR)
   find_package(Legion REQUIRED)
 endif()
 
+add_subdirectory(allreduce)
 add_subdirectory(attach_file)
 add_subdirectory(circuit)
 add_subdirectory(dynamic_registration)
@@ -39,18 +40,20 @@ add_subdirectory(layout_constraints)
 add_subdirectory(provenance)
 add_subdirectory(tiling)
 add_subdirectory(padded_instances)
+add_subdirectory(implicit_top_task)
+add_subdirectory(future_map_transforms)
+add_subdirectory(collective_writes)
+add_subdirectory(concurrent_tasks)
+add_subdirectory(tree_collectives)
 
 if(Legion_MPI_INTEROP)
   add_subdirectory(mpi_interop)
-endif()
-
-# implicit_top_task doesn't work in master with multiple nodes
-if(NOT Legion_NETWORKS)
-  add_subdirectory(implicit_top_task)
+  add_subdirectory(mpi_with_ctrl_repl)
 endif()
 
 if(Legion_USE_CUDA)
   add_subdirectory(thrust_interop)
+  add_subdirectory(future_instance)
 endif()
 
 if(Legion_USE_Python)

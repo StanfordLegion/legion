@@ -63,50 +63,49 @@ class LoggingWrapper : public ForwardingMapper {
                                     const SelectShardingFunctorInput& input,
                                     SelectShardingFunctorOutput& output);
  public:
-  virtual void map_replicate_task(const MapperContext ctx,
-                                  const Task& task,
-                                  const MapTaskInput& input,
-                                  const MapTaskOutput& default_output,
-                                  MapReplicateTaskOutput& output);
+  void replicate_task(MapperContext               ctx,
+                      const Task&                 task,
+                      const ReplicateTaskInput&   input,
+                            ReplicateTaskOutput&  output) override;
   using ForwardingMapper::select_sharding_functor;
-  virtual void select_sharding_functor(const MapperContext ctx,
-                                       const Task& task,
-                                       const SelectShardingFunctorInput& input,
-                                       SelectShardingFunctorOutput& output);
-  virtual void select_sharding_functor(const MapperContext ctx,
-                                       const Copy& copy,
-                                       const SelectShardingFunctorInput& input,
-                                       SelectShardingFunctorOutput& output);
+  void select_sharding_functor(const MapperContext ctx,
+                               const Task& task,
+                               const SelectShardingFunctorInput& input,
+                               SelectShardingFunctorOutput& output) override;
+  void select_sharding_functor(const MapperContext ctx,
+                               const Copy& copy,
+                               const SelectShardingFunctorInput& input,
+                               SelectShardingFunctorOutput& output) override;
 #endif // NO_LEGION_CONTROL_REPLICATION
  public:
-  virtual void slice_task(const MapperContext ctx,
-                          const Task& task,
-                          const SliceTaskInput& input,
-                          SliceTaskOutput& output);
-  virtual void map_task(const MapperContext ctx,
-                        const Task& task,
-                        const MapTaskInput& input,
-                        MapTaskOutput& output);
-  virtual void select_task_sources(const MapperContext ctx,
-                                   const Task& task,
-                                   const SelectTaskSrcInput& input,
-                                   SelectTaskSrcOutput& output);
-  virtual void map_inline(const MapperContext ctx,
-                          const InlineMapping& inline_op,
-                          const MapInlineInput& input,
-                          MapInlineOutput& output);
-  virtual void select_inline_sources(const MapperContext ctx,
-                                     const InlineMapping& inline_op,
-                                     const SelectInlineSrcInput& input,
-                                     SelectInlineSrcOutput& output);
-  virtual void map_copy(const MapperContext ctx,
-                        const Copy& copy,
-                        const MapCopyInput& input,
-                        MapCopyOutput& output);
-  virtual void select_copy_sources(const MapperContext ctx,
-                                   const Copy& copy,
-                                   const SelectCopySrcInput& input,
-                                   SelectCopySrcOutput& output);
+  void slice_task(const MapperContext ctx,
+                  const Task& task,
+                  const SliceTaskInput& input,
+                  SliceTaskOutput& output) override;
+  void map_task(const MapperContext ctx,
+                const Task& task,
+                const MapTaskInput& input,
+                MapTaskOutput& output) override;
+  void select_task_sources(const MapperContext ctx,
+                           const Task& task,
+                           const SelectTaskSrcInput& input,
+                           SelectTaskSrcOutput& output) override;
+  void map_inline(const MapperContext ctx,
+                  const InlineMapping& inline_op,
+                  const MapInlineInput& input,
+                  MapInlineOutput& output) override;
+  void select_inline_sources(const MapperContext ctx,
+                             const InlineMapping& inline_op,
+                             const SelectInlineSrcInput& input,
+                             SelectInlineSrcOutput& output) override;
+  void map_copy(const MapperContext ctx,
+                const Copy& copy,
+                const MapCopyInput& input,
+                MapCopyOutput& output) override;
+  void select_copy_sources(const MapperContext ctx,
+                           const Copy& copy,
+                           const SelectCopySrcInput& input,
+                           SelectCopySrcOutput& output) override;
  private:
   Logger* logger;
 };

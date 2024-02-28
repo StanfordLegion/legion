@@ -71,10 +71,16 @@ pub struct ProjectionID(u32);
 pub struct ContextID(pub u64);
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct ReplicationID(u32);
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct ShardID(u32);
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct UniqueID(pub u64);
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct FutureID(HexU64);
+pub struct FutureID(u64);
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct EventID(pub HexU64);
@@ -204,7 +210,7 @@ pub enum Record {
     #[serde(rename = "Operation Events")]
     OperationEvents { uid: UniqueID, pre: EventID, post: EventID },
     #[serde(rename = "Copy Events")]
-    RealmCopy { uid: UniqueID, expr: ExprID, src_tid: TreeID, dst_tid: TreeID, pre: EventID, post: EventID },
+    RealmCopy { uid: UniqueID, expr: ExprID, src_tid: TreeID, dst_tid: TreeID, pre: EventID, post: EventID, collective: u64 },
     #[serde(rename = "Copy Field")]
     RealmCopyField { id: EventID, srcfid: FieldID, srcid: EventID, dstfid: FieldID, dstid: EventID, redop: u64 },
     #[serde(rename = "Indirect Events")]
@@ -216,7 +222,7 @@ pub enum Record {
     #[serde(rename = "Indirect Group")]
     IndirectGroup { indirect: IndirectID, index: u64, inst: InstID, ispace: IspaceID },
     #[serde(rename = "Fill Events")]
-    RealmFill { uid: UniqueID, ispace: IspaceID, fspace: FspaceID, tid: TreeID, pre: EventID, post: EventID, fill_uid: UniqueID },
+    RealmFill { uid: UniqueID, ispace: IspaceID, fspace: FspaceID, tid: TreeID, pre: EventID, post: EventID, fill_uid: UniqueID, collective: u64 },
     #[serde(rename = "Fill Field")]
     RealmFillField { id: EventID, fid: FieldID, dstid: EventID },
     #[serde(rename = "Deppart Events")]
@@ -242,9 +248,9 @@ pub enum Record {
     #[serde(rename = "Mapping Dependence")]
     MappingDependence { ctx: ContextID, prev_id: UniqueID, pidx: u64, next_id: UniqueID, nidx: u64, dtype: u64 },
     #[serde(rename = "Future Creation")]
-    FutureCreate { uid: UniqueID, iid: FutureID, point: Point },
+    FutureCreate { uid: UniqueID, did: FutureID, point: Point },
     #[serde(rename = "Future Usage")]
-    FutureUse { uid: UniqueID, iid: FutureID },
+    FutureUse { uid: UniqueID, did: FutureID },
     #[serde(rename = "Predicate Use")]
     PredicateUse { uid: UniqueID, pred: UniqueID },
 
@@ -300,47 +306,49 @@ pub enum Record {
     #[serde(rename = "Top Task")]
     TopTask { tid: TaskID, ctx: ContextID, uid: UniqueID, name: String },
     #[serde(rename = "Individual Task")]
-    IndividualTask { ctx: ContextID, tid: TaskID, uid: UniqueID, index: u64, name: String },
+    IndividualTask { ctx: ContextID, tid: TaskID, uid: UniqueID, name: String },
     #[serde(rename = "Index Task")]
-    IndexTask { ctx: ContextID, tid: TaskID, uid: UniqueID, index: u64, name: String },
+    IndexTask { ctx: ContextID, tid: TaskID, uid: UniqueID, name: String },
     #[serde(rename = "Inline Task")]
     InlineTask { uid: UniqueID },
     #[serde(rename = "Mapping Operation")]
-    MappingOperation { ctx: ContextID, uid: UniqueID, index: u64 },
+    MappingOperation { ctx: ContextID, uid: UniqueID },
     #[serde(rename = "Close Operation")]
-    CloseOperation { ctx: ContextID, uid: UniqueID, index: u64, is_inter: bool },
+    CloseOperation { ctx: ContextID, uid: UniqueID, is_inter: bool },
+    #[serde(rename = "Refinement Operation")]
+    RefinementOperation { ctx: ContextID, uid: UniqueID },
     #[serde(rename = "Internal Operation Creator")]
     InternalCreator { uid: UniqueID, cuid: UniqueID, index: u64 },
     #[serde(rename = "Fence Operation")]
-    FenceOperation { ctx: ContextID, uid: UniqueID, index: u64, execution: bool },
+    FenceOperation { ctx: ContextID, uid: UniqueID, execution: bool },
     #[serde(rename = "Trace Operation")]
     TraceOperation { ctx: ContextID, uid: UniqueID },
     #[serde(rename = "Copy Operation")]
-    CopyOperation { ctx: ContextID, uid: UniqueID, kind: u64, index: u64, src_indirect: bool, dst_indirect: bool },
+    CopyOperation { ctx: ContextID, uid: UniqueID, kind: u64, src_indirect: bool, dst_indirect: bool },
     #[serde(rename = "Fill Operation")]
-    FillOperation { ctx: ContextID, uid: UniqueID, index: u64 },
+    FillOperation { ctx: ContextID, uid: UniqueID },
     #[serde(rename = "Acquire Operation")]
-    AcquireOperation { ctx: ContextID, uid: UniqueID, index: u64 },
+    AcquireOperation { ctx: ContextID, uid: UniqueID },
     #[serde(rename = "Release Operation")]
-    ReleaseOperation { ctx: ContextID, uid: UniqueID, index: u64 },
+    ReleaseOperation { ctx: ContextID, uid: UniqueID },
     #[serde(rename = "Creation Operation")]
-    CreationOperation { ctx: ContextID, uid: UniqueID, index: u64 },
+    CreationOperation { ctx: ContextID, uid: UniqueID },
     #[serde(rename = "Deletion Operation")]
-    DeletionOperation { ctx: ContextID, uid: UniqueID, index: u64, unordered: bool },
+    DeletionOperation { ctx: ContextID, uid: UniqueID, unordered: bool },
     #[serde(rename = "Attach Operation")]
-    AttachOperation { ctx: ContextID, uid: UniqueID, index: u64, restricted: bool },
+    AttachOperation { ctx: ContextID, uid: UniqueID, restricted: bool },
     #[serde(rename = "Detach Operation")]
-    DetachOperation { ctx: ContextID, uid: UniqueID, index: u64, unordered: bool },
+    DetachOperation { ctx: ContextID, uid: UniqueID, unordered: bool },
     #[serde(rename = "Unordered Operation")]
-    UnorderedOperation { ctx: ContextID, uid: UniqueID, index: u64 },
+    UnorderedOperation { ctx: ContextID, uid: UniqueID },
     #[serde(rename = "Dynamic Collective")]
-    DynamicCollective { ctx: ContextID, uid: UniqueID, index: u64 },
+    DynamicCollective { ctx: ContextID, uid: UniqueID },
     #[serde(rename = "Timing Operation")]
-    TimingOperation { ctx: ContextID, uid: UniqueID, index: u64 },
+    TimingOperation { ctx: ContextID, uid: UniqueID },
     #[serde(rename = "Tunable Operation")]
-    TunableOperation { ctx: ContextID, uid: UniqueID, index: u64 },
+    TunableOperation { ctx: ContextID, uid: UniqueID },
     #[serde(rename = "All Reduce Operation")]
-    AllReduceOperation { ctx: ContextID, uid: UniqueID, index: u64 },
+    AllReduceOperation { ctx: ContextID, uid: UniqueID },
     #[serde(rename = "Predicate Operation")]
     PredicateOperation { ctx: ContextID, uid: UniqueID },
     #[serde(rename = "Must Epoch Operation")]
@@ -350,9 +358,9 @@ pub enum Record {
     #[serde(rename = "Summary Operation")]
     SummaryOperation { ctx: ContextID, uid: UniqueID },
     #[serde(rename = "Dependent Partition Operation")]
-    DepPartOperation { ctx: ContextID, uid: UniqueID, pid: IpartID, kind: u64, index: u64 },
+    DepPartOperation { ctx: ContextID, uid: UniqueID, pid: IpartID, kind: u64 },
     #[serde(rename = "Pending Partition Operation")]
-    PendingPartOperation { ctx: ContextID, uid: UniqueID, index: u64 },
+    PendingPartOperation { ctx: ContextID, uid: UniqueID },
     #[serde(rename = "Pending Partition Target")]
     PendingPartTarget { uid: UniqueID, pid: IpartID, kind: u64 },
     #[serde(rename = "Index Slice")]
@@ -365,6 +373,12 @@ pub enum Record {
     PointPoint { point1: UniqueID, point2: UniqueID },
     #[serde(rename = "Index Point")]
     IndexPoint { index: UniqueID, point_id: UniqueID, point: Point },
+    #[serde(rename = "Replicate Task")]
+    ReplicateTask { uid: UniqueID, repl_id: ReplicationID, control_replicated: bool },
+    #[serde(rename = "Replicate Shard")]
+    ReplicateShard { repl_id: ReplicationID, sid: ShardID, uid: UniqueID },
+    #[serde(rename = "Owner Shard")]
+    OwnerShard { uid: UniqueID, sid: ShardID },
     #[serde(rename = "Intra Space Dependence")]
     IntraSpace { point_id: UniqueID, point: Point },
     #[serde(rename = "Operation Index")]
@@ -433,6 +447,10 @@ pub enum Record {
     Proc { pid: ProcID, kind: u64 },
     #[serde(rename = "Memory")]
     Mem { mid: MemID, capacity: u64, kind: u64 },
+
+    // Patterns for things rust is too stupid to understand
+    #[serde(rename = "Collective Rendezvous")]
+    CollectiveRendezvous { uid: UniqueID, req: u32, index: u32 },
 }
 
 #[cfg(test)]

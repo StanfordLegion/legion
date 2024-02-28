@@ -629,9 +629,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     SpecializedConstraint::SpecializedConstraint(SpecializedKind k,
-      ReductionOpID r, bool no, bool ext, Domain c, size_t pieces, int overhead)
-      : kind(k), redop(r), collective(c), max_pieces(pieces),
-        max_overhead(overhead), no_access(no), exact(ext)
+      ReductionOpID r, bool no, bool ext, size_t pieces, int overhead)
+      : kind(k), redop(r),  max_pieces(pieces), max_overhead(overhead),
+        no_access(no), exact(ext)
     //-------------------------------------------------------------------------
     {
       if (redop != 0)
@@ -655,7 +655,6 @@ namespace Legion {
     {
       return ((kind == other.kind) && (redop == other.redop) &&
         (max_pieces == other.max_pieces) && (max_overhead == other.max_overhead)
-          && (collective == other.collective) 
           && (no_access == other.no_access) && (exact == other.exact));
     }
 
@@ -670,8 +669,6 @@ namespace Legion {
         return false;
       // Make sure we also handle the unspecialized case of redop 0
       if ((redop != other.redop) && (other.redop != 0))
-        return false;
-      if (collective != other.collective)
         return false;
       if (max_pieces > other.max_pieces)
         return false;
@@ -697,8 +694,6 @@ namespace Legion {
       // Only conflicts if we both have non-zero redops that don't equal
       if ((redop != other.redop) && (redop != 0) && (other.redop != 0))
         return true;
-      if (collective != other.collective)
-        return true;
       if (max_pieces != other.max_pieces)
         return true;
       if (max_overhead != other.max_overhead)
@@ -714,7 +709,6 @@ namespace Legion {
     {
       SWAP_HELPER(SpecializedKind, kind)
       SWAP_HELPER(ReductionOpID, redop)
-      SWAP_HELPER(Domain, collective)
       SWAP_HELPER(size_t, max_pieces)
       SWAP_HELPER(int, max_overhead)
       SWAP_HELPER(bool, no_access)
@@ -735,7 +729,6 @@ namespace Legion {
         rez.serialize(max_pieces);
         rez.serialize(max_overhead);
       }
-      rez.serialize(collective);
       rez.serialize<bool>(no_access);
       rez.serialize<bool>(exact);
     }
@@ -754,7 +747,6 @@ namespace Legion {
         derez.deserialize(max_pieces);
         derez.deserialize(max_overhead);
       }
-      derez.deserialize(collective);
       derez.deserialize<bool>(no_access);
       derez.deserialize<bool>(exact);
     }
@@ -1919,17 +1911,188 @@ namespace Legion {
     bool LayoutConstraintSet::operator==(const LayoutConstraintSet &other) const
     //--------------------------------------------------------------------------
     {
-      return specialized_constraint == other.specialized_constraint
-             && field_constraint == other.field_constraint
-             && memory_constraint == other.memory_constraint
-             && pointer_constraint == other.pointer_constraint
-             && padding_constraint == other.padding_constraint
-             && ordering_constraint == other.ordering_constraint
-             && tiling_constraints == other.tiling_constraints
-             && dimension_constraints == other.dimension_constraints
-             && alignment_constraints == other.alignment_constraints
-             && offset_constraints == other.offset_constraints;
+      return equals(other);
     }
+
+    //--------------------------------------------------------------------------
+    bool LayoutConstraintSet::operator!=(const LayoutConstraintSet &other) const
+    //--------------------------------------------------------------------------
+    {
+      return !equals(other);
+    }
+
+    //--------------------------------------------------------------------------
+    bool LayoutConstraintSet::equals(const LayoutConstraintSet &other,
+                        LayoutConstraintKind *bad_kind, size_t *bad_index) const
+    //--------------------------------------------------------------------------
+    {
+      if (specialized_constraint != other.specialized_constraint)
+      {
+        if (bad_kind != NULL)
+          *bad_kind = LEGION_SPECIALIZED_CONSTRAINT;
+        if (bad_index != NULL)
+          *bad_index = 0;
+        return false;
+      }
+      if (field_constraint != other.field_constraint)
+      {
+        if (bad_kind != NULL)
+          *bad_kind = LEGION_FIELD_CONSTRAINT;
+        if (bad_index != NULL)
+          *bad_index = 0;
+        return false;
+      }
+      if (memory_constraint != other.memory_constraint)
+      {
+        if (bad_kind != NULL)
+          *bad_kind = LEGION_MEMORY_CONSTRAINT;
+        if (bad_index != NULL)
+          *bad_index = 0;
+        return false;
+      }
+      if (pointer_constraint != other.pointer_constraint)
+      {
+        if (bad_kind != NULL)
+          *bad_kind = LEGION_POINTER_CONSTRAINT;
+        if (bad_index != NULL)
+          *bad_index = 0;
+        return false;
+      }
+      if (ordering_constraint != other.ordering_constraint)
+      {
+        if (bad_kind != NULL)
+          *bad_kind = LEGION_ORDERING_CONSTRAINT;
+        if (bad_index != NULL)
+          *bad_index = 0;
+        return false;
+      }
+      if (padding_constraint != other.padding_constraint)
+      {
+        if (bad_kind != NULL)
+          *bad_kind = LEGION_PADDING_CONSTRAINT;
+        if (bad_index != NULL)
+          *bad_index = 0;
+        return false;
+      }
+      if (tiling_constraints.size() != other.tiling_constraints.size())
+      {
+        if (bad_kind != NULL)
+          *bad_kind = LEGION_TILING_CONSTRAINT;
+        if (bad_index != NULL)
+          *bad_index = 0;
+        return false;
+      }
+      for (unsigned idx = 0; idx < tiling_constraints.size(); idx++)
+      {
+        bool found = false;
+        for (std::vector<TilingConstraint>::const_iterator it =
+              other.tiling_constraints.begin(); it !=
+              other.tiling_constraints.end(); it++)
+        {
+          if (tiling_constraints[idx] != *it)
+            continue;
+          found = true;
+          break;
+        }
+        if (!found)
+        {
+          if (bad_kind != NULL)
+            *bad_kind = LEGION_TILING_CONSTRAINT;
+          if (bad_index != NULL)
+            *bad_index = idx;
+          return false;
+        }
+      }
+      if (dimension_constraints.size() != other.dimension_constraints.size())
+      {
+        if (bad_kind != NULL)
+          *bad_kind = LEGION_DIMENSION_CONSTRAINT;
+        if (bad_index != NULL)
+          *bad_index = 0;
+        return false;
+      }
+      for (unsigned idx = 0; idx < dimension_constraints.size(); idx++)
+      {
+        bool found = false;
+        for (std::vector<DimensionConstraint>::const_iterator it =
+              other.dimension_constraints.begin(); it !=
+              other.dimension_constraints.end(); it++)
+        {
+          if (dimension_constraints[idx] != *it)
+            continue;
+          found = true;
+          break;
+        }
+        if (!found)
+        {
+          if (bad_kind != NULL)
+            *bad_kind = LEGION_DIMENSION_CONSTRAINT;
+          if (bad_index != NULL)
+            *bad_index = idx;
+          return false;
+        }
+      }
+      if (alignment_constraints.size() != other.alignment_constraints.size())
+      {
+        if (bad_kind != NULL)
+          *bad_kind = LEGION_ALIGNMENT_CONSTRAINT;
+        if (bad_index != NULL)
+          *bad_index = 0;
+        return false;
+      }
+      for (unsigned idx = 0; idx < alignment_constraints.size(); idx++)
+      {
+        bool found = false;
+        for (std::vector<AlignmentConstraint>::const_iterator it =
+              other.alignment_constraints.begin(); it !=
+              other.alignment_constraints.end(); it++)
+        {
+          if (alignment_constraints[idx] != *it)
+            continue;
+          found = true;
+          break;
+        }
+        if (!found)
+        {
+          if (bad_kind != NULL)
+            *bad_kind = LEGION_ALIGNMENT_CONSTRAINT;
+          if (bad_index != NULL)
+            *bad_index = idx;
+          return false;
+        }
+      }
+      if (offset_constraints.size() != other.offset_constraints.size())
+      {
+        if (bad_kind != NULL)
+          *bad_kind = LEGION_OFFSET_CONSTRAINT;
+        if (bad_index != NULL)
+          *bad_index = 0;
+        return false;
+      }
+      for (unsigned idx = 0; idx < offset_constraints.size(); idx++)
+      {
+        bool found = false;
+        for (std::vector<OffsetConstraint>::const_iterator it =
+              other.offset_constraints.begin(); it !=
+              other.offset_constraints.end(); it++)
+        {
+          if (offset_constraints[idx] != *it)
+            continue;
+          found = true;
+          break;
+        }
+        if (!found)
+        {
+          if (bad_kind != NULL)
+            *bad_kind = LEGION_OFFSET_CONSTRAINT;
+          if (bad_index != NULL)
+            *bad_index = idx;
+          return false;
+        }
+      }
+      return true;
+    }
+
     //--------------------------------------------------------------------------
     bool LayoutConstraintSet::entails(const LayoutConstraintSet &other,
                                       unsigned total_dims,

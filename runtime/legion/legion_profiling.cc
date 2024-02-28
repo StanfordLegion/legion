@@ -690,6 +690,7 @@ namespace Legion {
       // use complete_time instead of end_time to include async work
       info.stop = timeline.complete_time;
       info.fevent = LgEvent(fevent.finish_event);
+      info.collective = (CollectiveKind)prof_info->id;
       assert(!cpinfo.inst_info.empty());
       InstanceNameClosure *closure = prof_info->extra.closure;
       typedef Realm::ProfilingMeasurements::OperationCopyInfo::InstInfo 
@@ -842,6 +843,7 @@ namespace Legion {
       Realm::ProfilingMeasurements::OperationFinishEvent fevent;
       if (response.get_measurement(fevent))
         info.fevent = LgEvent(fevent.finish_event);
+      info.collective = (CollectiveKind)prof_info->id;
       InstanceNameClosure *closure = prof_info->extra.closure;
       typedef Realm::ProfilingMeasurements::OperationCopyInfo::InstInfo 
         InstInfo;
@@ -1000,24 +1002,21 @@ namespace Legion {
     void LegionProfInstance::process_proc_mem_aff_desc(const Memory &m)
     //--------------------------------------------------------------------------
     {
-      unsigned int entry_count = 0;
       // record ALL memory<->processor affinities for consistency + if needed in the future
       std::vector<ProcessorMemoryAffinity> affinities;
       Machine::get_machine().get_proc_mem_affinity(affinities, Processor::NO_PROC, m);
       for (std::vector<ProcessorMemoryAffinity>::const_iterator it =
              affinities.begin(); it != affinities.end(); it++)
-        {
-          process_proc_desc(it->p);
-          proc_mem_aff_desc_infos.emplace_back(ProcMemDesc());
-          ProcMemDesc &info = proc_mem_aff_desc_infos.back();
-          info.proc_id = it->p.id;
-          info.mem_id = m.id;
-          info.bandwidth = it->bandwidth;
-          info.latency = it->latency;
-          entry_count++;
-        }
-      if (entry_count > 0)
-        owner->update_footprint(sizeof(ProcMemDesc)*entry_count, this);
+      {
+        process_proc_desc(it->p);
+        proc_mem_aff_desc_infos.emplace_back(ProcMemDesc());
+        ProcMemDesc &info = proc_mem_aff_desc_infos.back();
+        info.proc_id = it->p.id;
+        info.mem_id = m.id;
+        info.bandwidth = it->bandwidth;
+        info.latency = it->latency;
+        owner->update_footprint(sizeof(ProcMemDesc), this);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -2145,7 +2144,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void LegionProfiler::add_copy_request(Realm::ProfilingRequestSet &requests,
                                           InstanceNameClosure *closure,
-                                          Operation *op, unsigned count)
+                                          Operation *op, unsigned count,
+                                          CollectiveKind collective)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2154,8 +2154,9 @@ namespace Legion {
       increment_total_outstanding_requests(count);
 #endif
       ProfilingInfo info(this, LEGION_PROF_COPY); 
-      // No ID here
       info.op_id = (op != NULL) ? op->get_unique_op_id() : 0;
+      // Use ID to encode the collective copy kind
+      info.id = collective;
       closure->add_reference(count);
       info.extra.closure = closure;
       Realm::ProfilingRequest &req = requests.add_request(target_proc,
@@ -2173,7 +2174,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void LegionProfiler::add_fill_request(Realm::ProfilingRequestSet &requests,
                                           InstanceNameClosure *closure,
-                                          Operation *op)
+                                          Operation *op, 
+                                          CollectiveKind collective)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2182,8 +2184,9 @@ namespace Legion {
       increment_total_outstanding_requests();
 #endif
       ProfilingInfo info(this, LEGION_PROF_FILL);
-      // No ID here
       info.op_id = (op != NULL) ? op->get_unique_op_id() : 0;
+      // Use ID to encode the collective copy kind
+      info.id = collective;
       closure->add_reference();
       info.extra.closure = closure;
       Realm::ProfilingRequest &req = requests.add_request(target_proc,
@@ -2309,7 +2312,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void LegionProfiler::add_copy_request(Realm::ProfilingRequestSet &requests,
                                           InstanceNameClosure *closure,
-                                          UniqueID uid, unsigned count)
+                                          UniqueID uid, unsigned count,
+                                          CollectiveKind collective)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2318,8 +2322,9 @@ namespace Legion {
       increment_total_outstanding_requests(count);
 #endif
       ProfilingInfo info(this, LEGION_PROF_COPY); 
-      // No ID here
       info.op_id = uid;
+      // Use ID to encode the collective copy kind
+      info.id = collective;
       closure->add_reference(count);
       info.extra.closure = closure;
       Realm::ProfilingRequest &req = requests.add_request(target_proc,
@@ -2337,7 +2342,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void LegionProfiler::add_fill_request(Realm::ProfilingRequestSet &requests,
                                           InstanceNameClosure *closure,
-                                          UniqueID uid)
+                                          UniqueID uid,
+                                          CollectiveKind collective)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2346,8 +2352,9 @@ namespace Legion {
       increment_total_outstanding_requests();
 #endif
       ProfilingInfo info(this, LEGION_PROF_FILL);
-      // No ID here
       info.op_id = uid;
+      // Use ID to encode the collective copy kind
+      info.id = collective;
       closure->add_reference();
       info.extra.closure = closure;
       Realm::ProfilingRequest &req = requests.add_request(target_proc,

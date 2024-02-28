@@ -70,16 +70,36 @@ legion_cxx_tests = [
     ['examples/layout_constraints/transpose', []],
     ['examples/padded_instances/padded_instances', []],
     ['examples/inline_tasks/inline_tasks', []],
+    ['examples/allreduce/allreduce', []],
+    ['examples/tree_collectives/tree_collectives', []],
     ['examples/local_function_tasks/local_function_tasks', []],
     ['examples/provenance/provenance', []],
     ['examples/tiling/tiling', []],
     ['examples/machine_config/machine_config', []],
+    ['examples/future_map_transforms/future_map_transforms', []],
+    ['examples/collective_writes/collective_writes', ['-ll:cpu', '4']],
+    ['examples/concurrent_tasks/concurrent', ['-ll:cpu', '4']],
     # Comment this test out until it works everywhere
     #['examples/implicit_top_task/implicit_top_task', []],
 
     # Tests
     ['test/rendering/rendering', ['-i', '2', '-n', '64', '-ll:cpu', '4']],
     ['test/legion_stl/test_stl', []],
+    ['test/output_requirements/output_requirements', []],
+    ['test/output_requirements/output_requirements', ['-replicate']],
+    ['test/output_requirements/output_requirements', ['-index']],
+    ['test/output_requirements/output_requirements', ['-index', '-replicate']],
+    ['test/output_requirements/output_requirements', ['-empty']],
+    ['test/output_requirements/output_requirements', ['-empty', '-replicate']],
+    ['test/output_requirements/output_requirements', ['-empty', '-index']],
+    ['test/output_requirements/output_requirements', ['-empty', '-index', '-replicate']],
+    ['test/disjoint_complete/disjoint_complete', []],
+    ['test/reduce_future/reduce_future', ['-ll:cpu', '4']],
+    ['test/nested_replication/nested_replication', ['-ll:cpu', '4']],
+    ['test/ctrl_repl_safety/ctrl_repl_safety', [':0:0', '-ll:cpu', '4']],
+    ['test/ctrl_repl_safety/ctrl_repl_safety', [':0:1', '-ll:cpu', '4', '-lg:safe_ctrlrepl', '1']],
+    ['test/ctrl_repl_safety/ctrl_repl_safety', [':1:0', '-ll:cpu', '4']],
+    ['test/ctrl_repl_safety/ctrl_repl_safety', [':1:1', '-ll:cpu', '4', '-lg:safe_ctrlrepl', '1']],
 
     # Tutorial/realm
     ['tutorial/realm/hello_world/realm_hello_world', []],
@@ -136,7 +156,7 @@ if platform.system() != 'Darwin':
 legion_network_cxx_tests = [
     # Examples
     ['examples/mpi_interop/mpi_interop', []],
-
+    ['examples/mpi_with_ctrl_repl/mpi_with_ctrl_repl', []],
     # Tests
     ['test/bug954/bug954', ['-ll:rsize', '1024']],
 ]
@@ -482,7 +502,8 @@ def run_test_external1(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, 
     # SNAP
     # Contact: Mike Bauer <mbauer@nvidia.com>
     snap_dir = os.path.join(tmp_dir, 'snap')
-    clone_github('StanfordLegion', 'Legion-SNAP', snap_dir, tmp_dir)
+    # TODO: Merge deppart branch into master after this makes it to stable Legion branch
+    clone_github('StanfordLegion', 'Legion-SNAP', snap_dir, tmp_dir, branch='ctrlrepl')
     # This can't handle flags before application arguments, so place
     # them after.
     snap = [[os.path.join(snap_dir, 'src/snap'),

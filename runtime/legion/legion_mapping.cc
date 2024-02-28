@@ -15,6 +15,7 @@
 
 #include "legion.h"
 #include "legion/region_tree.h"
+#include "legion/legion_views.h"
 #include "legion/legion_mapping.h"
 #include "legion/mapper_manager.h"
 #include "legion/legion_instances.h"
@@ -38,11 +39,19 @@ namespace Legion {
       : impl(i)
     //--------------------------------------------------------------------------
     {
-      // By holding resource references, we prevent the data
+      // By holding gc references, we prevent the data
       // structure from being collected, it doesn't change if 
       // the actual instance itself can be collected or not
       if (impl != NULL)
-        impl->add_base_resource_ref(Internal::INSTANCE_MAPPER_REF);
+        impl->add_base_gc_ref(Internal::MAPPER_REF);
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalInstance::PhysicalInstance(PhysicalInstance &&rhs)
+      : impl(rhs.impl)
+    //--------------------------------------------------------------------------
+    {
+      rhs.impl = NULL;
     }
 
     //--------------------------------------------------------------------------
@@ -51,7 +60,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (impl != NULL)
-        impl->add_base_resource_ref(Internal::INSTANCE_MAPPER_REF);
+        impl->add_base_gc_ref(Internal::MAPPER_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -59,8 +68,20 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if ((impl != NULL) && 
-          impl->remove_base_resource_ref(Internal::INSTANCE_MAPPER_REF))
+          impl->remove_base_gc_ref(Internal::MAPPER_REF))
         delete (impl);
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalInstance& PhysicalInstance::operator=(PhysicalInstance &&rhs)
+    //--------------------------------------------------------------------------
+    {
+      if ((impl != NULL) && 
+          impl->remove_base_gc_ref(Internal::MAPPER_REF))
+        delete (impl);
+      impl = rhs.impl;
+      rhs.impl = NULL;
+      return *this;
     }
 
     //--------------------------------------------------------------------------
@@ -68,11 +89,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if ((impl != NULL) && 
-          impl->remove_base_resource_ref(Internal::INSTANCE_MAPPER_REF))
+          impl->remove_base_gc_ref(Internal::MAPPER_REF))
         delete (impl);
       impl = rhs.impl;
       if (impl != NULL)
-        impl->add_base_resource_ref(Internal::INSTANCE_MAPPER_REF);
+        impl->add_base_gc_ref(Internal::MAPPER_REF);
       return *this;
     }
 
@@ -103,7 +124,8 @@ namespace Legion {
     {
       if ((impl == NULL) || !impl->is_physical_manager())
         return Memory::NO_MEMORY;
-      return impl->as_physical_manager()->get_memory();
+      Internal::PhysicalManager *manager = impl->as_physical_manager();
+      return manager->get_memory();
     }
 
     //--------------------------------------------------------------------------
@@ -112,7 +134,8 @@ namespace Legion {
     {
       if ((impl == NULL) || !impl->is_physical_manager())
         return 0;
-      return impl->get_instance(DomainPoint()).id;
+      Internal::PhysicalManager *manager = impl->as_physical_manager();
+      return manager->get_instance().id;
     }
 
     //--------------------------------------------------------------------------
@@ -212,15 +235,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool PhysicalInstance::is_collective_instance(void) const
-    //--------------------------------------------------------------------------
-    {
-      if ((impl == NULL) || !impl->is_physical_manager())
-        return false;
-      return impl->is_collective_manager();
-    }
-
-    //--------------------------------------------------------------------------
     /*static*/ PhysicalInstance PhysicalInstance::get_virtual_instance(void)
     //--------------------------------------------------------------------------
     {
@@ -274,7 +288,7 @@ namespace Legion {
     {
       if (impl == NULL)
         return false;
-      return impl->entails(constraint_set, DomainPoint(), failed_constraint);
+      return impl->entails(constraint_set, failed_constraint);
     }
 
     //--------------------------------------------------------------------------
@@ -282,7 +296,143 @@ namespace Legion {
 					const PhysicalInstance& p)
     //--------------------------------------------------------------------------
     {
-      return os << p.impl->get_instance(DomainPoint());
+      if (!p.impl->is_physical_manager())
+        return os << Realm::RegionInstance::NO_INST;
+      else
+        return os << p.impl->as_physical_manager()->get_instance();
+    }
+
+    /////////////////////////////////////////////////////////////
+    // CollectiveView
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    CollectiveView::CollectiveView(void)
+      : impl(NULL)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    CollectiveView::CollectiveView(CollectiveViewImpl i)
+      : impl(i)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(impl != NULL);
+#endif
+      impl->add_base_gc_ref(Internal::MAPPER_REF);
+    }
+
+    //--------------------------------------------------------------------------
+    CollectiveView::CollectiveView(CollectiveView &&rhs)
+      : impl(rhs.impl)
+    //--------------------------------------------------------------------------
+    {
+      rhs.impl = NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    CollectiveView::CollectiveView(const CollectiveView &rhs)
+      : impl(rhs.impl)
+    //--------------------------------------------------------------------------
+    {
+      if (impl != NULL)
+        impl->add_base_gc_ref(Internal::MAPPER_REF);
+    }
+
+    //--------------------------------------------------------------------------
+    CollectiveView::~CollectiveView(void)
+    //--------------------------------------------------------------------------
+    {
+      if ((impl != NULL) &&
+          impl->remove_base_gc_ref(Internal::MAPPER_REF))
+        delete impl;
+    }
+
+    //--------------------------------------------------------------------------
+    CollectiveView& CollectiveView::operator=(CollectiveView &&rhs)
+    //--------------------------------------------------------------------------
+    {
+      if ((impl != NULL) &&
+          impl->remove_base_gc_ref(Internal::MAPPER_REF))
+        delete impl;
+      impl = rhs.impl;
+      rhs.impl = NULL;
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    CollectiveView& CollectiveView::operator=(const CollectiveView &rhs)
+    //--------------------------------------------------------------------------
+    {
+      if ((impl != NULL) &&
+          impl->remove_base_gc_ref(Internal::MAPPER_REF))
+        delete impl;
+      impl = rhs.impl;
+      if (impl != NULL)
+        impl->add_base_gc_ref(Internal::MAPPER_REF);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    bool CollectiveView::operator<(const CollectiveView &rhs) const
+    //--------------------------------------------------------------------------
+    {
+      return (impl < rhs.impl);
+    }
+
+    //--------------------------------------------------------------------------
+    bool CollectiveView::operator==(const CollectiveView &rhs) const
+    //--------------------------------------------------------------------------
+    {
+      return (impl == rhs.impl);
+    }
+
+    //--------------------------------------------------------------------------
+    bool CollectiveView::operator!=(const CollectiveView &rhs) const
+    //--------------------------------------------------------------------------
+    {
+      return (impl != rhs.impl);
+    }
+
+    //--------------------------------------------------------------------------
+    void CollectiveView::find_instances_in_memory(Memory memory,
+                                     std::vector<PhysicalInstance> &insts) const
+    //--------------------------------------------------------------------------
+    {
+      if (impl == NULL)
+        return;
+      std::vector<Internal::PhysicalManager*> managers;
+      impl->find_instances_in_memory(memory, managers);
+      insts.reserve(insts.size() + managers.size());
+      for (unsigned idx = 0; idx < managers.size(); idx++)
+        insts.emplace_back(PhysicalInstance(managers[idx]));
+    }
+
+    //--------------------------------------------------------------------------
+    void CollectiveView::find_instances_nearest_memory(Memory memory,
+                     std::vector<PhysicalInstance> &insts, bool bandwidth) const
+    //--------------------------------------------------------------------------
+    {
+      if (impl == NULL)
+        return;
+      std::vector<Internal::PhysicalManager*> managers;
+      impl->find_instances_nearest_memory(memory, managers, bandwidth);
+      insts.reserve(insts.size() + managers.size());
+      for (unsigned idx = 0; idx < managers.size(); idx++)
+        insts.emplace_back(PhysicalInstance(managers[idx]));
+    }
+
+    //--------------------------------------------------------------------------
+    /*friend*/ std::ostream& operator<<(std::ostream& os,
+					const CollectiveView &v)
+    //--------------------------------------------------------------------------
+    {
+      if (v.impl == NULL)
+        return os << "Empty Collective View";
+      else
+        return os << "Collective View " << std::hex << v.impl->did << std::dec;
     }
 
     /////////////////////////////////////////////////////////////
@@ -346,6 +496,34 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
     }
+
+    LEGION_DISABLE_DEPRECATED_WARNINGS
+
+    //--------------------------------------------------------------------------
+    Mapper::PremapTaskInput::PremapTaskInput(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    Mapper::PremapTaskInput::~PremapTaskInput(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    Mapper::PremapTaskOutput::PremapTaskOutput(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    Mapper::PremapTaskOutput::~PremapTaskOutput(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    LEGION_REENABLE_DEPRECATED_WARNINGS
 
     /////////////////////////////////////////////////////////////
     // MapperRuntime
@@ -590,12 +768,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool MapperRuntime::is_replicable_variant(MapperContext ctx, 
+    bool MapperRuntime::is_replicable_variant(MapperContext ctx,
                                      TaskID task_id, VariantID variant_id) const
     //--------------------------------------------------------------------------
     {
-      // Will be implemented in the control replication branch
-      return false;
+      return ctx->manager->is_replicable_variant(ctx, task_id, variant_id);
     }
 
     //--------------------------------------------------------------------------
@@ -603,11 +780,12 @@ namespace Legion {
                                       const TaskVariantRegistrar &registrar,
 				      const CodeDescriptor &codedesc,
 				      const void *user_data, size_t user_len,
+                                      size_t return_type_size, 
                                       bool has_return_type)
     //--------------------------------------------------------------------------
     {
       return ctx->manager->register_task_variant(ctx, registrar, codedesc,
-                                            user_data,user_len,has_return_type);
+                    user_data, user_len, return_type_size, has_return_type);
     }
 
     //--------------------------------------------------------------------------
@@ -716,7 +894,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return ctx->manager->find_physical_instance(ctx, target_memory, 
-                  constraints, regions, result, acquire, tight_bounds);
+                constraints, regions, result, acquire, tight_bounds);
     }
 
     //--------------------------------------------------------------------------
@@ -831,6 +1009,47 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       ctx->manager->release_instances(ctx, instances);
+    }
+
+    //--------------------------------------------------------------------------
+    bool MapperRuntime::subscribe(MapperContext ctx, 
+                                  const PhysicalInstance &inst) const
+    //--------------------------------------------------------------------------
+    {
+      return ctx->manager->subscribe(ctx, inst);
+    }
+
+    //--------------------------------------------------------------------------
+    void MapperRuntime::unsubscribe(MapperContext ctx, 
+                                    const PhysicalInstance &inst) const
+    //--------------------------------------------------------------------------
+    {
+      ctx->manager->unsubscribe(ctx, inst);
+    }
+
+    //--------------------------------------------------------------------------
+    bool MapperRuntime::collect_instance(MapperContext ctx,
+                                         const PhysicalInstance &instance) const
+    //--------------------------------------------------------------------------
+    {
+      return ctx->manager->collect_instance(ctx, instance);
+    }
+
+    //--------------------------------------------------------------------------
+    void MapperRuntime::collect_instances(MapperContext ctx,
+                                 const std::vector<PhysicalInstance> &instances,
+                                 std::vector<bool> &collected) const
+    //--------------------------------------------------------------------------
+    {
+      ctx->manager->collect_instances(ctx, instances, collected);
+    }
+
+    //--------------------------------------------------------------------------
+    bool MapperRuntime::acquire_future(MapperContext ctx,
+                                       const Future &f, Memory memory) const
+    //--------------------------------------------------------------------------
+    {
+      return ctx->manager->acquire_future(ctx, f, memory);
     }
 
     //--------------------------------------------------------------------------
@@ -1392,6 +1611,127 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       ctx->manager->retrieve_name(ctx, handle, result);
+    }
+
+    //--------------------------------------------------------------------------
+    bool MapperRuntime::is_MPI_interop_configured(MapperContext ctx)
+    //--------------------------------------------------------------------------
+    {
+      return ctx->manager->is_MPI_interop_configured();
+    }
+
+    //--------------------------------------------------------------------------
+    const std::map<int,AddressSpace>& MapperRuntime::find_forward_MPI_mapping(
+                                                              MapperContext ctx)
+    //--------------------------------------------------------------------------
+    {
+      return ctx->manager->find_forward_MPI_mapping(ctx);
+    }
+
+    //--------------------------------------------------------------------------
+    const std::map<AddressSpace,int>& MapperRuntime::find_reverse_MPI_mapping(
+                                                              MapperContext ctx)
+    //--------------------------------------------------------------------------
+    {
+      return ctx->manager->find_reverse_MPI_mapping(ctx);
+    }
+
+    //--------------------------------------------------------------------------
+    int MapperRuntime::find_local_MPI_rank(MapperContext ctx)
+    //--------------------------------------------------------------------------
+    {
+      return ctx->manager->find_local_MPI_rank();
+    }
+
+    /////////////////////////////////////////////////////////////
+    // AutoLock
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    AutoLock::AutoLock(MapperContext c, LocalLock &r, int mode, bool excl)
+      : Internal::AutoLock(mode, excl, r), ctx(c)
+    //--------------------------------------------------------------------------
+    {
+      bool paused = false;
+      if (exclusive)
+      {
+        Internal::RtEvent ready = local_lock.wrlock();
+        while (ready.exists())
+        {
+          if (!paused)
+          {
+            ctx->manager->pause_mapper_call(ctx);
+            paused = true;
+          }
+          ready.wait();
+          ready = local_lock.wrlock();
+        }
+      }
+      else
+      {
+        Internal::RtEvent ready = local_lock.rdlock();
+        while (ready.exists())
+        {
+          if (!paused)
+          {
+            ctx->manager->pause_mapper_call(ctx);
+            paused = true;
+          }
+          ready.wait();
+          ready = local_lock.rdlock();
+        }
+      }
+      held = true;
+      Internal::local_lock_list = this;
+      if (paused)
+        ctx->manager->resume_mapper_call(ctx, Internal::MAPPER_AUTO_LOCK_CALL);
+    }
+
+    //--------------------------------------------------------------------------
+    void AutoLock::reacquire(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!held);
+      assert(Internal::local_lock_list == previous);
+#endif
+#ifdef DEBUG_REENTRANT_LOCKS
+      if (previous != NULL)
+        previous->check_for_reentrant_locks(&local_lock);
+#endif
+      bool paused = false;
+      if (exclusive)
+      {
+        Internal::RtEvent ready = local_lock.wrlock();
+        while (ready.exists())
+        {
+          if (!paused)
+          {
+            ctx->manager->pause_mapper_call(ctx);
+            paused = true;
+          }
+          ready.wait();
+          ready = local_lock.wrlock();
+        }
+      }
+      else
+      {
+        Internal::RtEvent ready = local_lock.rdlock();
+        while (ready.exists())
+        {
+          if (!paused)
+          {
+            ctx->manager->pause_mapper_call(ctx);
+            paused = true;
+          }
+          ready.wait();
+          ready = local_lock.rdlock();
+        }
+      }
+      Internal::local_lock_list = this;
+      held = true;
+      if (paused)
+        ctx->manager->resume_mapper_call(ctx, Internal::MAPPER_AUTO_LOCK_CALL);
     }
 
   }; // namespace Mapping

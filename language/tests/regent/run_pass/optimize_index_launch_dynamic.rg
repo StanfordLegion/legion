@@ -67,4 +67,5 @@ task main()
     f_mixed(p[(i+1)%10])
   end
 end
+
 regentlib.start(main)

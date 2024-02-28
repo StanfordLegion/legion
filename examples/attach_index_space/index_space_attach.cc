@@ -118,8 +118,8 @@ void top_level_task(const Task *task,
   IndexAttachLauncher xy_launcher(LEGION_EXTERNAL_INSTANCE, input_lr, false/*restricted*/);
   IndexAttachLauncher z_launcher(LEGION_EXTERNAL_INSTANCE, output_lr, false/*restricted*/); 
   int offset = 0;
-  const ShardID local_shard = runtime->local_shard(ctx);
-  const size_t total_shards = runtime->total_shards(ctx);
+  const ShardID local_shard = task->get_shard_id();
+  const size_t total_shards = task->get_total_shards();
   for (int i = 0; i < num_subregions; ++i) {
     const DomainPoint point = Point<1>(i);
     IndexSpace child_space = runtime->get_index_subspace(ctx, ip, point);
@@ -131,6 +131,29 @@ void top_level_task(const Task *task,
     // We'll do this with the simple load balancing technique of round-robin mapping 
     if ((i % total_shards) != local_shard) {
       offset += child_elements;
+      if (i == 0)
+      {
+        if (soa_flag)
+        {
+          std::vector<FieldID> attach_fields(2);
+          attach_fields[0] = FID_X;
+          attach_fields[1] = FID_Y;
+          xy_launcher.initialize_constraints(false/*column major*/, true/*soa*/, attach_fields);
+          xy_launcher.privilege_fields.insert(attach_fields.begin(), attach_fields.end());
+        }
+        else
+        {
+          std::vector<FieldID> layout_constraint_fields(3);
+          layout_constraint_fields[0] = FID_X;
+          layout_constraint_fields[1] = FID_Y;
+          layout_constraint_fields[2] = FID_Z;
+          xy_launcher.initialize_constraints(false/*column major*/, false/*soa*/, layout_constraint_fields);
+          z_launcher.initialize_constraints(false/*column major*/, false/*soa*/, layout_constraint_fields);
+          xy_launcher.privilege_fields.insert(FID_X);
+          xy_launcher.privilege_fields.insert(FID_Y);
+          z_launcher.privilege_fields.insert(FID_Z);
+        }
+      }
       continue;
     }
     LogicalRegion input_handle = 
@@ -148,11 +171,7 @@ void top_level_task(const Task *task,
       }
       if (i == 0)
       {
-        std::vector<FieldID> attach_fields(2);
-        attach_fields[0] = FID_X;
-        attach_fields[1] = FID_Y;
-        xy_launcher.initialize_constraints(false/*column major*/, true/*soa*/, attach_fields);
-        xy_launcher.privilege_fields.insert(attach_fields.begin(), attach_fields.end());
+        
       }
       xy_ptrs.push_back(xy_ptr);
       xy_exts.emplace_back(Realm::ExternalMemoryResource(xy_ptr, 2*sizeof(int)*child_elements));

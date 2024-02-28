@@ -518,16 +518,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TestMapper::speculate(const MapperContext            ctx,
-                               const Task&                    task,
-                                     SpeculativeOutput&       output)
-    //--------------------------------------------------------------------------
-    {
-      // TODO: turn on random speculation
-      output.speculate = false;
-    }
-
-    //--------------------------------------------------------------------------
     void TestMapper::map_inline(const MapperContext        ctx,
                                 const InlineMapping&       inline_op,
                                 const MapInlineInput&      input,
@@ -605,34 +595,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TestMapper::speculate(const MapperContext      ctx,
-                               const Copy&              copy,
-                                     SpeculativeOutput& output)
-    //--------------------------------------------------------------------------
-    {
-      // TODO: speculate sometimes
-      output.speculate = false;
-    }
-
-    //--------------------------------------------------------------------------
-    void TestMapper::map_close(const MapperContext       ctx,
-                               const Close&              close,
-                               const MapCloseInput&      input,
-                                     MapCloseOutput&     output)
-    //--------------------------------------------------------------------------
-    {
-      // Figure out if we want to generate a real instance or a composite
-      if ((generate_random_integer() % REAL_CLOSE_RATIO) == 0)
-      {
-        // make real instances for all the fields
-        map_random_requirement(ctx, close.requirement, output.chosen_instances);
-      }
-      else // just make a composite instance
-        output.chosen_instances.push_back(
-                                  PhysicalInstance::get_virtual_instance());
-    }
-
-    //--------------------------------------------------------------------------
     void TestMapper::select_close_sources(const MapperContext        ctx,
                                           const Close&               close,
                                           const SelectCloseSrcInput&  input,
@@ -644,16 +606,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TestMapper::speculate(const MapperContext         ctx,
-                               const Acquire&              acquire,
-                                     SpeculativeOutput&    output)
-    //--------------------------------------------------------------------------
-    {
-      // TODO: enable speculation
-      output.speculate = false;
-    }
-
-    //--------------------------------------------------------------------------
     void TestMapper::select_release_sources(const MapperContext       ctx,
                                        const Release&                 release,
                                        const SelectReleaseSrcInput&   input,
@@ -662,16 +614,6 @@ namespace Legion {
     {
       select_random_source_order(input.source_instances,
                                  output.chosen_ranking);
-    }
-
-    //--------------------------------------------------------------------------
-    void TestMapper::speculate(const MapperContext         ctx,
-                               const Release&              release,
-                                     SpeculativeOutput&    output)
-    //--------------------------------------------------------------------------
-    {
-      // TODO: enable speculation
-      output.speculate = false;
     }
 
     //--------------------------------------------------------------------------

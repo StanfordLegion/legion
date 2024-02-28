@@ -160,7 +160,6 @@ void StencilMapper::map_task(const MapperContext      ctx,
         }
         continue;
       }
-      assert(input.valid_instances[idx].size() == 1);
       output.chosen_instances[idx] = input.valid_instances[idx];
       bool ok = runtime->acquire_and_filter_instances(ctx, output.chosen_instances);
       if (!ok) {

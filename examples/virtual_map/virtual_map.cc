@@ -368,6 +368,7 @@ int main(int argc, char **argv)
   {
     TaskVariantRegistrar top_level_registrar(TOP_LEVEL_TASK_ID);
     top_level_registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+    top_level_registrar.set_replicable();
     Runtime::preregister_task_variant<top_level_task>(top_level_registrar, 
                                                       "Top Level Task");
     Runtime::set_top_level_task_id(TOP_LEVEL_TASK_ID);

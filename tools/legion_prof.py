@@ -2048,13 +2048,13 @@ class CopyInstInfo(object):
         return self.get_short_text()
 
 class Copy(ChanOperation, TimeRange, HasInitiationDependencies):
-    __slots__ = TimeRange._abstract_slots + HasInitiationDependencies._abstract_slots + ['size', 'fevent', 'copy_kind', 'copy_inst_infos']
+    __slots__ = TimeRange._abstract_slots + HasInitiationDependencies._abstract_slots + ['size', 'fevent', 'collective', 'copy_kind', 'copy_inst_infos']
     
     @typecheck
     def __init__(self, initiation_op: Operation, size: int, 
                  create: int, ready: int, 
                  start: int, stop: int, 
-                 fevent: int
+                 fevent: int, collective: int,
     ) -> None:
         ChanOperation.__init__(self)
         TimeRange.__init__(self, None, None, None, None)
@@ -2065,6 +2065,7 @@ class Copy(ChanOperation, TimeRange, HasInitiationDependencies):
         self.start = start
         self.stop = stop
         self.fevent = fevent
+        self.collective = collective
         self.copy_kind: Optional[CopyKind] = None
         self.copy_inst_infos: List[CopyInstInfo] = list()
 
@@ -2140,7 +2141,7 @@ class Copy(ChanOperation, TimeRange, HasInitiationDependencies):
             new_copy = Copy(self.initiation_op, self.size, 
                             self.create, self.ready, 
                             self.start, self.stop, 
-                            self.fevent)
+                            self.fevent, self.collective)
             new_copy.copy_kind = copy_kind
             new_copy.copy_inst_infos = group
             channel.add_copy(new_copy)
@@ -3789,10 +3790,11 @@ class State(object):
     def log_copy_info(self, op_id: int, size: int,
                       create: int, ready: int, 
                       start: int, stop: int,
-                      creator: int, fevent: int
+                      creator: int, fevent: int,
+                      collective: int
     ) -> None:
         op = self.find_or_create_op(op_id)
-        copy = self.create_copy(op, size, create, ready, start, stop, fevent)
+        copy = self.create_copy(op, size, create, ready, start, stop, fevent, collective)
         if stop > self.last_time:
             self.last_time = stop
 
@@ -4201,11 +4203,11 @@ class State(object):
     def create_copy(self, op: Operation, size: int,
                     create: int, ready: int, 
                     start: int, stop: int,
-                    fevent: int
+                    fevent: int, collective: int
     ) -> Copy:
         key = fevent
         if key not in self.copy_map:
-            copy = Copy(op, size, create, ready, start, stop, fevent)
+            copy = Copy(op, size, create, ready, start, stop, fevent, collective)
             self.add_copy_map(fevent,copy)
             # update prof_uid map
             self.prof_uid_map[copy.prof_uid] = copy
@@ -5071,7 +5073,7 @@ class State(object):
         self.spy_state.post_parse(False, True)
 
         print("Performing physical analysis...")
-        self.spy_state.perform_physical_analysis(False, False)
+        self.spy_state.perform_physical_analysis(False)
         self.spy_state.simplify_physical_graph(need_cycle_check=False)
 
         op = self.spy_state.get_operation(self.spy_state.top_level_uid)

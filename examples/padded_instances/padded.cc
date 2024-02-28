@@ -238,7 +238,6 @@ int main(int argc, char **argv)
                                                      /* redop =        */ 0,
                                                      /* no_access =    */ false,
                                                      /* exact =        */ false,
-                                                     /* collective =   */ Domain(),
                                                      /* max_pieces =   */ 2,
                                                      /* max_overhead = */ 1));
       CSI_const = Runtime::preregister_layout(registrar);

@@ -226,6 +226,9 @@ int main(int argc, char **argv)
   {
     TaskVariantRegistrar registrar(TOP_LEVEL_TASK_ID, "top_level");
     registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+#ifndef SEQUENTIAL_LOAD_CIRCUIT
+    registrar.set_replicable();
+#endif
     Runtime::preregister_task_variant<top_level_task>(registrar, "top_level");
   }
 

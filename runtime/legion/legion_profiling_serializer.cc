@@ -336,7 +336,8 @@ namespace Legion {
          << "start:timestamp_t:"       << sizeof(timestamp_t)        << delim
          << "stop:timestamp_t:"        << sizeof(timestamp_t)        << delim
          << "creator:unsigned long long:" << sizeof(LgEvent)      << delim
-         << "fevent:unsigned long long:" << sizeof(LgEvent)
+         << "fevent:unsigned long long:" << sizeof(LgEvent)          << delim
+         << "collective:unsigned:"     << sizeof(CollectiveKind)
          << "}" << std::endl;
 
       ss << "CopyInstInfo {"
@@ -948,6 +949,7 @@ namespace Legion {
       lp_fwrite(f, (char*)&(copy_info.stop),   sizeof(copy_info.stop));
       lp_fwrite(f, (char*)&(copy_info.creator),sizeof(copy_info.creator));
       lp_fwrite(f, (char*)&(copy_info.fevent),sizeof(copy_info.fevent.id));
+      lp_fwrite(f, (char*)&(copy_info.collective),sizeof(copy_info.collective));
       for (std::vector<LegionProfInstance::CopyInstInfo>::const_iterator it =
            copy_info.inst_infos.begin(); it != copy_info.inst_infos.end(); it++)
         serialize(*it, copy_info);
@@ -1778,10 +1780,11 @@ namespace Legion {
                                   const LegionProfInstance::CopyInfo& copy_info)
     //--------------------------------------------------------------------------
     {
-      log_prof.print("Prof Copy Info %llu %llu %llu %llu %llu %llu " IDFMT " " 
-                     IDFMT, copy_info.op_id, copy_info.size, copy_info.create,
-                     copy_info.ready, copy_info.start, copy_info.stop,
-                     copy_info.creator.id, copy_info.fevent.id);
+      log_prof.print("Prof Copy Info %llu %llu %llu %llu %llu %llu " IDFMT " "
+                     IDFMT " %u", copy_info.op_id, copy_info.size, 
+                     copy_info.create, copy_info.ready, copy_info.start,
+                     copy_info.stop, copy_info.creator.id, copy_info.fevent.id,
+                     copy_info.collective);
       for (std::vector<LegionProfInstance::CopyInstInfo>::const_iterator it =
            copy_info.inst_infos.begin(); it != copy_info.inst_infos.end(); it++)
         serialize(*it, copy_info);
