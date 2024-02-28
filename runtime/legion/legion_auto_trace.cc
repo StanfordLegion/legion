@@ -751,19 +751,10 @@ namespace Legion {
         return;
       }
 
-      // Now that we have some completed pointers, sort and issue them.
-      std::sort(
-          this->completed_commit_pointers.begin(),
-          this->completed_commit_pointers.end(),
-          [opidx](CommitPointer& left, CommitPointer& right) {
-            // We make these sort keys (score, -opidx) so that the highest
-            // scoring, earliest opidx is the first entry in the ordering.
-            auto ltup = std::make_pair(left.score(opidx), -(int64_t)left.get_opidx());
-            auto rtup = std::make_pair(right.score(opidx), -(int64_t)right.get_opidx());
-            // Use > instead of < so that we get descending order.
-            return ltup > rtup;
-          }
-      );
+#ifdef DEBUG_LEGION
+      assert(std::is_sorted(this->completed_commit_pointers.begin(), this->completed_commit_pointers.end()));
+#endif
+      // Now that we have some (sorted) completed pointers,  issue them.
       for (auto& pointer : this->completed_commit_pointers) {
         // If we're considering a pointer that starts earlier than the
         // pending set of operations, then that trace is behind us. So
@@ -816,13 +807,29 @@ namespace Legion {
         if (!pointer.advance(hash)) {
           continue;
         }
-        // TODO (rohany): Right now, we can't handle strings that have prefixes
-        //  in the trie in this watcher. However, if needed, we could have this
-        //  complete function return a completed pointer that corresponds to
-        //  the finished prefix, and then also add current pointer back to
-        //  the active pointers so then the heuristics we have work out nicely.
         if (pointer.complete()) {
-          this->completed_commit_pointers.push_back(pointer);
+          // Add the new completed pointer to the vector of
+          // completed_commit_pointers. We calculate the score of
+          // the pointer at the current opidx and use that score
+          // for the rest of the operations on the pointer. We must
+          // maintain the sortedness of completed_commit_pointers, so we
+          // use upper_bound + insert to insert the pointer into the right
+          // place. A future investigation can see if a std::set is a better
+          // data structure, but the controlled memory usage + cache behavior
+          // of the vector is likely better on the small sizes that
+          // completed_commit_pointers should grow to.
+#ifdef DEBUG_LEGION
+          assert(std::is_sorted(this->completed_commit_pointers.begin(), this->completed_commit_pointers.end()));
+#endif
+          FrozenCommitPointer frozen(pointer, opidx);
+          this->completed_commit_pointers.insert(
+            std::upper_bound(
+              this->completed_commit_pointers.begin(),
+              this->completed_commit_pointers.end(),
+              frozen
+            ),
+            frozen
+          );
         } else {
           this->active_commit_pointers[copyidx] = pointer;
           copyidx++;
@@ -863,20 +870,11 @@ namespace Legion {
         // completed traces [A, B] but B has a higher score, we'll issue A without
         // actually replaying that trace. Doing this seems to require some
         // fancier logic with interval trees or something, so we'll stick to
-        // the simpler piece. First, sort the completed pointers by their score
-        // so that we have the highest scoring pointers at the front.
-        std::sort(
-          this->completed_commit_pointers.begin(),
-          this->completed_commit_pointers.end(),
-          [opidx](CommitPointer& left, CommitPointer& right) {
-            // We make these sort keys (score, -opidx) so that the highest
-            // scoring, earliest opidx is the first entry in the ordering.
-            auto ltup = std::make_pair(left.score(opidx), -(int64_t)left.get_opidx());
-            auto rtup = std::make_pair(right.score(opidx), -(int64_t)right.get_opidx());
-            // Use > instead of < so that we get descending order.
-            return ltup > rtup;
-          }
-        );
+        // the simpler piece. completed_commit_pointers should already be
+        // sorted to have the highest scoring traces at the front.
+#ifdef DEBUG_LEGION
+        assert(std::is_sorted(this->completed_commit_pointers.begin(), this->completed_commit_pointers.end()));
+#endif
         for (auto& pointer : this->completed_commit_pointers) {
           // If we're considering a pointer that starts earlier than the
           // pending set of operations, then that trace is behind us. So
@@ -910,23 +908,9 @@ namespace Legion {
           // active pointers. This biases us towards longer traces when possible,
           // and makes the replay resilient against different kinds of traces
           // being inserted, such as AB, when the trie already contains BC.
-          // Sort the completed pointers again.
-          // TODO (rohany): There's a micro-optimization here to avoid re-sorting
-          //  the completed pointers so much, we can maintain a bit that holds onto
-          //  whether the vector has changed since the last time we sorted it (i.e.
-          //  we actually inserted a new pointer into the list).
-          std::sort(
-            this->completed_commit_pointers.begin(),
-            this->completed_commit_pointers.end(),
-            [opidx](CommitPointer& left, CommitPointer& right) {
-              // We make these sort keys (score, -opidx) so that the highest
-              // scoring, earliest opidx is the first entry in the ordering.
-              auto ltup = std::make_pair(left.score(opidx), -(int64_t)left.get_opidx());
-              auto rtup = std::make_pair(right.score(opidx), -(int64_t)right.get_opidx());
-              // Use > instead of < so that we get descending order.
-              return ltup > rtup;
-            }
-          );
+#ifdef DEBUG_LEGION
+          assert(std::is_sorted(this->completed_commit_pointers.begin(), this->completed_commit_pointers.end()));
+#endif
           uint64_t cutoff_opidx = earliest_active;
           uint64_t pending_completion_cutoff = std::numeric_limits<uint64_t>::max();
           uint64_t copyidx = 0;
@@ -934,7 +918,6 @@ namespace Legion {
             auto pointer = this->completed_commit_pointers[i];
             // If this completed pointer spans into an active pointer, then we need
             // to save it for later.
-            // TODO (rohany): Not sure if this is supposed to be > or >=.
             if (pointer.get_opidx() + pointer.get_length() >= cutoff_opidx) {
               this->completed_commit_pointers[copyidx] = pointer;
               copyidx++;
@@ -950,7 +933,6 @@ namespace Legion {
             }
             // Lastly, make sure that this completed pointer doesn't invalidate
             // a completed pointer that was re-queued with a better score.
-            // TODO (rohany): Not sure if this should be > or >=.
             if (pointer.get_opidx() + pointer.get_length() >= pending_completion_cutoff) {
               this->completed_commit_pointers[copyidx] = pointer;
               copyidx++;
@@ -965,6 +947,9 @@ namespace Legion {
           this->completed_commit_pointers.erase(this->completed_commit_pointers.begin() + copyidx, this->completed_commit_pointers.end());
 
 #ifdef DEBUG_LEGION
+          // Since we iterated through completed_commit_pointers in sorted order
+          // to construct the new vector, it should still be sorted.
+          assert(std::is_sorted(this->completed_commit_pointers.begin(), this->completed_commit_pointers.end()));
           // Since we waited to not cut off any active pointers, there should not
           // be any invalid active pointers.
           for (auto& pointer : this->active_commit_pointers) {

@@ -37,8 +37,9 @@ namespace Legion {
       const std::unordered_map<T, TrieNode<T, V>*>& get_children() const { return this->children; }
       TrieNode<T, V>* get_parent() const { return this->parent; }
       V& get_value() { return this->value; }
-      bool get_end() { return this->end; }
-      T get_token() { return this->token; }
+      const V& get_value() const { return this->value; }
+      bool get_end() const { return this->end; }
+      T get_token() const { return this->token; }
     private:
       friend class Trie<T, V>;
       T token;
