@@ -399,8 +399,26 @@ namespace Legion {
         uint64_t depth;
       };
       std::vector<CommitPointer> active_commit_pointers;
-      std::vector<CommitPointer> completed_commit_pointers;
-
+      // FrozenCommitPointer is a commit pointer with a frozen score
+      // so that it can be maintained in-order inside completed_commit_pointers.
+      // We use a separate type here so that CommitPointers do not get
+      // accidentally ordered by the metric below.
+      class FrozenCommitPointer : public CommitPointer {
+      public:
+        // We make these sort keys (score, -opidx) so that the highest
+        // scoring, earliest opidx is the first entry in the ordering.
+        FrozenCommitPointer(CommitPointer& p, uint64_t opidx)
+          : CommitPointer(p), score(p.score(opidx), -int64_t(p.get_opidx())) {}
+        friend bool operator<(const FrozenCommitPointer& a, const FrozenCommitPointer& b) {
+          // Use > instead of < so that we get descending order.
+          return a.score > b.score;
+        }
+      private:
+        std::pair<double, int64_t> score;
+      };
+      // completed_commit_pointers is a _sorted_ vector of completed
+      // commit pointers. All operations on it must preserve the sortedness.
+      std::vector<FrozenCommitPointer> completed_commit_pointers;
 
       // Fields for the management of pending operations.
       struct PendingOperation {
