@@ -1520,16 +1520,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool InnerContext::verify_hash(const uint64_t hash[2],
-                    const char *description, Provenance *provenance, bool every)
-    //--------------------------------------------------------------------------
-    {
-      // Nothing to do for now, but this is where trace checking code
-      // should go once we start checking that on replays
-      return true;
-    }
-
-    //--------------------------------------------------------------------------
     void InnerContext::register_region_creations(
                                       std::map<LogicalRegion,unsigned> &regions)
     //--------------------------------------------------------------------------
@@ -10282,6 +10272,8 @@ namespace Legion {
       // Mark that the current trace is now fixed
       if (!current_trace->is_fixed())
         current_trace->fix_trace(provenance);
+      else if (runtime->safe_tracing)
+        current_trace->check_operation_count();
       current_trace->reset_intermediate_fence();
       previous_trace = current_trace;
       current_trace = NULL;
@@ -13881,8 +13873,7 @@ namespace Legion {
         exchange.exchange(hash);
       // If all shards had the same hashes then we are done
       if (hashes.size() == 1)
-        return InnerContext::verify_hash(hash, description, 
-                                        provenance, verify_every_call);
+        return true;
       if (!verify_every_call)
       {
         // First pass, we detected a violation so go around again and see

@@ -4683,7 +4683,7 @@ namespace Legion {
 #endif
         for (int i = 0; runtime->safe_control_replication && (i < 2); i++)
         {
-          InnerContext::HashVerifier hasher(repl_ctx, 
+          ReplicateContext::HashVerifier hasher(repl_ctx, 
               runtime->safe_control_replication > 1, i > 0);
           hasher.hash(
               ReplicateContext::REPLICATE_FUTURE_MAP_GET_ALL_FUTURES, __func__);
@@ -4738,7 +4738,7 @@ namespace Legion {
       context->record_blocking_call(future_coordinate);
       for (int i = 0; runtime->safe_control_replication && (i < 2); i++)
       {
-        InnerContext::HashVerifier hasher(repl_ctx, 
+        ReplicateContext::HashVerifier hasher(repl_ctx, 
             runtime->safe_control_replication > 1, i > 0);
         hasher.hash(
             ReplicateContext::REPLICATE_FUTURE_MAP_WAIT_ALL_FUTURES, __func__);
@@ -17028,6 +17028,7 @@ namespace Legion {
 #else
         unsafe_mapper(!config.safe_mapper),
 #endif
+        safe_tracing(config.safe_tracing),
         disable_independence_tests(config.disable_independence_tests),
         legion_spy_enabled(config.legion_spy_enabled),
         supply_default_mapper(default_mapper),
@@ -17246,6 +17247,7 @@ namespace Legion {
         resilient_mode(rhs.resilient_mode),
         unsafe_launch(rhs.unsafe_launch),
         unsafe_mapper(rhs.unsafe_mapper),
+        safe_tracing(rhs.safe_tracing),
         disable_independence_tests(rhs.disable_independence_tests),
         legion_spy_enabled(rhs.legion_spy_enabled),
         supply_default_mapper(rhs.supply_default_mapper),
@@ -30498,6 +30500,7 @@ namespace Legion {
         .add_option_bool("-lg:unsafe_launch",config.unsafe_launch,!filter)
         .add_option_bool("-lg:unsafe_mapper",config.unsafe_mapper,!filter)
         .add_option_bool("-lg:safe_mapper",config.safe_mapper,!filter)
+        .add_option_bool("-lg:safe_tracing", config.safe_tracing, !filter)
         .add_option_int("-lg:safe_ctrlrepl",
                          config.safe_control_replication, !filter)
         .add_option_bool("-lg:inorder",config.program_order_execution,!filter)

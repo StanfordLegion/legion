@@ -2522,6 +2522,7 @@ namespace Legion {
             unsafe_launch(false),
             unsafe_mapper(false),
             safe_mapper(false),
+            safe_tracing(false),
             disable_independence_tests(false),
 #ifdef LEGION_SPY
             legion_spy_enabled(true),
@@ -2580,6 +2581,7 @@ namespace Legion {
         bool unsafe_launch;
         bool unsafe_mapper;
         bool safe_mapper;
+        bool safe_tracing;
         bool disable_independence_tests;
         bool legion_spy_enabled;
         bool enable_test_mapper;
@@ -2704,6 +2706,7 @@ namespace Legion {
       const bool resilient_mode;
       const bool unsafe_launch;
       const bool unsafe_mapper;
+      const bool safe_tracing;
       const bool disable_independence_tests;
       const bool legion_spy_enabled;
       const bool supply_default_mapper;

@@ -88,14 +88,20 @@ namespace Legion {
       };
       struct OperationInfo {
       public:
-        OperationInfo(Operation *op)
-          : kind(op->get_operation_kind()),
-            region_count(op->get_region_count()) { }
-      public:
         LegionVector<DependenceRecord> dependences;
         LegionVector<CloseInfo> closes;
+      };
+      struct VerificationInfo {
+      public:
+        VerificationInfo(Operation::OpKind k, TaskID tid,
+            unsigned r, uint64_t h[2])
+          : kind(k), task_id(tid), regions(r)
+        { hash[0] = h[0]; hash[1] = h[1]; }
+      public:
         Operation::OpKind kind;
-        unsigned region_count;
+        TaskID task_id;
+        unsigned regions;
+        uint64_t hash[2];
       };
       class StaticTranslator {
       public:
@@ -139,6 +145,7 @@ namespace Legion {
     public:
       bool initialize_op_tracing(Operation *op,
                      const std::vector<StaticDependence> *dependences = NULL);
+      void check_operation_count(void);
       bool skip_analysis(RegionTreeID tid) const;
       size_t register_operation(Operation *op, GenerationID gen);
       void register_internal(InternalOp *op);
@@ -199,6 +206,8 @@ namespace Legion {
       PhysicalTrace *const physical_trace;
     protected:
       // Application stage of the pipeline
+      std::vector<VerificationInfo> verification_infos;
+      unsigned verification_index;
       bool blocking_call_observed;
       bool fixed;
       bool intermediate_fence;

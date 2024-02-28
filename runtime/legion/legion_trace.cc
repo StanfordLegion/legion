@@ -125,8 +125,8 @@ namespace Legion {
       : context(c), tid(t), begin_provenance(p), end_provenance(NULL),
         physical_trace(logical_only ? NULL :
             new PhysicalTrace(c->owner_task->runtime, this)),
-        blocking_call_observed(false), fixed(false), intermediate_fence(false),
-        recording(true), trace_fence(NULL),
+        verification_index(0), blocking_call_observed(false), fixed(false),
+        intermediate_fence(false), recording(true), trace_fence(NULL),
         static_translator(static_trace ? new StaticTranslator(trees) : NULL)
     //--------------------------------------------------------------------------
     {
@@ -172,12 +172,169 @@ namespace Legion {
       }
       else
       {
+        if (has_physical_trace() && (op->get_memoizable() == NULL))
+          REPORT_LEGION_ERROR(ERROR_PHYSICAL_TRACING_UNSUPPORTED_OP,
+              "Illegal operation in physical trace. The application launched "
+              "a %s operation inside of physical trace %d of parent task %s "
+              "(UID %lld) but this kind of operation is not supported for "
+              "physical traces at the moment. You can request support but "
+              "we can guarantee support for all kinds of operations in "
+              "physical traces.", op->get_logging_name(), tid,
+              context->get_task_name(), context->get_unique_id())
+        // Check to see if we are doing safe tracing checks or not
+        if (context->runtime->safe_tracing)
+        {
+          // Compute the hash for this operation
+          Murmur3Hasher hasher;
+          const Operation::OpKind kind = op->get_operation_kind();
+          hasher.hash(kind);
+          TaskID task_id = 0;
+          if (kind == Operation::TASK_OP_KIND)
+          {
+#ifdef DEBUG_LEGION
+            TaskOp *task = dynamic_cast<TaskOp*>(op);
+            assert(task != NULL);
+#else
+            TaskOp *task = dynamic_cast<TaskOp*>(op);
+#endif
+            task_id = task->task_id;
+            hasher.hash(task_id);
+          }
+          const unsigned num_regions = op->get_region_count();
+          for (unsigned idx = 0; idx < num_regions; idx++)
+          {
+            const RegionRequirement &req = op->get_requirement(idx);
+            hasher.hash(req.parent);
+            hasher.hash(req.handle_type);
+            if (req.handle_type == LEGION_PARTITION_PROJECTION)
+              hasher.hash(req.partition);
+            else
+              hasher.hash(req.region);
+            for (std::set<FieldID>::const_iterator it =
+                  req.privilege_fields.begin(); it != 
+                  req.privilege_fields.end(); it++)
+              hasher.hash(*it);
+            for (std::vector<FieldID>::const_iterator it =
+                  req.instance_fields.begin(); it != 
+                  req.instance_fields.end(); it++)
+              hasher.hash(*it);
+            hasher.hash(req.privilege);
+            hasher.hash(req.prop);
+            hasher.hash(req.redop);
+            hasher.hash(req.tag);
+            hasher.hash(req.flags);
+            if (req.handle_type != LEGION_SINGULAR_PROJECTION)
+              hasher.hash(req.projection);
+            size_t projection_size = 0;
+            const void *projection_args = 
+              req.get_projection_args(&projection_size);
+            if (projection_size > 0)
+              hasher.hash(projection_args, projection_size);
+          }
+          uint64_t hash[2];
+          hasher.finalize(hash);
+          if (fixed)
+          {
+            if (verification_infos.size() <= verification_index)
+              REPORT_LEGION_ERROR(ERROR_TRACE_VIOLATION_OPERATION,
+                  "Detected %d operations in trace %d of parent task %s "
+                  "(UID %lld) which differs from the %zd operations that "
+                  "where recorded in the first execution of the trace. "
+                  "The number of operations in the trace must always "
+                  "be the same across all executions of the trace.",
+                  verification_index, tid, context->get_task_name(),
+                  context->get_unique_id(), verification_infos.size())
+            const VerificationInfo &info = 
+              verification_infos[verification_index++];
+            if (info.kind != kind)
+              REPORT_LEGION_ERROR(ERROR_TRACE_VIOLATION_OPERATION,
+                  "Operation %s does match the recorded operation kind %s "
+                  "for the %d operation in trace %d of parent task %s "
+                  "(UID %lld). The same order of operations must be "
+                  "issued every time a trace is executed.",
+                  Operation::get_string_rep(kind), op->get_logging_name(),
+                  verification_index-1, tid, 
+                  context->get_task_name(), context->get_unique_id())
+            if (info.task_id != task_id)
+              REPORT_LEGION_ERROR(ERROR_TRACE_VIOLATION_OPERATION,
+                  "Task %d does match the recorded task %d for the %d task "
+                  "in trace %d of parent task %s (UID %lld). The same order "
+                  "of operations must be issued every time a trace is "
+                  "executed.", task_id, info.task_id,
+                  verification_index-1, tid, 
+                  context->get_task_name(), context->get_unique_id())
+            if (info.regions != num_regions)
+            {
+              if (kind == Operation::TASK_OP_KIND)
+                REPORT_LEGION_ERROR(ERROR_TRACE_VIOLATION_OPERATION,
+                    "Task %s recorded %d region requirements for trace "
+                    "%d in parent task %s (UID %lld) but was re-executed with "
+                    "%d region requirements. The number of region requirements"
+                    " recorded must always match the number re-executed for "
+                    "each corresponding operation in the trace.",
+                    op->get_logging_name(), info.regions, tid,
+                    context->get_task_name(), context->get_unique_id(),
+                    num_regions)
+              else
+                REPORT_LEGION_ERROR(ERROR_TRACE_VIOLATION_OPERATION,
+                    "Operation %s recorded %d region requirements for trace "
+                    "%d in parent task %s (UID %lld) but was re-executed with "
+                    "%d region requirements. The number of region requirements"
+                    " must always match the number re-executed for each "
+                    "corresponding operation in the trace.",
+                    op->get_logging_name(), info.regions, tid,
+                    context->get_task_name(), context->get_unique_id(),
+                    num_regions)
+            }
+            if ((info.hash[0] != hash[0]) || (info.hash[1] != hash[1]))
+            {
+              if (kind == Operation::TASK_OP_KIND)
+                REPORT_LEGION_ERROR(ERROR_TRACE_VIOLATION_OPERATION,
+                    "Task %s was replayed with different region requirements "
+                    "for trace %d in parent task %s (UID %lld) than what it "
+                    "had when it was recorded. Region requirement arguments "
+                    "must match exactly every time a trace is executed.",
+                    op->get_logging_name(), tid, context->get_task_name(),
+                    context->get_unique_id())
+              else
+                REPORT_LEGION_ERROR(ERROR_TRACE_VIOLATION_OPERATION,
+                    "Operation %s was replayed with different region "
+                    "requirements for trace %d in parent task %s (UID %lld) "
+                    "than waht it had when it was recorded. Region "
+                    "requirement arguments must match exactly every time a "
+                    "trace is executed.", op->get_logging_name(),
+                    tid, context->get_task_name(), context->get_unique_id())
+            }
+          }
+          else
+            verification_infos.emplace_back(
+                VerificationInfo(kind, task_id, num_regions, hash));
+        }
         if (fixed)
           return false;
       }
       if (static_translator != NULL)
         static_translator->push_dependences(dependences);
       return true;
+    }
+
+    //--------------------------------------------------------------------------
+    void LogicalTrace::check_operation_count(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(verification_index <= verification_infos.size());
+#endif
+      if (verification_index < verification_infos.size())
+        REPORT_LEGION_ERROR(ERROR_TRACE_VIOLATION_OPERATION,
+                "Detected %d operations in trace %d of parent task %s "
+                "(UID %lld) which differs from the %zd operations that "
+                "where recorded in the first execution of the trace. "
+                "The number of operations in the trace must always "
+                "be the same across all executions of the trace.",
+                verification_index, tid, context->get_task_name(),
+                context->get_unique_id(), verification_infos.size())
+      verification_index = 0;
     }
 
     //--------------------------------------------------------------------------
@@ -208,17 +365,10 @@ namespace Legion {
           // We don't need to register internal operations
           return SIZE_MAX;
         const size_t index = replay_info.size();
-        if (has_physical_trace() && op->get_memoizable() == NULL)
-          REPORT_LEGION_ERROR(ERROR_PHYSICAL_TRACING_UNSUPPORTED_OP,
-              "Invalid memoization request. Operation of type %s (UID %lld) "
-              "at index %zd in trace %d requested memoization, but physical "
-              "tracing does not support this operation type yet.",
-              Operation::get_string_rep(op->get_operation_kind()),
-              op->get_unique_op_id(), index, tid);
         const size_t op_index = operations.size();
         op_map[key] = op_index;
         operations.push_back(key);
-        replay_info.push_back(OperationInfo(op));
+        replay_info.push_back(OperationInfo());
         if (static_translator != NULL)
         {
           // Add a mapping reference since we might need to refer to it later
@@ -247,25 +397,6 @@ namespace Legion {
                         context->get_unique_id(), index+1)
         // Check to see if the meta-data alignes
         const OperationInfo &info = replay_info[index];
-        // Check that they are the same kind of operation
-        if (info.kind != op->get_operation_kind())
-          REPORT_LEGION_ERROR(ERROR_TRACE_VIOLATION_OPERATION,
-                        "Trace violation! Operation at index %zd of trace %d "
-                        "in task %s (UID %lld) was recorded as having type "
-                        "%s but instead has type %s in replay.",
-                        index, tid, context->get_task_name(),
-                        context->get_unique_id(),
-                        Operation::get_string_rep(info.kind),
-                        Operation::get_string_rep(op->get_operation_kind()))
-        // Check that they have the same number of region requirements
-        if (info.region_count != op->get_region_count())
-          REPORT_LEGION_ERROR(ERROR_TRACE_VIOLATION_OPERATION,
-                        "Trace violation! Operation at index %zd of trace %d "
-                        "in task %s (UID %lld) was recorded as having %d "
-                        "regions, but instead has %zd regions in replay.",
-                        index, tid, context->get_task_name(),
-                        context->get_unique_id(), info.region_count,
-                        op->get_region_count())
         // Add a mapping reference since ops will be registering dependences
         op->add_mapping_reference(gen);
         operations.push_back(key);

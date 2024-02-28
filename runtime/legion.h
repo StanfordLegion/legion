@@ -9644,6 +9644,8 @@ namespace Legion {
        *              Level 0: no checks
        *              Level 1: sound but incomplete checks (no false positives)
        *              Level 2: unsound but complete checks (no false negatives)
+       * -lg:safe_tracing Request that the runtime check the invariants
+       *              required for using tracing.
        * -lg:local <int> Specify the maximum number of local fields
        *              permitted in any field space within a context.
        * ---------------------
