@@ -14,7 +14,7 @@
 
 import "regent"
 
-local launcher = require("launcher")
+local launcher = require("std/launcher")
 
 local cmapper = launcher.build_library("miniaero")
 

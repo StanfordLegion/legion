@@ -1547,5 +1547,5 @@ toplevel:set_task_id(2)
 
 end -- not use_python_main
 
-local launcher = require("launcher")
+local launcher = require("std/launcher")
 launcher.launch(toplevel, "pennant", cpennant.register_mappers, {"-lpennant", "-lm"})

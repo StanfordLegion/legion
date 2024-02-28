@@ -22,7 +22,7 @@ import "regent"
 local parallel = rawget(_G, "pennant_parallel") ~= false
 
 -- Compile and link pennant.cc
-local launcher = require("launcher")
+local launcher = require("std/launcher")
 cpennant = launcher.build_library("pennant")
 
 -- Also copy input files into the destination directory.

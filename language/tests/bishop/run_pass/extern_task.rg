@@ -23,51 +23,8 @@ task#f {
 
 end
 
-local cextern_task
-do
-  assert(os.getenv('LG_RT_DIR') ~= nil, "$LG_RT_DIR should be set!")
-  local root_dir = arg[0]:match(".*/") or "./"
-
-  local include_path = ""
-  local include_dirs = terralib.newlist()
-  include_dirs:insert("-I")
-  include_dirs:insert(root_dir)
-  for path in string.gmatch(os.getenv("INCLUDE_PATH"), "[^;]+") do
-    include_path = include_path .. " -I " .. path
-    include_dirs:insert("-I")
-    include_dirs:insert(path)
-  end
-
-  local legion_interop_cc = root_dir .. "extern_task.cc"
-  local legion_interop_so
-  if os.getenv('SAVEOBJ') == '1' then
-    legion_interop_so = root_dir .. "libextern_task.so"
-  else
-    legion_interop_so = os.tmpname() .. ".so" -- root_dir .. "mapper.so"
-  end
-  local cxx = os.getenv('CXX') or 'c++'
-
-  local cxx_flags = os.getenv('CXXFLAGS') or ''
-  cxx_flags = cxx_flags .. " -O2 -Wall -Werror"
-  local ffi = require("ffi")
-  if ffi.os == "OSX" then
-    cxx_flags =
-      (cxx_flags ..
-         " -dynamiclib -single_module -undefined dynamic_lookup -fPIC")
-  else
-    cxx_flags = cxx_flags .. " -shared -fPIC"
-  end
-
-  local cmd = (cxx .. " " .. cxx_flags .. " " .. include_path .. " " ..
-                 legion_interop_cc .. " -o " .. legion_interop_so)
-  if os.execute(cmd) ~= 0 then
-    print("Error: failed to compile " .. legion_interop_cc)
-    assert(false)
-  end
-  regentlib.linklibrary(legion_interop_so)
-  cextern_task =
-    terralib.includec("extern_task.h", include_dirs)
-end
+local launcher = require("std/launcher")
+local cextern_task = launcher.build_library("extern_task")
 
 struct s {
   a : int32,
