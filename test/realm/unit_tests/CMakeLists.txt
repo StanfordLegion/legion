@@ -27,6 +27,7 @@ list(APPEND REALM_TESTS
   address_list_test.cc
   index_space_iterator_test.cc
   sparsity_map_test.cc
+  sequence_assembler_test.cc
  )
 
 list(APPEND REALM_MEMORY_QUERY_TEST
