@@ -2477,7 +2477,15 @@ namespace Legion {
         derez.deserialize(num_future_memories);
         future_memories.resize(num_future_memories);
         for (unsigned idx = 0; idx < num_future_memories; idx++)
+        {
           derez.deserialize(future_memories[idx]);
+          const RtEvent future_mapped =
+            futures[idx].impl->request_application_instance(
+                future_memories[idx], this, unique_op_id,
+                future_memories[idx].address_space());
+          if (future_mapped.exists())
+            ready_events.insert(future_mapped);
+        }
         size_t num_task_requests;
         derez.deserialize(num_task_requests);
         if (num_task_requests > 0)

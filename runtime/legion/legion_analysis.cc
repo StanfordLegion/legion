@@ -14694,11 +14694,18 @@ namespace Legion {
       assert(!(record_mask - restricted_fields));
 #endif
       // Check to see if there are any restrictions which cover the whole
-      // set and therefore we know that there are on partial coverings
+      // set and therefore we know that there are no partial coverings
       ExprViewMaskSets::const_iterator finder =
         restricted_instances.find(set_expr);
       if (finder != restricted_instances.end())
       {
+        if (tracing_postconditions != NULL)
+        {
+          FieldMask overlap = record_mask & finder->second.get_valid_mask();
+          if (!!overlap)
+            invalidate_tracing_restricted_views(finder->second, 
+                                                set_expr, overlap);
+        }
         record_mask -= finder->second.get_valid_mask();
         if (!record_mask)
           return;
@@ -14710,7 +14717,7 @@ namespace Legion {
       {
         if (it == finder)
           continue;
-        const FieldMask overlap = it->second.get_valid_mask() & record_mask;
+        FieldMask overlap = it->second.get_valid_mask() & record_mask;
         if (!overlap)
           continue;
         if (!expr_covers)
@@ -14718,10 +14725,20 @@ namespace Legion {
           IndexSpaceExpression *overlap_expr =
             runtime->forest->intersect_index_spaces(expr, it->first);
           if (!overlap_expr->is_empty())
+          {
             restrictions.insert(overlap_expr, overlap);
+            if (tracing_postconditions != NULL)
+              invalidate_tracing_restricted_views(it->second, 
+                                      overlap_expr, overlap);
+          }
         }
         else
+        {
           restrictions.insert(it->first, overlap);
+          if (tracing_postconditions != NULL)
+            invalidate_tracing_restricted_views(it->second,
+                                        it->first, overlap);
+        }
       }
       // Sort these into grouped field sets so we can union them before
       // doing the subtraction to figure out what we can record
@@ -19422,6 +19439,28 @@ namespace Legion {
         tracing_postconditions =
           new TraceViewSet(context, did, set_expr, tree_id); 
       tracing_postconditions->insert(dst_view, expr, view_mask);
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::invalidate_tracing_restricted_views(
+                        const FieldMaskSet<InstanceView> &restricted_views,
+                        IndexSpaceExpression *expr, FieldMask &restricted_mask)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(tracing_postconditions != NULL);
+#endif
+      for (FieldMaskSet<InstanceView>::const_iterator it =
+            restricted_views.begin(); it != restricted_views.end(); it++)
+      {
+        const FieldMask overlap = restricted_mask & it->second;
+        if (!overlap)
+          continue;
+        tracing_postconditions->invalidate_all_but(it->first, expr, overlap);
+        restricted_mask -= overlap;
+        if (!restricted_mask)
+          break;
+      }
     }
 
     //--------------------------------------------------------------------------

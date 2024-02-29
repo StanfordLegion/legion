@@ -3509,6 +3509,10 @@ namespace Legion {
                                    InstanceView *dst_view,
                                    IndexSpaceExpression *expr,
                                    const FieldMask &copy_mask);
+      // Invalidate restricted views that shouldn't be postconditions
+      void invalidate_tracing_restricted_views(
+                  const FieldMaskSet<InstanceView> &restricted_views,
+                  IndexSpaceExpression *expr, FieldMask &restricted_mask);
       RtEvent capture_trace_conditions(PhysicalTemplate *target,
                                    AddressSpaceID target_space,
                                    unsigned parent_req_index,

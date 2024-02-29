@@ -9925,10 +9925,14 @@ namespace Legion {
     void FenceOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
+      const TraceInfo trace_info(this);
       switch (fence_kind)
       {
         case MAPPING_FENCE:
           {
+            if (is_recording())
+              trace_info.record_complete_replay(ApEvent::NO_AP_EVENT,
+                  ApEvent::NO_AP_EVENT, map_applied_conditions);
             if (!map_applied_conditions.empty())
               complete_mapping(Runtime::merge_events(map_applied_conditions));
             else
@@ -9943,7 +9947,6 @@ namespace Legion {
             // If we're recording find all the prior event dependences
             if (is_recording())
               tpl->find_execution_fence_preconditions(execution_preconditions);
-            const PhysicalTraceInfo trace_info(this, 0/*index*/);
             // We can always trigger the completion event when these are done
             record_completion_effects(execution_preconditions);
             // Mark that we finished our mapping now
@@ -10022,8 +10025,6 @@ namespace Legion {
 #ifdef LEGION_SPY
       LegionSpy::log_replay_operation(unique_op_id);
 #endif
-      if (fence_kind != EXECUTION_FENCE)
-        complete_execution();
       complete_mapping();
     }
 
@@ -10033,8 +10034,9 @@ namespace Legion {
     {
       if (result.impl != NULL)
         result.impl->set_result(fence_complete_event, NULL);
-      // Handle the case for marking when the copy completes
-      record_completion_effect(fence_complete_event);
+      if (fence_complete_event.exists())
+        // Handle the case for marking when the copy completes
+        record_completion_effect(fence_complete_event);
       complete_execution();
     }
 

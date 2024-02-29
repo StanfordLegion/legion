@@ -1301,6 +1301,8 @@ namespace Legion {
 #endif
         impl->set_sharding_function(sharding_function);
       }
+      if (concurrent_validator != NULL)
+        concurrent_validator->elide_collective();
       // If it's empty we're done, otherwise we do the replay
       if (!internal_space.exists())
       {
@@ -1311,13 +1313,9 @@ namespace Legion {
 #endif
         // Still need to do any rendezvous for concurrent analysis
         if (concurrent_task)
-        {
           concurrent_exchange->exchange(concurrent_slices,
               concurrent_lamport_clock, concurrent_poisoned,
               concurrent_task_barrier, concurrent_variant, 0/*points*/);
-          if (concurrent_validator != NULL)
-            concurrent_validator->elide_collective();
-        }
         // We have no local points, so we can just trigger
         if (serdez_redop_fns == NULL)
         {
@@ -6130,10 +6128,14 @@ namespace Legion {
     void ReplFenceOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
+      const TraceInfo trace_info(this);
       switch (fence_kind)
       {
         case MAPPING_FENCE:
           {
+            if (is_recording())
+              trace_info.record_complete_replay(ApEvent::NO_AP_EVENT,
+                  ApEvent::NO_AP_EVENT, map_applied_conditions);
             // Do our arrival
             if (!map_applied_conditions.empty())
               Runtime::phase_barrier_arrive(mapping_fence_barrier, 1/*count*/,
@@ -6152,7 +6154,6 @@ namespace Legion {
             // If we're recording find all the prior event dependences
             if (is_recording())
               tpl->find_execution_fence_preconditions(execution_preconditions);
-            const PhysicalTraceInfo trace_info(this, 0/*index*/);
             // We arrive on our barrier when all our previous operations
             // have finished executing
             ApEvent execution_fence_precondition;
@@ -6190,7 +6191,6 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(mapping_fence_barrier.exists());
-      assert(execution_fence_barrier.exists());
 #endif
       // We don't need the mapping fence barrier
       Runtime::phase_barrier_arrive(mapping_fence_barrier, 1/*count*/);
@@ -6201,9 +6201,17 @@ namespace Legion {
     void ReplFenceOp::complete_replay(ApEvent pre, ApEvent complete_event)
     //--------------------------------------------------------------------------
     {
-      Runtime::phase_barrier_arrive(execution_fence_barrier, 
-                                    1/*count*/, complete_event);
-      FenceOp::complete_replay(pre, execution_fence_barrier);
+      if (fence_kind == EXECUTION_FENCE)
+      {
+#ifdef DEBUG_LEGION
+        assert(execution_fence_barrier.exists());
+#endif
+        Runtime::phase_barrier_arrive(execution_fence_barrier, 
+                                      1/*count*/, complete_event);
+        FenceOp::complete_replay(pre, execution_fence_barrier);
+      }
+      else
+        FenceOp::complete_replay(pre, complete_event);
     }
 
     /////////////////////////////////////////////////////////////
