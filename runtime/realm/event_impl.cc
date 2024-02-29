@@ -1621,18 +1621,19 @@ namespace Realm {
 
       // both easy cases failed, so take the lock that lets us see which local triggers exist
       // this prevents us from ever answering "no" on the current node if the trigger occurred here
-      bool locally_triggered = false;
-      poisoned = false;
-      {
-	AutoLock<> a(mutex);
-
-	std::map<gen_t, bool>::const_iterator it = local_triggers.find(needed_gen);
-	if(it != local_triggers.end()) {
-	  locally_triggered = true;
-	  poisoned = it->second;
-	}
+      AutoLock<> a(mutex);
+      // In order to avoid cases where has_triggered gives non-monotonic results
+      // you also have to retest the generation condition above while holding the lock
+      if(needed_gen <= generation.load()) {
+        poisoned = is_generation_poisoned(needed_gen);
+        return true;
       }
-      return locally_triggered;
+      std::map<gen_t, bool>::const_iterator it = local_triggers.find(needed_gen);
+      if(it != local_triggers.end()) {
+        poisoned = it->second;
+        return true;
+      }
+      return false;
     }
 
     void GenEventImpl::subscribe(gen_t subscribe_gen)
