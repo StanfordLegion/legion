@@ -967,7 +967,9 @@ impl StateDataSource {
             if let Some(creator) = self.state.fevents.get(&entry.creator) {
                 // Check to see if these are function calls or tasks
                 match entry.kind {
-                    ProcEntryKind::MapperCall(_) | ProcEntryKind::RuntimeCall(_) => {
+                    ProcEntryKind::MapperCall(_)
+                    | ProcEntryKind::RuntimeCall(_)
+                    | ProcEntryKind::GPUKernel(_, _) => {
                         if let Some(start_time) = entry.time_range.start {
                             fields.push((
                                 self.fields.caller,

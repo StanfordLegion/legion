@@ -302,6 +302,7 @@ pub enum ProcEntryKind {
     MetaTask(VariantID),
     MapperCall(MapperCallKindID),
     RuntimeCall(RuntimeCallKindID),
+    GPUKernel(TaskID, VariantID),
     ProfTask,
 }
 
@@ -406,6 +407,25 @@ impl ContainerEntry for ProcEntry {
             ProcEntryKind::RuntimeCall(kind) => {
                 state.runtime_call_kinds.get(&kind).unwrap().name.clone()
             }
+            ProcEntryKind::GPUKernel(task_id, variant_id) => {
+                let task_name = &state.task_kinds.get(&task_id).unwrap().name;
+                let variant_name = &state.variants.get(&(task_id, variant_id)).unwrap().name;
+                match task_name {
+                    Some(task_name) => {
+                        if task_name != variant_name {
+                            format!(
+                                "GPU Kernel for {} [{}] <{}>",
+                                task_name,
+                                variant_name,
+                                op_id.unwrap().0
+                            )
+                        } else {
+                            format!("GPU Kernel for {} <{}>", task_name, op_id.unwrap().0)
+                        }
+                    }
+                    None => format!("GPU Kernel for {}", variant_name.clone()),
+                }
+            }
             ProcEntryKind::ProfTask => {
                 format!("ProfTask <{:?}>", initiation_op.unwrap().0)
             }
@@ -414,7 +434,8 @@ impl ContainerEntry for ProcEntry {
 
     fn color(&self, state: &State) -> Color {
         match self.kind {
-            ProcEntryKind::Task(task_id, variant_id) => state
+            ProcEntryKind::Task(task_id, variant_id)
+            | ProcEntryKind::GPUKernel(task_id, variant_id) => state
                 .variants
                 .get(&(task_id, variant_id))
                 .unwrap()
@@ -679,6 +700,7 @@ impl Proc {
             all_points: &mut Vec<ProcPoint>,
             points: &mut Vec<ProcPoint>,
             util_points: &mut Vec<ProcPoint>,
+            record_util: bool,
         ) {
             let start = time.start.unwrap();
             let stop = time.stop.unwrap();
@@ -704,15 +726,22 @@ impl Proc {
             ));
             points.push(ProcPoint::new(stop, prof_uid, false, 0));
 
-            util_points.push(ProcPoint::new(
-                start,
-                prof_uid,
-                true,
-                std::u64::MAX - stop.0,
-            ));
-            util_points.push(ProcPoint::new(stop, prof_uid, false, 0));
+            if record_util {
+                util_points.push(ProcPoint::new(
+                    start,
+                    prof_uid,
+                    true,
+                    std::u64::MAX - stop.0,
+                ));
+                util_points.push(ProcPoint::new(stop, prof_uid, false, 0));
+            }
         }
-        fn add_waiters(waiters: &Waiters, prof_uid: ProfUID, util_points: &mut Vec<ProcPoint>) {
+        fn add_waiters(
+            waiters: &Waiters,
+            prof_uid: ProfUID,
+            util_points: &mut Vec<ProcPoint>,
+            record_util: bool,
+        ) {
             for wait in &waiters.wait_intervals {
                 util_points.push(ProcPoint::new(
                     wait.start,
@@ -720,7 +749,9 @@ impl Proc {
                     false,
                     std::u64::MAX - wait.end.0,
                 ));
-                util_points.push(ProcPoint::new(wait.end, prof_uid, true, 0));
+                if record_util {
+                    util_points.push(ProcPoint::new(wait.end, prof_uid, true, 0));
+                }
             }
         }
 
@@ -731,10 +762,53 @@ impl Proc {
         let mut points = Vec::new();
         let mut util_points = Vec::new();
 
-        for (uid, entry) in &self.entries {
-            let time = &entry.time_range;
-            add(time, *uid, &mut all_points, &mut points, &mut util_points);
-            add_waiters(&entry.waiters, *uid, &mut util_points);
+        if self.kind == ProcKind::GPU {
+            // GPUs are special when it comes to utilization
+            // We only want to report utilization of the actual kernels running
+            // on the GPUs. However, we still want to render what happens on the
+            // CPU side in case it effects the outcome of the running of the kernels
+            // Therefore we still render all the entries on the GPU processor but
+            // we only add the GPU kernel times to the utilization points
+            for (uid, entry) in &self.entries {
+                let time = &entry.time_range;
+                match entry.kind {
+                    ProcEntryKind::GPUKernel(_, _) => {
+                        add(
+                            time,
+                            *uid,
+                            &mut all_points,
+                            &mut points,
+                            &mut util_points,
+                            true,
+                        );
+                        add_waiters(&entry.waiters, *uid, &mut util_points, true);
+                    }
+                    _ => {
+                        add(
+                            time,
+                            *uid,
+                            &mut all_points,
+                            &mut points,
+                            &mut util_points,
+                            false,
+                        );
+                        add_waiters(&entry.waiters, *uid, &mut util_points, false);
+                    }
+                }
+            }
+        } else {
+            for (uid, entry) in &self.entries {
+                let time = &entry.time_range;
+                add(
+                    time,
+                    *uid,
+                    &mut all_points,
+                    &mut points,
+                    &mut util_points,
+                    true,
+                );
+                add_waiters(&entry.waiters, *uid, &mut util_points, true);
+            }
         }
 
         points.sort_by_key(|a| a.time_key());
@@ -2674,6 +2748,31 @@ impl State {
         )
     }
 
+    fn create_gpu_kernel(
+        &mut self,
+        op_id: OpID,
+        proc_id: ProcID,
+        task_id: TaskID,
+        variant_id: VariantID,
+        time_range: TimeRange,
+        fevent: EventID,
+    ) -> &mut ProcEntry {
+        let alloc = &mut self.prof_uid_allocator;
+        let proc = self.procs.get_mut(&proc_id).unwrap();
+        proc.create_proc_entry(
+            Base::new(alloc),
+            Some(op_id),
+            None,
+            ProcEntryKind::GPUKernel(task_id, variant_id),
+            time_range,
+            fevent,
+            fevent,
+            &mut self.op_prof_uid,
+            &mut self.prof_uid_proc,
+            &mut self.fevents,
+        )
+    }
+
     fn create_prof_task(
         &mut self,
         proc_id: ProcID,
@@ -3786,11 +3885,12 @@ fn process_record(
             proc_id,
             create,
             ready,
+            start,
+            stop,
             gpu_start,
             gpu_stop,
             creator,
             fevent,
-            ..
         } => {
             // it is possible that gpu_start is larger than gpu_stop when cuda hijack is disabled,
             // because the cuda event completions of these two timestamp may be out of order when
@@ -3799,7 +3899,9 @@ fn process_record(
             if gpu_start > *gpu_stop {
                 gpu_start.0 = gpu_stop.0 - 1;
             }
-            let time_range = TimeRange::new_full(*create, *ready, gpu_start, *gpu_stop);
+            let gpu_range = TimeRange::new_start(gpu_start, *gpu_stop);
+            state.create_gpu_kernel(*op_id, *proc_id, *task_id, *variant_id, gpu_range, *fevent);
+            let time_range = TimeRange::new_full(*create, *ready, *start, *stop);
             state.create_task(
                 *op_id,
                 *proc_id,
@@ -3809,7 +3911,11 @@ fn process_record(
                 *creator,
                 *fevent,
             );
-            state.update_last_time(*gpu_stop);
+            if *stop < *gpu_stop {
+                state.update_last_time(*gpu_stop);
+            } else {
+                state.update_last_time(*stop);
+            }
         }
         Record::MetaInfo {
             op_id,
