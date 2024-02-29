@@ -4400,7 +4400,8 @@ namespace Legion {
         Mapper::MemoizeInput  input;
         Mapper::MemoizeOutput output;
         input.trace_id = trace->get_trace_id();
-        output.memoize = false;
+        // Mappers have to opt-out of tracing
+        output.memoize = true;
         Processor mapper_proc = parent_ctx->get_executing_processor();
         MapperManager *mapper = runtime->find_mapper(mapper_proc, 
                                                      mappable->map_id);
