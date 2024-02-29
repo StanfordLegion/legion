@@ -12724,7 +12724,159 @@ namespace Legion {
         FieldMask invalid_mask = vit->second & user_mask;
         if (!invalid_mask)
           continue;
-        if (vit->first->is_reduction_kind())
+        if (vit->first->is_deferred_view())
+        {
+          // Should only have fill deferred views here
+          // No need to worry about collective aliasing in this case
+#ifdef DEBUG_LEGION
+          assert(vit->first->is_fill_view());
+#endif
+          FillView *fill = vit->first->as_fill_view();
+          // Check the total valid instances first
+          if (!total_valid_instances.empty())
+          {
+            // Check names for the easy case
+            FieldMaskSet<LogicalView>::const_iterator finder =
+              total_valid_instances.find(vit->first);
+            if (finder != total_valid_instances.end())
+            {
+              invalid_mask -= finder->second;
+              if (!invalid_mask)
+                continue;
+            }
+            // Check to see if we have another fill view that matches
+            for (FieldMaskSet<LogicalView>::const_iterator it =
+                  total_valid_instances.begin(); it !=
+                  total_valid_instances.end(); it++)
+            {
+              if (!it->first->is_fill_view())
+                continue;
+              FillView *view = it->first->as_fill_view();
+              if (fill->matches(view))
+              {
+                invalid_mask -= it->second;
+                if (!invalid_mask)
+                  break;
+              }
+            }
+            if (!invalid_mask)
+              continue;
+          }
+          if (!partial_valid_instances.empty() && 
+              !(invalid_mask * partial_valid_fields))
+          {
+            FieldMaskSet<IndexSpaceExpression> partial_valid_exprs;
+            ViewExprMaskSets::const_iterator finder =
+              partial_valid_instances.find(vit->first);
+            if ((finder != partial_valid_instances.end()) &&
+                !(finder->second.get_valid_mask() * invalid_mask))
+            {
+              FieldMaskSet<IndexSpaceExpression>::const_iterator expr_finder =
+                finder->second.find(expr);
+              if (expr_finder != finder->second.end())
+              {
+                invalid_mask -= expr_finder->second;
+                if (!invalid_mask)
+                  continue;
+              }
+              for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+                    finder->second.begin(); it != finder->second.end(); it++)
+              {
+                if (it->first == expr)
+                  continue;
+                const FieldMask overlap = it->second & invalid_mask;
+                if (!overlap)
+                  continue;
+                IndexSpaceExpression *expr_overlap = 
+                  runtime->forest->intersect_index_spaces(expr, it->first);
+                const size_t overlap_volume = expr_overlap->get_volume();
+                if (overlap_volume == expr->get_volume())
+                {
+                  invalid_mask -= overlap;
+                  if (!invalid_mask)
+                    break;
+                }
+                // Record any partial valid expressions
+                else if (overlap_volume > 0)
+                  partial_valid_exprs.insert(expr_overlap, overlap);
+              }
+              if (!invalid_mask)
+                continue;
+              // Also check for matching logical views with expressions
+              for (ViewExprMaskSets::const_iterator pit =
+                    partial_valid_instances.begin(); pit !=
+                    partial_valid_instances.end(); pit++)
+              {
+                if (!pit->first->is_fill_view())
+                  continue;
+                if (invalid_mask * pit->second.get_valid_mask())
+                  continue;
+                if (!fill->matches(pit->first->as_fill_view()))
+                  continue;
+                FieldMaskSet<IndexSpaceExpression>::const_iterator expr_finder =
+                  finder->second.find(expr);
+                if (expr_finder != finder->second.end())
+                {
+                  invalid_mask -= expr_finder->second;
+                  if (!invalid_mask)
+                    break;
+                }
+                for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+                      finder->second.begin(); it != finder->second.end(); it++)
+                {
+                  if (it->first == expr)
+                    continue;
+                  const FieldMask overlap = it->second & invalid_mask;
+                  if (!overlap)
+                    continue;
+                  IndexSpaceExpression *expr_overlap = 
+                    runtime->forest->intersect_index_spaces(expr, it->first);
+                  const size_t overlap_volume = expr_overlap->get_volume();
+                  if (overlap_volume == expr->get_volume())
+                  {
+                    invalid_mask -= overlap;
+                    if (!invalid_mask)
+                      break;
+                  }
+                  // Record any partial valid expressions
+                  else if (overlap_volume > 0)
+                    partial_valid_exprs.insert(expr_overlap, overlap);
+                }
+              }
+              if (!invalid_mask)
+                continue;
+              if (partial_valid_exprs.size() > 1)
+              {
+                LegionList<FieldSet<IndexSpaceExpression*> > field_sets;
+                partial_valid_exprs.compute_field_sets(FieldMask(), field_sets);
+                for (LegionList<FieldSet<IndexSpaceExpression*> >::
+                      const_iterator it = field_sets.begin(); 
+                      it != field_sets.end(); it++)
+                {
+                  // If we don't have at least two sets to union together
+                  // then we know the expression is already not big enough
+                  // to cover the needed expression
+                  if (it->elements.size() < 2)
+                    continue;
+                  IndexSpaceExpression *union_expr =
+                    runtime->forest->intersect_index_spaces(it->elements);
+                  IndexSpaceExpression *expr_overlap = 
+                    runtime->forest->intersect_index_spaces(expr, union_expr);
+                  const size_t overlap_volume = expr_overlap->get_volume();
+                  if (overlap_volume == expr->get_volume())
+                  {
+                    invalid_mask -= it->set_mask;
+                    if (!invalid_mask)
+                      break;
+                  }
+                }
+                if (!invalid_mask)
+                  continue;
+              }
+            }
+          }
+        }
+        else if (vit->first->is_reduction_kind())
         {
           // Reduction instance path
           InstanceView *reduction_view = vit->first->as_instance_view();
@@ -13084,6 +13236,9 @@ namespace Legion {
             analysis.antivalid_instances.begin(); ait !=
             analysis.antivalid_instances.end(); ait++)
       {
+#ifdef DEBUG_LEGION
+        assert(!ait->first->is_deferred_view());
+#endif
         const FieldMask antivalid_mask = ait->second & user_mask;
         if (!antivalid_mask)
           continue;

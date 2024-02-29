@@ -5148,9 +5148,47 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool FillView::matches(const void *other, size_t size) const
+    bool FillView::matches(FillView *other)
     //--------------------------------------------------------------------------
     {
+      if (value == NULL)
+      {
+        RtEvent wait_on;
+        {
+          AutoLock v_lock(view_lock);
+          if (value == NULL)
+          {
+            value_ready = Runtime::create_rt_user_event();
+            wait_on = value_ready;
+          }
+        }
+        if (wait_on.exists())
+          wait_on.wait();
+      }
+#ifdef DEBUG_LEGION
+      assert(value != NULL);
+#endif
+      return other->matches(value, value_size);
+    }
+
+    //--------------------------------------------------------------------------
+    bool FillView::matches(const void *other, size_t size)
+    //--------------------------------------------------------------------------
+    {
+      if (value == NULL)
+      {
+        RtEvent wait_on;
+        {
+          AutoLock v_lock(view_lock);
+          if (value == NULL)
+          {
+            value_ready = Runtime::create_rt_user_event();
+            wait_on = value_ready;
+          }
+        }
+        if (wait_on.exists())
+          wait_on.wait();
+      }
 #ifdef DEBUG_LEGION
       assert(value != NULL);
 #endif
@@ -5173,8 +5211,8 @@ namespace Legion {
       memcpy(result, val, size);
       // Take the lock and sent out any notifications
       AutoLock v_lock(view_lock);
-      value.store(result);
       value_size.store(size);
+      value.store(result);
       if (value_ready.exists())
         Runtime::trigger_event(value_ready);
       if (is_owner() && has_remote_instances())

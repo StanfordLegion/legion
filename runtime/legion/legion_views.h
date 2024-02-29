@@ -1847,7 +1847,8 @@ namespace Legion {
                            EquivalenceSet *tracing_eq,
                            CopyAcrossHelper *helper); 
     public:
-      bool matches(const void *value, size_t size) const;
+      bool matches(FillView *other);
+      bool matches(const void *value, size_t size);
       bool set_value(const void *value, size_t size);
       ApEvent issue_fill(Operation *op, IndexSpaceExpression *fill_expr,
                          const PhysicalTraceInfo &trace_info,
