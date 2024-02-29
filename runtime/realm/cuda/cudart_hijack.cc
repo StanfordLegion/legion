@@ -26,6 +26,7 @@ namespace Realm {
   namespace Cuda {
 
     extern Logger log_cudart;
+    extern Logger log_gpu;
 
     static GPUProcessor *get_gpu_or_die(const char *funcname)
     {
