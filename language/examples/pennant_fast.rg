@@ -1,4 +1,4 @@
--- Copyright 2023 Stanford University
+-- Copyright 2024 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -1941,5 +1941,5 @@ toplevel:set_task_id(2)
 
 end -- not use_python_main
 
-local launcher = require("launcher")
+local launcher = require("std/launcher")
 launcher.launch(toplevel, "pennant", cpennant.register_mappers, {"-lpennant", "-lm"})

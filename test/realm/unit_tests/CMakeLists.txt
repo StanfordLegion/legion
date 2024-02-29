@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------#
-# Copyright 2023 Stanford University
+# Copyright 2024 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -27,6 +27,11 @@ list(APPEND REALM_TESTS
   address_list_test.cc
   index_space_iterator_test.cc
   sparsity_map_test.cc
+  sequence_assembler_test.cc
+ )
+
+list(APPEND REALM_MEMORY_QUERY_TEST
+  memory_query_test.cc
  )
 
 include(FetchContent)
@@ -39,8 +44,16 @@ FetchContent_MakeAvailable(googletest)
 
 enable_testing()
 add_executable(realm_tests ${REALM_TESTS})
+add_executable(realm_memory_query_test ${REALM_MEMORY_QUERY_TEST})
 
-target_link_libraries(realm_tests Legion::RealmTests GTest::gtest_main ${CMAKE_DL_LIBS})
-target_compile_options(realm_tests PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
-include(GoogleTest)
-gtest_discover_tests(realm_tests)
+list(APPEND REALM_UNIT_TESTS_LIST
+  realm_tests
+  realm_memory_query_test
+)
+
+foreach(ITEM IN LISTS REALM_UNIT_TESTS_LIST)
+  target_link_libraries(${ITEM} Legion::RealmTests GTest::gtest_main ${CMAKE_DL_LIBS})
+  target_compile_options(${ITEM} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
+  include(GoogleTest)
+  gtest_discover_tests(${ITEM})
+endforeach()

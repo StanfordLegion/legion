@@ -1,4 +1,4 @@
--- Copyright 2023 Stanford University
+-- Copyright 2024 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -24,11 +24,11 @@
 import "regent"
 
 local format = require("std/format")
+local launcher = require("std/launcher")
 
 local use_python_main = rawget(_G, "circuit_use_python_main") == true
 
 -- Compile and link circuit_mapper.cc
-local launcher = require("launcher")
 local cmapper = launcher.build_library("circuit_mapper")
 
 local cconfig
