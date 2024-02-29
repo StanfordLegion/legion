@@ -1,4 +1,4 @@
--- Copyright 2023 Stanford University
+-- Copyright 2024 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -13,52 +13,12 @@
 -- limitations under the License.
 
 -- Compile and link layout_test_colocation.cc
+local launcher = require("std/launcher")
 local clayout_test
 do
   local root_dir = arg[0]:match(".*/") or "./"
-
-  local include_path = ""
-  local include_dirs = terralib.newlist()
-  include_dirs:insert("-I")
-  include_dirs:insert(root_dir)
-  for path in string.gmatch(os.getenv("INCLUDE_PATH"), "[^;]+") do
-    include_path = include_path .. " -I " .. path
-    include_dirs:insert("-I")
-    include_dirs:insert(path)
-  end
-
   local layout_test_cc = root_dir .. "layout_test_colocation.cc"
-  local layout_test_so
-  if os.getenv('OBJNAME') then
-    local out_dir = os.getenv('OBJNAME'):match('.*/') or './'
-    layout_test_so = out_dir .. "liblayout_test.so"
-  elseif os.getenv('SAVEOBJ') == '1' then
-    layout_test_so = root_dir .. "liblayout_test.so"
-  else
-    layout_test_so = os.tmpname() .. ".so" -- root_dir .. "layout_test.so"
-  end
-  local cxx = os.getenv('CXX') or 'c++'
-
-  local cxx_flags = os.getenv('CXXFLAGS') or ''
-  --cxx_flags = cxx_flags .. " -O2 -Wall -Werror"
-  cxx_flags = cxx_flags .. " -g -O0"
-  local ffi = require("ffi")
-  if ffi.os == "OSX" then
-    cxx_flags =
-      (cxx_flags ..
-         " -dynamiclib -single_module -undefined dynamic_lookup -fPIC")
-  else
-    cxx_flags = cxx_flags .. " -shared -fPIC"
-  end
-
-  local cmd = (cxx .. " " .. cxx_flags .. " " .. include_path .. " " ..
-                 layout_test_cc .. " -o " .. layout_test_so)
-  if os.execute(cmd) ~= 0 then
-    print("Error: failed to compile " .. layout_test_cc)
-    assert(false)
-  end
-  regentlib.linklibrary(layout_test_so)
-  clayout_test = terralib.includec("layout_test.h", include_dirs)
+  clayout_test = launcher.build_library("layout_test", {layout_test_cc})
 end
 
 import "regent"
@@ -180,10 +140,4 @@ task toplevel()
   end
 end
 
-if os.getenv('SAVEOBJ') == '1' then
-  local root_dir = arg[0]:match(".*/") or "./"
-  local link_flags = terralib.newlist({"-L" .. root_dir, "-llayout_test"})
-  regentlib.saveobj(toplevel, "layout_test6", "executable", clayout_test.register_mappers, link_flags)
-else
-  regentlib.start(toplevel, clayout_test.register_mappers)
-end
+launcher.launch(toplevel, "layout_test6", clayout_test.register_mappers, {"-llayout_test"})
