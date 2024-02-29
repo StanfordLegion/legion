@@ -27,7 +27,7 @@
 #define STATIC_BREADTH_FIRST          false
 #define STATIC_STEALING_ENABLED       false
 #define STATIC_MAX_SCHEDULE_COUNT     8
-#define STATIC_MEMOIZE                false
+#define STATIC_MEMOIZE                true
 #define STATIC_MAP_LOCALLY            false
 #define STATIC_EXACT_REGION           false
 #define STATIC_REPLICATION_ENABLED    true
@@ -87,6 +87,7 @@ namespace Legion {
       {
         int argc = HighLevelRuntime::get_input_args().argc;
         char **argv = HighLevelRuntime::get_input_args().argv;
+        bool no_memoize = false;
         // Parse the input arguments looking for ones for the default mapper
         for (int i=1; i < argc; i++)
         {
@@ -106,6 +107,7 @@ namespace Legion {
           BOOL_ARG("-dm:bft", breadth_first_traversal);
           INT_ARG("-dm:sched", max_schedule_count);
           BOOL_ARG("-dm:memoize", memoize);
+          BOOL_ARG("-dm:no-memoize", no_memoize);
           BOOL_ARG("-dm:map_locally", map_locally);
           BOOL_ARG("-dm:exact_region", exact_region);
           INT_ARG("-dm:replicate", replication_enabled);
@@ -113,6 +115,8 @@ namespace Legion {
 #undef BOOL_ARG
 #undef INT_ARG
         }
+        if (no_memoize)
+          memoize = false;
       }
       if (stealing_enabled)
       {
