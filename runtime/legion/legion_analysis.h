@@ -3508,7 +3508,8 @@ namespace Legion {
       void update_tracing_reduction_views(InstanceView *src_view,
                                    InstanceView *dst_view,
                                    IndexSpaceExpression *expr,
-                                   const FieldMask &copy_mask);
+                                   const FieldMask &copy_mask,
+                                   bool across);
       // Invalidate restricted views that shouldn't be postconditions
       void invalidate_tracing_restricted_views(
                   const FieldMaskSet<InstanceView> &restricted_views,

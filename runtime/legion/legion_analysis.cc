@@ -6980,7 +6980,8 @@ namespace Legion {
       assert(tracing_eq != NULL);
 #endif
       if (redop > 0)
-        tracing_eq->update_tracing_reduction_views(src, dst, expr, mask);
+        tracing_eq->update_tracing_reduction_views(src, dst, expr, mask,
+                                                   (src_index != dst_index));
       else
         tracing_eq->update_tracing_copy_views(src, dst, expr, mask,
                                               (src_index != dst_index));
@@ -19365,12 +19366,12 @@ namespace Legion {
             new TraceViewSet(context, did, set_expr, tree_id);
         tracing_preconditions->insert(not_dominated);
       }
-      // record the destination view
+      // record the destination view unless this is an across copy
+      if (across)
+        return;
       if (tracing_postconditions == NULL)
         tracing_postconditions =
           new TraceViewSet(context, did, set_expr, tree_id);
-      else if (across) // Invalidate only in the across case
-        tracing_postconditions->invalidate_all_but(dst_view, expr, view_mask);
       tracing_postconditions->insert(dst_view, expr, view_mask);
     }
 
@@ -19378,7 +19379,8 @@ namespace Legion {
     void EquivalenceSet::update_tracing_reduction_views(InstanceView *src_view,
                                                      InstanceView *dst_view,
                                                      IndexSpaceExpression *expr,
-                                                     const FieldMask &view_mask)
+                                                     const FieldMask &view_mask,
+                                                     bool across)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -19402,6 +19404,9 @@ namespace Legion {
       // Also need to check to see if the destination was produced in the 
       // trace or whether we need to record it as a precondition as well
       // since we're applying reductions to it
+      // If this is an across copy though then we don't need to do this
+      if (across)
+        return;
       if (dst_view->is_reduction_kind())
       {
         if (tracing_anticonditions != NULL)
