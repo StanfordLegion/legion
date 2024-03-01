@@ -23,12 +23,12 @@ fn print_statistics(
     println!("  -------------------------");
     println!("  {}", category);
     println!("  -------------------------");
-    for (_, entries) in ordering {
+    for entries in ordering.values() {
         for entry in entries {
-            println!("");
+            println!();
             match entry {
                 ProcEntryKind::Task(task_id, variant_id) => {
-                    let key = (task_id, variant_id);
+                    let key = (*task_id, *variant_id);
                     println!(
                         "      Task {} Variant {}",
                         state
@@ -63,7 +63,7 @@ fn print_statistics(
                     println!("       Profiler Response");
                 }
                 ProcEntryKind::GPUKernel(task_id, variant_id) => {
-                    let key = (task_id, variant_id);
+                    let key = (*task_id, *variant_id);
                     println!(
                         "      GPU Kernel for Task {} Variant {}",
                         state
@@ -77,30 +77,28 @@ fn print_statistics(
                     );
                 }
             }
-            let threshold = 1000000.0;
+            let threshold = Timestamp(1000000000); // 1e9 ns or 1e6 us
             let stats = statistics.get(&entry).unwrap();
             println!("          Invocations: {}", stats.invocations);
-            let total = stats.total_time.to_us();
-            if total < threshold {
-                println!("          Total time: {:.3} us", total);
+            if stats.total_time < threshold {
+                println!("          Total time: {:.3} us", stats.total_time.to_us());
             } else {
-                println!("          Total time: {:.3e} us", total);
+                println!("          Total time: {:.3e} us", stats.total_time.to_us());
             }
-            let running = stats.running_time.to_us();
-            if running < threshold {
+            if stats.running_time < threshold {
                 println!(
                     "          Running time: {:.3} us ({:.2}%)",
-                    running,
-                    100.0 * running / total
+                    stats.running_time.to_us(),
+                    100.0 * stats.running_time.to_us() / stats.total_time.to_us()
                 );
             } else {
                 println!(
                     "          Running time: {:.3e} us ({:.2}%)",
-                    running,
-                    100.0 * running / total
+                    stats.running_time.to_us(),
+                    100.0 * stats.running_time.to_us() / stats.total_time.to_us()
                 );
             }
-            if stats.next_mean < threshold {
+            if stats.next_mean < threshold.to_us() {
                 println!("          Average time: {:.3} us", stats.next_mean);
             } else {
                 println!("          Average time: {:.3e} us", stats.next_mean);
@@ -111,22 +109,20 @@ fn print_statistics(
             } else {
                 0.0
             };
-            if stddev < threshold {
+            if stddev < threshold.to_us() {
                 println!("          Std Dev: {:.3} us", stddev);
             } else {
                 println!("          Std Dev: {:.3e} us", stddev);
             }
-            let min = stats.min_time.to_us();
-            if min < threshold {
-                println!("          Min time: {:.3} us", min);
+            if stats.min_time < threshold {
+                println!("          Min time: {:.3} us", stats.min_time.to_us());
             } else {
-                println!("          Min time: {:.3e} us", min);
+                println!("          Min time: {:.3e} us", stats.min_time.to_us());
             }
-            let max = stats.max_time.to_us();
-            if max < threshold {
-                println!("          Max time: {:.3} us", max);
+            if stats.max_time < threshold {
+                println!("          Max time: {:.3} us", stats.max_time.to_us());
             } else {
-                println!("          Max time: {:.3e} us", max);
+                println!("          Max time: {:.3e} us", stats.max_time.to_us());
             }
         }
     }

@@ -1,5 +1,5 @@
 use std::cmp::Ordering;
-use std::cmp::{max, Reverse};
+use std::cmp::{max, min, Reverse};
 use std::collections::{BTreeMap, BTreeSet, BinaryHeap};
 use std::convert::TryFrom;
 use std::fmt;
@@ -220,6 +220,8 @@ macro_rules! conditional_assert {
 pub struct Timestamp(pub u64 /* ns */);
 
 impl Timestamp {
+    const MAX: Timestamp = Timestamp(std::u64::MAX);
+    const MIN: Timestamp = Timestamp(std::u64::MIN);
     pub const fn from_us(microseconds: u64) -> Timestamp {
         Timestamp(microseconds * 1000)
     }
@@ -336,10 +338,10 @@ impl ProcEntryStats {
     fn new() -> Self {
         ProcEntryStats {
             invocations: 0,
-            total_time: Timestamp(0),
-            running_time: Timestamp(0),
-            min_time: Timestamp(std::u64::MAX),
-            max_time: Timestamp(0),
+            total_time: Timestamp::MIN,
+            running_time: Timestamp::MIN,
+            min_time: Timestamp::MAX,
+            max_time: Timestamp::MIN,
             prev_mean: 0.0,
             next_mean: 0.0,
             prev_stddev: 0.0,
@@ -926,12 +928,8 @@ impl Proc {
                 stats.prev_mean = stats.next_mean;
                 stats.prev_stddev = stats.next_stddev;
             }
-            if total < stats.min_time {
-                stats.min_time = total;
-            }
-            if stats.max_time < total {
-                stats.max_time = total;
-            }
+            stats.min_time = min(stats.min_time, total);
+            stats.max_time = max(stats.max_time, total);
             for wait in &entry.waiters.wait_intervals {
                 let waiting = wait.end - wait.start;
                 assert!(waiting <= total);
