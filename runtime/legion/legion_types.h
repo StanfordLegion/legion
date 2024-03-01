@@ -2330,7 +2330,7 @@ namespace Legion {
     class AllGatherCollective;
     template<typename T> class BarrierExchangeCollective;
     template<typename T> class ValueBroadcast;
-    template<typename T> class AllReduceCollective;
+    template<typename T, bool> class AllReduceCollective;
     class CrossProductCollective;
     class ShardingGatherCollective;
     class FieldDescriptorExchange;
