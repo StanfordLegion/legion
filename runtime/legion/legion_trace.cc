@@ -6300,6 +6300,25 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void PhysicalTemplate::check_finalize_transitive_reduction(void)
+    //--------------------------------------------------------------------------
+    {
+      TransitiveReductionState *state =
+        finished_transitive_reduction.exchange(NULL);
+      if (state != NULL)
+      {
+        finalize_transitive_reduction(state->inv_topo_order, 
+                                      state->incoming_reduced);
+        delete state;
+        // We also need to rerun the propagate copies analysis to
+        // remove any mergers which contain only a single input
+        propagate_copies(NULL/*don't need the gen out*/);
+        if (trace->runtime->dump_physical_traces)
+          dump_template();
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void PhysicalTemplate::propagate_copies(std::vector<unsigned> *gen)
     //--------------------------------------------------------------------------
     {
@@ -7634,19 +7653,7 @@ namespace Legion {
       remaining_replays.store(trace->get_replay_targets().size());
       total_logical.store(0);
       // Check to see if we have a finished transitive reduction result
-      TransitiveReductionState *state = finished_transitive_reduction.load();
-      if (state != NULL)
-      {
-        finished_transitive_reduction.store(NULL);
-        finalize_transitive_reduction(state->inv_topo_order, 
-                                      state->incoming_reduced);
-        delete state;
-        // We also need to rerun the propagate copies analysis to
-        // remove any mergers which contain only a single input
-        propagate_copies(NULL/*don't need the gen out*/);
-        if (trace->runtime->dump_physical_traces)
-          dump_template();
-      }
+      check_finalize_transitive_reduction();
 
       if (recurrent)
       {
@@ -7769,7 +7776,10 @@ namespace Legion {
       pending_deletion = get_completion_for_deletion();
       if (!pending_deletion.exists() && 
           transitive_reduction_done.has_triggered())
+      {
+        check_finalize_transitive_reduction();
         return false;
+      }
       RtEvent precondition = Runtime::protect_event(pending_deletion);
       if (transitive_reduction_done.exists() && 
           !transitive_reduction_done.has_triggered())
@@ -7788,7 +7798,10 @@ namespace Legion {
         return true;
       }
       else
+      {
+        check_finalize_transitive_reduction();
         return false;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -7814,6 +7827,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const DeleteTemplateArgs *pargs = (const DeleteTemplateArgs*)args;
+      pargs->tpl->check_finalize_transitive_reduction();
       delete pargs->tpl;
     }
 
