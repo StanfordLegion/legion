@@ -1,5 +1,4 @@
-use std::cmp::Ordering;
-use std::cmp::{max, min, Reverse};
+use std::cmp::{max, Ordering, Reverse};
 use std::collections::{BTreeMap, BTreeSet, BinaryHeap};
 use std::convert::TryFrom;
 use std::fmt;
@@ -220,8 +219,8 @@ macro_rules! conditional_assert {
 pub struct Timestamp(pub u64 /* ns */);
 
 impl Timestamp {
-    const MAX: Timestamp = Timestamp(std::u64::MAX);
-    const MIN: Timestamp = Timestamp(std::u64::MIN);
+    pub const MAX: Timestamp = Timestamp(std::u64::MAX);
+    pub const MIN: Timestamp = Timestamp(std::u64::MIN);
     pub const fn from_us(microseconds: u64) -> Timestamp {
         Timestamp(microseconds * 1000)
     }
@@ -319,35 +318,6 @@ pub enum ProcEntryKind {
     RuntimeCall(RuntimeCallKindID),
     GPUKernel(TaskID, VariantID),
     ProfTask,
-}
-
-#[derive(Debug, Copy, Clone)]
-pub struct ProcEntryStats {
-    pub invocations: u64,
-    pub total_time: Timestamp,
-    pub running_time: Timestamp,
-    pub min_time: Timestamp,
-    pub max_time: Timestamp,
-    pub prev_mean: f64,
-    pub next_mean: f64,
-    pub prev_stddev: f64,
-    pub next_stddev: f64,
-}
-
-impl ProcEntryStats {
-    fn new() -> Self {
-        ProcEntryStats {
-            invocations: 0,
-            total_time: Timestamp::MIN,
-            running_time: Timestamp::MIN,
-            min_time: Timestamp::MAX,
-            max_time: Timestamp::MIN,
-            prev_mean: 0.0,
-            next_mean: 0.0,
-            prev_stddev: 0.0,
-            next_stddev: 0.0,
-        }
-    }
 }
 
 #[derive(Debug)]
@@ -636,6 +606,10 @@ impl Proc {
         self.entries.is_empty()
     }
 
+    pub(crate) fn entries(&self) -> impl Iterator<Item = &ProcEntry> {
+        self.entries.values()
+    }
+
     fn trim_time_range(&mut self, start: Timestamp, stop: Timestamp) {
         self.entries.retain(|_, t| !t.trim_time_range(start, stop));
     }
@@ -902,69 +876,6 @@ impl Proc {
 
     pub fn is_visible(&self) -> bool {
         self.visible
-    }
-
-    pub fn accumulate_statistics(
-        &self,
-        task_stats: &mut BTreeMap<ProcEntryKind, ProcEntryStats>,
-        runtime_stats: &mut BTreeMap<ProcEntryKind, ProcEntryStats>,
-        mapper_stats: &mut BTreeMap<ProcEntryKind, ProcEntryStats>,
-    ) {
-        fn update_stats(entry: &ProcEntry, stats: &mut ProcEntryStats) {
-            stats.invocations += 1;
-            let mut total = entry.time_range.stop.unwrap() - entry.time_range.start.unwrap();
-            stats.total_time += total;
-            // Accumulate running variance using Welford's algorithm
-            if stats.invocations == 1 {
-                stats.next_mean = total.to_us();
-                stats.prev_mean = stats.next_mean;
-            } else {
-                let ftotal = total.to_us();
-                stats.next_mean =
-                    stats.prev_mean + (ftotal - stats.prev_mean) / (stats.invocations as f64);
-                stats.next_stddev =
-                    stats.prev_stddev + (ftotal - stats.prev_mean) * (ftotal - stats.next_mean);
-
-                stats.prev_mean = stats.next_mean;
-                stats.prev_stddev = stats.next_stddev;
-            }
-            stats.min_time = min(stats.min_time, total);
-            stats.max_time = max(stats.max_time, total);
-            for wait in &entry.waiters.wait_intervals {
-                let waiting = wait.end - wait.start;
-                assert!(waiting <= total);
-                if waiting <= total {
-                    total -= waiting;
-                } else {
-                    total = Timestamp(0);
-                }
-            }
-            stats.running_time += total;
-        }
-        for entry in self.entries.values() {
-            match entry.kind {
-                ProcEntryKind::Task(_, _) | ProcEntryKind::GPUKernel(_, _) => {
-                    let stats = task_stats
-                        .entry(entry.kind)
-                        .or_insert(ProcEntryStats::new());
-                    update_stats(&entry, stats);
-                }
-                ProcEntryKind::MetaTask(_)
-                | ProcEntryKind::RuntimeCall(_)
-                | ProcEntryKind::ProfTask => {
-                    let stats = runtime_stats
-                        .entry(entry.kind)
-                        .or_insert(ProcEntryStats::new());
-                    update_stats(&entry, stats);
-                }
-                ProcEntryKind::MapperCall(_) => {
-                    let stats = mapper_stats
-                        .entry(entry.kind)
-                        .or_insert(ProcEntryStats::new());
-                    update_stats(&entry, stats);
-                }
-            }
-        }
     }
 }
 

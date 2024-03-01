@@ -1,6 +1,99 @@
-use crate::state::{ProcEntryKind, ProcEntryStats, State, Timestamp};
-use std::cmp::Reverse;
+use std::cmp::{max, min, Reverse};
 use std::collections::BTreeMap;
+
+use crate::state::{Proc, ProcEntry, ProcEntryKind, State, Timestamp};
+
+#[derive(Debug, Copy, Clone)]
+struct ProcEntryStats {
+    invocations: u64,
+    total_time: Timestamp,
+    running_time: Timestamp,
+    min_time: Timestamp,
+    max_time: Timestamp,
+    prev_mean: f64,
+    next_mean: f64,
+    prev_stddev: f64,
+    next_stddev: f64,
+}
+
+impl ProcEntryStats {
+    fn new() -> Self {
+        ProcEntryStats {
+            invocations: 0,
+            total_time: Timestamp::MIN,
+            running_time: Timestamp::MIN,
+            min_time: Timestamp::MAX,
+            max_time: Timestamp::MIN,
+            prev_mean: 0.0,
+            next_mean: 0.0,
+            prev_stddev: 0.0,
+            next_stddev: 0.0,
+        }
+    }
+}
+
+fn accumulate_statistics(
+    proc: &Proc,
+    task_stats: &mut BTreeMap<ProcEntryKind, ProcEntryStats>,
+    runtime_stats: &mut BTreeMap<ProcEntryKind, ProcEntryStats>,
+    mapper_stats: &mut BTreeMap<ProcEntryKind, ProcEntryStats>,
+) {
+    fn update_stats(entry: &ProcEntry, stats: &mut ProcEntryStats) {
+        stats.invocations += 1;
+        let mut total = entry.time_range.stop.unwrap() - entry.time_range.start.unwrap();
+        stats.total_time += total;
+        // Accumulate running variance using Welford's algorithm
+        if stats.invocations == 1 {
+            stats.next_mean = total.to_us();
+            stats.prev_mean = stats.next_mean;
+        } else {
+            let ftotal = total.to_us();
+            stats.next_mean =
+                stats.prev_mean + (ftotal - stats.prev_mean) / (stats.invocations as f64);
+            stats.next_stddev =
+                stats.prev_stddev + (ftotal - stats.prev_mean) * (ftotal - stats.next_mean);
+
+            stats.prev_mean = stats.next_mean;
+            stats.prev_stddev = stats.next_stddev;
+        }
+        stats.min_time = min(stats.min_time, total);
+        stats.max_time = max(stats.max_time, total);
+        for wait in &entry.waiters.wait_intervals {
+            let waiting = wait.end - wait.start;
+            assert!(waiting <= total);
+            if waiting <= total {
+                total -= waiting;
+            } else {
+                total = Timestamp(0);
+            }
+        }
+        stats.running_time += total;
+    }
+    for entry in proc.entries() {
+        match entry.kind {
+            ProcEntryKind::Task(_, _) | ProcEntryKind::GPUKernel(_, _) => {
+                let stats = task_stats
+                    .entry(entry.kind)
+                    .or_insert(ProcEntryStats::new());
+                update_stats(&entry, stats);
+            }
+            ProcEntryKind::MetaTask(_)
+            | ProcEntryKind::RuntimeCall(_)
+            | ProcEntryKind::ProfTask => {
+                let stats = runtime_stats
+                    .entry(entry.kind)
+                    .or_insert(ProcEntryStats::new());
+                update_stats(&entry, stats);
+            }
+            ProcEntryKind::MapperCall(_) => {
+                let stats = mapper_stats
+                    .entry(entry.kind)
+                    .or_insert(ProcEntryStats::new());
+                update_stats(&entry, stats);
+            }
+        }
+    }
+}
 
 fn print_statistics(
     state: &State,
@@ -133,7 +226,7 @@ pub fn analyze_statistics(state: &State) {
     let mut runtime_stats = BTreeMap::new();
     let mut mapper_stats = BTreeMap::new();
     for proc in state.procs.values() {
-        proc.accumulate_statistics(&mut task_stats, &mut runtime_stats, &mut mapper_stats);
+        accumulate_statistics(proc, &mut task_stats, &mut runtime_stats, &mut mapper_stats);
     }
     print_statistics(state, &task_stats, "Task Statistics");
     print_statistics(state, &runtime_stats, "Runtime Statistics");
