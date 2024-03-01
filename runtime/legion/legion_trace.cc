@@ -1857,7 +1857,7 @@ namespace Legion {
         // Now do the exchange between the operations to handle the case
         // of control replication to see if all the shards agree on what
         // to do with the template
-        if (op->allreduce_template_status(valid, acquired))
+        if (op->allreduce_template_status(valid, acquired || !valid))
         {
           // Delete now because couldn't acquire some instances
           if (acquired)
