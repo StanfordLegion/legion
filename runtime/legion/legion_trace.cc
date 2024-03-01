@@ -1838,6 +1838,7 @@ namespace Legion {
           op->get_begin_operation(), map_applied_events);
       // Scan backwards since more recently used templates are likely
       // to be the ones that best match what we are executing
+      std::vector<unsigned> to_delete;
       for (int idx = templates.size() - 1; idx >= 0; idx--)
       {
         // If it's not the first or the last iteration then we prefetch
@@ -1870,7 +1871,7 @@ namespace Legion {
             delete current;
           if (pending_deletion.exists())
             execution_preconditions.insert(pending_deletion);
-          templates.erase(templates.begin()+idx);
+          to_delete.push_back(idx);
         }
         else if (valid)
         {
@@ -1888,6 +1889,13 @@ namespace Legion {
           // Everybody agreed to reuse this template so make it the
           // new current template and shuffle it to the front
           current_template = current;
+          // Remove any deleted templates before rearranging, by definition
+          // all these will be later in the vector than the current template
+          // Note this will delete back to front to avoid invalidating
+          // indexes later in the to_delete vector
+          for (std::vector<unsigned>::const_iterator it =
+                to_delete.begin(); it != to_delete.end(); it++)
+            templates.erase(templates.begin() + (*it));
           // Move the template to the end of the vector as most-recently used
           if (idx < int(templates.size() - 1))
             std::rotate(templates.begin()+idx, 
@@ -1907,6 +1915,9 @@ namespace Legion {
             current_ready = next_ready;
         }
       }
+      for (std::vector<unsigned>::const_iterator it =
+            to_delete.begin(); it != to_delete.end(); it++)
+        templates.erase(templates.begin() + (*it));
       return false;
     }
 
