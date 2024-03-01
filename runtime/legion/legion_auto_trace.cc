@@ -213,6 +213,9 @@ namespace Legion {
           }
           return true;
         }
+        case Operation::OpKind::FRAME_OP_KIND: {
+          return false;
+        }
         default:
           return true;
       }
