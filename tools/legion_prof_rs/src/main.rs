@@ -316,7 +316,7 @@ fn main() -> io::Result<()> {
     state.check_message_latencies(message_threshold, message_percentage);
     state.filter_output();
     if cli.statistics {
-        analyze::print_statistics(&state);
+        analyze::analyze_statistics(&state);
     } else if cli.trace {
         trace_viewer::emit_trace(&state, cli.output, cli.force)?;
     } else if cli.archive {
