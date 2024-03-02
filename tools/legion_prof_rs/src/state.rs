@@ -3929,11 +3929,7 @@ fn process_record(
                 *creator,
                 *fevent,
             );
-            if *stop < *gpu_stop {
-                state.update_last_time(*gpu_stop);
-            } else {
-                state.update_last_time(*stop);
-            }
+            state.update_last_time(max(*stop, *gpu_stop));
         }
         Record::MetaInfo {
             op_id,
