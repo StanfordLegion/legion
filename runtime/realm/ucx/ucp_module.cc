@@ -1,5 +1,5 @@
 
-/* Copyright 2023 NVIDIA Corporation
+/* Copyright 2024 NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -255,40 +255,32 @@ err_del_mod:
   {
     assert(storage_size >= sizeof(Realm::UCP::UCPMessageImpl));
     return new(storage_base) Realm::UCP::UCPMessageImpl(
-        internal,
-        target,
-        msgid,
-        header_size,
-        max_payload_size,
-        src_payload_addr,
-        src_payload_lines,
-        src_payload_line_stride,
-        storage_size);
+        internal, target, msgid, header_size, max_payload_size, src_payload_addr,
+        src_payload_lines, src_payload_line_stride, nullptr, nullptr, storage_size);
   }
 
-  ActiveMessageImpl* UCPModule::create_active_message_impl(NodeID target,
-      unsigned short msgid,
-      size_t header_size,
-      size_t max_payload_size,
-      const void *src_payload_addr,
-      size_t src_payload_lines,
-      size_t src_payload_line_stride,
-      const RemoteAddress& dest_payload_addr,
-      void *storage_base,
-      size_t storage_size)
+  ActiveMessageImpl *UCPModule::create_active_message_impl(
+      NodeID target, unsigned short msgid, size_t header_size, size_t max_payload_size,
+      const LocalAddress &src_payload_addr, size_t src_payload_lines,
+      size_t src_payload_line_stride, const RemoteAddress &dest_payload_addr,
+      void *storage_base, size_t storage_size)
   {
     assert(storage_size >= sizeof(Realm::UCP::UCPMessageImpl));
     return new(storage_base) Realm::UCP::UCPMessageImpl(
-        internal,
-        target,
-        msgid,
-        header_size,
-        max_payload_size,
-        src_payload_addr,
-        src_payload_lines,
-        src_payload_line_stride,
-        dest_payload_addr,
-        storage_size);
+        internal, target, msgid, header_size, max_payload_size,
+        static_cast<char *>(src_payload_addr.segment->base) + src_payload_addr.offset,
+        src_payload_lines, src_payload_line_stride, src_payload_addr.segment,
+        &dest_payload_addr, storage_size);
+  }
+
+  ActiveMessageImpl *UCPModule::create_active_message_impl(
+      NodeID target, unsigned short msgid, size_t header_size, size_t max_payload_size,
+      const RemoteAddress &dest_payload_addr, void *storage_base, size_t storage_size)
+  {
+    assert(storage_size >= sizeof(Realm::UCP::UCPMessageImpl));
+    return new(storage_base) Realm::UCP::UCPMessageImpl(
+        internal, target, msgid, header_size, max_payload_size, nullptr, 0, 0, nullptr,
+        &dest_payload_addr, storage_size);
   }
 
   ActiveMessageImpl* UCPModule::create_active_message_impl(const NodeSet& targets,
@@ -318,23 +310,18 @@ err_del_mod:
       bool with_congestion,
       size_t header_size)
   {
-    return internal->recommended_max_payload(target, nullptr,
-        with_congestion, header_size);
+    (void)target;
+    return internal->recommended_max_payload(nullptr, nullptr, nullptr, with_congestion,
+                                             header_size);
   }
 
   size_t UCPModule::recommended_max_payload(const NodeSet& targets,
       bool with_congestion,
       size_t header_size)
   {
-    if (targets.size() == 1) {
-      // this is same as single-target case
-      NodeID target = *(targets.begin());
-      return internal->recommended_max_payload(target, nullptr,
-          with_congestion, header_size);
-    }
-
-    // just use the no-target version
-    return internal->recommended_max_payload(nullptr, with_congestion, header_size);
+    (void)targets;
+    return internal->recommended_max_payload(nullptr, nullptr, nullptr, with_congestion,
+                                             header_size);
   }
 
   size_t UCPModule::recommended_max_payload(NodeID target,
@@ -342,55 +329,43 @@ err_del_mod:
       bool with_congestion,
       size_t header_size)
   {
-    const RemoteAddress *dp_addr = &dest_payload_addr;
+    (void)target;
+    return internal->recommended_max_payload(nullptr, nullptr, &dest_payload_addr,
+                                             with_congestion, header_size);
+  }
 
-    return internal->recommended_max_payload(target, dp_addr,
-        with_congestion, header_size);
+  size_t UCPModule::recommended_max_payload(NodeID target, const void *data,
+                                            size_t bytes_per_line, size_t lines,
+                                            size_t line_stride, bool with_congestion,
+                                            size_t header_size)
+  {
+    (void)target;
+    return internal->recommended_max_payload(data, nullptr, nullptr, with_congestion,
+                                             header_size);
+  }
+
+  size_t UCPModule::recommended_max_payload(const NodeSet &targets, const void *data,
+                                            size_t bytes_per_line, size_t lines,
+                                            size_t line_stride, bool with_congestion,
+                                            size_t header_size)
+  {
+    (void)targets;
+    return internal->recommended_max_payload(data, nullptr, nullptr, with_congestion,
+                                             header_size);
   }
 
   size_t UCPModule::recommended_max_payload(NodeID target,
-      const void *data, size_t bytes_per_line,
-      size_t lines, size_t line_stride,
-      bool with_congestion,
-      size_t header_size)
+                                            const LocalAddress &src_payload_addr,
+                                            size_t bytes_per_line, size_t lines,
+                                            size_t line_stride,
+                                            const RemoteAddress &dest_payload_addr,
+                                            bool with_congestion, size_t header_size)
   {
-    return internal->recommended_max_payload(target, nullptr,
-        data, bytes_per_line, lines, line_stride,
-        with_congestion, header_size);
-  }
-
-  size_t UCPModule::recommended_max_payload(const NodeSet& targets,
-      const void *data, size_t bytes_per_line,
-      size_t lines, size_t line_stride,
-      bool with_congestion,
-      size_t header_size)
-  {
-    if (targets.size() == 1) {
-      // this is same as single-target case
-      NodeID target = *(targets.begin());
-      return internal->recommended_max_payload(target, nullptr,
-          data, bytes_per_line, lines, line_stride,
-          with_congestion, header_size);
-    }
-
-    // just use the no-target version
-    return internal->recommended_max_payload(nullptr,
-        data, bytes_per_line, lines, line_stride,
-        with_congestion, header_size);
-  }
-
-  size_t UCPModule::recommended_max_payload(NodeID target,
-      const void *data, size_t bytes_per_line,
-      size_t lines, size_t line_stride,
-      const RemoteAddress& dest_payload_addr,
-      bool with_congestion,
-      size_t header_size)
-  {
-    const RemoteAddress *dp_addr = &dest_payload_addr;
-
-    return internal->recommended_max_payload(target, dp_addr,
-        data, bytes_per_line, lines, line_stride,
-        with_congestion, header_size);
+    (void)target;
+    char *data =
+        static_cast<char *>(src_payload_addr.segment->base) + src_payload_addr.offset;
+    return internal->recommended_max_payload(
+        data, src_payload_addr.segment, &dest_payload_addr, with_congestion, header_size);
   }
 
 }; // namespace Realm

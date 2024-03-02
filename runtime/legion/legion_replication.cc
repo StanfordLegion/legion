@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -1238,7 +1238,7 @@ namespace Legion {
         {
           concurrent_exchange->exchange(concurrent_slices,
               concurrent_lamport_clock, concurrent_poisoned,
-              concurrent_task_barrier, 0/*points*/);
+              concurrent_task_barrier, concurrent_variant, 0/*points*/);
           if (concurrent_validator != NULL)
             concurrent_validator->perform_validation(concurrent_processors);
         }
@@ -1315,7 +1315,7 @@ namespace Legion {
         {
           concurrent_exchange->exchange(concurrent_slices,
               concurrent_lamport_clock, concurrent_poisoned,
-              concurrent_task_barrier, 0/*points*/);
+              concurrent_task_barrier, concurrent_variant, 0/*points*/);
           if (concurrent_validator != NULL)
             concurrent_validator->elide_collective();
         }
@@ -1688,7 +1688,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void ReplIndexTask::concurrent_allreduce(SliceTask *slice,
         AddressSpaceID slice_space, size_t points, uint64_t lamport_clock,
-        bool barrier, bool poisoned)
+        VariantID vid, bool poisoned)
     //--------------------------------------------------------------------------
     {
       bool done = false;
@@ -1700,21 +1700,15 @@ namespace Legion {
           concurrent_poisoned = true;
         concurrent_slices.push_back(std::make_pair(slice, slice_space));
         if (concurrent_points == 0)
-          concurrent_barrier = barrier;
-        else if (concurrent_barrier != barrier)
-          REPORT_LEGION_ERROR(ERROR_ILLEGAL_CONCURRENT_TASK_BARRIER,
-              "Different points tasks of concurrent task %s (UID %lld) "
-              "selected variants with different concurrent barrier "
-              "settings. All point tasks in a concurrent task launch "
-              "must be mapped to variants with the same setting for "
-              "whether concurrent barrier support is required.",
-              get_task_name(), get_unique_id())
+          concurrent_variant = vid;
+        else if (concurrent_variant != vid)
+          concurrent_variant = std::min(concurrent_variant, vid);
         concurrent_points += points;
         done = (concurrent_points == total_points);
       }
       if (done)
       {
-        if (concurrent_barrier)
+        if (concurrent_variant > 0)
         {
 #ifdef DEBUG_LEGION
           ReplicateContext *repl_ctx =
@@ -1743,7 +1737,7 @@ namespace Legion {
         }
         concurrent_exchange->exchange(concurrent_slices, 
             concurrent_lamport_clock, concurrent_poisoned,
-            concurrent_task_barrier, concurrent_points);
+            concurrent_task_barrier, concurrent_variant, concurrent_points);
       }
     }
 
@@ -16696,6 +16690,7 @@ namespace Legion {
       {
         rez.serialize(collective_kernel_barrier);
         rez.serialize(concurrent_lamport_clock);
+        rez.serialize(concurrent_variant);
         rez.serialize<bool>(concurrent_poisoned);
       }
     }
@@ -16717,6 +16712,12 @@ namespace Legion {
         derez.deserialize(lamport_clock);
         if (concurrent_lamport_clock < lamport_clock)
           concurrent_lamport_clock = lamport_clock;
+        VariantID vid;
+        derez.deserialize(vid);
+        if (total_points == 0)
+          concurrent_variant = vid;
+        else if (concurrent_variant != vid)
+          concurrent_variant = std::min(concurrent_variant, vid);
         bool poisoned;
         derez.deserialize<bool>(poisoned);
         if (poisoned)
@@ -16748,6 +16749,7 @@ namespace Legion {
             rez.serialize(it->first);
             rez.serialize(collective_kernel_barrier);
             rez.serialize(concurrent_lamport_clock);
+            rez.serialize(concurrent_variant);
             rez.serialize(concurrent_poisoned);
           }
           runtime->send_slice_concurrent_allreduce_response(it->second, rez);
@@ -16755,14 +16757,15 @@ namespace Legion {
         else
           it->first->finish_concurrent_allreduce(
               concurrent_lamport_clock, concurrent_poisoned,
-              collective_kernel_barrier);
+              concurrent_variant, collective_kernel_barrier);
       }
     }
 
     //--------------------------------------------------------------------------
     void ConcurrentAllreduce::exchange(
         std::vector<std::pair<SliceTask*,AddressSpaceID> > &slices,
-        uint64_t lamport_clock, bool poisoned, RtBarrier barrier, size_t points)
+        uint64_t lamport_clock, bool poisoned, RtBarrier barrier, 
+        VariantID vid, size_t points)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -16771,6 +16774,7 @@ namespace Legion {
       concurrent_slices.swap(slices);
       collective_kernel_barrier = barrier;
       concurrent_lamport_clock = lamport_clock;
+      concurrent_variant = vid;
       concurrent_poisoned = poisoned;
       total_points = points;
       if (total_points == expected_points)

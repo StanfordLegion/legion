@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -967,7 +967,7 @@ namespace Legion {
         Runtime::trigger_event(NULL,use_event,fetch_metadata(instance,u_event));
       }
       else // add a resource reference to remove once this manager is set
-        add_base_resource_ref(PENDING_UNBOUND_REF);
+        add_base_valid_ref(PENDING_UNBOUND_REF);
 
       if (!is_owner() && !is_external_instance())
         memory_manager->register_remote_instance(this);
@@ -1599,7 +1599,7 @@ namespace Legion {
       if (finder->second == 0)
         detailed_base_valid_references.erase(finder);
       if (valid_references == 0)
-        return notify_invalid();
+        return notify_invalid(i_lock);
       else
         return false;
     }
@@ -1622,7 +1622,7 @@ namespace Legion {
       if (finder->second == 0)
         detailed_nested_valid_references.erase(finder);
       if (valid_references == 0)
-        return notify_invalid();
+        return notify_invalid(i_lock);
       else
         return false;
     } 
@@ -1655,7 +1655,7 @@ namespace Legion {
       assert(valid_references.load() >= cnt);
 #endif
       if (valid_references.fetch_sub(cnt) == cnt)
-        return notify_invalid();
+        return notify_invalid(i_lock);
       else
         return false;
     }
@@ -1673,7 +1673,8 @@ namespace Legion {
       // is valid as long as a copy of the manager on one node is valid
       // This way we can easily check that acquires are being done safely
       // if instance isn't already valid somewhere
-      if (need_check && (!is_external_instance() || !is_owner()))
+      if (need_check && (kind != UNBOUND_INSTANCE_KIND) &&
+          (!is_external_instance() || !is_owner()))
       {
         // Should never be here if we're the owner as it indicates that
         // we tried to add a valid reference without first doing an acquire
@@ -1769,17 +1770,27 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool PhysicalManager::notify_invalid(void)
+    bool PhysicalManager::notify_invalid(AutoLock &i_lock)
     //--------------------------------------------------------------------------
     {
       // No need for the lock it is held by the caller
 #ifdef DEBUG_LEGION
+      assert(kind != UNBOUND_INSTANCE_KIND);
       assert((gc_state == VALID_GC_STATE) || is_external_instance());
 #endif
       // If we're an external instance that has already been detached and
-      // therfore delete then we don't ever want to go back to collectable
+      // therfore deleted then we don't ever want to go back to collectable
       if (!is_external_instance() || (gc_state != COLLECTED_GC_STATE))
+      {
         gc_state = COLLECTABLE_GC_STATE;
+        // If we're an eagerly allocated instance start the collection
+        // immediately since there's no point in re-use
+        if (kind == EAGER_INSTANCE_KIND)
+        {
+          RtEvent dummy_ready;
+          collect(dummy_ready, &i_lock);
+        }
+      }
       return remove_base_gc_ref(INTERNAL_VALID_REF);
     }
 
@@ -2333,10 +2344,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool PhysicalManager::collect(RtEvent &ready)
+    bool PhysicalManager::collect(RtEvent &ready, AutoLock *i_lock)
     //--------------------------------------------------------------------------
     {
-      AutoLock i_lock(inst_lock);
+      if (i_lock == NULL)
+      {
+        AutoLock i2_lock(inst_lock);
+        return collect(ready, &i2_lock);
+      }
       // Do a quick to check to see if we can do a collection on the local node
       if (gc_state == VALID_GC_STATE)
         return false;
@@ -2429,9 +2444,9 @@ namespace Legion {
         const RtEvent wait_on = collection_ready;
         if (!wait_on.has_triggered())
         {
-          i_lock.release();
+          i_lock->release();
           wait_on.wait();
-          i_lock.reacquire();
+          i_lock->reacquire();
         }
 #ifdef DEBUG_LEGION
         assert(pending_changes > 0);
@@ -2485,7 +2500,7 @@ namespace Legion {
                 // Notify the subscribers if we've been collected
                 to_notify.swap(subscribers);
                 // Now we can perform the deletion which will release the lock
-                perform_deletion(runtime->address_space, &i_lock);
+                perform_deletion(runtime->address_space, i_lock);
                 // Send notification messages to the remote nodes to tell
                 // them that this instance has been deleted, this is needed
                 // so that we can invalidate any subscribers on those nodes
@@ -2569,7 +2584,7 @@ namespace Legion {
       else
       {
         // No longer need the lock here since we're just sending a message
-        i_lock.release();
+        i_lock->release();
         // Send it to the owner to check
         std::atomic<bool> result(false);
         const RtUserEvent done = Runtime::create_rt_user_event();
@@ -2584,6 +2599,7 @@ namespace Legion {
         pack_global_ref();
         runtime->send_gc_request(owner_space, rez);
         done.wait();
+        i_lock->reacquire();
         return result.load();
       }
     }
@@ -3322,7 +3338,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     bool PhysicalManager::update_physical_instance(
                                                   PhysicalInstance new_instance,
-                                                  InstanceKind new_kind,
                                                   size_t new_footprint,
                                                   uintptr_t new_pointer)
     //--------------------------------------------------------------------------
@@ -3334,7 +3349,7 @@ namespace Legion {
         assert(instance_footprint == -1U);
 #endif
         instance = new_instance;
-        kind = new_kind;
+        kind = EAGER_INSTANCE_KIND;
         external_pointer = new_pointer;
 #ifdef DEBUG_LEGION
         assert(external_pointer != -1UL);
@@ -3358,7 +3373,7 @@ namespace Legion {
         Runtime::trigger_event(
             NULL, use_event, fetch_metadata(instance, producer_event));
       }
-      return remove_base_resource_ref(PENDING_UNBOUND_REF);
+      return remove_base_valid_ref(PENDING_UNBOUND_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -3371,7 +3386,6 @@ namespace Legion {
         rez.serialize(did);
         rez.serialize(instance);
         rez.serialize(instance_footprint);
-        rez.serialize(kind);
       }
       BroadcastFunctor functor(context->runtime, rez);
       map_over_remote_instances(functor);
@@ -3389,8 +3403,6 @@ namespace Legion {
       derez.deserialize(instance);
       size_t footprint;
       derez.deserialize(footprint);
-      InstanceKind kind;
-      derez.deserialize(kind);
 
       RtEvent manager_ready;
       PhysicalManager *manager =
@@ -3398,7 +3410,7 @@ namespace Legion {
       if (manager_ready.exists() && !manager_ready.has_triggered())
         manager_ready.wait();
 
-      if (manager->update_physical_instance(instance, kind, footprint))
+      if (manager->update_physical_instance(instance, footprint))
         delete manager;
     }
 

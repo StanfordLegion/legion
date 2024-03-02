@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -139,7 +139,10 @@ namespace Realm {
 
     // gets info related to rdma access from other nodes
     const ByteArray *get_rdma_info(NetworkModule *network) const;
-    
+
+    // rdma transfers need to use LocalAddress and RemoteAddress helper objects
+    //  rather than raw pointers
+    virtual bool get_local_addr(off_t offset, LocalAddress &local_addr);
     virtual bool get_remote_addr(off_t offset, RemoteAddress& remote_addr);
 
     // gets the network segment info for potential registration

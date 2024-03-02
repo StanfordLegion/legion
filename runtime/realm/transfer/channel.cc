@@ -1,5 +1,5 @@
-/* Copyright 2023 Stanford University
- * Copyright 2023 Los Alamos National Laboratory
+/* Copyright 2024 Stanford University
+ * Copyright 2024 Los Alamos National Laboratory
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -1259,6 +1259,12 @@ namespace Realm {
 	bool flush = out_port->iter->get_addresses(out_port->addrlist,
                                                    out_nonaffine);
 	write_bytes_avail = out_port->addrlist.bytes_pending();
+        // TODO(apryakhin@): We add this to handle scatter when both
+        // indirection and source are coming from IB and this needs
+        // good testing.
+        if(out_port->indirect_port_idx >= 0 && write_bytes_avail) {
+          min_xfer_size = std::min(write_bytes_avail, min_xfer_size);
+        }
         if(flush) {
           if(write_bytes_avail > 0) {
             // ignore a nonaffine piece as we still have some affine bytes
@@ -3650,19 +3656,19 @@ namespace Realm {
 		  assert(ok);
 
 		  // now look at the input
-		  const void *src_buf = in_port->mem->get_direct_ptr(in_alc.get_offset(), icount);
-		  size_t src_1d_maxbytes = 0;
-		  if(in_dim > 0) {
-		    size_t rec_bytes = ActiveMessage<Write1DMessage>::recommended_max_payload(dst_node,
-											      src_buf, icount, 1, 0,
-											      dst_buf,
-											      true /*w/ congestion*/);
-		    src_1d_maxbytes = std::min({ dst_1d_maxbytes,
-					         icount,
-					         rec_bytes });
-		  }
+                  LocalAddress src_buf;
+                  ok = in_port->mem->get_local_addr(in_alc.get_offset(), src_buf);
+                  assert(ok);
+                  size_t src_1d_maxbytes = 0;
+                  if(in_dim > 0) {
+                    size_t rec_bytes =
+                        ActiveMessage<Write1DMessage>::recommended_max_payload(
+                            dst_node, src_buf, icount, 1, 0, dst_buf,
+                            true /*w/ congestion*/);
+                    src_1d_maxbytes = std::min({dst_1d_maxbytes, icount, rec_bytes});
+                  }
 
-		  size_t src_2d_maxbytes = 0;
+                  size_t src_2d_maxbytes = 0;
                   // TODO: permit if source memory is cpu-accessible?
 #ifdef ALLOW_RDMA_SOURCE_2D
 		  if(in_dim > 1) {
@@ -4351,6 +4357,26 @@ namespace Realm {
 	return 0;
       }
 
+      Memory Channel::suggest_ib_memories(Memory memory) const
+      {
+        Node &n = get_runtime()->nodes[node];
+        for(std::vector<IBMemory *>::const_iterator it = n.ib_memories.begin();
+            it != n.ib_memories.end(); ++it) {
+          switch((*it)->lowlevel_kind) {
+          case Memory::SYSTEM_MEM:
+          case Memory::REGDMA_MEM:
+          case Memory::SOCKET_MEM:
+          case Memory::Z_COPY_MEM:
+            return (*it)->me;
+          default:
+            break;
+          }
+        }
+        log_new_dma.fatal() << "no sysmem ib memory on node:" << node;
+        abort();
+        return Memory::NO_MEMORY;
+      }
+
       // sometimes we need to return a reference to a SupportedPath that won't
       //  actually be added to a channel
       Channel::SupportedPath dummy_supported_path;
@@ -4912,8 +4938,8 @@ namespace Realm {
 							"memcpy channel")
       {
         //cbs = (MemcpyRequest**) calloc(max_nr, sizeof(MemcpyRequest*));
-	unsigned bw = 5000; // HACK - estimate at 5 GB/s
-	unsigned latency = 100; // HACK - estimate at 100ns
+        unsigned bw = 128000;         // HACK - estimate at 128 GB/s
+        unsigned latency = 100;       // HACK - estimate at 100ns
         unsigned frag_overhead = 100; // HACK - estimate at 100ns
 
         // all local cpu memories are valid sources and dests
@@ -5744,6 +5770,9 @@ namespace Realm {
 
       long RemoteWriteChannel::submit(Request** requests, long nr)
       {
+        // should not be reached
+        assert(0);
+#if 0 // TODO: DELETE
         for (long i = 0; i < nr; i ++) {
           RemoteWriteRequest* req = (RemoteWriteRequest*) requests[i];
 	  XferDes::XferPort *in_port = &req->xd->input_ports[req->src_port_idx];
@@ -5803,9 +5832,11 @@ namespace Realm {
                                                       PAYLOAD_KEEPREG,
                                                       req->dst_buf);*/
         }
+#endif
         return nr;
       }
 
+#if 0 // TODO: DELETE
       /*static*/
       void XferDesRemoteWriteMessage::handle_message(NodeID sender,
 						     const XferDesRemoteWriteMessage &args,
@@ -5849,6 +5880,7 @@ namespace Realm {
         req->xd->notify_request_read_done(req);
         req->xd->notify_request_write_done(req);
       }
+#endif
 
       /*static*/ void XferDesDestroyMessage::handle_message(NodeID sender,
 							    const XferDesDestroyMessage &args,
@@ -6288,8 +6320,10 @@ namespace Realm {
 
 ActiveMessageHandlerReg<SimpleXferDesCreateMessage> simple_xfer_des_create_message_handler;
 ActiveMessageHandlerReg<NotifyXferDesCompleteMessage> notify_xfer_des_complete_handler;
+#if 0 // TODO: DELETE
 ActiveMessageHandlerReg<XferDesRemoteWriteMessage> xfer_des_remote_write_handler;
 ActiveMessageHandlerReg<XferDesRemoteWriteAckMessage> xfer_des_remote_write_ack_handler;
+#endif
 ActiveMessageHandlerReg<XferDesDestroyMessage> xfer_des_destroy_message_handler;
 ActiveMessageHandlerReg<UpdateBytesTotalMessage> update_bytes_total_message_handler;
 ActiveMessageHandlerReg<UpdateBytesWriteMessage> update_bytes_write_message_handler;

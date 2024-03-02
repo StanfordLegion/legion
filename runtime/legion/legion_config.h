@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -1390,6 +1390,7 @@ typedef enum legion_error_t {
   LEGION_WARNING_COLLECTIVE_HAMMER_REDUCTION = 1115,
   LEGION_WARNING_WRITE_PRIVILEGE_COLLECTIVE = 1116,
   LEGION_WARNING_UNSUPPORTED_REPLICATION = 1117,
+  LEGION_WARNING_UNUSED_CONCURRENCY = 1118,
   
   
   LEGION_FATAL_MUST_EPOCH_NOADDRESS = 2000,

@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -841,6 +841,7 @@ namespace Legion {
       DISTRIBUTED_DOWNGRADE_RESPONSE,
       DISTRIBUTED_DOWNGRADE_SUCCESS,
       DISTRIBUTED_DOWNGRADE_UPDATE,
+      DISTRIBUTED_DOWNGRADE_RESTART,
       DISTRIBUTED_GLOBAL_ACQUIRE_REQUEST,
       DISTRIBUTED_GLOBAL_ACQUIRE_RESPONSE,
       DISTRIBUTED_VALID_ACQUIRE_REQUEST,
@@ -1164,6 +1165,7 @@ namespace Legion {
         "Distributed Downgrade Response",                             \
         "Distributed Downgrade Success",                              \
         "Distributed Downgrade Update",                               \
+        "Distributed Downgrade Restart",                              \
         "Distributed Global Acquire Request",                         \
         "Distributed Global Acquire Response",                        \
         "Distributed Valid Acquire Request",                          \

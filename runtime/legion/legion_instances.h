@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -378,7 +378,7 @@ namespace Legion {
       bool remove_valid_reference(int cnt);
 #endif
       void notify_valid(bool need_check);
-      bool notify_invalid(void);
+      bool notify_invalid(AutoLock &i_lock);
     public:
       virtual void send_manager(AddressSpaceID target);
       static void handle_manager_request(Deserializer &derez, Runtime *runtime);
@@ -389,7 +389,7 @@ namespace Legion {
       bool can_collect(bool &already_collected) const;
       bool acquire_collect(std::set<ApEvent> &gc_events, 
           uint64_t &sent_valid, uint64_t &received_valid);
-      bool collect(RtEvent &collected);
+      bool collect(RtEvent &collected, AutoLock *i_lock = NULL);
       void notify_remote_deletion(void);
       RtEvent set_garbage_collection_priority(MapperID mapper_id, Processor p, 
                                   AddressSpaceID source, GCPriority priority);
@@ -405,10 +405,7 @@ namespace Legion {
       void update_instance_footprint(size_t footprint)
         { instance_footprint = footprint; }
     public:
-      inline bool is_unbound() const 
-        { return kind == UNBOUND_INSTANCE_KIND; }
       bool update_physical_instance(PhysicalInstance new_instance,
-                                    InstanceKind new_kind,
                                     size_t new_footprint,
                                     uintptr_t new_pointer = 0);
       void broadcast_manager_update(void);

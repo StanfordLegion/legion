@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -110,15 +110,15 @@ namespace Realm {
     };
 
     template <size_t N, typename Offset_t = size_t>
-    struct MemcpyUnstructuredInfo {
+    struct MemcpyIndirectInfo {
       Offset_t volume;
       Offset_t field_size;
-      uintptr_t src_ind;
-      uintptr_t dst_ind;
-      AffineSubRect<N, Offset_t> src;
-      AffineSubRect<N, Offset_t> dst;
-      // TODO(apryakhin@): Use for out-of-bound detection.
-      // Rect<N, long long> dst_bounds;
+      Offset_t src_strides[N];
+      Offset_t dst_strides[N];
+      uintptr_t src_ind_addr;
+      uintptr_t dst_ind_addr;
+      uintptr_t src_addr;
+      uintptr_t dst_addr;
     };
 
     static const size_t CUDA_MAX_DIM = REALM_MAX_DIM < 3 ? REALM_MAX_DIM : 3;

@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -10982,7 +10982,7 @@ namespace Legion {
           ready_events.insert(ready);
         FieldMask mask;
         derez.deserialize(mask);
-        views.insert(static_cast<InstanceView*>(view), mask);
+        reductions.insert(static_cast<InstanceView*>(view), mask);
       }
       const PhysicalTraceInfo trace_info = 
         PhysicalTraceInfo::unpack_trace_info(derez, runtime);

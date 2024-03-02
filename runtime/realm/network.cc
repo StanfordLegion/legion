@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -109,24 +109,28 @@ namespace Realm {
   {}
 #endif
 
-  void NetworkSegment::request(NetworkSegmentInfo::MemoryType _memtype,
-			       size_t _bytes, size_t _alignment,
-			       NetworkSegmentInfo::MemoryTypeExtraData _memextra /*= 0*/)
+  void NetworkSegment::request(NetworkSegmentInfo::MemoryType _memtype, size_t _bytes,
+                               size_t _alignment,
+                               NetworkSegmentInfo::MemoryTypeExtraData _memextra /*= 0*/,
+                               NetworkSegmentInfo::FlagsType _flags /*= 0*/)
   {
     memtype = _memtype;
     bytes = _bytes;
     alignment = _alignment;
     memextra = _memextra;
+    flags = _flags;
   }
 
-  void NetworkSegment::assign(NetworkSegmentInfo::MemoryType _memtype,
-			      void *_base, size_t _bytes,
-			      NetworkSegmentInfo::MemoryTypeExtraData _memextra /*= 0*/)
+  void NetworkSegment::assign(NetworkSegmentInfo::MemoryType _memtype, void *_base,
+                              size_t _bytes,
+                              NetworkSegmentInfo::MemoryTypeExtraData _memextra /*= 0*/,
+                              NetworkSegmentInfo::FlagsType _flags /*= 0*/)
   {
     memtype = _memtype;
     base = _base;
     bytes = _bytes;
     memextra = _memextra;
+    flags = _flags;
   }
 
 
@@ -191,16 +195,15 @@ namespace Realm {
 							  void *storage_base,
 							  size_t storage_size);
 
-    virtual ActiveMessageImpl *create_active_message_impl(NodeID target,
-							  unsigned short msgid,
-							  size_t header_size,
-							  size_t max_payload_size,
-							  const void *src_payload_addr,
-							  size_t src_payload_lines,
-							  size_t src_payload_line_stride,
-							  const RemoteAddress& dest_payload_addr,
-							  void *storage_base,
-							  size_t storage_size);
+    virtual ActiveMessageImpl *create_active_message_impl(
+        NodeID target, unsigned short msgid, size_t header_size, size_t max_payload_size,
+        const LocalAddress &src_payload_addr, size_t src_payload_lines,
+        size_t src_payload_line_stride, const RemoteAddress &dest_payload_addr,
+        void *storage_base, size_t storage_size);
+
+    virtual ActiveMessageImpl *create_active_message_impl(
+        NodeID target, unsigned short msgid, size_t header_size, size_t max_payload_size,
+        const RemoteAddress &dest_payload_addr, void *storage_base, size_t storage_size);
 
     virtual ActiveMessageImpl *create_active_message_impl(const NodeSet& targets,
 							  unsigned short msgid,
@@ -233,11 +236,11 @@ namespace Realm {
 					   bool with_congestion,
 					   size_t header_size);
     virtual size_t recommended_max_payload(NodeID target,
-					   const void *data, size_t bytes_per_line,
-					   size_t lines, size_t line_stride,
-					   const RemoteAddress& dest_payload_addr,
-					   bool with_congestion,
-					   size_t header_size);
+                                           const LocalAddress &src_payload_addr,
+                                           size_t bytes_per_line, size_t lines,
+                                           size_t line_stride,
+                                           const RemoteAddress &dest_payload_addr,
+                                           bool with_congestion, size_t header_size);
   };
 
   LoopbackNetworkModule::LoopbackNetworkModule()
@@ -371,16 +374,19 @@ namespace Realm {
     abort();
   }
 
-  ActiveMessageImpl *LoopbackNetworkModule::create_active_message_impl(NodeID target,
-								       unsigned short msgid,
-								       size_t header_size,
-								       size_t max_payload_size,
-								       const void *src_payload_addr,
-								       size_t src_payload_lines,
-								       size_t src_payload_line_stride,
-								       const RemoteAddress& dest_payload_addr,
-								       void *storage_base,
-								       size_t storage_size)
+  ActiveMessageImpl *LoopbackNetworkModule::create_active_message_impl(
+      NodeID target, unsigned short msgid, size_t header_size, size_t max_payload_size,
+      const LocalAddress &src_payload_addr, size_t src_payload_lines,
+      size_t src_payload_line_stride, const RemoteAddress &dest_payload_addr,
+      void *storage_base, size_t storage_size)
+  {
+    // should never be called
+    abort();
+  }
+
+  ActiveMessageImpl *LoopbackNetworkModule::create_active_message_impl(
+      NodeID target, unsigned short msgid, size_t header_size, size_t max_payload_size,
+      const RemoteAddress &dest_payload_addr, void *storage_base, size_t storage_size)
   {
     // should never be called
     abort();
@@ -450,12 +456,10 @@ namespace Realm {
     return 0;
   }
 
-  size_t LoopbackNetworkModule::recommended_max_payload(NodeID target,
-							const void *data, size_t bytes_per_line,
-							size_t lines, size_t line_stride,
-							const RemoteAddress& dest_payload_addr,
-							bool with_congestion,
-							size_t header_size)
+  size_t LoopbackNetworkModule::recommended_max_payload(
+      NodeID target, const LocalAddress &src_payload_addr, size_t bytes_per_line,
+      size_t lines, size_t line_stride, const RemoteAddress &dest_payload_addr,
+      bool with_congestion, size_t header_size)
   {
     // should never be called
     abort();
@@ -524,9 +528,14 @@ namespace Realm {
   bool NetworkSegment::in_segment(uintptr_t range_base, size_t range_bytes) const
   {
     uintptr_t reg_lo = reinterpret_cast<uintptr_t>(base);
+
+    if(reg_lo == 0)
+      return true;
+    if(range_base < reg_lo)
+      return false;
+
     uintptr_t reg_hi = reg_lo + (bytes - 1);
-    if((range_base < reg_lo) || ((bytes > 0) &&
-                                 ((range_base + range_bytes - 1) > reg_hi)))
+    if((bytes > 0) && ((range_base + range_bytes - 1) > reg_hi))
       return false;
 
     return true;

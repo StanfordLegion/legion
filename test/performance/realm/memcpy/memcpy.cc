@@ -1,5 +1,5 @@
-/* Copyright 2023 Stanford University
- * Copyright 2023 NVIDIA Corp
+/* Copyright 2024 Stanford University
+ * Copyright 2024 NVIDIA Corp
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -159,8 +159,9 @@ static void display_memory_info(Memory m) {
                   << static_cast<double>(m.capacity()) / (1024.0 * 1024.0)
                   << "MiB";
   for (Machine::MemoryMemoryAffinity &m2m : affinities) {
-    log_app.print() << "\t" << m2m.m2 << " est-bw: " << m2m.bandwidth
-                    << "MB/s est-lat: " << m2m.latency << "ns";
+    log_app.print() << "\t" << m2m.m2 << " est-bw: " << std::fixed << std::setprecision(2)
+                    << (m2m.bandwidth / 1000.0) << "GB/s est-lat: " << m2m.latency
+                    << "ns";
   }
 }
 
@@ -343,10 +344,9 @@ static void display_node_data(std::vector<CopyOperation> &graph)
     if (TestConfig::graphviz) {
       std::cout << "<BR />";
     }
-    std::cout << " sz: " << graph[i].get_total_size() / (1024ULL * 1024ULL)
-              << "MiB"
-              << " bw: " << bw << "MB/s (" << 100.0 * bw / affinity[0].bandwidth
-              << "%)"
+    std::cout << " sz: " << graph[i].get_total_size() / (1024ULL * 1024ULL) << "MiB"
+              << " bw: " << std::fixed << std::setprecision(2) << bw / 1000.0 << "GB/s ("
+              << std::fixed << 100.0 * bw / affinity[0].bandwidth << "%)"
               << " lag: " << lag << "ns";
     if (TestConfig::graphviz) {
       std::cout << "</FONT>>];";

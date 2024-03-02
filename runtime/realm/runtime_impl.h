@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -442,6 +442,8 @@ namespace Realm {
 
       ReplicatedHeap repl_heap; // used for sparsity maps, instance layouts
 
+      bool shared_peers_use_network_module = true;
+
       class DeferredShutdown : public EventWaiter {
       public:
 	void defer(RuntimeImpl *_runtime, Event wait_on);
@@ -487,6 +489,10 @@ namespace Realm {
       friend class Runtime;
 
       Module *get_module_untyped(const char *name) const;
+
+      /// @brief Auxilary function to create Network::shared_peers using either ipc
+      /// mailbox or relying on network modules
+      void create_shared_peers(void);
 
       /// @brief Auxilary function for handling the sharing mechanism of all registered
       /// memories across the machine

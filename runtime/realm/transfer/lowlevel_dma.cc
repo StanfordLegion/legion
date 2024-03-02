@@ -1,5 +1,5 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
- * Copyright 2023 Los Alamos National Laboratory
+/* Copyright 2024 Stanford University, NVIDIA Corporation
+ * Copyright 2024 Los Alamos National Laboratory
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -827,6 +827,8 @@ namespace Realm {
     // we never know when we're done
     return false;
   }
+
+  size_t WrappingFIFOIterator::get_base_offset(void) const { return 0; }
 
   size_t WrappingFIFOIterator::step(size_t max_bytes, AddressInfo &info,
 				    unsigned flags,

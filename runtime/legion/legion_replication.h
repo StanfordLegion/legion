@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -1534,7 +1534,7 @@ namespace Legion {
     public:
       void exchange(std::vector<std::pair<SliceTask*,AddressSpaceID> > &slices,
         uint64_t lamport_clock, bool poisoned, RtBarrier collective_kernel_bar,
-        size_t points);
+        VariantID variant, size_t points);
     protected:
       void notify_concurrent_slices(void);
     public:
@@ -1543,6 +1543,7 @@ namespace Legion {
       std::vector<std::pair<SliceTask*,AddressSpaceID> > concurrent_slices;
       RtBarrier collective_kernel_barrier;
       uint64_t concurrent_lamport_clock;
+      VariantID concurrent_variant;
       size_t total_points;
       bool concurrent_poisoned;
     };
@@ -1984,7 +1985,7 @@ namespace Legion {
                                                   Processor target);
       virtual void concurrent_allreduce(SliceTask *slice,
           AddressSpaceID slice_space, size_t points, uint64_t lamport_clock,
-          bool barrier, bool poisoned);
+          VariantID vid, bool poisoned);
       void select_sharding_function(ReplicateContext *repl_ctx);
     public:
       // Methods for supporting intra-index-space mapping dependences

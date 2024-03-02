@@ -1,4 +1,4 @@
-# Copyright 2023 Stanford University
+# Copyright 2024 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -82,6 +82,7 @@ TESTS += task_stream
 TESTS += test_cuhook
 TESTS += cuda_memcpy_test
 TESTS += cuda_transpose_test
+TESTS += cuda_scatter_test
 endif
 
 ifeq ($(strip $(USE_HIP)),1)
