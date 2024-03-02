@@ -170,7 +170,7 @@ fn print_statistics(
                     );
                 }
             }
-            let threshold = Timestamp(1000000000); // 1e9 ns or 1e6 us
+            let threshold = Timestamp::from_us(1000000);
             let stats = statistics.get(&entry).unwrap();
             println!("          Invocations: {}", stats.invocations);
             if stats.total_time < threshold {
