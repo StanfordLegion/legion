@@ -394,8 +394,8 @@ namespace Legion {
      * Legion reduction operator. We'll build this on top
      * of the AllGatherCollective
      */
-    template<typename REDOP>
-    class AllReduceCollective : public AllGatherCollective<false> {
+    template<typename REDOP, bool INORDER>
+    class AllReduceCollective : public AllGatherCollective<INORDER> {
     public:
       AllReduceCollective(CollectiveIndexLocation loc, ReplicateContext *ctx);
       AllReduceCollective(ReplicateContext *ctx, CollectiveID id);
@@ -413,8 +413,6 @@ namespace Legion {
       typename REDOP::RHS get_result(void);
     protected:
       typename REDOP::RHS value;
-      int current_stage;
-      std::map<int,std::vector<typename REDOP::RHS> > future_values;
     };
 
     /**
@@ -1647,7 +1645,7 @@ namespace Legion {
      * for a replicated predicate impl
      */
     class PredicateCollective : 
-      public AllReduceCollective<MaxReduction<uint64_t> > {
+      public AllReduceCollective<MaxReduction<uint64_t>,false> {
     public:
       PredicateCollective(ReplPredicateImpl *predicate, 
           ReplicateContext *ctx, CollectiveID id);
