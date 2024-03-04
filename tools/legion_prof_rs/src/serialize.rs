@@ -1035,7 +1035,7 @@ fn check_version(version: u32) {
         .parse()
         .unwrap();
 
-    assert_eq!(version, expected_version, "Legion Prof was built against an incompatible Legion version. Please rebuild with the same version of Legion used by the application to generate the profile logs. (Exected version {}, got version {}.)", expected_version, version);
+    assert_eq!(version, expected_version, "Legion Prof was built against an incompatible Legion version. Please rebuild with the same version of Legion used by the application to generate the profile logs. (Expected version {}, got version {}.)", expected_version, version);
 }
 
 fn parse_record<'a>(
