@@ -197,6 +197,24 @@ impl StateDataSource {
                 let kind_name = format!("{:?}", kind);
                 let kind_first_letter = kind_name.chars().next().unwrap().to_lowercase();
 
+                let short_suffix = match device {
+                    Some(DeviceKind::Device) => "d",
+                    Some(DeviceKind::Host) => "h",
+                    None => "",
+                };
+
+                let medium_suffix = match device {
+                    Some(DeviceKind::Device) => " dev",
+                    Some(DeviceKind::Host) => " host",
+                    None => "",
+                };
+
+                let long_suffix = match device {
+                    Some(DeviceKind::Device) => " Device",
+                    Some(DeviceKind::Host) => " Host",
+                    None => "",
+                };
+
                 let kind_id = node_id.child(kind_index);
                 kind_index += 1;
 
@@ -221,18 +239,6 @@ impl StateDataSource {
                         let proc_id = kind_id.child(proc_index as u64);
                         entry_map.insert(proc_id.clone(), EntryKind::Proc(*proc, *device));
                         proc_entries.insert(*proc, proc_id);
-
-                        let short_suffix = match device {
-                            Some(DeviceKind::Device) => "d",
-                            Some(DeviceKind::Host) => "h",
-                            None => "",
-                        };
-
-                        let long_suffix = match device {
-                            Some(DeviceKind::Device) => " Device",
-                            Some(DeviceKind::Host) => " Host",
-                            None => "",
-                        };
 
                         let short_name = format!(
                             "{}{}{}",
@@ -263,8 +269,8 @@ impl StateDataSource {
                 entry_map.insert(summary_id, EntryKind::ProcKind(group));
 
                 kind_slots.push(EntryInfo::Panel {
-                    short_name: kind_name.to_lowercase(),
-                    long_name: format!("{} {}", node_long_name, kind_name),
+                    short_name: format!("{}{}", kind_name.to_lowercase(), medium_suffix),
+                    long_name: format!("{} {}{}", node_long_name, kind_name, long_suffix),
                     summary: Some(Box::new(EntryInfo::Summary { color })),
                     slots: proc_slots,
                 });

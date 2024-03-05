@@ -331,14 +331,19 @@ impl Proc {
         spy_state: &SpyState,
     ) -> io::Result<ProcessorRecord> {
         let suffix = match device {
-            Some(DeviceKind::Device) => " Device",
-            Some(DeviceKind::Host) => " Host",
+            Some(DeviceKind::Device) => "_Device",
+            Some(DeviceKind::Host) => "_Host",
+            None => "",
+        };
+        let file_suffix = match device {
+            Some(DeviceKind::Device) => "_Device",
+            Some(DeviceKind::Host) => "_Host",
             None => "",
         };
 
         let mut filename = PathBuf::new();
         filename.push("tsv");
-        filename.push(format!("Proc_0x{:x}{}.tsv", self.proc_id, suffix));
+        filename.push(format!("Proc_0x{:x}{}.tsv", self.proc_id, file_suffix));
         let mut f = csv::WriterBuilder::new()
             .delimiter(b'\t')
             .from_path(path.as_ref().join(&filename))?;
