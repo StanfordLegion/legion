@@ -4774,7 +4774,7 @@ namespace Legion {
           !postviews->independent_of(*antiviews))
         result->store(NOT_IDEMPOTENT_ANTIDEPENDENT);
       // Now we can convert these views into conditions
-      if ((previews != NULL) && disable_sharing)
+      if ((previews != NULL) && (disable_sharing || (postviews == NULL)))
       {
         LegionMap<IndexSpaceExpression*,FieldMaskSet<LogicalView> > exprviews;
         previews->transpose_uniquely(exprviews);
@@ -4814,7 +4814,7 @@ namespace Legion {
               tree_id, it->first, std::move(it->second), !disable_sharing); 
           set->add_reference(disable_sharing ? 1 : 2);
           postconditions.push_back(set);
-          if (!disable_sharing)
+          if (!disable_sharing && (previews != NULL))
             preconditions.push_back(set);
         }
       }
