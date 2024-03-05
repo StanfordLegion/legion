@@ -5,12 +5,16 @@ Version 24.03.0 (March ??, 2024)
   * Legion
     - Support for control replication has been merged
     - Support for discarding region contents on task completion
+    - Long-deprecated APIs, such as the old HighLevel namespace, have
+       been removed
   * Mappers
     - Default mapper support for control replication
     - Default and null mapper now use C++ `override` keyword
   * Regent
     - Support for pure projection functors that capture arguments
   * Tools
+    - The profiler now correctly recognizes the logger format version
+       and throws an error if it does not match
     - Many profiler fixes for correctly rendering runtime and mapper calls
     - Rust profiler now requires at least Rust 1.74
 
