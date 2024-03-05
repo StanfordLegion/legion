@@ -331,8 +331,8 @@ impl Proc {
         spy_state: &SpyState,
     ) -> io::Result<ProcessorRecord> {
         let suffix = match device {
-            Some(DeviceKind::Device) => "_Device",
-            Some(DeviceKind::Host) => "_Host",
+            Some(DeviceKind::Device) => " Device",
+            Some(DeviceKind::Host) => " Host",
             None => "",
         };
         let file_suffix = match device {
@@ -356,12 +356,12 @@ impl Proc {
         let level = max(self.max_levels(device), 1);
 
         Ok(ProcessorRecord {
-            full_text: format!("{:?} Processor 0x{:x}{}", self.kind, self.proc_id, suffix),
+            full_text: format!("{:?}{} Processor 0x{:x}", self.kind, suffix, self.proc_id),
             text: format!(
-                "{:?} Proc {}{}",
+                "{:?}{} Proc {}",
                 self.kind,
+                suffix,
                 self.proc_id.proc_in_node(),
-                suffix
             ),
             tsv: filename,
             levels: level,
