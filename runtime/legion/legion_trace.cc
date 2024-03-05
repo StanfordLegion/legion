@@ -4812,7 +4812,7 @@ namespace Legion {
         {
           TraceConditionSet *set = new TraceConditionSet(this, parent_req_index,
               tree_id, it->first, std::move(it->second), !disable_sharing); 
-          set->add_reference(disable_sharing ? 1 : 2);
+          set->add_reference((disable_sharing || (previews == NULL)) ? 1 : 2);
           postconditions.push_back(set);
           if (!disable_sharing && (previews != NULL))
             preconditions.push_back(set);
