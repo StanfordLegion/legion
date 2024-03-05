@@ -20481,7 +20481,7 @@ namespace Legion {
                                           owner_shard->shard_id);
       // Now we need to perform a collective to make sure that all the 
       // shards agree on the result of the interference
-      AllReduceCollective<SumReduction<bool> > any_interfering(this,
+      AllReduceCollective<SumReduction<bool>,false> any_interfering(this,
           get_next_collective_index(COLLECTIVE_LOC_105, true/*logical*/));
       return any_interfering.sync_all_reduce(result);
     }

@@ -258,12 +258,5 @@ namespace Legion {
   }; // namespace Mapping
 }; // namespace Legion
 
-// For backwards compatibility
-namespace LegionRuntime {
-  namespace HighLevel {
-    typedef Legion::Mapping::WrapperMapper WrapperMapper;
-  };
-};
-
 #endif 
 
