@@ -7028,6 +7028,7 @@ namespace Legion {
         assert(local_shard_id < shards_per_address_space);
 #endif
         local_proxy = proxy;
+        local_task_name = task_name;
         const ShardID shard = (shard_id < 0) ? (runtime->address_space * 
             shards_per_address_space + local_shard_id++) : shard_id;
         const size_t total_shards = 
@@ -30737,8 +30738,18 @@ namespace Legion {
             strlen(task_name) + 1, true/*mutable*/);
       // Record a fake variant if we're profiling
       if (profiler != NULL)
-        profiler->register_task_variant(top_task_id, 0/*variant ID*/, 
-                                        task_name);
+      {
+        if (task_name == NULL)
+        {
+          char implicit_name[64];
+          snprintf(implicit_name, 64, "implicit_variant_%d", top_task_id);
+          profiler->register_task_variant(top_task_id, 0/*variant ID*/, 
+                                          implicit_name);
+        }
+        else
+          profiler->register_task_variant(top_task_id, 0/*variant ID*/, 
+                                          task_name);
+      }
       // Get an individual task to be the top-level task
       IndividualTask *top_task = get_available_individual_task();
       // Get a remote task to serve as the top of the top-level task
