@@ -814,13 +814,9 @@ list(APPEND MAPPER_SRC
 # Legion runtime
 list(APPEND LEGION_SRC
   legion.h
-  legion/accessor.h
-  legion/arrays.h
   legion/bitmask.h
-  legion/field_tree.h
   legion/garbage_collection.h             legion/garbage_collection.cc
   legion/index_space_value.h              legion/index_space_value.cc
-  legion/interval_tree.h
   legion/legion_allocation.h
   legion/legion_analysis.h                legion/legion_analysis.cc
   legion/legion_c.h                       legion/legion_c.cc
@@ -846,7 +842,6 @@ list(APPEND LEGION_SRC
   legion/legion_views.h                   legion/legion_views.cc
   legion/legion_redop.h                   legion/legion_redop.cc
   legion/mapper_manager.h                 legion/mapper_manager.cc
-  legion/rectangle_set.h
   legion/region_tree.h                    legion/region_tree.cc
   legion/runtime.h                        legion/runtime.cc
 )

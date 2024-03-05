@@ -28,8 +28,7 @@ enum FieldIDs {
 };
 
 
-using namespace LegionRuntime::HighLevel;
-using namespace LegionRuntime::Accessor;
+using namespace Legion;
 
 struct Piece {
 public: 
@@ -47,7 +46,7 @@ void PersistentRegion_init();
 
 class PersistentRegion {
  public:
-    PersistentRegion(HighLevelRuntime * runtime);
+    PersistentRegion(Runtime * runtime);
     
     void create_persistent_subregions(Context ctx, const char *name, LogicalRegion parent_lr,
                                       LogicalPartition lp,
@@ -64,7 +63,7 @@ class PersistentRegion {
  private:
     //LogicalRegion get_subregion(LogicalPartition lp, Color c);
     std::vector<Piece> pieces; 
-    HighLevelRuntime * runtime;
+    Runtime * runtime;
     LogicalPartition  lp;
     LogicalRegion parent_lr;
     Domain dom;

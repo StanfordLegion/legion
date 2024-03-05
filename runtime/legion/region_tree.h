@@ -23,7 +23,6 @@
 #include "legion/legion_analysis.h"
 #include "legion/legion_profiling.h"
 #include "legion/garbage_collection.h"
-#include "legion/field_tree.h"
 
 #include <algorithm>
 

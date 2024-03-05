@@ -31,10 +31,24 @@
 #include <string.h>
 #include <algorithm>
 
+static inline bool operator<(const legion_ptr_t &lhs, const legion_ptr_t &rhs)
+{ return lhs.value < rhs.value; }
+
 namespace Legion {
 
     class CContext;
     class TaskMut;
+
+    struct ColoredPoints {
+    public:
+      std::set<legion_ptr_t> points;
+      std::set<std::pair<legion_ptr_t,legion_ptr_t> > ranges;
+    };
+    typedef std::map<Color,ColoredPoints> Coloring;
+    typedef std::map<Color,Domain> DomainColoring;
+    typedef std::map<DomainPoint,ColoredPoints> PointColoring;
+    typedef std::map<DomainPoint,Domain> DomainPointColoring;
+    typedef std::map<DomainPoint,std::set<Domain> > MultiDomainPointColoring; 
 
     class CObjectWrapper {
     public:
@@ -164,22 +178,6 @@ namespace Legion {
 #ifdef __PGIC__
 #pragma warning (pop)
 #endif
-
-      static legion_ptr_t
-      wrap(ptr_t ptr)
-      {
-        legion_ptr_t ptr_;
-        ptr_.value = ptr.value;
-        return ptr_;
-      }
-
-      static ptr_t
-      unwrap(legion_ptr_t ptr_)
-      {
-        ptr_t ptr;
-        ptr.value = ptr_.value;
-        return ptr;
-      }
 
 #define NEW_POINT_WRAPPER(DIM)                                  \
       typedef Point<DIM,coord_t> Point##DIM##D;                 \

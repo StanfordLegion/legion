@@ -142,8 +142,6 @@ namespace Legion {
     template<int DIM, typename T> __CUDA_HD__
     DomainPoint(const Point<DIM,T> &rhs);
 
-    template<unsigned DIM>
-    operator LegionRuntime::Arrays::Point<DIM>(void) const;
     template<int DIM, typename T> __CUDA_HD__
     operator Point<DIM,T>(void) const;
 
@@ -222,10 +220,6 @@ namespace Legion {
       }
     };
 
-    template<int DIM>
-    static DomainPoint from_point(
-        typename LegionRuntime::Arrays::Point<DIM> p);
-
     __CUDA_HD__
     Color get_color(void) const;
     __CUDA_HD__
@@ -234,9 +228,6 @@ namespace Legion {
     int get_dim(void) const;
     __CUDA_HD__
     inline bool exists(void) const { return (get_dim() > 0); }
-
-    template <int DIM>
-    LegionRuntime::Arrays::Point<DIM> get_point(void) const; 
 
     __CUDA_HD__
     bool is_null(void) const;
@@ -316,15 +307,6 @@ namespace Legion {
     template<int DIM, typename T> __CUDA_HD__
     Rect<DIM,T> bounds(void) const;
 
-    template<int DIM>
-    static Domain from_rect(typename LegionRuntime::Arrays::Rect<DIM> r);
-
-    template<int DIM>
-    static Domain from_point(typename LegionRuntime::Arrays::Point<DIM> p);
-
-    template<int DIM>
-    operator LegionRuntime::Arrays::Rect<DIM>(void) const;
-
     template<int DIM, typename T> __CUDA_HD__
     operator Rect<DIM,T>(void) const;
 
@@ -365,9 +347,6 @@ namespace Legion {
     // Returns the bounding box for this Domain and a point.
     // WARNING: only works with structured Domain.
     Domain convex_hull(const DomainPoint &p) const;
-
-    template <int DIM>
-    LegionRuntime::Arrays::Rect<DIM> get_rect(void) const; 
 
     class DomainPointIterator {
     public:

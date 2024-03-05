@@ -976,7 +976,7 @@ void top_level_task(const Task *task,
     // use the interference matrix to define an over-approximation of the
     //  image that includes every index in a destination rank if any index
     //  is included in the image
-    MultiDomainColoring mdc;
+    std::map<DomainPoint,std::vector<Rect<1> > > mdc;
     
     for(Domain::DomainPointIterator dpi(runtime->get_index_space_domain(ctx,
 									is_interference));
@@ -987,14 +987,18 @@ void top_level_task(const Task *task,
       IndexSpace is_dst = runtime->get_index_subspace(ctx,
 						      lp_owned.get_index_partition(),
 						      dst);
-      mdc[src].insert(runtime->get_index_space_domain(ctx, is_dst));
+      DomainT<1> domain = runtime->get_index_space_domain(ctx, is_dst);
+      for (RectInDomainIterator<1> itr(domain); itr(); itr++)
+        mdc[src].push_back(*itr);
     }
 
-    IndexPartition ip = runtime->create_index_partition(ctx,
-							is_owned,
-							runtime->get_index_space_domain(ctx, is_pieces),
-							mdc,
-							false /*!disjoint*/);
+    std::map<DomainPoint,Domain> domain_map;
+    for (std::map<DomainPoint,std::vector<Rect<1> > >::const_iterator it =
+          mdc.begin(); it != mdc.end(); it++)
+      domain_map[it->first] = Domain(DomainT<1>(it->second));
+
+    IndexPartition ip = runtime->create_partition_by_domain(ctx, is_owned,
+                                                            domain_map, is_pieces);
     runtime->attach_name(ip, "ip_bloated");
     lp_owned_image_bloated = runtime->get_logical_partition(ctx, lr_owned, ip);
     runtime->attach_name(lp_owned_image_bloated, "lp_bloated");

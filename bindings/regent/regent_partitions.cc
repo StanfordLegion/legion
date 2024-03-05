@@ -23,14 +23,7 @@
 // Disable deprecated warnings in this file since we are also
 // trying to maintain backwards compatibility support for older
 // interfaces here in the C API
-#ifdef __GNUC__
-#pragma GCC diagnostic ignored "-Wdeprecated"
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-#endif
-#ifdef __clang__
-#pragma clang diagnostic ignored "-Wdeprecated"
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-#endif
+LEGION_DISABLE_DEPRECATED_WARNINGS
 
 static inline legion_terra_index_space_list_list_t
 create_list_list(std::vector<IndexSpace> &spaces,
@@ -358,12 +351,11 @@ legion_terra_index_cross_product_create_list(
       IndexPartition rh_subpart = runtime->get_index_partition(ctx, rh_space, sub_color);
       IndexSpace rh_subspace = runtime->get_index_subspace(ctx, rh_subpart, lh_color);
 
-      IndexIterator rh_it(runtime, ctx, rh_subspace);
-      if (rh_it.has_next()) {
+      Domain rh_domain = runtime->get_index_space_domain(ctx, rh_subspace);
+      if (!rh_domain.empty())
         product[lh_space].push_back(rh_subspace);
-      } else {
+      else
         product[lh_space].push_back(IndexSpace::NO_SPACE);
-      }
     }
   }
 
@@ -512,38 +504,33 @@ create_cross_product_complete_unstructured(
     IndexSpace& lh_space = lhs[lhs_idx];
     std::vector<IndexSpace>& rh_spaces = product[lh_space];
     DomainPoint lh_color = lhs_colors[lhs_idx];
+    DomainT<1> lh_domain = runtime->get_index_space_domain(ctx, lh_space);
 
     for (unsigned rhs_idx = 0; rhs_idx < rh_spaces.size(); ++rhs_idx) {
       IndexSpace& rh_space = rh_spaces[rhs_idx];
 
       coloring[rh_space][lh_color];
-      for (IndexIterator rh_it(runtime, ctx, rh_space); rh_it.has_next();) {
-        size_t rh_count = 0;
-        ptr_t rh_ptr = rh_it.next_span(rh_count);
-        ptr_t rh_end = rh_ptr.value + rh_count - 1;
+      DomainT<1> rh_domain = runtime->get_index_space_domain(ctx, rh_space);
+      for (RectInDomainIterator<1> rh_it(rh_domain); rh_it(); rh_it++) {
+        legion_ptr_t rh_end{rh_it->hi[0]};
 
-        for (IndexIterator lh_it(runtime, ctx, lh_space, rh_ptr); lh_it.has_next();) {
-          size_t lh_count = 0;
-          ptr_t lh_ptr = lh_it.next_span(lh_count);
-          ptr_t lh_end = lh_ptr.value + lh_count - 1;
+        for (RectInDomainIterator<1> lh_it(lh_domain); lh_it(); lh_it++) {
+          legion_ptr_t lh_ptr{lh_it->lo[0]};
+          legion_ptr_t lh_end{lh_it->hi[0]};
 
           if (lh_ptr.value > rh_end.value) {
             break;
           }
 
-          if (color_spaces.count(rh_space) > 0) {
-            color_spaces[rh_space] =
-              color_spaces[rh_space].convex_hull(lh_color);
-          } else {
+          if (color_spaces.count(rh_space) > 0)
+            color_spaces[rh_space] = color_spaces[rh_space].convex_hull(lh_color);
+          else
             color_spaces[rh_space] = Domain::from_domain_point(lh_color);
-          }
 
-          if (lh_end.value > rh_end.value) {
-            coloring[rh_space][lh_color].ranges.insert(std::pair<ptr_t, ptr_t>(lh_ptr, rh_end));
-            break;
-          }
-
-          coloring[rh_space][lh_color].ranges.insert(std::pair<ptr_t, ptr_t>(lh_ptr, lh_end));
+          if (lh_end.value > rh_end.value)
+            coloring[rh_space][lh_color].ranges.emplace(std::make_pair(lh_ptr, rh_end));
+          else
+            coloring[rh_space][lh_color].ranges.emplace(std::make_pair(lh_ptr, lh_end));
         }
       }
     }
@@ -553,19 +540,62 @@ create_cross_product_complete_unstructured(
   for (std::map<IndexSpace, PointColoring>::iterator it = coloring.begin();
        it != coloring.end(); ++it) {
     IndexSpace rh_space = it->first;
-    PointColoring& coloring = it->second;
+    PointColoring& local_coloring = it->second;
     assert(color_spaces.count(rh_space) > 0);
     Domain color_space = color_spaces[rh_space];
 
     for (Domain::DomainPointIterator dp(color_space); dp; dp++) {
-      if (coloring.find(dp.p) == coloring.end()) {
-        coloring[dp.p].ranges.insert(std::pair<ptr_t, ptr_t>(0, -1));
+      if (local_coloring.find(dp.p) == local_coloring.end()) {
+        local_coloring[dp.p].ranges.emplace(
+            std::make_pair(legion_ptr_t{0}, legion_ptr_t{-1}));
       }
     }
 
-    IndexPartition ip = runtime->create_index_partition(
-        ctx, /* parent = */ rh_space, /* color_space = */ color_space,
-        coloring, lhs_part_disjoint ? DISJOINT_KIND : ALIASED_KIND);
+    std::map<DomainPoint,Domain> domains;
+    for (PointColoring::const_iterator cit = 
+          local_coloring.begin(); cit != local_coloring.end(); cit++)
+    {
+      if (cit->second.ranges.empty())
+      {
+        std::vector<Point<1,coord_t> > 
+          points(cit->second.points.size());
+        unsigned index = 0;
+        for (std::set<legion_ptr_t>::const_iterator it = 
+              cit->second.points.begin(); it != 
+              cit->second.points.end(); it++)
+          points[index++] = Point<1,coord_t>(it->value);
+        const DomainT<1,coord_t> space(points);
+        domains[cit->first] = DomainT<1,coord_t>(space);
+      }
+      else
+      {
+        std::vector<Rect<1,coord_t> >
+          ranges(cit->second.points.size() + cit->second.ranges.size());
+        unsigned index = 0;
+        for (std::set<legion_ptr_t>::const_iterator it = 
+              cit->second.points.begin(); it != 
+              cit->second.points.end(); it++)
+        {
+          Point<1,coord_t> point(it->value);
+          ranges[index++] = Rect<1,coord_t>(point, point);
+        }
+        for (std::set<std::pair<legion_ptr_t,legion_ptr_t> >::iterator it = 
+              cit->second.ranges.begin(); it !=
+              cit->second.ranges.end(); it++)
+        {
+          Point<1,coord_t> lo(it->first.value);
+          Point<1,coord_t> hi(it->second.value);
+          ranges[index++] = Rect<1,coord_t>(lo, hi);
+        }
+        const DomainT<1,coord_t> space(ranges);
+        domains[cit->first] = DomainT<1,coord_t>(space);
+      }
+    }
+    // Make an index space for the color space
+    IndexSpace index_color_space = runtime->create_index_space(ctx, color_space);
+    IndexPartition ip = runtime->create_partition_by_domain(ctx, rh_space, domains,
+        index_color_space, true/*perform intersections*/, 
+        lhs_part_disjoint ? LEGION_DISJOINT_KIND : LEGION_ALIASED_KIND);
     rh_partitions[it->first] = ip;
   }
 
