@@ -248,7 +248,8 @@ impl StateDataSource {
                             long_suffix
                         );
 
-                        let max_rows = state.procs.get(proc).unwrap().max_levels as u64 + 1;
+                        let max_rows =
+                            state.procs.get(proc).unwrap().max_levels(*device) as u64 + 1;
                         proc_slots.push(EntryInfo::Slot {
                             short_name,
                             long_name,
@@ -323,7 +324,7 @@ impl StateDataSource {
                         entry_map.insert(mem_id.clone(), EntryKind::Mem(*mem));
                         mem_entries.insert(*mem, mem_id);
 
-                        let rows = state.mems.get(mem).unwrap().max_live_insts as u64 + 1;
+                        let rows = state.mems.get(mem).unwrap().max_levels(None) as u64 + 1;
                         mem_slots.push(EntryInfo::Slot {
                             short_name: format!("{}{}", kind_first_letter, mem.mem_in_node()),
                             long_name: format!(
@@ -432,7 +433,7 @@ impl StateDataSource {
                             ChanKind::DepPart => "Dependent Partitioning".to_owned(),
                         };
 
-                        let rows = state.chans.get(chan).unwrap().max_levels as u64 + 1;
+                        let rows = state.chans.get(chan).unwrap().max_levels(None) as u64 + 1;
                         chan_slots.push(EntryInfo::Slot {
                             short_name,
                             long_name,
@@ -505,8 +506,9 @@ impl StateDataSource {
 
         let step_utilization = match self.entry_map.get(entry_id).unwrap() {
             EntryKind::ProcKind(group) => {
+                let ProcGroup(_, _, device) = *group;
                 let procs = self.proc_groups.get(group).unwrap();
-                let points = self.state.proc_group_timepoints(procs);
+                let points = self.state.proc_group_timepoints(device, procs);
                 let count = procs.len() as u64;
                 let owners: BTreeSet<_> = procs
                     .iter()
@@ -747,11 +749,12 @@ impl StateDataSource {
     {
         let mut items: Vec<Vec<Item>> = Vec::new();
         let mut merged = Vec::new();
-        items.resize_with(cont.max_levels() + 1, Vec::new);
+        let levels = cont.max_levels(device) as usize + 1;
+        items.resize_with(levels, Vec::new);
         if let Some(ref mut item_metas) = item_metas {
-            item_metas.resize_with(cont.max_levels() + 1, Vec::new);
+            item_metas.resize_with(levels, Vec::new);
         }
-        merged.resize(cont.max_levels() + 1, 0u64);
+        merged.resize(levels, 0u64);
         let points = cont.time_points(device);
 
         for point in points {

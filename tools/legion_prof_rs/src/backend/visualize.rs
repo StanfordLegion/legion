@@ -16,7 +16,7 @@ use crate::backend::common::{
 use crate::state::{
     Chan, ChanEntry, ChanID, ChanPoint, Config, Container, ContainerEntry, DeviceKind, Mem, MemID,
     MemKind, MemPoint, MemProcAffinity, NodeID, OperationInstInfo, Proc, ProcEntryKind, ProcID,
-    ProcPoint, ProfUID, SpyState, State, Timestamp,
+    ProcKind, ProcPoint, ProfUID, SpyState, State, Timestamp,
 };
 
 use crate::conditional_assert;
@@ -168,6 +168,7 @@ impl Proc {
     fn emit_tsv_point(
         &self,
         f: &mut csv::Writer<File>,
+        device: Option<DeviceKind>,
         point: &ProcPoint,
         state: &State,
         spy_state: &SpyState,
@@ -221,8 +222,8 @@ impl Proc {
             }
         }
 
-        let level = self.max_levels - base.level.unwrap();
-        let level_ready = base.level_ready.map(|l| self.max_levels_ready - l);
+        let level = self.max_levels(device) - base.level.unwrap();
+        let level_ready = base.level_ready.map(|l| self.max_levels_ready(device) - l);
 
         let instances = {
             // ProfTask has no op_id
@@ -324,27 +325,39 @@ impl Proc {
 
     fn emit_tsv<P: AsRef<Path>>(
         &self,
+        device: Option<DeviceKind>,
         path: P,
         state: &State,
         spy_state: &SpyState,
     ) -> io::Result<ProcessorRecord> {
+        let suffix = match device {
+            Some(DeviceKind::Device) => " Device",
+            Some(DeviceKind::Host) => " Host",
+            None => "",
+        };
+
         let mut filename = PathBuf::new();
         filename.push("tsv");
-        filename.push(format!("Proc_0x{:x}.tsv", self.proc_id));
+        filename.push(format!("Proc_0x{:x}{}.tsv", self.proc_id, suffix));
         let mut f = csv::WriterBuilder::new()
             .delimiter(b'\t')
             .from_path(path.as_ref().join(&filename))?;
 
-        for point in &self.time_points {
+        for point in self.time_points(device) {
             assert!(point.first);
-            self.emit_tsv_point(&mut f, point, state, spy_state)?;
+            self.emit_tsv_point(&mut f, device, point, state, spy_state)?;
         }
 
-        let level = max(self.max_levels, 1);
+        let level = max(self.max_levels(device), 1);
 
         Ok(ProcessorRecord {
-            full_text: format!("{:?} Processor 0x{:x}", self.kind, self.proc_id),
-            text: format!("{:?} Proc {}", self.kind, self.proc_id.proc_in_node()),
+            full_text: format!("{:?} Processor 0x{:x}{}", self.kind, self.proc_id, suffix),
+            text: format!(
+                "{:?} Proc {}{}",
+                self.kind,
+                self.proc_id.proc_in_node(),
+                suffix
+            ),
             tsv: filename,
             levels: level,
         })
@@ -453,7 +466,7 @@ impl Chan {
 
         let color = format!("#{:06x}", entry.color(state));
 
-        let level = max(self.max_levels + 1, 4) - base.level.unwrap() - 1;
+        let level = max(self.max_levels(None) + 1, 4) - base.level.unwrap() - 1;
 
         let instances = match entry {
             ChanEntry::Copy(copy) => {
@@ -597,12 +610,12 @@ impl Chan {
             .delimiter(b'\t')
             .from_path(path.as_ref().join(&filename))?;
 
-        for point in &self.time_points {
+        for point in self.time_points(None) {
             assert!(point.first);
             self.emit_tsv_point(&mut f, point, state)?;
         }
 
-        let level = max(self.max_levels + 1, 4) - 1;
+        let level = max(self.max_levels(None) + 1, 4) - 1;
 
         Ok(ProcessorRecord {
             full_text: long_name,
@@ -628,7 +641,7 @@ impl Mem {
 
         let color = format!("#{:06x}", inst.color(state));
 
-        let level = max(self.max_live_insts + 1, 4) - base.level.unwrap();
+        let level = max(self.max_levels(None) + 1, 4) - base.level.unwrap();
 
         f.serialize(DataRecord {
             level,
@@ -694,12 +707,12 @@ impl Mem {
             .delimiter(b'\t')
             .from_path(path.as_ref().join(&filename))?;
 
-        for point in &self.time_points {
+        for point in self.time_points(None) {
             assert!(point.first);
             self.emit_tsv_point(&mut f, point, state)?;
         }
 
-        let level = max(self.max_live_insts + 1, 4) - 1;
+        let level = max(self.max_levels(None) + 1, 4) - 1;
 
         Ok(ProcessorRecord {
             full_text: long_name,
@@ -1032,9 +1045,16 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
     let proc_records: BTreeMap<_, _> = procs
         .par_iter()
         .filter(|proc| !proc.is_empty() && proc.is_visible())
-        .map(|proc| {
-            proc.emit_tsv(&path, state, spy_state)
-                .map(|record| (proc.proc_id, record))
+        .flat_map(|proc| match proc.kind {
+            ProcKind::GPU => vec![
+                (proc, Some(DeviceKind::Device)),
+                (proc, Some(DeviceKind::Host)),
+            ],
+            _ => vec![(proc, None)],
+        })
+        .map(|(proc, device)| {
+            proc.emit_tsv(device, &path, state, spy_state)
+                .map(|record| ((proc.proc_id, device), record))
         })
         .collect::<io::Result<_>>()?;
 
