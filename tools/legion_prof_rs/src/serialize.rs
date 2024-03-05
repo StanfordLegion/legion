@@ -91,7 +91,7 @@ pub enum Record {
     MetaDesc { kind: VariantID, message: bool, ordered_vc: bool, name: String },
     OpDesc { kind: u32, name: String },
     MaxDimDesc { max_dim: MaxDim },
-    MachineDesc { node_id: NodeID, num_nodes: u32, hostname: String, host_id: u64, process_id: u32 },
+    MachineDesc { node_id: NodeID, num_nodes: u32, version: u32, hostname: String, host_id: u64, process_id: u32 },
     ZeroTime { zero_time: i64 },
     ProcDesc { proc_id: ProcID, kind: ProcKind, cuda_device_uuid: Uuid },
     MemDesc { mem_id: MemID, kind: MemKind, capacity: u64 },
@@ -381,6 +381,7 @@ fn parse_max_dim_desc(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
 fn parse_machine_desc(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, nodeid) = le_u32(input)?;
     let (input, num_nodes) = le_u32(input)?;
+    let (input, version) = le_u32(input)?;
     let (input, hostname) = parse_string(input)?;
     let (input, host_id) = le_u64(input)?;
     let (input, process_id) = le_u32(input)?;
@@ -390,6 +391,7 @@ fn parse_machine_desc(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
         Record::MachineDesc {
             node_id,
             num_nodes,
+            version,
             hostname,
             host_id,
             process_id,
@@ -1027,6 +1029,15 @@ fn filter_record<'a>(
     }
 }
 
+fn check_version(version: u32) {
+    let expected_version: u32 = include_str!("../../../runtime/legion/legion_profiling_version.h")
+        .trim()
+        .parse()
+        .unwrap();
+
+    assert_eq!(version, expected_version, "Legion Prof was built against an incompatible Legion version. Please rebuild with the same version of Legion used by the application to generate the profile logs. (Expected version {}, got version {}.)", expected_version, version);
+}
+
 fn parse_record<'a>(
     input: &'a [u8],
     parsers: &BTreeMap<u32, fn(&[u8], i32) -> IResult<&[u8], Record>>,
@@ -1115,8 +1126,14 @@ fn parse<'a>(
         if let Record::MaxDimDesc { max_dim: d } = &record {
             max_dim = *d;
         }
-        if let Record::MachineDesc { node_id: d, .. } = &record {
-            node_id = Some(*d);
+        if let Record::MachineDesc {
+            node_id: d,
+            version,
+            ..
+        } = record
+        {
+            node_id = Some(d);
+            check_version(version);
         }
         input = input_;
         if !filter_input || filter_record(&record, visible_nodes, node_id) {
