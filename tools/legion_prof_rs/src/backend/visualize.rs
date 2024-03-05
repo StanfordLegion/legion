@@ -14,9 +14,9 @@ use crate::backend::common::{
     CopyInstInfoDumpInstVec, FillInstInfoDumpInstVec, MemGroup, ProcGroup, StatePostprocess,
 };
 use crate::state::{
-    Chan, ChanEntry, ChanID, ChanPoint, Config, Container, ContainerEntry, Mem, MemID, MemKind,
-    MemPoint, MemProcAffinity, NodeID, OperationInstInfo, Proc, ProcEntryKind, ProcID, ProcPoint,
-    ProfUID, SpyState, State, Timestamp,
+    Chan, ChanEntry, ChanID, ChanPoint, Config, Container, ContainerEntry, DeviceKind, Mem, MemID,
+    MemKind, MemPoint, MemProcAffinity, NodeID, OperationInstInfo, Proc, ProcEntryKind, ProcID,
+    ProcPoint, ProfUID, SpyState, State, Timestamp,
 };
 
 use crate::conditional_assert;
@@ -738,12 +738,17 @@ impl State {
             self.calculate_proc_utilization_data(utilizations, owners, count)
         };
 
-        let ProcGroup(node, kind) = group;
+        let ProcGroup(node, kind, device) = group;
         let node_name = match node {
             None => "all".to_owned(),
             Some(node_id) => format!("{}", node_id.0),
         };
-        let group_name = format!("{} ({:?})", &node_name, kind);
+        let suffix = match device {
+            Some(DeviceKind::Device) => " Device",
+            Some(DeviceKind::Host) => " Host",
+            None => "",
+        };
+        let group_name = format!("{} ({:?}{})", &node_name, kind, suffix);
         let filename = path
             .as_ref()
             .join("tsv")
@@ -877,13 +882,18 @@ impl State {
 
         let multinode = self.has_multiple_nodes();
         for group in timepoint_proc.keys() {
-            let ProcGroup(node, kind) = group;
+            let ProcGroup(node, kind, device) = group;
             if node.is_some() || multinode {
                 let node_name = match node {
                     None => "all".to_owned(),
                     Some(node_id) => format!("{}", node_id.0),
                 };
-                let group_name = format!("{} ({:?})", &node_name, kind);
+                let suffix = match device {
+                    Some(DeviceKind::Device) => " Device",
+                    Some(DeviceKind::Host) => " Host",
+                    None => "",
+                };
+                let group_name = format!("{} ({:?}{})", &node_name, kind, suffix);
                 stats
                     .entry(node_name)
                     .or_insert_with(Vec::new)

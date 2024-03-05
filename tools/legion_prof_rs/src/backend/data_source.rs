@@ -21,8 +21,8 @@ use crate::backend::common::{
 use crate::conditional_assert;
 use crate::state::{
     ChanEntry, ChanID, ChanKind, Color, Config, Container, ContainerEntry, Copy, CopyInstInfo,
-    Fill, FillInstInfo, Inst, InstUID, MemID, MemKind, NodeID, OpID, ProcEntryKind, ProcID,
-    ProcKind, ProfUID, State, TimeRange, Timestamp,
+    DeviceKind, Fill, FillInstInfo, Inst, InstUID, MemID, MemKind, NodeID, OpID, ProcEntryKind,
+    ProcID, ProcKind, ProfUID, State, TimeRange, Timestamp,
 };
 
 impl Into<ts::Timestamp> for Timestamp {
@@ -62,7 +62,7 @@ impl Into<Color32> for Color {
 #[derive(Debug, Clone)]
 enum EntryKind {
     ProcKind(ProcGroup),
-    Proc(ProcID),
+    Proc(ProcID, Option<DeviceKind>),
     MemKind(MemGroup),
     Mem(MemID),
     ChanKind(Option<NodeID>),
@@ -148,8 +148,11 @@ impl StateDataSource {
         let mem_groups = state.group_mems();
         let chan_groups = state.group_chans();
 
-        let mut nodes: BTreeSet<_> = proc_groups.keys().map(|ProcGroup(n, _)| *n).collect();
-        let proc_kinds: BTreeSet<_> = proc_groups.keys().map(|ProcGroup(_, k)| *k).collect();
+        let mut nodes: BTreeSet<_> = proc_groups.keys().map(|ProcGroup(n, _, _)| *n).collect();
+        let proc_kinds: BTreeSet<_> = proc_groups
+            .keys()
+            .map(|ProcGroup(_, k, d)| (*k, *d))
+            .collect();
         let mem_kinds: BTreeSet<_> = mem_groups.keys().map(|MemGroup(_, k)| *k).collect();
 
         if !state.has_multiple_nodes() {
@@ -178,8 +181,8 @@ impl StateDataSource {
             let mut kind_index = 0;
             let mut node_empty = node.is_some();
             // Processors
-            for kind in &proc_kinds {
-                let group = ProcGroup(*node, *kind);
+            for (kind, device) in &proc_kinds {
+                let group = ProcGroup(*node, *kind, *device);
 
                 let procs = proc_groups.get(&group).unwrap();
                 if node.is_some() {
@@ -197,36 +200,61 @@ impl StateDataSource {
                 let kind_id = node_id.child(kind_index);
                 kind_index += 1;
 
-                let color = match kind {
-                    ProcKind::GPU => Color::OLIVEDRAB,
-                    ProcKind::CPU => Color::STEELBLUE,
-                    ProcKind::Utility => Color::CRIMSON,
-                    ProcKind::IO => Color::ORANGERED,
-                    ProcKind::ProcGroup => Color::ORANGERED,
-                    ProcKind::ProcSet => Color::ORANGERED,
-                    ProcKind::OpenMP => Color::ORANGERED,
-                    ProcKind::Python => Color::OLIVEDRAB,
+                let color = match (kind, device) {
+                    (ProcKind::GPU, Some(DeviceKind::Device)) => Color::OLIVEDRAB,
+                    (ProcKind::GPU, Some(DeviceKind::Host)) => Color::ORANGERED,
+                    (ProcKind::CPU, None) => Color::STEELBLUE,
+                    (ProcKind::Utility, None) => Color::CRIMSON,
+                    (ProcKind::IO, None) => Color::ORANGERED,
+                    (ProcKind::ProcGroup, None) => Color::ORANGERED,
+                    (ProcKind::ProcSet, None) => Color::ORANGERED,
+                    (ProcKind::OpenMP, None) => Color::ORANGERED,
+                    (ProcKind::Python, None) => Color::OLIVEDRAB,
+                    _ => unreachable!(),
                 };
                 let color: Color32 = color.into();
 
                 let mut proc_slots = Vec::new();
                 if node.is_some() {
-                    for (proc_index, proc) in procs.iter().enumerate() {
+                    let mut proc_index = 0;
+                    for proc in procs {
                         let proc_id = kind_id.child(proc_index as u64);
-                        entry_map.insert(proc_id.clone(), EntryKind::Proc(*proc));
+                        entry_map.insert(proc_id.clone(), EntryKind::Proc(*proc, *device));
                         proc_entries.insert(*proc, proc_id);
 
-                        let rows = state.procs.get(proc).unwrap().max_levels as u64 + 1;
+                        let short_suffix = match device {
+                            Some(DeviceKind::Device) => "d",
+                            Some(DeviceKind::Host) => "h",
+                            None => "",
+                        };
+
+                        let long_suffix = match device {
+                            Some(DeviceKind::Device) => " Device",
+                            Some(DeviceKind::Host) => " Host",
+                            None => "",
+                        };
+
+                        let short_name = format!(
+                            "{}{}{}",
+                            kind_first_letter,
+                            proc.proc_in_node(),
+                            short_suffix
+                        );
+                        let long_name = format!(
+                            "{} {} {}{}",
+                            node_long_name,
+                            kind_name,
+                            proc.proc_in_node(),
+                            long_suffix
+                        );
+
+                        let max_rows = state.procs.get(proc).unwrap().max_levels as u64 + 1;
                         proc_slots.push(EntryInfo::Slot {
-                            short_name: format!("{}{}", kind_first_letter, proc.proc_in_node()),
-                            long_name: format!(
-                                "{} {} {}",
-                                node_long_name,
-                                kind_name,
-                                proc.proc_in_node()
-                            ),
-                            max_rows: rows,
+                            short_name,
+                            long_name,
+                            max_rows,
                         });
+                        proc_index += 1;
                     }
                 }
 
@@ -245,8 +273,8 @@ impl StateDataSource {
             if node_empty {
                 // Remove this node's processors from the all nodes list to
                 // avoid influencing global utilization
-                for kind in &proc_kinds {
-                    let group = ProcGroup(None, *kind);
+                for (kind, device) in &proc_kinds {
+                    let group = ProcGroup(None, *kind, *device);
                     proc_groups
                         .get_mut(&group)
                         .unwrap()
@@ -708,6 +736,7 @@ impl StateDataSource {
     fn build_items<C>(
         &self,
         cont: &C,
+        device: Option<DeviceKind>,
         tile_id: TileID,
         full: bool,
         mut item_metas: Option<&mut Vec<Vec<ItemMeta>>>,
@@ -723,7 +752,7 @@ impl StateDataSource {
             item_metas.resize_with(cont.max_levels() + 1, Vec::new);
         }
         merged.resize(cont.max_levels() + 1, 0u64);
-        let points = cont.time_points();
+        let points = cont.time_points(device);
 
         for point in points {
             assert!(point.first);
@@ -828,11 +857,12 @@ impl StateDataSource {
         &self,
         entry_id: &EntryID,
         proc_id: ProcID,
+        device: Option<DeviceKind>,
         tile_id: TileID,
         full: bool,
     ) -> SlotTile {
         let proc = self.state.procs.get(&proc_id).unwrap();
-        let items = self.build_items(proc, tile_id, full, None, |_, _| unreachable!());
+        let items = self.build_items(proc, device, tile_id, full, None, |_, _| unreachable!());
         SlotTile {
             entry_id: entry_id.clone(),
             tile_id,
@@ -911,12 +941,13 @@ impl StateDataSource {
         &self,
         entry_id: &EntryID,
         proc_id: ProcID,
+        device: Option<DeviceKind>,
         tile_id: TileID,
         full: bool,
     ) -> SlotMetaTile {
         let proc = self.state.procs.get(&proc_id).unwrap();
-        let mut item_metas: Vec<Vec<ItemMeta>> = Vec::new();
-        let items = self.build_items(proc, tile_id, full, Some(&mut item_metas), |entry, info| {
+        let mut m: Vec<Vec<ItemMeta>> = Vec::new();
+        let items = self.build_items(proc, device, tile_id, full, Some(&mut m), |entry, info| {
             let ItemInfo {
                 point_interval,
                 expand,
@@ -1011,14 +1042,14 @@ impl StateDataSource {
                 fields,
             }
         });
-        assert_eq!(items.len(), item_metas.len());
-        for (item_row, item_meta_row) in items.iter().zip(item_metas.iter()) {
+        assert_eq!(items.len(), m.len());
+        for (item_row, item_meta_row) in items.iter().zip(m.iter()) {
             assert_eq!(item_row.len(), item_meta_row.len());
         }
         SlotMetaTile {
             entry_id: entry_id.clone(),
             tile_id,
-            data: SlotMetaTileData { items: item_metas },
+            data: SlotMetaTileData { items: m },
         }
     }
 
@@ -1030,7 +1061,7 @@ impl StateDataSource {
         full: bool,
     ) -> SlotTile {
         let mem = self.state.mems.get(&mem_id).unwrap();
-        let items = self.build_items(mem, tile_id, full, None, |_, _| unreachable!());
+        let items = self.build_items(mem, None, tile_id, full, None, |_, _| unreachable!());
         SlotTile {
             entry_id: entry_id.clone(),
             tile_id,
@@ -1070,8 +1101,8 @@ impl StateDataSource {
         full: bool,
     ) -> SlotMetaTile {
         let mem = self.state.mems.get(&mem_id).unwrap();
-        let mut item_metas: Vec<Vec<ItemMeta>> = Vec::new();
-        let items = self.build_items(mem, tile_id, full, Some(&mut item_metas), |entry, info| {
+        let mut m: Vec<Vec<ItemMeta>> = Vec::new();
+        let items = self.build_items(mem, None, tile_id, full, Some(&mut m), |entry, info| {
             let ItemInfo {
                 point_interval,
                 expand,
@@ -1119,14 +1150,14 @@ impl StateDataSource {
                 fields,
             }
         });
-        assert_eq!(items.len(), item_metas.len());
-        for (item_row, item_meta_row) in items.iter().zip(item_metas.iter()) {
+        assert_eq!(items.len(), m.len());
+        for (item_row, item_meta_row) in items.iter().zip(m.iter()) {
             assert_eq!(item_row.len(), item_meta_row.len());
         }
         SlotMetaTile {
             entry_id: entry_id.clone(),
             tile_id,
-            data: SlotMetaTileData { items: item_metas },
+            data: SlotMetaTileData { items: m },
         }
     }
 
@@ -1138,7 +1169,7 @@ impl StateDataSource {
         full: bool,
     ) -> SlotTile {
         let chan = self.state.chans.get(&chan_id).unwrap();
-        let items = self.build_items(chan, tile_id, full, None, |_, _| unreachable!());
+        let items = self.build_items(chan, None, tile_id, full, None, |_, _| unreachable!());
         SlotTile {
             entry_id: entry_id.clone(),
             tile_id,
@@ -1295,8 +1326,8 @@ impl StateDataSource {
         full: bool,
     ) -> SlotMetaTile {
         let chan = self.state.chans.get(&chan_id).unwrap();
-        let mut item_metas: Vec<Vec<ItemMeta>> = Vec::new();
-        let items = self.build_items(chan, tile_id, full, Some(&mut item_metas), |entry, info| {
+        let mut m: Vec<Vec<ItemMeta>> = Vec::new();
+        let items = self.build_items(chan, None, tile_id, full, Some(&mut m), |entry, info| {
             let ItemInfo {
                 point_interval,
                 expand,
@@ -1343,14 +1374,14 @@ impl StateDataSource {
                 fields,
             }
         });
-        assert_eq!(items.len(), item_metas.len());
-        for (item_row, item_meta_row) in items.iter().zip(item_metas.iter()) {
+        assert_eq!(items.len(), m.len());
+        for (item_row, item_meta_row) in items.iter().zip(m.iter()) {
             assert_eq!(item_row.len(), item_meta_row.len());
         }
         SlotMetaTile {
             entry_id: entry_id.clone(),
             tile_id,
-            data: SlotMetaTileData { items: item_metas },
+            data: SlotMetaTileData { items: m },
         }
     }
 
@@ -1398,8 +1429,8 @@ impl DataSource for StateDataSource {
     fn fetch_slot_tile(&self, entry_id: &EntryID, tile_id: TileID, full: bool) -> SlotTile {
         let entry = self.entry_map.get(entry_id).unwrap();
         match entry {
-            EntryKind::Proc(proc_id) => {
-                self.generate_proc_slot_tile(entry_id, *proc_id, tile_id, full)
+            EntryKind::Proc(proc_id, device) => {
+                self.generate_proc_slot_tile(entry_id, *proc_id, *device, tile_id, full)
             }
             EntryKind::Mem(mem_id) => self.generate_mem_slot_tile(entry_id, *mem_id, tile_id, full),
             EntryKind::Chan(chan_id) => {
@@ -1417,8 +1448,8 @@ impl DataSource for StateDataSource {
     ) -> SlotMetaTile {
         let entry = self.entry_map.get(entry_id).unwrap();
         match entry {
-            EntryKind::Proc(proc_id) => {
-                self.generate_proc_slot_meta_tile(entry_id, *proc_id, tile_id, full)
+            EntryKind::Proc(proc_id, device) => {
+                self.generate_proc_slot_meta_tile(entry_id, *proc_id, *device, tile_id, full)
             }
             EntryKind::Mem(mem_id) => {
                 self.generate_mem_slot_meta_tile(entry_id, *mem_id, tile_id, full)

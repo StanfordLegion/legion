@@ -3,15 +3,15 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use crate::state::{
-    Align, Bounds, ChanEntry, ChanID, ChanPoint, Config, CopyInstInfo, DimKind, FSpace, FieldID,
-    FillInstInfo, ISpaceID, Inst, InstUID, MemID, MemKind, MemPoint, NodeID, ProcID, ProcKind,
-    ProcPoint, State, TimePoint, Timestamp,
+    Align, Bounds, ChanEntry, ChanID, ChanPoint, Config, CopyInstInfo, DeviceKind, DimKind, FSpace,
+    FieldID, FillInstInfo, ISpaceID, Inst, InstUID, MemID, MemKind, MemPoint, NodeID, ProcID,
+    ProcKind, ProcPoint, State, TimePoint, Timestamp,
 };
 
 use crate::conditional_assert;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct ProcGroup(pub Option<NodeID>, pub ProcKind);
+pub struct ProcGroup(pub Option<NodeID>, pub ProcKind, pub Option<DeviceKind>);
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct MemGroup(pub Option<NodeID>, pub MemKind);
@@ -100,12 +100,18 @@ impl StatePostprocess for State {
             // Do NOT filter empty procs here because they count towards
             // utilization totals
             let nodes = [None, Some(proc.proc_id.node_id())];
+            let devices: &'static [_] = match proc.kind {
+                ProcKind::GPU => &[Some(DeviceKind::Device), Some(DeviceKind::Host)],
+                _ => &[None],
+            };
             for node in nodes {
-                let group = ProcGroup(node, proc.kind);
-                groups
-                    .entry(group)
-                    .or_insert_with(Vec::new)
-                    .push(proc.proc_id);
+                for device in devices {
+                    let group = ProcGroup(node, proc.kind, *device);
+                    groups
+                        .entry(group)
+                        .or_insert_with(Vec::new)
+                        .push(proc.proc_id);
+                }
             }
         }
         groups
@@ -204,14 +210,20 @@ impl StatePostprocess for State {
                 continue;
             }
             let nodes = [None, Some(proc.proc_id.node_id())];
+            let devices: &'static [_] = match proc.kind {
+                ProcKind::GPU => &[Some(DeviceKind::Device), Some(DeviceKind::Host)],
+                _ => &[None],
+            };
             for node in nodes {
-                let group = ProcGroup(node, proc.kind);
-                proc_count.entry(group).and_modify(|i| *i += 1).or_insert(1);
-                if !proc.is_empty() {
-                    timepoint
-                        .entry(group)
-                        .or_insert_with(Vec::new)
-                        .push((proc.proc_id, &proc.util_time_points));
+                for device in devices {
+                    let group = ProcGroup(node, proc.kind, *device);
+                    proc_count.entry(group).and_modify(|i| *i += 1).or_insert(1);
+                    if !proc.is_empty() {
+                        timepoint
+                            .entry(group)
+                            .or_insert_with(Vec::new)
+                            .push((proc.proc_id, &proc.util_time_points));
+                    }
                 }
             }
         }

@@ -145,6 +145,12 @@ pub enum DimKind {
     OuterDimR = 27,
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum DeviceKind {
+    Device,
+    Host,
+}
+
 // the class used to save configurations
 #[derive(Debug, PartialEq)]
 pub struct Config {
@@ -275,7 +281,7 @@ pub trait Container {
     type Entry: ContainerEntry;
 
     fn max_levels(&self) -> usize;
-    fn time_points(&self) -> &Vec<TimePoint<Self::E, Self::S>>;
+    fn time_points(&self, device: Option<DeviceKind>) -> &Vec<TimePoint<Self::E, Self::S>>;
     fn entry(&self, entry: Self::E) -> &Self::Entry;
     fn entry_mut(&mut self, entry: Self::E) -> &mut Self::Entry;
 }
@@ -497,6 +503,8 @@ pub struct Proc {
     pub max_levels_ready: u32,
     pub time_points: Vec<ProcPoint>,
     pub util_time_points: Vec<ProcPoint>,
+    pub time_points_device: Vec<ProcPoint>,
+    pub util_time_points_device: Vec<ProcPoint>,
     visible: bool,
 }
 
@@ -512,6 +520,8 @@ impl Proc {
             max_levels_ready: 0,
             time_points: Vec::new(),
             util_time_points: Vec::new(),
+            time_points_device: Vec::new(),
+            util_time_points_device: Vec::new(),
             visible: true,
         }
     }
@@ -700,7 +710,6 @@ impl Proc {
             all_points: &mut Vec<ProcPoint>,
             points: &mut Vec<ProcPoint>,
             util_points: &mut Vec<ProcPoint>,
-            record_util: bool,
         ) {
             let start = time.start.unwrap();
             let stop = time.stop.unwrap();
@@ -726,22 +735,15 @@ impl Proc {
             ));
             points.push(ProcPoint::new(stop, prof_uid, false, 0));
 
-            if record_util {
-                util_points.push(ProcPoint::new(
-                    start,
-                    prof_uid,
-                    true,
-                    std::u64::MAX - stop.0,
-                ));
-                util_points.push(ProcPoint::new(stop, prof_uid, false, 0));
-            }
+            util_points.push(ProcPoint::new(
+                start,
+                prof_uid,
+                true,
+                std::u64::MAX - stop.0,
+            ));
+            util_points.push(ProcPoint::new(stop, prof_uid, false, 0));
         }
-        fn add_waiters(
-            waiters: &Waiters,
-            prof_uid: ProfUID,
-            util_points: &mut Vec<ProcPoint>,
-            record_util: bool,
-        ) {
+        fn add_waiters(waiters: &Waiters, prof_uid: ProfUID, util_points: &mut Vec<ProcPoint>) {
             for wait in &waiters.wait_intervals {
                 util_points.push(ProcPoint::new(
                     wait.start,
@@ -749,9 +751,7 @@ impl Proc {
                     false,
                     std::u64::MAX - wait.end.0,
                 ));
-                if record_util {
-                    util_points.push(ProcPoint::new(wait.end, prof_uid, true, 0));
-                }
+                util_points.push(ProcPoint::new(wait.end, prof_uid, true, 0));
             }
         }
 
@@ -762,13 +762,14 @@ impl Proc {
         let mut points = Vec::new();
         let mut util_points = Vec::new();
 
+        let mut all_points_device = Vec::new();
+        let mut points_device = Vec::new();
+        let mut util_points_device = Vec::new();
+
         if self.kind == ProcKind::GPU {
-            // GPUs are special when it comes to utilization
-            // We only want to report utilization of the actual kernels running
-            // on the GPUs. However, we still want to render what happens on the
-            // CPU side in case it effects the outcome of the running of the kernels
-            // Therefore we still render all the entries on the GPU processor but
-            // we only add the GPU kernel times to the utilization points
+            // On GPUs, split the entries between GPU kernels (which
+            // we put on the device timeline) and other tasks (which
+            // we put on the host timeline).
             for (uid, entry) in &self.entries {
                 let time = &entry.time_range;
                 match entry.kind {
@@ -776,84 +777,83 @@ impl Proc {
                         add(
                             time,
                             *uid,
-                            &mut all_points,
-                            &mut points,
-                            &mut util_points,
-                            true,
+                            &mut all_points_device,
+                            &mut points_device,
+                            &mut util_points_device,
                         );
-                        add_waiters(&entry.waiters, *uid, &mut util_points, true);
+                        add_waiters(&entry.waiters, *uid, &mut util_points_device);
                     }
                     _ => {
-                        add(
-                            time,
-                            *uid,
-                            &mut all_points,
-                            &mut points,
-                            &mut util_points,
-                            false,
-                        );
-                        add_waiters(&entry.waiters, *uid, &mut util_points, false);
+                        add(time, *uid, &mut all_points, &mut points, &mut util_points);
+                        add_waiters(&entry.waiters, *uid, &mut util_points);
                     }
                 }
             }
         } else {
             for (uid, entry) in &self.entries {
                 let time = &entry.time_range;
-                add(
-                    time,
-                    *uid,
-                    &mut all_points,
-                    &mut points,
-                    &mut util_points,
-                    true,
-                );
-                add_waiters(&entry.waiters, *uid, &mut util_points, true);
+                add(time, *uid, &mut all_points, &mut points, &mut util_points);
+                add_waiters(&entry.waiters, *uid, &mut util_points);
             }
         }
 
-        points.sort_by_key(|a| a.time_key());
-        util_points.sort_by_key(|a| a.time_key());
+        let mut sort_and_stack =
+            |all_points: &mut Vec<ProcPoint>,
+             points: &mut Vec<ProcPoint>,
+             util_points: &mut Vec<ProcPoint>| {
+                points.sort_by_key(|a| a.time_key());
+                util_points.sort_by_key(|a| a.time_key());
 
-        // Hack: This is a max heap so reverse the values as they go in.
-        let mut free_levels = BinaryHeap::<Reverse<u32>>::new();
-        for point in &points {
-            if point.first {
-                let level = if let Some(level) = free_levels.pop() {
-                    level.0
-                } else {
-                    self.max_levels.postincrement()
-                };
-                self.entry_mut(point.entry).base.set_level(level);
-            } else {
-                let level = self.entry(point.entry).base.level.unwrap();
-                free_levels.push(Reverse(level));
-            }
-        }
+                // Hack: This is a max heap so reverse the values as they go in.
+                let mut free_levels = BinaryHeap::<Reverse<u32>>::new();
+                for point in points.iter() {
+                    if point.first {
+                        let level = if let Some(level) = free_levels.pop() {
+                            level.0
+                        } else {
+                            self.max_levels.postincrement()
+                        };
+                        self.entry_mut(point.entry).base.set_level(level);
+                    } else {
+                        let level = self.entry(point.entry).base.level.unwrap();
+                        free_levels.push(Reverse(level));
+                    }
+                }
 
-        all_points.sort_by_key(|a| a.time_key());
+                all_points.sort_by_key(|a| a.time_key());
 
-        // Hack: This is a max heap so reverse the values as they go in.
-        let mut free_levels_ready = BinaryHeap::<Reverse<u32>>::new();
-        for point in &all_points {
-            if point.first {
-                let level = if let Some(level) = free_levels_ready.pop() {
-                    level.0
-                } else {
-                    self.max_levels_ready.postincrement()
-                };
-                self.entry_mut(point.entry).base.set_level_ready(level);
-            } else {
-                let level = self.entry(point.entry).base.level_ready.unwrap();
-                free_levels_ready.push(Reverse(level));
-            }
-        }
+                // Hack: This is a max heap so reverse the values as they go in.
+                let mut free_levels_ready = BinaryHeap::<Reverse<u32>>::new();
+                for point in all_points {
+                    if point.first {
+                        let level = if let Some(level) = free_levels_ready.pop() {
+                            level.0
+                        } else {
+                            self.max_levels_ready.postincrement()
+                        };
+                        self.entry_mut(point.entry).base.set_level_ready(level);
+                    } else {
+                        let level = self.entry(point.entry).base.level_ready.unwrap();
+                        free_levels_ready.push(Reverse(level));
+                    }
+                }
 
-        // Rendering of the profile will never use non-first points, so we can
-        // throw those away now.
-        points.retain(|p| p.first);
+                // Rendering of the profile will never use non-first points, so we can
+                // throw those away now.
+                points.retain(|p| p.first);
+            };
+
+        sort_and_stack(&mut all_points, &mut points, &mut util_points);
+        sort_and_stack(
+            &mut all_points_device,
+            &mut points_device,
+            &mut util_points_device,
+        );
 
         self.time_points = points;
         self.util_time_points = util_points;
+        self.time_points_device = points_device;
+        self.util_time_points_device = util_points_device;
     }
 
     pub fn is_visible(&self) -> bool {
@@ -870,8 +870,12 @@ impl Container for Proc {
         self.max_levels as usize
     }
 
-    fn time_points(&self) -> &Vec<TimePoint<Self::E, Self::S>> {
-        &self.time_points
+    fn time_points(&self, device: Option<DeviceKind>) -> &Vec<TimePoint<Self::E, Self::S>> {
+        match device {
+            Some(DeviceKind::Device) => &self.time_points_device,
+            Some(DeviceKind::Host) => &self.time_points,
+            None => &self.time_points,
+        }
     }
 
     fn entry(&self, prof_uid: ProfUID) -> &ProcEntry {
@@ -1005,7 +1009,8 @@ impl Container for Mem {
         self.max_live_insts as usize
     }
 
-    fn time_points(&self) -> &Vec<TimePoint<Self::E, Self::S>> {
+    fn time_points(&self, device: Option<DeviceKind>) -> &Vec<TimePoint<Self::E, Self::S>> {
+        assert!(device.is_none());
         &self.time_points
     }
 
@@ -1347,7 +1352,8 @@ impl Container for Chan {
         self.max_levels as usize
     }
 
-    fn time_points(&self) -> &Vec<TimePoint<Self::E, Self::S>> {
+    fn time_points(&self, device: Option<DeviceKind>) -> &Vec<TimePoint<Self::E, Self::S>> {
+        assert!(device.is_none());
         &self.time_points
     }
 
