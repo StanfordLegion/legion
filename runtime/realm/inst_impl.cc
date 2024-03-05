@@ -967,6 +967,10 @@ namespace Realm {
 
       std::vector<RegionInstanceImpl *> insts(num_layouts);
       MemoryImpl *m_impl = get_runtime()->get_memory_impl(memory);
+
+      NodeID target = ID(m_impl->me).memory_owner_node();
+      assert(target == Network::my_node_id);
+
       for(size_t i = 0; i < num_layouts; i++) {
         insts[i] = m_impl->new_instance();
         insts[i]->metadata.layout = layouts[i];

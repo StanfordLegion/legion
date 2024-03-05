@@ -1,5 +1,6 @@
 #include "realm.h"
 #include "realm/id.h"
+#include "realm/network.h"
 
 #include <deque>
 
@@ -40,18 +41,31 @@ InstanceLayoutGeneric *create_layout(Rect<N> bounds)
 void top_level_task(const void *args, size_t arglen, const void *userdata, size_t userlen,
                     Processor p)
 {
-  Processor p_worker = p;
-  Machine::ProcessorQuery pq(Machine::get_machine());
-  pq.only_kind(Processor::LOC_PROC);
-  for(Machine::ProcessorQuery::iterator it = pq.begin(); it != pq.end(); ++it)
-    p_worker = *it;
+  std::map<NodeID, Memory> memories;
+  Machine::MemoryQuery mq(Machine::get_machine());
+  mq.only_kind( Memory::SYSTEM_MEM );
+  for(Machine::MemoryQuery::iterator it = mq.begin(); it != mq.end(); ++it) {
+    Memory memory = *it;
+    NodeID owner = ID(*it).memory_owner_node();
+    if(!ID(memory).is_ib_memory() && memories.count(owner) == 0) {
+      memories[owner] = memory;
+    }
+  }
 
-  // get a memory close to the target processor
-  Memory m_worker = Machine::MemoryQuery(Machine::get_machine())
-                        .only_kind(Memory::SYSTEM_MEM)
-                        .best_affinity_to(p_worker)
-                        .first();
-  assert(m_worker.exists());
+  std::vector<Processor> reader_cpus, cpus;
+  Machine machine = Machine::get_machine();
+  for(const std::pair<NodeID, Memory> &memory : memories) {
+    Machine::ProcessorQuery pq = Machine::ProcessorQuery(machine)
+                                     .only_kind(Processor::LOC_PROC)
+                                     .same_address_space_as(memory.second);
+    for(Machine::ProcessorQuery::iterator it = pq.begin(); it; it++) {
+      reader_cpus.push_back(*it);
+      break;
+    }
+  }
+
+  assert(!reader_cpus.empty());
+  assert(reader_cpus.size() == memories.size());
 
   Rect<1> bounds;
   bounds.lo[0] = 0;
@@ -60,16 +74,16 @@ void top_level_task(const void *args, size_t arglen, const void *userdata, size_
   std::vector<size_t> field_sizes(1, 4);
 
   RegionInstance inst;
-  RegionInstance::create_instance(inst, m_worker, bounds, field_sizes, 0 /*SOA*/,
+  RegionInstance::create_instance(inst, memories[0], bounds, field_sizes, 0 /*SOA*/,
                                   ProfilingRequestSet());
   assert(inst.exists());
-  Event e1 = inst.fetch_metadata(p_worker);
+  Event e1 = inst.fetch_metadata(reader_cpus[0]);
 
   WorkerArgs worker_args;
   worker_args.inst = inst;
   worker_args.bounds = bounds;
-  Event e2 = p_worker.spawn(WORKER_TASK, &worker_args, sizeof(WorkerArgs),
-                            ProfilingRequestSet(), e1);
+  Event e2 = reader_cpus[0].spawn(WORKER_TASK, &worker_args, sizeof(WorkerArgs),
+                                       ProfilingRequestSet(), e1);
   e2.wait();
 
   usleep(100000);
