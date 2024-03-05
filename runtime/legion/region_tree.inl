@@ -8618,7 +8618,8 @@ namespace Legion {
       {
         FieldMask remaining = mask;
         AutoLock n_lock(node_lock,1,false/*exclusive*/);
-        if (current_sets != NULL)
+        if ((current_sets != NULL) &&
+            !(remaining * current_sets->get_valid_mask()))
         {
           for (typename FieldMaskSet<EquivalenceSet>::const_iterator it =
                 current_sets->begin(); it != current_sets->end(); it++)
@@ -8628,17 +8629,28 @@ namespace Legion {
             local_sets[it->first] = req_index;
           }
           remaining -= current_sets->get_valid_mask();
+          if (!remaining)
+            return;
         }
-        // Don't need to consider previous sets since any equivalence sets
-        // that have tracing data will be a current set because it will have
-        // been accessed by an actual operation and reset operations are
-        // not traceable so they can't be in the trace
-        if (!!remaining && (lefts != NULL) &&
-            !(lefts->get_valid_mask() * mask))
+        if ((previous_sets != NULL) &&
+            !(remaining * previous_sets->get_valid_mask()))
+        {
+          for (typename FieldMaskSet<EquivalenceSet>::const_iterator it =
+                previous_sets->begin(); it != previous_sets->end(); it++)
+          {
+            if (mask * it->second)
+              continue;
+            local_sets[it->first] = req_index;
+          }
+          remaining -= previous_sets->get_valid_mask();
+          if (!remaining)
+            return;
+        }
+        if ((lefts != NULL) && !(lefts->get_valid_mask() * remaining))
         {
 #ifdef DEBUG_LEGION
           assert(rights != NULL);
-          assert(!(rights->get_valid_mask() * mask));
+          assert(!(rights->get_valid_mask() * remaining));
 #endif
           for (typename FieldMaskSet<EqKDNode<DIM,T> >::const_iterator it =
                 lefts->begin(); it != lefts->end(); it++)
@@ -9415,7 +9427,7 @@ namespace Legion {
         if ((lower == upper) || (get_total_volume() <= MIN_SPLIT_SIZE))
         {
           // No more refinements, see if the local shard is the lower shard
-          // and we can make a local node or node
+          // and if it is whether we have a node to traverse
           if (lower == local_shard)
           {
             EqKDTreeT<DIM,T> *local = left.load();
