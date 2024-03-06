@@ -606,7 +606,6 @@ namespace Legion {
       void filter_independent_fields(IndexSpaceExpression *expr,
                                      FieldMask &mask) const;
       bool subsumed_by(const TraceViewSet &set, bool allow_independent,
-                       bool &has_independent,
                        FailedPrecondition *condition = NULL) const;
       bool independent_of(const TraceViewSet &set,
                        FailedPrecondition *condition = NULL) const; 
@@ -657,11 +656,14 @@ namespace Legion {
     public:
       TraceConditionSet(PhysicalTemplate *tpl, unsigned parent_req_index,
                         RegionTreeID tree_id, IndexSpaceExpression *expr,
-                        FieldMaskSet<LogicalView> &&views, bool shared = false);
+                        FieldMaskSet<LogicalView> &&views);
       TraceConditionSet(const TraceConditionSet &rhs) = delete;
       virtual ~TraceConditionSet(void);
     public:
       TraceConditionSet& operator=(const TraceConditionSet &rhs) = delete;
+    public:
+      inline bool is_shared(void) const { return shared; }
+      inline void mark_shared(void) { shared = true; }
     public:
       virtual void add_subscription_reference(unsigned count = 1)
         { add_reference(count); }
@@ -674,6 +676,8 @@ namespace Legion {
       virtual ReferenceSource get_reference_source_kind(void) const 
         { return TRACE_REF; }
     public:
+      bool matches(IndexSpaceExpression *expr,
+                   const FieldMaskSet<LogicalView> &views) const;
       void invalidate_equivalence_sets(void);
       void refresh_equivalence_sets(FenceOp *op,
           std::vector<RtEvent> &ready_events);
@@ -697,7 +701,6 @@ namespace Legion {
       const FieldMaskSet<LogicalView> views;
       const RegionTreeID tree_id;
       const unsigned parent_req_index;
-      const bool shared;
     private:
       mutable LocalLock set_lock;
     private:
@@ -705,6 +708,7 @@ namespace Legion {
         InvalidInstAnalysis *invalid;
         AntivalidInstAnalysis *antivalid;
       } analysis;
+      bool shared;
     };
 
     /**

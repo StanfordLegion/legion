@@ -3026,8 +3026,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool TraceViewSet::subsumed_by(const TraceViewSet &set, 
-                    bool allow_independent, bool &has_independent,
-                    FailedPrecondition *condition) const
+                    bool allow_independent, FailedPrecondition *condition) const
     //--------------------------------------------------------------------------
     {
       for (ViewExprs::const_iterator vit = 
@@ -3059,10 +3058,7 @@ namespace Legion {
                 FieldMask mask = nit->second;
                 set.filter_independent_fields(nit->first, mask);
                 if (!mask)
-                {
-                  has_independent = true;
                   continue;
-                }
                 if (condition != NULL)
                 {
                   condition->view = vit->first;
@@ -3929,9 +3925,9 @@ namespace Legion {
     TraceConditionSet::TraceConditionSet(PhysicalTemplate *tpl,
                    unsigned req_index, RegionTreeID tid,
                    IndexSpaceExpression *expr,
-                   FieldMaskSet<LogicalView> &&vws, bool share)
+                   FieldMaskSet<LogicalView> &&vws)
       : EqSetTracker(set_lock), owner(tpl), condition_expr(expr),
-        views(vws), tree_id(tid), parent_req_index(req_index), shared(share)
+        views(vws), tree_id(tid), parent_req_index(req_index), shared(false)
     //--------------------------------------------------------------------------
     {
       condition_expr->add_base_expression_reference(TRACE_REF);
@@ -3957,6 +3953,28 @@ namespace Legion {
             views.begin(); it != views.end(); it++)
         if (it->first->remove_base_gc_ref(TRACE_REF))
           delete it->first;
+    }
+
+    //--------------------------------------------------------------------------
+    bool TraceConditionSet::matches(IndexSpaceExpression *other_expr,
+                             const FieldMaskSet<LogicalView> &other_views) const
+    //--------------------------------------------------------------------------
+    {
+      if (condition_expr != other_expr)
+        return false;
+      if (views.size() != other_views.size())
+        return false;
+      for (FieldMaskSet<LogicalView>::const_iterator it =
+            views.begin(); it != views.end(); it++)
+      {
+        FieldMaskSet<LogicalView>::const_iterator finder = 
+          other_views.find(it->first);
+        if (finder == other_views.end())
+          return false;
+        if (it->second != finder->second)
+          return false;
+      }
+      return true;
     }
 
     //--------------------------------------------------------------------------
@@ -4762,29 +4780,59 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // First check to see if these conditions are idempotent or not  
-      bool disable_sharing = false;
       if ((previews != NULL) && (postviews != NULL) &&
-          !previews->subsumed_by(*postviews, true/*allow independent*/,
-            disable_sharing))
-      {
+          !previews->subsumed_by(*postviews, true/*allow independent*/))
         result->store(NOT_IDEMPOTENT_SUBSUMPTION);
-        disable_sharing = true;
-      }
       else if ((postviews != NULL) && (antiviews != NULL) &&
           !postviews->independent_of(*antiviews))
         result->store(NOT_IDEMPOTENT_ANTIDEPENDENT);
       // Now we can convert these views into conditions
-      if ((previews != NULL) && (disable_sharing || (postviews == NULL)))
+      std::vector<TraceConditionSet*> postsets;
+      // Create the postconditions first so we can see if we can share
+      // them with any of the preconditions or anticonditions
+      if (postviews != NULL)
       {
-        LegionMap<IndexSpaceExpression*,FieldMaskSet<LogicalView> > exprviews;
-        previews->transpose_uniquely(exprviews);
-        AutoLock tpl_lock(template_lock);
+        LegionMap<IndexSpaceExpression*,FieldMaskSet<LogicalView> > expr_views;
+        postviews->transpose_uniquely(expr_views);
+        postsets.reserve(expr_views.size());
         for (LegionMap<IndexSpaceExpression*,FieldMaskSet<LogicalView> >::
-              iterator it = exprviews.begin(); it != exprviews.end(); it++)
+              iterator it = expr_views.begin(); it != expr_views.end(); it++)
         {
-          TraceConditionSet *set = new TraceConditionSet(this,
-              parent_req_index, tree_id, it->first, std::move(it->second)); 
+          TraceConditionSet *set = new TraceConditionSet(this, parent_req_index,
+              tree_id, it->first, std::move(it->second));
           set->add_reference();
+          postsets.push_back(set);
+        }
+        AutoLock tpl_lock(template_lock);
+        postconditions.insert(postconditions.end(),
+            postsets.begin(), postsets.end());
+      }
+      // Next do the previews and the antiviews looking for sharing with
+      // the postviews so we can minimize the number of EqSetTrackers
+      if (previews != NULL)
+      {
+        LegionMap<IndexSpaceExpression*,FieldMaskSet<LogicalView> > expr_views;
+        previews->transpose_uniquely(expr_views);
+        for (LegionMap<IndexSpaceExpression*,FieldMaskSet<LogicalView> >::
+              iterator eit = expr_views.begin(); eit != expr_views.end(); eit++)
+        {
+          TraceConditionSet *set = NULL;
+          for (std::vector<TraceConditionSet*>::iterator it =
+                postsets.begin(); it != postsets.end(); it++)
+          {
+            if (!(*it)->matches(eit->first, eit->second))
+              continue;
+            set = *it;
+            postsets.erase(it);
+            break;
+          }
+          if (set == NULL)
+            set = new TraceConditionSet(this, parent_req_index, tree_id, 
+                eit->first, std::move(eit->second));
+          else
+            set->mark_shared();
+          set->add_reference();
+          AutoLock tpl_lock(template_lock);
           preconditions.push_back(set);
         }
       }
@@ -4792,30 +4840,27 @@ namespace Legion {
       {
         LegionMap<IndexSpaceExpression*,FieldMaskSet<LogicalView> > expr_views;
         antiviews->transpose_uniquely(expr_views);
-        AutoLock tpl_lock(template_lock);
         for (LegionMap<IndexSpaceExpression*,FieldMaskSet<LogicalView> >::
-              iterator it = expr_views.begin(); it != expr_views.end(); it++)
+              iterator eit = expr_views.begin(); eit != expr_views.end(); eit++)
         {
-          TraceConditionSet *set = new TraceConditionSet(this,
-              parent_req_index, tree_id, it->first, std::move(it->second)); 
+          TraceConditionSet *set = NULL;
+          for (std::vector<TraceConditionSet*>::iterator it =
+                postsets.begin(); it != postsets.end(); it++)
+          {
+            if (!(*it)->matches(eit->first, eit->second))
+              continue;
+            set = *it;
+            postsets.erase(it);
+            break;
+          }
+          if (set == NULL)
+            set = new TraceConditionSet(this, parent_req_index, tree_id, 
+                eit->first, std::move(eit->second));
+          else
+            set->mark_shared();
           set->add_reference();
+          AutoLock tpl_lock(template_lock);
           anticonditions.push_back(set);
-        }
-      }
-      if (postviews != NULL)
-      {
-        LegionMap<IndexSpaceExpression*,FieldMaskSet<LogicalView> > expr_views;
-        postviews->transpose_uniquely(expr_views);
-        AutoLock tpl_lock(template_lock);
-        for (LegionMap<IndexSpaceExpression*,FieldMaskSet<LogicalView> >::
-              iterator it = expr_views.begin(); it != expr_views.end(); it++)
-        {
-          TraceConditionSet *set = new TraceConditionSet(this, parent_req_index,
-              tree_id, it->first, std::move(it->second), !disable_sharing); 
-          set->add_reference((disable_sharing || (previews == NULL)) ? 1 : 2);
-          postconditions.push_back(set);
-          if (!disable_sharing && (previews != NULL))
-            preconditions.push_back(set);
         }
       }
     }
@@ -4833,7 +4878,7 @@ namespace Legion {
         (*it)->refresh_equivalence_sets(op, ready_events);
       for (std::vector<TraceConditionSet*>::const_iterator it =
             postconditions.begin(); it != postconditions.end(); it++)
-        if (!(*it)->shared)
+        if (!(*it)->is_shared())
           (*it)->refresh_equivalence_sets(op, ready_events);
     }
 
