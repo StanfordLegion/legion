@@ -422,16 +422,16 @@ impl ContainerEntry for ProcEntry {
                     Some(task_name) => {
                         if task_name != variant_name {
                             format!(
-                                "GPU Kernel for {} [{}] <{}>",
+                                "GPU Kernel(s) for {} [{}] <{}>",
                                 task_name,
                                 variant_name,
                                 op_id.unwrap().0
                             )
                         } else {
-                            format!("GPU Kernel for {} <{}>", task_name, op_id.unwrap().0)
+                            format!("GPU Kernel(s) for {} <{}>", task_name, op_id.unwrap().0)
                         }
                     }
-                    None => format!("GPU Kernel for {}", variant_name.clone()),
+                    None => format!("GPU Kernel(s) for {}", variant_name.clone()),
                 }
             }
             ProcEntryKind::ProfTask => {
