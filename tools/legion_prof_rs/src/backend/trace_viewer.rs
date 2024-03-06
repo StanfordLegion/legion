@@ -44,13 +44,14 @@ pub fn emit_trace<P: AsRef<Path>>(state: &State, path: P, force: bool) -> io::Re
     let mut first = true;
 
     for proc in state.procs.values() {
-        for point in &proc.time_points {
+        for point in proc.time_points(None) {
             if point.first {
                 let entry = proc.entry(point.entry);
                 let (time_range, waiters) = (&entry.time_range, &entry.waiters);
 
                 let name = match entry.kind {
-                    ProcEntryKind::Task(task_id, variant_id) => {
+                    ProcEntryKind::Task(task_id, variant_id)
+                    | ProcEntryKind::GPUKernel(task_id, variant_id) => {
                         let task_name = &state.task_kinds.get(&task_id).unwrap().name;
                         let variant_name =
                             &state.variants.get(&(task_id, variant_id)).unwrap().name;

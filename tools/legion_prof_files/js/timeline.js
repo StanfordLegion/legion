@@ -211,6 +211,8 @@ function getLineColor(elem) {
   const colorMap = {
     "CPU": "steelblue",
     "GPU": "olivedrab",
+    "GPU Device": "olivedrab",
+    "GPU Host": "orangered",
     "Utility": "crimson",
     "IO": "orangered",
     "Proc Group": "orangered",
@@ -2010,7 +2012,7 @@ function drawExpandBox() {
         + "</div>"
         + "<div style='margin: 0 auto; margin-top: 10px; text-align: center;'>" 
           + "<input class='button' type='button' value='CPUs' onclick='evalExpandRequest(\"CPU\")'></input>" 
-          + "<input class='button' type='button' value='GPUs' onclick='evalExpandRequest(\"GPU\")'></input>" 
+          + "<input class='button' type='button' value='GPUs' onclick='evalExpandRequest(\"GPU\");evalExpandRequest(\"GPU Device\");evalExpandRequest(\"GPU Host\")'></input>"
           + "<input class='button' type='button' value='Utilities' onclick='evalExpandRequest(\"Utility\")'></input>" 
           + "<input class='button' type='button' value='IOs' onclick='evalExpandRequest(\"IO\")'></input>" 
           + "<input class='button' type='button' value='Memories' onclick='evalExpandRequest(\"Memory\")'></input>" 
