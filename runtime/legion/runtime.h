@@ -843,12 +843,6 @@ namespace Legion {
       bool is_mapped(void) const;
       LogicalRegion get_logical_region(void) const;
       PrivilegeMode get_privilege(void) const;
-      LegionRuntime::Accessor::RegionAccessor<
-        LegionRuntime::Accessor::AccessorType::Generic>
-          get_accessor(bool silence_warnings = true);
-      LegionRuntime::Accessor::RegionAccessor<
-        LegionRuntime::Accessor::AccessorType::Generic> 
-          get_field_accessor(FieldID field, bool silence_warnings = true);
     public:
       void unmap_region(void);
       ApEvent remap_region(ApEvent new_ready_event);
@@ -861,15 +855,6 @@ namespace Legion {
       void get_memories(std::set<Memory>& memories, 
           bool silence_warnings, const char *warning_string) const;
       void get_fields(std::vector<FieldID>& fields) const;
-#if defined(LEGION_PRIVILEGE_CHECKS) || defined(LEGION_BOUNDS_CHECKS)
-    public:
-      const char* get_task_name(void) const;
-#endif
-#ifdef LEGION_BOUNDS_CHECKS
-    public:
-      bool contains_ptr(ptr_t ptr);
-      bool contains_point(const DomainPoint &dp);
-#endif
     public:
       void get_bounds(void *realm_is, TypeTag type_tag);
       PieceIteratorImpl* get_piece_iterator(FieldID fid, bool privilege_only,
@@ -4832,15 +4817,6 @@ namespace Legion {
                                          const char *file_name, 
                                          const int line_number,
                                          const char *message);
-#if defined(LEGION_PRIVILEGE_CHECKS) || defined(LEGION_BOUNDS_CHECKS)
-    public:
-      static const char* find_privilege_task_name(void *impl);
-#endif
-#ifdef LEGION_BOUNDS_CHECKS
-    public:
-      static void check_bounds(void *impl, ptr_t ptr);
-      static void check_bounds(void *impl, const DomainPoint &dp);
-#endif
     public:
       // Static member variables
       static TaskID legion_main_id;
@@ -5117,7 +5093,7 @@ namespace Legion {
                                  const Processor target, RtEvent precondition)
     //--------------------------------------------------------------------------
     {
-      LEGION_STATIC_ASSERT(T::TASK_ID < LG_BEGIN_SHUTDOWN_TASK_IDS,
+      static_assert(T::TASK_ID < LG_BEGIN_SHUTDOWN_TASK_IDS,
           "Shutdown tasks should never be run directly on application procs");
       // If this is not a task directly related to shutdown or is a message, 
       // to a remote node then increment the number of outstanding tasks

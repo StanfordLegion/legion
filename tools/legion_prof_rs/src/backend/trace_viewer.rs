@@ -44,7 +44,7 @@ pub fn emit_trace<P: AsRef<Path>>(state: &State, path: P, force: bool) -> io::Re
     let mut first = true;
 
     for proc in state.procs.values() {
-        for point in &proc.time_points {
+        for point in proc.time_points(None) {
             if point.first {
                 let entry = proc.entry(point.entry);
                 let (time_range, waiters) = (&entry.time_range, &entry.waiters);

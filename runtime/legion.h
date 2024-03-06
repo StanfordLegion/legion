@@ -354,120 +354,6 @@ namespace Legion {
     //                       Data Allocation Classes
     //==========================================================================
 
-#ifdef __GNUC__
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-#endif
-#ifdef __clang__
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-#endif
-    /**
-     * \class IndexIterator
-     * @deprecated
-     * This is a helper class for iterating over the points within
-     * an index space or the index space of a given logical region.
-     * It should never be copied and will assert fail if a copy is
-     * made of it.
-     */
-    class LEGION_DEPRECATED("Use DomainPointIterator instead") IndexIterator {
-    public:
-      IndexIterator(void);
-      IndexIterator(const Domain &dom, ptr_t start = ptr_t());
-      IndexIterator(Runtime *rt, Context ctx, 
-                    IndexSpace space, ptr_t start = ptr_t());
-      IndexIterator(Runtime *rt, Context ctx, 
-                    LogicalRegion lr, ptr_t start = ptr_t());
-      IndexIterator(Runtime *rt,
-                    IndexSpace space, ptr_t start = ptr_t());
-      IndexIterator(const IndexIterator &rhs);
-      ~IndexIterator(void);
-    public:
-      /**
-       * Check to see if the iterator has a next point
-       */
-      inline bool has_next(void) const;
-      /**
-       * Get the current point in the iterator.  Advances
-       * the iterator to the next point.
-       */
-      inline ptr_t next(void);
-      /**
-       * Get the current point in the iterator and up to 'req_count'
-       * additional points in the index space.  Returns the actual
-       * count of contiguous points in 'act_count'.
-       */
-      inline ptr_t next_span(size_t& act_count, 
-                             size_t req_count = (size_t)-1LL);
-    public:
-      IndexIterator& operator=(const IndexIterator &rhs);
-    private:
-      Realm::IndexSpaceIterator<1,coord_t> is_iterator;
-      Realm::PointInRectIterator<1,coord_t> rect_iterator;
-    };
-
-    /**
-     * \class IndexAllocator
-     * @deprecated
-     * Index allocators provide objects for doing allocation on
-     * index spaces.  They must be explicitly created by the
-     * runtime so that they can be linked back to the runtime.
-     * Index allocators can be passed by value to functions
-     * and stored in data structures, but should not escape 
-     * the enclosing context in which they were created.
-     *
-     * Index space allocators operate on a single index space
-     * which is immutable.  Separate index space allocators
-     * must be made to perform allocations on different index
-     * spaces.
-     *
-     * @see Runtime
-     */
-    class LEGION_DEPRECATED("Dynamic IndexAllocators are no longer supported")
-      IndexAllocator : public Unserializable<IndexAllocator> {
-    public:
-      IndexAllocator(void);
-      IndexAllocator(const IndexAllocator &allocator);
-      ~IndexAllocator(void);
-    protected:
-      FRIEND_ALL_RUNTIME_CLASSES
-      // Only the Runtime should be able to make these
-      IndexAllocator(IndexSpace space, IndexIterator iterator);
-    public:
-      IndexAllocator& operator=(const IndexAllocator &allocator);
-      inline bool operator<(const IndexAllocator &rhs) const;
-      inline bool operator==(const IndexAllocator &rhs) const;
-    public:
-      /**
-       * @deprecated
-       * @param num_elements number of elements to allocate
-       * @return pointer to the first element in the allocated block
-       */
-      LEGION_DEPRECATED("Dynamic allocation is no longer supported")
-      ptr_t alloc(unsigned num_elements = 1);
-      /**
-       * @deprecated
-       * @param ptr pointer to the first element to free
-       * @param num_elements number of elements to be freed
-       */
-      LEGION_DEPRECATED("Dynamic allocation is no longer supported")
-      void free(ptr_t ptr, unsigned num_elements = 1);
-      /**
-       * @deprecated
-       * @return the index space associated with this allocator
-       */
-      inline IndexSpace get_index_space(void) const { return index_space; }
-    private:
-      IndexSpace index_space;
-      IndexIterator iterator;
-    };
-#ifdef __GNUC__
-#pragma GCC diagnostic pop
-#endif
-#ifdef __clang__
-#pragma clang diagnostic pop
-#endif
-
     /**
      * \class FieldAllocator
      * Field allocators provide objects for performing allocation on
@@ -1089,9 +975,6 @@ namespace Legion {
       const void* get_projection_args(size_t *size) const;
       void set_projection_args(const void *args, size_t size, bool own = false);
     public:
-#ifdef LEGION_PRIVILEGE_CHECKS
-      unsigned get_accessor_privilege(void) const;
-#endif
       bool has_field_privilege(FieldID fid) const;
     public:
       // Fields used for controlling task launches
@@ -2699,34 +2582,6 @@ namespace Legion {
        * @return the privilege mode for this physical region
        */
       PrivilegeMode get_privilege(void) const;
-      /**
-       * @deprecated
-       * Return a generic accessor for the entire physical region.
-       * This method is now deprecated. Please use the 'get_field_accessor'
-       * method instead. You can silence warnings about this blocking
-       * call with the 'silence_warnings' parameter.
-       */
-      LEGION_DEPRECATED("All accessors in the LegionRuntime::Accessor "
-                        "namespace are now deprecated. FieldAccessor "
-                        "from the Legion namespace should be used now.")
-      LegionRuntime::Accessor::RegionAccessor<
-        LegionRuntime::Accessor::AccessorType::Generic> 
-          get_accessor(bool silence_warnings = false) const;
-      /**
-       * @deprecated
-       * You should be able to create accessors by passing this
-       * object directly to the constructor of an accessor
-       * Return a field accessor for a specific field within the region.
-       * You can silence warnings regarding this blocking call with
-       * the 'silence_warnings' parameter.
-       */
-      LEGION_DEPRECATED("All accessors in the LegionRuntime::Accessor "
-                        "namespace are now deprecated. FieldAccessor "
-                        "from the Legion namespace should be used now.")
-      LegionRuntime::Accessor::RegionAccessor<
-        LegionRuntime::Accessor::AccessorType::Generic> 
-          get_field_accessor(FieldID field, 
-                             bool silence_warnings = false) const;
       /**
        * Return the memories where the underlying physical instances locate.
        */
@@ -4739,19 +4594,7 @@ namespace Legion {
 
     //==========================================================================
     //                           Runtime Classes
-    //==========================================================================
-
-    /**
-     * @deprecated 
-     * \struct ColoredPoints
-     * Colored points struct for describing colorings.
-     */
-    template<typename T>
-    struct ColoredPoints {
-    public:
-      std::set<T> points;
-      std::set<std::pair<T,T> > ranges;
-    };
+    //========================================================================== 
 
     /**
      * \struct InputArgs
@@ -5356,159 +5199,6 @@ namespace Legion {
                                const bool recurse = true,
                                const char *provenance = NULL);
     public:
-      //------------------------------------------------------------------------
-      // Index Partition Operations Based on Coloring
-      // (These are deprecated, use the dependent partitioning calls instead)
-      //------------------------------------------------------------------------
-      /**
-       * @deprecated
-       * Create an index partition from a point coloring
-       * @param ctx the enclosing task context
-       * @param parent index space being partitioned
-       * @param color_space space of colors for the partition
-       * @param coloring the coloring of the parent index space
-       * @param part_kind the kind of partition or whether to compute it
-       * @param color optional color for the new partition
-       * @param allocable whether the child index spaces are allocable
-       * @return handle for the new index partition
-       */
-      LEGION_DEPRECATED("Use the new dependent partitioning API calls instead.")
-      IndexPartition create_index_partition(Context ctx, IndexSpace parent,
-                                  const Domain &color_space,
-                                  const PointColoring &coloring,
-                                  PartitionKind part_kind = LEGION_COMPUTE_KIND,
-                                  Color color = LEGION_AUTO_GENERATE_ID,
-                                  bool allocable = false);
-      /**
-       * @deprecated
-       * See the previous create_index_partition call
-       * Create an index partition.
-       * @param ctx the enclosing task context
-       * @param parent index space being partitioned
-       * @param coloring the coloring of the parent index space
-       * @param disjoint whether the partitioning is disjoint or not
-       * @param color optional color name for the partition
-       * @return handle for the next index partition
-       */
-      LEGION_DEPRECATED("Use the new dependent partitioning API calls instead.")
-      IndexPartition create_index_partition(Context ctx, IndexSpace parent, 
-                                        const Coloring &coloring, bool disjoint,
-                                        Color color = LEGION_AUTO_GENERATE_ID);
-
-      /**
-       * @deprecated
-       * Create an index partition from a domain point coloring
-       * @param ctx the enclosing task context
-       * @param parent the index space being partitioned
-       * @param color_space space of colors for the partition
-       * @param coloring the coloring of the parent index space
-       * @param part_kind the kind of partition or whether to compute it
-       * @param color optional color for the new partition
-       * @return handle for the new index partition
-       */
-      LEGION_DEPRECATED("Use the new dependent partitioning API calls instead.")
-      IndexPartition create_index_partition(Context ctx, IndexSpace parent,
-                                  const Domain &color_space,
-                                  const DomainPointColoring &coloring,
-                                  PartitionKind part_kind = LEGION_COMPUTE_KIND,
-                                  Color color = LEGION_AUTO_GENERATE_ID);
-      /**
-       * @deprecated
-       * See the previous create index partition call
-       * Create an index partition from a domain color space and coloring.
-       * @param ctx the enclosing task context
-       * @param parent index space being partitioned
-       * @param color_space the domain of colors 
-       * @param coloring the domain coloring of the parent index space
-       * @param disjoint whether the partitioning is disjoint or not
-       * @param color optional color name for the partition
-       * @return handle for the next index partition
-       */
-      LEGION_DEPRECATED("Use the new dependent partitioning API calls instead.")
-      IndexPartition create_index_partition(Context ctx, IndexSpace parent, 
-					    Domain color_space, 
-                                            const DomainColoring &coloring,
-					    bool disjoint,
-                                            Color color = 
-                                                    LEGION_AUTO_GENERATE_ID);
-
-      /**
-       * @deprecated
-       * Create an index partition from a multi-domain point coloring
-       * @param ctx the enclosing task context
-       * @param parent the index space being partitioned
-       * @param color_space space of colors for the partition
-       * @param coloring the coloring of the parent index space
-       * @param part_kind the kind of partition or whether to compute it
-       * @param color optional color for the new partition
-       * @return handle for the new index partition
-       */
-      LEGION_DEPRECATED("Use the new dependent partitioning API calls instead.")
-      IndexPartition create_index_partition(Context ctx, IndexSpace parent,
-                                  const Domain &color_space,
-                                  const MultiDomainPointColoring &coloring,
-                                  PartitionKind part_kind = LEGION_COMPUTE_KIND,
-                                  Color color = LEGION_AUTO_GENERATE_ID);
-      /**
-       * @deprecated
-       * See the previous create index partition call
-       * Create an index partitiong from a domain color space and
-       * a multi-domain coloring which allows multiple domains to
-       * be associated with each color.
-       * @param ctx the enclosing task context
-       * @param parent index space being partitioned
-       * @param color_space the domain of colors
-       * @param coloring the multi-domain coloring
-       * @param disjoint whether the partitioning is disjoint or not
-       * @param color optional color name for the partition
-       * @return handle for the next index partition
-       */
-      LEGION_DEPRECATED("Use the new dependent partitioning API calls instead.")
-      IndexPartition create_index_partition(Context ctx, IndexSpace parent,
-                                            Domain color_space,
-                                            const MultiDomainColoring &coloring,
-                                            bool disjoint,
-                                            Color color = 
-                                                    LEGION_AUTO_GENERATE_ID);
-      /**
-       * @deprecated
-       * Create an index partitioning from a typed mapping.
-       * @param ctx the enclosing task context
-       * @param parent index space being partitioned
-       * @param mapping the mapping of points to colors
-       * @param color optional color name for the partition
-       * @return handle for the next index partition
-       */
-      template <typename T>
-      LEGION_DEPRECATED("Use the new dependent partitioning API calls instead.")
-      IndexPartition create_index_partition(Context ctx, IndexSpace parent,
-					    const T& mapping,
-					    Color color = 
-                                                    LEGION_AUTO_GENERATE_ID);
-
-      /**
-       * @deprecated 
-       * @see create_partition_by_field instead
-       * Create an index partitioning from an existing field
-       * in a physical instance.  This requires that the field
-       * accessor be valid for the entire parent index space.  By definition
-       * colors are always non-negative.  The runtime will iterate over the
-       * field accessor and interpret values as signed integers.  Any
-       * locations less than zero will be ignored.  Values greater than or
-       * equal to zero will be colored and placed in the appropriate
-       * subregion.  By definition this partitioning mechanism has to 
-       * disjoint since each pointer value has at most one color.
-       * @param ctx the enclosing task context
-       * @param field_accessor field accessor for the coloring field
-       * @param disjoint whether the partitioning is disjoint or not
-       * @param complete whether the partitioning is complete or not
-       * @return handle for the next index partition
-       */
-      LEGION_DEPRECATED("Use the new dependent partitioning API calls instead.")
-      IndexPartition create_index_partition(Context ctx, IndexSpace parent,
-       LegionRuntime::Accessor::RegionAccessor<
-        LegionRuntime::Accessor::AccessorType::Generic> field_accessor,
-                                        Color color = LEGION_AUTO_GENERATE_ID);
       /**
        * Create a new shared ownership of an index partition to prevent it 
        * from being destroyed by other potential owners. Every call to this
@@ -6790,19 +6480,6 @@ namespace Legion {
       bool is_index_partition_complete(IndexPartition p);
       ///@}
 
-      /**
-       * @deprecated
-       * Get an index subspace from a partition with a given color point.
-       * @param ctx enclosing task context
-       * @param p parent index partition handle
-       * @param color_point point containing color value of index subspace
-       * @return the corresponding index space to the specified color point
-       */
-      template <unsigned DIM>
-      LEGION_DEPRECATED("Use the new templated methods for geting a subspace.")
-      IndexSpace get_index_subspace(Context ctx, IndexPartition p, 
-                                LegionRuntime::Arrays::Point<DIM> color_point);
-
       ///@{
       /**
        * Return the color for the corresponding index space in
@@ -6912,16 +6589,6 @@ namespace Legion {
       //------------------------------------------------------------------------
       // Safe Cast Operations
       //------------------------------------------------------------------------
-      /**
-       * Safe cast a pointer down to a target region.  If the pointer
-       * is not in the target region, then a nil pointer is returned.
-       * @param ctx enclosing task context
-       * @param pointer the pointer to be case
-       * @param region the target logical region
-       * @return the same pointer if it can be safely cast, otherwise nil
-       */
-      ptr_t safe_cast(Context ctx, ptr_t pointer, LogicalRegion region);
-
       /**
        * Safe case a domain point down to a target region.  If the point
        * is not in the target region, then an empty domain point
@@ -7419,34 +7086,6 @@ namespace Legion {
       //------------------------------------------------------------------------
       // Allocator and Argument Map Operations 
       //------------------------------------------------------------------------
-#ifdef __GNUC__
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-#endif
-#ifdef __clang__
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-#endif
-      /**
-       * @deprecated
-       * Create an index allocator object for a given index space
-       * This method is deprecated becasue index spaces no longer support
-       * dynamic allocation. This will still work only if there is exactly
-       * one allocator made for the index space throughout the duration
-       * of its lifetime.
-       * @param ctx enclosing task context
-       * @param handle for the index space to create an allocator
-       * @return a new index space allocator for the given index space
-       */
-      LEGION_DEPRECATED("Dynamic index allocation is no longer supported.")
-      IndexAllocator create_index_allocator(Context ctx, IndexSpace handle);
-#ifdef __GNUC__
-#pragma GCC diagnostic pop
-#endif
-#ifdef __clang__
-#pragma clang diagnostic pop
-#endif
-
       /**
        * Create a field space allocator object for the given field space
        * @param ctx enclosing task context
@@ -10631,48 +10270,6 @@ namespace Legion {
     private:
       friend class Mapper;
       Internal::Runtime *runtime;
-    };
-
-    //==========================================================================
-    //                        Compiler Helper Classes
-    //==========================================================================
-
-    /**
-     * \class ColoringSerializer
-     * This is a decorator class that helps the Legion compiler
-     * with returning colorings as the result of task calls.
-     */
-    class ColoringSerializer {
-    public:
-      ColoringSerializer(void) { }
-      ColoringSerializer(const Coloring &c);
-    public:
-      size_t legion_buffer_size(void) const;
-      size_t legion_serialize(void *buffer) const;
-      size_t legion_deserialize(const void *buffer);
-    public:
-      inline Coloring& ref(void) { return coloring; }
-    private:
-      Coloring coloring;
-    };
-
-    /**
-     * \class DomainColoringSerializer
-     * This is a decorator class that helps the Legion compiler
-     * with returning domain colorings as the result of task calls.
-     */
-    class DomainColoringSerializer {
-    public:
-      DomainColoringSerializer(void) { }
-      DomainColoringSerializer(const DomainColoring &c);
-    public:
-      size_t legion_buffer_size(void) const;
-      size_t legion_serialize(void *buffer) const;
-      size_t legion_deserialize(const void *buffer);
-    public:
-      inline DomainColoring& ref(void) { return coloring; }
-    private:
-      DomainColoring coloring;
     };
 
 }; // namespace Legion

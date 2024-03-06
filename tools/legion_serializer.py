@@ -25,6 +25,8 @@ import struct
 import gzip
 import io
 import sys
+import os
+from pathlib import Path
 from abc import ABC
 from typing import Union, Dict, List, Tuple, Callable, Type, ItemsView, Any, Optional
 
@@ -107,6 +109,27 @@ class LegionDeserializer(ABC):
             else:
                 return False
         return True
+    
+    def check_version(self, version: int) -> None:
+        current_path = os.path.dirname(os.path.realpath(__file__))
+        # guess legion_profiling_version.h is in ../runtime/legion
+        legion_prof_version_h_path = os.path.abspath(os.path.join(*[current_path, os.pardir, "runtime", "legion", "legion_profiling_version.h"]))
+        if Path(legion_prof_version_h_path).is_file() == False:
+            # guess legion_profiling.h is in ../include/legion (legion is installed)
+            legion_prof_version_h_path = os.path.abspath(os.path.join(*[current_path, os.pardir, "include", "legion", "legion_profiling_version.h"]))
+            if Path(legion_prof_version_h_path).is_file() == False:
+               print("Warning: can not find legion_profiling_version.h, so legion_prof can not verify the version, the current version of the log is:", version)
+        with open(legion_prof_version_h_path, "r") as legion_prof_file:
+            version_regex = re.compile(r'(?P<version>[0-9]+)')
+            for line in legion_prof_file:
+                m = version_regex.match(line)
+                if m is not None:
+                    legion_version = int(m.groupdict()["version"])
+                    assert legion_version == version, "Can not match the version number of legion_prof:%d with the log:%d" %(legion_version, version)
+                    print(legion_version, version)
+                    return
+        print("Warning: can not find the version number in legion_profiling_version.h, so legion_prof can not verify the version, the current version of the log is:", version)
+
 
 @typecheck
 def read_max_dim(string: str) -> int:
@@ -134,8 +157,8 @@ class LegionProfASCIIDeserializer(LegionDeserializer):
         "MetaDesc": re.compile(prefix + r'Prof Meta Desc (?P<kind>[0-9]+) (?P<message>[0-1]) (?P<ordered_vc>[0-1]) (?P<name>[a-zA-Z0-9_ ]+)'),
         "OpDesc": re.compile(prefix + r'Prof Op Desc (?P<kind>[0-9]+) (?P<name>[a-zA-Z0-9_ ]+)'),
         "MaxDimDesc": re.compile(prefix + r'Max Dim Desc (?P<max_dim>[0-9]+)'),
-        "MachineDesc": re.compile(prefix + r'Machine Desc (?P<node_id>[0-9]+) (?P<num_nodes>[0-9]+)'),
-        "MachineDesc": re.compile(prefix + r'Machine Desc (?P<node_id>[0-9]+) (?P<num_nodes>[0-9]+) (?P<hostname>[a-zA-Z0-9_ ]+) (?P<host_id>[0-9]+) (?P<process_id>[0-9]+)'),
+        "MachineDesc": re.compile(prefix + r'Machine Desc (?P<node_id>[0-9]+) (?P<num_nodes>[0-9]+) (?P<version>[0-9]+)'),
+        "MachineDesc": re.compile(prefix + r'Machine Desc (?P<node_id>[0-9]+) (?P<num_nodes>[0-9]+) (?P<version>[0-9]+) (?P<hostname>[a-zA-Z0-9_ ]+) (?P<host_id>[0-9]+) (?P<process_id>[0-9]+)'),
         "ZeroTime": re.compile(prefix + r'Zero Time (?P<zero_time>[0-9]+)'),
         "ProcDesc": re.compile(prefix + r'Prof Proc Desc (?P<proc_id>[a-f0-9]+) (?P<kind>[0-9]+)'),
         "MemDesc": re.compile(prefix + r'Prof Mem Desc (?P<mem_id>[a-f0-9]+) (?P<kind>[0-9]+) (?P<capacity>[0-9]+)'),
@@ -248,6 +271,7 @@ class LegionProfASCIIDeserializer(LegionDeserializer):
         "node_id": int,
         "num_nodes": int,
         "zero_time": int,
+        "version": int,
         "hostname": str,
         "host_id": int,
         "process_id": int,
@@ -292,6 +316,7 @@ class LegionProfASCIIDeserializer(LegionDeserializer):
             first_time = 0
             last_time = 0
             node_id: Optional[int] = None
+            version: Optional[int] = None
             for line_bytes in log:
                 line = line_bytes.decode('utf-8')
                 if not self.state.has_spy_data and \
@@ -307,7 +332,9 @@ class LegionProfASCIIDeserializer(LegionDeserializer):
                         kwargs = self.parse_regex_matches(m)
                         if prof_event == "MachineDesc":
                             # parse node id
-                            node_id = callback(**kwargs)
+                            node_id, version = callback(**kwargs)
+                            assert version is not None
+                            self.check_version(version)
                             matched = True
                         else:
                             if filter_input:
@@ -483,6 +510,7 @@ class LegionProfBinaryDeserializer(LegionDeserializer):
         def parse_file(log: io.BufferedReader) -> int:
             matches = 0
             node_id: Optional[int] = None
+            version: Optional[int] = None
             self.parse_preamble(log)
             _id_raw = log.read(4)
             while _id_raw:
@@ -496,7 +524,9 @@ class LegionProfBinaryDeserializer(LegionDeserializer):
                 callback_name = self.id_to_name[_id]
                 if callback_name == "MachineDesc":
                     # parse node id
-                    node_id = self.callbacks[_id](**kwargs)
+                    node_id, version = self.callbacks[_id](**kwargs)
+                    assert version is not None
+                    self.check_version(version)
                     matches += 1
                 else:
                     if filter_input:

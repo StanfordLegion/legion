@@ -1,5 +1,5 @@
 /* Copyright 2024 Stanford University
- * Copyright 2024 Los Alamos National Laboratory 
+ * Copyright 2024 Los Alamos National Laboratory
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,10 +22,8 @@
 #include <time.h>
 
 #include <realm.h>
-#include <legion/accessor.h>
 
 using namespace Realm;
-using namespace LegionRuntime::Accessor;
 
 typedef long long coord_t;
 
@@ -359,14 +357,13 @@ void hist_batch_task(const void *args, size_t arglen,
   const HistBatchArgs<BucketType> *hbargs = (const HistBatchArgs<BucketType> *)args;
 
   // get a reduction accessor for the instance
-  RegionAccessor<AccessorType::Generic> untyped(hbargs->inst);
-  RegionAccessor<AccessorType::Generic,BucketType> ria = untyped.typeify<BucketType>();
+  AffineAccessor<BucketType, 1, coord_t> ria(hbargs->inst, 0 /*field id*/);
 
   for(unsigned i = 0; i < hbargs->count; i++) {
     unsigned rval = myrand(hbargs->start + i, hbargs->seed1, hbargs->seed2);
-    unsigned bucket = rval % hbargs->buckets;
+    coord_t bucket = rval % hbargs->buckets;
 
-    ria.reduce<REDOP>(ptr_t(bucket), 1);
+    REDOP::template apply<false>(ria[bucket], 1);
   }
 }
   
@@ -397,14 +394,13 @@ void hist_batch_localize_task(const void *args, size_t arglen,
 		      ProfilingRequestSet()).wait();
 
   // get an array accessor for the instance
-  RegionAccessor<AccessorType::Generic> untyped(lclinst);
-  RegionAccessor<AccessorType::SOA<0>,BucketType> ria = untyped.typeify<BucketType>().convert<AccessorType::SOA<0> >();
+  AffineAccessor<BucketType, 1, coord_t> ria(lclinst, 0 /*field id*/);
 
   for(unsigned i = 0; i < hbargs->count; i++) {
     unsigned rval = myrand(hbargs->start + i, hbargs->seed1, hbargs->seed2);
-    unsigned bucket = rval % hbargs->buckets;
+    coord_t bucket = rval % hbargs->buckets;
 
-    ria.reduce<REDOP>(ptr_t(bucket), 1);
+    REDOP::template apply<false>(ria[bucket], 1);
   }
 
   // now copy the local instance back to the original one
@@ -441,14 +437,13 @@ void hist_batch_redfold_task(const void *args, size_t arglen,
 		      &BucketReduction::identity, fld[0].size).wait();
 
   // get a reduction accessor for the instance
-  RegionAccessor<AccessorType::Generic> untyped(redinst);
-  RegionAccessor<AccessorType::ReductionFold<REDOP>, BucketType> ria = untyped.typeify<BucketType>().convert<AccessorType::ReductionFold<REDOP> >();
+  AffineAccessor<BucketReduction::RHS, 1, coord_t> ria(redinst, 0 /*field id*/);
 
   for(unsigned i = 0; i < hbargs->count; i++) {
     unsigned rval = myrand(hbargs->start + i, hbargs->seed1, hbargs->seed2);
-    unsigned bucket = rval % hbargs->buckets;
+    coord_t bucket = rval % hbargs->buckets;
 
-    ria.reduce(ptr_t(bucket), 1);
+    REDOP::template fold<false>(ria[bucket], 1);
   }
 
   // now copy the reduction instance back to the original one
