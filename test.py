@@ -472,8 +472,7 @@ def run_test_external1(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, 
     # Fast Direct Solver
     # Contact: Chao Chen <cchen10@stanford.edu>
     solver_dir = os.path.join(tmp_dir, 'fastSolver2')
-    # clone_github('Charles-Chao-Chen', 'fastSolver2', solver_dir, tmp_dir)
-    clone_github('elliottslaughter', 'fastSolver2', solver_dir, tmp_dir, branch='modernize-legion')
+    clone_github('Charles-Chao-Chen', 'fastSolver2', solver_dir, tmp_dir)
     solver = [[os.path.join(solver_dir, 'spmd_driver/solver'),
         ['-machine', '1', '-core', '8', '-mtxlvl', '6', '-ll:cpu', '8', '-ll:csize', '1024']]]
     run_cxx(solver, flags, launcher, root_dir, None, env, thread_count, timelimit)
