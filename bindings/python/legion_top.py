@@ -236,13 +236,9 @@ def remove_all_aliases(to_delete):
 
 
 def run_cmd(cmd, run_name):
-    if sys.version_info >= (3, 12):
-        import importlib
-        module_spec = importlib.util.find_spec(run_name)
-        module = importlib.util.module_from_spec(module_spec)
-    else:
-        import imp
-        module = imp.new_module(run_name)
+    import importlib.util
+    module_spec = importlib.util.find_spec(run_name)
+    module = importlib.util.module_from_spec(module_spec)
     setattr(module, '__name__', run_name)
     setattr(module, '__package__', None)
 
@@ -281,13 +277,9 @@ def run_cmd(cmd, run_name):
 # cleaning up after itself and removes the module before execution
 # has completed.
 def run_path(filename, run_name):
-    if sys.version_info >= (3, 12):
-        import importlib
-        spec = importlib.util.spec_from_file_location(run_name, filename)
-        module = importlib.util.module_from_spec(spec)
-    else:
-        import imp
-        module = imp.new_module(run_name)
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(run_name, filename)
+    module = importlib.util.module_from_spec(spec)
     setattr(module, '__name__', run_name)
     setattr(module, '__file__', filename)
     setattr(module, '__loader__', None)
