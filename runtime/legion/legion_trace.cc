@@ -1435,7 +1435,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(!physical->has_current_template());
 #endif
-        std::vector<RtEvent> refresh_ready;
+        std::set<RtEvent> refresh_ready;
         physical->refresh_condition_sets(this, refresh_ready);
         if (!refresh_ready.empty())
         {
@@ -1491,8 +1491,9 @@ namespace Legion {
         LogicalTrace *tr, LogicalTrace *prev, Provenance *prov, bool remove_ref)
     //--------------------------------------------------------------------------
     {
-      TraceOp::initialize(ctx, tr->has_physical_trace() ? EXECUTION_FENCE : 
-          MAPPING_FENCE, false/*need future*/, prov);
+      TraceOp::initialize(ctx, tr->has_physical_trace() || 
+          prev->has_physical_trace() ? EXECUTION_FENCE : MAPPING_FENCE,
+          false/*need future*/, prov);
       trace = tr;
       tracing = false;
       previous = prev;
@@ -1551,22 +1552,38 @@ namespace Legion {
     void TraceRecurrentOp::trigger_ready(void)
     //--------------------------------------------------------------------------
     {
-      if (trace->has_physical_trace())
+      std::set<RtEvent> ready_events;
+      if (trace != previous)
       {
-        PhysicalTrace *physical = trace->get_physical_trace();
-        if ((trace != previous) || physical->is_recording() ||
-            !physical->get_current_template()->is_idempotent())
+        if (previous->has_physical_trace())
         {
-          std::vector<RtEvent> refresh_ready;
-          physical->refresh_condition_sets(this, refresh_ready);
-          if (!refresh_ready.empty())
-          {
-            enqueue_ready_operation(Runtime::merge_events(refresh_ready));
-            return;
-          }
+          PhysicalTrace *physical = previous->get_physical_trace();
+          if (physical->is_replaying())
+            physical->complete_physical_trace(this, ready_events,
+                execution_preconditions, has_blocking_call);
+        }
+        if (trace->has_physical_trace())
+        {
+          PhysicalTrace *physical = trace->get_physical_trace();
+          physical->refresh_condition_sets(this, ready_events);
         }
       }
-      enqueue_ready_operation();
+      else if (trace->has_physical_trace())
+      {
+        PhysicalTrace *physical = trace->get_physical_trace();
+        if (physical->is_recording())
+          physical->refresh_condition_sets(this, ready_events);
+        else if (!physical->get_current_template()->is_idempotent())
+        {
+          physical->refresh_condition_sets(this, ready_events);
+          physical->complete_physical_trace(this, ready_events,
+              execution_preconditions, has_blocking_call);
+        }
+      }
+      if (!ready_events.empty())
+        enqueue_ready_operation(Runtime::merge_events(ready_events));
+      else
+        enqueue_ready_operation();
     }
 
     //--------------------------------------------------------------------------
@@ -1580,8 +1597,9 @@ namespace Legion {
         if (previous->has_physical_trace())
         {
           PhysicalTrace *physical = previous->get_physical_trace();
-          physical->complete_physical_trace(this, map_applied_conditions,
-              execution_preconditions, has_blocking_call);
+          if (physical->is_recording())
+            physical->complete_physical_trace(this, map_applied_conditions,
+                execution_preconditions, has_blocking_call);
         }
         if (trace->has_physical_trace())
         {
@@ -1811,14 +1829,15 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PhysicalTrace::refresh_condition_sets(FenceOp *op,
-                                       std::vector<RtEvent> &ready_events) const
+                                          std::set<RtEvent> &ready_events) const
     //--------------------------------------------------------------------------
     {
       // Make sure all the templates have up-to-date equivalence sets for
       // performing any kind of tests on preconditions/postconditions
       for (std::vector<PhysicalTemplate*>::const_iterator it =
             templates.begin(); it != templates.end(); it++)
-        (*it)->refresh_condition_sets(op, ready_events);
+        if ((*it) != current_template)
+          (*it)->refresh_condition_sets(op, ready_events);
     }
 
     //--------------------------------------------------------------------------
@@ -2034,9 +2053,18 @@ namespace Legion {
             // be replayed right away so we don't want to check it
             non_idempotent_template = current_template;
         }
+        // If we get here then we can't replay the current template so we
+        // can just do a normal begin physical trace
+        current_template = NULL;
       }
-      else
+      else if (current_template != NULL)
       {
+#ifdef DEBUG_LEGION
+        // We should only be here if we're going to do a recurrent replay
+        // If the current template was non-idempotent then it would have been
+        // cleared by the TraceRecurrentOp in trigger_ready
+        assert(current_template->is_idempotent());
+#endif
         // If this isn't a recurrent replay then we need to apply the
         // postconditions to the equivalence sets, if it is recurrent
         // then we know that the postconditions have already been applied
@@ -2044,17 +2072,30 @@ namespace Legion {
           current_template->apply_postconditions(
               op->get_complete_operation(), map_applied_conditions);
         current_template->finish_replay(execution_preconditions);
-        if (recurrent || current_template->is_idempotent())
-        {
-          begin_replay(op, true/*recurrent*/, has_intermediate_fence);
-          return true;
-        }
-        else
-          current_template->release_instance_references();
+        begin_replay(op, true/*recurrent*/, has_intermediate_fence);
+        return true;
       }
-      // If we get here then we can't replay the current template so we
-      // can just do a normal begin physical trace
-      current_template = NULL;
+      else
+      {
+        // This case occurs when have a recurrent trace with a non-idempotent
+        // template. The TraceRecurrentOp will have completed the prior
+        // template so the current template will have been cleared.
+        // The most recent replayed template should be at the back of the
+        // list of templates and it should be non-idempotent. There's no
+        // point in considering it for replay since it is non-idempotent
+        // and we know its preconditions aren't going to be satisfied so
+        // we pop it off the list of templates and add it back once we've
+        // decided what we're going to do.
+#ifdef DEBUG_LEGION
+        assert(!templates.empty());
+        assert(!templates.back()->is_idempotent());
+#endif
+        non_idempotent_template = templates.back();
+        templates.pop_back();
+      }
+#ifdef DEBUG_LEGION
+      assert(current_template == NULL);
+#endif
       if (non_idempotent_template != NULL)
       {
         // If we have a non-idempotent template we figure out what kind of
@@ -4182,7 +4223,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void TraceConditionSet::refresh_equivalence_sets(FenceOp *op,
-                                             std::vector<RtEvent> &ready_events)
+                                                std::set<RtEvent> &ready_events)
     //--------------------------------------------------------------------------
     {
       // We should not need the lock here because the fence op should be 
@@ -4192,51 +4233,37 @@ namespace Legion {
         views.get_valid_mask() - equivalence_sets.get_valid_mask();
       if (!!invalid_mask)
       {
-        const RtEvent ready = recompute_equivalence_sets(
-            op->get_unique_op_id(), invalid_mask);
-        if (ready.exists())
-          ready_events.push_back(ready);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    RtEvent TraceConditionSet::recompute_equivalence_sets(UniqueID opid,
-                                                  const FieldMask &invalid_mask)
-    //--------------------------------------------------------------------------
-    {
+        Runtime *runtime = owner->trace->runtime;
+        AddressSpaceID space = runtime->address_space;
+        // Create a user event and store it in equivalence_sets_ready
+        const RtUserEvent compute_event = Runtime::create_rt_user_event();
+        {
+          AutoLock s_lock(set_lock);
 #ifdef DEBUG_LEGION
-      assert(!!invalid_mask);
+          assert(equivalence_sets_ready == NULL);
 #endif
-      Runtime *runtime = owner->trace->runtime;
-      AddressSpaceID space = runtime->address_space;
-      // Create a user event and store it in the equivalence set ready structure
-      const RtUserEvent compute_event = Runtime::create_rt_user_event();
-      {
-        AutoLock s_lock(set_lock);
-#ifdef DEBUG_LEGION
-        assert(equivalence_sets_ready == NULL);
-#endif
-        equivalence_sets_ready = new LegionMap<RtUserEvent,FieldMask>();
-        equivalence_sets_ready->insert(
-            std::make_pair(compute_event, invalid_mask));
+          equivalence_sets_ready = new LegionMap<RtUserEvent,FieldMask>();
+          equivalence_sets_ready->insert(
+              std::make_pair(compute_event, invalid_mask));
+        }
+        std::vector<EqSetTracker*> targets(1, this);
+        std::vector<AddressSpaceID> target_spaces(1, space);
+        InnerContext *context = owner->trace->logical_trace->context;
+        RtEvent ready = context->compute_equivalence_sets(parent_req_index,
+            targets, target_spaces, space, condition_expr, invalid_mask);
+        if (ready.exists() && !ready.has_triggered())
+        {
+          // Launch a meta-task to finalize this trace condition set
+          LgFinalizeEqSetsArgs args(this, compute_event, op->get_unique_op_id(),
+              context, parent_req_index, condition_expr);
+          runtime->issue_runtime_meta_task(args, 
+                          LG_LATENCY_DEFERRED_PRIORITY, ready);
+        }
+        else
+          finalize_equivalence_sets(compute_event, context, runtime,
+              parent_req_index, condition_expr, op->get_unique_op_id());
+        ready_events.insert(compute_event);
       }
-      std::vector<EqSetTracker*> targets(1, this);
-      std::vector<AddressSpaceID> target_spaces(1, space);
-      InnerContext *context = owner->trace->logical_trace->context;
-      RtEvent ready = context->compute_equivalence_sets(parent_req_index,
-          targets, target_spaces, space, condition_expr, invalid_mask);
-      if (ready.exists() && !ready.has_triggered())
-      {
-        // Launch a meta-task to finalize this trace condition set
-        LgFinalizeEqSetsArgs args(this, compute_event, opid,
-            context, parent_req_index, condition_expr);
-        return runtime->issue_runtime_meta_task(args, 
-                        LG_LATENCY_DEFERRED_PRIORITY, ready);
-      }
-      else
-        finalize_equivalence_sets(compute_event, context, runtime,
-            parent_req_index, condition_expr, opid);
-      return compute_event;
     }
 
     /////////////////////////////////////////////////////////////
@@ -4867,7 +4894,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PhysicalTemplate::refresh_condition_sets(FenceOp *op,
-                                       std::vector<RtEvent> &ready_events) const
+                                          std::set<RtEvent> &ready_events) const
     //--------------------------------------------------------------------------
     {
       for (std::vector<TraceConditionSet*>::const_iterator it =

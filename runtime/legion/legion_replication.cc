@@ -8852,17 +8852,28 @@ namespace Legion {
       {
         PhysicalTrace *physical = trace->get_physical_trace();
 #ifdef DEBUG_LEGION
+        assert(mapping_fence_barrier.exists());
         assert(!physical->has_current_template());
 #endif
-        std::vector<RtEvent> refresh_ready;
+        std::set<RtEvent> refresh_ready;
         physical->refresh_condition_sets(this, refresh_ready);
+        // Have to do the mapping fence on the way in for physical traces
+        // since we need to know everything is done mapping before testing
+        // preconditions of any templates. Note that this is safe to do in 
+        // parallel with the refresh since we're not going to look inside
+        // the equivalence sets until later and any refinements to the 
+        // equivalence sets will do their own barriers across the shards
+        Runtime::phase_barrier_arrive(mapping_fence_barrier, 1/*count*/);
         if (!refresh_ready.empty())
         {
+          refresh_ready.insert(mapping_fence_barrier);
           enqueue_ready_operation(Runtime::merge_events(refresh_ready));
-          return;
         }
+        else
+          enqueue_ready_operation(mapping_fence_barrier);
       }
-      enqueue_ready_operation();
+      else
+        enqueue_ready_operation();
     }
 
     //--------------------------------------------------------------------------
@@ -8871,13 +8882,30 @@ namespace Legion {
     {
       if (trace->has_physical_trace())
       {
+#ifdef DEBUG_LEGION
+        assert(fence_kind == EXECUTION_FENCE);
+#endif
         PhysicalTrace *physical = trace->get_physical_trace();
         const bool replaying = physical->begin_physical_trace(this,
             map_applied_conditions, execution_preconditions);
         // Tell the parent context whether we are replaying
         parent_ctx->record_physical_trace_replay(mapped_event, replaying);
+        // Now we wrap up the fence, we already did the mapping fence
+        // during the trigger ready stage of the pipeline
+        if (!map_applied_conditions.empty())
+          complete_mapping(Runtime::merge_events(map_applied_conditions));
+        else
+          complete_mapping();
+        if (!execution_preconditions.empty())
+          Runtime::phase_barrier_arrive(execution_fence_barrier, 1/*count*/,
+              Runtime::merge_events(NULL, execution_preconditions));
+        else
+          Runtime::phase_barrier_arrive(execution_fence_barrier, 1/*count*/);
+        record_completion_effect(execution_fence_barrier);
+        complete_execution();
       }
-      ReplTraceOp::trigger_mapping();
+      else
+        ReplTraceOp::trigger_mapping();
     } 
 
     /////////////////////////////////////////////////////////////
@@ -8902,8 +8930,9 @@ namespace Legion {
         LogicalTrace *tr, LogicalTrace *prev, Provenance *prov, bool remove_ref)
     //--------------------------------------------------------------------------
     {
-      ReplTraceOp::initialize(ctx, tr->has_physical_trace() ? EXECUTION_FENCE :
-          MAPPING_FENCE, false/*need future*/, prov);
+      ReplTraceOp::initialize(ctx, tr->has_physical_trace() || 
+          prev->has_physical_trace() ? EXECUTION_FENCE : MAPPING_FENCE,
+          false/*need future*/, prov);
       trace = tr;
       tracing = false;
       previous = prev;
@@ -8964,28 +8993,73 @@ namespace Legion {
     void ReplTraceRecurrentOp::trigger_ready(void)
     //--------------------------------------------------------------------------
     {
-      if (trace->has_physical_trace())
+      bool fence_before = false;
+      // This is really subtle so be careful!
+      // The ready_events are the local events that we need to trigger before
+      // we can move on to trigger_mapping, the fence_events are events that
+      // have to be triggered across all the shards before any shard can move
+      // on to the trigger_mapping call. The former are for refreshing 
+      // equivalence sets while the latter are for applying postconditions
+      std::set<RtEvent> ready_events, fence_events;
+      if (trace != previous)
       {
-        PhysicalTrace *physical = trace->get_physical_trace();
-        if ((trace != previous) || physical->is_recording() ||
-            !physical->get_current_template()->is_idempotent())
+        if (trace->has_physical_trace())
         {
-          std::vector<RtEvent> refresh_ready;
-          physical->refresh_condition_sets(this, refresh_ready);
-          if (!refresh_ready.empty())
-          {
-            enqueue_ready_operation(Runtime::merge_events(refresh_ready));
-            return;
-          }
+          PhysicalTrace *physical = trace->get_physical_trace();
+          physical->refresh_condition_sets(this, ready_events);
+          fence_before = true;
+        }
+        if (previous->has_physical_trace())
+        {
+          PhysicalTrace *physical = previous->get_physical_trace();
+          if (physical->is_replaying())
+            physical->complete_physical_trace(this,
+                fence_before ? fence_events : map_applied_conditions,
+                execution_preconditions, has_blocking_call);
         }
       }
-      enqueue_ready_operation();
+      else if (trace->has_physical_trace())
+      {
+        PhysicalTrace *physical = trace->get_physical_trace();
+        if (physical->is_recording())
+          physical->refresh_condition_sets(this, ready_events);
+        else if (!physical->get_current_template()->is_idempotent())
+        {
+          physical->refresh_condition_sets(this, ready_events);
+          physical->complete_physical_trace(this, fence_events,
+              execution_preconditions, has_blocking_call);
+          fence_before = true;
+        }
+      }
+      if (fence_before)
+      {
+#ifdef DEBUG_LEGION
+        assert(mapping_fence_barrier.exists());
+#endif
+        if (!fence_events.empty())
+          Runtime::phase_barrier_arrive(mapping_fence_barrier, 1/*count*/,
+              Runtime::merge_events(fence_events));
+        else
+          Runtime::phase_barrier_arrive(mapping_fence_barrier, 1/*count*/);
+        if (!ready_events.empty())
+        {
+          ready_events.insert(mapping_fence_barrier);
+          enqueue_ready_operation(Runtime::merge_events(ready_events));
+        }
+        else
+          enqueue_ready_operation(mapping_fence_barrier);
+      }
+      else if (!ready_events.empty())
+        enqueue_ready_operation(Runtime::merge_events(ready_events));
+      else
+        enqueue_ready_operation();
     }
 
     //--------------------------------------------------------------------------
     void ReplTraceRecurrentOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
+      bool fence_before = false;
       // Check to see if this is a true recurrent replay or not
       if (trace != previous)
       {
@@ -8993,8 +9067,9 @@ namespace Legion {
         if (previous->has_physical_trace())
         {
           PhysicalTrace *physical = previous->get_physical_trace();
-          physical->complete_physical_trace(this, map_applied_conditions,
-              execution_preconditions, has_blocking_call);
+          if (physical->is_recording())
+            physical->complete_physical_trace(this, map_applied_conditions,
+                execution_preconditions, has_blocking_call);
         }
         if (trace->has_physical_trace())
         {
@@ -9003,12 +9078,16 @@ namespace Legion {
               map_applied_conditions, execution_preconditions);
           // Tell the parent whether we are replaying
           parent_ctx->record_physical_trace_replay(mapped_event, replaying);
+          fence_before = true;
         }
       }
       else if (trace->has_physical_trace())
       {
         // This is recurrent, so try to do the recurrent replay
         PhysicalTrace *physical = trace->get_physical_trace();
+        // The only way we no longer have a current template is if it was
+        // not idempotent and we had to complete it before the mapping fence
+        fence_before = !physical->has_current_template();
         const bool replaying = physical->replay_physical_trace(this,
             map_applied_conditions, execution_preconditions,
             has_blocking_call, has_intermediate_fence);
@@ -9017,7 +9096,27 @@ namespace Legion {
       }
       if (remove_trace_reference && previous->remove_reference())
         delete previous;
-      ReplTraceOp::trigger_mapping();
+      if (fence_before)
+      {
+#ifdef DEBUG_LEGION
+        assert(fence_kind == EXECUTION_FENCE);
+#endif
+        // Now we wrap up the fence, we already did the mapping fence
+        // during the trigger ready stage of the pipeline
+        if (!map_applied_conditions.empty())
+          complete_mapping(Runtime::merge_events(map_applied_conditions));
+        else
+          complete_mapping();
+        if (!execution_preconditions.empty())
+          Runtime::phase_barrier_arrive(execution_fence_barrier, 1/*count*/,
+              Runtime::merge_events(NULL, execution_preconditions));
+        else
+          Runtime::phase_barrier_arrive(execution_fence_barrier, 1/*count*/);
+        record_completion_effect(execution_fence_barrier);
+        complete_execution();
+      }
+      else
+        ReplTraceOp::trigger_mapping();
     }
 
     /////////////////////////////////////////////////////////////

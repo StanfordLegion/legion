@@ -514,7 +514,7 @@ namespace Legion {
       void record_parent_req_fields(unsigned index, const FieldMask &mask);
       void find_condition_sets(std::map<EquivalenceSet*,unsigned> &sets) const;
       void refresh_condition_sets(FenceOp *op,
-          std::vector<RtEvent> &refresh_ready) const;
+          std::set<RtEvent> &refresh_ready) const;
       bool begin_physical_trace(BeginOp *op,
           std::set<RtEvent> &map_applied_conditions,
           std::set<ApEvent> &execution_preconditions);
@@ -680,9 +680,7 @@ namespace Legion {
                    const FieldMaskSet<LogicalView> &views) const;
       void invalidate_equivalence_sets(void);
       void refresh_equivalence_sets(FenceOp *op,
-          std::vector<RtEvent> &ready_events);
-      RtEvent recompute_equivalence_sets(UniqueID opid, 
-                        const FieldMask &invalid_mask);
+          std::set<RtEvent> &ready_events);
       void dump_conditions(void) const;
     public:
       void test_preconditions(FenceOp *op, unsigned index,
@@ -854,7 +852,7 @@ namespace Legion {
           unsigned parent_req_index, RegionTreeID tree_id,
           std::atomic<unsigned> *result);
       void refresh_condition_sets(FenceOp *op,
-          std::vector<RtEvent> &ready_events) const;
+          std::set<RtEvent> &ready_events) const;
       bool acquire_instance_references(void) const;
       void release_instance_references(void) const;
     public:
