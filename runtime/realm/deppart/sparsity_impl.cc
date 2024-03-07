@@ -233,9 +233,6 @@ namespace Realm {
   {
     unsigned old_references = references.load();
     while(true) {
-      if(old_references == 0)
-        return;
-
       unsigned new_references =
           std::max(0, static_cast<int>(old_references) - static_cast<int>(count));
       if(references.compare_exchange(old_references, new_references)) {
