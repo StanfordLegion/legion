@@ -99,6 +99,14 @@ typedef
     size_t /*userlen*/,
     realm_id_t /*proc_id*/);
 
+// error code
+typedef enum RealmStatus_t
+{
+  // To comply with other C libraries, we use 0 for success, negative numbers for errors
+  REALM_SUCCESS = 0,
+  REALM_ERROR = -1,
+} RealmStatus;
+
 #ifdef __cplusplus
 }
 #endif
