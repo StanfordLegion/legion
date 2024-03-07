@@ -8335,10 +8335,10 @@ namespace Legion {
               this->runtime->weak_find_distributed_collectable(it->first));
           if (set == NULL)
             continue;
-#ifdef DEBUG_LEGION
-          assert(set->collective_mapping != NULL);
-#endif
-          if (set->collective_mapping->contains(local_space))
+          // If we don't have a collective mapping then this equivalence set
+          // was migrated here after it was initially created somewhere else
+          if ((set->collective_mapping != NULL) &&
+              set->collective_mapping->contains(local_space))
           {
             // All the nodes in the collective mapping will be represented
             // by at least one shard because this collective mapping had
