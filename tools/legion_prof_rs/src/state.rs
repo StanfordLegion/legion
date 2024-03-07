@@ -1,11 +1,10 @@
-use std::cmp::Ordering;
-use std::cmp::{max, Reverse};
+use std::cmp::{max, Ordering, Reverse};
 use std::collections::{BTreeMap, BTreeSet, BinaryHeap};
 use std::convert::TryFrom;
 use std::fmt;
 use std::sync::OnceLock;
 
-use derive_more::{Add, From, LowerHex, Sub};
+use derive_more::{Add, AddAssign, From, LowerHex, Sub, SubAssign};
 use num_enum::TryFromPrimitive;
 
 use rayon::prelude::*;
@@ -208,11 +207,26 @@ macro_rules! conditional_assert {
 }
 
 #[derive(
-    Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Default, Serialize, Add, Sub, From,
+    Debug,
+    Copy,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Default,
+    Serialize,
+    Add,
+    Sub,
+    AddAssign,
+    SubAssign,
+    From,
 )]
 pub struct Timestamp(pub u64 /* ns */);
 
 impl Timestamp {
+    pub const MAX: Timestamp = Timestamp(std::u64::MAX);
+    pub const MIN: Timestamp = Timestamp(std::u64::MIN);
     pub const fn from_us(microseconds: u64) -> Timestamp {
         Timestamp(microseconds * 1000)
     }
@@ -304,7 +318,7 @@ pub trait ContainerEntry {
     fn provenance<'a, 'b>(&'a self, state: &'b State) -> Option<&'b str>;
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ProcEntryKind {
     Task(TaskID, VariantID),
     MetaTask(VariantID),
@@ -606,6 +620,10 @@ impl Proc {
 
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
+    }
+
+    pub(crate) fn entries(&self) -> impl Iterator<Item = &ProcEntry> {
+        self.entries.values()
     }
 
     fn trim_time_range(&mut self, start: Timestamp, stop: Timestamp) {
