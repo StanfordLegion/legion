@@ -2187,17 +2187,21 @@ impl Waiters {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
-pub struct OpID(pub u64);
+pub struct OpID(pub NonMaxU64);
+
+impl OpID {
+    pub const ZERO: OpID = OpID(NonMaxU64::ZERO);
+}
 
 impl From<spy::serialize::UniqueID> for OpID {
     fn from(e: spy::serialize::UniqueID) -> Self {
-        OpID(e.0)
+        OpID(NonMaxU64::new(e.0).unwrap())
     }
 }
 
 impl From<spy::serialize::ContextID> for OpID {
     fn from(e: spy::serialize::ContextID) -> Self {
-        OpID(e.0)
+        OpID(NonMaxU64::new(e.0).unwrap())
     }
 }
 
@@ -2268,14 +2272,9 @@ impl Operation {
             operation_inst_infos: Vec::new(),
         }
     }
-    fn set_parent_id(&mut self, parent_id: OpID) -> &mut Self {
-        let parent = if parent_id == OpID(std::u64::MAX) {
-            None
-        } else {
-            Some(parent_id)
-        };
-        assert!(self.parent_id.is_none() || self.parent_id == parent);
-        self.parent_id = parent;
+    fn set_parent_id(&mut self, parent_id: Option<OpID>) -> &mut Self {
+        assert!(self.parent_id.is_none() || self.parent_id == parent_id);
+        self.parent_id = parent_id;
         self
     }
     fn set_kind(&mut self, kind: OpKindID) -> &mut Self {
@@ -2831,7 +2830,11 @@ impl State {
         proc.create_proc_entry(
             Base::new(alloc),
             None,
-            if op_id.0 > 0 { Some(op_id) } else { None },
+            if op_id != OpID::ZERO {
+                Some(op_id)
+            } else {
+                None
+            },
             ProcEntryKind::MapperCall(kind),
             time_range,
             fevent,
@@ -3928,7 +3931,7 @@ fn process_record(
             // order the logger calls are going to come in. If the task gets
             // logged first, this will come back Some(_) and we'll store it below.
             if let Some(task) = state.find_task_mut(*op_id) {
-                task.initiation_op = Some(*parent_id);
+                task.initiation_op = *parent_id;
             }
         }
         Record::MultiTask { op_id, task_id } => {
@@ -3939,7 +3942,7 @@ fn process_record(
                 .or_insert_with(|| MultiTask::new(*op_id, *task_id));
         }
         Record::SliceOwner { parent_id, op_id } => {
-            let parent_id = OpID(*parent_id);
+            let parent_id = OpID(NonMaxU64::new(*parent_id).unwrap());
             state.create_op(parent_id);
             state.create_op(*op_id); //.set_owner(parent_id);
         }

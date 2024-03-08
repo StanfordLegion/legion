@@ -907,7 +907,7 @@ impl StateDataSource {
                 ));
             }
         }
-        Field::U64(op_id.0)
+        Field::U64(op_id.0.get())
     }
 
     fn generate_inst_link(&self, inst_uid: InstUID, prefix: &str) -> Option<Field> {
@@ -974,7 +974,7 @@ impl StateDataSource {
                 // FIXME: You might think that initiation_op is None rather than
                 // needing this check with zero, but backwards compatibility is hard
                 // You can remove this check once we stop needing to be compatible with Python
-                if initiation_op.0 > 0 {
+                if initiation_op != OpID::ZERO {
                     fields.push((self.fields.operation, self.generate_op_link(initiation_op)));
                 }
             }
@@ -1132,7 +1132,7 @@ impl StateDataSource {
                 // FIXME: You might think that initiation_op is None rather than
                 // needing this check with zero, but backwards compatibility is hard
                 // You can remove this check once we stop needing to be compatible with Python
-                if initiation_op.0 > 0 {
+                if initiation_op != OpID::ZERO {
                     fields.push((self.fields.operation, self.generate_op_link(initiation_op)));
                 }
             }
@@ -1356,7 +1356,7 @@ impl StateDataSource {
                 // FIXME: You might think that initiation_op is None rather than
                 // needing this check with zero, but backwards compatibility is hard
                 // You can remove this check once we stop needing to be compatible with Python
-                if initiation_op.0 > 0 {
+                if initiation_op != OpID::ZERO {
                     fields.push((self.fields.operation, self.generate_op_link(initiation_op)));
                 }
             }
