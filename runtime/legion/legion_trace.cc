@@ -2247,15 +2247,61 @@ namespace Legion {
       char *m = mask.to_string();
       if (view->is_fill_view())
       {
-        ss << "fill view: " << view
+        ss << "fill view: " << std::hex << view->did << std::dec
            << ", Index expr: " << expr->expr_id
            << ", Field Mask: " << m;
       }
       else if (view->is_collective_view())
       {
-        ss << "collective view: " << view
+        CollectiveView *collective = view->as_collective_view();
+        ss << "collective view: " << std::hex << view->did << std::dec
            << ", Index expr: " << expr->expr_id
            << ", Field Mask: " << m;
+        const char *mem_names[] = {
+#define MEM_NAMES(name, desc) #name,
+            REALM_MEMORY_KINDS(MEM_NAMES) 
+#undef MEM_NAMES
+          };
+        bool first = true;
+        for (std::vector<DistributedID>::const_iterator it =
+              collective->instances.begin(); it != 
+              collective->instances.end(); it++)
+        {
+          RtEvent ready;
+          PhysicalManager *manager = 
+            ctx->runtime->find_or_request_instance_manager(*it, ready);
+          if (ready.exists())
+            ready.wait();
+          if (first)
+          {
+            ss << ", Fields: ";
+            FieldSpaceNode *field_space = manager->field_space_node;
+            std::vector<FieldID> fields;
+            field_space->get_field_set(mask, ctx, fields);
+            for (std::vector<FieldID>::const_iterator fit =
+                  fields.begin(); fit != fields.end(); fit++)
+            {
+              if (fit != fields.begin())
+                ss << ", ";
+              const void *name = NULL;
+              size_t name_size = 0;
+              if (field_space->retrieve_semantic_information(
+                    LEGION_NAME_SEMANTIC_TAG, name, name_size,
+                    true/*can fail*/, false/*wait until*/))
+                ss << ((const char*)name) << " (" << *fit << ")";
+              else
+                ss << *fit;
+            }
+            ss << ", Instances: ";
+            first = false;
+          }
+          Memory memory = manager->memory_manager->memory;
+          ss << "Instance " << std::hex << *it << std::dec
+             << " (" << std::hex << manager->get_instance().id 
+             << std::dec << ")"
+             << " in " << mem_names[memory.kind()]
+             << " Memory " << std::hex << memory.id << std::dec;
+        }
       }
       else
       {
@@ -2275,8 +2321,10 @@ namespace Legion {
         std::vector<FieldID> fields;
         field_space->get_field_set(mask, ctx, fields);
 
-        ss << "view: " << view << " in " << mem_names[memory.kind()]
-           << " memory " << std::hex << memory.id << std::dec
+        ss << "Instance " << std::hex << manager->did << std::dec
+           << " (" << std::hex << manager->get_instance().id << std::dec << ")"
+           << " in " << mem_names[memory.kind()]
+           << " Memory " << std::hex << memory.id << std::dec
            << ", Index expr: " << expr->expr_id
            << ", Field Mask: " << m << ", Fields: ";
         for (std::vector<FieldID>::const_iterator it =
@@ -3559,23 +3607,36 @@ namespace Legion {
               vit->second.begin(); it != vit->second.end(); ++it)
         {
           char *mask = region->column_source->to_string(it->second, context);
-          const void *name = NULL; size_t name_size = 0;
           if (view->is_fill_view())
           {
             log_tracing.info() << "  "
-                      << "Fill view: " << view
+                      << "Fill View: " << std::hex << view->did << std::dec
                       << ", Index expr: " << it->first->expr_id
-                      << ", Name: " << (name_size > 0 ? (const char*)name : "")
                       << ", Fields: " << mask;
           }
           else if (view->is_collective_view())
           {
+            CollectiveView *collective = view->as_collective_view();
+            std::stringstream ss;
+            for (std::vector<DistributedID>::const_iterator cit =
+                  collective->instances.begin(); cit != 
+                  collective->instances.end(); cit++)
+            {
+              RtEvent ready;
+              PhysicalManager *manager = 
+                context->runtime->find_or_request_instance_manager(*cit, ready);
+              if (ready.exists())
+                ready.wait();
+              ss << " Instance " << std::hex << manager->did << std::dec
+                 << "(" << std::hex << manager->get_instance().id 
+                 << std::dec << "),";
+            }
             log_tracing.info() << "  Collective "
                       << (view->is_reduction_kind() ? "Reduction " : "")
-                      << "view: " << view
+                      << "View: " << std::hex << view->did << std::dec
                       << ", Index expr: " << it->first->expr_id
-                      << ", Name: " << (name_size > 0 ? (const char*)name : "")
-                      << ", Fields: " << mask;
+                      << ", Fields: " << mask
+                      << ", Instances:" << ss.str();
           }
           else
           {
@@ -3583,11 +3644,11 @@ namespace Legion {
               view->as_individual_view()->get_manager();
             log_tracing.info() << "  "
                       << (view->is_reduction_view() ? 
-                          "Reduction" : "Materialized")
-                      << " view: " << view << ", Inst: "
-                      << std::hex << manager->get_instance().id << std::dec
+                          "Reduction" : "Normal")
+                      << " Instance " << std::hex << manager->did << std::dec
+                      << "(" << std::hex << manager->get_instance().id 
+                      << std::dec << ")"
                       << ", Index expr: " << it->first->expr_id
-                      << ", Name: " << (name_size > 0 ? (const char*)name : "")
                       << ", Fields: " << mask;
           }
           free(mask);
@@ -4289,6 +4350,10 @@ namespace Legion {
     PhysicalTemplate::~PhysicalTemplate(void)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(failure.view == NULL);
+      assert(failure.expr == NULL);
+#endif
       {
         AutoLock tpl_lock(template_lock); 
         for (std::vector<TraceConditionSet*>::const_iterator it =
@@ -4807,12 +4872,37 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // First check to see if these conditions are idempotent or not  
+      TraceViewSet::FailedPrecondition fail;
       if ((previews != NULL) && (postviews != NULL) &&
-          !previews->subsumed_by(*postviews, true/*allow independent*/))
-        result->store(NOT_IDEMPOTENT_SUBSUMPTION);
+          !previews->subsumed_by(*postviews, true/*allow independent*/, &fail))
+      {
+        unsigned initial = IDEMPOTENT;
+        if (result->compare_exchange_strong(initial,
+              NOT_IDEMPOTENT_SUBSUMPTION) &&
+            trace->runtime->dump_physical_traces)
+        {
+          failure = fail;
+          if (failure.view != NULL)
+            failure.view->add_base_resource_ref(TRACE_REF);
+          if (failure.expr != NULL)
+            failure.expr->add_base_expression_reference(TRACE_REF);
+        }
+      }
       else if ((postviews != NULL) && (antiviews != NULL) &&
-          !postviews->independent_of(*antiviews))
-        result->store(NOT_IDEMPOTENT_ANTIDEPENDENT);
+          !postviews->independent_of(*antiviews, &fail))
+      {
+        unsigned initial = IDEMPOTENT;
+        if (result->compare_exchange_strong(initial, 
+              NOT_IDEMPOTENT_ANTIDEPENDENT) && 
+            trace->runtime->dump_physical_traces)
+        {
+          failure = fail;
+          if (failure.view != NULL)
+            failure.view->add_base_resource_ref(TRACE_REF);
+          if (failure.expr != NULL)
+            failure.expr->add_base_expression_reference(TRACE_REF);
+        }
+      }
       // Now we can convert these views into conditions
       std::vector<TraceConditionSet*> postsets;
       // Create the postconditions first so we can see if we can share
@@ -6850,6 +6940,32 @@ namespace Legion {
         << this << " Trace " << trace->logical_trace->tid << " for " 
         << ctx->get_task_name()
         << " (UID " << ctx->get_unique_id() << ") ####";
+      if (idempotency == NOT_IDEMPOTENT_SUBSUMPTION)
+      {
+        log_tracing.info() << "Non-subsumed condition: "
+                           << failure.to_string(trace->logical_trace->context);
+        if ((failure.view != NULL) && 
+            failure.view->remove_base_resource_ref(TRACE_REF))
+          delete failure.view;
+        failure.view = NULL;
+        if ((failure.expr != NULL) &&
+            failure.expr->remove_base_expression_reference(TRACE_REF))
+          delete failure.expr;
+        failure.expr = NULL;
+      }
+      else if (idempotency == NOT_IDEMPOTENT_ANTIDEPENDENT)
+      {
+        log_tracing.info() << "Anti-dependent condition: " 
+                           << failure.to_string(trace->logical_trace->context);
+        if ((failure.view != NULL) && 
+            failure.view->remove_base_resource_ref(TRACE_REF))
+          delete failure.view;
+        failure.view = NULL;
+        if ((failure.expr != NULL) &&
+            failure.expr->remove_base_expression_reference(TRACE_REF))
+          delete failure.expr;
+        failure.expr = NULL;
+      }
       const size_t replay_parallelism = trace->get_replay_targets().size();
       for (unsigned sidx = 0; sidx < replay_parallelism; ++sidx)
       {

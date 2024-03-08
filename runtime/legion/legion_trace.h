@@ -567,6 +567,9 @@ namespace Legion {
     class TraceViewSet {
     public:
       struct FailedPrecondition {
+      public:
+        FailedPrecondition(void) : view(NULL), expr(NULL) { }
+      public:
         LogicalView *view;
         IndexSpaceExpression *expr;
         FieldMask mask;
@@ -1155,6 +1158,7 @@ namespace Legion {
       std::map<TraceLocalID,CachedAllreduce> cached_allreduces;
       bool has_virtual_mapping;
       std::atomic<bool> has_no_consensus;
+      mutable TraceViewSet::FailedPrecondition failure;
     protected:
       GetTermEvent                    *last_fence;
     protected:
