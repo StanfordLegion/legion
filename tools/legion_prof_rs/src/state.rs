@@ -4,7 +4,8 @@ use std::convert::TryFrom;
 use std::fmt;
 use std::sync::OnceLock;
 
-use derive_more::{Add, AddAssign, From, LowerHex, Sub, SubAssign};
+use derive_more::{Add, From, LowerHex, Sub};
+use nonmax::NonMaxU64;
 use num_enum::TryFromPrimitive;
 
 use rayon::prelude::*;
@@ -206,39 +207,77 @@ macro_rules! conditional_assert {
     )
 }
 
-#[derive(
-    Debug,
-    Copy,
-    Clone,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Default,
-    Serialize,
-    Add,
-    Sub,
-    AddAssign,
-    SubAssign,
-    From,
-)]
-pub struct Timestamp(pub u64 /* ns */);
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Default, Serialize, From)]
+pub struct Timestamp(NonMaxU64 /* ns */);
 
 impl Timestamp {
-    pub const MAX: Timestamp = Timestamp(std::u64::MAX);
-    pub const MIN: Timestamp = Timestamp(std::u64::MIN);
+    pub const MAX: Timestamp = Timestamp(NonMaxU64::MAX);
+    pub const MIN: Timestamp = Timestamp(NonMaxU64::ZERO);
+    pub const ZERO: Timestamp = Timestamp(NonMaxU64::ZERO);
+    pub const ONE: Timestamp = Timestamp(NonMaxU64::ONE);
     pub const fn from_us(microseconds: u64) -> Timestamp {
-        Timestamp(microseconds * 1000)
+        Timestamp(unwrap_option(NonMaxU64::new(microseconds * 1000)))
+    }
+    pub const fn from_ns(nanoseconds: u64) -> Timestamp {
+        Timestamp(unwrap_option(NonMaxU64::new(nanoseconds)))
     }
     pub fn to_us(&self) -> f64 {
-        self.0 as f64 / 1000.0
+        self.0.get() as f64 / 1000.0
+    }
+    pub const fn to_ns(&self) -> u64 {
+        self.0.get()
+    }
+}
+
+// This is a horrible, but currently supported, way of unwrapping an
+// Option in a const function in safe code. Once Rust supports unwrap
+// directly this can be removed.
+//
+// Note: this will hit an array access out of bounds, so the code
+// never reaches the infinite loop
+//
+// from: https://users.rust-lang.org/t/compile-time-const-unwrapping/51619/7
+const fn unwrap_option(opt: Option<NonMaxU64>) -> NonMaxU64 {
+    match opt {
+        Some(x) => x,
+        None => {
+            #[allow(unconditional_panic)]
+            ["You tried to unwrap a None!"][10];
+            loop {}
+        }
+    }
+}
+
+impl std::ops::Add for Timestamp {
+    type Output = Timestamp;
+    fn add(self, rhs: Timestamp) -> Timestamp {
+        Timestamp::from_ns(self.to_ns() + rhs.to_ns())
+    }
+}
+
+impl std::ops::AddAssign for Timestamp {
+    fn add_assign(&mut self, rhs: Timestamp) {
+        *self = *self + rhs;
+    }
+}
+
+impl std::ops::Sub for Timestamp {
+    type Output = Timestamp;
+    fn sub(self, rhs: Timestamp) -> Timestamp {
+        Timestamp::from_ns(self.to_ns() - rhs.to_ns())
+    }
+}
+
+impl std::ops::SubAssign for Timestamp {
+    fn sub_assign(&mut self, rhs: Timestamp) {
+        *self = *self - rhs;
     }
 }
 
 impl fmt::Display for Timestamp {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // Time is stored in nanoseconds. But it is displayed in microseconds.
-        let nanoseconds = self.0;
+        let nanoseconds = self.to_ns();
         let divisor = 1000;
         let microseconds = nanoseconds / divisor;
         let remainder = nanoseconds % divisor;
@@ -281,7 +320,7 @@ where
     }
     pub fn time_key(&self) -> (u64, u8, Secondary) {
         (
-            self.time.0,
+            self.time.to_ns(),
             if self.first { 0 } else { 1 },
             self.secondary_sort_key,
         )
@@ -487,7 +526,7 @@ impl ContainerEntry for ProcEntry {
     }
 }
 
-pub type ProcPoint = TimePoint<ProfUID, u64>;
+pub type ProcPoint = TimePoint<ProfUID, Timestamp>;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, LowerHex)]
 pub struct ProcID(pub u64);
@@ -739,33 +778,18 @@ impl Proc {
             let stop = time.stop.unwrap();
             let ready = time.ready;
             if stop - start > TASK_GRANULARITY_THRESHOLD && ready.is_some() {
-                all_points.push(ProcPoint::new(ready.unwrap(), prof_uid, true, start.0));
-                all_points.push(ProcPoint::new(stop, prof_uid, false, 0));
+                all_points.push(ProcPoint::new(ready.unwrap(), prof_uid, true, start));
+                all_points.push(ProcPoint::new(stop, prof_uid, false, Timestamp::ZERO));
             } else {
-                all_points.push(ProcPoint::new(
-                    start,
-                    prof_uid,
-                    true,
-                    std::u64::MAX - stop.0,
-                ));
-                all_points.push(ProcPoint::new(stop, prof_uid, false, 0));
+                all_points.push(ProcPoint::new(start, prof_uid, true, Timestamp::MAX - stop));
+                all_points.push(ProcPoint::new(stop, prof_uid, false, Timestamp::ZERO));
             }
 
-            points.push(ProcPoint::new(
-                start,
-                prof_uid,
-                true,
-                std::u64::MAX - stop.0,
-            ));
-            points.push(ProcPoint::new(stop, prof_uid, false, 0));
+            points.push(ProcPoint::new(start, prof_uid, true, Timestamp::MAX - stop));
+            points.push(ProcPoint::new(stop, prof_uid, false, Timestamp::ZERO));
 
-            util_points.push(ProcPoint::new(
-                start,
-                prof_uid,
-                true,
-                std::u64::MAX - stop.0,
-            ));
-            util_points.push(ProcPoint::new(stop, prof_uid, false, 0));
+            util_points.push(ProcPoint::new(start, prof_uid, true, Timestamp::MAX - stop));
+            util_points.push(ProcPoint::new(stop, prof_uid, false, Timestamp::ZERO));
         }
         fn add_waiters(waiters: &Waiters, prof_uid: ProfUID, util_points: &mut Vec<ProcPoint>) {
             for wait in &waiters.wait_intervals {
@@ -773,9 +797,9 @@ impl Proc {
                     wait.start,
                     prof_uid,
                     false,
-                    std::u64::MAX - wait.end.0,
+                    Timestamp::MAX - wait.end,
                 ));
-                util_points.push(ProcPoint::new(wait.end, prof_uid, true, 0));
+                util_points.push(ProcPoint::new(wait.end, prof_uid, true, Timestamp::ZERO));
             }
         }
 
@@ -906,7 +930,7 @@ impl Proc {
 
 impl Container for Proc {
     type E = ProfUID;
-    type S = u64;
+    type S = Timestamp;
     type Entry = ProcEntry;
 
     fn max_levels(&self, device: Option<DeviceKind>) -> u32 {
@@ -952,7 +976,7 @@ impl Container for Proc {
 
 pub type MemEntry = Inst;
 
-pub type MemPoint = TimePoint<InstUID, u64>;
+pub type MemPoint = TimePoint<InstUID, Timestamp>;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, LowerHex)]
 pub struct MemID(pub u64);
@@ -1016,17 +1040,27 @@ impl Mem {
                 inst.time_range.start.unwrap(),
                 *key,
                 true,
-                std::u64::MAX - inst.time_range.stop.unwrap().0,
+                Timestamp::MAX - inst.time_range.stop.unwrap(),
             ));
-            time_points.push(MemPoint::new(inst.time_range.stop.unwrap(), *key, false, 0));
+            time_points.push(MemPoint::new(
+                inst.time_range.stop.unwrap(),
+                *key,
+                false,
+                Timestamp::ZERO,
+            ));
 
             time_points_level.push(MemPoint::new(
                 inst.time_range.create.unwrap(),
                 *key,
                 true,
-                std::u64::MAX - inst.time_range.stop.unwrap().0,
+                Timestamp::MAX - inst.time_range.stop.unwrap(),
             ));
-            time_points_level.push(MemPoint::new(inst.time_range.stop.unwrap(), *key, false, 0));
+            time_points_level.push(MemPoint::new(
+                inst.time_range.stop.unwrap(),
+                *key,
+                false,
+                Timestamp::ZERO,
+            ));
         }
         time_points.sort_by_key(|a| a.time_key());
         time_points_level.sort_by_key(|a| a.time_key());
@@ -1065,7 +1099,7 @@ impl Mem {
 
 impl Container for Mem {
     type E = InstUID;
-    type S = u64;
+    type S = Timestamp;
     type Entry = Inst;
 
     fn max_levels(&self, device: Option<DeviceKind>) -> u32 {
@@ -1238,7 +1272,7 @@ impl ContainerEntry for ChanEntry {
     }
 }
 
-pub type ChanPoint = TimePoint<ProfUID, u64>;
+pub type ChanPoint = TimePoint<ProfUID, Timestamp>;
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, TryFromPrimitive)]
 #[repr(u32)]
@@ -1373,13 +1407,8 @@ impl Chan {
         fn add(time: TimeRange, prof_uid: ProfUID, points: &mut Vec<ChanPoint>) {
             let start = time.start.unwrap();
             let stop = time.stop.unwrap();
-            points.push(ChanPoint::new(
-                start,
-                prof_uid,
-                true,
-                std::u64::MAX - stop.0,
-            ));
-            points.push(ChanPoint::new(stop, prof_uid, false, 0));
+            points.push(ChanPoint::new(start, prof_uid, true, Timestamp::MAX - stop));
+            points.push(ChanPoint::new(stop, prof_uid, false, Timestamp::ZERO));
         }
 
         let mut points = Vec::new();
@@ -1418,7 +1447,7 @@ impl Chan {
 
 impl Container for Chan {
     type E = ProfUID;
-    type S = u64;
+    type S = Timestamp;
     type Entry = ChanEntry;
 
     fn max_levels(&self, device: Option<DeviceKind>) -> u32 {
@@ -2105,13 +2134,12 @@ impl TimeRange {
     }
     fn trim_time_range(&mut self, start: Timestamp, stop: Timestamp) -> bool {
         let clip = |value| {
-            let value = value - start;
-            if value < 0.into() {
-                0.into()
-            } else if value > stop - start {
+            if value <= start {
+                Timestamp::ZERO
+            } else if value - start > stop - start {
                 stop - start
             } else {
-                value
+                value - start
             }
         };
 
@@ -3052,13 +3080,13 @@ impl State {
         if let Some(proc_id) = self.prof_uid_proc.get(&prof_uid) {
             let proc = self.procs.get(proc_id).unwrap();
             let entry = &proc.entry(prof_uid);
-            let mut total = 0;
-            let mut start = entry.time_range.start.unwrap().0;
+            let mut total = 0u64;
+            let mut start = entry.time_range.start.unwrap().to_ns();
             for wait in &entry.waiters.wait_intervals {
-                total += wait.start.0 - start;
-                start = wait.end.0;
+                total += wait.start.to_ns() - start;
+                start = wait.end.to_ns();
             }
-            total += entry.time_range.stop.unwrap().0 - start;
+            total += entry.time_range.stop.unwrap().to_ns() - start;
             return total;
         }
         0
@@ -3068,11 +3096,10 @@ impl State {
         if start.is_none() && stop.is_none() {
             return;
         }
-        let start = start.unwrap_or_else(|| 0.into());
+        let start = start.unwrap_or(Timestamp::ZERO);
         let stop = stop.unwrap_or(self.last_time);
 
         assert!(start <= stop);
-        assert!(start >= 0.into());
         assert!(stop <= self.last_time);
 
         for proc in self.procs.values_mut() {
@@ -3986,7 +4013,7 @@ fn process_record(
             // they are not in the same stream. Usually, when it happened, it means the GPU task is tiny.
             let mut gpu_start = *gpu_start;
             if gpu_start > *gpu_stop {
-                gpu_start.0 = gpu_stop.0 - 1;
+                gpu_start = *gpu_stop - Timestamp::ONE;
             }
             let gpu_range = TimeRange::new_start(gpu_start, *gpu_stop);
             state.create_gpu_kernel(*op_id, *proc_id, *task_id, *variant_id, gpu_range, *fevent);

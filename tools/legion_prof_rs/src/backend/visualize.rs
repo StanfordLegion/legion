@@ -242,8 +242,8 @@ impl Proc {
             level,
             level_ready,
             ready: None,
-            start: TimestampFormat(Timestamp(0)),
-            end: TimestampFormat(Timestamp(0)),
+            start: TimestampFormat(Timestamp::ZERO),
+            end: TimestampFormat(Timestamp::ZERO),
             color: &color,
             opacity: 1.0,
             title: &name,
@@ -775,7 +775,7 @@ impl State {
             .delimiter(b'\t')
             .from_path(filename)?;
         f.serialize(UtilizationRecord {
-            time: TimestampFormat(Timestamp(0)),
+            time: TimestampFormat(Timestamp::ZERO),
             count: Count(0.0),
         })?;
         for (time, count) in utilization {
@@ -826,7 +826,7 @@ impl State {
             .delimiter(b'\t')
             .from_path(filename)?;
         f.serialize(UtilizationRecord {
-            time: TimestampFormat(Timestamp(0)),
+            time: TimestampFormat(Timestamp::ZERO),
             count: Count(0.0),
         })?;
         for (time, count) in utilization {
@@ -878,7 +878,7 @@ impl State {
             .delimiter(b'\t')
             .from_path(filename)?;
         f.serialize(UtilizationRecord {
-            time: TimestampFormat(Timestamp(0)),
+            time: TimestampFormat(Timestamp::ZERO),
             count: Count(0.0),
         })?;
         for (time, count) in utilization {
@@ -1190,7 +1190,7 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
         let stats_levels = 4;
         let scale_data = ScaleRecord {
             start: 0.0,
-            end: (state.last_time.0 as f64 / 100. * 1.01).ceil() / 10.,
+            end: (state.last_time.to_ns() as f64 / 100. * 1.01).ceil() / 10.,
             stats_levels,
             max_level: base_level + 1,
         };

@@ -2185,6 +2185,7 @@ dependencies = [
  "legion_prof_viewer",
  "log",
  "nom",
+ "nonmax",
  "num_enum 0.6.1",
  "rayon",
  "serde",
@@ -2466,6 +2467,15 @@ checksum = "d273983c5a657a70a3e8f2a01329822f3b8c8172b73826411a55751e404a0a4a"
 dependencies = [
  "memchr",
  "minimal-lexical",
+]
+
+[[package]]
+name = "nonmax"
+version = "0.5.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "610a5acd306ec67f907abe5567859a3c693fb9886eb1f012ab8f2a47bef3db51"
+dependencies = [
+ "serde",
 ]
 
 [[package]]
