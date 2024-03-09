@@ -27,13 +27,13 @@ use crate::state::{
 
 impl Into<ts::Timestamp> for Timestamp {
     fn into(self) -> ts::Timestamp {
-        ts::Timestamp(self.0.try_into().unwrap())
+        ts::Timestamp(self.to_ns().try_into().unwrap())
     }
 }
 
 impl Into<Timestamp> for ts::Timestamp {
     fn into(self) -> Timestamp {
-        Timestamp(self.0.try_into().unwrap())
+        Timestamp::from_ns(self.0.try_into().unwrap())
     }
 }
 
@@ -624,39 +624,39 @@ impl StateDataSource {
         }
 
         let mut utilization = Vec::new();
-        let mut last_t = Timestamp(0);
+        let mut last_t = 0u64;
         let mut last_u = 0.0;
         let mut step_it = step_utilization[first_index..last_index].iter().peekable();
         for sample in 0..samples {
-            let sample_start = Timestamp(duration * sample / samples + start_time);
-            let sample_stop = Timestamp(duration * (sample + 1) / samples + start_time);
-            if sample_stop.0 - sample_start.0 == 0 {
+            let sample_start = duration * sample / samples + start_time;
+            let sample_stop = duration * (sample + 1) / samples + start_time;
+            if sample_stop - sample_start == 0 {
                 continue;
             }
 
             let mut sample_util = 0.0;
-            while let Some((t, u)) = step_it.next_if(|(t, _)| *t < sample_stop) {
-                if *t < sample_start {
-                    (last_t, last_u) = (*t, *u);
+            while let Some((t, u)) = step_it.next_if(|(t, _)| t.to_ns() < sample_stop) {
+                if t.to_ns() < sample_start {
+                    (last_t, last_u) = (t.to_ns(), *u);
                     continue;
                 }
 
                 // This is a step utilization. So utilization u begins on time
                 // t. That means the previous utilization stop at time t-1.
-                let last_duration = (t.0 - 1).saturating_sub(last_t.0.max(sample_start.0));
+                let last_duration = (t.to_ns() - 1).saturating_sub(last_t.max(sample_start));
                 sample_util += last_duration as f64 * last_u;
 
-                (last_t, last_u) = (*t, *u);
+                (last_t, last_u) = (t.to_ns(), *u);
             }
             if last_t < sample_stop {
-                let last_duration = sample_stop.0 - last_t.0.max(sample_start.0);
+                let last_duration = sample_stop - last_t.max(sample_start);
                 sample_util += last_duration as f64 * last_u;
             }
 
-            sample_util = sample_util / (sample_stop.0 - sample_start.0) as f64;
+            sample_util = sample_util / (sample_stop - sample_start) as f64;
             assert!(sample_util <= 1.0);
             utilization.push(UtilPoint {
-                time: Timestamp((sample_start.0 + sample_stop.0) / 2).into(),
+                time: Timestamp::from_ns((sample_start + sample_stop) / 2).into(),
                 util: sample_util as f32,
             });
         }
@@ -1015,7 +1015,7 @@ impl StateDataSource {
                                 self.fields.caller,
                                 // Use the first tick before the start so it is outside
                                 // of our box but hopefully in the caller's box
-                                self.generate_creator_link(*creator, start_time - Timestamp(1)),
+                                self.generate_creator_link(*creator, start_time - Timestamp::ONE),
                             ));
                         }
                     }
@@ -1397,7 +1397,7 @@ impl StateDataSource {
     fn interval(&self) -> ts::Interval {
         let last_time = self.state.last_time;
         // Add a bit to the end of the timeline to make it more visible
-        let last_time = last_time + Timestamp(last_time.0 / 200);
+        let last_time = last_time + Timestamp::from_ns(last_time.to_ns() / 200);
         ts::Interval::new(ts::Timestamp(0), last_time.into())
     }
 }

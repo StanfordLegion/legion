@@ -334,7 +334,7 @@ fn parse_task_id(input: &[u8]) -> IResult<&[u8], TaskID> {
     map(le_u32, TaskID)(input)
 }
 fn parse_timestamp(input: &[u8]) -> IResult<&[u8], Timestamp> {
-    map(le_u64, Timestamp)(input)
+    map(le_u64, Timestamp::from_ns)(input)
 }
 fn parse_variant_id(input: &[u8]) -> IResult<&[u8], VariantID> {
     map(le_u32, VariantID)(input)
