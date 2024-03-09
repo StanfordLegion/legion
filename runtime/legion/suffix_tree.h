@@ -259,7 +259,7 @@ namespace Legion {
     // The algorithm that should be used to compute the repeats.
     enum NonOverlappingAlgorithm {
       SUFFIX_TREE_WALK = 0,
-      // TODO (broman): Add your new algorithm here, and update the parser/printer.
+      QUICK_MATCHING_SUBSTRINGS = 1,
       NO_ALGORITHM,
     };
     NonOverlappingAlgorithm parse_non_overlapping_algorithm(const std::string&);
@@ -339,6 +339,183 @@ namespace Legion {
       }
     }
 
+    // Suffix array construction in O(n*log n) time
+    template<typename T>
+    void suffix_array(const std::vector<T>& str,
+                      std::vector<size_t>& sarray,
+                      std::vector<int>& surrogate) {
+      size_t n = str.size();
+      using triple = std::tuple<int, int, size_t>;
+
+      // First round - O(n log n) sort
+      std::vector<triple> w(n);
+      for(size_t i = 0; i < n; i++)
+        w[i] = std::make_tuple(str[i], i + 1 < n ? str[i + 1] : -1, i);
+      std::sort(w.begin(), w.end());
+
+      size_t shift = 1;
+      while(true){
+        int v = 0;
+
+        // Construct surrogate
+        size_t x0 = std::get<0>(w[0]);
+        size_t x1 = std::get<1>(w[0]);
+        surrogate[std::get<2>(w[0])] = 0;
+        for(size_t i = 1; i < n; i++){
+          if(x0 != std::get<0>(w[i]) || x1 != std::get<1>(w[i]))
+            v++;
+          surrogate[std::get<2>(w[i])] = v;
+          x0 = std::get<0>(w[i]);
+          x1 = std::get<1>(w[i]);
+        }
+
+        // End if done
+        if(v >= n-1)
+          break;
+        shift *= 2;
+
+        // Update sort table
+        for(size_t i = 0; i < n; i++)
+          w[i] = std::make_tuple(surrogate[i],
+                                 (i + shift) < n ? surrogate[i + shift] : -1, i);
+        // Radix sort O(n) - rolled out, 2 digits
+        std::vector<size_t> count(v+2, 0);
+        std::vector<triple> tmp(n);
+        for(size_t i = 0; i < n; i++)
+          count[std::get<1>(w[i])+1]++;
+        for(size_t i = 1; i < v+2; i++)
+          count[i] += count[i - 1];
+        for(int i = n - 1; i >= 0; i--)
+          tmp[(count[std::get<1>(w[i]) + 1]--) - 1] = w[i];
+        for(size_t i = 0; i < v+2; i++)
+          count[i] = 0;
+        for(size_t i = 0; i < n; i++)
+          count[std::get<0>(tmp[i])+1]++;
+        for(size_t i = 1; i < v+2; i++)
+          count[i] += count[i - 1];
+        for(int i = n - 1; i >= 0; i--)
+          w[(count[std::get<0>(tmp[i]) + 1]--) - 1] = tmp[i];
+      }
+      // Reconstruct the suffix array
+      for(size_t i = 0; i < n; i++)
+        sarray[i] = std::get<2>(w[i]);
+    }
+
+    // Computes the LCP in O(n) time.
+    template<typename T>
+    std::vector<size_t> compute_lcp(const std::vector<T>& str,
+                                    const std::vector<size_t>& sarray,
+                                    const std::vector<int>& surrogate) {
+      size_t n = str.size();
+      int k = 0;
+      std::vector<size_t> lcp(n, 0);
+      for(size_t i = 0; i < n; i++){
+        if(surrogate[i] == n - 1)
+          k = 0;
+        else{
+          size_t j = sarray[surrogate[i] + 1];
+          for(; i + k < n && j + k < n && str[i + k] == str[j + k]; k++);
+          lcp[surrogate[i]] = k;
+          k = std::max(k - 1, 0);
+        }
+      }
+      return lcp;
+    }
+
+    // Compute non-overlapping matching substrings in O(n log n) time.
+    template<typename T>
+    std::vector<NonOverlappingRepeatsResult>
+    quick_matching_substrings(const std::vector<T>& str,
+                              size_t min_length,
+                              const std::vector<size_t>& sarray,
+                              const std::vector<size_t>& lcp) {
+      std::vector<NonOverlappingRepeatsResult> result;
+      size_t le = str.size();
+      using triple = std::tuple<size_t, size_t, size_t>;
+      using pair = std::tuple<size_t, size_t>;
+
+      // Construct tuple array O(n)
+      std::vector<triple> a(le * 2 - 2);
+      size_t k = 0;
+      size_t m = 0;
+      size_t pre_l = 0;
+      for(size_t i = 0; i < le - 1; i++){
+        int l1 = lcp[i];
+        int s1 = sarray[i];
+        int s2 = sarray[i + 1];
+        if(s2 >= s1 + l1 || s2 <= s1 - l1){
+          // Non-overlapping
+          if(pre_l != l1)
+            m += 1;
+          a[k++] = std::make_tuple(le - l1, m, s1);
+          a[k++] = std::make_tuple(le - l1, m, s2);
+          pre_l = l1;
+        }
+        else if(s2 > s1 && s2 < s1 + l1){
+          // Overlapping, increasing index
+          size_t d = s2 - s1;
+          size_t l3 = (((l1 + d) / 2) / d) * d;
+          if(pre_l != l3)
+            m += 1;
+          a[k++] = std::make_tuple(le - l3, m, s1);
+          a[k++] = std::make_tuple(le - l3, m, s1 + l3);
+          pre_l = l3;
+        }
+        else if(s1 > s2 && s1 < s2 + l1){
+          // Overlapping, decreasing index
+          size_t d = s1 - s2;
+          size_t l3 = (((l1 + d) / 2) / d) * d;
+          if(pre_l != l3)
+            m += 1;
+          a[k++] = std::make_tuple(le - l3, m, s2);
+          a[k++] = std::make_tuple(le - l3, m, s2 + l3);
+          pre_l = l3;
+        }
+      }
+      a.resize(k);
+
+      // Sort tuple vector: O(n log n)
+      std::sort(a.begin(), a.end());
+
+      // Construct matching intervals: O(n)
+      std::vector<bool> flag(le, false);
+      std::vector<pair> r;
+      size_t m_pre = 0;
+      size_t next_k = 0;
+      const size_t min_repeats = 2;
+      for(size_t i = 0; i < le; i++){
+        int l = std::get<0>(a[i]);
+        size_t m = std::get<1>(a[i]);
+        size_t k = std::get<2>(a[i]);
+        size_t le2 = le - l;
+        if(m != m_pre){
+          if(r.size() >= min_repeats){
+            result.push_back(NonOverlappingRepeatsResult{
+                .start = std::get<0>(r[0]),
+                .end = std::get<1>(r[0]),
+                .repeats = r.size()});
+            for(const pair &p : r)
+              for(size_t j = std::get<0>(p); j < std::get<1>(p); j++)
+                flag[j] = true;
+          }
+          r.clear();
+          next_k = 0;
+        }
+        m_pre = m;
+        if(le2 >= min_length && k >= next_k && !(flag[k]) && !(flag[k + le2 - 1])){
+          r.push_back(std::make_tuple(k, k + le2));
+          next_k = k + le2;
+        }
+      }
+      if(r.size() >= min_repeats){
+        result.push_back(NonOverlappingRepeatsResult{
+            .start = std::get<0>(r[0]),
+            .end = std::get<1>(r[0]),
+            .repeats = r.size()});
+      }
+      return result;
+    }
+
     // The input string must also be formatted correctly for the suffix tree (unique last character).
     template<typename T>
     std::vector<NonOverlappingRepeatsResult> compute_longest_nonoverlapping_repeats(
@@ -371,7 +548,17 @@ namespace Legion {
           result.erase(result.begin() + copyidx, result.end());
           return result;
         }
-        // TODO (broman): Add dispatch here.
+      case NonOverlappingAlgorithm::QUICK_MATCHING_SUBSTRINGS: {
+        if(str.size() < 2)
+          return {};
+        std::vector<size_t> sarray(str.size());
+        std::vector<int> surrogate(str.size());
+        suffix_array(str, sarray, surrogate);
+        std::vector<size_t> lcp = compute_lcp(str, sarray, surrogate);
+        std::vector<NonOverlappingRepeatsResult> result =
+          quick_matching_substrings(str, min_length, sarray, lcp);
+        return result;
+      }
         default:
           assert(false);
       }
