@@ -339,7 +339,7 @@ namespace Legion {
       }
     }
 
-    // Suffix array construction in O(n*log n) time
+    // Suffix array construction in O(n*log n) time.
     // The code has been implemented based on the explanations
     // from here http://www.cs.cmu.edu/~15451-f20/LectureNotes/lec25-suffarray.pdf,
     // with special treatment of radix sort to make it O(n*log n).
@@ -384,7 +384,7 @@ namespace Legion {
           w[i] = std::make_tuple(surrogate[i],
                                  (i + shift) < n ? surrogate[i + shift] : -1, i);
         // Radix sort O(n) - rolled out, 2 digits. The index in the third
-        // element is not needed to be sorted. The radix sort algorithms
+        // element is not needed to be sorted. The radix sort algorithm
         // sorts two digits corresponding to the first and second element in
         // the triple. See for instance https://hacktechhub.com/radix-sort/ for
         // the general idea of radix sort.
@@ -434,9 +434,9 @@ namespace Legion {
       return lcp;
     }
 
-    // Compute non-overlapping matching substrings in O(n log n) time.
+    // The function computes non-overlapping matching substrings in O(n log n) time.
     // This is a new algorithm designed by David Broman in 2024.
-    // Please see the following repo for a reference implementation and short explanation:
+    // Please see the following Git repo for a reference implementation and a short explanation:
     // https://github.com/david-broman/matching-substrings
     template<typename T>
     std::vector<NonOverlappingRepeatsResult>
