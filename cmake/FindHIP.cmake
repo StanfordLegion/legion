@@ -17,12 +17,17 @@
 # find hip package
 if(NOT DEFINED HIP_PATH)
   if(NOT DEFINED ENV{HIP_PATH})
-      set(HIP_PATH "/opt/rocm/hip" CACHE PATH "Path to where HIP has been installed")
+    set(HIP_PATH "/opt/rocm/hip" CACHE PATH "Path to where HIP has been installed")
   else()
-      set(HIP_PATH $ENV{HIP_PATH} CACHE PATH "Path to where HIP has been installed")
+    set(HIP_PATH $ENV{HIP_PATH} CACHE PATH "Path to where HIP has been installed")
   endif()
 endif()
-include(${HIP_PATH}/cmake/FindHIP.cmake)
+# ROCm 6.0 moves the location of FindHIP.cmake into lib/cmake/hip
+if(EXISTS "${HIP_PATH}/lib/cmake/hip/FindHIP.cmake")
+  include(${HIP_PATH}/lib/cmake/hip/FindHIP.cmake)
+else()
+  include(${HIP_PATH}/cmake/FindHIP.cmake)
+endif()
 
 if(NOT HIP_INCLUDE_DIRS)
   list(APPEND HIP_INCLUDE_DIRS
