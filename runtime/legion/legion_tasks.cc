@@ -2477,7 +2477,15 @@ namespace Legion {
         derez.deserialize(num_future_memories);
         future_memories.resize(num_future_memories);
         for (unsigned idx = 0; idx < num_future_memories; idx++)
+        {
           derez.deserialize(future_memories[idx]);
+          const RtEvent future_mapped =
+            futures[idx].impl->request_application_instance(
+                future_memories[idx], this, unique_op_id,
+                future_memories[idx].address_space());
+          if (future_mapped.exists())
+            ready_events.insert(future_mapped);
+        }
         size_t num_task_requests;
         derez.deserialize(num_task_requests);
         if (num_task_requests > 0)
@@ -3506,7 +3514,6 @@ namespace Legion {
 #ifdef LEGION_SPY
       LegionSpy::log_replay_operation(unique_op_id);
 #endif
-      tpl->register_operation(this);
       tpl->get_mapper_output(this, selected_variant, task_priority,
           perform_postmap, target_processors, future_memories,
           physical_instances);
@@ -4539,7 +4546,7 @@ namespace Legion {
         }
         log_mapping_decision(idx, regions[idx], result, true/*postmapping*/);
         // TODO: Implement physical tracing for postmapped regions
-        if (is_memoizing())
+        if (is_recording())
           assert(false);
         // Register this with a no-event so that the instance can
         // be used as soon as it is valid from the copy to it
@@ -6168,9 +6175,6 @@ namespace Legion {
     void IndividualTask::perform_base_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(memo_state != MEMO_REQ);
-#endif
       if (runtime->check_privileges && 
           !is_top_level_task() && !local_function)
         perform_privilege_checks();
@@ -7100,6 +7104,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       slice_owner->record_point_mapped(mapped_event);
+      tpl->register_operation(this);
       SingleTask::trigger_replay();
     }
 
@@ -9537,9 +9542,6 @@ namespace Legion {
     void IndexTask::perform_base_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(memo_state != MEMO_REQ);
-#endif 
       if (runtime->check_privileges)
         perform_privilege_checks();
       // To be correct with the new scheduler we also have to 
@@ -10893,7 +10895,6 @@ namespace Legion {
 #ifdef LEGION_SPY
       LegionSpy::log_replay_operation(unique_op_id);
 #endif
-      tpl->register_operation(this);
       // If we're going to be doing an output reduction do that now
       if (redop > 0)
       {

@@ -148,7 +148,7 @@ namespace Legion {
     struct LogicalTraceInfo {
     public:
       LogicalTraceInfo(Operation *op, unsigned idx,
-                       const RegionRequirement &r);
+          const RegionRequirement &r, const FieldMask &mask);
     public:
       LogicalTrace *const trace;
       const unsigned req_idx;
@@ -3508,12 +3508,19 @@ namespace Legion {
       void update_tracing_reduction_views(InstanceView *src_view,
                                    InstanceView *dst_view,
                                    IndexSpaceExpression *expr,
-                                   const FieldMask &copy_mask);
-      RtEvent capture_trace_conditions(TraceConditionSet *target,
-                                       AddressSpaceID target_space,
-                                       IndexSpaceExpression *expr,
-                                       const FieldMask &mask,
-                                       RtUserEvent ready_event);
+                                   const FieldMask &copy_mask,
+                                   bool across);
+      // Invalidate restricted views that shouldn't be postconditions
+      void invalidate_tracing_restricted_views(
+                  const FieldMaskSet<InstanceView> &restricted_views,
+                  IndexSpaceExpression *expr, FieldMask &restricted_mask);
+      RtEvent capture_trace_conditions(PhysicalTemplate *target,
+                                   AddressSpaceID target_space,
+                                   unsigned parent_req_index,
+                                   std::atomic<unsigned> *result,
+                                   RtUserEvent ready_event =
+                                    RtUserEvent::NO_RT_USER_EVENT);
+      AddressSpaceID select_collective_trace_capture_space(void);
     protected:
       void defer_analysis(AutoTryLock &eq, PhysicalAnalysis &analysis,
                           const FieldMask &mask,

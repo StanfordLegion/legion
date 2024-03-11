@@ -519,9 +519,6 @@ namespace Legion {
         Provenance *provenance) = 0;
       virtual void end_trace(TraceID tid, bool deprecated,
                              Provenance *provenance) = 0;
-      virtual void record_previous_trace(LogicalTrace *trace) = 0;
-      virtual void invalidate_trace_cache(LogicalTrace *trace,
-                                          Operation *invalidator) = 0;
       virtual void record_blocking_call(uint64_t future_coordinate) = 0;
     public:
       virtual void issue_frame(FrameOp *frame, ApEvent frame_termination) = 0;
@@ -738,6 +735,10 @@ namespace Legion {
                          public InstanceDeletionSubscriber,
                          public LegionHeapify<InnerContext> {
     public:
+      enum ReplayStatus {
+        TRACE_NOT_REPLAYING = 0,
+        TRACE_REPLAYING = 1,
+      };
       enum PipelineStage {
         EXECUTING_STAGE,
         EXECUTED_STAGE,
@@ -994,45 +995,7 @@ namespace Legion {
         const std::vector<IndexSpace> handles;
         const ProjectionID pid;
       };
-      typedef CollectiveViewCreatorBase::CollectiveResult CollectiveResult;
-    public:
-      class HashVerifier : protected Murmur3Hasher {
-      public:
-        HashVerifier(InnerContext *ctx, bool p,
-                     bool every_call, Provenance *prov = NULL)
-          : Murmur3Hasher(), context(ctx), provenance(prov), precise(p),
-            verify_every_call(every_call) { }
-        HashVerifier(const HashVerifier &rhs) = delete;
-        HashVerifier& operator=(const HashVerifier &rhs) = delete;
-      public:
-        template<typename T>
-        inline void hash(const T &value, const char *description)
-        {
-          if (precise)
-            Murmur3Hasher::hash<T,true>(value);
-          else
-            Murmur3Hasher::hash<T,false>(value);
-          if (verify_every_call)
-            verify(description, true/*verify every call*/);
-        }
-        inline void hash(const void *value, size_t size,const char *description)
-        {
-          Murmur3Hasher::hash(value, size);
-          if (verify_every_call)
-            verify(description, true/*verify every call*/);
-        }
-        inline bool verify(const char *description, bool every_call = false)
-        {
-          uint64_t hash[2];
-          finalize(hash);
-          return context->verify_hash(hash, description, provenance, every_call);
-        }
-      public:
-        InnerContext *const context;
-        Provenance *const provenance;
-        const bool precise;
-        const bool verify_every_call;
-      };
+      typedef CollectiveViewCreatorBase::CollectiveResult CollectiveResult; 
     public:
       InnerContext(Runtime *runtime, SingleTask *owner, int depth, 
                    bool full_inner, const std::vector<RegionRequirement> &reqs,
@@ -1052,7 +1015,7 @@ namespace Legion {
         { return total_tunable_count++; }
       inline unsigned get_max_trace_templates(void) const
         { return context_configuration.max_templates_per_trace; }
-      void record_physical_trace_replay(RtEvent ready, bool replay);
+      void record_physical_trace_replay(RtEvent ready, bool replay); 
       bool is_replaying_physical_trace(void); 
       inline bool is_concurrent_context(void) const
         { return concurrent_context; }
@@ -1072,9 +1035,6 @@ namespace Legion {
               std::map<IndexPartition,unsigned> &created_partitions,
               std::vector<DeletedPartition> &deleted_partitions,
               std::set<RtEvent> &preconditions);
-    public: // HashVerifier method
-      virtual bool verify_hash(const uint64_t hash[2],
-          const char *description, Provenance *provenance, bool every);
     public:
       LogicalRegion find_logical_region(unsigned index);
       int find_parent_region_req(const RegionRequirement &req, 
@@ -1204,6 +1164,8 @@ namespace Legion {
                       EquivalenceSet *set, const FieldMask &mask);
       EqKDTree* find_equivalence_set_kd_tree(unsigned req_index,
           LocalLock *&tree_lock, bool return_null_if_doesnt_exist = false);
+      void find_trace_local_sets(unsigned req_index, const FieldMask &mask,
+          std::map<EquivalenceSet*,unsigned> &current_sets);
       EqKDTree* find_or_create_output_set_kd_tree(unsigned req_index,
                                                   LocalLock *&tree_lock);
       void finalize_output_eqkd_tree(unsigned req_index);
@@ -1638,6 +1600,7 @@ namespace Legion {
       virtual bool add_to_dependence_queue(Operation *op, 
           const std::vector<StaticDependence> *dependences = NULL,
           bool unordered = false, bool outermost = true);
+      virtual FenceOp* initialize_trace_completion(Provenance *prov);
       void process_dependence_stage(void);
       void add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
                                   FutureInstance *instance,
@@ -1716,9 +1679,6 @@ namespace Legion {
           Provenance *provenance);
       virtual void end_trace(TraceID tid, bool deprecated,
                              Provenance *provenance);
-      virtual void record_previous_trace(LogicalTrace *trace);
-      virtual void invalidate_trace_cache(LogicalTrace *trace,
-                                          Operation *invalidator);
       virtual void record_blocking_call(uint64_t future_coordinate);
     public:
       virtual void issue_frame(FrameOp *frame, ApEvent frame_termination);
@@ -2084,8 +2044,9 @@ namespace Legion {
       LogicalTrace *current_trace;
       LogicalTrace *previous_trace;
       uint64_t current_trace_future_coordinate;
-      // ID is either 0 for not replaying, 1 for replaying, or
-      // the event id for signaling that the status isn't ready 
+      // ID is either 0 for not replaying, 1 for replaying not idempotent, 
+      // 2 for replaying idempotent or the event id for signaling that 
+      // the status isn't ready 
       std::atomic<realm_id_t> physical_trace_replay_status;
       RtUserEvent window_wait;
       std::deque<ApEvent> frame_events;
@@ -2467,6 +2428,44 @@ namespace Legion {
                               const size_t total_shards) { return UINT_MAX; }
       };
     public:
+      class HashVerifier : protected Murmur3Hasher {
+      public:
+        HashVerifier(ReplicateContext *ctx, bool p,
+                     bool every_call, Provenance *prov = NULL)
+          : Murmur3Hasher(), context(ctx), provenance(prov), precise(p),
+            verify_every_call(every_call) { }
+        HashVerifier(const HashVerifier &rhs) = delete;
+        HashVerifier& operator=(const HashVerifier &rhs) = delete;
+      public:
+        template<typename T>
+        inline void hash(const T &value, const char *description)
+        {
+          if (precise)
+            Murmur3Hasher::hash<T,true>(value);
+          else
+            Murmur3Hasher::hash<T,false>(value);
+          if (verify_every_call)
+            verify(description, true/*verify every call*/);
+        }
+        inline void hash(const void *value, size_t size,const char *description)
+        {
+          Murmur3Hasher::hash(value, size);
+          if (verify_every_call)
+            verify(description, true/*verify every call*/);
+        }
+        inline bool verify(const char *description, bool every_call = false)
+        {
+          uint64_t hash[2];
+          finalize(hash);
+          return context->verify_hash(hash, description, provenance, every_call);
+        }
+      public:
+        ReplicateContext *const context;
+        Provenance *const provenance;
+        const bool precise;
+        const bool verify_every_call;
+      };
+    public:
       ReplicateContext(Runtime *runtime, ShardTask *owner,int d,bool full_inner,
                        const std::vector<RegionRequirement> &reqs,
                        const std::vector<OutputRequirement> &output_reqs,
@@ -2509,7 +2508,7 @@ namespace Legion {
               std::vector<DeletedPartition> &deleted_partitions,
               std::set<RtEvent> &preconditions);
     public: // HashVerifier method
-      virtual bool verify_hash(const uint64_t hash[2],
+      bool verify_hash(const uint64_t hash[2],
           const char *description, Provenance *provenance, bool every);
     protected:
       void receive_replicate_resources(uint64_t return_index,
@@ -2984,6 +2983,7 @@ namespace Legion {
       virtual bool add_to_dependence_queue(Operation *op, 
           const std::vector<StaticDependence> *dependences = NULL,
           bool unordered = false, bool outermost = true);
+      virtual FenceOp* initialize_trace_completion(Provenance *prov);
       virtual PredicateImpl* create_predicate_impl(Operation *op);
       virtual CollectiveResult* find_or_create_collective_view(
           RegionTreeID tid, const std::vector<DistributedID> &instances, 
@@ -3960,9 +3960,6 @@ namespace Legion {
           Provenance *provenance);
       virtual void end_trace(TraceID tid, bool deprecated,
                              Provenance *provenance);
-      virtual void record_previous_trace(LogicalTrace *trace);
-      virtual void invalidate_trace_cache(LogicalTrace *trace,
-                                          Operation *invalidator);
       virtual void record_blocking_call(uint64_t future_coordinate);
     public:
       virtual void issue_frame(FrameOp *frame, ApEvent frame_termination);

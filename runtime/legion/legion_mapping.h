@@ -1820,7 +1820,7 @@ namespace Legion {
         TraceID trace_id;
       };
       struct MemoizeOutput {
-        bool memoize;
+        bool memoize; // = true
       };
       //------------------------------------------------------------------------
       virtual void memoize_operation(MapperContext        ctx,

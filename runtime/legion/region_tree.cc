@@ -1595,12 +1595,11 @@ namespace Legion {
       RegionTreePath path;
       initialize_path(child_node, parent_node->row_source, path);
 
-      LogicalTraceInfo trace_info(op, idx, req); 
-      // If we've already replayed the analysis we don't need to do it
-      if (trace_info.skip_analysis)
-        return;
       FieldMask user_mask = 
         parent_node->column_source->get_field_mask(req.privilege_fields);
+      LogicalTraceInfo trace_info(op, idx, req, user_mask);
+      if (trace_info.skip_analysis)
+        return;
       // Then compute the logical user
       ProjectionSummary *shard_proj = NULL;
       if (proj_info.is_sharding() && proj_info.is_projecting())

@@ -1520,16 +1520,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool InnerContext::verify_hash(const uint64_t hash[2],
-                    const char *description, Provenance *provenance, bool every)
-    //--------------------------------------------------------------------------
-    {
-      // Nothing to do for now, but this is where trace checking code
-      // should go once we start checking that on replays
-      return true;
-    }
-
-    //--------------------------------------------------------------------------
     void InnerContext::register_region_creations(
                                       std::map<LogicalRegion,unsigned> &regions)
     //--------------------------------------------------------------------------
@@ -2939,6 +2929,23 @@ namespace Legion {
         tree_lock = finder->second.lock;
         return finder->second.tree;
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::find_trace_local_sets(unsigned req_index,
+        const FieldMask &mask, std::map<EquivalenceSet*,unsigned> &current_sets)
+    //--------------------------------------------------------------------------
+    {
+      // Find the equivalence set tree for this region requirement
+      LocalLock *tree_lock = NULL;
+      EqKDTree *tree = find_equivalence_set_kd_tree(req_index, tree_lock);
+      const ShardID local_shard = get_shard_id();
+      // Need non-exclusive access to the tree for reading
+      // Technically this shouldn't be necessary since we're in a mapping
+      // fence when we run this function, but we put it here just so that
+      // nobody gets confused
+      AutoLock t_lock(*tree_lock,1,false/*exclusive*/);
+      tree->find_trace_local_sets(req_index, local_shard, mask, current_sets);
     }
 
     //--------------------------------------------------------------------------
@@ -8346,6 +8353,28 @@ namespace Legion {
       // and determine if we need to perform a window wait or not
       if (!unordered)
       {
+        // Update any previous trace with state of the new operation
+        if (previous_trace != NULL)
+        {
+          bool execution_fence = false;
+          if (op->invalidates_physical_trace_template(execution_fence))
+          {
+            if (!execution_fence)
+            {
+              // Issue a trace invalidation operation to free up 
+              // resources associated with the template
+              FenceOp *complete =
+                initialize_trace_completion(op->get_provenance());
+              // The previous trace is no longer valid
+              previous_trace = NULL;
+              // We can safely recurse here since cleared the previous
+              InnerContext::add_to_dependence_queue(complete, NULL/*deps*/,
+                  false/*unordered*/, false/*outermost*/);
+            }
+            else
+              previous_trace->record_intermediate_fence();
+          }
+        }
         // Get the context index for this new operation
         const size_t context_index = total_children_count++;
         op->set_context_index(context_index, true/*track*/);
@@ -8439,6 +8468,19 @@ namespace Legion {
         insert_unordered_ops(d_lock);
       }
       return true;
+    }
+
+    //--------------------------------------------------------------------------
+    FenceOp* InnerContext::initialize_trace_completion(Provenance *prov)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(previous_trace != NULL);
+#endif
+      TraceCompleteOp *op = runtime->get_available_complete_op();
+      op->initialize_complete(this, previous_trace, prov,
+          (traces.find(previous_trace->tid) == traces.end()));
+      return op;
     }
 
     //--------------------------------------------------------------------------
@@ -9151,6 +9193,15 @@ namespace Legion {
                                       std::vector<Operation*> &ready_operations)
     //--------------------------------------------------------------------------
     {
+      if ((previous_trace != NULL) && !ready_operations.empty())
+      {
+        // Make an invalidation operation and add it to the list of 
+        // operations to add to the queue
+        FenceOp *complete = initialize_trace_completion(
+            ready_operations.front()->get_provenance());
+        ready_operations.push_back(complete);
+        previous_trace = NULL;
+      }
       if (runtime->program_order_execution)
       {
         while (!ready_operations.empty())
@@ -9915,10 +9966,8 @@ namespace Legion {
                (op_kind == Operation::FRAME_OP_KIND) || 
                (op_kind == Operation::DELETION_OP_KIND) ||
                (op_kind == Operation::TRACE_BEGIN_OP_KIND) ||
-               (op_kind == Operation::TRACE_COMPLETE_OP_KIND) ||
-               (op_kind == Operation::TRACE_CAPTURE_OP_KIND) ||
-               (op_kind == Operation::TRACE_REPLAY_OP_KIND) ||
-               (op_kind == Operation::TRACE_SUMMARY_OP_KIND));
+               (op_kind == Operation::TRACE_RECURRENT_OP_KIND) ||
+               (op_kind == Operation::TRACE_COMPLETE_OP_KIND));
       }
 #endif
       std::vector<std::pair<Operation*,GenerationID> > previous_operations;
@@ -10132,29 +10181,33 @@ namespace Legion {
       }
       else
         trace = finder->second;
-
 #ifdef DEBUG_LEGION
       assert(trace != NULL);
 #endif
-      trace->clear_blocking_call();
-
-      // Issue a begin op
-      TraceBeginOp *begin = runtime->get_available_begin_op();
-      begin->initialize_begin(this, trace, provenance);
-      add_to_dependence_queue(begin);
-
-      if (!logical_only)
+      TraceOp *trace_op = NULL;
+      if (previous_trace == NULL)
       {
-        // Issue a replay op
-        TraceReplayOp *replay = runtime->get_available_replay_op();
-        replay->initialize_replay(this, trace, provenance);
-        // Record the event for when the trace replay is ready
-        physical_trace_replay_status.store(replay->get_mapped_event().id);
-#ifdef LEGION_SPY
-        tracing_replay_event = replay->get_completion_event();
-#endif
-        add_to_dependence_queue(replay);
+        TraceBeginOp *begin = runtime->get_available_begin_op();
+        begin->initialize_begin(this, trace, provenance);  
+        trace_op = begin;
       }
+      else
+      {
+        TraceRecurrentOp *recurrent = runtime->get_available_recurrent_op();
+        recurrent->initialize_recurrent(this, trace, previous_trace,
+            provenance, (traces.find(previous_trace->tid) == traces.end()));
+        trace_op = recurrent;
+        previous_trace = NULL;
+      }
+      if (trace->is_fixed() && trace->has_physical_trace())
+      {
+        // Record the event for when the trace replay is ready
+        physical_trace_replay_status.store(trace_op->get_mapped_event().id);
+#ifdef LEGION_SPY
+        tracing_replay_event = trace_op->get_completion_event();
+#endif
+      }
+      add_to_dependence_queue(trace_op);
       // Now mark that we are starting a trace
       current_trace = trace;
       current_trace_future_coordinate = next_future_coordinate;
@@ -10165,7 +10218,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       physical_trace_replay_status.compare_exchange_strong(ready.id, 
-                                                           replay ? 1 : 0);
+          replay ? TRACE_REPLAYING : TRACE_NOT_REPLAYING);
     }
 
     //--------------------------------------------------------------------------
@@ -10177,7 +10230,7 @@ namespace Legion {
       if (!current_trace->is_fixed())
         return false;
       realm_id_t status = physical_trace_replay_status.load();
-      if (status > 1)
+      if (status > TRACE_REPLAYING)
       {
         // Result is not ready yet so wait until it is
         RtEvent ready;
@@ -10188,10 +10241,10 @@ namespace Legion {
         // No need to spin again because there won't be anymore outstanding
         // trace capture ops to be setting this
 #ifdef DEBUG_LEGION
-        assert((status == 0) || (status == 1));
+        assert(status <= TRACE_REPLAYING);
 #endif
       }
-      return (status == 1);
+      return (status == TRACE_REPLAYING);
     }
 
     //--------------------------------------------------------------------------
@@ -10216,45 +10269,17 @@ namespace Legion {
           "Illegal end trace call on trace ID %d that does not match "
           "the current trace ID %d in task %s (UID %lld)", tid,
           current_trace->tid, get_task_name(), get_unique_id())
-      bool has_blocking_call = current_trace->has_blocking_call();
-      if (current_trace->is_fixed())
-      {
-        // Already fixed, dump a complete trace op into the stream
-        TraceCompleteOp *complete_op = runtime->get_available_trace_op();
-        complete_op->initialize_complete(this, has_blocking_call, provenance);
-        add_to_dependence_queue(complete_op);
-      }
-      else
-      {
-        // Not fixed yet, dump a capture trace op into the stream
-        TraceCaptureOp *capture_op = runtime->get_available_capture_op(); 
-        capture_op->initialize_capture(this, has_blocking_call,
-                                       deprecated, provenance);
-        add_to_dependence_queue(capture_op);
-        // Mark that the current trace is now fixed
+      // Mark that the current trace is now fixed
+      if (!current_trace->is_fixed())
         current_trace->fix_trace(provenance);
-      }
+      else if (runtime->safe_tracing)
+        current_trace->check_operation_count();
+      current_trace->reset_intermediate_fence();
+      previous_trace = current_trace;
       current_trace = NULL;
 #ifdef LEGION_SPY
       tracing_replay_event = ApEvent::NO_AP_EVENT;
 #endif
-    }
-
-    //--------------------------------------------------------------------------
-    void InnerContext::record_previous_trace(LogicalTrace *trace)
-    //--------------------------------------------------------------------------
-    {
-      previous_trace = trace;
-    }
-
-    //--------------------------------------------------------------------------
-    void InnerContext::invalidate_trace_cache(
-                                    LogicalTrace *trace, Operation *invalidator)
-    //--------------------------------------------------------------------------
-    {
-      if (!invalidator->is_internal_op() &&
-          (previous_trace != NULL) && (previous_trace != trace))
-        previous_trace->invalidate_trace_cache(invalidator);
     }
 
     //--------------------------------------------------------------------------
@@ -10269,7 +10294,17 @@ namespace Legion {
       if ((current_trace != NULL) && 
           (future_coordinate != NO_FUTURE_COORDINATE) &&
           (current_trace_future_coordinate <= future_coordinate))
-        current_trace->record_blocking_call();
+      {
+        if (is_replaying_physical_trace())
+          REPORT_LEGION_ERROR(ERROR_INVALID_PHYSICAL_TRACING,
+                "Physical tracing violation! Trace %d in task %s (UID %lld) "
+                "encountered a blocking API call that was unseen when it was "
+                "recorded. It is required that traces do not change their "
+                "behavior.", current_trace->get_trace_id(),
+                get_task_name(), get_unique_id())
+        else
+          current_trace->record_blocking_call();
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -12004,6 +12039,19 @@ namespace Legion {
       }
       else // implicit task
         realm_done_event = effects;
+      // Quick check to make sure the user didn't forget to end a trace
+      if (current_trace != NULL)
+        REPORT_LEGION_ERROR(ERROR_TASK_FAILED_END_TRACE,
+          "Task %s (UID %lld) failed to end trace before exiting!",
+                        get_task_name(), get_unique_id())
+      // See if we have an outstanding previous trace to clean up
+      else if (previous_trace != NULL) 
+      {
+        FenceOp *complete = initialize_trace_completion(NULL/*provenance*/);
+        // No longer have a previous trace
+        previous_trace = NULL;
+        add_to_dependence_queue(complete);
+      }
       // See if we have any local regions or fields that need to be deallocated
       std::vector<LogicalRegion> local_regions_to_delete;
       std::map<FieldSpace,std::set<FieldID> > local_fields_to_delete;
@@ -12111,12 +12159,7 @@ namespace Legion {
                 impl->get_name(), get_task_name(), get_unique_id());
           }
         }
-      }
-      // Quick check to make sure the user didn't forget to end a trace
-      if (current_trace != NULL)
-        REPORT_LEGION_ERROR(ERROR_TASK_FAILED_END_TRACE,
-          "Task %s (UID %lld) failed to end trace before exiting!",
-                        get_task_name(), get_unique_id()) 
+      } 
       // Unmap any of our mapped regions before issuing any close operations
       unmap_all_regions(false/*external*/);
       const std::deque<InstanceSet> &physical_instances = 
@@ -13830,8 +13873,7 @@ namespace Legion {
         exchange.exchange(hash);
       // If all shards had the same hashes then we are done
       if (hashes.size() == 1)
-        return InnerContext::verify_hash(hash, description, 
-                                        provenance, verify_every_call);
+        return true;
       if (!verify_every_call)
       {
         // First pass, we detected a violation so go around again and see
@@ -20072,29 +20114,35 @@ namespace Legion {
       }
       else
         trace = finder->second;
-
 #ifdef DEBUG_LEGION
       assert(trace != NULL);
 #endif
-      trace->clear_blocking_call();
-
-      // Issue a begin op
-      ReplTraceBeginOp *begin = runtime->get_available_repl_begin_op();
-      begin->initialize_begin(this, trace, provenance);
-      add_to_dependence_queue(begin);
-
-      if (!logical_only)
+      ReplTraceOp *trace_op = NULL;
+      if (previous_trace == NULL)
       {
-        // Issue a replay op
-        ReplTraceReplayOp *replay = runtime->get_available_repl_replay_op();
-        replay->initialize_replay(this, trace, provenance);
-        // Record the event for when the trace replay is ready
-        physical_trace_replay_status.store(replay->get_mapped_event().id);
-#ifdef LEGION_SPY
-        tracing_replay_event = replay->get_completion_event();
-#endif
-        add_to_dependence_queue(replay);
+        // Issue a begin op
+        ReplTraceBeginOp *begin = runtime->get_available_repl_begin_op();
+        begin->initialize_begin(this, trace, provenance);
+        trace_op = begin;
       }
+      else
+      {
+        ReplTraceRecurrentOp *recurrent = 
+          runtime->get_available_repl_recurrent_op();
+        recurrent->initialize_recurrent(this, trace, previous_trace,
+            provenance, (traces.find(previous_trace->tid) == traces.end()));
+        trace_op = recurrent;
+        previous_trace = NULL;
+      }
+      if (trace->is_fixed() && trace->has_physical_trace())
+      {
+        // Record the event for when the trace replay is ready
+        physical_trace_replay_status.store(trace_op->get_mapped_event().id);
+#ifdef LEGION_SPY
+        tracing_replay_event = trace_op->get_completion_event();
+#endif
+      }
+      add_to_dependence_queue(trace_op);
       // Now mark that we are starting a trace
       current_trace = trace;
       current_trace_future_coordinate = next_future_coordinate;
@@ -20116,45 +20164,7 @@ namespace Legion {
         if (hasher.verify(__func__))
           break;
       }
-      if (runtime->no_tracing) return;
-#ifdef DEBUG_LEGION
-      log_run.debug("Ending a trace in task %s (ID %lld)",
-                    get_task_name(), get_unique_id());
-#endif
-      if (current_trace == NULL)
-        REPORT_LEGION_ERROR(ERROR_UMATCHED_END_TRACE,
-          "Unmatched end trace for ID %d in task %s (ID %lld)", 
-          tid, get_task_name(), get_unique_id())
-      else if (!deprecated && (current_trace->tid != tid))
-        REPORT_LEGION_ERROR(ERROR_ILLEGAL_END_TRACE_CALL,
-          "Illegal end trace call on trace ID %d that does not match "
-          "the current trace ID %d in task %s (UID %lld)", tid,
-          current_trace->tid, get_task_name(), get_unique_id())
-      const bool has_blocking_call = current_trace->has_blocking_call();
-      if (current_trace->is_fixed())
-      {
-        // Already fixed, dump a complete trace op into the stream
-        ReplTraceCompleteOp *complete_op = 
-          runtime->get_available_repl_trace_op();
-        complete_op->initialize_complete(this, provenance, has_blocking_call);
-        add_to_dependence_queue(complete_op);
-      }
-      else
-      {
-        // Not fixed yet, dump a capture trace op into the stream
-        ReplTraceCaptureOp *capture_op = 
-          runtime->get_available_repl_capture_op();
-        capture_op->initialize_capture(this, provenance,
-                                       has_blocking_call, deprecated);
-        // Mark that the current trace is now fixed
-        current_trace->fix_trace(provenance);
-        add_to_dependence_queue(capture_op);
-      }
-      // We no longer have a trace that we're executing 
-      current_trace = NULL;
-#ifdef LEGION_SPY
-      tracing_replay_event = ApEvent::NO_AP_EVENT;
-#endif
+      InnerContext::end_trace(tid, deprecated, provenance);
     }
 
     //--------------------------------------------------------------------------
@@ -20356,6 +20366,20 @@ namespace Legion {
       else
         return InnerContext::add_to_dependence_queue(op, dependences,
                                                      unordered, outermost);
+    }
+
+    //--------------------------------------------------------------------------
+    FenceOp* ReplicateContext::initialize_trace_completion(Provenance *prov)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(previous_trace != NULL);
+#endif
+      ReplTraceCompleteOp *op = 
+        runtime->get_available_repl_complete_op();
+      op->initialize_complete(this, previous_trace, prov, 
+          (traces.find(previous_trace->tid) == traces.end()));
+      return op;
     }
 
     //--------------------------------------------------------------------------
@@ -24920,27 +24944,6 @@ namespace Legion {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_LEGION_END_TRACE,
         "Illegal Legion end trace call in leaf task %s (ID %lld)",
                      get_task_name(), get_unique_id())
-    }
-
-    //--------------------------------------------------------------------------
-    void LeafContext::record_previous_trace(LogicalTrace *trace)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(false);
-#endif
-      exit(ERROR_LEAF_TASK_VIOLATION);
-    }
-
-    //--------------------------------------------------------------------------
-    void LeafContext::invalidate_trace_cache(
-                                    LogicalTrace *trace, Operation *invalidator)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(false);
-#endif
-      exit(ERROR_LEAF_TASK_VIOLATION);
     }
 
     //--------------------------------------------------------------------------

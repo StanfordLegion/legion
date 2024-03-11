@@ -33,12 +33,6 @@ namespace Legion {
      */
     class LogicalTrace : public Collectable {
     public:
-      enum TracingState {
-        LOGICAL_ONLY,
-        PHYSICAL_RECORD,
-        PHYSICAL_REPLAY,
-      };
-    public:
       struct DependenceRecord {
       public:
         DependenceRecord(int idx)
@@ -94,14 +88,20 @@ namespace Legion {
       };
       struct OperationInfo {
       public:
-        OperationInfo(Operation *op)
-          : kind(op->get_operation_kind()),
-            region_count(op->get_region_count()) { }
-      public:
         LegionVector<DependenceRecord> dependences;
         LegionVector<CloseInfo> closes;
+      };
+      struct VerificationInfo {
+      public:
+        VerificationInfo(Operation::OpKind k, TaskID tid,
+            unsigned r, uint64_t h[2])
+          : kind(k), task_id(tid), regions(r)
+        { hash[0] = h[0]; hash[1] = h[1]; }
+      public:
         Operation::OpKind kind;
-        unsigned region_count;
+        TaskID task_id;
+        unsigned regions;
+        uint64_t hash[2];
       };
       class StaticTranslator {
       public:
@@ -140,9 +140,12 @@ namespace Legion {
       ~LogicalTrace(void);
     public:
       inline TraceID get_trace_id(void) const { return tid; }
+      inline size_t get_operation_count(void) const 
+        { return replay_info.size(); }
     public:
       bool initialize_op_tracing(Operation *op,
                      const std::vector<StaticDependence> *dependences = NULL);
+      void check_operation_count(void);
       bool skip_analysis(RegionTreeID tid) const;
       size_t register_operation(Operation *op, GenerationID gen);
       void register_internal(InternalOp *op);
@@ -162,27 +165,27 @@ namespace Legion {
       // Called by task execution thread
       inline bool is_fixed(void) const { return fixed; }
       void fix_trace(Provenance *provenance);
-    public:
-      bool has_physical_trace(void) { return physical_trace != NULL; }
-      PhysicalTrace* get_physical_trace(void) { return physical_trace; }
-    public:
-      void begin_trace_execution(FenceOp *fence_op);
-      void end_trace_execution(FenceOp *fence_op);
-    public:
-      void initialize_tracing_state(void) { state = LOGICAL_ONLY; }
-      void set_state_record(void) { state.store(PHYSICAL_RECORD); }
-      void set_state_replay(void) { state.store(PHYSICAL_REPLAY); }
-      bool is_recording(void) const { return state.load() == PHYSICAL_RECORD; }
-      bool is_replaying(void) const { return state.load() == PHYSICAL_REPLAY; }
-    public:
-      inline void clear_blocking_call(void) { blocking_call_observed = false; }
       inline void record_blocking_call(void) { blocking_call_observed = true; }
-      inline bool has_blocking_call(void) const {return blocking_call_observed;}
-      inline bool has_intermediate_operations(void) const 
-        { return has_intermediate_ops; }
-      inline void reset_intermediate_operations(void)
-        { has_intermediate_ops = false; }
-      void invalidate_trace_cache(Operation *invalidator);
+      inline bool get_and_clear_blocking_call(void)
+        {
+          const bool result = blocking_call_observed; 
+          blocking_call_observed = false;
+          return result;
+        }
+      inline void record_intermediate_fence(void)
+        { intermediate_fence = true; }
+      inline bool has_intermediate_fence(void) const
+        { return intermediate_fence; }
+      inline void reset_intermediate_fence(void)
+        { intermediate_fence = false; }
+    public:
+      // Called during logical dependence analysis stage
+      inline bool is_recording(void) const { return recording; }
+      void begin_logical_trace(FenceOp *fence_op);
+      void end_logical_trace(FenceOp *fence_op);
+    public:
+      bool has_physical_trace(void) const { return (physical_trace != NULL); }
+      PhysicalTrace* get_physical_trace(void) { return physical_trace; }
     protected:
       void replay_operation_dependences(Operation *op,
           const LegionVector<DependenceRecord> &dependences);
@@ -199,12 +202,17 @@ namespace Legion {
       // Set after end_trace is called
       Provenance *end_provenance;
     protected:
-      std::atomic<TracingState> state;
       // Pointer to a physical trace
-      PhysicalTrace *physical_trace;
+      PhysicalTrace *const physical_trace;
+    protected:
+      // Application stage of the pipeline
+      std::vector<VerificationInfo> verification_infos;
+      unsigned verification_index;
       bool blocking_call_observed;
-      bool has_intermediate_ops;
       bool fixed;
+      bool intermediate_fence;
+    protected:
+      // Logical dependence analysis stage of the pipeline
       bool recording;
       size_t replay_index;
       std::deque<OperationInfo> replay_info;
@@ -231,8 +239,11 @@ namespace Legion {
       TraceOp& operator=(const TraceOp &rhs);
     public:
       virtual bool is_tracing_fence(void) const override { return true; }
+      virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
+                                     std::set<RtEvent> &applied) const override;
     };
 
+#if 0
     /**
      * \class TraceCaptureOp
      * This class represents trace operations which we inject
@@ -265,6 +276,39 @@ namespace Legion {
       bool remove_trace_reference;
       bool is_recording;
     };
+#endif
+
+    enum ReplayableStatus {
+      REPLAYABLE,
+      NOT_REPLAYABLE_BLOCKING,
+      NOT_REPLAYABLE_CONSENSUS,
+      NOT_REPLAYABLE_VIRTUAL,
+      NOT_REPLAYABLE_REMOTE_SHARD,
+    };
+
+    enum IdempotencyStatus {
+      IDEMPOTENT,
+      NOT_IDEMPOTENT_SUBSUMPTION,
+      NOT_IDEMPOTENT_ANTIDEPENDENT,
+      NOT_IDEMPOTENT_REMOTE_SHARD,
+    };
+
+    /**
+     * \class CompleteOp
+     * A pure virtual interface for completion ops to implement
+     * to help with completing captures and replays of templates
+     */
+    class CompleteOp {
+    public:
+      virtual FenceOp* get_complete_operation(void) = 0;
+      virtual void begin_replayable_exchange(ReplayableStatus status) { }
+      virtual void end_replayable_exchange(ReplayableStatus &status) { }
+      virtual void begin_idempotent_exchange(IdempotencyStatus idempotent) { }
+      virtual void end_idempotent_exchange(IdempotencyStatus &idempotent) { }
+      virtual void sync_compute_frontiers(RtEvent event) { assert(false); }
+      virtual void deduplicate_condition_sets(
+          std::map<EquivalenceSet*,unsigned> &condition_sets) { }
+    };
 
     /**
      * \class TraceCompleteOp
@@ -274,7 +318,7 @@ namespace Legion {
      * then registers dependences on all operations in the trace
      * and becomes the new current fence.
      */
-    class TraceCompleteOp : public TraceOp {
+    class TraceCompleteOp : public TraceOp, public CompleteOp {
     public:
       static const AllocationType alloc_type = TRACE_COMPLETE_OP_ALLOC;
     public:
@@ -284,25 +328,23 @@ namespace Legion {
     public:
       TraceCompleteOp& operator=(const TraceCompleteOp &rhs);
     public:
-      void initialize_complete(InnerContext *ctx, bool has_blocking_call,
-                               Provenance *provenance);
+      void initialize_complete(InnerContext *ctx, LogicalTrace *trace,
+                               Provenance *provenance, bool remove_reference);
     public:
       virtual void activate(void);
       virtual void deactivate(bool free = true);
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
       virtual void trigger_dependence_analysis(void);
-      virtual void trigger_ready(void);
-      virtual void trigger_mapping(void);
-      virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
-                                         std::set<RtEvent> &applied) const;
+      virtual void trigger_mapping(void); 
     protected:
-      PhysicalTemplate *current_template;
-      bool replayed;
+      virtual FenceOp* get_complete_operation(void) { return this; }
+    protected:
       bool has_blocking_call;
-      bool is_recording;
+      bool remove_trace_reference;
     };
 
+#if 0
     /**
      * \class TraceReplayOp
      * This class represents trace operations which we inject
@@ -330,6 +372,26 @@ namespace Legion {
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const;
     };
+#endif
+
+    /**
+     * \class BeginOp
+     * This is a pure virtual interface for operations that need to be 
+     * performed across any kind of begin operation for tracing
+     */
+    class BeginOp {
+    public:
+      virtual bool allreduce_template_status(bool &valid, bool acquired)
+      {
+        if (acquired)
+          return false;
+        valid = false;
+        return true;
+      }
+      virtual ApEvent get_begin_completion(void) = 0;
+      virtual FenceOp* get_begin_operation(void) = 0;
+      virtual PhysicalTemplate* create_fresh_template(PhysicalTrace *trace) = 0;
+    };
 
     /**
      * \class TraceBeginOp
@@ -337,7 +399,7 @@ namespace Legion {
      * into the operation stream to begin a trace.  This fence
      * is by a TraceReplayOp if the trace allows physical tracing.
      */
-    class TraceBeginOp : public TraceOp {
+    class TraceBeginOp : public TraceOp, public BeginOp {
     public:
       static const AllocationType alloc_type = TRACE_BEGIN_OP_ALLOC;
     public:
@@ -355,22 +417,41 @@ namespace Legion {
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
       virtual void trigger_dependence_analysis(void);
+      virtual void trigger_ready(void);
+      virtual void trigger_mapping(void);
+    public:
+      virtual ApEvent get_begin_completion(void) 
+        { return get_completion_event(); }
+      virtual FenceOp* get_begin_operation(void) { return this; }
+      virtual PhysicalTemplate* create_fresh_template(PhysicalTrace *trace);
     };
 
-    class TraceSummaryOp : public TraceOp {
+    /**
+     * \class RecurrentOp
+     * A recurrent op supports both the begin and complete interfaces
+     */
+    class RecurrentOp : public BeginOp, public CompleteOp { };
+
+    /**
+     * \class TraceRecurrentOp
+     * This is a tracing operation that is inserted to invalidate an idempotent
+     * trace replay once an invalidating operation is detected in the stream
+     * of operations in the parent context. We make this a mapping fence so
+     * we ensure that the resources from the template are freed up before
+     * any other downstream operations attempt to map.
+     */
+    class TraceRecurrentOp : public TraceOp, public RecurrentOp {
     public:
-      static const AllocationType alloc_type = TRACE_SUMMARY_OP_ALLOC;
+      static const AllocationType alloc_type = TRACE_RECURRENT_OP_ALLOC;
     public:
-      TraceSummaryOp(Runtime *rt);
-      TraceSummaryOp(const TraceSummaryOp &rhs);
-      virtual ~TraceSummaryOp(void);
+      TraceRecurrentOp(Runtime *rt);
+      TraceRecurrentOp(const TraceRecurrentOp &rhs) = delete;
+      virtual ~TraceRecurrentOp(void);
     public:
-      TraceSummaryOp& operator=(const TraceSummaryOp &rhs);
+      TraceRecurrentOp& operator=(const TraceRecurrentOp &rhs) = delete;
     public:
-      void initialize_summary(InnerContext *ctx,
-                              PhysicalTemplate *tpl,
-                              Operation *invalidator,
-                              Provenance *provenance);
+      void initialize_recurrent(InnerContext *ctx, LogicalTrace *trace,
+         LogicalTrace *previous, Provenance *provenance, bool remove_reference);
     public:
       virtual void activate(void);
       virtual void deactivate(bool free = true);
@@ -380,10 +461,18 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
-      virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
-                                         std::set<RtEvent> &applied) const;
+    public:
+      virtual FenceOp* get_begin_operation(void) { return this; }
+      virtual ApEvent get_begin_completion(void) 
+        { return get_completion_event(); }
+      virtual PhysicalTemplate* create_fresh_template(PhysicalTrace *trace);
+    public:
+      virtual FenceOp* get_complete_operation(void) { return this; }
     protected:
-      PhysicalTemplate *current_template;
+      LogicalTrace *previous;
+      bool has_blocking_call;
+      bool has_intermediate_fence;
+      bool remove_trace_reference;
     };
 
     /**
@@ -398,64 +487,73 @@ namespace Legion {
       ~PhysicalTrace(void);
     public:
       PhysicalTrace& operator=(const PhysicalTrace &rhs) = delete;
+#if 0
     public:
-      bool check_memoize_consensus(size_t index);
-      void reset_last_memoized(void);
-      void clear_cached_template(void) { current_template = NULL; }
-      void check_template_preconditions(TraceReplayOp *op,
-                                        std::set<RtEvent> &applied_events);
       // Return true if we evaluated all the templates
       bool find_viable_templates(ReplTraceReplayOp *op, 
                                  std::set<RtEvent> &applied_events,
                                  unsigned templates_to_find,
                                  std::vector<int> &viable_templates);
       void select_template(unsigned template_index);
-    public:
-      inline PhysicalTemplate* get_current_template(void) 
-        { return current_template; }
-      inline bool has_any_templates(void) const { return !templates.empty(); }
-    public:
-      void record_previous_template_completion(ApEvent template_completion)
-        { previous_template_completion = template_completion; }
-      ApEvent get_previous_template_completion(void) const
-        { return previous_template_completion; }
-    public:
-      void set_current_execution_fence_event(ApEvent event)
-        { execution_fence_event = event; }
-      ApEvent get_current_execution_fence_event(void) const
-        { return execution_fence_event; }
-    public:
-      PhysicalTemplate* start_new_template(void);
       ApEvent record_capture(PhysicalTemplate *tpl,
                     std::set<RtEvent> &map_applied_conditions);
       void record_failed_capture(PhysicalTemplate *tpl);
-      void record_intermediate_execution_fence(FenceOp *fence);
-      void chain_replays(FenceOp *replay_op);
+#endif
     public:
-      const std::vector<Processor> &get_replay_targets(void)
+      inline bool has_current_template(void) const
+        { return (current_template != NULL); }
+      inline PhysicalTemplate* get_current_template(void) const
+        { return current_template; }
+      inline const std::vector<Processor> &get_replay_targets(void)
         { return replay_targets; }
+      inline bool is_recording(void) const { return recording; }
+      inline bool is_replaying(void) const { return !recording; }
+      inline bool is_recurrent(void) const { return recurrent; }
+      size_t get_expected_operation_count(void) const;
     public:
-      void initialize_template(ApEvent fence_completion, bool recurrent);
+      void record_parent_req_fields(unsigned index, const FieldMask &mask);
+      void find_condition_sets(std::map<EquivalenceSet*,unsigned> &sets) const;
+      void refresh_condition_sets(FenceOp *op,
+          std::set<RtEvent> &refresh_ready) const;
+      bool begin_physical_trace(BeginOp *op,
+          std::set<RtEvent> &map_applied_conditions,
+          std::set<ApEvent> &execution_preconditions);
+      void complete_physical_trace(CompleteOp *op,
+          std::set<RtEvent> &map_applied_conditions,
+          std::set<ApEvent> &execution_preconditions,
+          bool has_blocking_call);
+      bool replay_physical_trace(RecurrentOp *op,
+          std::set<RtEvent> &map_applied_events,
+          std::set<ApEvent> &execution_preconditions,
+          bool has_blocking_call, bool has_intermediate_fence);
+    protected:
+      bool find_replay_template(BeginOp *op,
+            std::set<RtEvent> &map_applied_conditions,
+            std::set<ApEvent> &execution_preconditions);
+      void begin_replay(BeginOp *op, bool recurrent,
+                        bool has_intermediate_fence);
+      bool complete_recording(CompleteOp *op,
+          std::set<RtEvent> &map_applied_conditions,
+          std::set<ApEvent> &execution_preconditions, bool has_blocking_call);
+      void complete_replay(std::set<ApEvent> &completion_events);
     public:
-      Runtime * const runtime;
-      const LogicalTrace *logical_trace;
+      Runtime *const runtime;
+      const LogicalTrace *const logical_trace;
       const bool perform_fence_elision;
-      ReplicateContext *const repl_ctx;
     private:
       mutable LocalLock trace_lock;
-      FenceOp *previous_replay;
-      UniqueID previous_replay_gen;
-      PhysicalTemplate* current_template;
+      // This is a mapping from the parent region requirements
+      // to the sets of fields referred to in the trace. We use
+      // this to find the equivalence sets for a template
+      LegionMap<unsigned,FieldMask> parent_req_fields;
       std::vector<PhysicalTemplate*> templates;
+      PhysicalTemplate* current_template;
       unsigned nonreplayable_count;
-      unsigned new_template_count;
-      size_t last_memoized;
+      unsigned new_template_count; 
     private:
-      ApEvent previous_template_completion;
-      ApEvent execution_fence_event;
       std::vector<Processor> replay_targets;
-    private:
-      bool intermediate_execution_fence;
+      bool recording;
+      bool recurrent;
     };
 
     /**
@@ -469,6 +567,9 @@ namespace Legion {
     class TraceViewSet {
     public:
       struct FailedPrecondition {
+      public:
+        FailedPrecondition(void) : view(NULL), expr(NULL) { }
+      public:
         LogicalView *view;
         IndexSpaceExpression *expr;
         FieldMask mask;
@@ -513,8 +614,7 @@ namespace Legion {
                        FailedPrecondition *condition = NULL) const; 
       void record_first_failed(FailedPrecondition *condition = NULL) const;
       void transpose_uniquely(LegionMap<IndexSpaceExpression*,
-                                        FieldMaskSet<LogicalView> > &target,
-                          std::set<IndexSpaceExpression*> &unique_exprs) const;
+                                  FieldMaskSet<LogicalView> > &target) const;
       void find_overlaps(TraceViewSet &target, IndexSpaceExpression *expr,
                          const bool expr_covers, const FieldMask &mask) const;
       bool empty(void) const;
@@ -557,43 +657,16 @@ namespace Legion {
     class TraceConditionSet : public EqSetTracker, public Collectable,
                               public LegionHeapify<TraceConditionSet> {
     public:
-      struct DeferTracePreconditionTestArgs :
-        public LgTaskArgs<DeferTracePreconditionTestArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_DEFER_TRACE_PRECONDITION_TASK_ID;
-      public:
-        DeferTracePreconditionTestArgs(TraceConditionSet *s, Operation *o, 
-                                       RtUserEvent d, RtUserEvent a)
-          : LgTaskArgs<DeferTracePreconditionTestArgs>(o->get_unique_op_id()),
-            set(s), op(o), done_event(d), applied_event(a) { }
-      public:
-        TraceConditionSet *const set;
-        Operation *const op;
-        const RtUserEvent done_event;
-        const RtUserEvent applied_event;
-      };
-      struct DeferTracePostconditionTestArgs :
-        public LgTaskArgs<DeferTracePostconditionTestArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_DEFER_TRACE_POSTCONDITION_TASK_ID;
-      public:
-        DeferTracePostconditionTestArgs(TraceConditionSet *s, Operation *o, 
-                                        RtUserEvent d)
-          : LgTaskArgs<DeferTracePostconditionTestArgs>(o->get_unique_op_id()),
-            set(s), op(o), done_event(d) { }
-      public:
-        TraceConditionSet *const set;
-        Operation *const op;
-        const RtUserEvent done_event;
-      };
-    public:
-      TraceConditionSet(PhysicalTrace *trace, RegionTreeForest *forest, 
-                        unsigned parent_req_index, IndexSpaceExpression *expr,
-                        const FieldMask &mask, RegionTreeID tree_id);
+      TraceConditionSet(PhysicalTemplate *tpl, unsigned parent_req_index,
+                        RegionTreeID tree_id, IndexSpaceExpression *expr,
+                        FieldMaskSet<LogicalView> &&views);
       TraceConditionSet(const TraceConditionSet &rhs) = delete;
       virtual ~TraceConditionSet(void);
     public:
       TraceConditionSet& operator=(const TraceConditionSet &rhs) = delete;
+    public:
+      inline bool is_shared(void) const { return shared; }
+      inline void mark_shared(void) { shared = true; }
     public:
       virtual void add_subscription_reference(unsigned count = 1)
         { add_reference(count); }
@@ -606,54 +679,37 @@ namespace Legion {
       virtual ReferenceSource get_reference_source_kind(void) const 
         { return TRACE_REF; }
     public:
+      bool matches(IndexSpaceExpression *expr,
+                   const FieldMaskSet<LogicalView> &views) const;
       void invalidate_equivalence_sets(void);
-      void capture(EquivalenceSet *set, const FieldMask &mask,
-                   std::vector<RtEvent> &ready_events);
-      void receive_capture(TraceViewSet *pre, TraceViewSet *anti,
-                           TraceViewSet *post, std::set<RtEvent> &ready);
-      bool is_empty(void) const;
-      bool is_idempotent(bool &not_subsumed,
-                         TraceViewSet::FailedPrecondition *failed);
-      void dump_preconditions(void) const;
-      void dump_anticonditions(void) const;
-      void dump_postconditions(void) const;
+      void refresh_equivalence_sets(FenceOp *op,
+          std::set<RtEvent> &ready_events);
+      void dump_conditions(void) const;
     public:
-      void test_require(Operation *op, std::set<RtEvent> &ready_events,
-                        std::set<RtEvent> &applied_events);
-      bool check_require(void);
-      void ensure(Operation *op, std::set<RtEvent> &applied_events);
+      void test_preconditions(FenceOp *op, unsigned index,
+                              std::vector<RtEvent> &ready_events,
+                              std::set<RtEvent> &applied_events);
+      bool check_preconditions(void);
+      void test_anticonditions(FenceOp *op, unsigned index,
+                               std::vector<RtEvent> &ready_events,
+                               std::set<RtEvent> &applied_events);
+      bool check_anticonditions(void);
+      void apply_postconditions(FenceOp *op, unsigned index,
+                                std::set<RtEvent> &applied_events);
     public:
-      static void handle_precondition_test(const void *args);
-      static void handle_postcondition_test(const void *args);
-    public:
-      RtEvent recompute_equivalence_sets(UniqueID opid, 
-                        const FieldMask &invalid_mask);
-    public:
-      InnerContext *const context;
-      RegionTreeForest *const forest;
+      PhysicalTemplate *const owner;
       IndexSpaceExpression *const condition_expr;
-      const FieldMask condition_mask;
+      const FieldMaskSet<LogicalView> views;
       const RegionTreeID tree_id;
       const unsigned parent_req_index;
     private:
       mutable LocalLock set_lock;
     private:
-      TraceViewSet *precondition_views;
-      TraceViewSet *anticondition_views;
-      TraceViewSet *postcondition_views; 
-      // Transpose of conditions for testing
-      typedef LegionMap<IndexSpaceExpression*,
-                        FieldMaskSet<LogicalView> > ExprViews;
-      ExprViews preconditions;
-      ExprViews anticonditions;
-      ExprViews postconditions;
-      // A unique set of index space expressions from the *_ views
-      // This is needed because transpose_uniquely might not capture
-      // all the needed expression references
-      std::set<IndexSpaceExpression*> unique_view_expressions;
-    private:
-      std::vector<InvalidInstAnalysis*> precondition_analyses;
-      std::vector<AntivalidInstAnalysis*> anticondition_analyses;
+      union {
+        InvalidInstAnalysis *invalid;
+        AntivalidInstAnalysis *antivalid;
+      } analysis;
+      bool shared;
     };
 
     /**
@@ -785,42 +841,25 @@ namespace Legion {
       PhysicalTemplate& operator=(const PhysicalTemplate &rhs) = delete;
     public:
       virtual size_t get_sharded_template_index(void) const { return 0; }
-      virtual void initialize_replay(ApEvent fence_completion, bool recurrent,
-                                     bool need_lock = true);
-      virtual void perform_replay(Runtime *rt, 
-                                  std::set<RtEvent> &replayed_events);
+      virtual void initialize_replay(ApEvent fence_completion, bool recurrent);
+      virtual void start_replay(void);
       virtual RtEvent refresh_managed_barriers(void);
       virtual void finish_replay(std::set<ApEvent> &postconditions);
       virtual ApEvent get_completion_for_deletion(void) const;
     public:
       void find_execution_fence_preconditions(std::set<ApEvent> &preconditions);
-      void finalize(InnerContext *context, Operation *op,
-                    bool has_blocking_call);
+      ReplayableStatus finalize(CompleteOp *op, bool has_blocking_call);
+      IdempotencyStatus capture_conditions(CompleteOp *op);
+      void receive_trace_conditions(TraceViewSet *preconditions,
+          TraceViewSet *anticonditions, TraceViewSet *postconditions,
+          unsigned parent_req_index, RegionTreeID tree_id,
+          std::atomic<unsigned> *result);
+      void refresh_condition_sets(FenceOp *op,
+          std::set<RtEvent> &ready_events) const;
+      bool acquire_instance_references(void) const;
+      void release_instance_references(void) const;
     public:
-      struct DetailedBoolean {
-        explicit DetailedBoolean(bool r)
-          : result(r), message()
-        {}
-        DetailedBoolean(bool r, const char *m)
-          : result(r), message(m)
-        {}
-        DetailedBoolean(bool r, const std::string &m)
-          : result(r), message(m)
-        {}
-        DetailedBoolean(const DetailedBoolean& r)
-          : result(r.result), message(r.message)
-        {}
-        operator bool(void) const { return result; }
-        bool result;
-        std::string message;
-      };
-    protected:
-      virtual DetailedBoolean check_replayable(Operation *op,
-          InnerContext *context, bool has_blocking_call);
-      virtual DetailedBoolean check_idempotent(Operation* op,
-                                               InnerContext* context);
-    public:
-      void optimize(Operation *op, bool do_transitive_reduction);
+      void optimize(CompleteOp *op, bool do_transitive_reduction);
     private:
       void find_all_last_instance_user_events(
                              std::vector<RtEvent> &frontier_events);
@@ -834,12 +873,13 @@ namespace Legion {
       void finalize_transitive_reduction(
           const std::vector<unsigned> &inv_topo_order,
           const std::vector<std::vector<unsigned> > &incoming_reduced);
+      void check_finalize_transitive_reduction(void);
       void propagate_copies(std::vector<unsigned> *gen);
       void eliminate_dead_code(std::vector<unsigned> &gen);
       void prepare_parallel_replay(const std::vector<unsigned> &gen);
       void push_complete_replays(void);
     protected:
-      virtual void sync_compute_frontiers(Operation *op,
+      virtual void sync_compute_frontiers(CompleteOp *op,
                           const std::vector<RtEvent> &frontier_events);
       virtual void initialize_generators(std::vector<unsigned> &new_gen);
       virtual void initialize_eliminate_dead_code_frontiers(
@@ -853,43 +893,43 @@ namespace Legion {
       virtual void rewrite_frontiers(
                       std::map<unsigned,unsigned> &substitutions);
     public:
+#if 0
       // Variant for normal traces
       bool check_preconditions(TraceReplayOp *op,
                                std::set<RtEvent> &applied_events);
       // Variant for control replication traces
       bool check_preconditions(ReplTraceReplayOp *op,
                                std::set<RtEvent> &applied_events);
-      void apply_postcondition(Operation *op,
-                               std::set<RtEvent> &applied_events);
+#endif
+      RtEvent test_preconditions(FenceOp *op,
+                                 std::set<RtEvent> &applied_events);
+      bool check_preconditions(void);
+      void apply_postconditions(FenceOp *op,
+                                std::set<RtEvent> &applied_events);
     public:
+      bool can_start_replay(void);
       void register_operation(MemoizableOp *op);
       void execute_slice(unsigned slice_idx, bool recurrent_replay);
     public:
-      virtual void issue_summary_operations(InnerContext* context,
-                                            Operation *invalidator,
-                                            Provenance *provenance);
-    public:
-      void dump_template(void);
-      virtual void dump_sharded_template(void) { }
+      void dump_template(void) const;
+      virtual void dump_sharded_template(void) const { }
     private:
-      void dump_instructions(const std::vector<Instruction*> &instructions);
+      void dump_instructions(
+          const std::vector<Instruction*> &instructions) const;
 #ifdef LEGION_SPY
     public:
       void set_fence_uid(UniqueID fence_uid) { prev_fence_uid = fence_uid; }
       UniqueID get_fence_uid(void) const { return prev_fence_uid; }
 #endif
     public:
-      inline bool is_replaying(void) const { return !recording.load(); }
-      inline bool is_replayable(void) const { return replayable.result; }
-      inline bool is_idempotent(void) const { return idempotent.result; }
-      inline const std::string& get_replayable_message(void) const
-        { return replayable.message; }
-      inline const std::string& get_idempotent_message(void) const
-        { return idempotent.message; }
-      inline void record_no_consensus(void) { has_no_consensus = true; }
-      inline bool get_no_consensus(void) { return has_no_consensus; }
+      inline bool is_replaying(void) const { return trace->is_replaying(); }
+      inline bool is_replayable(void) const
+        { return (replayable == REPLAYABLE); }
+      inline bool is_idempotent(void) const 
+        { return (idempotency == IDEMPOTENT); }
+      inline void record_no_consensus(void) { has_no_consensus.store(true); }
     public:
-      virtual bool is_recording(void) const { return recording.load(); }
+      virtual bool is_recording(void) const { return trace->is_recording(); }
       virtual void add_recorder_reference(void) { /*do nothing*/ }
       virtual bool remove_recorder_reference(void) 
         { /*do nothing, never delete*/ return false; }
@@ -1089,29 +1129,24 @@ namespace Legion {
     public:
       inline void update_last_fence(GetTermEvent *fence)
         { last_fence = fence; }
-      inline ApEvent get_fence_completion(void) { return fence_completion; }
     public:
       PhysicalTrace * const trace;
     protected:
-      std::atomic<bool> recording;
       // Count how many times we've been replayed so we know when we're going
       // to run out of phase barrier generations
       // Note we start this at 1 since some barriers are used as part of the
       // capture, while others are not used until the first replay, that throws
       // away one barrier generation on some barriers, but whatever
       size_t total_replays;
-      DetailedBoolean replayable;
-      DetailedBoolean idempotent;
+      ReplayableStatus replayable;
+      IdempotencyStatus idempotency;
     protected:
       mutable LocalLock template_lock;
       const unsigned fence_completion_id;
-    private:
-      const unsigned replay_parallelism;
     protected:
       static constexpr unsigned NO_INDEX = UINT_MAX;
     protected:
-      std::deque<std::map<TraceLocalID,MemoizableOp*> > operations;
-      std::deque<std::pair<ApEvent,bool/*recurrent*/> > pending_replays;
+      std::map<TraceLocalID,MemoizableOp*> operations;
       // Pair in memo_entries is <entry index, Operation::Kind>
       // This data structure is only used during template capture and
       // can be ignored after the template has been optimized
@@ -1122,11 +1157,15 @@ namespace Legion {
       std::map<TraceLocalID,std::map<Reservation,bool> > cached_reservations;
       std::map<TraceLocalID,CachedAllreduce> cached_allreduces;
       bool has_virtual_mapping;
-      bool has_no_consensus;
+      std::atomic<bool> has_no_consensus;
+      mutable TraceViewSet::FailedPrecondition failure;
     protected:
       GetTermEvent                    *last_fence;
     protected:
-      ApEvent                         fence_completion;
+      RtEvent                         replay_precondition;
+      RtUserEvent                     replay_postcondition;
+      std::atomic<unsigned>           remaining_replays;
+      std::atomic<unsigned>           total_logical;
       std::vector<ApEvent>            events;
       std::map<unsigned,ApUserEvent>  user_events;
     protected:
@@ -1160,18 +1199,19 @@ namespace Legion {
       std::vector<IssueAcross*>        across_copies;
       std::map<DistributedID,IndividualView*> recorded_views;
       std::set<IndexSpaceExpression*>  recorded_expressions;
+      std::vector<PhysicalManager*>    all_instances;
     protected:
       // Capture the names of all the instances that are mutated by this trace
       // and the index space expressions and fields that were mutated
       // THIS IS SHARDED FOR CONTROL REPLICATION!!!
-      LegionMap<UniqueInst,FieldMaskSet<IndexSpaceExpression> > mutated_insts;
-    protected:
-      // Capture the set of regions that we saw operations for, we'll use this
-      // at the end of the trace capture to compute the equivalence sets for
-      // this trace and then extract the different condition sets for this trace
+      LegionMap<UniqueInst,FieldMaskSet<IndexSpaceExpression> > mutated_insts; 
+    private:
       // THESE ARE SHARDED FOR CONTROL REPLICATION!!!
-      LegionVector<FieldMaskSet<RegionNode> > trace_regions;
-      std::vector<TraceConditionSet*> conditions;
+      // Each share has a disjoint set of trace conditions that they are
+      // responsible for handling checking
+      std::vector<TraceConditionSet*> preconditions; 
+      std::vector<TraceConditionSet*> anticonditions;
+      std::vector<TraceConditionSet*> postconditions;
 #ifdef LEGION_SPY
     private:
       UniqueID prev_fence_uid;
@@ -1272,10 +1312,8 @@ namespace Legion {
     public:
       virtual size_t get_sharded_template_index(void) const
         { return template_index; }
-      virtual void initialize_replay(ApEvent fence_completion, bool recurrent,
-                                     bool need_lock = true);
-      virtual void perform_replay(Runtime *runtime, 
-                                  std::set<RtEvent> &replayed_events);
+      virtual void initialize_replay(ApEvent fence_completion, bool recurrent);
+      virtual void start_replay(void);
       virtual RtEvent refresh_managed_barriers(void);
       virtual void finish_replay(std::set<ApEvent> &postconditions);
       virtual ApEvent get_completion_for_deletion(void) const;
@@ -1327,10 +1365,7 @@ namespace Legion {
       virtual void record_local_space(unsigned trace_local_id, IndexSpace sp);
       virtual void record_sharding_function(unsigned trace_local_id, 
                                             ShardingFunction *function);
-      virtual void issue_summary_operations(InnerContext *context,
-                                            Operation *invalidator,
-                                            Provenance *provenance);
-      virtual void dump_sharded_template(void);
+      virtual void dump_sharded_template(void) const;
     public:
       virtual ShardID find_owner_shard(unsigned trace_local_id);
       virtual IndexSpace find_local_space(unsigned trace_local_id);
@@ -1357,10 +1392,6 @@ namespace Legion {
       virtual unsigned find_event(const ApEvent &event, AutoLock &tpl_lock);
       void request_remote_shard_event(ApEvent event, RtUserEvent done_event);
       static AddressSpaceID find_event_space(ApEvent event);
-      virtual DetailedBoolean check_replayable(Operation *op,
-          InnerContext *context, bool has_blocking_call);
-      virtual DetailedBoolean check_idempotent(Operation *op,
-                                               InnerContext* context);
     protected:
       ShardID find_inst_owner(const UniqueInst &inst);
       void find_owner_shards(AddressSpace owner, std::vector<ShardID> &shards);
@@ -1372,7 +1403,7 @@ namespace Legion {
                                            const FieldMask &mask,
                                            std::set<RtEvent> &applied_events);
       virtual bool are_read_only_users(InstUsers &inst_users);
-      virtual void sync_compute_frontiers(Operation *op,
+      virtual void sync_compute_frontiers(CompleteOp *op,
                           const std::vector<RtEvent> &frontier_events);
       virtual void initialize_generators(std::vector<unsigned> &new_gen);
       virtual void initialize_eliminate_dead_code_frontiers(
@@ -1403,8 +1434,7 @@ namespace Legion {
       std::map<std::pair<size_t,size_t>,BarrierArrival*> collective_barriers;
       // Buffer up barrier updates as we're running ahead so that we can
       // apply them before we perform the trace replay
-      std::deque<
-            std::map<std::pair<size_t,size_t>,ApBarrier> > pending_collectives;
+      std::map<std::pair<size_t,size_t>,ApBarrier> pending_collectives;
       std::map<AddressSpaceID,std::vector<ShardID> > did_shard_owners;
       std::map<unsigned/*Trace Local ID*/,ShardID> owner_shards;
       std::map<unsigned/*Trace Local ID*/,IndexSpace> local_spaces;
@@ -1640,7 +1670,6 @@ namespace Legion {
         { return this; }
     private:
       friend class PhysicalTemplate;
-      PhysicalTemplate &tpl;
       unsigned lhs;
     };
 
