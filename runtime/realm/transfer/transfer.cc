@@ -3095,8 +3095,8 @@ namespace Realm {
       ChannelCopyInfo copy_info = channel_copy_info;
       copy_info.dst_mem = partials[i].ib_mem;
       copy_info.is_direct = false;
-      if (channel_copy_info.is_scatter)
-	copy_info.ind_mem = Memory::NO_MEMORY;
+      if(channel_copy_info.is_scatter)
+        copy_info.ind_mem = Memory::NO_MEMORY;
       if(best_channel_for_mem_pair(copy_info,
                                    serdez_id, 0 /*no dst serdez*/,
                                    0 /*no redop on not-last hops*/,
@@ -3181,8 +3181,8 @@ namespace Realm {
       XferDesKind kind;
       ChannelCopyInfo copy_info = channel_copy_info;
       copy_info.src_mem = partials[i].ib_mem;
-      if (!channel_copy_info.is_scatter)
-	copy_info.ind_mem = Memory::NO_MEMORY;
+      if(!channel_copy_info.is_scatter)
+        copy_info.ind_mem = Memory::NO_MEMORY;
       copy_info.is_direct = false;
       if(best_channel_for_mem_pair(copy_info,
                                    0 /*no src serdez*/, serdez_id, redop_id,
@@ -5220,17 +5220,24 @@ namespace Realm {
     create_xds();
   }
 
-  std::ostream& operator<<(std::ostream& os, const TransferGraph::XDTemplate::IO& io)
+  std::ostream &operator<<(std::ostream &os, const TransferGraph::XDTemplate::IO &io)
   {
     switch(io.iotype) {
     case TransferGraph::XDTemplate::IO_INST:
-      os << "inst(" << io.inst.inst << ":" << io.inst.inst.get_location().kind() <<"," << io.inst.fld_start << "+" << io.inst.fld_count << ")"; break;
+      os << "inst(" << io.inst.inst << ":" << io.inst.inst.get_location().kind() << ","
+         << io.inst.fld_start << "+" << io.inst.fld_count << ")";
+      break;
     case TransferGraph::XDTemplate::IO_INDIRECT_INST:
-      os << "ind(" << io.indirect.ind_idx << "," << io.indirect.port << "," << io.indirect.inst << ":" << io.indirect.inst.get_location().kind() <<"," << io.indirect.fld_start << "+" << io.indirect.fld_count << ")"; break;
+      os << "ind(" << io.indirect.ind_idx << "," << io.indirect.port << ","
+         << io.indirect.inst << ":" << io.indirect.inst.get_location().kind() << ","
+         << io.indirect.fld_start << "+" << io.indirect.fld_count << ")";
+      break;
     case TransferGraph::XDTemplate::IO_EDGE:
-      os << "edge(" << io.edge << ")"; break;
+      os << "edge(" << io.edge << ")";
+      break;
     case TransferGraph::XDTemplate::IO_FILL_DATA:
-      os << "fill(" << io.fill.fill_start << "+" << io.fill.fill_size << ")"; break;
+      os << "fill(" << io.fill.fill_start << "+" << io.fill.fill_size << ")";
+      break;
     default:
       assert(0);
     }
