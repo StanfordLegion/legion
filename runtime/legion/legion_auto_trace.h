@@ -42,6 +42,15 @@ struct std::equal_to<Legion::Internal::Murmur3Hasher::Hash> {
   }
 };
 
+template<>
+struct std::less<Legion::Internal::Murmur3Hasher::Hash> {
+  constexpr bool operator()(const Legion::Internal::Murmur3Hasher::Hash& lhs,
+                            const Legion::Internal::Murmur3Hasher::Hash& rhs) const
+  {
+    return lhs.x < rhs.x && lhs.y < rhs.y;
+  }
+};
+
 namespace Legion {
   namespace Internal {
 

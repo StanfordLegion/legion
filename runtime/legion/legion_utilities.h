@@ -616,6 +616,15 @@ namespace Legion {
       struct Hash {
         uint64_t x = 0;
         uint64_t y = 0;
+        const bool operator!=(const Hash& rhs) const {
+          return std::tie(x, y) != std::tie(rhs.x, rhs.y);
+        }
+        const bool operator==(const Hash& rhs) const {
+          return std::tie(x, y) == std::tie(rhs.x, rhs.y);
+        }
+        const bool operator<(const Hash& rhs) const {
+          return std::tie(x, y) < std::tie(rhs.x, rhs.y);
+        }
       };
       inline void finalize(Hash& hash);
     private:
