@@ -340,6 +340,9 @@ namespace Legion {
     }
 
     // Suffix array construction in O(n*log n) time
+    // The code has been implemented based on the explanations
+    // from here http://www.cs.cmu.edu/~15451-f20/LectureNotes/lec25-suffarray.pdf,
+    // with special treatment of radix sort to make it O(n*log n).
     template<typename T>
     void suffix_array(const std::vector<T>& str,
                       std::vector<size_t>& sarray,
@@ -354,6 +357,8 @@ namespace Legion {
       std::sort(w.begin(), w.end());
 
       size_t shift = 1;
+      std::vector<size_t> count(n+2);
+      std::vector<triple> tmp(n);
       while(true){
         int v = 0;
 
@@ -378,22 +383,26 @@ namespace Legion {
         for(size_t i = 0; i < n; i++)
           w[i] = std::make_tuple(surrogate[i],
                                  (i + shift) < n ? surrogate[i + shift] : -1, i);
-        // Radix sort O(n) - rolled out, 2 digits
-        std::vector<size_t> count(v+2, 0);
-        std::vector<triple> tmp(n);
-        for(size_t i = 0; i < n; i++)
-          count[std::get<1>(w[i])+1]++;
-        for(size_t i = 1; i < v+2; i++)
-          count[i] += count[i - 1];
-        for(int i = n - 1; i >= 0; i--)
-          tmp[(count[std::get<1>(w[i]) + 1]--) - 1] = w[i];
-        for(size_t i = 0; i < v+2; i++)
+        // Radix sort O(n) - rolled out, 2 digits. The index in the third
+        // element is not needed to be sorted. The radix sort algorithms
+        // sorts two digits corresponding to the first and second element in
+        // the triple. See for instance https://hacktechhub.com/radix-sort/ for
+        // the general idea of radix sort.
+        for(size_t i = 0; i < v + 2; i++) // Clear the counts
           count[i] = 0;
-        for(size_t i = 0; i < n; i++)
-          count[std::get<0>(tmp[i])+1]++;
-        for(size_t i = 1; i < v+2; i++)
+        for(size_t i = 0; i < n; i++)     // Count the frequency
+          count[std::get<1>(w[i])+1]++;
+        for(size_t i = 1; i < v+2; i++)   // Update count to contain actual positions
           count[i] += count[i - 1];
-        for(int i = n - 1; i >= 0; i--)
+        for(int i = n - 1; i >= 0; i--)   // Construct output array based on second digit
+          tmp[(count[std::get<1>(w[i]) + 1]--) - 1] = w[i];
+        for(size_t i = 0; i < v+2; i++)   // Clear count. Next, sort on first digit.
+          count[i] = 0;
+        for(size_t i = 0; i < n; i++)     // The source is in tmp. Count freq. on first digit.
+          count[std::get<0>(tmp[i])+1]++;
+        for(size_t i = 1; i < v+2; i++)   // Update count to contain actual positions.
+          count[i] += count[i - 1];
+        for(int i = n - 1; i >= 0; i--)   // Output to array w from tmp.
           w[(count[std::get<0>(tmp[i]) + 1]--) - 1] = tmp[i];
       }
       // Reconstruct the suffix array
@@ -401,7 +410,10 @@ namespace Legion {
         sarray[i] = std::get<2>(w[i]);
     }
 
-    // Computes the LCP in O(n) time.
+    // Computes the LCP in O(n) time. This is Kasai's algorithm. See e.g.,
+    // http://www.cs.cmu.edu/~15451-f20/LectureNotes/lec25-suffarray.pdf for an explanation.
+    // The original paper can be found here:
+    // https://link.springer.com/chapter/10.1007/3-540-48194-X_17
     template<typename T>
     std::vector<size_t> compute_lcp(const std::vector<T>& str,
                                     const std::vector<size_t>& sarray,
@@ -423,6 +435,9 @@ namespace Legion {
     }
 
     // Compute non-overlapping matching substrings in O(n log n) time.
+    // This is a new algorithm designed by David Broman in 2024.
+    // Please see the following repo for a reference implementation and short explanation:
+    // https://github.com/david-broman/matching-substrings
     template<typename T>
     std::vector<NonOverlappingRepeatsResult>
     quick_matching_substrings(const std::vector<T>& str,
