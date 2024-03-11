@@ -396,8 +396,7 @@ namespace Legion {
       bool wait_on_async_job,
       uint64_t min_trace_length,
       uint64_t max_trace_length
-    ) : batchsize(batchsize),
-        TraceIdentifier(
+    ) : TraceIdentifier(
           executor,
           watcher,
           repeats_alg,
@@ -406,7 +405,8 @@ namespace Legion {
           wait_on_async_job,
           min_trace_length,
           max_trace_length
-        )
+        ),
+        batchsize(batchsize)
     {
       // Reserve one extra place so that we can insert the sentinel
       // character at the end of the string.
@@ -448,8 +448,7 @@ namespace Legion {
       bool wait_on_async_job,
       uint64_t min_trace_length,
       uint64_t max_trace_length
-    ) : scale(scale),
-        BatchedTraceIdentifier(
+    ) : BatchedTraceIdentifier(
           batchsize,
           executor,
           watcher,
@@ -459,7 +458,8 @@ namespace Legion {
           wait_on_async_job,
           min_trace_length,
           max_trace_length
-        )
+        ),
+        scale(scale)
     { }
 
     void MultiScaleBatchedTraceIdentifier::maybe_issue_repeats_job(uint64_t opidx) {
