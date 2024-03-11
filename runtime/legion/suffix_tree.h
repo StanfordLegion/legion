@@ -346,68 +346,136 @@ namespace Legion {
     template<typename T>
     void suffix_array(const std::vector<T>& str,
                       std::vector<size_t>& sarray,
-                      std::vector<int>& surrogate) {
+                      std::vector<int64_t>& surrogate) {
       size_t n = str.size();
+      // Define a struct for sorting the input string. To handle an
+      // arbitrary type T, we use a boolean `present` to ensure that
+      // tokens without a "next" value are sorted before any other tokens.
+      struct Key {
+        T start;
+        bool present;
+        T next;
+        size_t idx;
+        const bool operator<(const Key& rhs) const {
+          return std::tie(start, present, next, idx) <
+            std::tie(rhs.start, rhs.present, rhs.next, rhs.idx);
+        }
+      };
       using triple = std::tuple<int, int, size_t>;
 
       // First round - O(n log n) sort
-      std::vector<triple> w(n);
-      for(size_t i = 0; i < n; i++)
-        w[i] = std::make_tuple(str[i], i + 1 < n ? str[i + 1] : -1, i);
+      std::vector<Key> w(n);
+      for(size_t i = 0; i < n; i++) {
+        w[i] = Key {
+          .start = str[i],
+          .present = i + 1 < n,
+          .next = i + 1 < n ? str[i + 1] : T{},
+          .idx = i,
+        };
+      }
       std::sort(w.begin(), w.end());
 
+      // After the first round of sorting, we don't need to
+      // look at the string anymore, and can just sort based
+      // on surrogates computed by the previous sorting step.
+      struct SKey {
+        int64_t start;
+        int64_t next;
+        size_t idx;
+        const bool operator<(const SKey& rhs) const {
+          return std::tie(start, next, idx) <
+            std::tie(rhs.start, rhs.next, rhs.idx);
+        }
+      };
+
+      // Use the surrogates from the previous iteration to construct
+      // a new surrogate that represents larger and larger suffixes of
+      // the input string.
       size_t shift = 1;
       std::vector<size_t> count(n+2);
-      std::vector<triple> tmp(n);
-      while(true){
-        int v = 0;
-
-        // Construct surrogate
-        size_t x0 = std::get<0>(w[0]);
-        size_t x1 = std::get<1>(w[0]);
-        surrogate[std::get<2>(w[0])] = 0;
-        for(size_t i = 1; i < n; i++){
-          if(x0 != std::get<0>(w[i]) || x1 != std::get<1>(w[i]))
-            v++;
-          surrogate[std::get<2>(w[i])] = v;
-          x0 = std::get<0>(w[i]);
-          x1 = std::get<1>(w[i]);
+      std::vector<SKey> surrogate_sorter(n);
+      std::vector<SKey> tmp(n);
+      while (true) {
+        int64_t v = 0;
+        // Construct surrogate array. We have to do an extra case here
+        // depending on whether this is the first iteration or not, as
+        // the types are not the same.
+        if (shift == 1) {
+          T x0 = w[0].start;
+          T x1 = w[0].next;
+          surrogate[w[0].idx] = 0;
+          for (size_t i = 1; i < n; i++) {
+            if (x0 != w[i].start || x1 != w[i].next) v++;
+            surrogate[w[i].idx] = v;
+            x0 = w[i].start;
+            x1 = w[i].next;
+          }
+        } else {
+          int64_t x0 = surrogate_sorter[0].start;
+          int64_t x1 = surrogate_sorter[0].next;
+          surrogate[surrogate_sorter[0].idx] = 0;
+          for (size_t i = 1; i < n; i++) {
+            if (x0 != surrogate_sorter[i].start || x1 != surrogate_sorter[i].next) v++;
+            surrogate[surrogate_sorter[i].idx] = v;
+            x0 = surrogate_sorter[i].start;
+            x1 = surrogate_sorter[i].next;
+          }
         }
 
-        // End if done
-        if(v >= n-1)
-          break;
+        // End if done.
+        if (v >= n-1) break;
         shift *= 2;
 
-        // Update sort table
-        for(size_t i = 0; i < n; i++)
-          w[i] = std::make_tuple(surrogate[i],
-                                 (i + shift) < n ? surrogate[i + shift] : -1, i);
+        // Udpate sort table.
+        for (size_t i = 0; i < n; i++) {
+          surrogate_sorter[i] = SKey {
+            .start = surrogate[i],
+            .next = (i + shift) < n ? surrogate[i + shift] : -1,
+            .idx = i,
+          };
+        }
+
         // Radix sort O(n) - rolled out, 2 digits. The index in the third
         // element is not needed to be sorted. The radix sort algorithm
         // sorts two digits corresponding to the first and second element in
         // the triple. See for instance https://hacktechhub.com/radix-sort/ for
-        // the general idea of radix sort.
-        for(size_t i = 0; i < v + 2; i++) // Clear the counts
-          count[i] = 0;
-        for(size_t i = 0; i < n; i++)     // Count the frequency
-          count[std::get<1>(w[i])+1]++;
-        for(size_t i = 1; i < v+2; i++)   // Update count to contain actual positions
+        // the general idea of radix sort. First, clear the counts.
+        std::fill(count.begin(), count.begin() + v + 2, 0);
+        // Next, count the frequency of each occurence.
+        for(size_t i = 0; i < n; i++) {
+          count[surrogate_sorter[i].next + 1]++;
+        }
+        // Update count to contain actual positions.
+        for(size_t i = 1; i < v + 2; i++) {
           count[i] += count[i - 1];
-        for(int i = n - 1; i >= 0; i--)   // Construct output array based on second digit
-          tmp[(count[std::get<1>(w[i]) + 1]--) - 1] = w[i];
-        for(size_t i = 0; i < v+2; i++)   // Clear count. Next, sort on first digit.
-          count[i] = 0;
-        for(size_t i = 0; i < n; i++)     // The source is in tmp. Count freq. on first digit.
-          count[std::get<0>(tmp[i])+1]++;
-        for(size_t i = 1; i < v+2; i++)   // Update count to contain actual positions.
+        }
+        // Construct output array based on second digit.
+        for(int64_t i = n - 1; i >= 0; i--) {
+          tmp[(count[surrogate_sorter[i].next + 1]--) - 1] = surrogate_sorter[i];
+        }
+        // Clear count. Next, sort on first digit.
+        std::fill(count.begin(), count.begin() + v + 2, 0);
+        // The source is in tmp. Count freq. on first digit.
+        for(size_t i = 0; i < n; i++) {
+          count[tmp[i].start + 1]++;
+        }
+        // Update count to contain actual positions.
+        for(size_t i = 1; i < v + 2; i++) {
           count[i] += count[i - 1];
-        for(int i = n - 1; i >= 0; i--)   // Output to array w from tmp.
-          w[(count[std::get<0>(tmp[i]) + 1]--) - 1] = tmp[i];
+        }
+        // Output to array w from tmp.
+        for(int64_t i = n - 1; i >= 0; i--) {
+          surrogate_sorter[(count[tmp[i].start + 1]--) - 1] = SKey {
+            .start = tmp[i].start,
+            .next = tmp[i].next,
+            .idx = tmp[i].idx,
+          };
+        }
       }
-      // Reconstruct the suffix array
-      for(size_t i = 0; i < n; i++)
-        sarray[i] = std::get<2>(w[i]);
+      // Reconstruct the suffix array.
+      for (size_t i = 0; i < n; i++) {
+        sarray[i] = surrogate_sorter[i].idx;
+      }
     }
 
     // Computes the LCP in O(n) time. This is Kasai's algorithm. See e.g.,
@@ -417,7 +485,7 @@ namespace Legion {
     template<typename T>
     std::vector<size_t> compute_lcp(const std::vector<T>& str,
                                     const std::vector<size_t>& sarray,
-                                    const std::vector<int>& surrogate) {
+                                    const std::vector<int64_t>& surrogate) {
       size_t n = str.size();
       int k = 0;
       std::vector<size_t> lcp(n, 0);
@@ -567,7 +635,7 @@ namespace Legion {
         if(str.size() < 2)
           return {};
         std::vector<size_t> sarray(str.size());
-        std::vector<int> surrogate(str.size());
+        std::vector<int64_t> surrogate(str.size());
         suffix_array(str, sarray, surrogate);
         std::vector<size_t> lcp = compute_lcp(str, sarray, surrogate);
         std::vector<NonOverlappingRepeatsResult> result =
