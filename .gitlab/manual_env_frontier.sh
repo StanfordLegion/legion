@@ -1,11 +1,11 @@
-export CI_PIPELINE_ID=manual_$USER
-export CI_JOB_ID=test
-export CI_PROJECT_DIR=$PWD
-
 export USE_HIP="1"
 export ROCM_VERSION="5.4.3"
 export HIP_ARCH="gfx90a" # for runtime.mk
 export GPU_ARCH="gfx90a" # for Regent
+
+export CI_PIPELINE_ID=manual_${USER}_rocm${ROCM_VERSION}
+export CI_JOB_ID=test
+export CI_PROJECT_DIR=$PWD
 
 export REALM_NETWORKS="gasnetex"
 export GASNET_CONDUIT="ofi-slingshot11"
