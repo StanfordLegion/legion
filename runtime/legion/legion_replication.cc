@@ -8786,7 +8786,7 @@ namespace Legion {
         static_cast<ReplicateContext*>(this->parent_ctx);
 #endif
       return new ShardedPhysicalTemplate(physical, 
-          this->execution_fence_event, repl_ctx);
+          this->get_completion_event(), repl_ctx);
     }
 
     //--------------------------------------------------------------------------
