@@ -619,11 +619,11 @@ if __name__ == '__main__':
         help='Use Make to build Terra.')
     parser.add_argument(
         '--gasnet-version', dest='gasnet_version', required=False,
-        default=os.environ.get('GASNET_VERSION', 'GASNet-2023.3.0'),
+        default=os.environ.get('GASNET_VERSION', 'GASNet-2023.9.0'),
         help='Select GASNet version.')
     parser.add_argument(
         '--gasnet-config-version', dest='gasnet_config_version', required=False,
-        default='3d75a6ffb3c398a96f91248be29de06e475d029b',
+        default='7630347069fb6c930d6678e55dd8f922bd2961db', # master as of 2024-03-12
         help='Select version of the GASNet configuration/build tool.')
     parser.add_argument(
         '-j', dest='thread_count', nargs='?', type=int,
