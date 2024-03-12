@@ -12,7 +12,7 @@ use serde::de::{
     self, DeserializeSeed, EnumAccess, IntoDeserializer, MapAccess, SeqAccess, VariantAccess,
     Visitor,
 };
-use serde::{self, forward_to_deserialize_any, Deserialize};
+use serde::{self, forward_to_deserialize_any, Deserialize, Serialize};
 
 use super::error::{Error, Result};
 
@@ -328,7 +328,7 @@ impl<'de, 'a> VariantAccess<'de> for Enum<'a, 'de> {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct HexU64(pub u64);
 
 impl<'de> Deserialize<'de> for HexU64 {

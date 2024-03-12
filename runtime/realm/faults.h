@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -94,11 +94,14 @@ namespace Realm {
     uintptr_t pc_hash; // used for fast comparisons
     std::vector<uintptr_t> pcs;
     std::vector<std::string> symbols;
+#ifdef REALM_USE_LIBDW
+    std::vector<std::string> filenames;
+    std::vector<int> line_numbers;
+#endif
 
     template <typename S>
       friend bool serdez(S& serdez, const Backtrace& b);
   };
-
 
   // Realm execution exceptions
 
@@ -108,11 +111,16 @@ namespace Realm {
     ExecutionException(int _error_code,
 		       const void *_detail_data, size_t _detail_size,
 		       bool capture_backtrace = true);
-    virtual ~ExecutionException(void) throw();
+    virtual ~ExecutionException(void) REALM_NOEXCEPT;
 
-    virtual const char *what(void) const throw() = 0;
+    virtual const char *what(void) const REALM_NOEXCEPT = 0;
 
     virtual void populate_profiling_measurements(ProfilingMeasurementCollection& pmc) const;
+
+    ExecutionException(const ExecutionException &) = default;
+    ExecutionException &operator=(const ExecutionException &) = default;
+    ExecutionException(ExecutionException &&) noexcept = default;
+    ExecutionException &operator=(ExecutionException &&) noexcept = default;
 
     int error_code;
     ByteArray details;
@@ -124,7 +132,7 @@ namespace Realm {
   public:
     CancellationException(void);
 
-    virtual const char *what(void) const throw();
+    virtual const char *what(void) const REALM_NOEXCEPT;
   };
 
   // the result of testing a poisoned event
@@ -132,7 +140,7 @@ namespace Realm {
   public:
     PoisonedEventException(Event _event);
 
-    virtual const char *what(void) const throw();
+    virtual const char *what(void) const REALM_NOEXCEPT;
 
   protected:
     Event event;
@@ -144,7 +152,7 @@ namespace Realm {
     ApplicationException(int _error_code,
 			 const void *_detail_data, size_t _detail_size);
 
-    virtual const char *what(void) const throw();
+    virtual const char *what(void) const REALM_NOEXCEPT;
   };
 
 }; // namespace Realm

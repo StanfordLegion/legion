@@ -1,5 +1,5 @@
 
-/* Copyright 2023 NVIDIA Corporation
+/* Copyright 2024 NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,12 +14,13 @@
  * limitations under the License.
  */
 
-#include "mpool.h"
-#include "ucp_utils.h"
+#include "realm/ucx/mpool.h"
+#include "realm/ucx/ucp_utils.h"
 #include "realm/logging.h"
 
 #include <string>
 #include <cmath>
+#include <cstdint>
 
 namespace Realm {
   Logger log_ucp_mp("ucpmp");

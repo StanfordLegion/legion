@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -167,7 +167,9 @@ namespace Realm {
     LoggerMessage& vprintf(const char *typeName, LoggerMessageID messageID, const char *fmt, va_list ap);
     
     bool is_active(void) const;
-    
+
+    void deactivate(void);
+
     std::ostream& get_stream(void);
     
   protected:

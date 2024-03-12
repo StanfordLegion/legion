@@ -1,4 +1,4 @@
--- Copyright 2023 Stanford University
+-- Copyright 2024 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -14,49 +14,8 @@
 
 import "regent"
 
-local clegion_interop
-do
-  local root_dir = arg[0]:match(".*/") or "./"
-
-  local include_path = ""
-  local include_dirs = terralib.newlist()
-  include_dirs:insert("-I")
-  include_dirs:insert(root_dir)
-  for path in string.gmatch(os.getenv("INCLUDE_PATH"), "[^;]+") do
-    include_path = include_path .. " -I " .. path
-    include_dirs:insert("-I")
-    include_dirs:insert(path)
-  end
-
-  local legion_interop_cc = root_dir .. "legion_interop.cc"
-  local legion_interop_so
-  if os.getenv('SAVEOBJ') == '1' then
-    legion_interop_so = root_dir .. "liblegion_interop.so"
-  else
-    legion_interop_so = os.tmpname() .. ".so" -- root_dir .. "mapper.so"
-  end
-  local cxx = os.getenv('CXX') or 'c++'
-
-  local cxx_flags = os.getenv('CXXFLAGS') or ''
-  cxx_flags = cxx_flags .. " -O2 -Wall -Werror"
-  if os.execute('test "$(uname)" = Darwin') == 0 then
-    cxx_flags =
-      (cxx_flags ..
-         " -dynamiclib -single_module -undefined dynamic_lookup -fPIC")
-  else
-    cxx_flags = cxx_flags .. " -shared -fPIC"
-  end
-
-  local cmd = (cxx .. " " .. cxx_flags .. " " .. include_path .. " " ..
-                 legion_interop_cc .. " -o " .. legion_interop_so)
-  if os.execute(cmd) ~= 0 then
-    print("Error: failed to compile " .. legion_interop_cc)
-    assert(false)
-  end
-  regentlib.linklibrary(legion_interop_so)
-  clegion_interop =
-    terralib.includec("legion_interop.h", include_dirs)
-end
+local launcher = require("std/launcher")
+clegion_interop = launcher.build_library("legion_interop")
 
 struct s {
   a : int32,

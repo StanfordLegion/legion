@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------#
-# Copyright 2023 Kitware, Inc.
+# Copyright 2024 Kitware, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -24,6 +24,7 @@ endif()
 
 add_executable(multiple_partitions multiple_partitions.cc)
 target_link_libraries(multiple_partitions Legion::Legion)
+target_compile_options(multiple_partitions PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
 if(Legion_ENABLE_TESTING)
   add_test(NAME multiple_partitions COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:multiple_partitions> ${Legion_TEST_ARGS})
 endif()

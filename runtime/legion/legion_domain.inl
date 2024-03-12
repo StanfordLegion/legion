@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -253,17 +253,6 @@ namespace Legion {
 #endif
 #endif
     return coord_t(value);
-  }
-
-  //----------------------------------------------------------------------------
-  template<unsigned DIM>
-  inline DomainPoint::operator LegionRuntime::Arrays::Point<DIM>(void) const
-  //----------------------------------------------------------------------------
-  {
-    LegionRuntime::Arrays::Point<DIM> result;
-    for (int i = 0; i < DIM; i++)
-      result.x[i] = point_data[i];
-    return result;
   }
 
   //----------------------------------------------------------------------------
@@ -568,19 +557,6 @@ namespace Legion {
   }
 
   //----------------------------------------------------------------------------
-  template<int DIM>
-  /*static*/ inline DomainPoint 
-                    DomainPoint::from_point(LegionRuntime::Arrays::Point<DIM> p)
-  //----------------------------------------------------------------------------
-  {
-    DomainPoint dp;
-    assert(DIM <= MAX_POINT_DIM);
-    dp.dim = DIM;
-    p.to_array(dp.point_data);
-    return dp;
-  }
-
-  //----------------------------------------------------------------------------
   __CUDA_HD__ inline Color DomainPoint::get_color(void) const
   //----------------------------------------------------------------------------
   {
@@ -601,15 +577,6 @@ namespace Legion {
   //----------------------------------------------------------------------------
   {
     return dim;
-  }
-
-  //----------------------------------------------------------------------------
-  template<int DIM>
-  inline LegionRuntime::Arrays::Point<DIM> DomainPoint::get_point(void) const
-  //----------------------------------------------------------------------------
-  {
-    assert(dim == DIM); 
-    return LegionRuntime::Arrays::Point<DIM>(point_data);
   }
 
   //----------------------------------------------------------------------------
@@ -720,6 +687,17 @@ namespace Legion {
   }
 
   //----------------------------------------------------------------------------
+  __CUDA_HD__ inline Domain::Domain(Domain &&other) noexcept
+    : is_id(other.is_id), is_type(is_id > 0 ? other.is_type : 0), dim(other.dim)
+  //----------------------------------------------------------------------------
+  {
+    for (int i = 0; i < 2*MAX_RECT_DIM; i++)
+      rect_data[i] = other.rect_data[i];
+    other.is_id = 0;
+    other.is_type = 0;
+  }
+
+  //----------------------------------------------------------------------------
   __CUDA_HD__ inline Domain::Domain(const DomainPoint &lo,const DomainPoint &hi)
     : is_id(0), is_type(0), dim(lo.dim)
   //----------------------------------------------------------------------------
@@ -760,8 +738,12 @@ namespace Legion {
 #ifndef NDEBUG
     constexpr bool CHECK =
       std::is_unsigned<T>::value && (sizeof(T) >= sizeof(coord_t));
-    assert(!CHECK ||
-        (((unsigned long long)value) <= ((unsigned long long)LLONG_MAX)));
+#if !defined(__CUDA_ARCH__) && !defined(__HIP_DEVICE_COMPILE__)
+    constexpr uint64_t MAX = std::numeric_limits<coord_t>::max();
+#else
+    const uint64_t MAX = LLONG_MAX;
+#endif
+    assert(!CHECK || (((uint64_t)value) <= MAX));
 #endif
 #endif
     return coord_t(value);
@@ -793,6 +775,21 @@ namespace Legion {
     is_id = other.is_id;
     // Like this for backwards compatibility
     is_type = (is_id > 0) ? other.is_type : 0;
+    dim = other.dim;
+    for(int i = 0; i < 2*dim; i++)
+      rect_data[i] = other.rect_data[i];
+    return *this;
+  }
+
+  //----------------------------------------------------------------------------
+  __CUDA_HD__ inline Domain& Domain::operator=(Domain &&other) noexcept
+  //----------------------------------------------------------------------------
+  {
+    is_id = other.is_id;
+    other.is_id = 0;
+    // Like this for backwards compatibility
+    is_type = (is_id > 0) ? other.is_type : 0;
+    other.is_type = 0;
     dim = other.dim;
     for(int i = 0; i < 2*dim; i++)
       rect_data[i] = other.rect_data[i];
@@ -949,48 +946,6 @@ namespace Legion {
   }
 
   //----------------------------------------------------------------------------
-  template<int DIM>
-  /*static*/ inline Domain Domain::from_rect(
-                                    typename LegionRuntime::Arrays::Rect<DIM> r)
-  //----------------------------------------------------------------------------
-  {
-    Domain d;
-    assert(DIM <= MAX_RECT_DIM);
-    d.dim = DIM;
-    r.to_array(d.rect_data);
-    return d;
-  }
-
-  //----------------------------------------------------------------------------
-  template<int DIM>
-  /*static*/ inline Domain Domain::from_point(
-                                   typename LegionRuntime::Arrays::Point<DIM> p)
-  //----------------------------------------------------------------------------
-  {
-    Domain d;
-    assert(DIM <= MAX_RECT_DIM);
-    d.dim = DIM;
-    p.to_array(d.rect_data);
-    p.to_array(d.rect_data+DIM);
-    return d;
-  }
-
-  //----------------------------------------------------------------------------
-  template<int DIM>
-  inline Domain::operator LegionRuntime::Arrays::Rect<DIM>(void) const
-  //----------------------------------------------------------------------------
-  {
-    assert(DIM == dim);
-    assert(is_id == 0); // better not be one of these
-    LegionRuntime::Arrays::Rect<DIM> result;
-    for (int i = 0; i < DIM; i++)
-      result.lo.x[i] = rect_data[i];
-    for (int i = 0; i < DIM; i++)
-      result.hi.x[i] = rect_data[DIM+i];
-    return result;
-  }
-
-  //----------------------------------------------------------------------------
   template<int DIM, typename T> __CUDA_HD__
   inline Domain::operator Rect<DIM,T>(void) const
   //----------------------------------------------------------------------------
@@ -1046,7 +1001,7 @@ namespace Legion {
         assert(false);
 #define DIMFUNC(DIM) \
       case DIM: \
-        return Domain::from_point<DIM>(p.get_point<DIM>());
+        return Domain(p, p);
       LEGION_FOREACH_N(DIMFUNC)
 #undef DIMFUNC
       default:
@@ -1233,19 +1188,6 @@ namespace Legion {
         assert(false);
     }
     return Domain::NO_DOMAIN;
-  }
-
-  //----------------------------------------------------------------------------
-  template<int DIM>
-  inline LegionRuntime::Arrays::Rect<DIM> Domain::get_rect(void) const
-  //----------------------------------------------------------------------------
-  {
-    assert(DIM > 0);
-    assert(DIM == dim);
-    // Runtime only returns tight domains so if it still has
-    // a sparsity map then it is a real sparsity map
-    assert(is_id == 0);
-    return LegionRuntime::Arrays::Rect<DIM>(rect_data);
   }
 
   //----------------------------------------------------------------------------

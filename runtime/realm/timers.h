@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,8 +24,10 @@
 
 #include <cstdint>
 
-#if defined(__i386__) || defined(__x86_64__)
-#define REALM_TIMERS_USE_RDTSC
+#if !defined(REALM_TIMERS_USE_RDTSC) && \
+    (defined(__i386__) || defined(__x86_64__) || \
+    defined(__aarch64__) || defined(__arm__))
+#define REALM_TIMERS_USE_RDTSC 1
 #endif
 
 namespace Realm {
@@ -69,6 +71,10 @@ namespace Realm {
     static void calibrate(int use_cpu_tsc /*1=yes, 0=no, -1=dont care*/,
                           uint64_t force_cpu_tsc_freq);
 
+    // return the accumulated realm timer error since calibration (in nanoseconds,
+    //  positive indicates realm timer is faster) relative to system clock
+    static long long get_calibration_error();
+
     class TimescaleConverter {
     public:
       // defaults to identity conversion
@@ -80,6 +86,10 @@ namespace Realm {
       // fails if the translation cannot be represented (i.e. if the
       //  time intervals differ by a factor of more than 2^32)
       bool set(uint64_t ta1, uint64_t tb1, uint64_t ta2, uint64_t tb2);
+
+      // adjusts the affine translation to maintain the same slope but pass
+      //  through a specified (ta, tb) pair
+      void adjust(uint64_t ta, uint64_t tb);
 
       // conversion of absolute times ("forward" = A->B, "reverse" = B-A)
       uint64_t convert_forward_absolute(uint64_t ta);
@@ -94,8 +104,12 @@ namespace Realm {
     };
 
   protected:
-#ifdef REALM_TIMERS_USE_RDTSC
-    static uint64_t raw_cpu_tsc();
+#if REALM_TIMERS_USE_RDTSC
+    // Raw timestamp counter (in ticks of a given frequency)
+    static uint64_t raw_cpu_tsc(void);
+    // Raw timestamp counter frequency (in Hz) or zero if the frequency needs to
+    // be estimated
+    static uint64_t raw_cpu_tsc_freq(void);
 #endif
 
     // slower function-call version of native_time for platform portability
@@ -103,7 +117,7 @@ namespace Realm {
 
     static uint64_t zero_time;
     static TimescaleConverter native_to_nanoseconds;
-#ifdef REALM_TIMERS_USE_RDTSC
+#if REALM_TIMERS_USE_RDTSC
     static bool cpu_tsc_enabled;
 #endif
   };

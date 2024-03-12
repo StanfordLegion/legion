@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -189,6 +189,56 @@ namespace Realm {
     }
   }
 
+  bool CoreReservation::set_affinity(int begin /* =-1 */, int end /* =-1 */)
+  {
+    if(allocation) {
+#ifdef HAVE_CPUSET
+      if(allocation->restrict_cpus == true) {
+        assert(end >= begin);
+        cpu_set_t cpu_set;
+        if(begin == -1 || end == -1) {
+          memcpy(&cpu_set, &(allocation->allowed_cpus), sizeof(cpu_set_t));
+        } else {
+          assert(begin >= 0 && end <= static_cast<int>(allocation->proc_ids.size() - 1));
+          CPU_ZERO(&cpu_set);
+          std::vector<int> proc_ids(allocation->proc_ids.size());
+          std::copy(allocation->proc_ids.begin(), allocation->proc_ids.end(),
+                    proc_ids.begin());
+          std::sort(proc_ids.begin(), proc_ids.end());
+          for(int i = begin; i <= end; i++) {
+            CPU_SET(proc_ids[i], &cpu_set);
+          }
+        }
+#ifdef REALM_ON_WINDOWS
+        HANDLE thread = GetCurrentThread();
+        int result = SetThreadAffinityMask(thread, cpu_set);
+        return (result == 0 ? false : true);
+#else
+        int result = sched_setaffinity(0, sizeof(cpu_set_t), &cpu_set);
+        return (result == 0 ? true : false);
+#endif
+      }
+#endif
+    }
+    log_thread.info("allocation is NULL or restrict_cpus is false");
+    return false;
+  }
+
+  std::ostream &operator<<(std::ostream &stream, const CoreReservation &core_resv)
+  {
+    if(core_resv.allocation) {
+      std::vector<int> proc_ids(core_resv.allocation->proc_ids.size());
+      std::copy(core_resv.allocation->proc_ids.begin(),
+                core_resv.allocation->proc_ids.end(), proc_ids.begin());
+      stream << "name:" << core_resv.name
+             << ", exclusive_ownership:" << core_resv.allocation->exclusive_ownership
+             << ", proc_ids:" << PrettyVector<int>(proc_ids);
+#ifdef HAVE_CPUSET
+      stream << ", restrict_cpus:" << core_resv.allocation->restrict_cpus;
+#endif
+    }
+    return stream;
+  }
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -917,8 +967,8 @@ namespace Realm {
     // TODO: actually use heap size
 
 #ifdef REALM_USE_ALTSTACK
-    // default altstack size is 64KB
-    altstack_size = 64 << 10;
+    // default altstack size is 256KB
+    altstack_size = 256 << 10;
     if(params.alt_stack_size != params.ALTSTACK_SIZE_DEFAULT)
       altstack_size = params.alt_stack_size;
     else if(rsrv.params.alt_stack_size != rsrv.params.ALTSTACK_SIZE_DEFAULT)

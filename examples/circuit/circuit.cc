@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University
+/* Copyright 2024 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -226,6 +226,9 @@ int main(int argc, char **argv)
   {
     TaskVariantRegistrar registrar(TOP_LEVEL_TASK_ID, "top_level");
     registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+#ifndef SEQUENTIAL_LOAD_CIRCUIT
+    registrar.set_replicable();
+#endif
     Runtime::preregister_task_variant<top_level_task>(registrar, "top_level");
   }
 

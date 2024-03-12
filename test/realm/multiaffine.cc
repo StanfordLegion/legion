@@ -180,11 +180,15 @@ void top_level_task(const void *args, size_t arglen,
   log_app.print() << "Realm multi-affine instance test";
 
   // decide which processor we'll do writes on - use a GPU if available
+#if defined(REALM_USE_CUDA) // || defined(REALM_USE_HIP)
   Processor proc_write = Machine::ProcessorQuery(Machine::get_machine())
     .only_kind(Processor::TOC_PROC)
     .first();
   if(!proc_write.exists())
     proc_write = p;
+#else
+  Processor proc_write = p;
+#endif
 
   int test_id = 0;
   int errors = 0;

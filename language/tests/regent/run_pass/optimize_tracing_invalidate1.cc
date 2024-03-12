@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University
+/* Copyright 2024 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,14 +26,14 @@ public:
   TracingMapper(MapperRuntime *rt, Machine machine, Processor local,
                 const char *mapper_name);
 public:
-  virtual void slice_task(const MapperContext      ctx,
+  void slice_task(const MapperContext      ctx,
                           const Task&              task,
                           const SliceTaskInput&    input,
-                                SliceTaskOutput&   output);
-  virtual void map_task(const MapperContext ctx,
+                                SliceTaskOutput&   output) override;
+  void map_task(const MapperContext ctx,
                         const Task &task,
                         const MapTaskInput &input,
-                        MapTaskOutput &output);
+                        MapTaskOutput &output) override;
 private:
   typedef std::map<std::pair<LogicalRegion,FieldID>,PhysicalInstance> Mapping;
   Mapping inc_instances;

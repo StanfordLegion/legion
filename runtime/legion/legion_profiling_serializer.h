@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -49,6 +49,8 @@ namespace Legion {
       virtual void serialize(const LegionProfDesc::OpDesc&) = 0;
       virtual void serialize(const LegionProfDesc::MaxDimDesc&) = 0;
       virtual void serialize(const LegionProfDesc::MachineDesc&) = 0;
+      virtual void serialize(const LegionProfDesc::ZeroTime&) = 0;
+      virtual void serialize(const LegionProfDesc::CalibrationErr&) = 0;
       virtual void serialize(const LegionProfInstance::IndexSpacePointDesc&) = 0;
       virtual void serialize(const LegionProfInstance::IndexSpaceRectDesc&) = 0;
       virtual void serialize(const LegionProfInstance::IndexSpaceEmptyDesc&) = 0;
@@ -89,8 +91,10 @@ namespace Legion {
       virtual void serialize(const LegionProfInstance::MapperCallInfo&) = 0;
       virtual void serialize(const LegionProfInstance::RuntimeCallInfo&) = 0;
       virtual void serialize(const LegionProfInstance::GPUTaskInfo&) = 0;
-      virtual void serialize(const LegionProfInstance::CopyInstInfo&) = 0;
-      virtual void serialize(const LegionProfInstance::FillInstInfo&) = 0;
+      virtual void serialize(const LegionProfInstance::CopyInstInfo&,
+                             const LegionProfInstance::CopyInfo&) = 0;
+      virtual void serialize(const LegionProfInstance::FillInstInfo&,
+                             const LegionProfInstance::FillInfo&) = 0;
       virtual void serialize(const LegionProfInstance::ProcDesc&) = 0;
       virtual void serialize(const LegionProfInstance::MemDesc&) = 0;
       virtual void serialize(const LegionProfInstance::ProcMemDesc&) = 0;
@@ -115,6 +119,8 @@ namespace Legion {
       void serialize(const LegionProfDesc::OpDesc&);
       void serialize(const LegionProfDesc::MaxDimDesc&);
       void serialize(const LegionProfDesc::MachineDesc&);
+      void serialize(const LegionProfDesc::ZeroTime&);
+      void serialize(const LegionProfDesc::CalibrationErr&);
       void serialize(const LegionProfInstance::IndexSpacePointDesc&);
       void serialize(const LegionProfInstance::IndexSpaceRectDesc&);
       void serialize(const LegionProfInstance::IndexSpaceEmptyDesc&);
@@ -150,8 +156,10 @@ namespace Legion {
       void serialize(const LegionProfInstance::MapperCallInfo&);
       void serialize(const LegionProfInstance::RuntimeCallInfo&);
       void serialize(const LegionProfInstance::GPUTaskInfo&);
-      void serialize(const LegionProfInstance::CopyInstInfo&);
-      void serialize(const LegionProfInstance::FillInstInfo&);
+      void serialize(const LegionProfInstance::CopyInstInfo&,
+                     const LegionProfInstance::CopyInfo&);
+      void serialize(const LegionProfInstance::FillInstInfo&,
+                     const LegionProfInstance::FillInfo&);
       void serialize(const LegionProfInstance::ProcDesc&);
       void serialize(const LegionProfInstance::MemDesc&);
       void serialize(const LegionProfInstance::ProcMemDesc&);
@@ -211,8 +219,10 @@ namespace Legion {
         COPY_INST_INFO_ID,
         FILL_INST_INFO_ID,
 #ifdef LEGION_PROF_SELF_PROFILE
-        PROFTASK_INFO_ID
+        PROFTASK_INFO_ID,
 #endif
+        ZERO_TIME_ID,
+        CALIBRATION_ERR_ID,
       };
     };
 
@@ -230,6 +240,8 @@ namespace Legion {
       void serialize(const LegionProfDesc::OpDesc&);
       void serialize(const LegionProfDesc::MaxDimDesc&);
       void serialize(const LegionProfDesc::MachineDesc&);
+      void serialize(const LegionProfDesc::ZeroTime&);
+      void serialize(const LegionProfDesc::CalibrationErr&);
       void serialize(const LegionProfInstance::IndexSpacePointDesc&);
       void serialize(const LegionProfInstance::IndexSpaceRectDesc&);
       void serialize(const LegionProfInstance::IndexSpaceEmptyDesc&);
@@ -265,8 +277,10 @@ namespace Legion {
       void serialize(const LegionProfInstance::MapperCallInfo&);
       void serialize(const LegionProfInstance::RuntimeCallInfo&);
       void serialize(const LegionProfInstance::GPUTaskInfo&);
-      void serialize(const LegionProfInstance::CopyInstInfo&);
-      void serialize(const LegionProfInstance::FillInstInfo&);
+      void serialize(const LegionProfInstance::CopyInstInfo&,
+                     const LegionProfInstance::CopyInfo&);
+      void serialize(const LegionProfInstance::FillInstInfo&,
+                     const LegionProfInstance::FillInfo&);
       void serialize(const LegionProfInstance::ProcDesc&);
       void serialize(const LegionProfInstance::MemDesc&);
       void serialize(const LegionProfInstance::ProcMemDesc&);

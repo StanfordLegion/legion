@@ -1,4 +1,4 @@
--- Copyright 2023 Stanford University
+-- Copyright 2024 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -23,7 +23,8 @@ local expect_vars = terralib.newlist({"TERRA_PATH", "INCLUDE_PATH", "LG_RT_DIR",
 if os.getenv("USE_CMAKE") == "1" then
   expect_vars:insert("CMAKE_BUILD_DIR")
 end
-if os.execute("bash -c \"[ `uname` == 'Darwin' ]\"") == 0 then
+local ffi = require("ffi")
+if ffi.os == "OSX" then
   expect_vars:insert("DYLD_LIBRARY_PATH")
 else
   expect_vars:insert("LD_LIBRARY_PATH")
@@ -42,6 +43,8 @@ for _, expect_var in ipairs(expect_vars) do
 end
 
 config.UNSPECIFIED = -1
+
+local legion_replicable_env = os.getenv('REGENT_LEGION_REPLICABLE')
 
 local default_options = {
   -- Main user-facing correctness flags:
@@ -84,7 +87,7 @@ local default_options = {
   ["legion-leaf"] = true,
   ["legion-inner"] = true,
   ["legion-idempotent"] = true,
-  ["legion-replicable"] = true,
+  ["legion-replicable"] = legion_replicable_env == '1' or legion_replicable_env == nil,
 
   -- Dataflow optimization flags:
   ["flow"] = os.getenv('USE_RDIR') == '1' or false,

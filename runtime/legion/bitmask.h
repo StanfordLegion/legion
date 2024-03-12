@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -9286,10 +9286,6 @@
     inline int CompoundBitMask<DT,BLOAT,BIDIR>::find_index(unsigned bit) const
     //-------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(bit >= 0);
-      assert(bit < pop_count());
-#endif
       if (is_sparse())
       {
         // Binary search for it

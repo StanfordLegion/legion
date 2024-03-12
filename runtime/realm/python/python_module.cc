@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,7 +16,6 @@
 #include "realm/python/python_module.h"
 #include "realm/python/python_internal.h"
 
-#include "realm/numa/numasysif.h"
 #include "realm/logging.h"
 #include "realm/cmdline.h"
 #include "realm/proc_impl.h"
@@ -36,9 +35,13 @@
 #include <link.h>
 #endif // REALM_USE_DLMOPEN
 
+#include <array>
 #include <list>
+#include <memory>
 
 namespace Realm {
+
+  extern Logger log_taskreg;
 
   Logger log_py("python");
 
@@ -60,17 +63,18 @@ namespace Realm {
 #ifdef USE_PYGILSTATE_CALLS
     get_symbol(this->PyGILState_Ensure, "PyGILState_Ensure");
     get_symbol(this->PyGILState_Release, "PyGILState_Release");
-    get_symbol(this->PyGILState_Check, "PyGILState_Check");
 #else
     get_symbol(this->PyThreadState_New, "PyThreadState_New");
     get_symbol(this->PyThreadState_Clear, "PyThreadState_Clear");
     get_symbol(this->PyThreadState_Delete, "PyThreadState_Delete");
 #endif
+    get_symbol(this->PyGILState_GetThisThreadState, "PyGILState_GetThisThreadState");
     get_symbol(this->PyEval_RestoreThread, "PyEval_RestoreThread");
     get_symbol(this->PyEval_SaveThread, "PyEval_SaveThread");
 
     get_symbol(this->PyThreadState_Swap, "PyThreadState_Swap");
     get_symbol(this->PyThreadState_Get, "PyThreadState_Get");
+    get_symbol(this->PyThreadState_GetDict, "PyThreadState_GetDict");
 
     get_symbol(this->PyErr_PrintEx, "PyErr_PrintEx");
 
@@ -82,10 +86,11 @@ namespace Realm {
     get_symbol(this->PyObject_CallFunction, "PyObject_CallFunction");
     get_symbol(this->PyObject_CallObject, "PyObject_CallObject");
     get_symbol(this->PyObject_GetAttrString, "PyObject_GetAttrString");
-    get_symbol(this->PyObject_Print, "PyObject_Print");
+    // PyObject_Print is not abi3 compatible and is used exclusively for debugging
+    // get_symbol(this->PyObject_Print, "PyObject_Print");
 
-    get_symbol(this->PyRun_SimpleString, "PyRun_SimpleString");
-    get_symbol(this->PyRun_String, "PyRun_String");
+    get_symbol(this->Py_CompileString, "Py_CompileString");
+    get_symbol(this->PyEval_EvalCode, "PyEval_EvalCode");
 
     get_symbol(this->PyTuple_New, "PyTuple_New");
     get_symbol(this->PyTuple_SetItem, "PyTuple_SetItem");
@@ -125,12 +130,42 @@ namespace Realm {
   }
 #endif
 
-  PythonInterpreter::PythonInterpreter() 
+  PythonInterpreter::PythonInterpreter()
   {
-#ifdef REALM_PYTHON_LIB
-    const char *python_lib = REALM_PYTHON_LIB;
+    std::unique_ptr<FILE, decltype(&pclose)> fp{
+        popen("python3 -c 'import sysconfig; import os; import sys; "
+              "lbdir = sysconfig.get_config_var(\"LIBDIR\");"
+              "masd = sysconfig.get_config_var(\"multiarchsubdir\");"
+              "masd = masd if masd else \"\";"
+              "masd = masd[len(os.sep):] if masd.startswith(os.sep) else masd;"
+              "name = f\"libpython{sys.version_info.major}.{sys.version_info.minor}\";"
+              "print(os.path.join(lbdir, masd, name),end=\"\")'",
+              "r"),
+        pclose};
+    if(fp == NULL) {
+      log_py.fatal() << "Failed to run a popen script";
+      abort();
+    }
+
+    std::array<char, PATH_MAX> path;
+    int lines = 0;
+    std::string python_lib = "";
+    while(fgets(path.data(), path.size(), fp.get())) {
+      python_lib += path.data();
+      lines++;
+    }
+    if(lines != 1) {
+      log_py.fatal() << "Failed to find a libpython candidate";
+      if(lines != 0) {
+        log_py.fatal() << "Expected single line output, received: " << python_lib;
+      }
+      abort();
+    }
+
+#if defined(REALM_ON_MACOS)
+    python_lib += ".dylib";
 #else
-    const char *python_lib = "libpython2.7.so";
+    python_lib += ".so";
 #endif
 
 #ifdef REALM_USE_DLMOPEN
@@ -141,14 +176,14 @@ namespace Realm {
     const char *dlmproxy_filename = getenv("DLMPROXY_LIBPTHREAD");
     if(!dlmproxy_filename)
       dlmproxy_filename = "dlmproxy_libpthread.so.0";
-    dlmproxy_handle = dlmopen(LM_ID_NEWLM,
-			      dlmproxy_filename,
-			      RTLD_DEEPBIND | RTLD_GLOBAL | RTLD_LAZY);
+    dlmproxy_handle =
+        dlmopen(LM_ID_NEWLM, dlmproxy_filename, RTLD_DEEPBIND | RTLD_GLOBAL | RTLD_LAZY);
     if(!dlmproxy_handle) {
       const char *error = dlerror();
-      log_py.fatal() << "HELP!  Use of dlmopen for python requires dlmproxy for pthreads!  Failed to\n"
-		     << "  load: " << dlmproxy_filename << "\n"
-		     << "  error: " << error;
+      log_py.fatal() << "HELP!  Use of dlmopen for python requires dlmproxy for "
+                        "pthreads!  Failed to\n"
+                     << "  load: " << dlmproxy_filename << "\n"
+                     << "  error: " << error;
       assert(false);
     }
 
@@ -165,15 +200,16 @@ namespace Realm {
     int ret = dlinfo(dlmproxy_handle, RTLD_DI_LMID, &lmid);
     assert(ret == 0);
 
-    handle = dlmopen(lmid, python_lib, RTLD_DEEPBIND | RTLD_GLOBAL | RTLD_NOW);
+    handle = dlmopen(lmid, python_lib.c_str(), RTLD_DEEPBIND | RTLD_GLOBAL | RTLD_NOW);
 #else
     // life is so much easier if we use dlopen (but we only get one copy then)
-    handle = dlopen(python_lib, RTLD_GLOBAL | RTLD_LAZY);
+    handle = dlopen(python_lib.c_str(), RTLD_GLOBAL | RTLD_LAZY);
 #endif
+
     if (!handle) {
       const char *error = dlerror();
-      log_py.fatal() << error;
-      assert(false);
+      log_py.fatal() << "libpython not loaded, dlerror: " << error;
+      abort();
     }
 
     api = new PythonAPI(handle);
@@ -285,22 +321,33 @@ namespace Realm {
     assert(mainmod != 0);
     PyObject *globals = (api->PyModule_GetDict)(mainmod);
     assert(globals != 0);
-    PyObject *res = (api->PyRun_String)(script_text.c_str(),
-					Py_file_input,
-					globals,
-					globals);
-    if(!res) {
-      log_py.fatal() << "unable to run python string:" << script_text;
+
+    PyObject *compiled = (api->Py_CompileString)(script_text.c_str(), "realm", Py_file_input);
+    if(!compiled) {
+      log_py.fatal() << "unable to compile python string: " << script_text;
       (api->PyErr_PrintEx)(0);
       (api->Py_Finalize)(); // otherwise Python doesn't flush its buffers
-      assert(0);
+      abort();
+    }
+
+    PyObject *res = (api->PyEval_EvalCode)(compiled, globals, globals);
+    if(!res) {
+      log_py.fatal() << "unable to run python string: " << script_text;
+      (api->PyErr_PrintEx)(0);
+      (api->Py_Finalize)(); // otherwise Python doesn't flush its buffers
+      abort();
     }
     (api->Py_DecRef)(res);
-    (api->Py_DecRef)(globals);
+    (api->Py_DecRef)(compiled);
     (api->Py_DecRef)(mainmod);
   }
 
-  
+  int PythonInterpreter::check_gil_state()
+  {
+    return (api->PyThreadState_GetDict)() != NULL &&
+           (api->PyGILState_GetThisThreadState)() == (api->PyThreadState_Get)();
+  }
+
   ////////////////////////////////////////////////////////////////////////
   //
   // class PythonThreadTaskScheduler
@@ -590,7 +637,7 @@ namespace Realm {
     //  restore each python thread on the OS thread that owned it intially, the
     //  PyGILState TLS stuff should remain consistent
     PyThreadState *saved = 0;
-    if((pyproc->interpreter->api->PyGILState_Check)() == 1) {
+    if(pyproc->interpreter->check_gil_state() == 1) {
       log_py.info() << "python worker sleeping - releasing GIL";
       // would like to sanity-check that this returns the expected thread state,
       //  but that would require taking the PythonThreadTaskScheduler's lock
@@ -604,7 +651,7 @@ namespace Realm {
     if(saved) {
       log_py.info() << "python worker awake - acquiring GIL";
       log_py.debug() << "RestoreThread <- " << saved;
-      assert( (pyproc->interpreter->api->PyGILState_Check)() == 0 );
+      assert( pyproc->interpreter->check_gil_state() == 0);
       (pyproc->interpreter->api->PyEval_RestoreThread)(saved);
     } else
       log_py.info() << "python worker awake - not acquiring GIL";
@@ -754,7 +801,7 @@ namespace Realm {
     interpreter = new PythonInterpreter;
     // the call to PyEval_InitThreads in the PythonInterpreter constructor
     //  acquired the GIL on our behalf already
-    assert( (interpreter->api->PyGILState_Check)() == 1 );
+    assert( interpreter->check_gil_state() == 1);
     master_thread = (interpreter->api->PyThreadState_Get)();
 
     // always need the python threading module
@@ -802,7 +849,7 @@ namespace Realm {
     //  we'll get a KeyError in threading.py
     // resolve this by calling threading.current_thread() here, using __import__
     //  to deal with the case where 'import threading' never got called
-    (interpreter->api->PyRun_SimpleString)("__import__('threading').current_thread()");
+    interpreter->run_string("__import__('threading').current_thread()");
 
     // Python > 3.9.7 requires the main thread to collapse the threading module,
     // but we're in a non-master thread when tearing down the interpreter here,
@@ -811,7 +858,7 @@ namespace Realm {
     // module tries to lock and unlock it to emulate the thread join, there won't
     // be a deadlock. See this GitHub issue for the detail:
     //   https://github.com/nv-legate/cunumeric/issues/187
-    (interpreter->api->PyRun_SimpleString)(
+    interpreter->run_string(
       "[main_thread._tstate_lock.release() "
       "if (v.major > 3 or v.major == 3 and (v.minor > 10 or (v.minor == 10 and v.micro > 0) or (v.minor == 9 and v.micro > 7))) "
       "and main_thread != curr_thread "
@@ -937,6 +984,12 @@ namespace Realm {
                                            CodeDescriptor& codedesc,
                                            const ByteArrayRef& user_data)
   {
+    // make sure we have a function of the right type
+    if(codedesc.type() != TypeConv::from_cpp_type<Processor::TaskFuncPtr>()) {
+      log_taskreg.fatal() << "attempt to register a task function of improper type: " << codedesc.type();
+      assert(0);
+    }
+
     TaskRegistration *treg = new TaskRegistration;
     treg->proc = this;
     treg->func_id = func_id;
@@ -1016,63 +1069,85 @@ namespace Realm {
 
     ////////////////////////////////////////////////////////////////////////
     //
+    // class PythonModuleConfig
+
+    PythonModuleConfig::PythonModuleConfig(void)
+      : ModuleConfig("python")
+    {
+      config_map.insert({"pyproc", &cfg_num_python_cpus});
+      config_map.insert({"pystack", &cfg_stack_size});
+    }
+
+    void PythonModuleConfig::configure_from_cmdline(std::vector<std::string>& cmdline)
+    {
+      // first order of business - read command line parameters
+      CommandLineParser cp;
+
+      cp.add_option_int("-ll:py", cfg_num_python_cpus)
+          .add_option_int_units("-ll:pystack", cfg_stack_size, 'm')
+          .add_option_stringlist("-ll:pyimport", cfg_import_modules)
+          .add_option_stringlist("-ll:pyinit", cfg_init_scripts);
+#ifdef REALM_USE_OPENMP
+        cp.add_option_int("-ll:pyomp", cfg_pyomp_threads);
+#endif
+
+      bool ok = cp.parse_command_line(cmdline);
+      if(!ok) {
+        log_py.fatal() << "error reading Python command line parameters";
+        assert(false);
+      }
+    }
+
+    ////////////////////////////////////////////////////////////////////////
+    //
     // class PythonModule
 
     /*static*/ std::vector<std::string> PythonModule::extra_import_modules;
 
     PythonModule::PythonModule(void)
       : Module("python")
-      , cfg_num_python_cpus(0)
-      , cfg_use_numa(false)
-      , cfg_stack_size(2 << 20)
-#ifdef REALM_USE_OPENMP
-      , cfg_pyomp_threads(0)
-#endif
+      , config(nullptr)
     {
     }
 
     PythonModule::~PythonModule(void)
-    {}
+    {
+      assert(config != nullptr);
+      config = nullptr;
+    }
 
     /*static*/ void PythonModule::import_python_module(const char *module_name)
     {
       extra_import_modules.push_back(module_name);
     }
 
-    /*static*/ Module *PythonModule::create_module(RuntimeImpl *runtime,
-                                                 std::vector<std::string>& cmdline)
+    /*static*/ ModuleConfig *PythonModule::create_module_config(RuntimeImpl *runtime)
+    {
+      PythonModuleConfig *config = new PythonModuleConfig();
+      return config;
+    }
+
+    /*static*/ Module *PythonModule::create_module(RuntimeImpl *runtime)
     {
       // create a module to fill in with stuff - we'll delete it if numa is
       //  disabled
       PythonModule *m = new PythonModule;
 
-      // first order of business - read command line parameters
-      {
-        CommandLineParser cp;
-
-        cp.add_option_int("-ll:py", m->cfg_num_python_cpus)
-	  .add_option_int("-ll:pynuma", m->cfg_use_numa)
-	  .add_option_int_units("-ll:pystack", m->cfg_stack_size, 'm')
-	  .add_option_stringlist("-ll:pyimport", m->cfg_import_modules)
-	  .add_option_stringlist("-ll:pyinit", m->cfg_init_scripts);
-#ifdef REALM_USE_OPENMP
-	cp.add_option_int("-ll:pyomp", m->cfg_pyomp_threads);
-#endif
-
-        bool ok = cp.parse_command_line(cmdline);
-        if(!ok) {
-          log_py.fatal() << "error reading Python command line parameters";
-          assert(false);
-        }
-      }
+      PythonModuleConfig *config =
+          checked_cast<PythonModuleConfig *>(runtime->get_module_config("python"));
+      assert(config != nullptr);
+      assert(config->finish_configured);
+      assert(m->name == config->get_name());
+      assert(m->config == nullptr);
+      m->config = config;
 
       // add extra module imports requested by the application
-      m->cfg_import_modules.insert(m->cfg_import_modules.end(),
+      m->config->cfg_import_modules.insert(m->config->cfg_import_modules.end(),
                                    extra_import_modules.begin(),
                                    extra_import_modules.end());
 
       // if no cpus were requested, there's no point
-      if(m->cfg_num_python_cpus == 0) {
+      if(m->config->cfg_num_python_cpus == 0) {
         log_py.debug() << "no Python cpus requested";
         delete m;
         return 0;
@@ -1080,42 +1155,11 @@ namespace Realm {
 
 #ifndef REALM_USE_DLMOPEN
       // Multiple CPUs are only allowed if we're using dlmopen.
-      if(m->cfg_num_python_cpus > 1) {
+      if(m->config->cfg_num_python_cpus > 1) {
         log_py.fatal() << "support for multiple Python CPUs is not available: recompile with USE_DLMOPEN";
         assert(false);
       }
 #endif
-
-      // get number/sizes of NUMA nodes -
-      //   disable (with a warning) numa binding if support not found
-      if(m->cfg_use_numa) {
-        std::map<int, NumaNodeCpuInfo> cpuinfo;
-        if(numasysif_numa_available() &&
-           numasysif_get_cpu_info(cpuinfo) &&
-           !cpuinfo.empty()) {
-          // filter out any numa domains with insufficient core counts
-          int cores_needed = m->cfg_num_python_cpus;
-          for(std::map<int, NumaNodeCpuInfo>::const_iterator it = cpuinfo.begin();
-              it != cpuinfo.end();
-              ++it) {
-            const NumaNodeCpuInfo& ci = it->second;
-            if(ci.cores_available >= cores_needed) {
-              m->active_numa_domains.insert(ci.node_id);
-            } else {
-              log_py.warning() << "not enough cores in NUMA domain " << ci.node_id << " (" << ci.cores_available << " < " << cores_needed << ")";
-            }
-          }
-        } else {
-          log_py.warning() << "numa support not found (or not working)";
-          m->cfg_use_numa = false;
-        }
-      }
-
-      // if we don't end up with any active numa domains,
-      //  use NUMA_DOMAIN_DONTCARE
-      // actually, use the value (-1) since it seems to cause link errors!?
-      if(m->active_numa_domains.empty())
-        m->active_numa_domains.insert(-1 /*CoreReservationParameters::NUMA_DOMAIN_DONTCARE*/);
 
       return m;
     }
@@ -1134,50 +1178,44 @@ namespace Realm {
     {
       Module::create_processors(runtime);
 
-      for(std::set<int>::const_iterator it = active_numa_domains.begin();
-          it != active_numa_domains.end();
-          ++it) {
-        int cpu_node = *it;
-        for(int i = 0; i < cfg_num_python_cpus; i++) {
-          Processor p = runtime->next_local_processor_id();
-          ProcessorImpl *pi = new LocalPythonProcessor(p, cpu_node,
-                                                       runtime->core_reservation_set(),
-                                                       cfg_stack_size,
+      for(int i = 0; i < config->cfg_num_python_cpus; i++) {
+        Processor proc = runtime->next_local_processor_id();
+        ProcessorImpl *proc_impl = new LocalPythonProcessor(
+            proc, -1 /*numa node*/, runtime->core_reservation_set(),
+            config->cfg_stack_size,
 #ifdef REALM_USE_OPENMP
-						       cfg_pyomp_threads,
+            config->cfg_pyomp_threads,
 #endif
-						       cfg_import_modules,
-						       cfg_init_scripts);
-          runtime->add_processor(pi);
+            config->cfg_import_modules, config->cfg_init_scripts);
+        runtime->add_processor(proc_impl);
 
-          // create affinities between this processor and system, numa, reg, and zc memories
-          // if the memory is one we created, use the kernel-reported distance
-          // to adjust the answer
-          std::vector<MemoryImpl *>& local_mems = runtime->nodes[Network::my_node_id].memories;
-          for(std::vector<MemoryImpl *>::iterator it2 = local_mems.begin();
-              it2 != local_mems.end();
-              ++it2) {
-            Memory::Kind kind = (*it2)->get_kind();
-            if((kind != Memory::SYSTEM_MEM) && (kind != Memory::SOCKET_MEM) &&
-               (kind != Memory::REGDMA_MEM) && (kind != Memory::Z_COPY_MEM))
-              continue;
+        // create affinities between this processor and system, numa, reg, and zc memories
+        // if the memory is one we created, use the kernel-reported distance
+        // to adjust the answer
+        std::vector<MemoryImpl *> &local_mems =
+            runtime->nodes[Network::my_node_id].memories;
+        for(std::vector<MemoryImpl *>::iterator it2 = local_mems.begin();
+            it2 != local_mems.end(); ++it2) {
+          Memory::Kind kind = (*it2)->get_kind();
+          if((kind != Memory::SYSTEM_MEM) && (kind != Memory::SOCKET_MEM) &&
+             (kind != Memory::REGDMA_MEM) && (kind != Memory::Z_COPY_MEM))
+            continue;
 
-            Machine::ProcessorMemoryAffinity pma;
-            pma.p = p;
-            pma.m = (*it2)->me;
+          Machine::ProcessorMemoryAffinity pma;
+          pma.p = proc;
+          pma.m = (*it2)->me;
 
-            // use the same made-up numbers as in
-            //  runtime_impl.cc
-            if(kind == Memory::SYSTEM_MEM) {
-              pma.bandwidth = 100;  // "large"
-              pma.latency = 5;      // "small"
-            } else {
-              pma.bandwidth = 80;   // "large"
-              pma.latency = 10;     // "small"
-            }
-
-            runtime->add_proc_mem_affinity(pma);
+          // use the same made-up numbers as in
+          //  runtime_impl.cc
+          if(kind == Memory::SYSTEM_MEM) {
+            pma.bandwidth = 100; // "large"
+            pma.latency = 5;     // "small"
+          } else {
+            pma.bandwidth = 80; // "large"
+            pma.latency = 10;   // "small"
           }
+
+          runtime->add_proc_mem_affinity(pma);
         }
       }
     }

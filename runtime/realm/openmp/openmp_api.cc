@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -1512,6 +1512,20 @@ extern "C" {
     *p_lb = lb_signed ^ (uint64_t(1) << 63);
     *p_ub = ub_signed ^ (uint64_t(1) << 63);
     return ret;
+  }
+
+  // clang/llvm's OpenMP will invoke this function instead of the nowait
+  // variants below.
+  REALM_PUBLIC_API
+  kmp_int32 __kmpc_reduce(ident_t *loc, kmp_int32 global_tid, kmp_int32 num_vars,
+                        size_t reduce_size, void *reduce_data,
+                        kmpc_reduce reduce_func,
+                        kmp_critical_name *lck) {
+    // Tell caller to just do it themselves in all cases. In particular,
+    // this tells the caller to perform an atomic reduction of the 
+    // thread-local results. Returning 1 indicates to the caller that
+    // atomics are not needed.
+    return 2;
   }
 
   REALM_PUBLIC_API

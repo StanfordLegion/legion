@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------#
-# Copyright 2023 Kitware, Inc.
+# Copyright 2024 Kitware, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -24,6 +24,7 @@ endif()
 
 add_executable(tasks_and_futures tasks_and_futures.cc)
 target_link_libraries(tasks_and_futures Legion::Legion)
+target_compile_options(tasks_and_futures PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
 if(Legion_ENABLE_TESTING)
   add_test(NAME tasks_and_futures COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:tasks_and_futures> ${Legion_TEST_ARGS})
 endif()

@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------#
-# Copyright 2023 Stanford University
+# Copyright 2024 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -24,6 +24,7 @@ endif()
 
 add_executable(bug954 bug954.cc)
 target_link_libraries(bug954 Legion::Legion)
+target_compile_options(bug954 PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
 if(Legion_ENABLE_TESTING)
-  add_test(NAME bug954 COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:bug954> ${Legion_TEST_ARGS} -ll:rsize 1024)
+  add_test(NAME bug954 COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:bug954> ${Legion_TEST_ARGS} -ll:rsize 1)
 endif()

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# Copyright 2023 Stanford University
+# Copyright 2024 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -132,8 +132,13 @@ def build_terra(terra_dir, terra_branch, use_cmake, cmake_exe, thread_count, llv
 
     if use_cmake:
         if not os.path.exists(os.path.join(build_dir, 'CMakeCache.txt')):
+            llvm_cmakedir = None
+            llvm_config = os.environ.get('LLVM_CONFIG')
+            if llvm_config is not None:
+                llvm_cmakedir = subprocess.check_output([llvm_config, '--cmakedir']).decode('utf-8').strip()
             subprocess.check_call(
-                [cmake_exe, '..', '-DCMAKE_INSTALL_PREFIX=%s' % release_dir],
+                [cmake_exe, '..', '-DCMAKE_INSTALL_PREFIX=%s' % release_dir] + (
+                    ['-DLLVM_HINTS=%s' % llvm_cmakedir] if llvm_cmakedir is not None else []),
                 cwd=build_dir)
         subprocess.check_call(
             [make_exe, 'install', '-j', str(thread_count)],

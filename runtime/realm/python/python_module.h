@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,8 +25,26 @@ namespace Realm {
 
   namespace Python {
 
+    class PythonModuleConfig : public ModuleConfig {
+      friend class PythonModule;
+    protected:
+      PythonModuleConfig(void);
+
+    public:
+      virtual void configure_from_cmdline(std::vector<std::string>& cmdline);
+
+    protected:
+      int cfg_num_python_cpus = 0;
+      size_t cfg_stack_size = 2 << 20;
+#ifdef REALM_USE_OPENMP
+      int cfg_pyomp_threads = 0;
+#endif
+      std::vector<std::string> cfg_import_modules;
+      std::vector<std::string> cfg_init_scripts;
+    };
+
     // our interface to the rest of the runtime
-    class PythonModule : public Module {
+    class REALM_PUBLIC_API PythonModule : public Module {
     protected:
       PythonModule(void);
 
@@ -36,7 +54,9 @@ namespace Realm {
       // Request that the named Python module be imported
       static void import_python_module(const char *module_name);
 
-      static Module *create_module(RuntimeImpl *runtime, std::vector<std::string>& cmdline);
+      static ModuleConfig *create_module_config(RuntimeImpl *runtime);
+
+      static Module *create_module(RuntimeImpl *runtime);
 
       // do any general initialization - this is called after all configuration is
       //  complete
@@ -64,16 +84,7 @@ namespace Realm {
     public:
       static std::vector<std::string> extra_import_modules;
 
-      int cfg_num_python_cpus;
-      bool cfg_use_numa;
-      size_t cfg_stack_size;
-#ifdef REALM_USE_OPENMP
-      int cfg_pyomp_threads;
-#endif
-      std::vector<std::string> cfg_import_modules;
-      std::vector<std::string> cfg_init_scripts;
-
-      std::set<int> active_numa_domains;
+      PythonModuleConfig *config;
     };
 
   }; // namespace Python

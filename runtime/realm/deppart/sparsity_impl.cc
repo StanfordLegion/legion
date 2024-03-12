@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -29,6 +29,68 @@ namespace Realm {
   extern Logger log_part;
   extern Logger log_dpops;
 
+#define REALM_SPARSITY_DELETES
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class SparsityMapRefCounter
+
+  SparsityMapRefCounter::SparsityMapRefCounter(::realm_id_t _id)
+    : id(_id)
+  {}
+
+  void SparsityMapRefCounter::add_references(unsigned count)
+  {
+    if(ID(*this).is_sparsity()) {
+      NodeID owner = ID(*this).sparsity_creator_node();
+      if(owner == Network::my_node_id) {
+        get_runtime()->get_sparsity_impl(*this)->add_references(count);
+      } else {
+        ActiveMessage<typename SparsityMapRefCounter::SparsityMapAddReferenceMessage>
+            amsg(owner);
+        amsg->id = id;
+        amsg->count = count;
+        amsg.commit();
+      }
+    }
+  }
+
+  void SparsityMapRefCounter::remove_references(unsigned count)
+  {
+    if(ID(*this).is_sparsity()) {
+      NodeID owner = ID(*this).sparsity_creator_node();
+      if(owner == Network::my_node_id) {
+        get_runtime()->get_sparsity_impl(*this)->remove_references(count);
+      } else {
+        ActiveMessage<typename SparsityMapRefCounter::SparsityMapRemoveReferencesMessage>
+            amsg(owner);
+        amsg->id = id;
+        amsg->count = count;
+        amsg.commit();
+      }
+    }
+  }
+
+  void SparsityMapRefCounter::SparsityMapAddReferenceMessage::handle_message(
+      NodeID sender, const SparsityMapAddReferenceMessage &msg, const void *data,
+      size_t datalen)
+  {
+    SparsityMapImplWrapper *wrapper = get_runtime()->get_sparsity_impl(msg.id);
+    if(wrapper) {
+      wrapper->add_references(msg.count);
+    }
+  }
+
+  void SparsityMapRefCounter::SparsityMapRemoveReferencesMessage::handle_message(
+      NodeID sender, const SparsityMapRemoveReferencesMessage &msg, const void *data,
+      size_t datalen)
+  {
+    SparsityMapImplWrapper *wrapper = get_runtime()->get_sparsity_impl(msg.id);
+    if(wrapper) {
+      wrapper->remove_references(msg.count);
+    }
+  }
+
   ////////////////////////////////////////////////////////////////////////
   //
   // class SparsityMap<N,T>
@@ -39,6 +101,39 @@ namespace Realm {
   {
     SparsityMapImplWrapper *wrapper = get_runtime()->get_sparsity_impl(*this);
     return wrapper->get_or_create<N,T>(*this);
+  }
+
+  template <int N, typename T>
+  void SparsityMap<N, T>::destroy(Event wait_on)
+  {
+    NodeID owner = ID(*this).sparsity_creator_node();
+    if(owner == Network::my_node_id) {
+      SparsityMapImplWrapper *wrapper = get_runtime()->get_sparsity_impl(*this);
+      if(wait_on.has_triggered()) {
+        wrapper->destroy();
+      } else {
+        wrapper->deferred_destroy.defer(wrapper, wait_on);
+      }
+    } else {
+      ActiveMessage<typename SparsityMapRefCounter::SparsityMapRemoveReferencesMessage>
+          amsg(owner);
+      amsg->id = id;
+      amsg->count = 1;
+      amsg->wait_on = wait_on;
+      amsg.commit();
+    }
+  }
+
+  template <int N, typename T>
+  void SparsityMap<N, T>::add_references(unsigned count)
+  {
+    SparsityMapRefCounter(id).add_references(count);
+  }
+
+  template <int N, typename T>
+  void SparsityMap<N, T>::remove_references(unsigned count)
+  {
+    SparsityMapRefCounter(id).remove_references(count);
   }
 
   // if 'always_create' is false and the points/rects completely fill their
@@ -106,19 +201,91 @@ namespace Realm {
   // class SparsityMapImplWrapper
 
   SparsityMapImplWrapper::SparsityMapImplWrapper(void)
-    : me((ID::IDType)-1), owner((unsigned)-1), type_tag(0), map_impl(0)
+    : me((ID::IDType)-1)
+    , owner((unsigned)-1)
+    , next_free(0)
+    , type_tag(0)
+    , map_impl(0)
+    , references(0)
   {}
 
   SparsityMapImplWrapper::~SparsityMapImplWrapper(void)
   {
-    if(map_impl.load() != 0)
+    if(map_impl.load() != 0) {
       (*map_deleter)(map_impl.load());
+    }
   }
 
   void SparsityMapImplWrapper::init(ID _me, unsigned _init_owner)
   {
     me = _me;
     owner = _init_owner;
+  }
+
+  void SparsityMapImplWrapper::destroy(void) { remove_references(/*count=*/1); }
+
+  void SparsityMapImplWrapper::add_references(unsigned count)
+  {
+    AutoLock<> al(mutex);
+    if(map_impl.load() != 0) {
+      references += count;
+    }
+  }
+
+  void SparsityMapImplWrapper::remove_references(unsigned count)
+  {
+    AutoLock<> al(mutex);
+    if(map_impl.load() == 0) {
+      return;
+    }
+
+    if(references > 0) {
+      references -= std::min(references, count);
+    }
+
+    if(references == 0) {
+#ifdef REALM_SPARSITY_DELETES
+      (*map_deleter)(map_impl.load());
+
+      NodeID owner_node = ID(me).sparsity_creator_node();
+      assert(owner_node == Network::my_node_id);
+
+      get_runtime()->local_sparsity_map_free_lists[owner_node]->free_entry(this);
+
+      map_impl.store(0);
+      type_tag.store(0);
+#endif
+    }
+  }
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class SparsityMapImplWrapper::DeferredDestroy
+  //
+
+  void SparsityMapImplWrapper::DeferredDestroy::defer(SparsityMapImplWrapper *wrap,
+                                                      Event wait_on)
+  {
+    wrapper = wrap;
+    if(!wait_on.has_triggered()) {
+      EventImpl::add_waiter(wait_on, this);
+    }
+  }
+
+  void SparsityMapImplWrapper::DeferredDestroy::event_triggered(bool poisoned,
+                                                                TimeLimit work_until)
+  {
+    wrapper->destroy();
+  }
+
+  void SparsityMapImplWrapper::DeferredDestroy::print(std::ostream &os) const
+  {
+    os << "deferred instance destruction";
+  }
+
+  Event SparsityMapImplWrapper::DeferredDestroy::get_finish_event(void) const
+  {
+    return Event::NO_EVENT;
   }
 
   template <int N, typename T>
@@ -142,8 +309,9 @@ namespace Realm {
 
     // now see if the pointer is valid - the validity of the old_tag is no guarantee
     void *impl = map_impl.load_acquire();
-    if(impl)
+    if(impl) {
       return static_cast<SparsityMapImpl<N,T> *>(impl);
+    }
 
     // create one and try to swap it in
     SparsityMapImpl<N,T> *new_impl = new SparsityMapImpl<N,T>(me);
@@ -1576,6 +1744,18 @@ namespace Realm {
   template <int N, typename T>
   /*static*/ ActiveMessageHandlerReg<typename SparsityMapImpl<N,T>::SetContribCountMessage> SparsityMapImpl<N,T>::set_contrib_count_msg_reg;
 
+  template <int N, typename T>
+  /*static*/ ActiveMessageHandlerReg<
+      typename SparsityMapImpl<N, T>::SparsityMapDestroyMessage>
+      SparsityMapImpl<N, T>::sparse_map_destroy_message_handler_reg;
+
+  /*static*/ ActiveMessageHandlerReg<
+      typename SparsityMapRefCounter::SparsityMapAddReferenceMessage>
+      SparsityMapRefCounter::sparse_untyped_add_references_message_handler_reg;
+
+  /*static*/ ActiveMessageHandlerReg<
+      typename SparsityMapRefCounter::SparsityMapRemoveReferencesMessage>
+      SparsityMapRefCounter::sparse_untyped_remove_references_message_handler_reg;
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -1624,6 +1804,23 @@ namespace Realm {
   {
     log_part.info() << "received contributor count: sparsity=" << msg.sparsity << " count=" << msg.count;
     SparsityMapImpl<N,T>::lookup(msg.sparsity)->set_contributor_count(msg.count);
+  }
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class SparsityMapDestroyMessage
+
+  template <int N, typename T>
+  /*static*/ void SparsityMapImpl<N, T>::SparsityMapDestroyMessage::handle_message(
+      NodeID sender, const SparsityMapDestroyMessage &msg, const void *data,
+      size_t datalen)
+  {
+    SparsityMapImplWrapper *wrapper = get_runtime()->get_sparsity_impl(msg.sparsity_map);
+    if(msg.wait_on.has_triggered()) {
+      wrapper->destroy();
+    } else {
+      wrapper->deferred_destroy.defer(wrapper, msg.wait_on);
+    }
   }
 
 #define DOIT(N,T) \

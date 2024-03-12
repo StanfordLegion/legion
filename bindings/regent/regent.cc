@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University
+/* Copyright 2024 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@
 #include <cstdlib>
 #include <limits>
 #include <vector>
+#include <cinttypes>
 
 #define LEGION_ENABLE_C_BINDINGS
 #include "legion.h"
@@ -66,7 +67,7 @@ void regent_register_kernel_id(int64_t kernel_id)
   if (registered_kernel_ids.find(kernel_id) != registered_kernel_ids.end())
   {
     fprintf(stderr,
-      "Some other CUDA kernel has already been registered with ID %ld. "
+      "Some other CUDA kernel has already been registered with ID %" PRId64 ". "
       "This is a Regent compiler bug. Please report this on GibHub.",
       kernel_id);
     exit(-1);

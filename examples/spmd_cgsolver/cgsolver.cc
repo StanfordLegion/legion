@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University
+/* Copyright 2024 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -449,8 +449,7 @@ void top_level_task(const Task *task,
   // define the main grid index space and its partition into blocks
   IndexSpaceT<3> is_grid = runtime->create_index_space(ctx,
       Rect<3>(Point<3>(0,0,0), grid_dim - Point<3>(1,1,1)));
-  IndexPartition ip_grid = runtime->create_partition_by_blockify(ctx, is_grid, 
-                                                        block_dim, 0/*color*/);
+  IndexPartition ip_grid = runtime->create_partition_by_blockify(ctx, is_grid, block_dim);
 
   // we also use an index space with an element per block to record things like which shard owns each block
   IndexSpace is_blks = runtime->create_index_space(ctx,
@@ -642,7 +641,7 @@ void top_level_task(const Task *task,
 					.add_flags(NO_ACCESS_FLAG));
       }
 #ifdef USE_SINGLE_TASK_LAUNCHES_IN_MUST_EPOCH
-      must.add_single_task(DomainPoint::from_point<1>(shard), launcher);
+      must.add_single_task(DomainPoint(Point<1>(shard)), launcher);
 #else
       must.add_index_task(launcher);
 #endif
@@ -657,7 +656,7 @@ void top_level_task(const Task *task,
     // make sure all shard returned successful results
     bool ok = true;
     for(int shard = 0; shard < num_shards; shard++) {
-      bool shard_ok = fm.get_result<bool>(DomainPoint::from_point<1>(shard));
+      bool shard_ok = fm.get_result<bool>(DomainPoint(Point<1>(shard)));
       if(!shard_ok) {
 	log_app.print() << "error returned from shard " << shard;
 	ok = false;
@@ -743,7 +742,7 @@ bool spmd_main_task(const Task *task,
 {
   const SpmdMainArgs& args = *(const SpmdMainArgs *)(task->args);
 
-  int shard = task->index_point.get_point<1>();
+  int shard = task->index_point[0];
 
   log_app.print() << "in spmd_main_task, shard=" << shard << ", proc=" << runtime->get_executing_processor(ctx) << ", regions=" << regions.size();
 
@@ -832,8 +831,7 @@ bool spmd_main_task(const Task *task,
                                                               color_space,
                                                               transform,
                                                               r_subset,
-                                                              COMPUTE_KIND,
-                                                              dir*2+side);
+                                                              COMPUTE_KIND);
 	  IndexSpace is_subset = runtime->get_index_subspace(ctx, ip, 0);
 	  assert(runtime->get_index_space_domain(ctx, is_subset) == r_subset);
 	  g.ispace = is_subset;
@@ -935,7 +933,7 @@ bool spmd_main_task(const Task *task,
       log_app.info() << "resold = " << resold;
   }
 
-  Future f_restarget = Future::from_value<double>(runtime, 1e-10);
+  Future f_restarget = Future::from_value<double>(1e-10);
 
   Predicate p_notdone = Predicate::TRUE_PRED;
 
@@ -1058,6 +1056,23 @@ bool spmd_main_task(const Task *task,
 					  fid_sol_r, true /*private*/,
 					  p_notdone);
     f_residuals.push(f_resnew);
+
+    if(args.future_lag > 0) {
+      Future f_notdone = FLT_double::compute(runtime, ctx, f_restarget, f_resnew);
+      p_notdone = runtime->predicate_and(ctx, p_notdone,
+					 runtime->create_predicate(ctx, f_notdone));
+    }
+
+    // p = r + (resnew/resold)*p
+    Future f_beta = FDV_double::compute(runtime, ctx, f_resnew, f_resold);
+    double beta = f_beta.get_result<double>();
+    VectorAcc::compute(myblocks, runtime, ctx,
+		       1.0, fid_sol_r, true /*private*/,
+		       beta, fid_sol_p, false /*!private*/,
+		       p_notdone);
+
+    f_resold = f_resnew;
+
     if(f_residuals.size() > (size_t)args.future_lag) {
       Future f = f_residuals.front();
       f_residuals.pop();
@@ -1085,23 +1100,7 @@ bool spmd_main_task(const Task *task,
       if(shard == 0)
 	log_app.info() << "not speculating past " << iter << " iterations";
       break;
-    }
-
-    if(args.future_lag > 0) {
-      Future f_notdone = FLT_double::compute(runtime, ctx, f_restarget, f_resnew);
-      p_notdone = runtime->predicate_and(ctx, p_notdone,
-					 runtime->create_predicate(ctx, f_notdone));
-    }
-
-    // p = r + (resnew/resold)*p
-    Future f_beta = FDV_double::compute(runtime, ctx, f_resnew, f_resold);
-    double beta = f_beta.get_result<double>();
-    VectorAcc::compute(myblocks, runtime, ctx,
-		       1.0, fid_sol_r, true /*private*/,
-		       beta, fid_sol_p, false /*!private*/,
-		       p_notdone);
-
-    f_resold = f_resnew;
+    } 
 
     if(args.use_tracing)
       runtime->end_trace(ctx, TRACE_ID_CG_ITER);
@@ -1334,6 +1333,7 @@ int main(int argc, char **argv)
   {
     TaskVariantRegistrar tvr(TOP_LEVEL_TASK_ID, "top_level_task");
     tvr.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+    tvr.set_replicable();
     Runtime::preregister_task_variant<top_level_task>(tvr, "top_level_task");
     Runtime::set_top_level_task_id(TOP_LEVEL_TASK_ID);
   }

@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,7 +28,7 @@
 
 namespace Legion {
 
-#if __cplusplus < 202002L
+#if !defined(__cpp_lib_atomic_ref) || (__cpp_lib_atomic_ref < 201806L)
   // We only need this crap if we're using a version of c++ < 20
   // Starting with c++20 we can do all this the right way with atomic_ref
   namespace TypePunning {
@@ -523,8 +523,8 @@ namespace Legion {
       newval = atomicCAS(ptr, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -567,7 +567,7 @@ namespace Legion {
       newval = atomicCAS(ptr, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -1107,8 +1107,8 @@ namespace Legion {
     }
 #endif
 #else
-#if __cplusplus >= 202002L
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -1174,7 +1174,7 @@ namespace Legion {
     }
 #endif
 #else
-#if __cplusplus >= 202002L
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -1211,8 +1211,8 @@ namespace Legion {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     atomicAdd(&lhs, rhs);
 #else
-#if __cplusplus >= 202002L
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -1243,7 +1243,7 @@ namespace Legion {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     atomicAdd(&rhs1, rhs2);
 #else
-#if __cplusplus >= 202002L
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -1288,8 +1288,8 @@ namespace Legion {
     } while (oldval != newval);
 #endif
 #else
-#if __cplusplus >= 202002L
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -1333,7 +1333,7 @@ namespace Legion {
     } while (oldval != newval);
 #endif
 #else
-#if __cplusplus >= 202002L
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -1376,8 +1376,8 @@ namespace Legion {
             __complex_as_uint(oldval), __complex_as_uint(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -1416,7 +1416,7 @@ namespace Legion {
             __complex_as_uint(oldval), __complex_as_uint(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -1457,8 +1457,8 @@ namespace Legion {
             __complex_as_ulonglong(oldval), __complex_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -1497,7 +1497,7 @@ namespace Legion {
             __complex_as_ulonglong(oldval), __complex_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -1552,8 +1552,8 @@ namespace Legion {
     } while (oldval != newval);
 #endif
 #else
-#if __cplusplus >= 202002L
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -1609,7 +1609,7 @@ namespace Legion {
     } while (oldval != newval);
 #endif
 #else
-#if __cplusplus >= 202002L
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -2174,8 +2174,8 @@ namespace Legion {
     }
 #endif
 #else
-#if __cplusplus >= 202002L
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -2250,7 +2250,7 @@ namespace Legion {
     }
 #endif
 #else
-#if __cplusplus >= 202002L
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -2296,8 +2296,8 @@ namespace Legion {
             __float_as_int(oldval), __float_as_int(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -2337,7 +2337,7 @@ namespace Legion {
             __float_as_int(oldval), __float_as_int(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -2378,8 +2378,8 @@ namespace Legion {
             __double_as_ulonglong(oldval), __double_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -2419,7 +2419,7 @@ namespace Legion {
             __double_as_ulonglong(oldval), __double_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -2462,8 +2462,8 @@ namespace Legion {
             __complex_as_uint(oldval), __complex_as_uint(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -2502,7 +2502,7 @@ namespace Legion {
             __complex_as_uint(oldval), __complex_as_uint(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -2543,8 +2543,8 @@ namespace Legion {
             __complex_as_ulonglong(oldval), __complex_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -2583,7 +2583,7 @@ namespace Legion {
             __complex_as_ulonglong(oldval), __complex_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -2627,8 +2627,8 @@ namespace Legion {
       newval = atomicCAS(ptr, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -2671,7 +2671,7 @@ namespace Legion {
       newval = atomicCAS(ptr, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -2715,8 +2715,8 @@ namespace Legion {
       newval = atomicCAS(ptr, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -2758,7 +2758,7 @@ namespace Legion {
       newval = atomicCAS(ptr, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -2829,8 +2829,8 @@ namespace Legion {
     }
 #endif
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -2900,7 +2900,7 @@ namespace Legion {
     }
 #endif
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -2937,8 +2937,8 @@ namespace Legion {
       newval = atomicCAS(target, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -2974,7 +2974,7 @@ namespace Legion {
       newval = atomicCAS(target, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -3015,8 +3015,8 @@ namespace Legion {
             __longlong_as_ulonglong(oldval), __longlong_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -3056,7 +3056,7 @@ namespace Legion {
             __longlong_as_ulonglong(oldval), __longlong_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -3099,8 +3099,8 @@ namespace Legion {
       newval = atomicCAS(ptr, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -3142,7 +3142,7 @@ namespace Legion {
       newval = atomicCAS(ptr, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -3209,8 +3209,8 @@ namespace Legion {
     }
 #endif
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -3276,7 +3276,7 @@ namespace Legion {
     }
 #endif
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -3313,8 +3313,8 @@ namespace Legion {
       newval = atomicCAS(target, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -3350,7 +3350,7 @@ namespace Legion {
       newval = atomicCAS(target, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -3387,8 +3387,8 @@ namespace Legion {
       newval = atomicCAS(target, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -3424,7 +3424,7 @@ namespace Legion {
       newval = atomicCAS(target, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -3496,8 +3496,8 @@ namespace Legion {
     }
 #endif
 #else
-#if __cplusplus >= 202002L
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -3572,7 +3572,7 @@ namespace Legion {
     }
 #endif
 #else
-#if __cplusplus >= 202002L
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -3618,8 +3618,8 @@ namespace Legion {
             __float_as_int(oldval), __float_as_int(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -3659,7 +3659,7 @@ namespace Legion {
             __float_as_int(oldval), __float_as_int(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -3700,8 +3700,8 @@ namespace Legion {
             __double_as_ulonglong(oldval), __double_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -3741,7 +3741,7 @@ namespace Legion {
             __double_as_ulonglong(oldval), __double_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -3784,8 +3784,8 @@ namespace Legion {
             __complex_as_uint(oldval), __complex_as_uint(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -3824,7 +3824,7 @@ namespace Legion {
             __complex_as_uint(oldval), __complex_as_uint(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -3865,8 +3865,8 @@ namespace Legion {
             __complex_as_ulonglong(oldval), __complex_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -3905,7 +3905,7 @@ namespace Legion {
             __complex_as_ulonglong(oldval), __complex_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -3949,8 +3949,8 @@ namespace Legion {
       newval = atomicCAS(ptr, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -3992,7 +3992,7 @@ namespace Legion {
       newval = atomicCAS(ptr, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -4063,8 +4063,8 @@ namespace Legion {
     }
 #endif
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -4134,7 +4134,7 @@ namespace Legion {
     }
 #endif
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -4171,8 +4171,8 @@ namespace Legion {
       newval = atomicCAS(target, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -4208,7 +4208,7 @@ namespace Legion {
       newval = atomicCAS(target, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -4249,8 +4249,8 @@ namespace Legion {
             __longlong_as_ulonglong(oldval), __longlong_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -4290,7 +4290,7 @@ namespace Legion {
             __longlong_as_ulonglong(oldval), __longlong_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -4333,8 +4333,8 @@ namespace Legion {
       newval = atomicCAS(ptr, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -4376,7 +4376,7 @@ namespace Legion {
       newval = atomicCAS(ptr, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -4443,8 +4443,8 @@ namespace Legion {
     }
 #endif
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -4510,7 +4510,7 @@ namespace Legion {
     }
 #endif
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -4547,8 +4547,8 @@ namespace Legion {
       newval = atomicCAS(target, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -4584,7 +4584,7 @@ namespace Legion {
       newval = atomicCAS(target, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -4621,8 +4621,8 @@ namespace Legion {
       newval = atomicCAS(target, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -4658,7 +4658,7 @@ namespace Legion {
       newval = atomicCAS(target, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -4730,8 +4730,8 @@ namespace Legion {
     }
 #endif
 #else
-#if __cplusplus >= 202002L
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -4806,7 +4806,7 @@ namespace Legion {
     }
 #endif
 #else
-#if __cplusplus >= 202002L
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -4852,8 +4852,8 @@ namespace Legion {
             __float_as_int(oldval), __float_as_int(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -4893,7 +4893,7 @@ namespace Legion {
             __float_as_int(oldval), __float_as_int(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -4934,8 +4934,8 @@ namespace Legion {
             __double_as_ulonglong(oldval), __double_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -4975,7 +4975,7 @@ namespace Legion {
             __double_as_ulonglong(oldval), __double_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -5018,8 +5018,8 @@ namespace Legion {
             __complex_as_uint(oldval), __complex_as_uint(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -5058,7 +5058,7 @@ namespace Legion {
             __complex_as_uint(oldval), __complex_as_uint(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -5099,8 +5099,8 @@ namespace Legion {
             __complex_as_ulonglong(oldval), __complex_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -5139,7 +5139,7 @@ namespace Legion {
             __complex_as_ulonglong(oldval), __complex_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -5184,8 +5184,8 @@ namespace Legion {
       newval = atomicCAS(ptr, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -5229,7 +5229,7 @@ namespace Legion {
       newval = atomicCAS(ptr, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -5274,8 +5274,8 @@ namespace Legion {
       newval = atomicCAS(ptr, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -5318,7 +5318,7 @@ namespace Legion {
       newval = atomicCAS(ptr, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -5390,8 +5390,8 @@ namespace Legion {
     }
 #endif
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -5462,7 +5462,7 @@ namespace Legion {
     }
 #endif
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -5494,8 +5494,8 @@ namespace Legion {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     atomicMax(&lhs, rhs);
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -5526,7 +5526,7 @@ namespace Legion {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     atomicMax(&rhs1, rhs2);  
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -5568,8 +5568,8 @@ namespace Legion {
             __longlong_as_ulonglong(oldval), __longlong_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -5610,7 +5610,7 @@ namespace Legion {
             __longlong_as_ulonglong(oldval), __longlong_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -5654,8 +5654,8 @@ namespace Legion {
       newval = atomicCAS(ptr, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -5698,7 +5698,7 @@ namespace Legion {
       newval = atomicCAS(ptr, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -5766,8 +5766,8 @@ namespace Legion {
     }
 #endif
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -5834,7 +5834,7 @@ namespace Legion {
     }
 #endif
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -5866,8 +5866,8 @@ namespace Legion {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     atomicMax(&lhs, rhs);
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -5898,7 +5898,7 @@ namespace Legion {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     atomicMax(&rhs1, rhs2); 
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -5941,8 +5941,8 @@ namespace Legion {
     atomicMax((unsigned long long*)&lhs, (unsigned long long)rhs);
 #endif
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -5984,7 +5984,7 @@ namespace Legion {
     atomicMax((unsigned long long*)&rhs1, (unsigned long long)rhs2);
 #endif
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -6057,8 +6057,8 @@ namespace Legion {
     }
 #endif
 #else
-#if __cplusplus >= 202002L
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -6134,7 +6134,7 @@ namespace Legion {
     }
 #endif
 #else
-#if __cplusplus >= 202002L
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -6181,8 +6181,8 @@ namespace Legion {
             __float_as_int(oldval), __float_as_int(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -6223,7 +6223,7 @@ namespace Legion {
             __float_as_int(oldval), __float_as_int(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -6265,8 +6265,8 @@ namespace Legion {
             __double_as_ulonglong(oldval), __double_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -6307,7 +6307,7 @@ namespace Legion {
             __double_as_ulonglong(oldval), __double_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -6352,8 +6352,8 @@ namespace Legion {
       newval = atomicCAS(ptr, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -6397,7 +6397,7 @@ namespace Legion {
       newval = atomicCAS(ptr, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -6442,8 +6442,8 @@ namespace Legion {
       newval = atomicCAS(ptr, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -6486,7 +6486,7 @@ namespace Legion {
       newval = atomicCAS(ptr, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -6558,8 +6558,8 @@ namespace Legion {
     }
 #endif
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -6630,7 +6630,7 @@ namespace Legion {
     }
 #endif
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -6662,8 +6662,8 @@ namespace Legion {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     atomicMin(&lhs, rhs);
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -6694,7 +6694,7 @@ namespace Legion {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     atomicMin(&rhs1, rhs2);
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -6736,8 +6736,8 @@ namespace Legion {
             __longlong_as_ulonglong(oldval), __longlong_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -6778,7 +6778,7 @@ namespace Legion {
             __longlong_as_ulonglong(oldval), __longlong_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -6822,8 +6822,8 @@ namespace Legion {
       newval = atomicCAS(ptr, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -6866,7 +6866,7 @@ namespace Legion {
       newval = atomicCAS(ptr, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -6934,8 +6934,8 @@ namespace Legion {
     }
 #endif
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -7002,7 +7002,7 @@ namespace Legion {
     }
 #endif
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -7034,8 +7034,8 @@ namespace Legion {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     atomicMin(&lhs, rhs); 
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -7066,7 +7066,7 @@ namespace Legion {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     atomicMin(&rhs1, rhs2); 
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -7109,8 +7109,8 @@ namespace Legion {
     atomicMin((unsigned long long*)&lhs, (unsigned long long)rhs);
 #endif
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -7152,7 +7152,7 @@ namespace Legion {
     atomicMin((unsigned long long*)&rhs1, (unsigned long long)rhs2);
 #endif
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -7225,8 +7225,8 @@ namespace Legion {
     }
 #endif
 #else
-#if __cplusplus >= 202002L
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -7307,7 +7307,7 @@ namespace Legion {
     }
 #endif
 #else
-#if __cplusplus >= 202002L
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -7354,8 +7354,8 @@ namespace Legion {
             __float_as_int(oldval), __float_as_int(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -7396,7 +7396,7 @@ namespace Legion {
             __float_as_int(oldval), __float_as_int(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -7438,8 +7438,8 @@ namespace Legion {
             __double_as_ulonglong(oldval), __double_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -7480,7 +7480,7 @@ namespace Legion {
             __double_as_ulonglong(oldval), __double_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -7524,8 +7524,8 @@ namespace Legion {
       newval = atomicCAS(ptr, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -7567,7 +7567,7 @@ namespace Legion {
       newval = atomicCAS(ptr, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -7638,8 +7638,8 @@ namespace Legion {
     }
 #endif
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -7709,7 +7709,7 @@ namespace Legion {
     }
 #endif
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -7740,8 +7740,8 @@ namespace Legion {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     atomicOr(&lhs, rhs);
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -7771,7 +7771,7 @@ namespace Legion {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     atomicOr(&rhs1, rhs2); 
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -7812,8 +7812,8 @@ namespace Legion {
             __longlong_as_ulonglong(oldval), __longlong_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -7853,7 +7853,7 @@ namespace Legion {
             __longlong_as_ulonglong(oldval), __longlong_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -7896,8 +7896,8 @@ namespace Legion {
       newval = atomicCAS(ptr, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -7939,7 +7939,7 @@ namespace Legion {
       newval = atomicCAS(ptr, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -8006,8 +8006,8 @@ namespace Legion {
     }
 #endif
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -8073,7 +8073,7 @@ namespace Legion {
     }
 #endif
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -8104,8 +8104,8 @@ namespace Legion {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     atomicOr(&lhs, rhs);
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -8135,7 +8135,7 @@ namespace Legion {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     atomicOr(&rhs1, rhs2); 
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -8177,8 +8177,8 @@ namespace Legion {
     atomicOr((unsigned long long*)&lhs, (unsigned long long)rhs);
 #endif
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -8219,7 +8219,7 @@ namespace Legion {
     atomicOr((unsigned long long*)&rhs1, (unsigned long long)rhs2);
 #endif
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -8262,8 +8262,8 @@ namespace Legion {
       newval = atomicCAS(ptr, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -8305,7 +8305,7 @@ namespace Legion {
       newval = atomicCAS(ptr, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -8376,8 +8376,8 @@ namespace Legion {
     }
 #endif
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -8447,7 +8447,7 @@ namespace Legion {
     }
 #endif
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -8478,8 +8478,8 @@ namespace Legion {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     atomicAnd(&lhs, rhs); 
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -8509,7 +8509,7 @@ namespace Legion {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     atomicAnd(&rhs1, rhs2); 
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -8550,8 +8550,8 @@ namespace Legion {
             __longlong_as_ulonglong(oldval), __longlong_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -8591,7 +8591,7 @@ namespace Legion {
             __longlong_as_ulonglong(oldval), __longlong_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -8634,8 +8634,8 @@ namespace Legion {
       newval = atomicCAS(ptr, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -8677,7 +8677,7 @@ namespace Legion {
       newval = atomicCAS(ptr, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -8744,8 +8744,8 @@ namespace Legion {
     }
 #endif   
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -8811,7 +8811,7 @@ namespace Legion {
     }
 #endif
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -8842,8 +8842,8 @@ namespace Legion {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     atomicAnd(&lhs, rhs); 
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -8873,7 +8873,7 @@ namespace Legion {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     atomicAnd(&rhs1, rhs2); 
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -8915,8 +8915,8 @@ namespace Legion {
     atomicAnd((unsigned long long*)&lhs, (unsigned long long)rhs);
 #endif
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -8957,7 +8957,7 @@ namespace Legion {
     atomicAnd((unsigned long long*)&rhs1, (unsigned long long)rhs2);
 #endif
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -9000,8 +9000,8 @@ namespace Legion {
       newval = atomicCAS(ptr, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -9044,7 +9044,7 @@ namespace Legion {
       newval = atomicCAS(ptr, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -9088,8 +9088,8 @@ namespace Legion {
       newval = atomicCAS(ptr, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -9131,7 +9131,7 @@ namespace Legion {
       newval = atomicCAS(ptr, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -9202,8 +9202,8 @@ namespace Legion {
     }
 #endif
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -9273,7 +9273,7 @@ namespace Legion {
     }
 #endif
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -9304,8 +9304,8 @@ namespace Legion {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     atomicXor(&lhs, rhs);
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -9335,7 +9335,7 @@ namespace Legion {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     atomicXor(&rhs1, rhs2); 
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -9376,8 +9376,8 @@ namespace Legion {
             __longlong_as_ulonglong(oldval), __longlong_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -9417,7 +9417,7 @@ namespace Legion {
             __longlong_as_ulonglong(oldval), __longlong_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -9460,8 +9460,8 @@ namespace Legion {
       newval = atomicCAS(ptr, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -9503,7 +9503,7 @@ namespace Legion {
       newval = atomicCAS(ptr, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -9570,8 +9570,8 @@ namespace Legion {
     }
 #endif
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -9637,7 +9637,7 @@ namespace Legion {
     }
 #endif
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -9668,8 +9668,8 @@ namespace Legion {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     atomicXor(&lhs, rhs); 
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -9699,7 +9699,7 @@ namespace Legion {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     atomicXor(&rhs1, rhs2); 
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -9741,8 +9741,8 @@ namespace Legion {
     atomicXor((unsigned long long*)&lhs, (unsigned long long)rhs);
 #endif
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -9783,7 +9783,7 @@ namespace Legion {
     atomicXor((unsigned long long*)&rhs1, (unsigned long long)rhs2);
 #endif
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;

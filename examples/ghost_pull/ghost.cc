@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University
+/* Copyright 2024 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -232,6 +232,8 @@ void top_level_task(const Task *task,
             DomainPoint point(my_color);
             must_epoch_launcher.add_single_task(point, spmd_launcher);
         }
+        // Specify our launch domain
+        must_epoch_launcher.launch_domain = Domain(Point<1>(0), Point<1>(num_subregions-1));
         FutureMap fm = runtime->execute_must_epoch(ctx, must_epoch_launcher);
         // wait for completion at least
         fm.wait_all_results();
@@ -675,6 +677,7 @@ int main(int argc, char **argv)
     {
         TaskVariantRegistrar registrar(TOP_LEVEL_TASK_ID, "top_level");
         registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+        registrar.set_replicable();
         Runtime::preregister_task_variant<top_level_task>(registrar, "top_level");
     }
 

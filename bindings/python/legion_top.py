@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# Copyright 2023 Stanford University, NVIDIA Corporation
+# Copyright 2024 Stanford University, NVIDIA Corporation
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -27,6 +27,7 @@ import readline
 import threading
 import importlib
 import traceback
+import warnings
 
 from legion_cffi import ffi, lib as c
 
@@ -75,6 +76,52 @@ def add_cleanup_item(item):
     _cleanup_items.append(item)
 
 
+# Helper class for deduplicating output streams with control replication
+class LegionOutputStream(object):
+    def __init__(self, stream):
+        # This is the original stream
+        self.stream = stream
+
+    def close(self):
+        self.stream.close()
+
+    def fileno(self):
+        return self.stream.fileno()
+
+    def flush(self):
+        self.stream.flush()
+
+    def write(self, string):
+        if self.print_local_shard():
+            self.stream.write(string)
+
+    def writelines(self, sequence):
+        if self.print_local_shard():
+            self.stream.writelines(sequence)
+
+    def isatty(self):
+        return self.stream.isatty()
+
+    def print_local_shard(self):
+        return c.legion_runtime_local_shard_without_context() == 0
+        
+    def set_parent(self, parent):
+        self.stream.set_parent(parent)
+
+# Replace the output stream with one that will deduplicate
+# printing for any control-replicated tasks
+sys.stdout = LegionOutputStream(sys.stdout)
+
+
+# Also direct output from the `warnings` module to this deduplicated
+# stdout. This avoids flooding of output in control replicated
+# applications that use `warnings`. This method of doing so
+# was taken from https://stackoverflow.com/a/858928.
+def customwarn(message, category, filename, lineno, file=None, line=None):
+    sys.stdout.write(warnings.formatwarning(message, category, filename, lineno))
+warnings.showwarning = customwarn
+
+
 def input_args(filter_runtime_options=False):
     raw_args = c.legion_runtime_get_input_args()
 
@@ -121,7 +168,12 @@ def input_args(filter_runtime_options=False):
 # not safe to use with control replication so this will give them a way
 # to check whether they are running in a safe context or not
 def is_control_replicated():
-  return False
+    try:
+        # We should only be doing something for this if we're the top-level task
+        return c.legion_context_get_num_shards(top_level.runtime[0],
+                top_level.context[0], True) > 1
+    except AttributeError:
+        raise RuntimeError('"is_control_replicated" must be called in a legion_python task')
 
 
 ###########################################################
@@ -184,8 +236,9 @@ def remove_all_aliases(to_delete):
 
 
 def run_cmd(cmd, run_name):
-    import imp
-    module = imp.new_module(run_name)
+    import importlib.util
+    module_spec = importlib.util.find_spec(run_name)
+    module = importlib.util.module_from_spec(module_spec)
     setattr(module, '__name__', run_name)
     setattr(module, '__package__', None)
 
@@ -224,8 +277,9 @@ def run_cmd(cmd, run_name):
 # cleaning up after itself and removes the module before execution
 # has completed.
 def run_path(filename, run_name):
-    import imp
-    module = imp.new_module(run_name)
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(run_name, filename)
+    module = importlib.util.module_from_spec(spec)
     setattr(module, '__name__', run_name)
     setattr(module, '__file__', filename)
     setattr(module, '__loader__', None)

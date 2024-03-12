@@ -1,5 +1,5 @@
-/* Copyright 2023 Stanford University
- * Copyright 2023 NVIDIA Corp
+/* Copyright 2024 Stanford University
+ * Copyright 2024 NVIDIA Corp
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -40,6 +40,7 @@ struct BenchTimingTaskArgs {
   size_t arg_size = 0;
   bool chain = false;
   bool test_gpu = false;
+  bool use_proc_group = false;
 };
 
 struct DummyTaskLauncherArgs {
@@ -160,32 +161,41 @@ static void bench_timing_task(const void *args, size_t arglen, const void *userd
     proc_kind = Processor::LOC_PROC;
   }
 
-  size_t num_procs_to_test = Machine::ProcessorQuery(Machine::get_machine())
-                                 .only_kind(proc_kind)
-                                 .count();
+  std::vector<Processor> processors;
+  size_t proc_num = 0;
 
-  log_app.print() << "Proc kind:" << proc_kind << " count:" <<num_procs_to_test;
+  {
+    Machine::ProcessorQuery processors_to_test =
+        Machine::ProcessorQuery(Machine::get_machine()).only_kind(proc_kind);
 
-  std::vector<Event> task_events(self_args.num_launcher_tasks * num_procs_to_test,
+    processors.assign(processors_to_test.begin(), processors_to_test.end());
+    proc_num = processors.size();
+
+    if (self_args.use_proc_group) {
+      ProcessorGroup proc_group = ProcessorGroup::create_group(processors);
+      processors.clear();
+      processors.push_back(proc_group);
+    }
+  }
+
+  std::vector<Event> task_events(self_args.num_launcher_tasks * proc_num,
                                  Event::NO_EVENT);
-  std::vector<Event> child_task_events(self_args.num_launcher_tasks * num_procs_to_test,
+  std::vector<Event> child_task_events(self_args.num_launcher_tasks * proc_num,
                                        Event::NO_EVENT);
+
   for(size_t s = 0; s < self_args.num_samples + 1; s++) {
     UserEvent trigger_event = UserEvent::create_user_event();
     launcher_args.dummy_task_trigger_event = UserEvent::create_user_event();
 
-    Machine::ProcessorQuery processors_to_test =
-        Machine::ProcessorQuery(Machine::get_machine()).only_kind(proc_kind);
-    size_t proc_num = 0;
-    for(Processor target_processor : processors_to_test) {
+    for(size_t p = 0; p < proc_num; p++) {
+      Processor target_processor = processors[p % processors.size()];
       for(size_t t = 0; t < self_args.num_launcher_tasks; t++) {
         launcher_args.dummy_task_wait_event = UserEvent::create_user_event();
-        task_events[proc_num * self_args.num_launcher_tasks + t] = target_processor.spawn(
+        task_events[p * self_args.num_launcher_tasks + t] = target_processor.spawn(
             DUMMY_TASK_LAUNCHER, &launcher_args, sizeof(launcher_args), trigger_event);
-        child_task_events[proc_num * self_args.num_launcher_tasks + t] =
+        child_task_events[p * self_args.num_launcher_tasks + t] =
             launcher_args.dummy_task_wait_event;
       }
-      proc_num++;
     }
 
     // Make sure the launcher tasks have completed (their child tasks are all queued)
@@ -266,6 +276,7 @@ int main(int argc, char **argv)
   cp.add_option_int("-n", args.num_dummy_tasks);
   cp.add_option_bool("-c", args.chain);
   cp.add_option_bool("-gpu", args.test_gpu);
+  cp.add_option_bool("-g", args.use_proc_group);
 
   ok = cp.parse_command_line(argc, (const char **)argv);
   assert(ok);

@@ -1,5 +1,5 @@
 
-/* Copyright 2023 NVIDIA Corporation
+/* Copyright 2024 NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,9 +19,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <dlfcn.h>
-#include "bootstrap_util.h"
-#include "bootstrap_internal.h"
-#include "realm_defines.h"
+#include "realm/realm_config.h"
+#include "realm/ucx/bootstrap/bootstrap_util.h"
+#include "realm/ucx/bootstrap/bootstrap_internal.h"
 
 #define GET_SYMBOL(lib_handle, name, var, status)                         \
   do {                                                                    \

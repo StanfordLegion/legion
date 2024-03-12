@@ -1,4 +1,4 @@
--- Copyright 2023 Stanford University, NVIDIA Corporation
+-- Copyright 2024 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -2877,7 +2877,7 @@ local function wrap_partition_internal(node, parent)
 end
 
 local function make_partition_projection_functor(cx, expr, loop_index, color_space,
-                                                 free_vars, free_vars_setup, requirement)
+                                                 free_vars, free_vars_setup, proj_args_raw)
   cx = cx:new_local_scope()
 
   if expr:is(ast.typed.expr.Projection) then
@@ -2932,11 +2932,9 @@ local function make_partition_projection_functor(cx, expr, loop_index, color_spa
     end
   end
 
-  -- Generate a projection functor that evaluates `expr`.
-  local value = codegen.expr(cx, index):read(cx)
-
-  if requirement and free_vars_setup then
-    free_vars_setup:insert(as_quote(value.actions))
+  -- Closure, generate projection functor with args.
+  if proj_args_raw and free_vars and not free_vars:is_empty() then
+    assert(free_vars_setup)
 
     local parent = terralib.newsymbol(c.legion_logical_partition_t, "parent")
     local base_type = std.as_read(util.get_base_indexed_node(expr).expr_type)
@@ -2954,45 +2952,31 @@ local function make_partition_projection_functor(cx, expr, loop_index, color_spa
     local index_access = codegen.expr(cx, expr):read(cx)
 
     local terra partition_functor([cx.runtime],
-                                  mappable : c.legion_mappable_t,
-                                  idx : uint,
                                   [parent],
-                                  [point])
-      var [requirement];
-      var mappable_type = c.legion_mappable_get_type(mappable)
-      if mappable_type == c.TASK_MAPPABLE then
-        var task = c.legion_mappable_as_task(mappable)
-        [requirement] = c.legion_task_get_requirement(task, idx)
-      elseif mappable_type == c.COPY_MAPPABLE then
-        var copy = c.legion_mappable_as_copy(mappable)
-        [requirement] = c.legion_copy_get_requirement(copy, idx)
-      elseif mappable_type == c.FILL_MAPPABLE then
-        var fill = c.legion_mappable_as_fill(mappable)
-        std.assert(idx == 0, "projection index for fill is not zero")
-        [requirement] = c.legion_fill_get_requirement(fill)
-      elseif mappable_type == c.INLINE_MAPPABLE then
-        var mapping = c.legion_mappable_as_inline_mapping(mappable)
-        std.assert(idx == 0, "projection index for inline mapping is not zero")
-        [requirement] = c.legion_inline_get_requirement(mapping)
-      else
-        std.assert(false, "unhandled mappable type")
-      end
+                                  [point],
+                                  launch : c.legion_domain_t,
+                                  [proj_args_raw],
+                                  size: c.size_t)
       [symbol_setup];
       [free_vars_setup];
       [index_access.actions];
       return [index_access.value].impl
     end
 
-    return std.register_projection_functor(false, false, depth, nil, partition_functor)
+    return std.register_projection_functor(false, true, true, depth, nil, partition_functor)
 
-  -- create fill projection functor without mappable
-  -- create projection functors with no preamble or free variables without mappable
+  -- No closure, create projection functor without args.
   else
+    -- Note: partition value comes through functor arguments. Only need
+    -- codegen for index expression.
+    local value = codegen.expr(cx, index):read(cx)
+
     local terra partition_functor(runtime : c.legion_runtime_t,
                                   parent : c.legion_logical_partition_t,
                                   [point],
                                   launch : c.legion_domain_t)
       [symbol_setup];
+      [free_vars_setup or empty_quote];
       [value.actions];
       var index : index_type = [value.value];
       var subregion = c.legion_logical_partition_get_logical_subregion_by_color_domain_point(
@@ -3000,7 +2984,7 @@ local function make_partition_projection_functor(cx, expr, loop_index, color_spa
       return subregion
     end
 
-    return std.register_projection_functor(false, true, 0, nil, partition_functor)
+    return std.register_projection_functor(false, true, false, 0, nil, partition_functor)
   end
 end
 
@@ -3305,6 +3289,10 @@ local function expr_call_setup_list_of_regions_arg(
 end
 
 local function index_launch_free_var_setup(free_vars)
+  if free_vars:is_empty() then
+    return terralib.newlist(), nil, nil
+  end
+
   local free_vars_struct = terralib.types.newstruct()
   free_vars_struct.entries = terralib.newlist()
   for _, symbol in free_vars:keys() do
@@ -3317,10 +3305,10 @@ local function index_launch_free_var_setup(free_vars)
   local free_vars_setup = terralib.newlist()
   local get_args = c.legion_index_launcher_get_projection_args
   local proj_args_get = terralib.newsymbol(free_vars_struct, "proj_args")
-  local reg_requirement = terralib.newsymbol(c.legion_region_requirement_t, "requirement")
+  local proj_args_raw = terralib.newsymbol(&opaque, "proj_args_raw")
   free_vars_setup:insert(
     quote
-      var [proj_args_get] = @[&free_vars_struct]([get_args]([reg_requirement], nil))
+      var [proj_args_get] = @[&free_vars_struct](proj_args_raw)
     end)
   for _, symbol in free_vars:keys() do
     free_vars_setup:insert(
@@ -3328,7 +3316,7 @@ local function index_launch_free_var_setup(free_vars)
         var [symbol:getsymbol()] = [proj_args_get].[tostring(symbol)]
       end)
   end
-  return free_vars_setup, free_vars_struct, reg_requirement
+  return free_vars_setup, free_vars_struct, proj_args_raw
 end
 
 local function expr_call_setup_partition_arg(
@@ -3340,7 +3328,7 @@ local function expr_call_setup_partition_arg(
   local coherence_modes = coherences:map(std.coherence_mode)
 
   local set_args = c.legion_index_launcher_set_projection_args
-  local free_vars_setup, free_vars_struct, reg_requirement =
+  local free_vars_setup, free_vars_struct, proj_args_raw =
     index_launch_free_var_setup(free_vars)
 
   free_vars_setup:insertall(loop_vars_setup)
@@ -3401,7 +3389,7 @@ local function expr_call_setup_partition_arg(
     end
     assert(add_requirement)
 
-    local projection_functor = make_partition_projection_functor(outer_cx, arg_value, loop_index, false, free_vars, free_vars_setup, reg_requirement)
+    local projection_functor = make_partition_projection_functor(outer_cx, arg_value, loop_index, false, free_vars, free_vars_setup, proj_args_raw)
 
     local requirement = terralib.newsymbol(uint, "requirement")
     local requirement_args = terralib.newlist({
@@ -4676,11 +4664,19 @@ function codegen.expr_region(cx, node)
       c.legion_physical_region_wait_until_valid([pr])
       [pr_actions]
     end
+
+    cx:add_cleanup_item(
+      quote
+        if [pr].impl ~= nil then
+          c.legion_physical_region_destroy([pr])
+          [pr].impl = nil
+        end
+      end)
   else -- make sure all regions are unmapped in inner tasks
     actions = quote
       [actions];
       c.legion_runtime_unmap_all_regions([cx.runtime], [cx.context])
-      var [pr] -- FIXME: Need to define physical region for detach to work
+      var [pr] = [c.legion_physical_region_t]{ impl = nil } -- FIXME: Need to define physical region for detach to work
     end
   end
 
@@ -7243,6 +7239,12 @@ function codegen.expr_attach_hdf5(cx, node)
 
   local new_pr = terralib.newsymbol(c.legion_physical_region_t, "new_pr")
 
+  local old_prs = data.set(
+    absolute_field_paths:map(
+      function(field_path)
+        return cx:region(region_type):physical_region(field_path)
+      end))
+
   local actions = quote
     [region.actions]
     [filename.actions]
@@ -7256,13 +7258,20 @@ function codegen.expr_attach_hdf5(cx, node)
       [filename.value], [region.value].impl, [parent], [fm], [mode.value])
     [fm_teardown]
 
-    [absolute_field_paths:map(
-       function(field_path)
+    -- FIXME: Disabled for now, seems to cause crashes in HTR test?
+    -- [old_prs:map_keys(
+    --    function(pr)
+    --      return quote
+    --        if [pr].impl ~= nil then
+    --          c.legion_physical_region_destroy([pr])
+    --          [pr].impl = nil
+    --        end
+    --      end
+    --    end)]
+    [old_prs:map_keys(
+       function(pr)
          return quote
-           -- FIXME: This is redundant (since the same physical region
-           -- will generally show up more than once. At any rate, it
-           -- would be preferable not to have to do this at all.
-           [cx:region(region_type):physical_region(field_path)] = [new_pr]
+           [pr] = [new_pr]
          end
        end)]
   end
@@ -7313,8 +7322,10 @@ function codegen.expr_detach_hdf5(cx, node)
     [pr_list:map(
        function(pr)
          return quote
+           std.assert([pr].impl ~= nil, "double free of physical region in detach")
            c.legion_runtime_detach_hdf5([cx.runtime], [cx.context], [pr])
            c.legion_physical_region_destroy([pr])
+           [pr].impl = nil
          end
        end)]
   end
@@ -9436,6 +9447,8 @@ local function stat_index_launch_setup(cx, node, domain, actions)
       [predicate_symbol], false, [mapper], [tag])
     c.legion_index_launcher_set_provenance([launcher], [get_provenance(node)])
     [task_args_loop_setup]
+    -- Always elide the result of index launches except for reductions
+    c.legion_index_launcher_set_elide_future_return([launcher], [not node.reduce_lhs])
   end
 
   local execute_fn = c.legion_index_launcher_execute

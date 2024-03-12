@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -84,5 +84,33 @@ namespace Realm {
     return os << std::hex << e.id << std::dec;
   }
 
+  /*static*/ inline Event Event::merge_events(const std::set<Event> &wait_for) {
+    // Highly inefficient, only left here for compatibility, consider using
+    // std::vector or array instead
+    std::vector<Event> events(wait_for.begin(), wait_for.end());
+    return merge_events(span<const Event>(events));
+  }
+  /*static*/ inline Event
+  Event::merge_events(const span<const Event> &wait_for) {
+    return merge_events(wait_for.data(), wait_for.size());
+  }
+  /*static*/ inline Event
+  Event::merge_events_ignorefaults(const span<const Event> &wait_for) {
+    return merge_events_ignorefaults(wait_for.data(), wait_for.size());
+  }
+  /*static*/ inline Event
+  Event::merge_events_ignorefaults(const std::set<Event> &wait_for) {
+    // Highly inefficient, only left here for compatibility, consider using
+    // std::vector or array instead
+    std::vector<Event> events(wait_for.begin(), wait_for.end());
+    return merge_events_ignorefaults(span<const Event>(events));
+  }
+  /*static*/ inline void
+  Event::advise_event_ordering(const span<Event> &happens_before,
+                               Event happens_after,
+                               bool all_must_trigger /*= true */) {
+    advise_event_ordering(happens_before.data(), happens_before.size(),
+                          happens_after, all_must_trigger);
+  }
 
 }; // namespace Realm  

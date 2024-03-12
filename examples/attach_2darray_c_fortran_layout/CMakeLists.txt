@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------#
-# Copyright 2023 Los Alamos National Laboratory
+# Copyright 2024 Los Alamos National Laboratory
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -24,6 +24,8 @@ endif()
 
 add_executable(attach_2darray attach_2darray.cc)
 target_link_libraries(attach_2darray Legion::Legion)
+target_compile_options(attach_2darray PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
+
 if(Legion_ENABLE_TESTING)
-  add_test(NAME attach_2darray COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:attach_2darray> ${Legion_TEST_ARGS}) 
+  add_test(NAME attach_2darray COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:attach_2darray> ${Legion_TEST_ARGS})
 endif()

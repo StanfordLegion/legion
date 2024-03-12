@@ -1,4 +1,4 @@
--- Copyright 2023 Stanford University
+-- Copyright 2024 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -24,6 +24,7 @@
 import "regent"
 
 local format = require("std/format")
+local launcher = require("std/launcher")
 
 local common = require("stencil_common")
 
@@ -39,104 +40,30 @@ local use_python_main = rawget(_G, "stencil_use_python_main") == true
 local c = regentlib.c
 
 -- Compile and link stencil.cc
+local cstencil
 if USE_FOREIGN then
-  local root_dir = arg[0]:match(".*/") or "./"
-  local stencil_cc = root_dir .. "stencil.cc"
-  if os.getenv('OBJNAME') then
-    local out_dir = os.getenv('OBJNAME'):match('.*/') or './'
-    stencil_so = out_dir .. "libstencil.so"
-  elseif os.getenv('SAVEOBJ') == '1' then
-    stencil_so = root_dir .. "libstencil.so"
-  else
-    stencil_so = os.tmpname() .. ".so" -- root_dir .. "stencil.so"
-  end
-  local cxx = os.getenv('CXX') or 'c++'
+  local include_flags = terralib.newlist({
+    "-DDTYPE=" .. tostring(DTYPE),
+    "-DRESTRICT=__restrict__",
+    "-DRADIUS=" .. tostring(RADIUS),
+  })
 
   local march = os.getenv('MARCH') or 'native'
-  local march_flag = '-march=' .. march
+  local march_flags = {'-march=' .. march}
   if os.execute("bash -c \"[ `uname` == 'Linux' ]\"") == 0 then
     if os.execute("grep altivec /proc/cpuinfo > /dev/null") == 0 then
-      march_flag = '-mcpu=' .. march .. ' -maltivec -mabi=altivec -mvsx'
+      march_flags = {'-mcpu=' .. march, '-maltivec', '-mabi=altivec', '-mvsx'}
     end
   end
 
-  local cxx_flags = os.getenv('CXXFLAGS') or ''
-  cxx_flags = cxx_flags .. " -O3 " .. march_flag .. " -Wall -Werror -DDTYPE=" .. tostring(DTYPE) .. " -DRESTRICT=__restrict__ -DRADIUS=" .. tostring(RADIUS)
-  if os.execute('test "$(uname)" = Darwin') == 0 then
-    cxx_flags =
-      (cxx_flags ..
-         " -dynamiclib -single_module -undefined dynamic_lookup -fPIC")
-  else
-    cxx_flags = cxx_flags .. " -shared -fPIC"
-  end
+  local flags = terralib.newlist({"-O3"})
+  flags:insertall(march_flags)
+  flags:insertall(include_flags)
 
-  local cmd = (cxx .. " " .. cxx_flags .. " " .. stencil_cc .. " -o " .. stencil_so)
-  if os.execute(cmd) ~= 0 then
-    print("Error: failed to compile " .. stencil_cc)
-    assert(false)
-  end
-  regentlib.linklibrary(stencil_so)
-  cstencil = terralib.includec("stencil.h", {"-I", root_dir,
-                              "-DDTYPE=" .. tostring(DTYPE),
-                              "-DRESTRICT=__restrict__",
-                              "-DRADIUS=" .. tostring(RADIUS)})
+  cstencil = launcher.build_library("stencil", nil, nil, flags, include_flags)
 end
 
-local map_locally = false
-do
-  local cstring = terralib.includec("string.h")
-  for _, arg in ipairs(arg) do
-    if cstring.strcmp(arg, "-map_locally") == 0 then
-      map_locally = true
-      break
-    end
-  end
-end
-
-do
-  local root_dir = arg[0]:match(".*/") or "./"
-
-  local include_path = ""
-  local include_dirs = terralib.newlist()
-  include_dirs:insert("-I")
-  include_dirs:insert(root_dir)
-  for path in string.gmatch(os.getenv("INCLUDE_PATH"), "[^;]+") do
-    include_path = include_path .. " -I " .. path
-    include_dirs:insert("-I")
-    include_dirs:insert(path)
-  end
-
-  local mapper_cc = root_dir .. "stencil_mapper.cc"
-  if os.getenv('OBJNAME') then
-    local out_dir = os.getenv('OBJNAME'):match('.*/') or './'
-    mapper_so = out_dir .. "libstencil_mapper.so"
-  elseif os.getenv('SAVEOBJ') == '1' then
-    mapper_so = root_dir .. "libstencil_mapper.so"
-  else
-    mapper_so = os.tmpname() .. ".so" -- root_dir .. "stencil_mapper.so"
-  end
-  local cxx = os.getenv('CXX') or 'c++'
-
-  local cxx_flags = os.getenv('CXXFLAGS') or ''
-  cxx_flags = cxx_flags .. " -O2 -Wall -Werror"
-  if map_locally then cxx_flags = cxx_flags .. " -DMAP_LOCALLY " end
-  if os.execute('test "$(uname)" = Darwin') == 0 then
-    cxx_flags =
-      (cxx_flags ..
-         " -dynamiclib -single_module -undefined dynamic_lookup -fPIC")
-  else
-    cxx_flags = cxx_flags .. " -shared -fPIC"
-  end
-
-  local cmd = (cxx .. " " .. cxx_flags .. " " .. include_path .. " " ..
-                 mapper_cc .. " -o " .. mapper_so)
-  if os.execute(cmd) ~= 0 then
-    print("Error: failed to compile " .. mapper_cc)
-    assert(false)
-  end
-  regentlib.linklibrary(mapper_so)
-  cmapper = terralib.includec("stencil_mapper.h", include_dirs)
-end
+local cmapper = launcher.build_library("stencil_mapper")
 
 local min = regentlib.fmin
 local max = regentlib.fmax
@@ -717,21 +644,8 @@ main:set_task_id(2)
 
 end -- not use_python_main
 
-if os.getenv('SAVEOBJ') == '1' then
-  local root_dir = arg[0]:match(".*/") or "./"
-  local out_dir = (os.getenv('OBJNAME') and os.getenv('OBJNAME'):match('.*/')) or root_dir
-  local link_flags = terralib.newlist({"-L" .. out_dir, "-lstencil_mapper"})
-  if USE_FOREIGN then
-    link_flags:insert("-lstencil")
-  end
-
-  if os.getenv('STANDALONE') == '1' then
-    os.execute('cp ' .. os.getenv('LG_RT_DIR') .. '/../bindings/regent/' ..
-        regentlib.binding_library .. ' ' .. out_dir)
-  end
-
-  local exe = os.getenv('OBJNAME') or "stencil"
-  regentlib.saveobj(main, exe, "executable", cmapper.register_mappers, link_flags)
-else
-  regentlib.start(main, cmapper.register_mappers)
+local link_flags = terralib.newlist({"-lstencil_mapper"})
+if USE_FOREIGN then
+  link_flags:insert("-lstencil")
 end
+launcher.launch(main, "stencil", cmapper.register_mappers, link_flags)

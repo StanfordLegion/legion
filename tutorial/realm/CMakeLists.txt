@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------#
-# Copyright 2023 NVIDIA Corp.
+# Copyright 2024 NVIDIA Corp.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -14,14 +14,11 @@
 # limitations under the License.
 #------------------------------------------------------------------------------#
 
-cmake_minimum_required(VERSION 3.1)
+cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
 
 if(NOT Legion_SOURCE_DIR)
   find_package(Legion REQUIRED)
 endif()
-
-# enable build warnings for all tutorials/examples/tests/etc.
-add_compile_options(${CXX_BUILD_WARNING_FLAGS})
 
 add_subdirectory(hello_world)
 add_subdirectory(machine_model)
@@ -36,7 +33,7 @@ add_subdirectory(subgraph)
 add_subdirectory(reservation)
 add_subdirectory(completion_queue)
 add_subdirectory(profiling)
-# FIXME: HIP does not appear to have full support for surf2Dwrite
+# FIXME: https://github.com/StanfordLegion/legion/issues/1475
 if (REALM_USE_CUDA)# OR REALM_USE_HIP)
   add_subdirectory(cuda_interop)
 endif ()

@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -618,6 +618,24 @@ namespace Realm {
     return new GASNet1Module;
   }
 
+  void GASNet1Module::get_shared_peers(NodeSet &shared_peers)
+  {
+    std::vector<gasnet_nodeinfo_t> node_info_table(gasnet_nodes());
+    gasnet_getNodeInfo(node_info_table.data(), node_info_table.size());
+    gex_Rank_t my_host = node_info_table[Network::my_node_id].host;
+    int rank_id = 0;
+    for(gasnet_nodeinfo_t &node_info : node_info_table) {
+      if((rank_id != Network::my_node_id) && (node_info.host == my_host)) {
+        shared_peers.add(rank_id);
+      }
+      rank_id++;
+    }
+    if(shared_peers.empty()) {
+      // if gasnet can't return any shared peers (like if the PSHM feature is disabled),
+      // then just assume all_peers are shareable
+      shared_peers = Network::all_peers;
+    }
+  }
   // actual parsing of the command line should wait until here if at all
   //  possible
   void GASNet1Module::parse_command_line(RuntimeImpl *runtime,
@@ -656,6 +674,9 @@ namespace Realm {
       if((*it)->base != 0) continue;
       // must be host memory
       if((*it)->memtype != NetworkSegmentInfo::HostMem) continue;
+      // must not be asking for ODR
+      if(((*it)->flags & NetworkSegmentInfo::OptionFlags::OnDemandRegistration) != 0)
+        continue;
       // TODO: consider alignment
       inseg_bytes += (*it)->bytes;
     }
@@ -746,6 +767,35 @@ namespace Realm {
 		       GASNET_COLL_FLAGS);
   }
 
+  void GASNet1Module::allgatherv(const char *val_in, size_t bytes,
+                                 std::vector<char> &vals_out,
+                                 std::vector<size_t> &lengths)
+  {
+    lengths.resize(Network::max_node_id + 1);
+
+    // Collect all the sizes of the buffers
+    gasnet_coll_gather_all(GASNET_TEAM_ALL, lengths.data(), &bytes, sizeof(bytes),
+                           GASNET_COLL_FLAGS);
+
+    // Set up the receive buffer and describe the final buffer layout
+    size_t total = 0;
+    std::vector<int> sizes(Network::max_node_id + 1);
+
+    for(size_t idx = 0; idx < sizes.size(); idx++) {
+      sizes[idx] = static_cast<int>(lengths[idx]);
+      total += lengths[idx];
+    }
+    vals_out.resize(total);
+
+    // Now perform the emulated all_gatherv by having each rank in turn broadcast their
+    // data, each of which gets placed in a specific offset within the buffer
+    char *buffer = vals_out.data();
+    for(int rank = 0; rank < (Network::max_node_id + 1); rank++) {
+      broadcast(rank, val_in, buffer, sizes[rank]);
+      buffer += sizes[rank];
+    }
+  }
+
   size_t GASNet1Module::sample_messages_received_count(void)
   {
     return quiescence_checker.sample_messages_received_count();
@@ -810,28 +860,32 @@ namespace Realm {
     return impl;
   }
 
-  ActiveMessageImpl *GASNet1Module::create_active_message_impl(NodeID target,
-							       unsigned short msgid,
-							       size_t header_size,
-							       size_t max_payload_size,
-							       const void *src_payload_addr,
-							       size_t src_payload_lines,
-							       size_t src_payload_line_stride,
-							       const RemoteAddress& dest_payload_addr,
-							       void *storage_base,
-							       size_t storage_size)
+  ActiveMessageImpl *GASNet1Module::create_active_message_impl(
+      NodeID target, unsigned short msgid, size_t header_size, size_t max_payload_size,
+      const LocalAddress &src_payload_addr, size_t src_payload_lines,
+      size_t src_payload_line_stride, const RemoteAddress &dest_payload_addr,
+      void *storage_base, size_t storage_size)
+  {
+    assert(storage_size >= sizeof(GASNet1MessageImpl));
+    char *src_ptr =
+        (static_cast<char *>(src_payload_addr.segment->base) + src_payload_addr.offset);
+    void *dest_ptr = reinterpret_cast<void *>(dest_payload_addr.ptr);
+    assert(dest_ptr != 0);
+    GASNet1MessageImpl *impl = new(storage_base)
+        GASNet1MessageImpl(target, msgid, header_size, max_payload_size, src_ptr,
+                           src_payload_lines, src_payload_line_stride, dest_ptr);
+    return impl;
+  }
+
+  ActiveMessageImpl *GASNet1Module::create_active_message_impl(
+      NodeID target, unsigned short msgid, size_t header_size, size_t max_payload_size,
+      const RemoteAddress &dest_payload_addr, void *storage_base, size_t storage_size)
   {
     assert(storage_size >= sizeof(GASNet1MessageImpl));
     void *dest_ptr = reinterpret_cast<void *>(dest_payload_addr.ptr);
     assert(dest_ptr != 0);
-    GASNet1MessageImpl *impl = new(storage_base) GASNet1MessageImpl(target,
-								    msgid,
-								    header_size,
-								    max_payload_size,
-								    src_payload_addr,
-								    src_payload_lines,
-								    src_payload_line_stride,
-								    dest_ptr);
+    GASNet1MessageImpl *impl = new(storage_base) GASNet1MessageImpl(
+        target, msgid, header_size, max_payload_size, 0, 0, 0, dest_ptr);
     return impl;
   }
 
@@ -899,11 +953,11 @@ namespace Realm {
   }
 
   size_t GASNet1Module::recommended_max_payload(NodeID target,
-						const void *data, size_t bytes_per_line,
-						size_t lines, size_t line_stride,
-						const RemoteAddress& dest_payload_addr,
-						bool with_congestion,
-						size_t header_size)
+                                                const LocalAddress &src_payload_addr,
+                                                size_t bytes_per_line, size_t lines,
+                                                size_t line_stride,
+                                                const RemoteAddress &dest_payload_addr,
+                                                bool with_congestion, size_t header_size)
   {
     // RDMA uses long, but don't go above 4MB per packet for responsiveness
     // we also need the source to be contiguous, so clamp at a single

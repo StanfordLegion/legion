@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -74,6 +74,23 @@ namespace Realm {
     bool exists(void) const;
 
     /**
+     * Destroy the sparsity map.
+     * @param wait_on a precondition event
+     */
+    void destroy(Event wait_on = Event::NO_EVENT);
+
+    /**
+     * Add one reference to the sparsity map.
+     */
+    void add_references(unsigned count = 1);
+
+    /**
+     * Remove references from the sparsity map.
+     * @param count a number of references to remove
+     */
+    void remove_references(unsigned count = 1);
+
+    /**
      * Lookup the public implementation object for this sparsity map.
      * @return the public implementation object for this sparsity map
      */
@@ -144,58 +161,64 @@ namespace Realm {
     * @param precise if true, the sparsity map is computed precisely
     * @return an event that triggers when the sparsity map is valid
     */
-   Event make_valid(bool precise = true);
+    REALM_PUBLIC_API
+    Event make_valid(bool precise = true);
 
-   /**
-    * Check if this sparsity map is valid.
-    * @param precise if true, the sparsity map is computed precisely
-    * @return true if the sparsity map is valid, false otherwise
-    */
-   bool is_valid(bool precise = true);
+    /**
+     * Check if this sparsity map is valid.
+     * @param precise if true, the sparsity map is computed precisely
+     * @return true if the sparsity map is valid, false otherwise
+     */
+    REALM_PUBLIC_API
+    bool is_valid(bool precise = true);
 
-   /**
-    * Get the entries of this sparsity map.
-    * A sparsity map entry is similar to an IndexSpace - it's a rectangle and
-    * optionally a reference to another SparsityMap OR a pointer to a
-    * HierarchicalBitMap, which is a dense array of bits describing the
-    * validity of each point in the rectangle.
-    * @return the entries of this sparsity map
-    */
-   const std::vector<SparsityMapEntry<N, T> >& get_entries(void);
+    /**
+     * Get the entries of this sparsity map.
+     * A sparsity map entry is similar to an IndexSpace - it's a rectangle and
+     * optionally a reference to another SparsityMap OR a pointer to a
+     * HierarchicalBitMap, which is a dense array of bits describing the
+     * validity of each point in the rectangle.
+     * @return the entries of this sparsity map
+     */
+    REALM_PUBLIC_API
+    const std::vector<SparsityMapEntry<N, T>> &get_entries(void);
 
-   /**
-    * Get the approximate rectangles of this sparsity map.
-    * A sparsity map can exist in an approximate form as well - this is a
-    * bounded list of rectangles that are guaranteed to cover all actual
-    * entries.
-    * @return the approximate rectangles of this sparsity map
-    */
-   const std::vector<Rect<N, T> >& get_approx_rects(void);
+    /**
+     * Get the approximate rectangles of this sparsity map.
+     * A sparsity map can exist in an approximate form as well - this is a
+     * bounded list of rectangles that are guaranteed to cover all actual
+     * entries.
+     * @return the approximate rectangles of this sparsity map
+     */
+    REALM_PUBLIC_API
+    const std::vector<Rect<N, T>> &get_approx_rects(void);
 
-   /**
-    * Check if this sparsity map overlaps another sparsity map.
-    * This method is not cheap - try bounds-based checks first (see
-    * IndexSpace::overlaps).
-    * @param other the other sparsity map
-    * @param bounds the bounds of the other sparsity map
-    * @param approx if true, use the approximate rectangles of this sparsity map
-    * @return true if this sparsity map overlaps the other sparsity map, false
-    * otherwise
-    */
-   bool overlaps(SparsityMapPublicImpl<N, T>* other, const Rect<N, T>& bounds,
-                 bool approx);
+    /**
+     * Check if this sparsity map overlaps another sparsity map.
+     * This method is not cheap - try bounds-based checks first (see
+     * IndexSpace::overlaps).
+     * @param other the other sparsity map
+     * @param bounds the bounds of the other sparsity map
+     * @param approx if true, use the approximate rectangles of this sparsity map
+     * @return true if this sparsity map overlaps the other sparsity map, false
+     * otherwise
+     */
+    REALM_PUBLIC_API
+    bool overlaps(SparsityMapPublicImpl<N, T> *other, const Rect<N, T> &bounds,
+                  bool approx);
 
-   /**
-    * Attempt to compute a set of covering rectangles.
-    * See IndexSpace<N,T>::compute_covering for a description of this.
-    * @param bounds the bounds of the rectangle
-    * @param max_rects Maximum number of rectangles to use (0 = no limit).
-    * @param max_overhead Maximum relative storage overhead (0 = no limit).
-    * @param covering Vector to fill in with covering rectangles.
-    * @return true if the covering was computed, false otherwise
-    */
-   bool compute_covering(const Rect<N, T>& bounds, size_t max_rects,
-                         int max_overhead, std::vector<Rect<N, T> >& covering);
+    /**
+     * Attempt to compute a set of covering rectangles.
+     * See IndexSpace<N,T>::compute_covering for a description of this.
+     * @param bounds the bounds of the rectangle
+     * @param max_rects Maximum number of rectangles to use (0 = no limit).
+     * @param max_overhead Maximum relative storage overhead (0 = no limit).
+     * @param covering Vector to fill in with covering rectangles.
+     * @return true if the covering was computed, false otherwise
+     */
+    REALM_PUBLIC_API
+    bool compute_covering(const Rect<N, T> &bounds, size_t max_rects, int max_overhead,
+                          std::vector<Rect<N, T>> &covering);
 
   protected:
     atomic<bool> entries_valid, approx_valid;

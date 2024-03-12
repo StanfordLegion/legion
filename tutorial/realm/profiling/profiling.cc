@@ -1,4 +1,4 @@
-/* Copyright 2023 NVIDIA Corporation
+/* Copyright 2024 NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -63,15 +63,21 @@ struct ComputeProfResultWrapper {
   UserEvent done;
 };
 
+struct CopyInstInfo {
+  std::vector<RegionInstance> src_insts;
+  std::vector<RegionInstance> dst_insts;
+  std::vector<FieldID> src_fids;
+  std::vector<FieldID> dst_fids;
+  int request_type;
+  unsigned int num_hops;
+};
+
 struct CopyProfResult {
   // performance metrics from OperationTimeline
   long long start_time;
   long long complete_time;
   // performance metrics from OperationCopyInfo
-  unsigned long long src_inst_id;
-  unsigned long long dst_inst_id;
-  int request_type;
-  unsigned int num_hops;
+  std::vector<CopyInstInfo> inst_info;
   // performance metrics from OperationMemoryUsage
   Memory src_mem;
   Memory dst_mem;
@@ -80,6 +86,7 @@ struct CopyProfResult {
 
 struct CopyProfResultWrapper {
   struct CopyProfResult *metrics;
+  size_t inst_size;
   UserEvent done;
 };
 
@@ -136,10 +143,21 @@ void copy_prof_task(const void *args, size_t arglen,
   }
   ProfilingMeasurements::OperationCopyInfo copy_info;
   if (resp.get_measurement(copy_info)) {
-    metrics->src_inst_id = copy_info.inst_info[0].src_inst_id.id;
-    metrics->dst_inst_id = copy_info.inst_info[0].dst_inst_id.id;
-    metrics->request_type = copy_info.inst_info[0].request_type;
-    metrics->num_hops = copy_info.inst_info[0].num_hops;
+    assert(result->inst_size == copy_info.inst_info.size());
+    metrics->inst_info.resize(result->inst_size);
+    for (size_t i = 0; i < result->inst_size; i++) {
+      metrics->inst_info[i].src_insts = copy_info.inst_info[i].src_insts;
+      metrics->inst_info[i].dst_insts = copy_info.inst_info[i].dst_insts;
+      metrics->inst_info[i].request_type = copy_info.inst_info[i].request_type;
+      metrics->inst_info[i].num_hops = copy_info.inst_info[i].num_hops;
+      metrics->inst_info[i].src_fids = copy_info.inst_info[i].src_fields;
+      metrics->inst_info[i].dst_fids = copy_info.inst_info[i].dst_fields;
+      // fill has no src insts
+      if (metrics->inst_info[i].request_type == ProfilingMeasurements::OperationCopyInfo::FILL) {
+        assert(metrics->inst_info[i].src_insts.size() == 0);
+        assert(metrics->inst_info[i].src_fids.size() == 0);
+      }
+    }
   }
   ProfilingMeasurements::OperationMemoryUsage memory_usage;
   if (resp.get_measurement(memory_usage)) {
@@ -239,11 +257,12 @@ void main_task(const void *args, size_t arglen,
   compute_task_args.cpu_idx = 0;
   worker_procs[0].spawn(COMPUTE_TASK, &compute_task_args, sizeof(ComputeTaskArgs), task_prs).wait();
 
-  // second, profile a copy and instance creation
+  // second, profile a fill and a copy and instance creation
   size_t elements = 1024;
   IndexSpace<1> ispace = Rect<1>(0, elements - 1);
   std::map<FieldID, size_t> field_sizes;
   field_sizes[FID_BASE] = sizeof(int);
+  field_sizes[FID_BASE+1] = sizeof(int);
   
   // create instances on cpu memory
   Machine::MemoryQuery mq = Machine::MemoryQuery(Machine::get_machine())
@@ -277,41 +296,62 @@ void main_task(const void *args, size_t arglen,
   RegionInstance::create_instance(dst_inst, cpu_mem, ispace, field_sizes,
 		  0, dst_inst_prs).wait();
 
-  // fill the instance with some data for verification
+  // fill the instance with some data for verification and profile the fill
+  CopyProfResult fill_metrics;
+  UserEvent fill_done = UserEvent::create_user_event();
+  CopyProfResultWrapper fill_result;
   {
     int fill_value = 10;
-    std::vector<CopySrcDstField> srcs(1);
+    std::vector<CopySrcDstField> srcs(2);
     srcs[0].set_fill(fill_value);
-    std::vector<CopySrcDstField> dsts(1);
+    srcs[1].set_fill(fill_value+1);
+    std::vector<CopySrcDstField> dsts(2);
     dsts[0].set_field(src_inst, FID_BASE, sizeof(int));
-    ispace.copy(srcs, dsts, ProfilingRequestSet()).wait();
+    dsts[1].set_field(src_inst, FID_BASE+1, sizeof(int));
+    fill_result.metrics = &fill_metrics;
+    fill_result.done = fill_done;
+    fill_result.inst_size = 2; // fill can only work on single field, so we need an array of two
+    ProfilingRequestSet fill_prs;
+    fill_prs.add_request(profile_proc, COPY_PROF_TASK, &fill_result, sizeof(CopyProfResultWrapper))
+      .add_measurement<ProfilingMeasurements::OperationTimeline>()
+      .add_measurement<ProfilingMeasurements::OperationCopyInfo>()
+      .add_measurement<ProfilingMeasurements::OperationMemoryUsage>();
+    ispace.copy(srcs, dsts, fill_prs).wait();
   }
 
   // launch a copy from src to dst and profile the copy
-  std::vector<CopySrcDstField> srcs(1);
-  srcs[0].set_field(src_inst, FID_BASE, sizeof(int));
-  std::vector<CopySrcDstField> dsts(1);
-  dsts[0].set_field(dst_inst, FID_BASE, sizeof(int));
-
   CopyProfResult copy_metrics;
   UserEvent copy_done = UserEvent::create_user_event();
   CopyProfResultWrapper copy_result;
-  copy_result.metrics = &copy_metrics;
-  copy_result.done = copy_done;
-  ProfilingRequestSet copy_prs;
-  copy_prs.add_request(profile_proc, COPY_PROF_TASK, &copy_result, sizeof(CopyProfResultWrapper))
-    .add_measurement<ProfilingMeasurements::OperationTimeline>()
-    .add_measurement<ProfilingMeasurements::OperationCopyInfo>()
-    .add_measurement<ProfilingMeasurements::OperationMemoryUsage>();
-  ispace.copy(srcs, dsts, copy_prs).wait();
+  {
+    std::vector<CopySrcDstField> srcs(2);
+    srcs[0].set_field(src_inst, FID_BASE, sizeof(int));
+    srcs[1].set_field(src_inst, FID_BASE+1, sizeof(int));
+    std::vector<CopySrcDstField> dsts(2);
+    dsts[0].set_field(dst_inst, FID_BASE, sizeof(int));
+    dsts[1].set_field(dst_inst, FID_BASE+1, sizeof(int));
+
+    copy_result.metrics = &copy_metrics;
+    copy_result.inst_size = 1;
+    copy_result.done = copy_done;
+    ProfilingRequestSet copy_prs;
+    copy_prs.add_request(profile_proc, COPY_PROF_TASK, &copy_result, sizeof(CopyProfResultWrapper))
+      .add_measurement<ProfilingMeasurements::OperationTimeline>()
+      .add_measurement<ProfilingMeasurements::OperationCopyInfo>()
+      .add_measurement<ProfilingMeasurements::OperationMemoryUsage>();
+    ispace.copy(srcs, dsts, copy_prs).wait();
+  }
 
   // verify the result of copy
-  AffineAccessor<int, 1> acc(dst_inst, FID_BASE);
-  for(IndexSpaceIterator<1, int> it(ispace); it.valid; it.step()) {
-    for(PointInRectIterator<1, int> it2(it.rect); it2.valid; it2.step()) {
-      int act = acc[it2.p];
-      if(act != 10) {
-        log_app.error() << "mismatch: [" << it2.p << "] = " << act << " (expected 1)";
+  for (FieldID fid = FID_BASE; fid <= FID_BASE+1; fid++) {
+    AffineAccessor<int, 1> acc(dst_inst, fid);
+    for(IndexSpaceIterator<1, int> it(ispace); it.valid; it.step()) {
+      for(PointInRectIterator<1, int> it2(it.rect); it2.valid; it2.step()) {
+        int act = acc[it2.p];
+        int expected = 10 + fid - FID_BASE;
+        if(act != expected) {
+          log_app.error() << "mismatch: [" << it2.p << "] = " << act << " (expected " << expected << ")" ;
+        }
       }
     }
   }
@@ -327,13 +367,26 @@ void main_task(const void *args, size_t arglen,
                 task_metrics.proc.id,
                 task_metrics.ready_time, task_metrics.start_time, task_metrics.complete_time, task_total_time, task_wait_time);
 
+  fill_result.done.wait();
+  for (int i = 0; i < 2; i++) {
+    long long fill_total_time = fill_metrics.complete_time - fill_metrics.start_time;
+    log_app.print("Fill start at %lld, complete at %lld, total time %lld ns, "
+                  "dst inst %llx on memory %llx, size %zu (B), num hops %u, dst fid %d",  
+                  fill_metrics.start_time, fill_metrics.complete_time, fill_total_time,
+                  fill_metrics.inst_info[i].dst_insts[0].id, fill_metrics.dst_mem.id,
+                  fill_metrics.size, fill_metrics.inst_info[i].num_hops, 
+                  fill_metrics.inst_info[i].dst_fids[0]);
+  }
+
   copy_result.done.wait();
   long long copy_total_time = copy_metrics.complete_time - copy_metrics.start_time;
   log_app.print("Copy start at %lld, complete at %lld, total time %lld ns, "
-                "src inst %llx on memory %llx, dst inst %llx on memory %llx, size %zu (B), num hops %u",  
+                "src inst %llx on memory %llx, dst inst %llx on memory %llx, size %zu (B), num hops %u, src fid (%d, %d), dst fid (%d, %d)",  
                 copy_metrics.start_time, copy_metrics.complete_time, copy_total_time,
-                copy_metrics.src_inst_id, copy_metrics.src_mem.id, copy_metrics.dst_inst_id, copy_metrics.dst_mem.id,
-                copy_metrics.size, copy_metrics.num_hops);
+                copy_metrics.inst_info[0].src_insts[0].id, copy_metrics.src_mem.id, copy_metrics.inst_info[0].dst_insts[0].id, copy_metrics.dst_mem.id,
+                copy_metrics.size, copy_metrics.inst_info[0].num_hops, 
+                copy_metrics.inst_info[0].src_fids[0], copy_metrics.inst_info[0].src_fids[1], 
+                copy_metrics.inst_info[0].dst_fids[0], copy_metrics.inst_info[0].dst_fids[1]);
 
   src_inst_done.wait();
   log_app.print("Src instance on memory %llx, size %zu (B), created at %lld, ready at %lld, destroyed at %lld",

@@ -1,4 +1,4 @@
--- Copyright 2023 Stanford University
+-- Copyright 2024 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -22,49 +22,8 @@ import "regent"
 local parallel = rawget(_G, "pennant_parallel") ~= false
 
 -- Compile and link pennant.cc
-do
-  local root_dir = arg[0]:match(".*/") or "./"
-
-  local include_path = ""
-  local include_dirs = terralib.newlist()
-  include_dirs:insert("-I")
-  include_dirs:insert(root_dir)
-  for path in string.gmatch(os.getenv("INCLUDE_PATH"), "[^;]+") do
-    include_path = include_path .. " -I " .. path
-    include_dirs:insert("-I")
-    include_dirs:insert(path)
-  end
-
-  local pennant_cc = root_dir .. "pennant.cc"
-  if os.getenv('OBJNAME') then
-    local out_dir = os.getenv('OBJNAME'):match('.*/') or './'
-    pennant_so = out_dir .. "libpennant.so"
-  elseif os.getenv('SAVEOBJ') == '1' then
-    pennant_so = root_dir .. "libpennant.so"
-  else
-    pennant_so = os.tmpname() .. ".so" -- root_dir .. "pennant.so"
-  end
-  local cxx = os.getenv('CXX') or 'c++'
-
-  local cxx_flags = os.getenv('CXXFLAGS') or ''
-  cxx_flags = cxx_flags .. " -O2 -Wall -Werror"
-  if os.execute('test "$(uname)" = Darwin') == 0 then
-    cxx_flags =
-      (cxx_flags ..
-         " -dynamiclib -single_module -undefined dynamic_lookup -fPIC")
-  else
-    cxx_flags = cxx_flags .. " -shared -fPIC"
-  end
-
-  local cmd = (cxx .. " " .. cxx_flags .. " " .. include_path .. " " ..
-                pennant_cc .. " -o " .. pennant_so)
-  if os.execute(cmd) ~= 0 then
-    print("Error: failed to compile " .. pennant_cc)
-    assert(false)
-  end
-  regentlib.linklibrary(pennant_so)
-  cpennant = terralib.includec("pennant.h", include_dirs)
-end
+local launcher = require("std/launcher")
+cpennant = launcher.build_library("pennant")
 
 -- Also copy input files into the destination directory.
 if os.getenv('STANDALONE') == '1' and os.getenv('OBJNAME') then

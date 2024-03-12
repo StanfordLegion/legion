@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -142,8 +142,6 @@ namespace Legion {
     template<int DIM, typename T> __CUDA_HD__
     DomainPoint(const Point<DIM,T> &rhs);
 
-    template<unsigned DIM>
-    operator LegionRuntime::Arrays::Point<DIM>(void) const;
     template<int DIM, typename T> __CUDA_HD__
     operator Point<DIM,T>(void) const;
 
@@ -222,19 +220,14 @@ namespace Legion {
       }
     };
 
-    template<int DIM>
-    static DomainPoint from_point(
-        typename LegionRuntime::Arrays::Point<DIM> p);
-
     __CUDA_HD__
     Color get_color(void) const;
     __CUDA_HD__
     coord_t get_index(void) const;
     __CUDA_HD__
     int get_dim(void) const;
-
-    template <int DIM>
-    LegionRuntime::Arrays::Point<DIM> get_point(void) const; 
+    __CUDA_HD__
+    inline bool exists(void) const { return (get_dim() > 0); }
 
     __CUDA_HD__
     bool is_null(void) const;
@@ -268,6 +261,8 @@ namespace Legion {
     __CUDA_HD__
     Domain(const Domain& other);
     __CUDA_HD__
+    Domain(Domain &&other) noexcept;
+    __CUDA_HD__
     Domain(const DomainPoint &lo, const DomainPoint &hi);
 
     template<int DIM, typename T> __CUDA_HD__
@@ -278,6 +273,8 @@ namespace Legion {
 
     __CUDA_HD__
     Domain& operator=(const Domain& other);
+    __CUDA_HD__
+    Domain& operator=(Domain &&other) noexcept;
     template<int DIM, typename T> __CUDA_HD__
     Domain& operator=(const Rect<DIM,T> &other);
     template<int DIM, typename T> __CUDA_HD__
@@ -309,15 +306,6 @@ namespace Legion {
 
     template<int DIM, typename T> __CUDA_HD__
     Rect<DIM,T> bounds(void) const;
-
-    template<int DIM>
-    static Domain from_rect(typename LegionRuntime::Arrays::Rect<DIM> r);
-
-    template<int DIM>
-    static Domain from_point(typename LegionRuntime::Arrays::Point<DIM> p);
-
-    template<int DIM>
-    operator LegionRuntime::Arrays::Rect<DIM>(void) const;
 
     template<int DIM, typename T> __CUDA_HD__
     operator Rect<DIM,T>(void) const;
@@ -360,9 +348,6 @@ namespace Legion {
     // WARNING: only works with structured Domain.
     Domain convex_hull(const DomainPoint &p) const;
 
-    template <int DIM>
-    LegionRuntime::Arrays::Rect<DIM> get_rect(void) const; 
-
     class DomainPointIterator {
     public:
       DomainPointIterator(const Domain& d);
@@ -379,7 +364,7 @@ namespace Legion {
       DomainPoint p;
       // Note: GCC 4.9 breaks even with C++11, so for now peg this on
       // C++14 until we deprecate GCC 4.9 support.
-#if __cplusplus >= 201402L
+#if !defined(__GNUC__) || (__GNUC__ >= 5)
       // Realm's iterators are copyable by value so we can just always
       // copy them in and out of some buffers
       static_assert(std::is_trivially_copyable<

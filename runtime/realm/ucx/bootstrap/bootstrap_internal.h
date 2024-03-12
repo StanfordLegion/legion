@@ -1,5 +1,5 @@
 
-/* Copyright 2023 NVIDIA Corporation
+/* Copyright 2024 NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,7 +20,7 @@
 #define BOOTSTRAP_INTERNAL_H
 
 #include <cstddef>
-#include "bootstrap.h"
+#include "realm/ucx/bootstrap/bootstrap.h"
 
 #define BOOTSTRAP_MPI_PLUGIN "realm_ucp_bootstrap_mpi.so"
 

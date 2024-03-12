@@ -1,6 +1,7 @@
 .eggs
 dist
 *.egg-info
+build/
 
 /cached_legion.h
 /legion_builtin_cffi.py

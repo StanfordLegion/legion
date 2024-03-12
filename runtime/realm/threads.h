@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -338,6 +338,13 @@ namespace Realm {
     };
 
     void add_listener(NotificationListener *listener);
+
+    // This method is used to set affinity for the calling thread
+    // if begin == -1 or end == -1, the thread will be mapped to all the cores
+    bool set_affinity(int begin = -1, int end = -1);
+
+    friend std::ostream &operator<<(std::ostream &stream,
+                                    const CoreReservation &core_resv);
 
   public:
     std::string name;

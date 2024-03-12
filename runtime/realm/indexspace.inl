@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -358,10 +358,12 @@ namespace Realm {
   // class IndexSpace<N,T>
 
   template <int N, typename T>
+  REALM_CUDA_HD
   inline IndexSpace<N,T>::IndexSpace(void)
   {}
 
   template <int N, typename T>
+  REALM_CUDA_HD
   inline IndexSpace<N,T>::IndexSpace(const Rect<N,T>& _bounds)
     : bounds(_bounds)
   {
@@ -429,6 +431,7 @@ namespace Realm {
 
   // constructs a guaranteed-empty index space
   template <int N, typename T>
+  REALM_CUDA_HD
   inline /*static*/ IndexSpace<N,T> IndexSpace<N,T>::make_empty(void)
   {
     return IndexSpace<N,T>(Rect<N,T>::make_empty());
@@ -443,6 +446,7 @@ namespace Realm {
   // true if we're SURE that there are no points in the space (may be imprecise due to
   //  lazy loading of sparsity data)
   template <int N, typename T>
+  REALM_CUDA_HD
   inline bool IndexSpace<N,T>::empty(void) const
   {
     return bounds.empty();

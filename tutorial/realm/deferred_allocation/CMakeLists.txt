@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------#
-# Copyright 2023 NVIDIA Corp.
+# Copyright 2024 NVIDIA Corp.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
 # limitations under the License.
 #------------------------------------------------------------------------------#
 
-cmake_minimum_required(VERSION 3.1)
+cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
 project(RealmExample_deferred_allocation)
 
 # Only search if were building stand-alone and not as part of Legion
@@ -24,6 +24,7 @@ endif()
 
 add_executable(realm_deferred_allocation deferred_allocation.cc)
 target_link_libraries(realm_deferred_allocation Legion::Realm)
+target_compile_options(realm_deferred_allocation PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
 
 if(Legion_ENABLE_TESTING)
   add_test(NAME realm_deferred_allocation COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:realm_deferred_allocation> ${Legion_TEST_ARGS})

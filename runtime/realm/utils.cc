@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,13 +18,34 @@
 //  reduce the chance of conflicts
 
 #include "realm/utils.h"
+#include "realm/logging.h"
+
+#include <cstring> // strerror_*
+#include <type_traits> // std::is_same
 
 // on an x86 system with SSE4.2, we can use the builtin CRC32(C) instruction
 #ifdef __SSE4_2__
 #include <smmintrin.h>
 #endif
 
+#if defined(REALM_ON_WINDOWS)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN 1
+#endif
+#include <windows.h>
+#elif defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS)
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <unistd.h>
+#endif
+
+#ifndef MSG_CMSG_CLOEXEC
+#define MSG_CMSG_CLOEXEC 0
+#endif
+
 namespace Realm {
+
+  Logger log_mailbox("mailbox");
 
   // dummy variable used to make sure utils.cc ends up in binary
   int force_utils_cc_linkage;
@@ -106,6 +127,237 @@ namespace Realm {
     return accum;
 #endif
   }
-  
 
+#ifndef REALM_ON_WINDOWS
+  template<typename T>
+  struct ErrorHelper {
+  public:
+    static inline const char* process_error_message(T result, char *buffer)
+    {
+      // this is the version of strerror_r that returns an int so make
+      // sure that it is not zero and then return the buffer
+      assert(result == 0);
+      return buffer;
+    }
+  };
+
+  template<>
+  struct ErrorHelper<char*> {
+  public:
+    static inline const char* process_error_message(char *result, char *buffer)
+    {
+      // this is the version of strerror_r that returns a string so use
+      // that if it is not null
+      return (result == nullptr) ? buffer : result;
+    }
+  };
+#endif
+  
+  // allocation for thread-local error buffer for reporting error messages
+  namespace ThreadLocal {
+    REALM_THREAD_LOCAL char error_buffer[REALM_ERROR_BUFFER_SIZE];
+  }
+
+  const char* realm_strerror(int err)
+  {
+#ifdef REALM_ON_WINDOWS
+    int result = strerror_s<REALM_ERROR_BUFFER_SIZE>(ThreadLocal::error_buffer, err);
+    assert(result == 0);
+    return ThreadLocal::error_buffer;
+#else
+    // Deal with the fact that strerror_r has two different possible
+    // return types on different systems, call the right one based
+    // on the return type and get the result
+    auto result = strerror_r(err, ThreadLocal::error_buffer, REALM_ERROR_BUFFER_SIZE);
+    // Return types should either be int or char*
+    static_assert(
+      std::is_same<decltype(result),int>::value ||
+      std::is_same<decltype(result),char*>::value,
+      "Unknown strerror_r return type");
+    return ErrorHelper<decltype(result)>::process_error_message(result, ThreadLocal::error_buffer);
+#endif
+  }
+
+  unsigned ctz(uint64_t v)
+  {
+#ifdef REALM_ON_WINDOWS
+    unsigned long index;
+#ifdef _WIN64
+    if(_BitScanForward64(&index, v))
+      return index;
+#else
+    unsigned v_lo = v;
+    unsigned v_hi = v >> 32;
+    if(_BitScanForward(&index, v_lo))
+      return index;
+    else if(_BitScanForward(&index, v_hi))
+      return index + 32;
+#endif
+    else
+      return 0;
+#else
+    return __builtin_ctzll(v);
+#endif
+  }
+#if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS)
+  static const char MAILBOX_PREFIX[] = "@realm_uds.";
+#endif
+
+  OsHandle ipc_mailbox_create(const std::string &name)
+  {
+#if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS)
+    struct sockaddr_un addr = {};
+    addr.sun_family = AF_UNIX;
+    std::strncpy(addr.sun_path, MAILBOX_PREFIX, sizeof(addr.sun_path) - 1);
+    std::strncat(addr.sun_path, name.c_str(),
+                 sizeof(addr.sun_path) - sizeof(MAILBOX_PREFIX));
+    // Use the abstract namespace so we don't need to unlink the file system
+    // https://man7.org/linux/man-pages/man7/unix.7.html
+    addr.sun_path[0] = 0;
+    // Use a DGRAM socket instead of a stream socket in order to create a connection-less,
+    // bidirectional socket that mimics a mailbox
+    OsHandle fd = socket(AF_UNIX, SOCK_DGRAM, 0);
+    if(fd < 0) {
+      log_mailbox.info("Failed to create socket! errno: %s\n", realm_strerror(errno));
+      return Realm::INVALID_OS_HANDLE;
+    }
+    if(bind(fd, reinterpret_cast<struct sockaddr *>(&addr), sizeof(addr)) != 0) {
+      log_mailbox.info("Failed to bind socket! errno: %s\n", realm_strerror(errno));
+      close(fd);
+      return Realm::INVALID_OS_HANDLE;
+    }
+    return fd;
+#else
+    // TODO: Add support for windows
+    return Realm::INVALID_OS_HANDLE;
+#endif
+  }
+
+  bool ipc_mailbox_send(OsHandle mailbox, const std::string &to,
+                        const std::vector<OsHandle> &handles, const void *data,
+                        size_t data_sz)
+  {
+#if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS)
+    struct msghdr msg;
+    struct sockaddr_un addr;
+    struct iovec in_band_msg;
+    std::vector<char> control_buffer(CMSG_SPACE(handles.size() * sizeof(handles[0])), 0);
+
+    memset(&addr, 0, sizeof(addr));
+    memset(&in_band_msg, 0, sizeof(in_band_msg));
+    memset(&msg, 0, sizeof(msg));
+
+    std::strncpy(addr.sun_path, MAILBOX_PREFIX, sizeof(addr.sun_path) - 1);
+    std::strncat(addr.sun_path, to.c_str(),
+                 sizeof(addr.sun_path) - sizeof(MAILBOX_PREFIX));
+    // Use the abstract namespace so we don't need to unlink the file system
+    // https://man7.org/linux/man-pages/man7/unix.7.html
+    addr.sun_path[0] = 0;
+    addr.sun_family = AF_UNIX;
+
+    msg.msg_name = &addr;
+    msg.msg_namelen = sizeof(addr);
+
+    if(data_sz > 0) {
+      in_band_msg.iov_base = const_cast<void *>(data);
+      in_band_msg.iov_len = data_sz;
+      msg.msg_iov = &in_band_msg;
+      msg.msg_iovlen = 1;
+    }
+
+    if(handles.size() > 0) {
+      struct cmsghdr *cmsg = nullptr;
+      msg.msg_control = control_buffer.data();
+      msg.msg_controllen = control_buffer.size();
+
+      cmsg = CMSG_FIRSTHDR(&msg);
+      cmsg->cmsg_level = SOL_SOCKET;
+      cmsg->cmsg_type = SCM_RIGHTS;
+      cmsg->cmsg_len = CMSG_LEN(sizeof(handles[0]) * handles.size());
+      memcpy(CMSG_DATA(cmsg), handles.data(), handles.size() * sizeof(handles[0]));
+    }
+
+    if(sendmsg(mailbox, &msg, 0) > 0) {
+      return true;
+    }
+    log_mailbox.info("Failed to send message: %s", realm_strerror(errno));
+#endif
+    // TODO: Add support for windows
+    return false;
+  }
+
+  bool ipc_mailbox_recv(OsHandle mailbox, const std::string &from,
+                        std::vector<OsHandle> &handles, void *data, size_t &data_sz,
+                        size_t max_data_sz)
+  {
+#if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS)
+    struct msghdr msg;
+    struct sockaddr_un addr;
+    struct cmsghdr *cmsg = nullptr;
+    struct iovec in_band_msg;
+    const size_t MAX_HANDLES = 1024; // TODO: implement MSG_PEEK
+    std::vector<char> control_buffer(CMSG_SPACE(MAX_HANDLES * sizeof(handles[0])));
+
+    memset(&addr, 0, sizeof(addr));
+    memset(&in_band_msg, 0, sizeof(in_band_msg));
+    memset(&msg, 0, sizeof(msg));
+
+    std::strncpy(addr.sun_path, MAILBOX_PREFIX, sizeof(addr.sun_path) - 1);
+    std::strncat(addr.sun_path, from.c_str(),
+                 sizeof(addr.sun_path) - sizeof(MAILBOX_PREFIX));
+    // Use the abstract namespace so we don't need to unlink the file system
+    // https://man7.org/linux/man-pages/man7/unix.7.html
+    addr.sun_path[0] = 0;
+    addr.sun_family = AF_UNIX;
+
+    in_band_msg.iov_base = data;
+    in_band_msg.iov_len = max_data_sz;
+    msg.msg_iov = &in_band_msg;
+    msg.msg_iovlen = 1;
+
+    msg.msg_control = control_buffer.data();
+    msg.msg_controllen = control_buffer.size();
+    cmsg = CMSG_FIRSTHDR(&msg);
+    cmsg->cmsg_level = SOL_SOCKET;
+    cmsg->cmsg_type = SCM_RIGHTS;
+    cmsg->cmsg_len = CMSG_LEN(MAX_HANDLES * sizeof(handles[0]));
+
+    // Make sure any file descriptors are closed if we fork+exec
+    ssize_t bytes = recvmsg(mailbox, &msg, MSG_CMSG_CLOEXEC);
+    if(bytes < 0) {
+      log_mailbox.info("Failed to recv message: %s", realm_strerror(errno));
+      return false;
+    }
+
+    // Make sure we got the entire message
+    if((msg.msg_flags & (MSG_TRUNC | MSG_CTRUNC)) != 0) {
+      log_mailbox.info("Failed to recv the entire message!");
+      return false;
+    }
+
+    if(msg.msg_controllen > 0) {
+      const size_t clen = cmsg->cmsg_len - CMSG_LEN(0);
+      handles.resize(clen / sizeof(handles[0]));
+      memcpy(handles.data(), CMSG_DATA(cmsg), clen);
+    } else {
+      handles.clear();
+    }
+    data_sz = static_cast<size_t>(bytes);
+    return true;
+#else
+    // TODO: Add support for windows
+    return false;
+#endif
+  }
+
+  void close_handle(OsHandle handle)
+  {
+    if(handle != Realm::INVALID_OS_HANDLE) {
+#if defined(REALM_ON_WINDOWS)
+      CloseHandle(handle);
+#elif defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS)
+      close(handle);
+#endif
+    }
+  }
 };

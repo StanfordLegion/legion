@@ -3,10 +3,11 @@
 #include <cassert>
 #include <cstring>
 #include <time.h>
-
-#include "osdep.h"
+#include <thread>
 
 #include "realm.h"
+
+#include "osdep.h"
 
 using namespace Realm;
 
@@ -63,7 +64,9 @@ void child_task(const void *args, size_t arglen,
   Barrier b = child_args.b;  // so we can advance it
   for(size_t i = 0; i < child_args.num_iters; i++) {
     // make one task slower than all the others
-    if(i != 0) sleep(1);
+    if(i != 0) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
 
     int reduce_val = (i+1)*(child_args.index+1);
     b.arrive(1, Event::NO_EVENT, &reduce_val, sizeof(reduce_val));
@@ -145,9 +148,6 @@ void top_level_task(const void *args, size_t arglen,
 
   std::set<Event> task_events;
 
-  // set an alarm so that we turn hangs into error messages
-  alarm(10);
-
   // spawn the check tasks before the arriving tasks
   {
     Barrier check_barrier = b;
@@ -182,8 +182,13 @@ void top_level_task(const void *args, size_t arglen,
     int result;
     bool ready = b.get_result(&result, sizeof(result));
     if(!ready) {
+      // set an alarm so that we turn hangs into error messages.
+      // this reset the alarm for the next wait
+      alarm(all_cpus.size() * 2 + 10);
       // wait on barrier to be ready and then ask for result again
       b.wait();
+      // We made progress, cancel any pending alarm to avoid it triggering spuriously
+      alarm(0);
       bool ready2 = b.get_result(&result, sizeof(result));
       if(!ready2) {
 	printf("parent: iter %zd still not ready after explicit wait!?\n", i);

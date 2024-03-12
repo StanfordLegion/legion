@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University
+/* Copyright 2024 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -31,10 +31,24 @@
 #include <string.h>
 #include <algorithm>
 
+static inline bool operator<(const legion_ptr_t &lhs, const legion_ptr_t &rhs)
+{ return lhs.value < rhs.value; }
+
 namespace Legion {
 
     class CContext;
     class TaskMut;
+
+    struct ColoredPoints {
+    public:
+      std::set<legion_ptr_t> points;
+      std::set<std::pair<legion_ptr_t,legion_ptr_t> > ranges;
+    };
+    typedef std::map<Color,ColoredPoints> Coloring;
+    typedef std::map<Color,Domain> DomainColoring;
+    typedef std::map<DomainPoint,ColoredPoints> PointColoring;
+    typedef std::map<DomainPoint,Domain> DomainPointColoring;
+    typedef std::map<DomainPoint,std::set<Domain> > MultiDomainPointColoring; 
 
     class CObjectWrapper {
     public:
@@ -112,6 +126,7 @@ namespace Legion {
       NEW_OPAQUE_WRAPPER(legion_index_copy_launcher_t, IndexCopyLauncher *);
       NEW_OPAQUE_WRAPPER(legion_fill_launcher_t, FillLauncher *);
       NEW_OPAQUE_WRAPPER(legion_index_fill_launcher_t, IndexFillLauncher *);
+      NEW_OPAQUE_WRAPPER(legion_discard_launcher_t, DiscardLauncher *);
       NEW_OPAQUE_WRAPPER(legion_acquire_launcher_t, AcquireLauncher *);
       NEW_OPAQUE_WRAPPER(legion_release_launcher_t, ReleaseLauncher *);
       NEW_OPAQUE_WRAPPER(legion_attach_launcher_t, AttachLauncher *);
@@ -130,6 +145,7 @@ namespace Legion {
       NEW_OPAQUE_WRAPPER(legion_inline_t, InlineMapping *);
       NEW_OPAQUE_WRAPPER(legion_mappable_t, Mappable *);
       NEW_OPAQUE_WRAPPER(legion_region_requirement_t , RegionRequirement *);
+      NEW_OPAQUE_WRAPPER(legion_output_requirement_t , OutputRequirement *);
       NEW_OPAQUE_WRAPPER(legion_machine_t, Machine *);
       NEW_OPAQUE_WRAPPER(legion_logger_t, Realm::Logger *);
       NEW_OPAQUE_WRAPPER(legion_mapper_t, Mapping::Mapper *);
@@ -146,9 +162,13 @@ namespace Legion {
       NEW_OPAQUE_WRAPPER(legion_slice_task_output_t, Mapping::Mapper::SliceTaskOutput *);
       NEW_OPAQUE_WRAPPER(legion_physical_instance_t, Mapping::PhysicalInstance *);
       NEW_OPAQUE_WRAPPER(legion_mapper_runtime_t, Mapping::MapperRuntime *);
-      NEW_OPAQUE_WRAPPER(legion_mapper_context_t, Mapping::MapperContext);
+      // nvcc wrongly complains about a meaningless qualifer on the return type,
+      // probably due to it not chasing the typedefs when doing the check.
+      // here we inline the type alias to suppress the warning
+      NEW_OPAQUE_WRAPPER(legion_mapper_context_t, Internal::MappingCallInfo *);
       typedef std::map<FieldID, const char *> FieldMap;
       NEW_OPAQUE_WRAPPER(legion_field_map_t, FieldMap *);
+      NEW_OPAQUE_WRAPPER(legion_point_transform_functor_t, PointTransformFunctor *);
 #undef NEW_OPAQUE_WRAPPER
 #ifdef __ICC
 // icpc complains about "error #858: type qualifier on return type is meaningless"
@@ -158,22 +178,6 @@ namespace Legion {
 #ifdef __PGIC__
 #pragma warning (pop)
 #endif
-
-      static legion_ptr_t
-      wrap(ptr_t ptr)
-      {
-        legion_ptr_t ptr_;
-        ptr_.value = ptr.value;
-        return ptr_;
-      }
-
-      static ptr_t
-      unwrap(legion_ptr_t ptr_)
-      {
-        ptr_t ptr;
-        ptr.value = ptr_.value;
-        return ptr;
-      }
 
 #define NEW_POINT_WRAPPER(DIM)                                  \
       typedef Point<DIM,coord_t> Point##DIM##D;                 \
@@ -702,7 +706,7 @@ namespace Legion {
         assert(false);
         return 0;
       }
-      virtual size_t get_context_index(void) const {
+      virtual uint64_t get_context_index(void) const {
         assert(false);
         return 0;
       }
@@ -729,6 +733,22 @@ namespace Legion {
       virtual Domain get_slice_domain(void) const {
         assert(false);
         return Domain::NO_DOMAIN;
+      }
+      virtual ShardID get_shard_id(void) const {
+        assert(false);
+        return 0;
+      }
+      virtual size_t get_total_shards(void) const {
+        assert(false);
+        return 1;
+      };
+      virtual DomainPoint get_shard_point(void) const {
+        assert(false);
+        return DomainPoint();
+      };
+      virtual Domain get_shard_domain(void) const {
+        assert(false);
+        return Domain();
       }
     };
 };

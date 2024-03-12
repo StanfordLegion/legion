@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------#
-# Copyright 2023 Kitware, Inc.
+# Copyright 2024 Kitware, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -24,6 +24,7 @@ endif()
 
 add_executable(privileges privileges.cc)
 target_link_libraries(privileges Legion::Legion)
+target_compile_options(privileges PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
 if(Legion_ENABLE_TESTING)
   add_test(NAME privileges COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:privileges> ${Legion_TEST_ARGS})
 endif()

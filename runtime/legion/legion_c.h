@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University
+/* Copyright 2024 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -76,6 +76,7 @@ extern "C" {
   NEW_OPAQUE_TYPE(legion_index_copy_launcher_t);
   NEW_OPAQUE_TYPE(legion_fill_launcher_t);
   NEW_OPAQUE_TYPE(legion_index_fill_launcher_t);
+  NEW_OPAQUE_TYPE(legion_discard_launcher_t);
   NEW_OPAQUE_TYPE(legion_acquire_launcher_t);
   NEW_OPAQUE_TYPE(legion_release_launcher_t);
   NEW_OPAQUE_TYPE(legion_attach_launcher_t);
@@ -94,6 +95,7 @@ extern "C" {
   NEW_OPAQUE_TYPE(legion_inline_t);
   NEW_OPAQUE_TYPE(legion_mappable_t);
   NEW_OPAQUE_TYPE(legion_region_requirement_t);
+  NEW_OPAQUE_TYPE(legion_output_requirement_t);
   NEW_OPAQUE_TYPE(legion_machine_t);
   NEW_OPAQUE_TYPE(legion_logger_t);
   NEW_OPAQUE_TYPE(legion_mapper_t);
@@ -111,6 +113,7 @@ extern "C" {
   NEW_OPAQUE_TYPE(legion_mapper_runtime_t);
   NEW_OPAQUE_TYPE(legion_mapper_context_t);
   NEW_OPAQUE_TYPE(legion_field_map_t);
+  NEW_OPAQUE_TYPE(legion_point_transform_functor_t);
 #undef NEW_OPAQUE_TYPE
 
   /**
@@ -417,6 +420,32 @@ extern "C" {
       legion_logical_partition_t /* upper_bound */,
       legion_domain_point_t /* point */,
       legion_domain_t /* launch domain */);
+
+  /**
+   * Interface for a Legion C projection functor (Logical Region
+   * upper bound).
+   */
+  typedef
+    legion_logical_region_t (*legion_projection_functor_logical_region_args_t)(
+      legion_runtime_t /* runtime */,
+      legion_logical_region_t /* upper_bound */,
+      legion_domain_point_t /* point */,
+      legion_domain_t /* launch domain */,
+      const void * /* args */,
+      size_t /* size */);
+
+  /**
+   * Interface for a Legion C projection functor (Logical Partition
+   * upper bound).
+   */
+  typedef
+    legion_logical_region_t (*legion_projection_functor_logical_partition_args_t)(
+      legion_runtime_t /* runtime */,
+      legion_logical_partition_t /* upper_bound */,
+      legion_domain_point_t /* point */,
+      legion_domain_t /* launch domain */,
+      const void * /* args */,
+      size_t /* size */);
 
   /**
    * Interface for a Legion C projection functor (Logical Region
@@ -2097,6 +2126,19 @@ extern "C" {
                                          legion_logical_partition_t handle,
                                          const char **result);
 
+  /**
+   * The caller must have ownership of all regions, partitions and fields
+   * passed into this function.
+   *
+   * @see Legion::Runtime::advise_analysis_subtree()
+   */
+  void legion_reset_equivalence_sets(legion_runtime_t runtime,
+                                     legion_context_t ctx,
+                                     legion_logical_region_t parent,
+                                     legion_logical_region_t region,
+                                     int num_fields,
+                                     legion_field_id_t* fields);
+
   // -----------------------------------------------------------------------
   // Region Requirement Operations
   // -----------------------------------------------------------------------
@@ -2283,6 +2325,59 @@ extern "C" {
    */
   legion_projection_id_t
   legion_region_requirement_get_projection(legion_region_requirement_t handle);
+
+  // -----------------------------------------------------------------------
+  // Output Requirement Operations
+  // -----------------------------------------------------------------------
+
+  /**
+   * @see Legion::OutputRequirement::OutputRequirement()
+   */
+  legion_output_requirement_t
+  legion_output_requirement_create(legion_field_space_t field_space,
+                                   legion_field_id_t *fields,
+                                   size_t fields_size,
+                                   int dim,
+                                   bool global_indexing);
+
+  /**
+   * @see Legion::OutputRequirement::OutputRequirement()
+   */
+  legion_output_requirement_t
+  legion_output_requirement_create_region_requirement(
+      legion_region_requirement_t handle);
+
+  /**
+   * @see Legion::OutputRequirement::~OutputRequirement()
+   */
+  void
+  legion_output_requirement_destroy(legion_output_requirement_t handle);
+
+  /**
+   * @see Legion::OutputRequirement::add_field()
+   */
+  void
+  legion_output_requirement_add_field(legion_output_requirement_t handle,
+                                      legion_field_id_t field,
+                                      bool instance);
+
+  /**
+   * @see Legion::OutputRequirement::region
+   */
+  legion_logical_region_t
+  legion_output_requirement_get_region(legion_output_requirement_t handle);
+
+  /**
+   * @see Legion::OutputRequirement::parent
+   */
+  legion_logical_region_t
+  legion_output_requirement_get_parent(legion_output_requirement_t handle);
+
+  /**
+   * @see Legion::OutputRequirement::partition
+   */
+  legion_logical_partition_t
+  legion_output_requirement_get_partition(legion_output_requirement_t handle);
 
   // -----------------------------------------------------------------------
   // Allocator and Argument Map Operations
@@ -2589,6 +2684,19 @@ extern "C" {
   /**
    * @return Caller takes ownership of return value.
    *
+   * @see Legion::Future::from_untyped_pointer()
+   */
+  legion_future_t
+  legion_future_from_untyped_pointer_detailed(legion_runtime_t runtime,
+                                              const void *buffer,
+                                              size_t size,
+                                              bool take_ownership,
+                                              const char *provenance,
+                                              bool shard_local);
+
+  /**
+   * @return Caller takes ownership of return value.
+   *
    * @see Legion::Future::Future()
    */
   legion_future_t
@@ -2647,6 +2755,12 @@ extern "C" {
   size_t
   legion_future_get_untyped_size(legion_future_t handle);
 
+  /**
+   * @see Legion::Future::get_metadata(size_t *size)
+   */
+  const void *
+  legion_future_get_metadata(legion_future_t handle, size_t *size/*=NULL*/);
+
   // -----------------------------------------------------------------------
   // Future Map Operations
   // -----------------------------------------------------------------------
@@ -2683,6 +2797,12 @@ extern "C" {
                                legion_domain_point_t point);
 
   /**
+   * @see Legion::FutureMap::get_future_map_domain
+   */
+  legion_domain_t
+  legion_future_map_get_domain(legion_future_map_t handle);
+
+  /**
    * @return Caller takes ownership of return value
    *
    * @see Legion::Runtime::reduce_future_map
@@ -2692,7 +2812,25 @@ extern "C" {
                            legion_context_t ctx,
                            legion_future_map_t handle,
                            legion_reduction_op_id_t redop,
-                           bool deterministic);
+                           bool deterministic,
+                           legion_mapper_id_t map_id,
+                           legion_mapping_tag_id_t tag);
+
+  /**
+   * @return Caller takes ownership of return value
+   *
+   * @see Legion::Runtime::reduce_future_map
+   */
+  legion_future_t
+  legion_future_map_reduce_with_initial_value(legion_runtime_t runtime,
+                                              legion_context_t ctx,
+                                              legion_future_map_t handle,
+                                              legion_reduction_op_id_t redop,
+                                              bool deterministic,
+                                              legion_mapper_id_t map_id,
+                                              legion_mapping_tag_id_t tag,
+                                              const char *provenance,
+                                              legion_future_t initial_value);
 
   /**
    * @return Caller takes ownership of return value
@@ -2725,6 +2863,19 @@ extern "C" {
                                            bool collective,
                                            legion_sharding_id_t sid,
                                            bool implicit_sharding);
+
+  /**
+   * @return Caller takes ownership of return value
+   *
+   * @see Legion::Runtime::transform_future_map
+   */
+  legion_future_map_t
+  legion_future_map_transform(legion_runtime_t runtime,
+                              legion_context_t ctx,
+                              legion_future_map_t fm,
+                              legion_index_space_t new_domain,
+                              legion_point_transform_functor_t functor,
+                              bool take_ownership);
 
   // -----------------------------------------------------------------------
   // Deferred Buffer Operations
@@ -2813,6 +2964,18 @@ extern "C" {
   legion_task_launcher_execute(legion_runtime_t runtime,
                                legion_context_t ctx,
                                legion_task_launcher_t launcher);
+
+  /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see Legion::Runtime::execute_task()
+   */
+  legion_future_t
+  legion_task_launcher_execute_outputs(legion_runtime_t runtime,
+                                       legion_context_t ctx,
+                                       legion_task_launcher_t launcher,
+                                       legion_output_requirement_t *reqs,
+                                       size_t reqs_size);
 
   /**
    * @see Legion::TaskLauncher::add_region_requirement()
@@ -3091,6 +3254,18 @@ extern "C" {
   /**
    * @return Caller takes ownership of return value.
    *
+   * @see Legion::Runtime::execute_index_space(Context, const IndexTaskLauncher &, std::vector<OutputRequirement>*)
+   */
+  legion_future_map_t
+  legion_index_launcher_execute_outputs(legion_runtime_t runtime,
+                                        legion_context_t ctx,
+                                        legion_index_launcher_t launcher,
+                                        legion_output_requirement_t *reqs,
+                                        size_t reqs_size);
+
+  /**
+   * @return Caller takes ownership of return value.
+   *
    * @see Legion::Runtime::execute_index_space(Context, const IndexTaskLauncher &, ReductionOpID)
    */
   legion_future_t
@@ -3099,6 +3274,20 @@ extern "C" {
                                                         legion_index_launcher_t launcher,
                                                         legion_reduction_op_id_t redop,
                                                         bool deterministic);
+
+  /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see Legion::Runtime::execute_index_space(Context, const IndexTaskLauncher &, ReductionOpID, std::vector<OutputRequirement>*)
+   */
+  legion_future_t
+  legion_index_launcher_execute_reduction_and_outputs(legion_runtime_t runtime,
+                                                      legion_context_t ctx,
+                                                      legion_index_launcher_t launcher,
+                                                      legion_reduction_op_id_t redop,
+                                                      bool deterministic,
+                                                      legion_output_requirement_t *reqs,
+                                                      size_t reqs_size);
 
   /**
    * @see Legion::IndexTaskLauncher::add_region_requirement()
@@ -3328,6 +3517,20 @@ extern "C" {
   void
   legion_index_launcher_set_provenance(legion_index_launcher_t launcher,
                                        const char *provenance);
+
+  /**
+   * @see Legion::IndexTaskLauncher::concurrent
+   */
+  void
+  legion_index_launcher_set_concurrent(legion_index_launcher_t launcher,
+                                       bool concurrent);
+
+  /**
+   * @see Legion::IndexTaskLauncher::initial_value
+   */
+  void
+  legion_index_launcher_set_initial_value(legion_index_launcher_t launcher,
+                                          legion_future_t initial_value);
 
   // -----------------------------------------------------------------------
   // Inline Mapping Operations
@@ -3757,6 +3960,50 @@ extern "C" {
    */
   legion_region_requirement_t
   legion_fill_get_requirement(legion_fill_t fill);
+
+  // -----------------------------------------------------------------------
+  // Discard Operation
+  // -----------------------------------------------------------------------
+
+  /**
+   * @return Caller takes ownership of return value
+   *
+   * @see Legion::DiscardLauncher::DiscardLauncher()
+   */
+  legion_discard_launcher_t
+  legion_discard_launcher_create(
+    legion_logical_region_t handle,
+    legion_logical_region_t parent);
+
+  /**
+   * @param hanlde Caller must have ownership of parameter 'handle'
+   *
+   * @see Legion::DiscardLauncher::~DiscardLauncher()
+   */
+  void
+  legion_discard_launcher_destroy(legion_discard_launcher_t handle);
+
+  /**
+   * @see Legion::DiscardLauncher::add_field()
+   */
+  void
+  legion_discard_launcher_add_field(legion_discard_launcher_t handle,
+                                    legion_field_id_t fid);
+
+  /**
+   * @see Legion::Runtime::discard_fields()
+   */
+  void
+  legion_discard_launcher_execute(legion_runtime_t runtime,
+                                  legion_context_t ctx,
+                                  legion_discard_launcher_t launcher);
+
+  /**
+   * @see Legion::DiscardLauncher::provenance
+   */
+  void
+  legion_discard_launcher_set_provenance(legion_discard_launcher_t launcher,
+                                         const char *provenance);
 
   // -----------------------------------------------------------------------
   // File Operations
@@ -4804,11 +5051,48 @@ extern "C" {
   legion_shard_id_t
   legion_runtime_local_shard(legion_runtime_t runtime, legion_context_t ctx);
 
+  legion_shard_id_t
+  legion_runtime_local_shard_without_context(void);
+
   /**
    * @see Legion::Runtime::total_shards()
    */
   size_t
   legion_runtime_total_shards(legion_runtime_t runtime, legion_context_t ctx);
+
+  /**
+   * @param sid Must correspond to a previously registered sharding functor.
+   *
+   * @see Legion::ShardingFunctor::shard()
+   */
+  legion_shard_id_t
+  legion_sharding_functor_shard(legion_sharding_id_t sid,
+                                legion_domain_point_t point,
+                                legion_domain_t full_space,
+                                size_t total_shards);
+
+  /**
+   * @param sid Must correspond to a previously registered sharding functor.
+   *            This functor must be invertible.
+   * @param points Pre-allocated array to fill in with the points returned by
+   *               the `invert` call. This array must be large enough to fit the
+   *               output of any call to this functor's `invert`. A safe limit
+   *               that will work for any functor is
+   *               `legion_domain_get_volume(full_domain)`.
+   * @param points_size At entry this must be the capacity of the `points`
+   *                    array. At exit this value has been updated to the actual
+   *                    number of returned points.
+   *
+   * @see Legion::ShardingFunctor::invert()
+   */
+  void
+  legion_sharding_functor_invert(legion_sharding_id_t sid,
+                                 legion_shard_id_t shard,
+                                 legion_domain_t shard_domain,
+                                 legion_domain_t full_domain,
+                                 size_t total_shards,
+                                 legion_domain_point_t *points,
+                                 size_t *points_size);
 
   void
   legion_runtime_enable_scheduler_lock(void);
@@ -5630,6 +5914,41 @@ extern "C" {
     legion_projection_functor_logical_partition_t partition_functor);
 
   /**
+   * @see Legion::Runtime::register_projection_functor()
+   */
+  void
+  legion_runtime_register_projection_functor(
+    legion_runtime_t runtime,
+    legion_projection_id_t id,
+    bool exclusive,
+    unsigned depth,
+    legion_projection_functor_logical_region_args_t region_functor,
+    legion_projection_functor_logical_partition_args_t partition_functor);
+
+  /**
+   * @see Legion::Runtime::preregister_projection_functor()
+   */
+  void
+  legion_runtime_preregister_projection_functor_args(
+    legion_projection_id_t id,
+    bool exclusive,
+    unsigned depth,
+    legion_projection_functor_logical_region_args_t region_functor,
+    legion_projection_functor_logical_partition_args_t partition_functor);
+
+  /**
+   * @see Legion::Runtime::register_projection_functor()
+   */
+  void
+  legion_runtime_register_projection_functor_args(
+    legion_runtime_t runtime,
+    legion_projection_id_t id,
+    bool exclusive,
+    unsigned depth,
+    legion_projection_functor_logical_region_t region_functor,
+    legion_projection_functor_logical_partition_t partition_functor);
+
+  /**
    * @see Legion::Runtime::preregister_projection_functor()
    */
   void
@@ -5639,18 +5958,6 @@ extern "C" {
     unsigned depth,
     legion_projection_functor_logical_region_mappable_t region_functor,
     legion_projection_functor_logical_partition_mappable_t partition_functor);
-
-  /**
-   * @see Legion::Runtime::register_projection_functor()
-   */
-  void
-  legion_runtime_register_projection_functor(
-    legion_runtime_t runtime,
-    legion_projection_id_t id,
-    bool exclusive,
-    unsigned depth,
-    legion_projection_functor_logical_region_t region_functor,
-    legion_projection_functor_logical_partition_t partition_functor);
 
   /**
    * @see Legion::Runtime::register_projection_functor()
@@ -6513,7 +6820,18 @@ extern "C" {
   legion_context_get_num_shards(legion_runtime_t /*runtime*/,
                                 legion_context_t /*context*/,
                                 bool /*I know what I am doing*/);
-      
+  // Another hidden method for control replication that most
+  // people should not be using but for which there are legitamite
+  // user, especially in garbage collected languages
+  // Note the caller takes ownership of the future
+  legion_future_t
+  legion_context_consensus_match(legion_runtime_t /*runtime*/,
+                                 legion_context_t /*context*/,
+                                 const void* /*input*/,
+                                 void* /*output*/,
+                                 size_t /*num elements*/,
+                                 size_t /*element size*/);
+
   /**
    * used by fortran API
    */

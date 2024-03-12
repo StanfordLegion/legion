@@ -1,4 +1,4 @@
--- Copyright 2023 Stanford University, Los Alamos National Laboratory
+-- Copyright 2024 Stanford University, Los Alamos National Laboratory
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -209,6 +209,12 @@ local supported_archs = {
 }
 
 local function parse_cuda_arch(arch)
+  -- If the user manually passed a compute version, just return that
+  local arch_value = tonumber(arch)
+  if arch_value ~= nil then
+    return arch_value
+  end
+
   arch = string.lower(arch)
   local sm = supported_archs[arch]
   if sm == nil then

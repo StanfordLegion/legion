@@ -211,6 +211,8 @@ function getLineColor(elem) {
   const colorMap = {
     "CPU": "steelblue",
     "GPU": "olivedrab",
+    "GPU Device": "olivedrab",
+    "GPU Host": "orangered",
     "Utility": "crimson",
     "IO": "orangered",
     "Proc Group": "orangered",
@@ -1338,6 +1340,9 @@ function timelineElementStrokeCalculator(elem) {
 }
 
 function timelineEventMouseDown(_timelineEvent) {
+  // event.preventDefault();
+  d3.event.stopPropagation();
+  
   // only the first event of this uid will have information
   var timelineEvent = prof_uid_map[_timelineEvent.prof_uid][0];
 	
@@ -1345,22 +1350,11 @@ function timelineEventMouseDown(_timelineEvent) {
   var hasInstances = timelineEvent.instances.length != 0;	
   if (hasInstances) {
     if (d3.event.button === 0) {
-      if (!state.searchInstEnabled) {
-        searchInstRegexLength = timelineEvent.instances.length;
-        state.searchInstEnabled = true;
-        clickBoxProf_uid = timelineEvent.prof_uid;
-        searchInstRegex = new Array(searchInstRegexLength);
-        for (let i = 0; i < searchInstRegexLength; i++) {
-          var re = timelineEvent.instances[i][1];
-          searchInstRegex[i] = re;
-        }
-      } else {
-        state.searchInstEnabled = false;
-        searchInstRegex = null;
-        clickBoxProf_uid = null;
-      }
+      // record the coordinattes of the mouse
+      var mouse_coordinates = d3.mouse(this);
+      state.mouse_x = mouse_coordinates[0];
+      state.mouse_y = mouse_coordinates[1];
     }
-    redraw();
   }
 	
   // draw dependencies
@@ -1388,6 +1382,38 @@ function timelineEventMouseDown(_timelineEvent) {
       }
     }
     redraw();
+  }
+}
+
+function timelineEventMouseUp(_timelineEvent) {
+  d3.event.stopPropagation();
+  // only the first event of this uid will have information
+  var timelineEvent = prof_uid_map[_timelineEvent.prof_uid][0];
+
+  // draw instances
+  var hasInstances = timelineEvent.instances.length != 0;
+  if (hasInstances) {
+    if (d3.event.button === 0) {
+      // if mouse does not move, let's do the highlighting, otherwise, this is a zoom, we give up.
+      var mouse_coordinates = d3.mouse(this);
+      if (mouse_coordinates[0] == state.mouse_x && mouse_coordinates[1] == state.mouse_y) {
+        if (!state.searchInstEnabled) {
+          searchInstRegexLength = timelineEvent.instances.length;
+          state.searchInstEnabled = true;
+          clickBoxProf_uid = timelineEvent.prof_uid;
+          searchInstRegex = new Array(searchInstRegexLength);
+          for (let i = 0; i < searchInstRegexLength; i++) {
+            var re = timelineEvent.instances[i][1];
+            searchInstRegex[i] = re;
+          }
+        } else {
+          state.searchInstEnabled = false;
+          searchInstRegex = null;
+          clickBoxProf_uid = null;
+        }
+        redraw();
+      }
+    }
   }
 }
 
@@ -1458,14 +1484,14 @@ function drawTimeline() {
       }
       return opacity;
     })
-    .on("mouseout", function(d, i) { 
+    .on("mouseout", function(d, i) {
       if ((d.in.length != 0) || (d.out.length != 0)) {
         d3.select(this).style("cursor", "default");
       }
       state.timelineSvg.selectAll("#desc").remove();
     })
     .on("mousedown", timelineEventMouseDown)
-
+    .on("mouseup", timelineEventMouseUp)
 
   timelineText.enter().append("text");
 
@@ -1986,7 +2012,7 @@ function drawExpandBox() {
         + "</div>"
         + "<div style='margin: 0 auto; margin-top: 10px; text-align: center;'>" 
           + "<input class='button' type='button' value='CPUs' onclick='evalExpandRequest(\"CPU\")'></input>" 
-          + "<input class='button' type='button' value='GPUs' onclick='evalExpandRequest(\"GPU\")'></input>" 
+          + "<input class='button' type='button' value='GPUs' onclick='evalExpandRequest(\"GPU\");evalExpandRequest(\"GPU Device\");evalExpandRequest(\"GPU Host\")'></input>"
           + "<input class='button' type='button' value='Utilities' onclick='evalExpandRequest(\"Utility\")'></input>" 
           + "<input class='button' type='button' value='IOs' onclick='evalExpandRequest(\"IO\")'></input>" 
           + "<input class='button' type='button' value='Memories' onclick='evalExpandRequest(\"Memory\")'></input>" 
@@ -2773,6 +2799,8 @@ function initializeState() {
   state.resolution = 10; // time (in us) of the smallest feature we want to load
   state.searchEnabled = false;
   state.searchInstEnabled = false;
+  state.mouse_x = 0;
+  state.mouse_y = 0;
   state.rangeZoom = true;
   state.collapseAll = false;
   state.display_critical_path = false;

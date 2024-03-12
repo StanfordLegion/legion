@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -37,12 +37,11 @@ namespace Realm {
   // class Processor
   //
 
-    /*static*/ const Processor Processor::NO_PROC = { 0 }; 
+  /*static*/ const Processor Processor::NO_PROC = {/* zero-initialization */};
 
   namespace ThreadLocal {
-    // Assume zero initialized
-    REALM_THREAD_LOCAL Processor current_processor = { 0 };
-    
+    REALM_THREAD_LOCAL Processor current_processor = {/* zero-initialization */};
+
     // if nonzero, prevents application thread from yielding execution
     //  resources on an Event wait
     REALM_THREAD_LOCAL int scheduler_lock = 0;
@@ -53,23 +52,23 @@ namespace Realm {
       return get_runtime()->get_processor_impl(*this)->kind;
     }
 
-    /*static*/ Processor Processor::create_group(const std::vector<Processor>& members)
+    void Processor::get_group_members(Processor *members, size_t& num_members) const
     {
-      return ProcessorGroup::create_group(members);
-    }
-
-    void Processor::get_group_members(std::vector<Processor>& members) const
-    {
-      // if we're a plain old processor, the only member of our "group" is ourself
-      if(ID(*this).is_processor()) {
-	members.push_back(*this);
-	return;
+      if (ID(*this).is_processor()) {
+        num_members = 1;
+        if ((members != nullptr) && (num_members > 0)) {
+          members[0] = *this;
+        }
+        return;
       }
-
-      assert(ID(*this).is_procgroup());
-
       ProcessorGroupImpl *grp = get_runtime()->get_procgroup_impl(*this);
-      grp->get_group_members(members);
+      size_t old_num_members = num_members;
+      num_members = grp->members.size();
+      if (members != nullptr) {
+        for (size_t i = 0; i < std::min(old_num_members, grp->members.size()); i++) {
+          members[i] = grp->members[i]->me;
+        }
+      }
     }
 
     int Processor::get_num_cores(void) const
@@ -134,12 +133,6 @@ namespace Realm {
 				   const void *user_data /*= 0*/,
 				   size_t user_data_len /*= 0*/) const
     {
-      // some sanity checks first
-      if(codedesc.type() != TypeConv::from_cpp_type<TaskFuncPtr>()) {
-	log_taskreg.fatal() << "attempt to register a task function of improper type: " << codedesc.type();
-	assert(0);
-      }
-
       // TODO: special case - registration on a local processor with a raw function pointer and no
       //  profiling requests - can be done immediately and return NO_EVENT
 
@@ -246,12 +239,6 @@ namespace Realm {
 						      const void *user_data /*= 0*/,
 						      size_t user_data_len /*= 0*/)
     {
-      // some sanity checks first
-      if(codedesc.type() != TypeConv::from_cpp_type<TaskFuncPtr>()) {
-	log_taskreg.fatal() << "attempt to register a task function of improper type: " << codedesc.type();
-	assert(0);
-      }
-
       // TODO: special case - registration on local processord with a raw function pointer and no
       //  profiling requests - can be done immediately and return NO_EVENT
 
@@ -376,6 +363,11 @@ namespace Realm {
       return NULL;
     }
 
+  /*static*/ Processor Processor::get_executing_processor(void)
+  { 
+    return ThreadLocal::current_processor;
+  }
+
   /*static*/ void Processor::enable_scheduler_lock(void)
   {
 #ifdef DEBUG_REALM
@@ -398,46 +390,49 @@ namespace Realm {
   // class ProcessorGroup
   //
 
-    /*static*/ const ProcessorGroup ProcessorGroup::NO_PROC_GROUP =
-			      ID(ID::ID_NULL).convert<ProcessorGroup>();
+  /*static*/ const ProcessorGroup ProcessorGroup::NO_PROC_GROUP = {
+      /* zero-initialization */};
 
-    /*static*/ ProcessorGroup ProcessorGroup::create_group(const std::vector<Processor>& members)
-    {
-      NodeID owner_node;
-      if(members.empty()) {
-	// create empty groups locally
-	owner_node = Network::my_node_id;
-      } else {
-	// owner of pgroup is owner of (all) processors
-	owner_node = ID(members[0]).proc_owner_node();
-	for(size_t i = 1; i < members.size(); i++)
-	  assert(NodeID(ID(members[i]).proc_owner_node()) == owner_node);
-      }
-
-      ProcessorGroupImpl *grp = get_runtime()->local_proc_group_free_lists[owner_node]->alloc_entry();
-      grp->set_group_members(members);
-
-      // fix ID to include creator node
-      ID id = grp->me;
-      id.pgroup_creator_node() = Network::my_node_id;
-      ProcessorGroup pgrp = ID(id).convert<ProcessorGroup>();
-      grp->me = pgrp;
-
-      log_pgroup.info() << "creating processor group: pgrp=" << pgrp
-			<< " members=" << PrettyVector<Processor>(members);
-
-      // if we're creating a remote group, send a message as well
-      if(owner_node != Network::my_node_id) {
-	ActiveMessage<ProcGroupCreateMessage> amsg(owner_node,
-						   members.size() * sizeof(Processor));
-	amsg->pgrp = pgrp;
-	amsg->num_members = members.size();
-	amsg.add_payload(members.data(), members.size() * sizeof(Processor));
-	amsg.commit();
-      }
-
-      return pgrp;
+  /*static*/ ProcessorGroup ProcessorGroup::create_group(const Processor *_members,
+                                                         size_t num_members)
+  {
+    NodeID owner_node;
+    span<const Processor> members(_members, num_members);
+    if(members.empty()) {
+      // create empty groups locally
+      owner_node = Network::my_node_id;
+    } else {
+      // owner of pgroup is owner of (all) processors
+      owner_node = ID(members[0]).proc_owner_node();
+      for(size_t i = 1; i < members.size(); i++)
+        assert(NodeID(ID(members[i]).proc_owner_node()) == owner_node);
     }
+
+    ProcessorGroupImpl *grp =
+        get_runtime()->local_proc_group_free_lists[owner_node]->alloc_entry();
+    grp->set_group_members(members);
+
+    // fix ID to include creator node
+    ID id = grp->me;
+    id.pgroup_creator_node() = Network::my_node_id;
+    ProcessorGroup pgrp = ID(id).convert<ProcessorGroup>();
+    grp->me = pgrp;
+
+    log_pgroup.info() << "creating processor group: pgrp=" << pgrp
+                      << " members=" << PrettyVector<Processor>(members);
+
+    // if we're creating a remote group, send a message as well
+    if(owner_node != Network::my_node_id) {
+      ActiveMessage<ProcGroupCreateMessage> amsg(owner_node,
+                                                 members.size() * sizeof(Processor));
+      amsg->pgrp = pgrp;
+      amsg->num_members = members.size();
+      amsg.add_payload(members.data(), members.size() * sizeof(Processor));
+      amsg.commit();
+    }
+
+    return pgrp;
+  }
 
     void ProcessorGroup::destroy(Event wait_on /*= NO_EVENT*/) const
     {
@@ -522,95 +517,123 @@ namespace Realm {
 
     // helper function for spawn implementations
     void ProcessorImpl::enqueue_or_defer_task(Task *task, Event start_event,
-					      DeferredSpawnCache *cache)
-    {
+                                              DeferredSpawnCache *cache) {
       // case 1: no precondition
-      if(!start_event.exists()) {
-	enqueue_task(task);
-	return;
+      if (!start_event.exists()) {
+        enqueue_task(task);
+        return;
       }
 
       // case 2: precondition is triggered or poisoned
       EventImpl *start_impl = get_runtime()->get_event_impl(start_event);
       EventImpl::gen_t start_gen = ID(start_event).event_generation();
       bool poisoned = false;
-      if(!start_impl->has_triggered(start_gen, poisoned)) {
-	// we'll create a new deferral unless we can tack it on to an existing
-	//  one
-	bool new_deferral = true;
+      if (!start_impl->has_triggered(start_gen, poisoned)) {
+        // we'll create a new deferral unless we can tack it on to an existing
+        //  one
+        bool new_deferral = true;
         // we might hit in the cache below, but set up the deferral before to
         //  avoid race conditions with other tasks being added
-	task->deferred_spawn.setup(this, task, start_event);
+        task->deferred_spawn.setup(this, task, start_event);
 
-	if(cache) {
-	  Task *leader = 0;
-	  Task *evicted = 0;
-	  {
-	    AutoLock<> al(cache->mutex);
-	    size_t i = 0;
-	    while((i < DeferredSpawnCache::MAX_ENTRIES) &&
-		  (cache->events[i] != start_event)) i++;
-	    if(i < DeferredSpawnCache::MAX_ENTRIES) {
-	      // cache hit
-	      cache->counts[i]++;
-	      leader = cache->tasks[i];
-	      leader->add_reference();  // keep it alive until we use it below
-	    } else {
-	      // miss - see if any counts are at 0
-	      i = 0;
-	      while((i < DeferredSpawnCache::MAX_ENTRIES) &&
-		    (cache->counts[i] > 0)) i++;
-	      // no? decrement them all and see if one goes to 0 now
-	      if(i < DeferredSpawnCache::MAX_ENTRIES) {
-		i = 0;
-		while((i < DeferredSpawnCache::MAX_ENTRIES) &&
-		      (--cache->counts[i] > 0)) i++;
-		// decrement the rest too
-		for(size_t j = i+1; j < DeferredSpawnCache::MAX_ENTRIES; j++)
-		  cache->counts[j]--;
-	      }
+        if (cache) {
+          Task *leader = nullptr;
+          Task *evicted = nullptr;
 
-	      // if we've got a candidate now, do a replacement
-	      if(i < DeferredSpawnCache::MAX_ENTRIES) {
-		evicted = cache->tasks[i];
-		cache->events[i] = start_event;
-		cache->tasks[i] = task;
-		cache->counts[i] = 1;
-		task->add_reference(); // cache holds a reference now too
-	      }
-	    }
-	  }
-	  // decrement the refcount on a task we evicted (if any)
-	  if(evicted)
-	    evicted->remove_reference();
+          {
+            AutoLock<> al(cache->mutex);
+            size_t idx = 0;
+            // Case 1: find an entry with the same event impl
+            for (idx = 0; idx < DeferredSpawnCache::MAX_ENTRIES; idx++) {
+              if (cache->events[idx] == start_impl) {
+                break;
+              }
+            }
+            if (idx < DeferredSpawnCache::MAX_ENTRIES) {
+              cache->ages[idx] = cache->current_age;
+              cache->counts[idx]++;
+              if (cache->generations[idx] == start_gen) {
+                // Same genration, grab the cached task, we'll add to it's list
+                leader = cache->tasks[idx];
+                leader->add_reference();
+              } else {
+                // Different generation, this entry is stale, replace it!
+                evicted = cache->tasks[idx];
+                cache->generations[idx] = start_gen;
+                cache->tasks[idx] = task;
+                task->add_reference();
+              }
+            } else {
+              // Case 2: find a stale or empty entry (an entry who's event has
+              // already triggered)
+              // TODO: remove the poisoned lookup, since we don't care
+              task->add_reference();
+              for (idx = 0; idx < DeferredSpawnCache::MAX_ENTRIES; idx++) {
+                bool tmp_poisoned = false;
+                if ((cache->events[idx] == nullptr) ||
+                    cache->events[idx]->has_triggered(cache->generations[idx],
+                                                      tmp_poisoned)) {
+                  break;
+                }
+              }
+              if (idx < DeferredSpawnCache::MAX_ENTRIES) {
+                evicted = cache->tasks[idx];
+                cache->ages[idx] = cache->current_age;
+                cache->counts[idx] = 1;
+                cache->events[idx] = start_impl;
+                cache->generations[idx] = start_gen;
+                cache->tasks[idx] = task;
+              } else {
+                size_t min_key = cache->counts[0] + cache->ages[0];
+                size_t min_idx = 0;
+                // Case 3: find the LRU entry, accounting for the age, and evict it
+                for (idx = 1; idx < DeferredSpawnCache::MAX_ENTRIES; idx++) {
+                  size_t test_key = cache->counts[idx] + cache->ages[idx];
+                  if (min_key > test_key) {
+                    min_idx = idx;
+                    min_key = test_key;
+                  }
+                }
+                evicted = cache->tasks[min_idx];
+                // Update the current age -- all newly referenced entries will get this new age
+                cache->current_age = cache->ages[min_idx] + cache->counts[min_idx];
+                cache->events[min_idx] = start_impl;
+                cache->generations[min_idx] = start_gen;
+                cache->tasks[min_idx] = task;
+                cache->ages[min_idx] = cache->current_age;
+                cache->counts[min_idx] = 1;
+              }
+            }
+          }
 
-	  // if we found a leader, try to add ourselves to their list
-	  if(leader) {
-	    bool added = leader->deferred_spawn.add_task(task, poisoned);
-            leader->remove_reference();  // safe to let go of this now
-            if(added) {
-	      // success - nothing more needs to be done here
-	      return;
-	    } else {
-	      // failure, so no deferral is needed - fall through to
-	      //  enqueue-or-cancel code below
-	      new_deferral = false;
-	    }
-	  }
-	}
+          if (evicted != nullptr) {
+            evicted->remove_reference();
+          }
+          if (leader != nullptr) {
+            assert(leader != task);
+            bool added = leader->deferred_spawn.add_task(task, poisoned);
+            leader->remove_reference();
+            if (added) {
+              return;
+            } else {
+              new_deferral = false;
+            }
+          }
+        }
 
-	if(new_deferral) {
-	  task->deferred_spawn.defer(start_impl, start_gen);
-	  return;
-	}
+        if (new_deferral) {
+          task->deferred_spawn.defer(start_impl, start_gen);
+          return;
+        }
       }
 
       // precondition is either triggered or poisoned
-      if(poisoned) {
-	log_poison.info() << "cancelling poisoned task - task=" << task << " after=" << task->get_finish_event();
-	task->handle_poisoned_precondition(start_event);
+      if (poisoned) {
+        log_poison.info() << "cancelling poisoned task - task=" << task
+                          << " after=" << task->get_finish_event();
+        task->handle_poisoned_precondition(start_event);
       } else {
-	enqueue_task(task);
+        enqueue_task(task);
       }
     }
 
@@ -679,10 +702,10 @@ namespace Realm {
     {
       assert(members_valid);
 
-      for(std::vector<ProcessorImpl *>::const_iterator it = members.begin();
-	  it != members.end();
-	  it++)
-	member_list.push_back((*it)->me);
+      member_list.resize(members.size());
+
+      for (size_t i = 0; i < members.size(); i++)
+        member_list[i] = members[i]->me;
     }
 
     void ProcessorGroupImpl::destroy(void)
@@ -1074,6 +1097,12 @@ namespace Realm {
 					 CodeDescriptor& codedesc,
 					 const ByteArrayRef& user_data)
   {
+    // make sure we have a function of the right type
+    if(codedesc.type() != TypeConv::from_cpp_type<Processor::TaskFuncPtr>()) {
+      log_taskreg.fatal() << "attempt to register a task function of improper type: " << codedesc.type();
+      assert(0);
+    }
+
     // see if we have a function pointer to register
     Processor::TaskFuncPtr fnptr;
     const FunctionPointerImplementation *fpi = codedesc.find_impl<FunctionPointerImplementation>();

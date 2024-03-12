@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -244,17 +244,7 @@ namespace Legion {
         if (logical)
           node->print_logical_context(ctx, logger, capture_mask);
         else
-        {
-          RegionTreeNode *parent_node = rt->forest->get_node(req->parent);
-          std::deque<RegionTreeNode*> to_traverse;
-          while (node != parent_node)
-          {
-            to_traverse.push_front(node);
-            node = node->get_parent();
-          }
-          parent_node->print_physical_context(ctx, logger, capture_mask,
-              to_traverse);
-        }
+          assert(false); // we don't support this anymore
 
         logger->finish_block();
       }

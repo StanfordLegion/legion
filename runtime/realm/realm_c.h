@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -98,6 +98,14 @@ typedef
     const void * /*userdata*/,
     size_t /*userlen*/,
     realm_id_t /*proc_id*/);
+
+// error code
+typedef enum RealmStatus_t
+{
+  // To comply with other C libraries, we use 0 for success, negative numbers for errors
+  REALM_SUCCESS = 0,
+  REALM_ERROR = -1,
+} RealmStatus;
 
 #ifdef __cplusplus
 }

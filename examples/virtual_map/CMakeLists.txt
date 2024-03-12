@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------#
-# Copyright 2023 Kitware, Inc.
+# Copyright 2024 Kitware, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -24,6 +24,7 @@ endif()
 
 add_executable(virtual_map virtual_map.cc)
 target_link_libraries(virtual_map Legion::Legion)
+target_compile_options(virtual_map PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
 if(Legion_ENABLE_TESTING)
   add_test(NAME virtual_map COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:virtual_map> ${Legion_TEST_ARGS})
 endif()

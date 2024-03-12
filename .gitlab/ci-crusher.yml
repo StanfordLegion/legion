@@ -66,32 +66,32 @@ legion:
   variables:
     <<: [*legion]
 
-# legion_cmake:
-#   <<: [*tests]
-#   stage: test
-#   tags:
-#     - slurm
-#     - crusher
-#   variables:
-#     <<: [*legion, *cmake, *ctest]
+legion_cmake:
+  <<: [*tests]
+  stage: test
+  tags:
+    - slurm
+    - crusher
+  variables:
+    <<: [*legion, *cmake, *ctest]
 
-# regent:
-#   <<: [*tests]
-#   stage: test
-#   tags:
-#     - slurm
-#     - crusher
-#   variables:
-#     <<: [*regent]
+regent:
+  <<: [*tests]
+  stage: test
+  tags:
+    - slurm
+    - crusher
+  variables:
+    <<: [*regent]
 
-# regent_cmake:
-#   <<: [*tests]
-#   stage: test
-#   tags:
-#     - slurm
-#     - crusher
-#   variables:
-#     <<: [*regent, *cmake]
+regent_cmake:
+  <<: [*tests]
+  stage: test
+  tags:
+    - slurm
+    - crusher
+  variables:
+    <<: [*regent, *cmake]
 
 clean:
   stage: clean

@@ -1,5 +1,5 @@
 #=============================================================================
-# Copyright 2023 Kitware, Inc.
+# Copyright 2024 Kitware, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@
 # GASNet backend configuration get's used:
 #
 # GASNet_CONDUIT   - Communication conduit to use
+# GASNet_SYSTEM    - system or machine-specific configuration to use for GASNet
 # GASNet_THREADING - Threading mode to use
 #
 # Valid options for these are dependenent on the specific GASNet installation
@@ -103,7 +104,7 @@ gasnet-libs:
       COMMAND ${GASNet_MAKE_PROGRAM} -s -f ${_TEMP_MAKEFILE} gasnet-libs
       OUTPUT_VARIABLE _GASNet_LIBS
       ERROR_VARIABLE _GASNet_LIBS_ERROR
-      OUTPUT_STRIP_TRAILING_WHITESPACE 
+      OUTPUT_STRIP_TRAILING_WHITESPACE
     )
     file(REMOVE ${_TEMP_MAKEFILE})
   endif()
@@ -251,7 +252,7 @@ if(NOT GASNet_FOUND AND NOT TARGET GASNet::GASNet)
       # Extract the component name from the makefile
       get_filename_component(_COMPONENT ${CMF} NAME_WE)
 
-      # Seperate the filename components 
+      # Seperate the filename components
       _GASNet_parse_conduit_and_threading_names("${CMF}"
         GASNet_CONDUITS GASNet_THREADING_OPTS
       )
@@ -312,6 +313,9 @@ if(GASNet_FOUND AND NOT TARGET GASNet::GASNet)
   if(_I EQUAL -1)
     message(FATAL_ERROR "Invalid GASNet_CONDUIT setting.  Valid options are: ${GASNet_CONDUITS}")
   endif()
+
+  set(GASNet_SYSTEM "${GASNet_SYSTEM}" CACHE STRING "system or machine-specific configuration to use for GASNet")
+  mark_as_advanced(GASNet_SYSTEM)
 
   set(GASNet_THREADING "${GASNet_THREADING}" CACHE STRING "GASNet Threading model to use")
   mark_as_advanced(GASNet_THREADING)

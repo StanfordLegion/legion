@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University
+/* Copyright 2024 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -63,7 +63,10 @@ void top_level_task(const Task *task,
   field_vec.push_back(FID_X);
   for(int reps = 0; reps < 2; reps++) {
     AttachLauncher alr(EXTERNAL_POSIX_FILE, lr_A, lr_A);
-    alr.attach_file(input_file, field_vec, LEGION_FILE_CREATE);
+    alr.initialize_constraints(false/*column major*/, true/*soa*/, field_vec);
+    alr.privilege_fields.insert(FID_X);
+    Realm::ExternalFileResource resource(std::string(input_file), LEGION_FILE_CREATE);
+    alr.external_resource = &resource;
     pr_A = runtime->attach_external_resource(ctx, alr);
     
     CopyLauncher clr;

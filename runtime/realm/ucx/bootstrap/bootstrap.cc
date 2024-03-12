@@ -1,5 +1,5 @@
 
-/* Copyright 2023 NVIDIA Corporation
+/* Copyright 2024 NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,8 +17,8 @@
 // UCP network module internals
 
 #include "realm/logging.h"
-#include "bootstrap_internal.h"
-#include "bootstrap_loader.h"
+#include "realm/ucx/bootstrap/bootstrap_internal.h"
+#include "realm/ucx/bootstrap/bootstrap_loader.h"
 
 namespace Realm {
 

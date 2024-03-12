@@ -3,15 +3,15 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use crate::state::{
-    Bounds, ChanID, ChanPoint, Config, CopyInstInfo, DimKind, FSpace, FieldID, FillInstInfo,
-    ISpaceID, Inst, InstUID, MemID, MemKind, MemPoint, NodeID, ProcID, ProcKind, ProcPoint, State,
-    TimePoint, Timestamp,
+    Align, Bounds, ChanEntry, ChanID, ChanPoint, Config, Container, CopyInstInfo, DeviceKind,
+    DimKind, FSpace, FieldID, FillInstInfo, ISpaceID, Inst, InstUID, MemID, MemKind, MemPoint,
+    NodeID, ProcID, ProcKind, ProcPoint, State, TimePoint, Timestamp,
 };
 
 use crate::conditional_assert;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct ProcGroup(pub Option<NodeID>, pub ProcKind);
+pub struct ProcGroup(pub Option<NodeID>, pub ProcKind, pub Option<DeviceKind>);
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct MemGroup(pub Option<NodeID>, pub MemKind);
@@ -23,7 +23,11 @@ pub trait StatePostprocess {
     fn group_mems(&self) -> BTreeMap<MemGroup, Vec<MemID>>;
     fn group_chans(&self) -> BTreeMap<Option<NodeID>, Vec<ChanID>>;
 
-    fn proc_group_timepoints(&self, procs: &Vec<ProcID>) -> Vec<&Vec<ProcPoint>>;
+    fn proc_group_timepoints(
+        &self,
+        device: Option<DeviceKind>,
+        procs: &Vec<ProcID>,
+    ) -> Vec<&Vec<ProcPoint>>;
     fn mem_group_timepoints(&self, mems: &Vec<MemID>) -> Vec<&Vec<MemPoint>>;
     fn chan_group_timepoints(&self, chans: &Vec<ChanID>) -> Vec<&Vec<ChanPoint>>;
 
@@ -100,12 +104,18 @@ impl StatePostprocess for State {
             // Do NOT filter empty procs here because they count towards
             // utilization totals
             let nodes = [None, Some(proc.proc_id.node_id())];
+            let devices: &'static [_] = match proc.kind {
+                ProcKind::GPU => &[Some(DeviceKind::Device), Some(DeviceKind::Host)],
+                _ => &[None],
+            };
             for node in nodes {
-                let group = ProcGroup(node, proc.kind);
-                groups
-                    .entry(group)
-                    .or_insert_with(Vec::new)
-                    .push(proc.proc_id);
+                for device in devices {
+                    let group = ProcGroup(node, proc.kind, *device);
+                    groups
+                        .entry(group)
+                        .or_insert_with(Vec::new)
+                        .push(proc.proc_id);
+                }
             }
         }
         groups
@@ -117,7 +127,7 @@ impl StatePostprocess for State {
             if !mem.is_visible() {
                 continue;
             }
-            if !mem.time_points.is_empty() {
+            if !mem.time_points(None).is_empty() {
                 let nodes = [None, Some(mem.mem_id.node_id())];
                 for node in nodes {
                     let group = MemGroup(node, mem.kind);
@@ -138,7 +148,7 @@ impl StatePostprocess for State {
             if !chan.is_visible() {
                 continue;
             }
-            if !chan.time_points.is_empty() && chan_id.node_id().is_some() {
+            if !chan.time_points(None).is_empty() && chan_id.node_id().is_some() {
                 // gathers/scatters
                 let mut nodes = vec![None];
                 if chan_id.dst.is_some() && chan_id.dst.unwrap() != MemID(0) {
@@ -157,12 +167,16 @@ impl StatePostprocess for State {
         groups
     }
 
-    fn proc_group_timepoints(&self, procs: &Vec<ProcID>) -> Vec<&Vec<ProcPoint>> {
+    fn proc_group_timepoints(
+        &self,
+        device: Option<DeviceKind>,
+        procs: &Vec<ProcID>,
+    ) -> Vec<&Vec<ProcPoint>> {
         let mut timepoints = Vec::new();
         for proc_id in procs {
             let proc = self.procs.get(proc_id).unwrap();
             if proc.is_visible() {
-                timepoints.push(&proc.util_time_points);
+                timepoints.push(proc.util_time_points(device));
             }
         }
         timepoints
@@ -173,7 +187,7 @@ impl StatePostprocess for State {
         for mem_id in mems {
             let mem = self.mems.get(mem_id).unwrap();
             if mem.is_visible() {
-                timepoints.push(&mem.time_points);
+                timepoints.push(mem.util_time_points(None));
             }
         }
         timepoints
@@ -184,7 +198,7 @@ impl StatePostprocess for State {
         for chan_id in chans {
             let chan = self.chans.get(chan_id).unwrap();
             if chan.is_visible() {
-                timepoints.push(&chan.time_points);
+                timepoints.push(chan.util_time_points(None));
             }
         }
         timepoints
@@ -204,14 +218,20 @@ impl StatePostprocess for State {
                 continue;
             }
             let nodes = [None, Some(proc.proc_id.node_id())];
+            let devices: &'static [_] = match proc.kind {
+                ProcKind::GPU => &[Some(DeviceKind::Device), Some(DeviceKind::Host)],
+                _ => &[None],
+            };
             for node in nodes {
-                let group = ProcGroup(node, proc.kind);
-                proc_count.entry(group).and_modify(|i| *i += 1).or_insert(1);
-                if !proc.is_empty() {
-                    timepoint
-                        .entry(group)
-                        .or_insert_with(Vec::new)
-                        .push((proc.proc_id, &proc.util_time_points));
+                for device in devices {
+                    let group = ProcGroup(node, proc.kind, *device);
+                    proc_count.entry(group).and_modify(|i| *i += 1).or_insert(1);
+                    if !proc.is_empty() {
+                        timepoint
+                            .entry(group)
+                            .or_insert_with(Vec::new)
+                            .push((proc.proc_id, proc.util_time_points(*device)));
+                    }
                 }
             }
         }
@@ -225,14 +245,14 @@ impl StatePostprocess for State {
             if !mem.is_visible() {
                 continue;
             }
-            if !mem.time_points.is_empty() {
+            if !mem.time_points(None).is_empty() {
                 let nodes = [None, Some(mem.mem_id.node_id())];
                 for node in nodes {
                     let group = MemGroup(node, mem.kind);
                     result
                         .entry(group)
                         .or_insert_with(Vec::new)
-                        .push((mem.mem_id, &mem.time_points))
+                        .push((mem.mem_id, mem.util_time_points(None)))
                 }
             }
         }
@@ -249,7 +269,7 @@ impl StatePostprocess for State {
             if !chan.is_visible() {
                 continue;
             }
-            if !chan.time_points.is_empty() && chan_id.node_id().is_some() {
+            if !chan.time_points(None).is_empty() && chan_id.node_id().is_some() {
                 // gathers/scatters
                 let mut nodes = vec![None];
                 if chan_id.dst.is_some() && chan_id.dst.unwrap() != MemID(0) {
@@ -264,7 +284,7 @@ impl StatePostprocess for State {
                         result
                             .entry(node)
                             .or_insert_with(Vec::new)
-                            .push((*chan_id, &chan.time_points))
+                            .push((*chan_id, chan.util_time_points(None)))
                     }
                 }
             }
@@ -530,6 +550,62 @@ impl fmt::Display for ISpacePretty<'_> {
 }
 
 #[derive(Debug)]
+pub struct FSpaceShort<'a>(pub &'a FSpace);
+
+impl fmt::Display for FSpaceShort<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let FSpaceShort(fspace) = self;
+
+        if let Some(name) = &fspace.name {
+            write!(f, "{} <{}>", name, fspace.fspace_id.0)
+        } else {
+            write!(f, "<{}>", fspace.fspace_id.0)
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct FieldPretty<'a>(pub &'a FSpace, pub FieldID, pub &'a Align);
+
+impl fmt::Display for FieldPretty<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let FieldPretty(fspace, field_id, align) = self;
+
+        if let Some(field) = fspace.fields.get(field_id) {
+            write!(f, "{} <{}>", field.name, field_id.0)?;
+        } else {
+            write!(f, "<{}>", field_id.0)?;
+        }
+
+        if align.has_align {
+            write!(f, " (align={})", align.align_desc)?;
+        }
+
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub struct FieldsPretty<'a>(pub &'a FSpace, pub &'a Inst);
+
+impl fmt::Display for FieldsPretty<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let FieldsPretty(fspace, inst) = self;
+
+        let field_ids = inst.fields.get(&fspace.fspace_id).unwrap();
+        let align_desc = inst.align_desc.get(&fspace.fspace_id).unwrap();
+        let mut i = field_ids.iter().zip(align_desc.iter()).peekable();
+        while let Some((field_id, align)) = i.next() {
+            write!(f, "{}", FieldPretty(&fspace, *field_id, align))?;
+            if i.peek().is_some() {
+                write!(f, ", ")?;
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
 pub struct FSpacePretty<'a>(pub &'a FSpace, pub &'a Inst);
 
 impl fmt::Display for FSpacePretty<'_> {
@@ -551,7 +627,7 @@ impl fmt::Display for FSpacePretty<'_> {
             while let Some((i, field)) = fields.next() {
                 let align = &align_desc[i];
                 if let Some(fld) = fspace.fields.get(field) {
-                    write!(f, "{}", fld.name)?;
+                    write!(f, "fid:{}:{}", field.0, fld.name)?;
                 } else {
                     write!(f, "fid:{}", field.0)?;
                 }
@@ -572,11 +648,11 @@ impl fmt::Display for FSpacePretty<'_> {
 }
 
 #[derive(Debug)]
-pub struct DimOrderPretty<'a>(pub &'a Inst);
+pub struct DimOrderPretty<'a>(pub &'a Inst, pub bool);
 
 impl fmt::Display for DimOrderPretty<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let inst = self.0;
+        let DimOrderPretty(inst, brackets) = self;
 
         let mut aos = false;
         let mut soa = false;
@@ -620,27 +696,67 @@ impl fmt::Display for DimOrderPretty<'_> {
                 }
             }
         }
+
+        let open = |f: &mut fmt::Formatter<'_>, previous: &mut bool| -> fmt::Result {
+            if *brackets {
+                write!(f, "[")?;
+            } else if *previous {
+                write!(f, ", ")?;
+            }
+            Ok(())
+        };
+        let close = |f: &mut fmt::Formatter<'_>, previous: &mut bool| -> fmt::Result {
+            if *brackets {
+                write!(f, "]")?;
+            }
+            *previous = true;
+            Ok(())
+        };
+
+        let mut previous = false;
+
         if dim_last.map_or(false, |(d, _)| d.0 != 1) {
             if column_major == dim_last.unwrap().0 .0 && !cmpx_order {
-                write!(f, "[Column Major]")?;
+                open(f, &mut previous)?;
+                write!(f, "Column Major")?;
+                close(f, &mut previous)?;
             } else if row_major == dim_last.unwrap().0 .0 && !cmpx_order {
-                write!(f, "[Row Major]")?;
+                open(f, &mut previous)?;
+                write!(f, "Row Major")?;
+                close(f, &mut previous)?;
             }
         }
         if cmpx_order {
+            open(f, &mut previous)?;
             for (dim, dim_order) in &inst.dim_order {
-                write!(f, "[{:?}]", dim_order)?;
-                if (dim.0 + 1) % 4 == 0 && dim != dim_last.unwrap().0 {
+                write!(f, "{:?}", dim_order)?;
+                if *brackets && (dim.0 + 1) % 4 == 0 && dim != dim_last.unwrap().0 {
                     write!(f, "$")?;
                 }
             }
+            close(f, &mut previous)?;
         } else if aos {
-            write!(f, "[Array-of-structs (AOS)]")?;
+            open(f, &mut previous)?;
+            write!(f, "Array-of-structs (AOS)")?;
+            close(f, &mut previous)?;
         } else if soa {
-            write!(f, "[Struct-of-arrays (SOA)]")?;
+            open(f, &mut previous)?;
+            write!(f, "Struct-of-arrays (SOA)")?;
+            close(f, &mut previous)?;
         }
 
         Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub struct InstShort<'a>(pub &'a Inst);
+
+impl fmt::Display for InstShort<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let InstShort(inst) = self;
+
+        write!(f, "0x{:x}", inst.inst_id.unwrap().0)
     }
 }
 
@@ -667,7 +783,7 @@ impl fmt::Display for InstPretty<'_> {
             }
         }
         if inst.dim_order.len() > 0 {
-            write!(f, "$Layout Order: {} ", DimOrderPretty(inst))?;
+            write!(f, "$Layout Order: {} ", DimOrderPretty(inst, true))?;
         }
         write!(
             f,
@@ -681,11 +797,62 @@ impl fmt::Display for InstPretty<'_> {
 }
 
 #[derive(Debug)]
+pub struct ChanEntryShort<'a>(pub &'a ChanEntry);
+
+impl fmt::Display for ChanEntryShort<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let ChanEntryShort(entry) = self;
+
+        match entry {
+            ChanEntry::Copy(copy) => write!(f, "{}", copy.copy_kind.unwrap()),
+            ChanEntry::Fill(_) => write!(f, "Fill"),
+            ChanEntry::DepPart(deppart) => write!(f, "{}", deppart.part_op),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct ChanEntryFieldsPretty<'a>(pub Option<&'a Inst>, pub &'a Vec<FieldID>, pub &'a State);
+
+impl fmt::Display for ChanEntryFieldsPretty<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let ChanEntryFieldsPretty(inst, field_ids, state) = self;
+
+        let fspace = inst.and_then(|inst| {
+            // FIXME (Elliott): not sure how we're supposed to do this if we
+            // have more than one field space in an instance
+            if inst.fspace_ids.len() == 1 {
+                let fspace_id = inst.fspace_ids[0];
+                Some(state.field_spaces.get(&fspace_id).unwrap())
+            } else {
+                None
+            }
+        });
+
+        let mut i = field_ids.iter().peekable();
+        while let Some(fid) = i.next() {
+            if let Some(field) = fspace.and_then(|fs| fs.fields.get(fid)) {
+                write!(f, "{} <{}>", field.name, fid.0)?;
+            } else {
+                write!(f, "<{}>", fid.0)?;
+            }
+            if i.peek().is_some() {
+                write!(f, ", ")?;
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
 pub struct CopyInstInfoDisplay<'a>(
     pub Option<&'a Inst>, // src_inst
     pub Option<&'a Inst>, // src_dst
     pub InstUID,          // src_inst_uid
     pub InstUID,          // dst_inst_uid
+    pub FieldID,          // src_fid
+    pub FieldID,          // dst_fid
+    pub u32,              // num_hops
 );
 
 impl fmt::Display for CopyInstInfoDisplay<'_> {
@@ -701,16 +868,24 @@ impl fmt::Display for CopyInstInfoDisplay<'_> {
         match (self.2 .0, self.3 .0) {
             (0, 0) => unreachable!(),
             (0, _) => {
-                write!(f, "Scatter: dst_indirect_inst=0x{:x}", dst_inst_id)
+                write!(
+                    f,
+                    "Scatter: dst_indirect_inst=0x{:x}, fid={}",
+                    dst_inst_id, self.5 .0
+                )
             }
             (_, 0) => {
-                write!(f, "Gather: src_indirect_inst=0x{:x}", src_inst_id)
+                write!(
+                    f,
+                    "Gather: src_indirect_inst=0x{:x}, fid={}",
+                    src_inst_id, self.4 .0
+                )
             }
             (_, _) => {
                 write!(
                     f,
-                    "src_inst=0x{:x}, dst_inst=0x{:x}",
-                    src_inst_id, dst_inst_id
+                    "src_inst=0x{:x}, src_fid={}, dst_inst=0x{:x}, dst_fid={}, num_hops={}",
+                    src_inst_id, self.4 .0, dst_inst_id, self.5 .0, self.6
                 )
             }
         }
@@ -729,7 +904,15 @@ impl fmt::Display for CopyInstInfoVec<'_> {
                 f,
                 "$req[{}]: {}",
                 i,
-                CopyInstInfoDisplay(src_inst, dst_inst, elt.src_inst_uid, elt.dst_inst_uid)
+                CopyInstInfoDisplay(
+                    src_inst,
+                    dst_inst,
+                    elt.src_inst_uid,
+                    elt.dst_inst_uid,
+                    elt.src_fid,
+                    elt.dst_fid,
+                    elt.num_hops
+                )
             )?;
         }
         Ok(())
@@ -744,25 +927,31 @@ impl fmt::Display for CopyInstInfoDumpInstVec<'_> {
         // remove duplications
         let mut insts_set = BTreeSet::new();
         for elt in self.0.iter() {
-            if let Some(src_inst) = self.1.find_inst(elt.src_inst_uid) {
-                insts_set.insert(src_inst);
-            } else {
-                conditional_assert!(
-                    false,
-                    Config::all_logs(),
-                    "Copy can not find src_inst:0x{:x}",
-                    elt.src_inst_uid.0
-                );
+            // src_inst_uid = 0 means scatter (indirection inst)
+            if elt.src_inst_uid != InstUID(0) {
+                if let Some(src_inst) = self.1.find_inst(elt.src_inst_uid) {
+                    insts_set.insert(src_inst);
+                } else {
+                    conditional_assert!(
+                        false,
+                        Config::all_logs(),
+                        "Copy can not find src_inst:0x{:x}",
+                        elt.src_inst_uid.0
+                    );
+                }
             }
-            if let Some(dst_inst) = self.1.find_inst(elt.dst_inst_uid) {
-                insts_set.insert(dst_inst);
-            } else {
-                conditional_assert!(
-                    false,
-                    Config::all_logs(),
-                    "Copy can not find dst_inst:0x{:x}",
-                    elt.dst_inst_uid.0
-                );
+            // dst_inst_uid = 0 means gather (indirection inst)
+            if elt.dst_inst_uid != InstUID(0) {
+                if let Some(dst_inst) = self.1.find_inst(elt.dst_inst_uid) {
+                    insts_set.insert(dst_inst);
+                } else {
+                    conditional_assert!(
+                        false,
+                        Config::all_logs(),
+                        "Copy can not find dst_inst:0x{:x}",
+                        elt.dst_inst_uid.0
+                    );
+                }
             }
         }
         write!(f, "[")?;

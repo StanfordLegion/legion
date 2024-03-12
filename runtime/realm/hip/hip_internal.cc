@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *                Los Alamos National Laboratory
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -334,8 +334,6 @@ namespace Realm {
                   const void *src = reinterpret_cast<const void *>(in_base + in_offset);
                   void *dst = reinterpret_cast<void *>(out_base + out_offset);
 
-                  CHECK_HIP( hipMemcpy2DAsync(dst, out_lstride, src, in_lstride, contig_bytes, lines, copy_type, stream->get_stream()) );
-
                   log_gpudma.info() << "gpu memcpy 2d: dst="
                                     << std::hex << (out_base + out_offset) << std::dec
                                     << "+" << out_lstride << " src="
@@ -344,6 +342,10 @@ namespace Realm {
                                     << " bytes=" << bytes << " lines=" << lines
                                     << " stream=" << stream
                                     << " kind=" << memcpy_kind;
+
+                  CHECK_HIP(hipMemcpy2DAsync(dst, out_lstride, src, in_lstride,
+                                             contig_bytes, lines, copy_type,
+                                             stream->get_stream()));
 
                   in_alc.advance(id, lines * iscale);
                   out_alc.advance(od, lines * oscale);
@@ -526,7 +528,7 @@ namespace Realm {
       src_gpu = _src_gpu;
         
       // switch out of ordered mode if multi-threaded dma is requested
-      if(_src_gpu->module->cfg_multithread_dma)
+      if(_src_gpu->module->config->cfg_multithread_dma)
         xdq.ordered_mode = false;
 
       std::vector<Memory> local_gpu_mems;
@@ -805,9 +807,11 @@ namespace Realm {
               //  ranges - whatever we get can be assumed to be regular
               int out_dim = out_alc.get_dim();
 
+#ifdef DEBUG_REALM
               // since HIP does not support 12/32 bit 2D memset, we need to
               //  use the default path for them
               int memset2d_flag = 0;
+#endif
 
               // fast paths for 8/16/32 bit memsets exist for 1-D and 2-D
               switch(reduced_fill_size) {
@@ -843,9 +847,9 @@ namespace Realm {
                 memcpy(&fill_u16, fill_data, 2);
                 if(out_dim == 1) {
                   size_t bytes = out_alc.remaining(0);
-  #ifdef DEBUG_REALM
+#ifdef DEBUG_REALM
                   assert((bytes & 1) == 0);
-  #endif
+#endif
                   CHECK_HIP( hipMemsetD16Async((hipDeviceptr_t)(out_base + out_offset),
                                                 fill_u16,
                                                 bytes >> 1,
@@ -853,7 +857,9 @@ namespace Realm {
                   out_alc.advance(0, bytes);
                   total_bytes += bytes;
                 } else {
+#ifdef DEBUG_REALM
                   memset2d_flag = 2;
+#endif
                   goto default_memset;
                 }
                 break;
@@ -865,9 +871,9 @@ namespace Realm {
                 memcpy(&fill_u32, fill_data, 4);
                 if(out_dim == 1) {
                   size_t bytes = out_alc.remaining(0);
-  #ifdef DEBUG_REALM
+#ifdef DEBUG_REALM
                   assert((bytes & 3) == 0);
-  #endif
+#endif
                   CHECK_HIP( hipMemsetD32Async((hipDeviceptr_t)(out_base + out_offset),
                                                 fill_u32,
                                                 bytes >> 2,
@@ -875,7 +881,9 @@ namespace Realm {
                   out_alc.advance(0, bytes);
                   total_bytes += bytes;
                 } else {
+#ifdef DEBUG_REALM
                   memset2d_flag = 4;
+#endif
                   goto default_memset;
                 }
                 break;
@@ -888,7 +896,7 @@ namespace Realm {
   default_memset:
                 size_t bytes = out_alc.remaining(0);
                 size_t elems = bytes / reduced_fill_size;
-  #ifdef DEBUG_REALM
+#ifdef DEBUG_REALM
                 switch(memset2d_flag) {
                   case 2: {
                     assert((bytes & 1) == 0);
@@ -904,7 +912,7 @@ namespace Realm {
                     assert((bytes % reduced_fill_size) == 0);
                   }
 		}
-  #endif
+#endif
                 size_t partial_bytes = 0;
                 // if((reduced_fill_size & 3) == 0) {
                 //   // 32-bit partial fills allowed
@@ -1503,16 +1511,16 @@ namespace Realm {
         return true;
       }
 
-      uint64_t GPUreduceChannel::supports_path(Memory src_mem, Memory dst_mem,
-                                                   CustomSerdezID src_serdez_id,
-                                                   CustomSerdezID dst_serdez_id,
-                                                   ReductionOpID redop_id,
-                                                   size_t total_bytes,
-                                                   const std::vector<size_t> *src_frags,
-                                                   const std::vector<size_t> *dst_frags,
-                                                   XferDesKind *kind_ret /*= 0*/,
-                                                   unsigned *bw_ret /*= 0*/,
-                                                   unsigned *lat_ret /*= 0*/)
+      uint64_t GPUreduceChannel::supports_path(ChannelCopyInfo channel_copy_info,
+                                               CustomSerdezID src_serdez_id,
+                                               CustomSerdezID dst_serdez_id,
+                                               ReductionOpID redop_id,
+                                               size_t total_bytes,
+                                               const std::vector<size_t> *src_frags,
+                                               const std::vector<size_t> *dst_frags,
+                                               XferDesKind *kind_ret /*= 0*/,
+                                               unsigned *bw_ret /*= 0*/,
+                                               unsigned *lat_ret /*= 0*/)
       {
         // first check that we have a reduction op (if not, we want the cudamemcpy
         //   path to pick this up instead) and that it has cuda kernels available
@@ -1520,7 +1528,7 @@ namespace Realm {
           return 0;
 
         // then delegate to the normal supports_path logic
-        return Channel::supports_path(src_mem, dst_mem,
+        return Channel::supports_path(channel_copy_info,
                                       src_serdez_id, dst_serdez_id, redop_id,
                                       total_bytes, src_frags, dst_frags,
                                       kind_ret, bw_ret, lat_ret);
@@ -1619,16 +1627,16 @@ namespace Realm {
         : RemoteChannel(_remote_ptr)
       {}
 
-      uint64_t GPUreduceRemoteChannel::supports_path(Memory src_mem, Memory dst_mem,
-                                                         CustomSerdezID src_serdez_id,
-                                                         CustomSerdezID dst_serdez_id,
-                                                         ReductionOpID redop_id,
-                                                         size_t total_bytes,
-                                                         const std::vector<size_t> *src_frags,
-                                                         const std::vector<size_t> *dst_frags,
-                                                         XferDesKind *kind_ret /*= 0*/,
-                                                         unsigned *bw_ret /*= 0*/,
-                                                         unsigned *lat_ret /*= 0*/)
+      uint64_t GPUreduceRemoteChannel::supports_path(ChannelCopyInfo channel_copy_info,
+                                                     CustomSerdezID src_serdez_id,
+                                                     CustomSerdezID dst_serdez_id,
+                                                     ReductionOpID redop_id,
+                                                     size_t total_bytes,
+                                                     const std::vector<size_t> *src_frags,
+                                                     const std::vector<size_t> *dst_frags,
+                                                     XferDesKind *kind_ret /*= 0*/,
+                                                     unsigned *bw_ret /*= 0*/,
+                                                     unsigned *lat_ret /*= 0*/)
       {
         // check first that we have a reduction op (if not, we want the cudamemcpy
         //   path to pick this up instead) and that it has cuda kernels available
@@ -1636,7 +1644,7 @@ namespace Realm {
           return 0;
 
         // then delegate to the normal supports_path logic
-        return Channel::supports_path(src_mem, dst_mem,
+        return Channel::supports_path(channel_copy_info,
                                       src_serdez_id, dst_serdez_id, redop_id,
                                       total_bytes, src_frags, dst_frags,
                                       kind_ret, bw_ret, lat_ret);

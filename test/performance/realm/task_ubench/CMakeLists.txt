@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------#
-# Copyright 2023 Kitware, Inc.
+# Copyright 2024 Kitware, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -24,14 +24,15 @@ endif()
 
 set(CPU_SOURCES task_ubench.cc)
 if(Legion_USE_CUDA)
-  set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS} -Wno-deprecated-gpu-targets)
   set(GPU_SOURCES task_ubench_gpu.cu)
-  cuda_add_executable(task_ubench ${CPU_SOURCES} ${GPU_SOURCES})
+  add_executable(task_ubench ${CPU_SOURCES} ${GPU_SOURCES})
+  set_target_cuda_standard(task_ubench STANDARD ${Legion_CUDA_STANDARD})
+  set_target_cuda_architectures(task_ubench ARCHITECTURES ${Legion_CUDA_ARCH})
+  set_target_cuda_warnings_and_errors(task_ubench WARN_AS_ERROR ${Legion_BUILD_WARN_AS_ERROR})
 elseif(Legion_USE_HIP)
   set(GPU_SOURCES task_ubench_gpu.cu)
   if(Legion_HIP_TARGET STREQUAL "CUDA")
-    set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS} -Wno-deprecated-gpu-targets)
-    cuda_add_executable(task_ubench ${CPU_SOURCES} ${GPU_SOURCES})
+    add_executable(task_ubench ${CPU_SOURCES} ${GPU_SOURCES})
     target_compile_definitions(task_ubench PRIVATE __HIP_PLATFORM_NVIDIA__)
   elseif (Legion_HIP_TARGET STREQUAL "ROCM")
     hip_add_executable(task_ubench ${CPU_SOURCES} ${GPU_SOURCES})
@@ -43,6 +44,7 @@ else()
 endif()
 
 target_link_libraries(task_ubench Legion::Realm)
+target_compile_options(task_ubench PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
 if(Legion_ENABLE_TESTING)
   add_test(NAME task_ubench COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:task_ubench> ${Legion_TEST_ARGS})
 endif()
