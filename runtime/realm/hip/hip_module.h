@@ -183,8 +183,6 @@ namespace Realm {
       HipModuleConfig *config;
       RuntimeImpl *runtime;
 
-      RuntimeImpl *runtime;
-
       // "global" variables live here too
       GPUWorker *shared_worker;
       std::map<GPU *, GPUWorker *> dedicated_workers;
