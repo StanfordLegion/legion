@@ -259,7 +259,7 @@ namespace Legion {
     // The algorithm that should be used to compute the repeats.
     enum NonOverlappingAlgorithm {
       SUFFIX_TREE_WALK = 0,
-      QUICK_MATCHING_SUBSTRINGS = 1,
+      QUICK_MATCHING_OF_SUBSTRINGS = 1,
       NO_ALGORITHM,
     };
     NonOverlappingAlgorithm parse_non_overlapping_algorithm(const std::string&);
@@ -348,6 +348,9 @@ namespace Legion {
                       std::vector<size_t>& sarray,
                       std::vector<int64_t>& surrogate) {
       size_t n = str.size();
+      if(n == 0){
+        return;
+      }
       // Define a struct for sorting the input string. To handle an
       // arbitrary type T, we use a boolean `present` to ensure that
       // tokens without a "next" value are sorted before any other tokens.
@@ -361,7 +364,6 @@ namespace Legion {
             std::tie(rhs.start, rhs.present, rhs.next, rhs.idx);
         }
       };
-      using triple = std::tuple<int, int, size_t>;
 
       // First round - O(n log n) sort
       std::vector<Key> w(n);
@@ -426,7 +428,7 @@ namespace Legion {
         if (v >= n-1) break;
         shift *= 2;
 
-        // Udpate sort table.
+        // Update sort table.
         for (size_t i = 0; i < n; i++) {
           surrogate_sorter[i] = SKey {
             .start = surrogate[i],
@@ -506,14 +508,12 @@ namespace Legion {
     // This is a new algorithm designed by David Broman in 2024.
     // Please see the following Git repo for a reference implementation and a short explanation:
     // https://github.com/david-broman/matching-substrings
-    template<typename T>
     std::vector<NonOverlappingRepeatsResult>
-    quick_matching_substrings(const std::vector<T>& str,
-                              size_t min_length,
-                              const std::vector<size_t>& sarray,
-                              const std::vector<size_t>& lcp) {
+    quick_matching_of_substrings(size_t min_length,
+                                 const std::vector<size_t>& sarray,
+                                 const std::vector<size_t>& lcp) {
       std::vector<NonOverlappingRepeatsResult> result;
-      size_t le = str.size();
+      size_t le = sarray.size();
       using triple = std::tuple<size_t, size_t, size_t>;
       using pair = std::tuple<size_t, size_t>;
 
@@ -566,7 +566,7 @@ namespace Legion {
       size_t m_pre = 0;
       size_t next_k = 0;
       const size_t min_repeats = 2;
-      for(size_t i = 0; i < le; i++){
+      for(size_t i = 0; i < a.size(); i++){
         int l = std::get<0>(a[i]);
         size_t m = std::get<1>(a[i]);
         size_t k = std::get<2>(a[i]);
@@ -585,7 +585,8 @@ namespace Legion {
           next_k = 0;
         }
         m_pre = m;
-        if(le2 >= min_length && k >= next_k && !(flag[k]) && !(flag[k + le2 - 1])){
+        if(le2 != 0 && le2 >= min_length && k >= next_k &&
+           !(flag[k]) && !(flag[k + le2 - 1])){
           r.push_back(std::make_tuple(k, k + le2));
           next_k = k + le2;
         }
@@ -631,7 +632,7 @@ namespace Legion {
           result.erase(result.begin() + copyidx, result.end());
           return result;
         }
-      case NonOverlappingAlgorithm::QUICK_MATCHING_SUBSTRINGS: {
+      case NonOverlappingAlgorithm::QUICK_MATCHING_OF_SUBSTRINGS: {
         if(str.size() < 2)
           return {};
         std::vector<size_t> sarray(str.size());
@@ -639,7 +640,7 @@ namespace Legion {
         suffix_array(str, sarray, surrogate);
         std::vector<size_t> lcp = compute_lcp(str, sarray, surrogate);
         std::vector<NonOverlappingRepeatsResult> result =
-          quick_matching_substrings(str, min_length, sarray, lcp);
+          quick_matching_of_substrings(min_length, sarray, lcp);
         return result;
       }
         default:

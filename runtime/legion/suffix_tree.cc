@@ -21,8 +21,8 @@ namespace Legion {
       if (str == "suffix_tree_walk") {
         return NonOverlappingAlgorithm::SUFFIX_TREE_WALK;
       }
-      else if (str == "quick_matching_substrings") {
-        return NonOverlappingAlgorithm::QUICK_MATCHING_SUBSTRINGS;
+      else if (str == "quick_matching_of_substrings") {
+        return NonOverlappingAlgorithm::QUICK_MATCHING_OF_SUBSTRINGS;
       }
       return NonOverlappingAlgorithm::NO_ALGORITHM;
     }
@@ -30,7 +30,7 @@ namespace Legion {
     const char* non_overlapping_algorithm_to_string(NonOverlappingAlgorithm alg) {
       switch (alg) {
         case NonOverlappingAlgorithm::SUFFIX_TREE_WALK: return "suffix_tree_walk";
-        case NonOverlappingAlgorithm::QUICK_MATCHING_SUBSTRINGS: return "quick_matching_substrings";
+        case NonOverlappingAlgorithm::QUICK_MATCHING_OF_SUBSTRINGS: return "quick_matching_of_substrings";
         case NonOverlappingAlgorithm::NO_ALGORITHM: return "no_algorithm";
         default: {
           assert(false);
