@@ -19,7 +19,6 @@ if [[ "$LMOD_SYSTEM_NAME" = frontier ]]; then
     cat >>env.sh <<EOF
 module load PrgEnv-gnu
 module load rocm/$ROCM_VERSION
-export HIP_PATH="\$ROCM_PATH/hip"
 export CC=cc
 export CXX=CC
 if [[ "\$REALM_NETWORKS" != "" ]]; then
