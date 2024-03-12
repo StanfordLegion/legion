@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -4967,151 +4967,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    LegionRuntime::Accessor::RegionAccessor<
-      LegionRuntime::Accessor::AccessorType::Generic>
-        PhysicalRegionImpl::get_accessor(bool silence_warnings)
-    //--------------------------------------------------------------------------
-    {
-      if (context != NULL)
-      {
-        if (context->is_inner_context())
-          REPORT_LEGION_ERROR(ERROR_INNER_TASK_VIOLATION, 
-            "Illegal call to 'get_accessor' inside task "
-            "%s (UID %lld) for a variant that was labeled as an 'inner' "
-            "variant.", context->get_task_name(), context->get_unique_id())
-        else if (runtime->runtime_warnings && !silence_warnings &&
-                  !context->is_leaf_context())
-          REPORT_LEGION_WARNING(LEGION_WARNING_NONLEAF_ACCESSOR, 
-              "Call to 'get_accessor' in non-leaf task %s "
-              "(UID %lld) is a blocking operation in violation of Legion's "
-              "deferred execution model best practices. You may notice a "
-              "severe performance degradation.", context->get_task_name(),
-              context->get_unique_id())
-      }
-      // If this physical region isn't mapped, then we have to
-      // map it before we can return an accessor
-      if (!mapped)
-      {
-        if (virtual_mapped)
-          REPORT_LEGION_ERROR(ERROR_ILLEGAL_IMPLICIT_MAPPING, 
-                        "Illegal implicit mapping of a virtual mapped region "
-                        "in task %s (UID %lld)", context->get_task_name(),
-                        context->get_unique_id())
-        if (runtime->runtime_warnings && !silence_warnings)
-          REPORT_LEGION_WARNING(LEGION_WARNING_UNMAPPED_ACCESSOR, 
-                          "Request for 'get_accessor' was "
-                          "performed on an unmapped region in task %s "
-                          "(UID %lld). Legion is mapping it for you. "
-                          "Please try to be more careful.",
-                          context->get_task_name(), context->get_unique_id())
-        runtime->remap_region(context, PhysicalRegion(this));
-        // At this point we should have a new ready event
-        // and be mapped
-#ifdef DEBUG_LEGION
-        assert(mapped);
-#endif
-      }
-      // Wait until we are valid before returning the accessor
-      wait_until_valid(silence_warnings, NULL, 
-                       runtime->runtime_warnings, "get_accessor");
-      // You can only legally invoke this method when you have one instance
-      if (references.size() > 1)
-        REPORT_LEGION_ERROR(ERROR_DEPRECATED_METHOD_USE, 
-                      "Illegal invocation of deprecated 'get_accessor' method "
-                      "in task %s (ID %lld) on a PhysicalRegion containing "
-                      "multiple internal instances. Use of this deprecated "
-                      "method is only supported if the PhysicalRegion contains "
-                      "a single physical instance.", context->get_task_name(),
-                      context->get_unique_id())
-      made_accessor = true;
-      const InstanceSet &instances = references;
-#if defined(LEGION_PRIVILEGE_CHECKS) || defined(LEGION_BOUNDS_CHECKS)
-      LegionRuntime::Accessor::RegionAccessor<
-        LegionRuntime::Accessor::AccessorType::Generic>
-          result = instances[0].get_accessor();
-      result.set_region_untyped(this);
-#ifdef LEGION_PRIVILEGE_CHECKS
-      result.set_privileges_untyped(
-          (LegionRuntime::AccessorPrivilege)req.get_accessor_privilege()); 
-#endif
-      return result;
-#else // privilege or bounds checks
-      return instances[0].get_accessor();
-#endif
-    }
-
-    //--------------------------------------------------------------------------
-    LegionRuntime::Accessor::RegionAccessor<
-        LegionRuntime::Accessor::AccessorType::Generic>
-          PhysicalRegionImpl::get_field_accessor(FieldID fid, 
-                                                 bool silence_warnings)
-    //--------------------------------------------------------------------------
-    {
-      if (context != NULL)
-      {
-        if (context->is_inner_context())
-          REPORT_LEGION_ERROR(ERROR_INNER_TASK_VIOLATION, 
-            "Illegal call to 'get_field_accessor' inside "
-            "task %s (UID %lld) for a variant that was labeled as an 'inner' "
-            "variant.", context->get_task_name(), context->get_unique_id())
-        else if (runtime->runtime_warnings && !silence_warnings &&
-                  !context->is_leaf_context())
-          REPORT_LEGION_WARNING(LEGION_WARNING_NONLEAF_ACCESSOR, 
-              "Call to 'get_field_accessor' in non-leaf "
-              "task %s (UID %lld) is a blocking operation in violation of "
-              "Legion's deferred execution model best practices. You may "
-              "notice a severe performance degradation.", 
-              context->get_task_name(), context->get_unique_id())
-      }
-      // If this physical region isn't mapped, then we have to
-      // map it before we can return an accessor
-      if (!mapped)
-      {
-        if (virtual_mapped)
-          REPORT_LEGION_ERROR(ERROR_ILLEGAL_IMPLICIT_MAPPING, 
-                        "Illegal implicit mapping of a virtual mapped region "
-                        "in task %s (UID %lld)", context->get_task_name(),
-                        context->get_unique_id())
-        if (runtime->runtime_warnings && !silence_warnings)
-          REPORT_LEGION_WARNING(LEGION_WARNING_UNMAPPED_ACCESSOR, 
-                          "Request for 'get_field_accessor' was "
-                          "performed on an unmapped region in task %s "
-                          "(UID %lld). Legion is mapping it for you. "
-                          "Please try to be more careful.",
-                          context->get_task_name(), context->get_unique_id())
-        runtime->remap_region(context, PhysicalRegion(this));
-        // At this point we should have a new ready event
-        // and be mapped
-#ifdef DEBUG_LEGION
-        assert(mapped);
-#endif 
-      }
-      // Wait until we are valid before returning the accessor
-      wait_until_valid(silence_warnings, NULL, 
-                       runtime->runtime_warnings, "get_field_acessor");
-#ifdef DEBUG_LEGION
-      if (req.privilege_fields.find(fid) == req.privilege_fields.end())
-        REPORT_LEGION_ERROR(ERROR_INVALID_FIELD_PRIVILEGES, 
-            "Requested field accessor for field %d without privileges!", fid)
-#endif
-      made_accessor = true;
-      const InstanceSet &instances = references;
-#if defined(LEGION_PRIVILEGE_CHECKS) || defined(LEGION_BOUNDS_CHECKS)
-      LegionRuntime::Accessor::RegionAccessor<
-        LegionRuntime::Accessor::AccessorType::Generic>
-          result = instances.get_field_accessor(fid);
-      result.set_region_untyped(this);
-#ifdef LEGION_PRIVILEGE_CHECKS
-      result.set_privileges_untyped(
-          (LegionRuntime::AccessorPrivilege)req.get_accessor_privilege());
-#endif
-      return result;
-#else // privilege or bounds checks
-      return instances.get_field_accessor(fid);
-#endif
-    } 
-
-    //--------------------------------------------------------------------------
     void PhysicalRegionImpl::unmap_region(void)
     //--------------------------------------------------------------------------
     {
@@ -5270,39 +5125,6 @@ namespace Legion {
       fields.insert(fields.end(), req.privilege_fields.begin(),
                     req.privilege_fields.end());
     }
-
-
-#if defined(LEGION_PRIVILEGE_CHECKS) || defined(LEGION_BOUNDS_CHECKS)
-    //--------------------------------------------------------------------------
-    const char* PhysicalRegionImpl::get_task_name(void) const
-    //--------------------------------------------------------------------------
-    {
-      return context->get_task_name();
-    }
-#endif
-
-#ifdef LEGION_BOUNDS_CHECKS 
-    //--------------------------------------------------------------------------
-    bool PhysicalRegionImpl::contains_ptr(ptr_t ptr)
-    //--------------------------------------------------------------------------
-    {
-      if (!bounds.exists())
-        bounds = runtime->forest->get_node(req.region.get_index_space())->
-                    get_color_space_domain();
-      DomainPoint dp(ptr.value);
-      return bounds.contains(dp);
-    }
-    
-    //--------------------------------------------------------------------------
-    bool PhysicalRegionImpl::contains_point(const DomainPoint &dp)
-    //--------------------------------------------------------------------------
-    {
-      if (!bounds.exists())
-        bounds = runtime->forest->get_node(req.region.get_index_space())->
-                    get_color_space_domain();
-      return bounds.contains(dp);
-    }
-#endif
 
     //--------------------------------------------------------------------------
     void PhysicalRegionImpl::get_bounds(void *realm_is, TypeTag type_tag)
@@ -7208,6 +7030,7 @@ namespace Legion {
         assert(local_shard_id < shards_per_address_space);
 #endif
         local_proxy = proxy;
+        local_task_name = task_name;
         const ShardID shard = (shard_id < 0) ? (runtime->address_space * 
             shards_per_address_space + local_shard_id++) : shard_id;
         const size_t total_shards = 
@@ -17210,17 +17033,6 @@ namespace Legion {
       for (unsigned idx = 0; idx < outstanding_counts.size(); idx++)
         outstanding_counts[idx].store(0);
 #endif
-      // Attach any accessor debug hooks for privilege or bounds checks
-#ifdef LEGION_PRIVILEGE_CHECKS
-      LegionRuntime::Accessor::DebugHooks::find_privilege_task_name =
-	&Legion::Internal::Runtime::find_privilege_task_name;
-#endif
-#ifdef LEGION_BOUNDS_CHECKS
-      LegionRuntime::Accessor::DebugHooks::check_bounds_ptr =
-	&Legion::Internal::Runtime::check_bounds;
-      LegionRuntime::Accessor::DebugHooks::check_bounds_dpoint =
-	&Legion::Internal::Runtime::check_bounds;
-#endif 
     }
 
     //--------------------------------------------------------------------------
@@ -17631,7 +17443,7 @@ namespace Legion {
         ProcessorGroup::create_group(prof_procs) : prof_procs.front();
       LG_TASK_DESCRIPTIONS(lg_task_descriptions);
       LG_MESSAGE_DESCRIPTIONS(lg_message_descriptions);
-      LEGION_STATIC_ASSERT((LG_MESSAGE_ID+1) == LG_LAST_TASK_ID,
+      static_assert((LG_MESSAGE_ID+1) == LG_LAST_TASK_ID,
           "LG_MESSAGE_ID must always be the last meta-task ID");
       profiler = new LegionProfiler(target_proc_for_profiler,
                                     machine, this, LG_MESSAGE_ID,
@@ -30331,35 +30143,35 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Some static asserts that need to hold true for the runtime to work
-      LEGION_STATIC_ASSERT(LEGION_MAX_RETURN_SIZE > 0, 
+      static_assert(LEGION_MAX_RETURN_SIZE > 0, 
           "Need a positive and non-zero value for LEGION_MAX_RETURN_SIZE");
-      LEGION_STATIC_ASSERT((1 << LEGION_FIELD_LOG2) == LEGION_MAX_FIELDS,
+      static_assert((1 << LEGION_FIELD_LOG2) == LEGION_MAX_FIELDS,
           "LEGION_MAX_FIELDS must be a pwoer of 2");
-      LEGION_STATIC_ASSERT(LEGION_MAX_NUM_NODES > 0,
+      static_assert(LEGION_MAX_NUM_NODES > 0,
           "Need a positive and non-zero value for LEGION_MAX_NUM_NODES");
-      LEGION_STATIC_ASSERT(LEGION_MAX_NUM_PROCS > 0,
+      static_assert(LEGION_MAX_NUM_PROCS > 0,
           "Need a positive and non-zero value for LEGION_MAX_NUM_PROCS");
-      LEGION_STATIC_ASSERT(LEGION_DEFAULT_MAX_TASK_WINDOW > 0,
+      static_assert(LEGION_DEFAULT_MAX_TASK_WINDOW > 0,
           "Need a positive and non-zero value for "
           "LEGION_DEFAULT_MAX_TASK_WINDOW");
-      LEGION_STATIC_ASSERT(LEGION_DEFAULT_MIN_TASKS_TO_SCHEDULE > 0,
+      static_assert(LEGION_DEFAULT_MIN_TASKS_TO_SCHEDULE > 0,
           "Need a positive and non-zero value for "
           "LEGION_DEFAULT_MIN_TASKS_TO_SCHEDULE");
-      LEGION_STATIC_ASSERT(LEGION_DEFAULT_MAX_MESSAGE_SIZE > 0,
+      static_assert(LEGION_DEFAULT_MAX_MESSAGE_SIZE > 0,
           "Need a positive and non-zero value for "
           "LEGION_DEFAULT_MAX_MESSAGE_SIZE"); 
 #ifdef LEGION_SPY
-      LEGION_STATIC_ASSERT(
+      static_assert(
           Realm::Logger::REALM_LOGGING_MIN_LEVEL <= Realm::Logger::LEVEL_INFO,
         "Legion Spy requires a COMPILE_TIME_MIN_LEVEL of at most LEVEL_INFO.");
 #endif
 #ifdef LEGION_GC
-      LEGION_STATIC_ASSERT(
+      static_assert(
           Realm::Logger::REALM_LOGGING_MIN_LEVEL <= Realm::Logger::LEVEL_INFO,
           "Legion GC requires a COMPILE_TIME_MIN_LEVEL of at most LEVEL_INFO.");
 #endif
 #ifdef DEBUG_SHUTDOWN_HANG
-      LEGION_STATIC_ASSERT(
+      static_assert(
           Realm::Logger::REALM_LOGGING_MIN_LEVEL <= Realm::Logger::LEVEL_INFO,
           "DEBUG_SHUTDOWN_HANG requires a COMPILE_TIME_MIN_LEVEL "
           "of at most LEVEL_INFO.");
@@ -31012,8 +30824,18 @@ namespace Legion {
             strlen(task_name) + 1, true/*mutable*/);
       // Record a fake variant if we're profiling
       if (profiler != NULL)
-        profiler->register_task_variant(top_task_id, 0/*variant ID*/, 
-                                        task_name);
+      {
+        if (task_name == NULL)
+        {
+          char implicit_name[64];
+          snprintf(implicit_name, 64, "implicit_variant_%d", top_task_id);
+          profiler->register_task_variant(top_task_id, 0/*variant ID*/, 
+                                          implicit_name);
+        }
+        else
+          profiler->register_task_variant(top_task_id, 0/*variant ID*/, 
+                                          task_name);
+      }
       // Get an individual task to be the top-level task
       IndividualTask *top_task = get_available_individual_task();
       // Get a remote task to serve as the top of the top-level task
@@ -32371,124 +32193,6 @@ namespace Legion {
       abort();
 #endif
     }
-
-#if defined(LEGION_PRIVILEGE_CHECKS) || defined(LEGION_BOUNDS_CHECKS)
-    //--------------------------------------------------------------------------
-    /*static*/ const char* Runtime::find_privilege_task_name(void *impl)
-    //--------------------------------------------------------------------------
-    {
-      PhysicalRegionImpl *region = static_cast<PhysicalRegionImpl*>(impl);
-      return region->get_task_name();
-    }
-#endif
-
-#ifdef LEGION_BOUNDS_CHECKS
-    //--------------------------------------------------------------------------
-    /*static*/ void Runtime::check_bounds(void *impl, ptr_t ptr)
-    //--------------------------------------------------------------------------
-    {
-      PhysicalRegionImpl *region = static_cast<PhysicalRegionImpl*>(impl);
-      if (!region->contains_ptr(ptr))
-      {
-        fprintf(stderr,"BOUNDS CHECK ERROR IN TASK %s: Accessing invalid "
-                       "pointer %lld\n", region->get_task_name(), ptr.value);
-        assert(false);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void Runtime::check_bounds(void *impl, 
-                                          const DomainPoint &dp)
-    //--------------------------------------------------------------------------
-    {
-      PhysicalRegionImpl *region = static_cast<PhysicalRegionImpl*>(impl);
-      if (!region->contains_point(dp))
-      {
-        switch(dp.get_dim())
-        {
-          case 1:
-            fprintf(stderr,"BOUNDS CHECK ERROR IN TASK %s: Accessing invalid "
-                           "1D point (%lld)\n", region->get_task_name(),
-                            dp.point_data[0]);
-            break;
-#if LEGION_MAX_DIM >= 2
-          case 2:
-            fprintf(stderr,"BOUNDS CHECK ERROR IN TASK %s: Accessing invalid "
-                           "2D point (%lld,%lld)\n", region->get_task_name(),
-                            dp.point_data[0], dp.point_data[1]);
-            break;
-#endif
-#if LEGION_MAX_DIM >= 3
-          case 3:
-            fprintf(stderr,"BOUNDS CHECK ERROR IN TASK %s: Accessing invalid "
-                         "3D point (%lld,%lld,%lld)\n", region->get_task_name(),
-                          dp.point_data[0], dp.point_data[1], dp.point_data[2]);
-            break;
-#endif
-#if LEGION_MAX_DIM >= 4
-          case 4:
-            fprintf(stderr,"BOUNDS CHECK ERROR IN TASK %s: Accessing invalid "
-                         "4D point (%lld,%lld,%lld,%lld)\n", 
-                          region->get_task_name(),
-                          dp.point_data[0], dp.point_data[1], dp.point_data[2],
-                          dp.point_data[3]);
-            break;
-#endif
-#if LEGION_MAX_DIM >= 5
-          case 5:
-            fprintf(stderr,"BOUNDS CHECK ERROR IN TASK %s: Accessing invalid "
-                         "5D point (%lld,%lld,%lld,%lld,%lld)\n", 
-                          region->get_task_name(),
-                          dp.point_data[0], dp.point_data[1], dp.point_data[2],
-                          dp.point_data[3], dp.point_data[4]);
-            break;
-#endif
-#if LEGION_MAX_DIM >= 6
-          case 6:
-            fprintf(stderr,"BOUNDS CHECK ERROR IN TASK %s: Accessing invalid "
-                         "6D point (%lld,%lld,%lld,%lld,%lld,%lld)\n", 
-                          region->get_task_name(),
-                          dp.point_data[0], dp.point_data[1], dp.point_data[2],
-                          dp.point_data[3], dp.point_data[4], dp.point_data[5]);
-            break;
-#endif
-#if LEGION_MAX_DIM >= 7
-          case 7:
-            fprintf(stderr,"BOUNDS CHECK ERROR IN TASK %s: Accessing invalid "
-                         "7D point (%lld,%lld,%lld,%lld,%lld,%lld,%lld)\n", 
-                          region->get_task_name(),
-                          dp.point_data[0], dp.point_data[1], dp.point_data[2],
-                          dp.point_data[3], dp.point_data[4], dp.point_data[5],
-                          dp.point_data[6]);
-            break;
-#endif
-#if LEGION_MAX_DIM >= 8
-          case 8:
-            fprintf(stderr,"BOUNDS CHECK ERROR IN TASK %s: Accessing invalid "
-                         "8D point (%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld)\n",
-                          region->get_task_name(),
-                          dp.point_data[0], dp.point_data[1], dp.point_data[2],
-                          dp.point_data[3], dp.point_data[4], dp.point_data[5],
-                          dp.point_data[6], dp.point_data[7]);
-            break;
-#endif
-#if LEGION_MAX_DIM >= 9
-          case 9:
-            fprintf(stderr,"BOUNDS CHECK ERROR IN TASK %s: Accessing invalid "
-                   "9D point (%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld)\n",
-                          region->get_task_name(),
-                          dp.point_data[0], dp.point_data[1], dp.point_data[2],
-                          dp.point_data[3], dp.point_data[4], dp.point_data[5],
-                          dp.point_data[6], dp.point_data[7], dp.point_data[8]);
-            break;
-#endif
-          default:
-            assert(false);
-        }
-        assert(false);
-      }
-    }
-#endif
 
     //--------------------------------------------------------------------------
     /*static*/ void Runtime::shutdown_runtime_task(const void *args, 

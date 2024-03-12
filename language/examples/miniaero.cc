@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University
+/* Copyright 2024 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -33,7 +33,7 @@ using namespace Legion::Mapping;
 
 #define SPMD_SHARD_USE_IO_PROC 1
 
-LegionRuntime::Logger::Category log_mapper("mapper");
+Logger log_mapper("mapper");
 
 class MiniAeroMapper : public DefaultMapper
 {

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# Copyright 2023 Stanford University, NVIDIA Corporation
+# Copyright 2024 Stanford University, NVIDIA Corporation
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -236,8 +236,9 @@ def remove_all_aliases(to_delete):
 
 
 def run_cmd(cmd, run_name):
-    import imp
-    module = imp.new_module(run_name)
+    import importlib.util
+    module_spec = importlib.util.find_spec(run_name)
+    module = importlib.util.module_from_spec(module_spec)
     setattr(module, '__name__', run_name)
     setattr(module, '__package__', None)
 
@@ -276,8 +277,9 @@ def run_cmd(cmd, run_name):
 # cleaning up after itself and removes the module before execution
 # has completed.
 def run_path(filename, run_name):
-    import imp
-    module = imp.new_module(run_name)
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(run_name, filename)
+    module = importlib.util.module_from_spec(spec)
     setattr(module, '__name__', run_name)
     setattr(module, '__file__', filename)
     setattr(module, '__loader__', None)

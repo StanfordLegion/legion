@@ -7,7 +7,7 @@ use std::path::Path;
 use serde::Serialize;
 use serde_json;
 
-use crate::state::{Container, ProcEntryKind, State, Timestamp};
+use crate::state::{Container, ProcEntryKind, State};
 
 #[derive(Serialize, Copy, Clone)]
 struct Event<'a> {
@@ -22,10 +22,6 @@ struct Event<'a> {
     duration: f64,
     pid: u64,
     tid: u64,
-}
-
-fn ts_to_us(ts: Timestamp) -> f64 {
-    (ts.0 as f64) / 1e3
 }
 
 pub fn emit_trace<P: AsRef<Path>>(state: &State, path: P, force: bool) -> io::Result<()> {
@@ -44,13 +40,14 @@ pub fn emit_trace<P: AsRef<Path>>(state: &State, path: P, force: bool) -> io::Re
     let mut first = true;
 
     for proc in state.procs.values() {
-        for point in &proc.time_points {
+        for point in proc.time_points(None) {
             if point.first {
                 let entry = proc.entry(point.entry);
                 let (time_range, waiters) = (&entry.time_range, &entry.waiters);
 
                 let name = match entry.kind {
-                    ProcEntryKind::Task(task_id, variant_id) => {
+                    ProcEntryKind::Task(task_id, variant_id)
+                    | ProcEntryKind::GPUKernel(task_id, variant_id) => {
                         let task_name = &state.task_kinds.get(&task_id).unwrap().name;
                         let variant_name =
                             &state.variants.get(&(task_id, variant_id)).unwrap().name;
@@ -91,8 +88,8 @@ pub fn emit_trace<P: AsRef<Path>>(state: &State, path: P, force: bool) -> io::Re
                         &file,
                         &Event {
                             name: &name,
-                            timestamp: ts_to_us(start),
-                            duration: ts_to_us(wait.start - start),
+                            timestamp: start.to_us(),
+                            duration: (wait.start - start).to_us(),
                             ..default
                         },
                     )?;
@@ -101,8 +98,8 @@ pub fn emit_trace<P: AsRef<Path>>(state: &State, path: P, force: bool) -> io::Re
                         &file,
                         &Event {
                             name: &format!("{} (waiting)", &name),
-                            timestamp: ts_to_us(wait.start),
-                            duration: ts_to_us(wait.ready - wait.start),
+                            timestamp: wait.start.to_us(),
+                            duration: (wait.ready - wait.start).to_us(),
                             ..default
                         },
                     )?;
@@ -111,8 +108,8 @@ pub fn emit_trace<P: AsRef<Path>>(state: &State, path: P, force: bool) -> io::Re
                         &file,
                         &Event {
                             name: &format!("{} (ready)", &name),
-                            timestamp: ts_to_us(wait.ready),
-                            duration: ts_to_us(wait.end - wait.ready),
+                            timestamp: (wait.ready).to_us(),
+                            duration: (wait.end - wait.ready).to_us(),
                             ..default
                         },
                     )?;
@@ -127,8 +124,8 @@ pub fn emit_trace<P: AsRef<Path>>(state: &State, path: P, force: bool) -> io::Re
                         &file,
                         &Event {
                             name: &name,
-                            timestamp: ts_to_us(start),
-                            duration: ts_to_us(time_range.stop.unwrap() - start),
+                            timestamp: start.to_us(),
+                            duration: (time_range.stop.unwrap() - start).to_us(),
                             ..default
                         },
                     )?;

@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -39,7 +39,6 @@
 #include <unordered_map>
 
 #include "legion/legion_config.h"
-#include "legion/legion_template_help.h"
 
 // Make sure we have the appropriate defines in place for including realm
 #include "realm.h"
@@ -210,8 +209,6 @@ namespace Legion {
   class PieceIteratorT;
   template<PrivilegeMode,typename,int,typename>
   class SpanIterator;
-  class IndexIterator;
-  template<typename T> struct ColoredPoints; 
   struct InputArgs;
   struct RegistrationCallbackArgs;
   class ProjectionFunctor;
@@ -240,11 +237,6 @@ namespace Legion {
   using AffineAccessor = Realm::AffineAccessor<FT,N,T>;
   template<typename FT, int N, typename T = ::legion_coord_t>
   using MultiAffineAccessor = Realm::MultiAffineAccessor<FT,N,T>;
-
-  // Forward declarations for compiler level objects
-  // legion.h
-  class ColoringSerializer;
-  class DomainColoringSerializer;
 
   // Forward declarations for wrapper tasks
   // legion.h
@@ -2339,7 +2331,7 @@ namespace Legion {
     class AllGatherCollective;
     template<typename T> class BarrierExchangeCollective;
     template<typename T> class ValueBroadcast;
-    template<typename T> class AllReduceCollective;
+    template<typename T, bool> class AllReduceCollective;
     class CrossProductCollective;
     class ShardingGatherCollective;
     class FieldDescriptorExchange;
@@ -2628,7 +2620,7 @@ namespace Legion {
   typedef bool (*PredicateFnptr)(const void*, size_t, 
       const std::vector<Future> futures);
   typedef void (*RealmFnptr)(const void*,size_t,
-                             const void*,size_t,Processor);
+                             const void*,size_t,Processor); 
   // Magical typedefs 
   // (don't forget to update ones in old HighLevel namespace in legion.inl)
   typedef Internal::TaskContext* Context;
@@ -3430,20 +3422,5 @@ namespace Legion {
   };
 
 }; // Legion namespace
-
-// now that we have things like LgEvent defined, we can include accessor.h to
-// pick up ptr_t, which is used for compatibility-mode Coloring and friends
-#include "legion/accessor.h"
-
-namespace Legion {
-  typedef LegionRuntime::Accessor::ByteOffset ByteOffset;
-
-  typedef std::map<Color,ColoredPoints<ptr_t> > Coloring;
-  typedef std::map<Color,Domain> DomainColoring;
-  typedef std::map<Color,std::set<Domain> > MultiDomainColoring;
-  typedef std::map<DomainPoint,ColoredPoints<ptr_t> > PointColoring;
-  typedef std::map<DomainPoint,Domain> DomainPointColoring;
-  typedef std::map<DomainPoint,std::set<Domain> > MultiDomainPointColoring;
-};
 
 #endif // __LEGION_TYPES_H__

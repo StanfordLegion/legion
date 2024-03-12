@@ -1,4 +1,4 @@
--- Copyright 2023 Stanford University
+-- Copyright 2024 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -84,45 +84,19 @@ struct EdgeStruct {
 
 local clegion_interop
 do
-  assert(os.getenv('LG_RT_DIR') ~= nil, "$LG_RT_DIR should be set!")
   local root_dir = arg[0]:match(".*/") or "./"
-  local runtime_dir = os.getenv('LG_RT_DIR') .. "/"
-  local cubpath_dir = os.getenv("CUB_INCLUDE_DIR") or "/share/software/user/open/cub/1.7.3/"
-  local legion_dir = runtime_dir .. "legion/"
-  local mapper_dir = runtime_dir .. "mappers/"
-  local realm_dir = runtime_dir .. "realm/"
-  local legion_interop_cc = root_dir .. "legion_interop.cu"
-  local legion_interop_so
-  --if os.getenv('SAVEOBJ') == '1' then
-  if true then
-    legion_interop_so = root_dir .. "liblegion_interop.so"
-  else
-    legion_interop_so = os.tmpname() .. ".so" -- root_dir .. "mapper.so"
-  end
-  local cxx = os.getenv('NVCC') or 'nvcc'
+  local legion_interop_cu = root_dir .. "legion_interop.cu"
+  local nvcc = os.getenv('NVCC') or 'nvcc'
 
-  local cxx_flags = os.getenv('CXXFLAGS') or ''
-  local ffi = require("ffi")
-  if ffi.os == "OSX" then
-    cxx_flags =
-      (cxx_flags ..
-         " -dynamiclib -single_module -undefined dynamic_lookup -std=c++11 -Xcompiler -fPIC")
-  else
-    cxx_flags = cxx_flags .. " -shared -arch=compute_60 -code=sm_60 -std=c++11 -Xcompiler -fPIC"
-  end
+  local cubpath_dir = os.getenv("CUB_INCLUDE_DIR")
+  assert(cubpath_dir ~= nil, "Please set CUB_INCLUDE_DIR to the path of CUB headers")
 
-  local cmd = (cxx .. " " .. cxx_flags .. " -I " .. runtime_dir .. " " ..
-                 " -I " .. mapper_dir .. " " .. " -I " .. legion_dir .. " " .. " -I " .. cubpath_dir .. " " ..
-                 " -I " .. realm_dir .. " " .. legion_interop_cc .. " -o " .. legion_interop_so)
-  if os.execute(cmd) ~= 0 then
-    print("Error: failed to compile " .. legion_interop_cc)
-    assert(false)
-  end
-  regentlib.linklibrary(legion_interop_so)
-  clegion_interop =
-    terralib.includec("legion_interop.h", {"-I", root_dir, "-I", runtime_dir,
-                                           "-I", mapper_dir, "-I", legion_dir,
-                                           "-I", realm_dir})
+  local include_flags = {"-I" .. cubpath_dir}
+  local nvcc_flags = terralib.newlist({"-Xcompiler", "-fPIC"})
+  nvcc_flags:insertall(include_flags)
+
+  local launcher = require("std/launcher")
+  clegion_interop = launcher.build_library("legion_interop", {legion_interop_cu}, nvcc, nvcc_flags, include_flags)
 end
 
 terra parse_input_args(conf : Config)

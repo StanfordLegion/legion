@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24070,30 +24070,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    LegionRuntime::Accessor::RegionAccessor<
-      LegionRuntime::Accessor::AccessorType::Generic> 
-        InstanceRef::get_accessor(void) const
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(manager != NULL);
-#endif
-      return manager->get_accessor();
-    }
-
-    //--------------------------------------------------------------------------
-    LegionRuntime::Accessor::RegionAccessor<
-      LegionRuntime::Accessor::AccessorType::Generic>
-        InstanceRef::get_field_accessor(FieldID fid) const
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(manager != NULL);
-#endif
-      return manager->get_field_accessor(fid);
-    }
-
-    //--------------------------------------------------------------------------
     void InstanceRef::pack_reference(Serializer &rez) const
     //--------------------------------------------------------------------------
     {
@@ -24730,32 +24706,6 @@ namespace Legion {
       {
         for (unsigned idx = 0; idx < refs.multi->vector.size(); idx++)
           refs.multi->vector[idx].remove_valid_reference(source);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    LegionRuntime::Accessor::RegionAccessor<
-      LegionRuntime::Accessor::AccessorType::Generic> InstanceSet::
-                                           get_field_accessor(FieldID fid) const
-    //--------------------------------------------------------------------------
-    {
-      if (single)
-      {
-#ifdef DEBUG_LEGION
-        assert(refs.single != NULL);
-#endif
-        return refs.single->get_field_accessor(fid);
-      }
-      else
-      {
-        for (unsigned idx = 0; idx < refs.multi->vector.size(); idx++)
-        {
-          const InstanceRef &ref = refs.multi->vector[idx];
-          if (ref.is_field_set(fid))
-            return ref.get_field_accessor(fid);
-        }
-        assert(false);
-        return refs.multi->vector[0].get_field_accessor(fid);
       }
     }
 

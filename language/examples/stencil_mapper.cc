@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University
+/* Copyright 2024 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,7 +22,7 @@
 using namespace Legion;
 using namespace Legion::Mapping;
 
-static LegionRuntime::Logger::Category log_stencil("stencil");
+static Logger log_stencil("stencil");
 
 class StencilMapper : public DefaultMapper
 {

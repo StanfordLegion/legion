@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -490,8 +490,7 @@ namespace Legion {
         info.create = timeline.create_time;
         info.ready = timeline.ready_time;
         info.start = timeline.start_time;
-        // use complete_time instead of end_time to include async work
-        info.stop = timeline.complete_time;
+        info.stop = timeline.end_time;
 
         // record gpu time
         info.gpu_start = timeline_gpu.start_time;
@@ -1755,6 +1754,7 @@ namespace Legion {
       machine_desc.node_id = static_cast<unsigned>(rt->address_space);
       machine_desc.num_nodes = static_cast<unsigned>(
         rt->total_address_spaces);
+      machine_desc.version = LEGION_PROF_VERSION;
 
       serializer->serialize(machine_desc);
 

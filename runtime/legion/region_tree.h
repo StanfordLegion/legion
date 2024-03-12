@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,7 +23,6 @@
 #include "legion/legion_analysis.h"
 #include "legion/legion_profiling.h"
 #include "legion/garbage_collection.h"
-#include "legion/field_tree.h"
 
 #include <algorithm>
 

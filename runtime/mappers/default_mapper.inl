@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -61,26 +61,6 @@ namespace Legion {
           slices.push_back(slice);
         }
       }
-    }
-
-    //--------------------------------------------------------------------------
-    template<int DIM>
-    /*static*/ void DefaultMapper::default_decompose_points(
-                               const LegionRuntime::Arrays::Rect<DIM> &rect,
-                               const std::vector<Processor> &targets,
-                               const LegionRuntime::Arrays::Point<DIM> &blocks,
-                               bool recurse, bool stealable,
-                               std::vector<TaskSlice> &slices)
-    //--------------------------------------------------------------------------
-    {
-      const Domain dom_rect = Domain::from_rect<DIM>(rect);
-      const DomainT<DIM,coord_t> point_space = dom_rect;
-
-      const DomainPoint dom_point = DomainPoint::from_point<DIM>(blocks);
-      const Point<DIM,coord_t> num_blocks = dom_point;
-
-      default_decompose_points(point_space, targets, num_blocks, 
-                               recurse, stealable, slices);
     }
 
     //--------------------------------------------------------------------------

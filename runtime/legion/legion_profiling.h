@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -39,6 +39,13 @@
 #else
 #define DETAILED_PROFILER(runtime, call) // Nothing
 #endif
+
+// This version tracks the compabilitity of the Legion Prof logging
+// format. Whenver you make changes to the logging format, increment the number
+// stored in legion_profiling_version.h to track the change.
+constexpr unsigned LEGION_PROF_VERSION =
+#include "legion/legion_profiling_version.h"
+;
 
 namespace Legion {
   namespace Internal { 
@@ -129,7 +136,8 @@ namespace Legion {
       };
       struct MachineDesc {
         unsigned node_id;
-	unsigned num_nodes;
+        unsigned num_nodes;
+        unsigned version;
         Machine::ProcessInfo process_info;
       };
       struct CalibrationErr {

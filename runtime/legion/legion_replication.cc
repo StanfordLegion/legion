@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -7225,7 +7225,8 @@ namespace Legion {
 #else
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
-      AllReduceCollective<ProdReduction<bool> > all_direct_children(repl_ctx,
+      AllReduceCollective<ProdReduction<bool>,false> all_direct_children(
+          repl_ctx,
        repl_ctx->get_next_collective_index(COLLECTIVE_LOC_27, true/*logical*/));
       return all_direct_children.sync_all_reduce(local);
     }
@@ -8084,7 +8085,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Check to see if this template is replayable across all the shards
-      AllReduceCollective<ProdReduction<bool> > 
+      AllReduceCollective<ProdReduction<bool>,false>
         all_replayable_collective(repl_ctx, replayable_collective_id);
       return all_replayable_collective.sync_all_reduce(shard_replayable);
     }
@@ -8367,7 +8368,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Check to see if this template is replayable across all the shards
-      AllReduceCollective<ProdReduction<bool> > 
+      AllReduceCollective<ProdReduction<bool>,false>
         all_replayable_collective(repl_ctx, replayable_collective_id);
       return all_replayable_collective.sync_all_reduce(shard_replayable);
     }
@@ -13259,92 +13260,71 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    template<typename REDOP>
-    AllReduceCollective<REDOP>::AllReduceCollective(CollectiveIndexLocation loc,
-                                                    ReplicateContext *ctx)
-      : AllGatherCollective(loc, ctx), current_stage(-1)
+    template<typename REDOP, bool INORDER>
+    AllReduceCollective<REDOP,INORDER>::AllReduceCollective(
+        CollectiveIndexLocation loc, ReplicateContext *ctx)
+      : AllGatherCollective<INORDER>(loc, ctx)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    template<typename REDOP>
-    AllReduceCollective<REDOP>::AllReduceCollective(ReplicateContext *ctx,
-                                                    CollectiveID id)
-      : AllGatherCollective(ctx, id), current_stage(-1)
+    template<typename REDOP, bool INORDER>
+    AllReduceCollective<REDOP,INORDER>::AllReduceCollective(
+        ReplicateContext *ctx, CollectiveID id)
+      : AllGatherCollective<INORDER>(ctx, id)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    template<typename REDOP>
-    AllReduceCollective<REDOP>::~AllReduceCollective(void)
+    template<typename REDOP, bool INORDER>
+    AllReduceCollective<REDOP,INORDER>::~AllReduceCollective(void)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    template<typename REDOP>
-    void AllReduceCollective<REDOP>::pack_collective_stage(ShardID target,
-                                                     Serializer &rez, int stage)
+    template<typename REDOP, bool INORDER>
+    void AllReduceCollective<REDOP,INORDER>::pack_collective_stage(
+                                     ShardID target, Serializer &rez, int stage)
     //--------------------------------------------------------------------------
     {
-      // The first time we pack a stage we merge any values that we had
-      // unpacked earlier as they are needed for sending this stage for
-      // the first time.
-      if (stage != current_stage)
-      {
-        if (!future_values.empty())
-        {
-          typename std::map<int,std::vector<typename REDOP::RHS> >::iterator 
-            next = future_values.begin();
-          if (next->first == current_stage)
-          {
-            for (typename std::vector<typename REDOP::RHS>::const_iterator it =
-                  next->second.begin(); it != next->second.end(); it++)
-              REDOP::template fold<true/*exclusive*/>(value, *it);
-            future_values.erase(next);
-          }
-        }
-        current_stage = stage;
-      }
       rez.serialize(value);
     }
 
     //--------------------------------------------------------------------------
-    template<typename REDOP>
-    void AllReduceCollective<REDOP>::unpack_collective_stage(
+    template<typename REDOP, bool INORDER>
+    void AllReduceCollective<REDOP,INORDER>::unpack_collective_stage(
                                                  Deserializer &derez, int stage)
     //--------------------------------------------------------------------------
     {
-      // We never eagerly do reductions as they can arrive out of order
-      // and we can't apply them too early or we'll get duplicate 
-      // applications of reductions
       typename REDOP::RHS next;
       derez.deserialize(next);
-      future_values[stage].push_back(next);
+      REDOP::template fold<true/*exclusive*/>(value, next);
     }
     
     //--------------------------------------------------------------------------
-    template<typename REDOP>
-    void AllReduceCollective<REDOP>::async_all_reduce(typename REDOP::RHS val)
+    template<typename REDOP, bool INORDER>
+    void AllReduceCollective<REDOP,INORDER>::async_all_reduce(
+                                                        typename REDOP::RHS val)
     //--------------------------------------------------------------------------
     {
       value = val;
-      perform_collective_async();
+      this->perform_collective_async();
     }
 
     //--------------------------------------------------------------------------
-    template<typename REDOP>
-    RtEvent AllReduceCollective<REDOP>::wait_all_reduce(bool block)
+    template<typename REDOP, bool INORDER>
+    RtEvent AllReduceCollective<REDOP,INORDER>::wait_all_reduce(bool block)
     //--------------------------------------------------------------------------
     {
-      return perform_collective_wait(block);
+      return this->perform_collective_wait(block);
     }
 
     //--------------------------------------------------------------------------
-    template<typename REDOP>
-    typename REDOP::RHS AllReduceCollective<REDOP>::sync_all_reduce(
+    template<typename REDOP, bool INORDER>
+    typename REDOP::RHS AllReduceCollective<REDOP,INORDER>::sync_all_reduce(
                                                         typename REDOP::RHS val)
     //--------------------------------------------------------------------------
     {
@@ -13353,46 +13333,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<typename REDOP>
-    typename REDOP::RHS AllReduceCollective<REDOP>::get_result(void)
+    template<typename REDOP, bool INORDER>
+    typename REDOP::RHS AllReduceCollective<REDOP,INORDER>::get_result(void)
     //--------------------------------------------------------------------------
     {
       // Wait for the results to be ready
       wait_all_reduce(true);
-      // Need to avoid races here so we have to always recompute the last stage
-      typename REDOP::RHS result = value;
-      if (!future_values.empty())
-      {
-#ifdef DEBUG_LEGION
-        // Should be at most one stage left
-        assert(future_values.size() == 1);
-#endif
-        const typename std::map<int,std::vector<typename REDOP::RHS> >::
-          const_iterator last = future_values.begin();
-        if (last->first == -1)
-        {
-          // Special case for the last stage which already includes our
-          // value so just do the overwrite
-#ifdef DEBUG_LEGION
-          assert(last->second.size() == 1);
-#endif
-          result = last->second.front();
-        }
-        else
-        {
-          // Do the reduction here
-          for (typename std::vector<typename REDOP::RHS>::const_iterator it =
-                last->second.begin(); it != last->second.end(); it++)
-            REDOP::template fold<true/*exclusive*/>(result, *it);
-        }
-      }
-      return result;
+      return value;
     }
 
     // Instantiate this for a common use case
-    template class AllReduceCollective<SumReduction<bool> >;
-    template class AllReduceCollective<ProdReduction<bool> >;
-    template class AllReduceCollective<MaxReduction<uint64_t> >;
+    template class AllReduceCollective<SumReduction<bool>,false>;
+    template class AllReduceCollective<ProdReduction<bool>,false>;
+    template class AllReduceCollective<MaxReduction<uint64_t>,false>;
 
     /////////////////////////////////////////////////////////////
     // Buffer Broadcast
@@ -17056,7 +17009,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     PredicateCollective::PredicateCollective(ReplPredicateImpl *pred,
                                          ReplicateContext *ctx, CollectiveID id)
-      : AllReduceCollective<MaxReduction<uint64_t> >(ctx, id), predicate(pred)
+      : AllReduceCollective<MaxReduction<uint64_t>,false>(ctx, id),
+        predicate(pred)
     //--------------------------------------------------------------------------
     {
       predicate->add_reference();
@@ -17067,7 +17021,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const RtEvent result = 
-        AllReduceCollective<MaxReduction<uint64_t> >::post_complete_exchange();
+        AllReduceCollective<
+          MaxReduction<uint64_t>,false>::post_complete_exchange();
       if (predicate->remove_reference())
         delete predicate;
       return result;
