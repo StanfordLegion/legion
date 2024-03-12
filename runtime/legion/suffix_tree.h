@@ -348,9 +348,7 @@ namespace Legion {
                       std::vector<size_t>& sarray,
                       std::vector<int64_t>& surrogate) {
       size_t n = str.size();
-      if(n == 0){
-        return;
-      }
+      if (n == 0) return;
       // Define a struct for sorting the input string. To handle an
       // arbitrary type T, we use a boolean `present` to ensure that
       // tokens without a "next" value are sorted before any other tokens.
@@ -359,23 +357,45 @@ namespace Legion {
         bool present;
         T next;
         size_t idx;
-        const bool operator<(const Key& rhs) const {
+        bool operator<(const Key& rhs) const {
           return std::tie(start, present, next, idx) <
             std::tie(rhs.start, rhs.present, rhs.next, rhs.idx);
         }
       };
 
-      // First round - O(n log n) sort
+      // First round - O(n log n) sort. We unroll the loop from the
+      // lecture notes above once, as we have to do an O(nlog(n)) sort
+      // first before we can transition to the radix sorts below.
       std::vector<Key> w(n);
-      for(size_t i = 0; i < n; i++) {
-        w[i] = Key {
-          .start = str[i],
-          .present = i + 1 < n,
-          .next = i + 1 < n ? str[i + 1] : T{},
-          .idx = i,
-        };
+      int64_t v = 0;
+      {
+        for (size_t i = 0; i < n; i++) {
+          w[i] = Key {
+            .start = str[i],
+            .present = i + 1 < n,
+            .next = i + 1 < n ? str[i + 1] : T{},
+            .idx = i,
+          };
+        }
+        std::sort(w.begin(), w.end());
+        T x0 = w[0].start;
+        T x1 = w[0].next;
+        surrogate[w[0].idx] = 0;
+        for (size_t i = 1; i < n; i++) {
+          if (x0 != w[i].start || x1 != w[i].next) v++;
+          surrogate[w[i].idx] = v;
+          x0 = w[i].start;
+          x1 = w[i].next;
+        }
+        // In case we're done, reconstruct the suffix array directly
+        // from the w vector.
+        if (v >= n - 1) {
+          for (size_t i = 0; i < n; i++) {
+            sarray[i] = w[i].idx;
+          }
+          return;
+        }
       }
-      std::sort(w.begin(), w.end());
 
       // After the first round of sorting, we don't need to
       // look at the string anymore, and can just sort based
@@ -384,56 +404,26 @@ namespace Legion {
         int64_t start;
         int64_t next;
         size_t idx;
-        const bool operator<(const SKey& rhs) const {
+        bool operator<(const SKey& rhs) const {
           return std::tie(start, next, idx) <
-            std::tie(rhs.start, rhs.next, rhs.idx);
+                 std::tie(rhs.start, rhs.next, rhs.idx);
         }
       };
 
       // Use the surrogates from the previous iteration to construct
       // a new surrogate that represents larger and larger suffixes of
       // the input string.
-      size_t shift = 1;
-      std::vector<size_t> count(n+2);
-      std::vector<SKey> surrogate_sorter(n);
+      size_t shift = 2;
+      std::vector<size_t> count(n + 2);
       std::vector<SKey> tmp(n);
+      std::vector<SKey> surrogate_sorter(n);
       while (true) {
-        int64_t v = 0;
-        // Construct surrogate array. We have to do an extra case here
-        // depending on whether this is the first iteration or not, as
-        // the types are not the same.
-        if (shift == 1) {
-          T x0 = w[0].start;
-          T x1 = w[0].next;
-          surrogate[w[0].idx] = 0;
-          for (size_t i = 1; i < n; i++) {
-            if (x0 != w[i].start || x1 != w[i].next) v++;
-            surrogate[w[i].idx] = v;
-            x0 = w[i].start;
-            x1 = w[i].next;
-          }
-        } else {
-          int64_t x0 = surrogate_sorter[0].start;
-          int64_t x1 = surrogate_sorter[0].next;
-          surrogate[surrogate_sorter[0].idx] = 0;
-          for (size_t i = 1; i < n; i++) {
-            if (x0 != surrogate_sorter[i].start || x1 != surrogate_sorter[i].next) v++;
-            surrogate[surrogate_sorter[i].idx] = v;
-            x0 = surrogate_sorter[i].start;
-            x1 = surrogate_sorter[i].next;
-          }
-        }
-
-        // End if done.
-        if (v >= n-1) break;
-        shift *= 2;
-
         // Update sort table.
         for (size_t i = 0; i < n; i++) {
           surrogate_sorter[i] = SKey {
-            .start = surrogate[i],
-            .next = (i + shift) < n ? surrogate[i + shift] : -1,
-            .idx = i,
+              .start = surrogate[i],
+              .next = (i + shift) < n ? surrogate[i + shift] : -1,
+              .idx = i,
           };
         }
 
@@ -444,35 +434,49 @@ namespace Legion {
         // the general idea of radix sort. First, clear the counts.
         std::fill(count.begin(), count.begin() + v + 2, 0);
         // Next, count the frequency of each occurence.
-        for(size_t i = 0; i < n; i++) {
+        for (size_t i = 0; i < n; i++) {
           count[surrogate_sorter[i].next + 1]++;
         }
         // Update count to contain actual positions.
-        for(size_t i = 1; i < v + 2; i++) {
+        for (size_t i = 1; i < v + 2; i++) {
           count[i] += count[i - 1];
         }
         // Construct output array based on second digit.
-        for(int64_t i = n - 1; i >= 0; i--) {
+        for (int64_t i = n - 1; i >= 0; i--) {
           tmp[(count[surrogate_sorter[i].next + 1]--) - 1] = surrogate_sorter[i];
         }
         // Clear count. Next, sort on first digit.
         std::fill(count.begin(), count.begin() + v + 2, 0);
         // The source is in tmp. Count freq. on first digit.
-        for(size_t i = 0; i < n; i++) {
+        for (size_t i = 0; i < n; i++) {
           count[tmp[i].start + 1]++;
         }
         // Update count to contain actual positions.
-        for(size_t i = 1; i < v + 2; i++) {
+        for (size_t i = 1; i < v + 2; i++) {
           count[i] += count[i - 1];
         }
         // Output to array w from tmp.
-        for(int64_t i = n - 1; i >= 0; i--) {
-          surrogate_sorter[(count[tmp[i].start + 1]--) - 1] = SKey {
-            .start = tmp[i].start,
-            .next = tmp[i].next,
-            .idx = tmp[i].idx,
-          };
+        for (int64_t i = n - 1; i >= 0; i--) {
+          surrogate_sorter[(count[tmp[i].start + 1]--) - 1] = tmp[i];
         }
+
+        v = 0;
+        // Construct surrogate array. We have to do an extra case here
+        // depending on whether this is the first iteration or not, as
+        // the types are not the same.
+        int64_t x0 = surrogate_sorter[0].start;
+        int64_t x1 = surrogate_sorter[0].next;
+        surrogate[surrogate_sorter[0].idx] = 0;
+        for (size_t i = 1; i < n; i++) {
+          if (x0 != surrogate_sorter[i].start || x1 != surrogate_sorter[i].next) v++;
+          surrogate[surrogate_sorter[i].idx] = v;
+          x0 = surrogate_sorter[i].start;
+          x1 = surrogate_sorter[i].next;
+        }
+
+        // End if done.
+        if (v >= n-1) break;
+        shift *= 2;
       }
       // Reconstruct the suffix array.
       for (size_t i = 0; i < n; i++) {

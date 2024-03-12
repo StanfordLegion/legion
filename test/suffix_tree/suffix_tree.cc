@@ -103,7 +103,7 @@ auto str_tests = std::vector<std::vector<int>>{
   std::vector<int>{'a','a','a','a','a','a'} ,
   std::vector<int>{'a','a','a'} ,
   std::vector<int>{'a','a','a'} ,
-  //std::vector<int>{'a','a'},
+  std::vector<int>{'a','a'},
   std::vector<int>{'a'} ,
   std::vector<int>{},
   std::vector<int>{'f','d','d','d','a','b','a','b','c','d','c','d','c','d','e','d','d','d'}
@@ -117,7 +117,7 @@ auto sarray_tests = std::vector<std::vector<size_t>>{
   std::vector<size_t>{5, 4, 3, 2, 1, 0},
   std::vector<size_t>{2, 1, 0},
   std::vector<size_t>{2, 1, 0},
-  //std::vector<size_t>{1, 0},
+  std::vector<size_t>{1, 0},
   std::vector<size_t>{0},
   std::vector<size_t>{},
   std::vector<size_t>{4, 6, 5, 7, 8, 10, 12, 17, 3, 9, 11, 16, 2, 15, 1, 13, 14, 0}
@@ -131,7 +131,7 @@ auto lcp_tests = std::vector<std::vector<size_t>>{
   std::vector<size_t>{1, 2, 3, 4, 5, 0},
   std::vector<size_t>{1, 2, 0},
   std::vector<size_t>{1, 2, 0},
-  //std::vector<size_t>{1, 0},
+  std::vector<size_t>{1, 0},
   std::vector<size_t>{0},
   std::vector<size_t>{},
   std::vector<size_t>{2, 0, 1, 0, 4, 2, 0, 1, 1, 3, 1, 2, 2, 3, 1, 0, 0, 0}
@@ -147,7 +147,7 @@ auto result_tests = std::vector<std::vector<NonOverlappingRepeatsResult>>{
   std::vector<NonOverlappingRepeatsResult>{RES(0, 3, 2)},
   std::vector<NonOverlappingRepeatsResult>{RES(0, 1, 3)},
   std::vector<NonOverlappingRepeatsResult>{},
-  //std::vector<NonOverlappingRepeatsResult>{RES(0, 1, 2)},
+  std::vector<NonOverlappingRepeatsResult>{RES(0, 1, 2)},
   std::vector<NonOverlappingRepeatsResult>{},
   std::vector<NonOverlappingRepeatsResult>{},
   std::vector<NonOverlappingRepeatsResult>{RES(1, 4, 2), RES(4, 6, 2), RES(8, 10, 3)}
