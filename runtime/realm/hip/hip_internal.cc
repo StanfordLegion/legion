@@ -1303,9 +1303,9 @@ namespace Realm {
                   hipPointerAttribute_t src_attr;
                   CHECK_HIP( hipPointerGetAttributes(&src_attr, src_ptr) );
 #if HIP_VERSION_MAJOR < 6
-                  if (src_attr.memoryType == hipMemoryTypeHost) {
+                  if(src_attr.memoryType == hipMemoryTypeHost) {
 #else
-                  if (src_attr.type == hipMemoryTypeHost) {
+                  if(src_attr.type == hipMemoryTypeHost) {
 #endif
                     CHECK_HIP( hipHostGetDevicePointer((void **)&src_device, src_ptr, 0) );
                   }
