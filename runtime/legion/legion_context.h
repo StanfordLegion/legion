@@ -3536,7 +3536,7 @@ namespace Legion {
       // trace_analysis_did_block_collective is a collective that holds on
       // to the "previous" wait's result of shards reducing whether or not
       // they had to wait.
-      std::unique_ptr<AllReduceCollective<SumReduction<bool>>> trace_analysis_did_block_collective;
+      std::unique_ptr<AllReduceCollective<SumReduction<bool>, false>> trace_analysis_did_block_collective;
     };
 
     /**

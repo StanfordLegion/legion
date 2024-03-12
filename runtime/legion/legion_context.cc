@@ -22736,8 +22736,8 @@ namespace Legion {
       // was enough or not. We aren't officially C++14 to be able to
       // use std::make_unique.
       this->trace_analysis_did_block_collective =
-          std::unique_ptr<AllReduceCollective<SumReduction<bool>>>(
-              new AllReduceCollective<SumReduction<bool>>(COLLECTIVE_LOC_106, this));
+          std::unique_ptr<AllReduceCollective<SumReduction<bool>, false>>(
+              new AllReduceCollective<SumReduction<bool>, false>(COLLECTIVE_LOC_106, this));
       // Reduce to see if any shard was not ready.
       this->trace_analysis_did_block_collective->async_all_reduce(!ready);
 
