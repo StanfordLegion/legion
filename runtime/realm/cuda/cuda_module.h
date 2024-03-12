@@ -220,14 +220,12 @@ namespace Realm {
       GPUZCMemory *zcmem;
       void *uvm_base; // guaranteed to be same for CPU and GPU
       GPUZCMemory *uvmmem;
-      std::vector<void *> registered_host_ptrs;
       GPUReplHeapListener *rh_listener;
+      atomic<bool> initialization_complete;
 
       Mutex cudaipc_mutex;
       Mutex::CondVar cudaipc_condvar;
-      atomic<int> cudaipc_responses_needed;
-      atomic<int> cudaipc_releases_needed;
-      atomic<int> cudaipc_exports_remaining;
+      atomic<size_t> cudaipc_responses_received;
     };
 
   }; // namespace Cuda

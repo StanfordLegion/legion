@@ -33,7 +33,7 @@ using namespace Legion::Mapping;
 
 #define SPMD_SHARD_USE_IO_PROC 1
 
-LegionRuntime::Logger::Category log_mapper("mapper");
+Logger log_mapper("mapper");
 
 class MiniAeroMapper : public DefaultMapper
 {

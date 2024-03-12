@@ -28,7 +28,6 @@
 #include <functional>
 #include <stdlib.h>
 #include "legion/legion_config.h"
-#include "legion/legion_template_help.h" // StaticAssert
 #include <utility>
 
 namespace Legion {
@@ -147,7 +146,7 @@ namespace Legion {
     inline void* legion_alloc_aligned(size_t cnt)
     //--------------------------------------------------------------------------
     {
-      LEGION_STATIC_ASSERT((SIZE % ALIGNMENT) == 0, 
+      static_assert((SIZE % ALIGNMENT) == 0, 
           "SIZE must be evenly divisible by ALIGNMENT");
       size_t alloc_size = cnt;
       if (!BYTES)

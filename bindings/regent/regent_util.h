@@ -43,7 +43,7 @@ void lua_push_opaque_object_array(lua_State* L, T* objs, unsigned num_objs)
   lua_newtable(L);
   for(unsigned i = 0; i < num_objs; ++i)
   {
-    lua_push_opaque_object<LegionRuntime::HighLevel::CObjectWrapper>(L, objs[i]);
+    lua_push_opaque_object<Legion::CObjectWrapper>(L, objs[i]);
     lua_pushinteger(L, i + 1);
     lua_insert(L, -2);
     lua_settable(L, -3);
@@ -62,7 +62,7 @@ void lua_push_opaque_object_array(lua_State* L, T* objs, unsigned num_objs)
 
 struct ObjectWrapper
 {
-  typedef LegionRuntime::HighLevel::Mapper::TaskSlice TaskSlice;
+  typedef Legion::Mapper::TaskSlice TaskSlice;
 
   static vector_legion_task_slice_t
   wrap(std::vector<TaskSlice>* slices)

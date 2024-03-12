@@ -84,7 +84,6 @@ legion_cxx_tests = [
 
     # Tests
     ['test/rendering/rendering', ['-i', '2', '-n', '64', '-ll:cpu', '4']],
-    ['test/legion_stl/test_stl', []],
     ['test/output_requirements/output_requirements', []],
     ['test/output_requirements/output_requirements', ['-replicate']],
     ['test/output_requirements/output_requirements', ['-index']],
@@ -482,7 +481,7 @@ def run_test_external1(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, 
     # Parallel Research Kernels: Stencil
     # Contact: Wonchan Lee <wonchan@cs.stanford.edu>
     prk_dir = os.path.join(tmp_dir, 'prk')
-    clone_github('magnatelee', 'PRK', prk_dir, tmp_dir)
+    clone_github('lightsighter', 'PRK', prk_dir, tmp_dir)
     # This uses a custom Makefile that requires additional
     # configuration. Rather than go to that trouble it's easier to
     # just use a copy of the standard Makefile template.
@@ -586,23 +585,22 @@ def run_test_private(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, ti
 
     # MiniAero
     # Contact: Wonchan Lee <wonchan@cs.stanford.edu>
-    miniaero_dir = os.path.join(tmp_dir, 'miniaero-spmd')
-    cmd(['git', 'clone', '-b', 'spmd_flattened_superblocks',
-         'git@github.com:magnatelee/miniaero-spmd.git', miniaero_dir])
-    cmd([make_exe, '-C', miniaero_dir, '-j', str(thread_count)], env=env,
-        cwd=miniaero_dir)
-    for test in ['3D_Sod', '3D_Sod_2nd_Order'
-                 # These tests take a long time so skip them by default.
-                 # , 'FlatPlate', 'Ramp'
-                ]:
-        test_dir = os.path.join(miniaero_dir, 'tests', test)
-        cmd([os.path.join(test_dir, 'test.sh')], env=env, cwd=test_dir, timelimit=timelimit)
+    #miniaero_dir = os.path.join(tmp_dir, 'miniaero-spmd')
+    #cmd(['git', 'clone', '-b', 'spmd_flattened_superblocks',
+    #     'git@github.com:magnatelee/miniaero-spmd.git', miniaero_dir])
+    #cmd([make_exe, '-C', miniaero_dir, '-j', str(thread_count)], env=env,
+    #    cwd=miniaero_dir)
+    #for test in ['3D_Sod', '3D_Sod_2nd_Order'
+    #             # These tests take a long time so skip them by default.
+    #             # , 'FlatPlate', 'Ramp'
+    #            ]:
+    #    test_dir = os.path.join(miniaero_dir, 'tests', test)
+    #    cmd([os.path.join(test_dir, 'test.sh')], env=env, cwd=test_dir, timelimit=timelimit)
 
     # PENNANT
     # Contact: Galen Shipman <gshipman@lanl.gov>
     pennant_dir = os.path.join(tmp_dir, 'pennant')
-    cmd(['git', 'clone', '-b', 'spmdv2',
-         'git@github.com:gshipman/pennant-legion.git', pennant_dir])
+    clone_github('StanfordLegion', 'pennant-legion', pennant_dir, tmp_dir)
     # This uses a custom Makefile that requires additional
     # configuration. Rather than go to that trouble it's easier to
     # just use a copy of the standard Makefile template.
@@ -619,7 +617,7 @@ def run_test_private(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, ti
     cmd([make_exe, '-f', makefile, '-C', pennant_dir, 'clean'], env=pennant_env)
     cmd([make_exe, '-f', makefile, '-C', pennant_dir, '-j', str(thread_count)], env=pennant_env)
     pennant = os.path.join(pennant_dir, 'pennant')
-    cmd([pennant, str(app_cores), 'test/sedovsmall/sedovsmall.pnt', '-ll:cpu', str(app_cores)],
+    cmd([pennant, '-n', str(app_cores), '-f', 'test/sedov/sedov.pnt', '-ll:cpu', str(app_cores)],
         env=env,
         cwd=pennant_dir,
         timelimit=timelimit)

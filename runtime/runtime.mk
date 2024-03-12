@@ -1141,11 +1141,7 @@ INSTALL_HEADERS += legion.h \
 		   realm.h \
 		   legion/bitmask.h \
 		   legion/legion.inl \
-		   legion/legion_agency.h \
-		   legion/legion_agency.inl \
-		   legion/accessor.h \
 		   legion/legion_allocation.h \
-		   legion/arrays.h \
 		   legion/legion_c.h \
 		   legion/legion_c_util.h \
 		   legion/legion_config.h \
@@ -1156,9 +1152,6 @@ INSTALL_HEADERS += legion.h \
 		   legion/legion_mapping.inl \
 		   legion/legion_redop.h \
 		   legion/legion_redop.inl \
-		   legion/legion_stl.h \
-		   legion/legion_stl.inl \
-		   legion/legion_template_help.h \
 		   legion/legion_types.h \
 		   legion/legion_utilities.h \
 		   mappers/debug_mapper.h \
