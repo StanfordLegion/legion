@@ -5654,7 +5654,7 @@ namespace Legion {
                                                const std::vector<unsigned> &gen)
     //--------------------------------------------------------------------------
     {
-      const size_t replay_parallelism = trace->get_replay_targets().size();
+      const size_t replay_parallelism = trace->runtime->max_replay_parallelism;
       slices.resize(replay_parallelism);
       std::map<TraceLocalID, unsigned> slice_indices_by_owner;
       std::vector<unsigned> slice_indices_by_inst;
@@ -7838,7 +7838,7 @@ namespace Legion {
       }
       else
         replay_precondition = RtEvent::NO_RT_EVENT;
-      remaining_replays.store(trace->get_replay_targets().size());
+      remaining_replays.store(slices.size());
       total_logical.store(0);
       // Check to see if we have a finished transitive reduction result
       check_finalize_transitive_reduction();
@@ -7876,9 +7876,9 @@ namespace Legion {
       const std::vector<Processor> &replay_targets = 
         trace->get_replay_targets();
 #ifdef DEBUG_LEGION
-      assert(remaining_replays.load() == replay_targets.size());
+      assert(remaining_replays.load() == slices.size());
 #endif
-      for (unsigned idx = 0; idx < replay_targets.size(); ++idx)
+      for (unsigned idx = 0; idx < slices.size(); ++idx)
       {
         ReplaySliceArgs args(this, idx, trace->is_recurrent());
         if (runtime->replay_on_cpus)
