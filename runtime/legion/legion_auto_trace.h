@@ -696,7 +696,9 @@ namespace Legion {
       }
       // Update counters for issued operations.
       if (!unordered) {
-        this->executed_ops++;
+        // Only count operations that can be traced (i.e. random discards
+        // don't count toward the trace success rate).
+        if (!is_operation_ignorable_in_traces(op)) this->executed_ops++;
         if (this->started_auto_trace) this->traced_ops++;
       }
       return T::add_to_dependence_queue(op, dependences, unordered, outermost);
