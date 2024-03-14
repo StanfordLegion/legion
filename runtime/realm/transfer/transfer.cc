@@ -3136,7 +3136,7 @@ namespace Realm {
         ChannelCopyInfo copy_info = channel_copy_info;
         copy_info.src_mem = partials[src_idx].ib_mem;
         copy_info.dst_mem = partials[dst_idx].ib_mem;
-	copy_info.ind_mem = Memory::NO_MEMORY;
+        copy_info.ind_mem = Memory::NO_MEMORY;
         copy_info.is_direct = false;
         if(best_channel_for_mem_pair(copy_info,
                                      0, 0, 0, // no serdez or redop on interhops
