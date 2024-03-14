@@ -2175,7 +2175,7 @@ checksum = "e2abad23fbc42b3700f2f279844dc832adb2b2eb069b2df918f455c4e18cc646"
 
 [[package]]
 name = "legion_prof"
-version = "0.1.0"
+version = "0.2403.0"
 dependencies = [
  "clap",
  "csv",
@@ -2197,7 +2197,8 @@ dependencies = [
 [[package]]
 name = "legion_prof_viewer"
 version = "0.1.0"
-source = "git+https://github.com/StanfordLegion/prof-viewer?branch=master#4ce390f79a365128ca5638be483fcf1a9004407f"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e44b0ebe86cf8e54cff3319dc3c1aa0b16d957289d08704522512c865c2e9e65"
 dependencies = [
  "actix-cors",
  "actix-web",
