@@ -2530,12 +2530,12 @@ namespace Realm {
         {
           AutoGPUContext agc(gpu);
           // TODO: handle large alignments?
-          ret = hipMalloc(&base, size);
+          ret = hipMalloc(&base, bytes);
           if((ret != hipSuccess) && (ret != hipErrorOutOfMemory))
             REPORT_HIP_ERROR("hipMalloc", ret);
         }
         if(ret == hipErrorOutOfMemory) {
-          log_gpu.warning() << "out of memory in hipMalloc: size=" << size;
+          log_gpu.warning() << "out of memory in hipMalloc: bytes=" << bytes;
           inst->notify_allocation(ALLOC_INSTANT_FAILURE,
                                   RegionInstanceImpl::INSTOFFSET_FAILED,
                                   work_until);
