@@ -6,7 +6,8 @@ use std::path::Path;
 
 use flate2::read::GzDecoder;
 
-use nom;
+use nonmax::NonMaxU64;
+
 use nom::{
     bytes::complete::{tag, take_till, take_while1},
     character::{is_alphanumeric, is_digit},
@@ -113,7 +114,7 @@ pub enum Record {
     PhysicalInstanceUsage { inst_uid: InstUID, op_id: OpID, index_id: u32, field_id: FieldID },
     TaskKind { task_id: TaskID, name: String, overwrite: bool },
     TaskVariant { task_id: TaskID, variant_id: VariantID, name: String },
-    OperationInstance { op_id: OpID, parent_id: OpID, kind: u32, provenance: String },
+    OperationInstance { op_id: OpID, parent_id: Option<OpID>, kind: u32, provenance: String },
     MultiTask { op_id: OpID, task_id: TaskID },
     SliceOwner { parent_id: UniqueID, op_id: OpID },
     TaskWaitInfo { op_id: OpID, task_id: TaskID, variant_id: VariantID, wait_start: Timestamp, wait_ready: Timestamp, wait_end: Timestamp },
@@ -321,8 +322,11 @@ fn parse_mapper_call_kind_id(input: &[u8]) -> IResult<&[u8], MapperCallKindID> {
 fn parse_mem_id(input: &[u8]) -> IResult<&[u8], MemID> {
     map(le_u64, MemID)(input)
 }
+fn parse_option_op_id(input: &[u8]) -> IResult<&[u8], Option<OpID>> {
+    map(le_u64, |x| NonMaxU64::new(x).map(OpID))(input)
+}
 fn parse_op_id(input: &[u8]) -> IResult<&[u8], OpID> {
-    map(le_u64, OpID)(input)
+    map(le_u64, |x| OpID(NonMaxU64::new(x).unwrap()))(input)
 }
 fn parse_proc_id(input: &[u8]) -> IResult<&[u8], ProcID> {
     map(le_u64, ProcID)(input)
@@ -653,7 +657,7 @@ fn parse_task_variant(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
 }
 fn parse_operation(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, op_id) = parse_op_id(input)?;
-    let (input, parent_id) = parse_op_id(input)?;
+    let (input, parent_id) = parse_option_op_id(input)?;
     let (input, kind) = le_u32(input)?;
     let (input, provenance) = parse_string(input)?;
     Ok((
