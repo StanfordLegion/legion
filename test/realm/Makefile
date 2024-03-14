@@ -35,7 +35,7 @@ GEN_GPU_SRC	:=				# .cu files
 INC_FLAGS	?=
 CC_FLAGS	?=
 NVCC_FLAGS	?=
-HIPCC_FLAGS	?=
+HIPCC_FLAGS	?= -gencode arch=compute_60,code=sm_60
 GASNET_FLAGS	?=
 LD_FLAGS	?=
 

@@ -4151,19 +4151,19 @@ namespace Realm {
       }
 
       // a single unified (managed) memory for everybody
-      if((cfg_uvm_mem_size > 0) && !gpus.empty()) {
+      if((config->cfg_uvm_mem_size > 0) && !gpus.empty()) {
 	      char* uvm_gpu_base;
         // borrow GPU 0's context for the allocation call
         {
           AutoGPUContext agc(gpus[0]);
 
           hipError_t ret = hipMallocManaged((void**)&uvm_gpu_base, 
-                                            cfg_uvm_mem_size,
+                                            config->cfg_uvm_mem_size,
                                             hipMemAttachGlobal);
           if(ret != hipSuccess) {
             if(ret == hipErrorOutOfMemory) {
               log_gpu.fatal() << "unable to allocate managed memory: "
-                  << cfg_uvm_mem_size << " bytes needed (from -ll:msize)";
+                  << config->cfg_uvm_mem_size << " bytes needed (from -ll:msize)";
             } else {
               const char *errstring = hipGetErrorString(ret);
               log_gpu.fatal() << "unexpected error from cuMemAllocManaged: result=" << ret
@@ -4176,7 +4176,7 @@ namespace Realm {
         uvm_base = reinterpret_cast<void *>(uvm_gpu_base);
         Memory m = runtime->next_local_memory_id();
         uvmmem = new GPUZCMemory(m, uvm_gpu_base, uvm_base,
-                                 cfg_uvm_mem_size,
+                                 config->cfg_uvm_mem_size,
                                  MemoryImpl::MKIND_MANAGED,
                                  Memory::Kind::GPU_MANAGED_MEM);
         runtime->add_memory(uvmmem);
