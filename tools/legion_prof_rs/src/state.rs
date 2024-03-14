@@ -336,9 +336,28 @@ pub trait Container {
     fn max_levels(&self, device: Option<DeviceKind>) -> u32;
     fn max_levels_ready(&self, device: Option<DeviceKind>) -> u32;
     fn time_points(&self, device: Option<DeviceKind>) -> &Vec<TimePoint<Self::E, Self::S>>;
+    fn time_points_stacked(
+        &self,
+        device: Option<DeviceKind>,
+    ) -> &Vec<Vec<TimePoint<Self::E, Self::S>>>;
     fn util_time_points(&self, device: Option<DeviceKind>) -> &Vec<TimePoint<Self::E, Self::S>>;
     fn entry(&self, entry: Self::E) -> &Self::Entry;
     fn entry_mut(&mut self, entry: Self::E) -> &mut Self::Entry;
+
+    // For internal use only
+    fn stack(
+        &self,
+        time_points: Vec<TimePoint<Self::E, Self::S>>,
+        max_levels: u32,
+    ) -> Vec<Vec<TimePoint<Self::E, Self::S>>> {
+        let mut stacked = Vec::new();
+        stacked.resize_with(max_levels as usize + 1, Vec::new);
+        for point in time_points {
+            let level = self.entry(point.entry).base().level;
+            stacked[level.unwrap() as usize].push(point);
+        }
+        stacked
+    }
 }
 
 // Common methods that apply to ProcEntry, MemEntry, ChanEntry
@@ -557,10 +576,12 @@ pub struct Proc {
     max_levels: u32,
     max_levels_ready: u32,
     time_points: Vec<ProcPoint>,
+    time_points_stacked: Vec<Vec<ProcPoint>>,
     util_time_points: Vec<ProcPoint>,
     max_levels_device: u32,
     max_levels_ready_device: u32,
     time_points_device: Vec<ProcPoint>,
+    time_points_stacked_device: Vec<Vec<ProcPoint>>,
     util_time_points_device: Vec<ProcPoint>,
     visible: bool,
 }
@@ -576,10 +597,12 @@ impl Proc {
             max_levels: 0,
             max_levels_ready: 0,
             time_points: Vec::new(),
+            time_points_stacked: Vec::new(),
             util_time_points: Vec::new(),
             max_levels_device: 0,
             max_levels_ready_device: 0,
             time_points_device: Vec::new(),
+            time_points_stacked_device: Vec::new(),
             util_time_points_device: Vec::new(),
             visible: true,
         }
@@ -923,6 +946,16 @@ impl Proc {
         self.util_time_points_device = util_points_device;
     }
 
+    fn stack_time_points(&mut self) {
+        let mut time_points = Vec::new();
+        std::mem::swap(&mut time_points, &mut self.time_points);
+        self.time_points_stacked = self.stack(time_points, self.max_levels);
+
+        let mut time_points_device = Vec::new();
+        std::mem::swap(&mut time_points_device, &mut self.time_points_device);
+        self.time_points_stacked_device = self.stack(time_points_device, self.max_levels_device);
+    }
+
     pub fn is_visible(&self) -> bool {
         self.visible
     }
@@ -954,6 +987,17 @@ impl Container for Proc {
             Some(DeviceKind::Device) => &self.time_points_device,
             Some(DeviceKind::Host) => &self.time_points,
             None => &self.time_points,
+        }
+    }
+
+    fn time_points_stacked(
+        &self,
+        device: Option<DeviceKind>,
+    ) -> &Vec<Vec<TimePoint<Self::E, Self::S>>> {
+        match device {
+            Some(DeviceKind::Device) => &self.time_points_stacked_device,
+            Some(DeviceKind::Host) => &self.time_points_stacked,
+            None => &self.time_points_stacked,
         }
     }
 
@@ -1000,6 +1044,7 @@ pub struct Mem {
     pub capacity: u64,
     pub insts: BTreeMap<InstUID, Inst>,
     time_points: Vec<MemPoint>,
+    time_points_stacked: Vec<Vec<MemPoint>>,
     util_time_points: Vec<MemPoint>,
     max_live_insts: u32,
     visible: bool,
@@ -1013,6 +1058,7 @@ impl Mem {
             capacity,
             insts: BTreeMap::new(),
             time_points: Vec::new(),
+            time_points_stacked: Vec::new(),
             util_time_points: Vec::new(),
             max_live_insts: 0,
             visible: true,
@@ -1092,6 +1138,12 @@ impl Mem {
         self.util_time_points = time_points;
     }
 
+    fn stack_time_points(&mut self) {
+        let mut time_points = Vec::new();
+        std::mem::swap(&mut time_points, &mut self.time_points);
+        self.time_points_stacked = self.stack(time_points, self.max_live_insts);
+    }
+
     pub fn is_visible(&self) -> bool {
         self.visible
     }
@@ -1114,6 +1166,14 @@ impl Container for Mem {
     fn time_points(&self, device: Option<DeviceKind>) -> &Vec<TimePoint<Self::E, Self::S>> {
         assert!(device.is_none());
         &self.time_points
+    }
+
+    fn time_points_stacked(
+        &self,
+        device: Option<DeviceKind>,
+    ) -> &Vec<Vec<TimePoint<Self::E, Self::S>>> {
+        assert!(device.is_none());
+        &self.time_points_stacked
     }
 
     fn util_time_points(&self, device: Option<DeviceKind>) -> &Vec<TimePoint<Self::E, Self::S>> {
@@ -1351,6 +1411,7 @@ pub struct Chan {
     fills: BTreeMap<EventID, ProfUID>,
     depparts: BTreeMap<OpID, Vec<ProfUID>>,
     time_points: Vec<ChanPoint>,
+    time_points_stacked: Vec<Vec<ChanPoint>>,
     util_time_points: Vec<ChanPoint>,
     max_levels: u32,
     visible: bool,
@@ -1365,6 +1426,7 @@ impl Chan {
             fills: BTreeMap::new(),
             depparts: BTreeMap::new(),
             time_points: Vec::new(),
+            time_points_stacked: Vec::new(),
             util_time_points: Vec::new(),
             max_levels: 0,
             visible: true,
@@ -1440,6 +1502,12 @@ impl Chan {
         self.util_time_points = points;
     }
 
+    fn stack_time_points(&mut self) {
+        let mut time_points = Vec::new();
+        std::mem::swap(&mut time_points, &mut self.time_points);
+        self.time_points_stacked = self.stack(time_points, self.max_levels);
+    }
+
     pub fn is_visible(&self) -> bool {
         self.visible
     }
@@ -1462,6 +1530,14 @@ impl Container for Chan {
     fn time_points(&self, device: Option<DeviceKind>) -> &Vec<TimePoint<Self::E, Self::S>> {
         assert!(device.is_none());
         &self.time_points
+    }
+
+    fn time_points_stacked(
+        &self,
+        device: Option<DeviceKind>,
+    ) -> &Vec<Vec<TimePoint<Self::E, Self::S>>> {
+        assert!(device.is_none());
+        &self.time_points_stacked
     }
 
     fn util_time_points(&self, device: Option<DeviceKind>) -> &Vec<TimePoint<Self::E, Self::S>> {
@@ -3180,6 +3256,18 @@ impl State {
         self.chans
             .par_iter_mut()
             .for_each(|(_, chan)| chan.sort_time_range());
+    }
+
+    pub fn stack_time_points(&mut self) {
+        self.procs
+            .par_iter_mut()
+            .for_each(|(_, proc)| proc.stack_time_points());
+        self.mems
+            .par_iter_mut()
+            .for_each(|(_, mem)| mem.stack_time_points());
+        self.chans
+            .par_iter_mut()
+            .for_each(|(_, chan)| chan.stack_time_points());
     }
 
     pub fn assign_colors(&mut self) {
