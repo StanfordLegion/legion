@@ -640,7 +640,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ShardID RemoteTraceRecorder::record_managed_barrier(ApBarrier bar,
+    ShardID RemoteTraceRecorder::record_barrier_creation(ApBarrier &bar,
                                                         size_t total_arrivals)
     //--------------------------------------------------------------------------
     {
@@ -649,24 +649,24 @@ namespace Legion {
 #endif
       if (local_space != origin_space)
       {
+        ShardID owner = 0;
         const RtUserEvent done = Runtime::create_rt_user_event();
-        std::atomic<ShardID> owner(0);
         Serializer rez;
         {
           RezCheck z(rez);
           rez.serialize(remote_tpl);
           rez.serialize(REMOTE_TRACE_RECORD_BARRIER);
           rez.serialize(done);
-          rez.serialize(bar);
+          rez.serialize(&bar);
           rez.serialize(total_arrivals);
           rez.serialize(&owner);
         }
         runtime->send_remote_trace_update(origin_space, rez);
         done.wait();
-        return owner.load();
+        return owner;
       }
       else
-        return remote_tpl->record_managed_barrier(bar, total_arrivals);
+        return remote_tpl->record_barrier_creation(bar, total_arrivals);
     }
 
     //--------------------------------------------------------------------------
@@ -1664,17 +1664,20 @@ namespace Legion {
           {
             RtUserEvent done_event;
             derez.deserialize(done_event);
-            ApBarrier barrier;
+            ApBarrier *barrier;
             derez.deserialize(barrier);
             size_t arrivals;
             derez.deserialize(arrivals);
-            std::atomic<ShardID> *target;
+            ShardID *target;
             derez.deserialize(target);
-            ShardID owner = tpl->record_managed_barrier(barrier, arrivals);
+            ApBarrier bar;
+            ShardID owner = tpl->record_barrier_creation(bar, arrivals);
             Serializer rez;
             {
               RezCheck z2(rez);
               rez.serialize(REMOTE_TRACE_RECORD_BARRIER);
+              rez.serialize(barrier);
+              rez.serialize(bar);
               rez.serialize(target);
               rez.serialize(owner);
               rez.serialize(done_event);
@@ -1754,13 +1757,14 @@ namespace Legion {
           }
         case REMOTE_TRACE_RECORD_BARRIER:
           {
-            std::atomic<ShardID> *target;
+            ApBarrier *barrier;
+            derez.deserialize(barrier);
+            derez.deserialize(*barrier);
+            ShardID *target;
             derez.deserialize(target);
-            ShardID owner;
-            derez.deserialize(owner);
+            derez.deserialize(*target);
             RtUserEvent done;
             derez.deserialize(done);
-            target->store(owner);
             Runtime::trigger_event(done);
             break;
           }
