@@ -26,6 +26,7 @@ namespace Realm {
   namespace Cuda {
 
     extern Logger log_cudart;
+    extern Logger log_gpu;
 
     static GPUProcessor *get_gpu_or_die(const char *funcname)
     {
@@ -33,9 +34,9 @@ namespace Realm {
       cudart_hijack_active = true;
 
       GPUProcessor *p = GPUProcessor::get_current_gpu_proc();
-      if(!p) {
-	log_cudart.fatal() << funcname << "() called outside CUDA task";
-	assert(false);
+      if (!p) {
+        log_cudart.fatal() << funcname << "() called outside CUDA task";
+        assert(false);
       }
       return p;
     }
@@ -215,8 +216,8 @@ extern "C" {
   REALM_PUBLIC_API
   cudaError_t cudaEventCreate(cudaEvent_t *event)
   {
-    GPUProcessor *p = get_gpu_or_die("cudaEventCreate");
-    p->event_create(event, cudaEventDefault);
+    get_gpu_or_die("cudaEventCreate");
+    CHECK_CU( cuEventCreate(event, CU_EVENT_DEFAULT) );
     return cudaSuccess;
   }
 	
@@ -224,8 +225,8 @@ extern "C" {
   cudaError_t cudaEventCreateWithFlags(cudaEvent_t *event,
 				       unsigned int flags)
   {
-    GPUProcessor *p = get_gpu_or_die("cudaEventCreateWithFlags");
-    p->event_create(event, flags);
+    get_gpu_or_die("cudaEventCreateWithFlags");
+    CHECK_CU( cuEventCreate(event, flags) );
     return cudaSuccess;
   }
 
@@ -240,24 +241,24 @@ extern "C" {
   REALM_PUBLIC_API
   cudaError_t cudaEventSynchronize(cudaEvent_t event)
   {
-    GPUProcessor *p = get_gpu_or_die("cudaEventSynchronize");
-    p->event_synchronize(event);
+    get_gpu_or_die("cudaEventSynchronize");
+    CHECK_CU( cuEventSynchronize(event) );
     return cudaSuccess;
   }
 
   REALM_PUBLIC_API
   cudaError_t cudaEventDestroy(cudaEvent_t event)
   {
-    GPUProcessor *p = get_gpu_or_die("cudaEventDestroy");
-    p->event_destroy(event);
+    get_gpu_or_die("cudaEventDestroy");
+    CHECK_CU( cuEventDestroy(event) );
     return cudaSuccess;
   }
 
   REALM_PUBLIC_API
   cudaError_t cudaEventElapsedTime(float *ms, cudaEvent_t start, cudaEvent_t end)
   {
-    GPUProcessor *p = get_gpu_or_die("cudaEventElapsedTime");
-    p->event_elapsed_time(ms, start, end);
+    get_gpu_or_die("cudaEventElapsedTime");
+    CHECK_CU( cuEventElapsedTime(ms, start, end) );
     return cudaSuccess;
   }
 
@@ -649,7 +650,7 @@ extern "C" {
 			 size_t size, cudaMemcpyKind kind)
   {
     GPUProcessor *p = get_gpu_or_die("cudaMemcpy");
-    p->gpu_memcpy(dst, src, size, kind);
+    p->gpu_memcpy(dst, src, size);
     return cudaSuccess;
   }
 
@@ -659,7 +660,7 @@ extern "C" {
 			      cudaStream_t stream)
   {
     GPUProcessor *p = get_gpu_or_die("cudaMemcpyAsync");
-    p->gpu_memcpy_async(dst, src, size, kind, stream);
+    p->gpu_memcpy_async(dst, src, size, stream);
     return cudaSuccess;
   }
 
@@ -668,7 +669,7 @@ extern "C" {
 			   size_t width, size_t height, cudaMemcpyKind kind)
   {
     GPUProcessor *p = get_gpu_or_die("cudaMemcpy2D");
-    p->gpu_memcpy2d(dst, dpitch, src, spitch, width, height, kind);
+    p->gpu_memcpy2d(dst, dpitch, src, spitch, width, height);
     return cudaSuccess;
   }
 
@@ -678,7 +679,7 @@ extern "C" {
 				cudaMemcpyKind kind, cudaStream_t stream)
   {
     GPUProcessor *p = get_gpu_or_die("cudaMemcpy2DAsync");
-    p->gpu_memcpy2d_async(dst, dpitch, src, spitch, width, height, kind, stream);
+    p->gpu_memcpy2d_async(dst, dpitch, src, spitch, width, height, stream);
     return cudaSuccess;
   }
 
@@ -745,7 +746,7 @@ extern "C" {
 				 cudaMemcpyKind kind)
   {
     GPUProcessor *p = get_gpu_or_die("cudaMemcpyToSymbol");
-    p->gpu_memcpy_to_symbol(dst, src, size, offset, kind);
+    p->gpu_memcpy_to_symbol(dst, src, size, offset);
     return cudaSuccess;
   }
 
@@ -755,7 +756,7 @@ extern "C" {
 				      cudaMemcpyKind kind, cudaStream_t stream)
   {
     GPUProcessor *p = get_gpu_or_die("cudaMemcpyToSymbolAsync");
-    p->gpu_memcpy_to_symbol_async(dst, src, size, offset, kind, stream);
+    p->gpu_memcpy_to_symbol_async(dst, src, size, offset, stream);
     return cudaSuccess;
   }
 
@@ -765,7 +766,7 @@ extern "C" {
 				   cudaMemcpyKind kind)
   {
     GPUProcessor *p = get_gpu_or_die("cudaMemcpyFromSymbol");
-    p->gpu_memcpy_from_symbol(dst, src, size, offset, kind);
+    p->gpu_memcpy_from_symbol(dst, src, size, offset);
     return cudaSuccess;
   }
       
@@ -775,7 +776,7 @@ extern "C" {
 					cudaMemcpyKind kind, cudaStream_t stream)
   {
     GPUProcessor *p = get_gpu_or_die("cudaMemcpyFromSymbolAsync");
-    p->gpu_memcpy_from_symbol_async(dst, src, size, offset, kind, stream);
+    p->gpu_memcpy_from_symbol_async(dst, src, size, offset, stream);
     return cudaSuccess;
   }
       
@@ -803,16 +804,132 @@ extern "C" {
     return cudaSuccess;
   }
 
+#define CUDA_DEVICE_ATTRIBUTES_PRE_8_0(__op__) \
+  __op__(major, COMPUTE_CAPABILITY_MAJOR)                  \
+  __op__(minor, COMPUTE_CAPABILITY_MINOR)                  \
+  __op__(sharedMemPerBlock, MAX_SHARED_MEMORY_PER_BLOCK)   \
+  __op__(regsPerBlock,      MAX_REGISTERS_PER_BLOCK)       \
+  __op__(warpSize,          WARP_SIZE)                     \
+  __op__(memPitch,          MAX_PITCH)                     \
+  __op__(maxThreadsPerBlock, MAX_THREADS_PER_BLOCK)        \
+  __op__(maxThreadsDim[0], MAX_BLOCK_DIM_X)                \
+  __op__(maxThreadsDim[1], MAX_BLOCK_DIM_Y)                \
+  __op__(maxThreadsDim[2], MAX_BLOCK_DIM_Z)                \
+  __op__(maxGridSize[0], MAX_GRID_DIM_X)                   \
+  __op__(maxGridSize[1], MAX_GRID_DIM_Y)                   \
+  __op__(maxGridSize[2], MAX_GRID_DIM_Z)                   \
+  __op__(maxSurface1D,  MAXIMUM_SURFACE1D_WIDTH)           \
+  __op__(maxSurface2D[0], MAXIMUM_SURFACE2D_WIDTH)         \
+  __op__(maxSurface2D[1], MAXIMUM_SURFACE2D_HEIGHT)        \
+  __op__(maxSurface3D[0], MAXIMUM_SURFACE3D_WIDTH)         \
+  __op__(maxSurface3D[1], MAXIMUM_SURFACE3D_HEIGHT)        \
+  __op__(maxSurface3D[2], MAXIMUM_SURFACE3D_DEPTH)         \
+  __op__(maxSurface1DLayered[0],  MAXIMUM_SURFACE1D_LAYERED_WIDTH)           \
+  __op__(maxSurface1DLayered[1],  MAXIMUM_SURFACE1D_LAYERED_LAYERS)          \
+  __op__(maxSurface2DLayered[0], MAXIMUM_SURFACE2D_LAYERED_WIDTH)            \
+  __op__(maxSurface2DLayered[1], MAXIMUM_SURFACE2D_LAYERED_HEIGHT)           \
+  __op__(maxSurface2DLayered[2], MAXIMUM_SURFACE2D_LAYERED_LAYERS)           \
+  __op__(maxSurfaceCubemap, MAXIMUM_SURFACECUBEMAP_WIDTH)                    \
+  __op__(maxSurfaceCubemapLayered[0], MAXIMUM_SURFACECUBEMAP_LAYERED_WIDTH)  \
+  __op__(maxSurfaceCubemapLayered[1], MAXIMUM_SURFACECUBEMAP_LAYERED_LAYERS) \
+  __op__(clockRate, CLOCK_RATE)                          \
+  __op__(totalConstMem, TOTAL_CONSTANT_MEMORY)           \
+  __op__(deviceOverlap, GPU_OVERLAP)                     \
+  __op__(multiProcessorCount, MULTIPROCESSOR_COUNT)      \
+  __op__(kernelExecTimeoutEnabled, KERNEL_EXEC_TIMEOUT)  \
+  __op__(integrated, INTEGRATED)                         \
+  __op__(canMapHostMemory, CAN_MAP_HOST_MEMORY)          \
+  __op__(computeMode, COMPUTE_MODE)                      \
+  __op__(concurrentKernels, CONCURRENT_KERNELS)          \
+  __op__(ECCEnabled, ECC_ENABLED)                        \
+  __op__(pciBusID, PCI_BUS_ID)                           \
+  __op__(pciDeviceID, PCI_DEVICE_ID)                     \
+  __op__(pciDomainID, PCI_DOMAIN_ID)                     \
+  __op__(tccDriver, TCC_DRIVER)                          \
+  __op__(asyncEngineCount, ASYNC_ENGINE_COUNT)           \
+  __op__(unifiedAddressing, UNIFIED_ADDRESSING)          \
+  __op__(memoryClockRate, MEMORY_CLOCK_RATE)             \
+  __op__(memoryBusWidth, GLOBAL_MEMORY_BUS_WIDTH)        \
+  __op__(l2CacheSize, L2_CACHE_SIZE)                     \
+  __op__(maxThreadsPerMultiProcessor, MAX_THREADS_PER_MULTIPROCESSOR) \
+  __op__(streamPrioritiesSupported, STREAM_PRIORITIES_SUPPORTED)      \
+  __op__(globalL1CacheSupported, GLOBAL_L1_CACHE_SUPPORTED)           \
+  __op__(localL1CacheSupported, LOCAL_L1_CACHE_SUPPORTED)             \
+  __op__(sharedMemPerMultiprocessor, MAX_SHARED_MEMORY_PER_MULTIPROCESSOR)  \
+  __op__(regsPerMultiprocessor, MAX_REGISTERS_PER_MULTIPROCESSOR)           \
+  __op__(managedMemory, MANAGED_MEMORY)                                     \
+  __op__(isMultiGpuBoard, MULTI_GPU_BOARD)                                  \
+  __op__(multiGpuBoardGroupID, MULTI_GPU_BOARD_GROUP_ID)
+
+#if CUDA_VERSION >= 8000
+#define CUDA_DEVICE_ATTRIBUTES_8_0(__op__)                                        \
+  __op__(singleToDoublePrecisionPerfRatio, SINGLE_TO_DOUBLE_PRECISION_PERF_RATIO) \
+  __op__(pageableMemoryAccess, PAGEABLE_MEMORY_ACCESS)                            \
+  __op__(concurrentManagedAccess, CONCURRENT_MANAGED_ACCESS)
+#else
+#define CUDA_DEVICE_ATTRIBUTES_8_0(__op__)
+#endif
+
+#if CUDA_VERSION >= 9000
+#define CUDA_DEVICE_ATTRIBUTES_9_0(__op__)                                            \
+  __op__(computePreemptionSupported, COMPUTE_PREEMPTION_SUPPORTED)                    \
+  __op__(canUseHostPointerForRegisteredMem, CAN_USE_HOST_POINTER_FOR_REGISTERED_MEM)  \
+  __op__(cooperativeLaunch, COOPERATIVE_LAUNCH)                                       \
+  __op__(cooperativeMultiDeviceLaunch, COOPERATIVE_MULTI_DEVICE_LAUNCH)               \
+  __op__(sharedMemPerBlockOptin, MAX_SHARED_MEMORY_PER_BLOCK_OPTIN)
+#else
+#define CUDA_DEVICE_ATTRIBUTES_9_0(__op__)
+#endif
+
+#if CUDA_VERSION >= 9200
+#define CUDA_DEVICE_ATTRIBUTES_9_2(__op__)                                                      \
+  __op__(pageableMemoryAccessUsesHostPageTables, PAGEABLE_MEMORY_ACCESS_USES_HOST_PAGE_TABLES)  \
+  __op__(directManagedMemAccessFromHost, DIRECT_MANAGED_MEM_ACCESS_FROM_HOST)
+#else
+#define CUDA_DEVICE_ATTRIBUTES_9_2(__op__)
+#endif
+#if CUDA_VERSION >= 11000
+#define CUDA_DEVICE_ATTRIBUTES_11_0(__op__)                         \
+  __op__(maxBlocksPerMultiProcessor, MAX_BLOCKS_PER_MULTIPROCESSOR) \
+  __op__(accessPolicyMaxWindowSize, MAX_ACCESS_POLICY_WINDOW_SIZE)
+#else
+#define CUDA_DEVICE_ATTRIBUTES_11_0(__op__)
+#endif
+
+#define CUDA_DEVICE_ATTRIBUTES(__op__)   \
+  CUDA_DEVICE_ATTRIBUTES_PRE_8_0(__op__) \
+  CUDA_DEVICE_ATTRIBUTES_8_0 (__op__)    \
+  CUDA_DEVICE_ATTRIBUTES_9_0 (__op__)    \
+  CUDA_DEVICE_ATTRIBUTES_9_2 (__op__)    \
+  CUDA_DEVICE_ATTRIBUTES_11_0(__op__)
+
   REALM_PUBLIC_API
   cudaError_t cudaGetDeviceProperties(cudaDeviceProp *prop, int index)
   {
     GPUProcessor *p = get_gpu_or_die("cudaGetDeviceProperties");
     const std::vector<GPUInfo*> &infos = p->gpu->module->gpu_info;
-    for (const GPUInfo* info : infos) {
+    for (GPUInfo* info : infos) {
       if (info->index != index)
         continue;
-      static_assert(std::is_trivially_copyable<cudaDeviceProp>::value, "cudaDeviceProp is no longer trivially copyable");
-      memcpy(prop, info, sizeof(cudaDeviceProp));
+
+      if (info->prop.totalGlobalMem != info->totalGlobalMem) {
+        // TODO: Replace with cuDeviceGetAttributes to batch
+        #define CUDA_GET_DEVICE_PROP(name, attr)                     \
+          do {								                                       \
+            int val = 0;                                             \
+            CHECK_CU( CUDA_DRIVER_FNPTR(cuDeviceGetAttribute)        \
+                      (&val, CU_DEVICE_ATTRIBUTE_##attr, info->device) );     \
+            info->prop.name = val;                                           \
+          } while(0);
+        CUDA_DEVICE_ATTRIBUTES(CUDA_GET_DEVICE_PROP);
+
+        strncpy(info->prop.name, info->name, sizeof(info->prop.name));
+        info->prop.totalGlobalMem = info->totalGlobalMem;
+        #undef CUDA_GET_DEVICE_PROP
+      }
+
+      memcpy(prop, &info->prop, sizeof(*prop));
+
       return cudaSuccess;
     }
     return cudaErrorInvalidDevice;
@@ -1182,6 +1299,7 @@ extern "C" {
     }
   }
 
+  REALM_PUBLIC_API
   cudaError_t cudaSetDeviceFlags(unsigned flags)
   {
     get_gpu_or_die("cudaSetDeviceFlags");
@@ -1191,6 +1309,7 @@ extern "C" {
     return cudaErrorSetOnActiveProcess;
   }
 
+  REALM_PUBLIC_API
   cudaError_t cudaGetDeviceFlags(unsigned *flags)
   {
     get_gpu_or_die("cudaGetDeviceFlags");
@@ -1204,6 +1323,139 @@ extern "C" {
            (cudaDeviceMapHost == CU_CTX_MAP_HOST) &&
            (cudaDeviceLmemResizeToMax == CU_CTX_LMEM_RESIZE_TO_MAX));
     return (cudaError_t)cuCtxGetFlags(flags);
+  }
+
+  REALM_PUBLIC_API
+  cudaError_t cudaMalloc3DArray(cudaArray_t *array,
+                                const cudaChannelFormatDesc *desc,
+                                cudaExtent extent, unsigned flags)
+  {
+    get_gpu_or_die("cudaMalloc3DArray");
+
+    CUarray handle;
+    CUDA_ARRAY3D_DESCRIPTOR d;
+    d.Width = extent.width;
+    d.Height = extent.height;
+    d.Depth = extent.depth;
+
+    // runtime and driver describe channel count/format very differently
+    int channel_count = 0;
+    int channel_width = 0;
+    if(desc->x != 0) {
+      channel_count++;
+      channel_width = desc->x;
+    }
+    if(desc->y != 0) {
+      channel_count++;
+      if(channel_width && (desc->y != channel_width))
+        return cudaErrorInvalidValue;
+      channel_width = desc->y;
+    }
+    if(desc->z != 0) {
+      channel_count++;
+      if(channel_width && (desc->z != channel_width))
+        return cudaErrorInvalidValue;
+      channel_width = desc->z;
+    }
+    if(desc->w != 0) {
+      channel_count++;
+      if(channel_width && (desc->w != channel_width))
+        return cudaErrorInvalidValue;
+      channel_width = desc->w;
+    }
+
+    switch(desc->f) {
+    case cudaChannelFormatKindSigned:
+      {
+        switch(channel_width) {
+        case 8 : { d.Format = CU_AD_FORMAT_SIGNED_INT8; break; }
+        case 16 : { d.Format = CU_AD_FORMAT_SIGNED_INT16; break; }
+        case 32 : { d.Format = CU_AD_FORMAT_SIGNED_INT32; break; }
+        default: return cudaErrorInvalidValue;
+        }
+        break;
+      }
+    case cudaChannelFormatKindUnsigned:
+      {
+        switch(channel_width) {
+        case 8 : { d.Format = CU_AD_FORMAT_UNSIGNED_INT8; break; }
+        case 16 : { d.Format = CU_AD_FORMAT_UNSIGNED_INT16; break; }
+        case 32 : { d.Format = CU_AD_FORMAT_UNSIGNED_INT32; break; }
+        default: return cudaErrorInvalidValue;
+        }
+        break;
+      }
+    case cudaChannelFormatKindFloat:
+      {
+        switch(channel_width) {
+        case 16 : { d.Format = CU_AD_FORMAT_HALF; break; }
+        case 32 : { d.Format = CU_AD_FORMAT_FLOAT; break; }
+        default: return cudaErrorInvalidValue;
+        }
+        break;
+      }
+    default: return cudaErrorInvalidValue;
+    }
+
+    d.NumChannels = channel_count;
+
+    d.Flags = 0;
+    if((flags & cudaArrayLayered) != 0)
+      d.Flags |= CUDA_ARRAY3D_LAYERED;
+    if((flags & cudaArrayCubemap) != 0)
+      d.Flags |= CUDA_ARRAY3D_CUBEMAP;
+    if((flags & cudaArraySurfaceLoadStore) != 0)
+      d.Flags |= CUDA_ARRAY3D_SURFACE_LDST;
+    if((flags & cudaArrayTextureGather) != 0)
+      d.Flags |= CUDA_ARRAY3D_TEXTURE_GATHER;
+    // ignore flags we don't understand and hope for the best
+
+    CUresult ret = cuArray3DCreate(&handle, &d);
+    if(ret == CUDA_SUCCESS) {
+      *array = (struct cudaArray *)handle;
+      return cudaSuccess;
+    } else
+      return (cudaError_t)ret;
+  }
+
+  REALM_PUBLIC_API
+  cudaError_t cudaFreeArray(cudaArray_t array)
+  {
+    get_gpu_or_die("cudaFreeArray");
+
+    return (cudaError_t)cuArrayDestroy((CUarray)array);
+  }
+
+  REALM_PUBLIC_API
+  cudaError_t cudaCreateSurfaceObject(cudaSurfaceObject_t *object,
+                                      const cudaResourceDesc *desc)
+  {
+    get_gpu_or_die("cudaCreateSurfaceObject");
+
+    if(desc->resType != cudaResourceTypeArray)
+      return cudaErrorInvalidValue;
+
+    CUDA_RESOURCE_DESC d;
+    memset(&d, 0, sizeof(d));
+    d.resType = CU_RESOURCE_TYPE_ARRAY;
+    d.res.array.hArray = (CUarray)(desc->res.array.array);
+    d.flags = 0;
+
+    CUsurfObject surf;
+    CUresult ret = cuSurfObjectCreate(&surf, &d);
+    if(ret == CUDA_SUCCESS) {
+      *object = (cudaSurfaceObject_t)surf;
+      return cudaSuccess;
+    } else
+      return (cudaError_t)ret;
+  }
+
+  REALM_PUBLIC_API
+  cudaError_t cudaDestroySurfaceObject(cudaSurfaceObject_t object)
+  {
+    get_gpu_or_die("cudaDestroySurfaceObject");
+
+    return (cudaError_t)cuSurfObjectDestroy((CUsurfObject)object);
   }
 
 }; // extern "C"

@@ -1,4 +1,4 @@
--- Copyright 2022 Stanford University
+-- Copyright 2024 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -40,7 +40,7 @@ task main()
   var structured_lr = region(structured_is, fs)
 
   -- Note that you can create multiple regions with the same ispace
-  -- and fspace. This is a **NEW** region, distint from structured_lr
+  -- and fspace. This is a **NEW** region, distinct from structured_lr
   -- above.
   var no_clone_lr = region(structured_is, fs)
 end

@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,6 +22,38 @@
 #include "realm/mem_impl.h"
 
 namespace Realm {
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class MemoryImpl
+  //
+
+  template <typename T>
+  T *MemoryImpl::find_module_specific()
+  {
+    ModuleSpecificInfo *info = module_specific;
+    while(info) {
+      T *downcast = dynamic_cast<T *>(info);
+      if(downcast)
+        return downcast;
+      info = info->next;
+    }
+    return 0;
+  }
+
+  template <typename T>
+  const T *MemoryImpl::find_module_specific() const
+  {
+    const ModuleSpecificInfo *info = module_specific;
+    while(info) {
+      const T *downcast = dynamic_cast<const T *>(info);
+      if(downcast)
+        return downcast;
+      info = info->next;
+    }
+    return 0;
+  }
+
 
   ////////////////////////////////////////////////////////////////////////
   //

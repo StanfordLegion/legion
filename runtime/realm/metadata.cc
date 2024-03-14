@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -148,7 +148,7 @@ namespace Realm {
       return e;
     }
 
-    bool MetadataBase::initiate_cleanup(ID::IDType id)
+  bool MetadataBase::initiate_cleanup(ID::IDType id, bool local_only /*= false*/)
     {
       NodeSet invals_to_send;
       {
@@ -162,8 +162,14 @@ namespace Realm {
 	if(remote_copies.empty()) {
 	  state = STATE_INVALID;
 	} else {
-	  state = STATE_CLEANUP;
-	  invals_to_send = remote_copies;
+          if(local_only) {
+            // ignore remote copies
+            remote_copies.clear();
+            state = STATE_INVALID;
+          } else {
+            state = STATE_CLEANUP;
+            invals_to_send = remote_copies;
+          }
 	}
       }
 

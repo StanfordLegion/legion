@@ -1,4 +1,4 @@
-# Copyright 2022 Stanford University
+# Copyright 2024 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -21,7 +21,7 @@ endif
 # Flags for directing the runtime makefile what to include
 DEBUG           ?= 1		# Include debugging symbols
 MAX_DIM         ?= 3		# Maximum number of dimensions
-OUTPUT_LEVEL    ?= LEVEL_DEBUG	# Compile time logging level
+OUTPUT_LEVEL    ?= LEVEL_INFO	# Compile time logging level
 USE_CUDA        ?= 0		# Include CUDA support (requires CUDA)
 USE_HIP         ?= 0		# Include HIP support (requires HIP)
 HIP_TARGET      ?= ROCM
@@ -33,17 +33,7 @@ ALT_MAPPERS     ?= 0		# Include alternative mappers (not recommended)
 OUTFILE		?= circuit
 # List all the application source files here
 GEN_SRC		?= circuit.cc circuit_cpu.cc circuit_init.cc circuit_mapper.cc	# .cc files
-ifeq ($(strip $(USE_CUDA)),1)
 GEN_GPU_SRC	?= circuit_gpu.cu				# .cu files
-endif
-ifeq ($(strip $(USE_HIP)),1)
-ifeq ($(strip $(HIP_TARGET)),ROCM)
-GEN_HIP_SRC	?= circuit_gpu.cpp				# .cu files
-endif
-ifeq ($(strip $(HIP_TARGET)),CUDA)
-GEN_HIP_SRC	?= circuit_gpu.cu				# .cu files
-endif
-endif
 
 # You can modify these variables, some will be appended to by the runtime makefile
 INC_FLAGS	?=

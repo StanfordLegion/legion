@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,90 +17,115 @@
 
 #include "realm/realm_config.h"
 
-// include gasnet header files before mutex.h to make sure we have
-//  definitions for gasnet_hsl_t and gasnett_cond_t
-#ifdef REALM_USE_GASNET1
-
-// so OpenMPI borrowed gasnet's platform-detection code and didn't change
-//  the define names - work around it by undef'ing anything set via mpi.h
-//  before we include gasnet.h
-#undef __PLATFORM_COMPILER_GNU_VERSION_STR
-
-#ifndef GASNET_PAR
-#define GASNET_PAR
-#endif
-#include <gasnet.h>
-
-#ifndef GASNETT_THREAD_SAFE
-#define GASNETT_THREAD_SAFE
-#endif
-#include <gasnet_tools.h>
-
-// eliminate GASNet warnings for unused static functions
-REALM_ATTR_UNUSED(static const void *ignore_gasnet_warning1) = (void *)_gasneti_threadkey_init;
-REALM_ATTR_UNUSED(static const void *ignore_gasnet_warning2) = (void *)_gasnett_trace_printf_noop;
-
-// can't use gasnet_hsl_t in debug mode
-// actually, don't use gasnet_hsl_t at all right now...
-//#ifndef GASNET_DEBUG
-#if 0
-#define USE_GASNET_HSL_T
-#endif
-#endif
-
-#ifdef USE_GASNET_HSL_T
-
-#define REALM_KERNEL_MUTEX_IMPL   gasnet_hsl_t mutex
-#define REALM_KERNEL_CONDVAR_IMPL gasnett_cond_t condvar
-// gasnet doesn't provide an rwlock?
-#define REALM_RWLOCK_IMPL  pthread_rwlock_t rwlock
-
-#else
-
 #ifdef REALM_ON_WINDOWS
 #include <windows.h>
 #include <synchapi.h>
 #include <processthreadsapi.h>
 
-#define REALM_KERNEL_MUTEX_IMPL   CRITICAL_SECTION mutex
-#define REALM_KERNEL_CONDVAR_IMPL CONDITION_VARIABLE condvar
-struct RWLockImpl {
+typedef CRITICAL_SECTION NativeMutex;
+typedef CONDITION_VARIABLE NativeConditionVariable;
+
+typedef struct RWLockImpl {
   SRWLOCK rwlock;
   bool exclusive;
-};
-#define REALM_RWLOCK_IMPL  RWLockImpl rwlock
+} NativeRWLock;
 #else
 // use pthread mutex/condvar
 #include <pthread.h>
 #include <errno.h>
 
-#define REALM_KERNEL_MUTEX_IMPL   pthread_mutex_t mutex
-#define REALM_KERNEL_CONDVAR_IMPL pthread_cond_t  condvar
-#define REALM_RWLOCK_IMPL  pthread_rwlock_t rwlock
-#endif
+typedef pthread_mutex_t NativeMutex;
+typedef pthread_cond_t NativeConditionVariable;
+typedef pthread_rwlock_t NativeRWLock;
+
 #endif
 
 #include "realm/mutex.h"
 #include "realm/timers.h"
+#include "realm/faults.h"
 
 #include <assert.h>
 #include <new>
 
+#if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
+#include <unistd.h>
+#endif
+
 #if defined(REALM_ON_LINUX) && !defined(REALM_NO_USE_FUTEX)
 #include <linux/futex.h>
 #include <sys/time.h>
-#include <unistd.h>
 #include <sys/syscall.h>
 #endif
 
-#ifdef __SSE2__
-// technically pause is an "SSE2" instruction, but it's defined in xmmintrin
-//  (it'd be fine to call it on older CPUs, but since we're doing conditional
-//  compilation, only use it if it does something)
-#include <xmmintrin.h>
+#ifdef REALM_ON_WINDOWS
+static void sleep(long seconds) { Sleep(seconds * 1000); }
 #endif
 
 namespace Realm {
+
+  Logger log_mutex("mutex");
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class MutexChecker
+  //
+
+  namespace {
+    // only have one of the lock_fail or unlock_fail threads call abort so
+    //  that we don't mess up attempts to dump stack traces (which can take
+    //  quite a while)
+    atomic<int> abort_count(0);
+  };
+
+  void MutexChecker::lock_fail(int actval, CheckedScope *cs)
+  {
+    {
+      LoggerMessage msg = log_mutex.fatal();
+      msg << "over limit on entry into MutexChecker("
+          << (name ? name : "") << "," << object << ") limit="
+          << limit << " actval=" << actval;
+      if(cs)
+        msg << " on scope(" << (cs->name ? cs->name : "") << "," << cs->object << ")";
+      Backtrace bt;
+      bt.capture_backtrace();
+      bt.lookup_symbols();
+      msg << " at " << bt;
+    }
+    // wait a couple seconds so that threads in the guarded section hopefully
+    //  try to leave and declare who they are too
+    sleep(2);
+    while(abort_count.fetch_add(1) > 0) {
+      // if we're in this loop we'll never actually leave
+      sleep(60);
+    }
+    abort();
+  }
+
+  void MutexChecker::unlock_fail(int actval, CheckedScope *cs)
+  {
+    {
+      LoggerMessage msg = log_mutex.fatal();
+      msg << "over limit on exit of MutexChecker("
+          << (name ? name : "") << "," << object << ") limit="
+          << limit << " actval=" << actval;
+      if(cs)
+        msg << " on scope(" << (cs->name ? cs->name : "") << "," << cs->object << ")";
+      Backtrace bt;
+      bt.capture_backtrace();
+      bt.lookup_symbols();
+      msg << " at " << bt;
+    }
+    // wait a couple seconds so that threads in the guarded section hopefully
+    //  try to leave and declare who they are too
+    sleep(2);
+    while(abort_count.fetch_add(1) > 0) {
+      // if we're in this loop we'll never actually leave
+      sleep(60);
+    }
+    abort();
+  }
+
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -148,6 +173,9 @@ namespace Realm {
     , sleep_timeout(DOORBELL_SLEEP_DEFAULT)
     , next_sleep_time(-1)
     , owner_tid(0)
+#ifdef REALM_ENABLE_STARVATION_CHECKS
+    , starvation_count(0)
+#endif
     , next_doorbell(nullptr)
   {
 #ifdef REALM_USE_PTHREADS
@@ -216,18 +244,14 @@ namespace Realm {
 
       default:
         {
-          fprintf(stderr, "FATAL: unexpected doorbell state: this=%p val=%d\n", this, val);
+          fprintf(stderr, "FATAL: unexpected doorbell state: this=%p val=%d\n",
+                  static_cast<void *>(this), val);
           abort();
         }
       }
 
       if(spin) {
-        // x86 wants you to insert a PAUSE in any spin loop
-        // TODO: see if other processors need something similar
-#ifdef __SSE2__
-        _mm_pause();
-#endif
-
+        REALM_SPIN_YIELD();
         val = dbi->state.load_acquire();
         continue;
       }
@@ -241,8 +265,16 @@ namespace Realm {
         int ret = syscall(SYS_futex,
                           &dbi->state, FUTEX_WAIT, STATE_PENDING_ASLEEP,
                           nullptr, nullptr, 0);
+        // acceptable results are:
+        //  ret==0 (_probably_ woken up by another thread, but have to check)
+        //  errno=EINTR (_probably_ a spurious wakeup, have to check though)
+        //  errno=EAGAIN (FUTEX_WAKE preceded FUTEX_WAIT, no need to check
+        //                 state but no harm in it either)
         if(ret < 0) {
-          assert(errno == EAGAIN);
+          if((errno != EINTR) && (errno != EAGAIN)) {
+            log_mutex.fatal() << "unexpected futex_wait return: ret=" << ret << " errno=" << errno;
+            abort();
+          }
           errno = 0;
         }
         val = state.load_acquire();
@@ -317,6 +349,29 @@ namespace Realm {
     notify_slow();
   }
 
+#ifdef REALM_ENABLE_STARVATION_CHECKS
+  /*static*/ atomic<int> Doorbell::starvation_limit(1000);
+
+  void Doorbell::increase_starvation_count(int to_add, void *db_list)
+  {
+    starvation_count += to_add;
+    int cur_limit = starvation_limit.load();
+    if(starvation_count > cur_limit) {
+      // only print a warning if we can double the limit
+      if(starvation_limit.compare_exchange_relaxed(cur_limit, 2*cur_limit)) {
+        Backtrace bt;
+        bt.capture_backtrace();
+        bt.lookup_symbols();
+        log_mutex.warning() << "doorbell starvation limit reached: list="
+                            << db_list << " db=" << this << " owner="
+                            << std::hex << owner_tid << std::dec
+                            << " count=" << starvation_count
+                            << " at " << bt;
+      }
+    }
+  }
+#endif
+
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -325,6 +380,9 @@ namespace Realm {
 
   DoorbellList::DoorbellList()
     : head_or_count(0)
+#ifdef DEBUG_REALM
+    , mutex_check("DoorbellList", this)
+#endif
   {}
 
   DoorbellList::~DoorbellList()
@@ -353,6 +411,14 @@ namespace Realm {
         // failure, but we re-read hoc and will try again
       }
     }
+
+#ifdef DEBUG_REALM
+    // would like to guard code above as well, but a successful cmpxchg
+    //  immediately enables another thread to enter that code, and we can't
+    //  disable the mutex checker fast enough, so we wait until here to
+    //  look for illegal concurrence
+    MutexChecker::CheckedScope cs(mutex_check, "extract_newest");
+#endif
 
     // if we get here, we know 'hoc' points at a valid doorbell, and even if
     //  other doorbells get added concurrently, we have exclusive ownership of
@@ -389,6 +455,13 @@ namespace Realm {
       if(spinning) {
         chosen = spinning;
         chosen_prev = spinning_prev;
+#ifdef REALM_ENABLE_STARVATION_CHECKS
+        // if we chose something that wasn't oldest, update the starvation
+        //  count for the oldest
+        if(chosen->next_doorbell)
+          chosen->next_doorbell->increase_starvation_count(1 + chosen->starvation_count,
+                                                           this);
+#endif
       } else {
         chosen = cur;
         chosen_prev = prev;
@@ -441,6 +514,14 @@ namespace Realm {
       }
     }
 
+#ifdef DEBUG_REALM
+    // would like to guard code above as well, but a successful cmpxchg
+    //  immediately enables another thread to enter that code, and we can't
+    //  disable the mutex checker fast enough, so we wait until here to
+    //  look for illegal concurrence
+    MutexChecker::CheckedScope cs(mutex_check, "extract_newest");
+#endif
+
     // if we get here, we know 'hoc' points at a valid doorbell, and even if
     //  other doorbells get added concurrently, we have exclusive ownership of
     //  the "tail" of the list pointed to by 'hoc'
@@ -456,6 +537,10 @@ namespace Realm {
           //  messing with the atomic head pointer
           prev->next_doorbell = cur->next_doorbell;
           cur->next_doorbell = nullptr;
+#ifdef REALM_ENABLE_STARVATION_CHECKS
+          // we passed over the head of the list (and everything older)
+          head->increase_starvation_count(1, this);
+#endif
           return cur;
         }
         prev = cur;
@@ -476,6 +561,11 @@ namespace Realm {
       }
       cur->next_doorbell = head->next_doorbell;
     }
+#ifdef REALM_ENABLE_STARVATION_CHECKS
+    if(head->next_doorbell)
+      head->next_doorbell->increase_starvation_count(1 + head->starvation_count,
+                                                     this);
+#endif
     head->next_doorbell = nullptr;
     return head;
   }
@@ -732,70 +822,54 @@ namespace Realm {
 
   KernelMutex::KernelMutex(void)
   {
-    assert(sizeof(mutex) <= sizeof(placeholder));
-#ifdef USE_GASNET_HSL_T
-    gasnet_hsl_init(&mutex);
-#else
+    NativeMutex *mutex = reinterpret_cast<NativeMutex*>(&placeholder);
+    assert(sizeof(NativeMutex) <= sizeof(placeholder));
 #ifdef REALM_ON_WINDOWS
-    InitializeCriticalSection(&mutex);
+    InitializeCriticalSection(mutex);
 #else
-    pthread_mutex_init(&mutex, 0);
-#endif
+    pthread_mutex_init(mutex, 0);
 #endif
   }
 
   KernelMutex::~KernelMutex(void)
   {
-#ifdef USE_GASNET_HSL_T
-    gasnet_hsl_destroy(&mutex);
-#else
+    NativeMutex *mutex = reinterpret_cast<NativeMutex*>(&placeholder);
 #ifdef REALM_ON_WINDOWS
-    DeleteCriticalSection(&mutex);
+    DeleteCriticalSection(mutex);
 #else
-    pthread_mutex_destroy(&mutex);
-#endif
+    pthread_mutex_destroy(mutex);
 #endif
   }
 
   void KernelMutex::lock(void)
   {
-#ifdef USE_GASNET_HSL_T
-    gasnet_hsl_lock(&mutex);
-#else
+    NativeMutex *mutex = reinterpret_cast<NativeMutex*>(&placeholder);
 #ifdef REALM_ON_WINDOWS
-    EnterCriticalSection(&mutex);
+    EnterCriticalSection(mutex);
 #else
-    pthread_mutex_lock(&mutex);
-#endif
+    pthread_mutex_lock(mutex);
 #endif
   }
 
   void KernelMutex::unlock(void)
   {
-#ifdef USE_GASNET_HSL_T
-    gasnet_hsl_unlock(&mutex);
-#else
+    NativeMutex *mutex = reinterpret_cast<NativeMutex*>(&placeholder);
 #ifdef REALM_ON_WINDOWS
-    LeaveCriticalSection(&mutex);
+    LeaveCriticalSection(mutex);
 #else
-    pthread_mutex_unlock(&mutex);
-#endif
+    pthread_mutex_unlock(mutex);
 #endif
   }
 
   bool KernelMutex::trylock(void)
   {
-#ifdef USE_GASNET_HSL_T
-    int ret = gasnet_hsl_trylock(&mutex);
-    return (ret == 0);
-#else
+    NativeMutex *mutex = reinterpret_cast<NativeMutex*>(&placeholder);
 #ifdef REALM_ON_WINDOWS
-    BOOL ret = TryEnterCriticalSection(&mutex);
+    BOOL ret = TryEnterCriticalSection(mutex);
     return (ret != 0);
 #else
-    int ret = pthread_mutex_trylock(&mutex);
+    int ret = pthread_mutex_trylock(mutex);
     return (ret == 0);
-#endif
 #endif
   }
 
@@ -964,68 +1038,55 @@ namespace Realm {
   KernelCondVar::KernelCondVar(KernelMutex &_mutex)
     : mutex(_mutex)
   {
-    assert(sizeof(condvar) <= sizeof(placeholder));
-#ifdef USE_GASNET_HSL_T
-    gasnett_cond_init(&condvar);
-#else
+    NativeConditionVariable *condvar = reinterpret_cast<NativeConditionVariable*>(&placeholder);
+    assert(sizeof(NativeConditionVariable) <= sizeof(placeholder));
 #ifdef REALM_ON_WINDOWS
-    InitializeConditionVariable(&condvar);
+    InitializeConditionVariable(condvar);
 #else
-    pthread_cond_init(&condvar, 0);
-#endif
+    pthread_cond_init(condvar, 0);
 #endif
   }
 
   KernelCondVar::~KernelCondVar(void)
   {
-#ifdef USE_GASNET_HSL_T
-    gasnett_cond_destroy(&condvar);
-#else
+    NativeConditionVariable *condvar = reinterpret_cast<NativeConditionVariable*>(&placeholder);
 #ifdef REALM_ON_WINDOWS
     // no destructor on windows?
+    (void)condvar;
 #else
-    pthread_cond_destroy(&condvar);
-#endif
+    pthread_cond_destroy(condvar);
 #endif
   }
 
   // these require that you hold the lock when you call
   void KernelCondVar::signal(void)
   {
-#ifdef USE_GASNET_HSL_T
-    gasnett_cond_signal(&condvar);
-#else
+    NativeConditionVariable *condvar = reinterpret_cast<NativeConditionVariable*>(&placeholder);
 #ifdef REALM_ON_WINDOWS
-    WakeConditionVariable(&condvar);
+    WakeConditionVariable(condvar);
 #else
-    pthread_cond_signal(&condvar);
-#endif
+    pthread_cond_signal(condvar);
 #endif
   }
 
   void KernelCondVar::broadcast(void)
   {
-#ifdef USE_GASNET_HSL_T
-    gasnett_cond_broadcast(&condvar);
-#else
+    NativeConditionVariable *condvar = reinterpret_cast<NativeConditionVariable*>(&placeholder);
 #ifdef REALM_ON_WINDOWS
-    WakeAllConditionVariable(&condvar);
+    WakeAllConditionVariable(condvar);
 #else
-    pthread_cond_broadcast(&condvar);
-#endif
+    pthread_cond_broadcast(condvar);
 #endif
   }
 
   void KernelCondVar::wait(void)
   {
-#ifdef USE_GASNET_HSL_T
-    gasnett_cond_wait(&condvar, &(mutex.mutex.lock));
-#else
+    NativeMutex *native_mutex = reinterpret_cast<NativeMutex*>(&mutex.placeholder);
+    NativeConditionVariable *condvar = reinterpret_cast<NativeConditionVariable*>(&placeholder);
 #ifdef REALM_ON_WINDOWS
-    SleepConditionVariableCS(&condvar, &mutex.mutex, INFINITE);
+    SleepConditionVariableCS(condvar, native_mutex, INFINITE);
 #else
-    pthread_cond_wait(&condvar, &mutex.mutex);
-#endif
+    pthread_cond_wait(condvar, native_mutex);
 #endif
   }
 
@@ -1033,22 +1094,20 @@ namespace Realm {
   //  false if the timeout expires first
   bool KernelCondVar::timedwait(long long max_nsec)
   {
-#ifdef USE_GASNET_HSL_T
-    assert(0 && "gasnett_cond_t doesn't have timedwait!");
-#else
+    NativeMutex *native_mutex = reinterpret_cast<NativeMutex*>(&mutex.placeholder);
+    NativeConditionVariable *condvar = reinterpret_cast<NativeConditionVariable*>(&placeholder);
 #ifdef REALM_ON_WINDOWS
-    BOOL ret = SleepConditionVariableCS(&condvar, &mutex.mutex, max_nsec / 1000000LL);
+    BOOL ret = SleepConditionVariableCS(condvar, native_mutex, max_nsec / 1000000LL);
     return (ret != 0);
 #else
     struct timespec ts;
     clock_gettime(CLOCK_REALTIME, &ts);
     ts.tv_sec += (ts.tv_nsec + max_nsec) / 1000000000LL;
     ts.tv_nsec = (ts.tv_nsec + max_nsec) % 1000000000LL;
-    int ret = pthread_cond_timedwait(&condvar, &mutex.mutex, &ts);
+    int ret = pthread_cond_timedwait(condvar, native_mutex, &ts);
     if(ret == ETIMEDOUT) return false;
     // TODO: check other error codes?
     return true;
-#endif
 #endif
   }
 
@@ -1062,81 +1121,89 @@ namespace Realm {
     : writer(*this)
     , reader(*this)
   {
-    assert(sizeof(rwlock) <= sizeof(placeholder));
+    NativeRWLock *rwlock = reinterpret_cast<NativeRWLock*>(&placeholder);
+    assert(sizeof(NativeRWLock) <= sizeof(placeholder));
 #ifdef REALM_ON_WINDOWS
-    InitializeSRWLock(&rwlock.rwlock);
+    InitializeSRWLock(&rwlock->rwlock);
 #else
-    pthread_rwlock_init(&rwlock, 0);
+    pthread_rwlock_init(rwlock, 0);
 #endif
   }
 
   RWLock::~RWLock(void)
   {
+    NativeRWLock *rwlock = reinterpret_cast<NativeRWLock*>(&placeholder);
 #ifdef REALM_ON_WINDOWS
     // no destructor on windows?
+    (void)rwlock;
 #else
-    pthread_rwlock_destroy(&rwlock);
+    pthread_rwlock_destroy(rwlock);
 #endif
   }
 
   void RWLock::wrlock(void)
   {
+    NativeRWLock *rwlock = reinterpret_cast<NativeRWLock*>(&placeholder);
 #ifdef REALM_ON_WINDOWS
-    AcquireSRWLockExclusive(&rwlock.rwlock);
-    rwlock.exclusive = true;
+    AcquireSRWLockExclusive(&rwlock->rwlock);
+    rwlock->exclusive = true;
 #else
-    pthread_rwlock_wrlock(&rwlock);
+    pthread_rwlock_wrlock(rwlock);
 #endif
   }
 
   void RWLock::rdlock(void)
   {
+    NativeRWLock *rwlock = reinterpret_cast<NativeRWLock*>(&placeholder);
 #ifdef REALM_ON_WINDOWS
-    AcquireSRWLockShared(&rwlock.rwlock);
-    rwlock.exclusive = false;
+    AcquireSRWLockShared(&rwlock->rwlock);
+    rwlock->exclusive = false;
 #else
-    pthread_rwlock_rdlock(&rwlock);
+    pthread_rwlock_rdlock(rwlock);
 #endif
   }
 
   void RWLock::unlock(void)
   {
+    NativeRWLock *rwlock = reinterpret_cast<NativeRWLock*>(&placeholder);
 #ifdef REALM_ON_WINDOWS
-    if(rwlock.exclusive)
-      ReleaseSRWLockExclusive(&rwlock.rwlock);
+    if(rwlock->exclusive)
+      ReleaseSRWLockExclusive(&rwlock->rwlock);
     else
-      ReleaseSRWLockShared(&rwlock.rwlock);
+      ReleaseSRWLockShared(&rwlock->rwlock);
 #else
-    pthread_rwlock_unlock(&rwlock);
+    pthread_rwlock_unlock(rwlock);
 #endif
   }
 
   bool RWLock::trywrlock(void)
   {
+    NativeRWLock *rwlock = reinterpret_cast<NativeRWLock*>(&placeholder);
 #ifdef REALM_ON_WINDOWS
-    BOOL ret = TryAcquireSRWLockExclusive(&rwlock.rwlock);
+    BOOL ret = TryAcquireSRWLockExclusive(&rwlock->rwlock);
     if(ret != 0) {
-      rwlock.exclusive = true;
+      rwlock->exclusive = true;
       return true;
     } else
       return false;
 #else
-    int ret = pthread_rwlock_trywrlock(&rwlock);
+    int ret = pthread_rwlock_trywrlock(rwlock);
     return (ret == 0);
 #endif
   }
 
   bool RWLock::tryrdlock(void)
   {
+    NativeRWLock *rwlock = reinterpret_cast<NativeRWLock*>(&placeholder);
 #ifdef REALM_ON_WINDOWS
-    BOOL ret = TryAcquireSRWLockShared(&rwlock.rwlock);
+    BOOL ret = TryAcquireSRWLockShared(&rwlock->rwlock);
     if(ret != 0) {
-      rwlock.exclusive = false;
+      rwlock->exclusive = false;
       return true;
     } else
       return false;
 #else
-    int ret = pthread_rwlock_trywrlock(&rwlock);
+    int ret = pthread_rwlock_trywrlock(rwlock);
     return (ret == 0);
 #endif
   }

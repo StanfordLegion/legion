@@ -1,5 +1,5 @@
 #=============================================================================
-# Copyright 2022 Kitware, Inc.
+# Copyright 2024 Kitware, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@
 # GASNet backend configuration get's used:
 #
 # GASNet_CONDUIT   - Communication conduit to use
+# GASNet_SYSTEM    - system or machine-specific configuration to use for GASNet
 # GASNet_THREADING - Threading mode to use
 #
 # Valid options for these are dependenent on the specific GASNet installation
@@ -54,25 +55,23 @@ macro(_GASNet_parse_conduit_makefile _GASNet_MAKEFILE _GASNet_THREADING)
     file(WRITE ${_TEMP_MAKEFILE} "include ${_GASNet_MAKEFILE}")
   else()
     get_filename_component(MFDIR "${_GASNet_MAKEFILE}" DIRECTORY)
-    file(WRITE ${_TEMP_MAKEFILE} "include ${_GASNet_MAKEFILE}
-include ${MFDIR}/../gasnet_tools-${_GASNet_THREADING}.mak"
-    )
+    file(WRITE ${_TEMP_MAKEFILE} "include ${_GASNet_MAKEFILE}")
   endif()
   file(APPEND ${_TEMP_MAKEFILE} "
 gasnet-cc:
 	@echo $(GASNET_CC)
 gasnet-cflags:
-	@echo $(GASNET_CPPFLAGS) $(GASNET_CFLAGS) $(GASNETTOOLS_CPPFLAGS) $(GASNETTOOLS_CFLAGS)
+	@echo $(GASNET_CPPFLAGS) $(GASNET_CFLAGS)
 gasnet-cxx:
 	@echo $(GASNET_CXX)
 gasnet-cxxflags:
-	@echo $(GASNET_CXXCPPFLAGS) $(GASNET_CXXFLAGS) $(GASNETTOOLS_CPPFLAGS) $(GASNETTOOLS_CXXFLAGS)
+	@echo $(GASNET_CXXCPPFLAGS) $(GASNET_CXXFLAGS)
 gasnet-ld:
 	@echo $(GASNET_LD)
 gasnet-ldflags:
-	@echo $(GASNET_LDFLAGS) $(GASNETTOOLS_LDFLAGS)
+	@echo $(GASNET_LDFLAGS)
 gasnet-libs:
-	@echo $(GASNET_LIBS) $(GASNETTOOLS_LIBS)"
+	@echo $(GASNET_LIBS)"
   )
   find_program(GASNet_MAKE_PROGRAM NAMES gmake make smake)
   mark_as_advanced(GASNet_MAKE_PROGRAM)
@@ -105,7 +104,7 @@ gasnet-libs:
       COMMAND ${GASNet_MAKE_PROGRAM} -s -f ${_TEMP_MAKEFILE} gasnet-libs
       OUTPUT_VARIABLE _GASNet_LIBS
       ERROR_VARIABLE _GASNet_LIBS_ERROR
-      OUTPUT_STRIP_TRAILING_WHITESPACE 
+      OUTPUT_STRIP_TRAILING_WHITESPACE
     )
     file(REMOVE ${_TEMP_MAKEFILE})
   endif()
@@ -253,7 +252,7 @@ if(NOT GASNet_FOUND AND NOT TARGET GASNet::GASNet)
       # Extract the component name from the makefile
       get_filename_component(_COMPONENT ${CMF} NAME_WE)
 
-      # Seperate the filename components 
+      # Seperate the filename components
       _GASNet_parse_conduit_and_threading_names("${CMF}"
         GASNet_CONDUITS GASNet_THREADING_OPTS
       )
@@ -314,6 +313,9 @@ if(GASNet_FOUND AND NOT TARGET GASNet::GASNet)
   if(_I EQUAL -1)
     message(FATAL_ERROR "Invalid GASNet_CONDUIT setting.  Valid options are: ${GASNet_CONDUITS}")
   endif()
+
+  set(GASNet_SYSTEM "${GASNet_SYSTEM}" CACHE STRING "system or machine-specific configuration to use for GASNet")
+  mark_as_advanced(GASNet_SYSTEM)
 
   set(GASNet_THREADING "${GASNet_THREADING}" CACHE STRING "GASNet Threading model to use")
   mark_as_advanced(GASNet_THREADING)

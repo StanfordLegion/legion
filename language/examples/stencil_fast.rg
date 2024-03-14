@@ -1,4 +1,4 @@
--- Copyright 2022 Stanford University
+-- Copyright 2024 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -13,125 +13,57 @@
 -- limitations under the License.
 
 -- runs-with:
--- [["-ll:cpu", "4", "-ntx", "2", "-nty", "2", "-dm:memoize", "-tsteps", "2", "-tprune", "2"],
---  ["-ll:cpu", "4", "-ntx", "2", "-nty", "2", "-dm:memoize", "-tsteps", "2", "-tprune", "2", "-ffuture", "0"],
---  ["-ll:cpu", "4", "-fflow-spmd", "1", "-fflow-spmd-shardsize", "4", "-ftrace", "0"],
---  ["-ll:cpu", "4", "-fflow-spmd", "1", "-fflow-spmd-shardsize", "4", "-tsteps", "2", "-tprune", "2", "-dm:memoize"],
---  ["-ll:cpu", "2", "-fflow-spmd", "1", "-fflow-spmd-shardsize", "8", "-map_locally", "-ftrace", "0"]]
+-- [["-ll:cpu", "4", "-ntx", "2", "-nty", "2", "-dm:memoize", "-tsteps", "2", "-tprune", "2", "-foverride-demand-cuda", "1"],
+--  ["-ll:cpu", "4", "-ntx", "2", "-nty", "2", "-dm:memoize", "-tsteps", "2", "-tprune", "2", "-ffuture", "0", "-foverride-demand-cuda", "1"],
+--  ["-ll:cpu", "4", "-fflow-spmd", "1", "-fflow-spmd-shardsize", "4", "-ftrace", "0", "-foverride-demand-cuda", "1"],
+--  ["-ll:cpu", "4", "-fflow-spmd", "1", "-fflow-spmd-shardsize", "4", "-tsteps", "2", "-tprune", "2", "-dm:memoize", "-foverride-demand-cuda", "1"],
+--  ["-ll:cpu", "2", "-fflow-spmd", "1", "-fflow-spmd-shardsize", "8", "-map_locally", "-ftrace", "0", "-foverride-demand-cuda", "1"]]
 
 -- Inspired by https://github.com/ParRes/Kernels/tree/master/LEGION/Stencil
 
 import "regent"
 
+local format = require("std/format")
+local launcher = require("std/launcher")
+
 local common = require("stencil_common")
+
+local gpuhelper = require("regent/gpu/helper")
+local default_foreign = gpuhelper.check_gpu_available() and '0' or '1'
 
 local DTYPE = double
 local RADIUS = 2
-local USE_FOREIGN = (os.getenv('USE_FOREIGN') or '1') == '1'
+local USE_FOREIGN = (os.getenv('USE_FOREIGN') or default_foreign) == '1'
 
 local use_python_main = rawget(_G, "stencil_use_python_main") == true
 
 local c = regentlib.c
 
 -- Compile and link stencil.cc
+local cstencil
 if USE_FOREIGN then
-  local root_dir = arg[0]:match(".*/") or "./"
-  local stencil_cc = root_dir .. "stencil.cc"
-  if os.getenv('OBJNAME') then
-    local out_dir = os.getenv('OBJNAME'):match('.*/') or './'
-    stencil_so = out_dir .. "libstencil.so"
-  elseif os.getenv('SAVEOBJ') == '1' then
-    stencil_so = root_dir .. "libstencil.so"
-  else
-    stencil_so = os.tmpname() .. ".so" -- root_dir .. "stencil.so"
-  end
-  local cxx = os.getenv('CXX') or 'c++'
+  local include_flags = terralib.newlist({
+    "-DDTYPE=" .. tostring(DTYPE),
+    "-DRESTRICT=__restrict__",
+    "-DRADIUS=" .. tostring(RADIUS),
+  })
 
   local march = os.getenv('MARCH') or 'native'
-  local march_flag = '-march=' .. march
+  local march_flags = {'-march=' .. march}
   if os.execute("bash -c \"[ `uname` == 'Linux' ]\"") == 0 then
     if os.execute("grep altivec /proc/cpuinfo > /dev/null") == 0 then
-      march_flag = '-mcpu=' .. march .. ' -maltivec -mabi=altivec -mvsx'
+      march_flags = {'-mcpu=' .. march, '-maltivec', '-mabi=altivec', '-mvsx'}
     end
   end
 
-  local cxx_flags = os.getenv('CXXFLAGS') or ''
-  cxx_flags = cxx_flags .. " -O3 " .. march_flag .. " -Wall -Werror -DDTYPE=" .. tostring(DTYPE) .. " -DRESTRICT=__restrict__ -DRADIUS=" .. tostring(RADIUS)
-  if os.execute('test "$(uname)" = Darwin') == 0 then
-    cxx_flags =
-      (cxx_flags ..
-         " -dynamiclib -single_module -undefined dynamic_lookup -fPIC")
-  else
-    cxx_flags = cxx_flags .. " -shared -fPIC"
-  end
+  local flags = terralib.newlist({"-O3"})
+  flags:insertall(march_flags)
+  flags:insertall(include_flags)
 
-  local cmd = (cxx .. " " .. cxx_flags .. " " .. stencil_cc .. " -o " .. stencil_so)
-  if os.execute(cmd) ~= 0 then
-    print("Error: failed to compile " .. stencil_cc)
-    assert(false)
-  end
-  regentlib.linklibrary(stencil_so)
-  cstencil = terralib.includec("stencil.h", {"-I", root_dir,
-                              "-DDTYPE=" .. tostring(DTYPE),
-                              "-DRESTRICT=__restrict__",
-                              "-DRADIUS=" .. tostring(RADIUS)})
+  cstencil = launcher.build_library("stencil", nil, nil, flags, include_flags)
 end
 
-local map_locally = false
-do
-  local cstring = terralib.includec("string.h")
-  for _, arg in ipairs(arg) do
-    if cstring.strcmp(arg, "-map_locally") == 0 then
-      map_locally = true
-      break
-    end
-  end
-end
-
-do
-  local root_dir = arg[0]:match(".*/") or "./"
-
-  local include_path = ""
-  local include_dirs = terralib.newlist()
-  include_dirs:insert("-I")
-  include_dirs:insert(root_dir)
-  for path in string.gmatch(os.getenv("INCLUDE_PATH"), "[^;]+") do
-    include_path = include_path .. " -I " .. path
-    include_dirs:insert("-I")
-    include_dirs:insert(path)
-  end
-
-  local mapper_cc = root_dir .. "stencil_mapper.cc"
-  if os.getenv('OBJNAME') then
-    local out_dir = os.getenv('OBJNAME'):match('.*/') or './'
-    mapper_so = out_dir .. "libstencil_mapper.so"
-  elseif os.getenv('SAVEOBJ') == '1' then
-    mapper_so = root_dir .. "libstencil_mapper.so"
-  else
-    mapper_so = os.tmpname() .. ".so" -- root_dir .. "stencil_mapper.so"
-  end
-  local cxx = os.getenv('CXX') or 'c++'
-
-  local cxx_flags = os.getenv('CXXFLAGS') or ''
-  cxx_flags = cxx_flags .. " -O2 -Wall -Werror"
-  if map_locally then cxx_flags = cxx_flags .. " -DMAP_LOCALLY " end
-  if os.execute('test "$(uname)" = Darwin') == 0 then
-    cxx_flags =
-      (cxx_flags ..
-         " -dynamiclib -single_module -undefined dynamic_lookup -fPIC")
-  else
-    cxx_flags = cxx_flags .. " -shared -fPIC"
-  end
-
-  local cmd = (cxx .. " " .. cxx_flags .. " " .. include_path .. " " ..
-                 mapper_cc .. " -o " .. mapper_so)
-  if os.execute(cmd) ~= 0 then
-    print("Error: failed to compile " .. mapper_cc)
-    assert(false)
-  end
-  regentlib.linklibrary(mapper_so)
-  cmapper = terralib.includec("stencil_mapper.h", include_dirs)
-end
+local cmapper = launcher.build_library("stencil_mapper")
 
 local min = regentlib.fmin
 local max = regentlib.fmax
@@ -142,6 +74,8 @@ fspace point {
 }
 
 fspace timestamp {
+  init_start : int64,
+  init_stop : int64,
   start : int64,
   stop : int64,
 }
@@ -154,7 +88,9 @@ terra to_rect(lo : int2d, hi : int2d) : c.legion_rect_2d_t
     hi = hi:to_point(),
   }
 end
+to_rect.replicable = true
 
+__demand(__inline)
 task make_private_partition(points : region(ispace(int2d), point),
                             tiles : ispace(int1d),
                             n : int2d, nt : int2d, radius : int64)
@@ -170,11 +106,12 @@ task make_private_partition(points : region(ispace(int2d), point),
         coloring, i:to_domain_point(), c.legion_domain_from_rect_2d(rect))
     end
   end
-  var p = partition(disjoint, points, coloring, tiles)
+  var p = partition(disjoint, complete, points, coloring, tiles)
   c.legion_domain_point_coloring_destroy(coloring)
   return p
 end
 
+__demand(__inline)
 task make_interior_partition(points : region(ispace(int2d), point),
                              tiles : ispace(int1d),
                              n : int2d, nt : int2d, radius : int64)
@@ -190,11 +127,12 @@ task make_interior_partition(points : region(ispace(int2d), point),
         coloring, i:to_domain_point(), c.legion_domain_from_rect_2d(rect))
     end
   end
-  var p = partition(disjoint, points, coloring, tiles)
+  var p = partition(disjoint, incomplete, points, coloring, tiles)
   c.legion_domain_point_coloring_destroy(coloring)
   return p
 end
 
+__demand(__inline)
 task make_exterior_partition(points : region(ispace(int2d), point),
                              tiles : ispace(int1d),
                              n : int2d, nt : int2d, radius : int64)
@@ -219,7 +157,7 @@ task make_exterior_partition(points : region(ispace(int2d), point),
         coloring, i:to_domain_point(), c.legion_domain_from_rect_2d(rect))
     end
   end
-  var p = partition(disjoint, points, coloring, tiles)
+  var p = partition(disjoint, incomplete, points, coloring, tiles)
   c.legion_domain_point_coloring_destroy(coloring)
   return p
 end
@@ -227,10 +165,11 @@ end
 terra clamp(val : int64, lo : int64, hi : int64)
   return min(max(val, lo), hi)
 end
-
+clamp.replicable = true
 
 function make_ghost_x_partition(is_complete)
-  local task ghost_x_partition(points : region(ispace(int2d), point),
+  local __demand(__inline)
+  task ghost_x_partition(points : region(ispace(int2d), point),
                                tiles : ispace(int1d),
                                n : int2d, nt : int2d, radius : int64,
                                dir : int64)
@@ -249,11 +188,9 @@ function make_ghost_x_partition(is_complete)
     var p = [(
         function()
           if is_complete then
-            return rexpr partition(disjoint, points, coloring, tiles) end
+            return rexpr partition(disjoint, complete, points, coloring, tiles) end
           else
-            -- Hack: Since the compiler does not track completeness as
-            -- a static property, mark incomplete partitions as aliased.
-            return rexpr partition(aliased, points, coloring, tiles) end
+            return rexpr partition(disjoint, incomplete, points, coloring, tiles) end
           end
         end)()]
     c.legion_domain_point_coloring_destroy(coloring)
@@ -263,7 +200,8 @@ function make_ghost_x_partition(is_complete)
 end
 
 function make_ghost_y_partition(is_complete)
-  local task ghost_y_partition(points : region(ispace(int2d), point),
+  local __demand(__inline)
+  task ghost_y_partition(points : region(ispace(int2d), point),
                                tiles : ispace(int1d),
                                n : int2d, nt : int2d, radius : int64,
                                dir : int64)
@@ -282,11 +220,9 @@ function make_ghost_y_partition(is_complete)
     var p = [(
         function()
           if is_complete then
-            return rexpr partition(disjoint, points, coloring, tiles) end
+            return rexpr partition(disjoint, complete, points, coloring, tiles) end
           else
-            -- Hack: Since the compiler does not track completeness as
-            -- a static property, mark incomplete partitions as aliased.
-            return rexpr partition(aliased, points, coloring, tiles) end
+            return rexpr partition(disjoint, incomplete, points, coloring, tiles) end
           end
         end)()]
     c.legion_domain_point_coloring_destroy(coloring)
@@ -369,7 +305,7 @@ local function make_stencil_interior(private, interior, radius)
 end
 
 local function make_stencil(radius)
-  local --__demand(__cuda)
+  local __demand(__cuda)
         task stencil(private : region(ispace(int2d), point),
                      interior : region(ispace(int2d), point),
                      xm : region(ispace(int2d), point),
@@ -452,6 +388,7 @@ task increment(private : region(ispace(int2d), point),
                ym : region(ispace(int2d), point),
                yp : region(ispace(int2d), point),
                times : region(ispace(int1d), timestamp),
+               init_ts : bool,
                print_ts : bool)
 where reads writes(private.input, xm.input, xp.input, ym.input, yp.input, times) do
   [make_increment_interior(private, exterior)]
@@ -460,8 +397,11 @@ where reads writes(private.input, xm.input, xp.input, ym.input, yp.input, times)
   for i in ym do i.input += 1 end
   for i in yp do i.input += 1 end
 
+  var t = c.legion_get_current_time_in_micros()
+  if init_ts then
+    for x in times do x.init_stop = t end
+  end
   if print_ts then
-    var t = c.legion_get_current_time_in_micros()
     for x in times do x.stop = t end
   end
 end
@@ -472,23 +412,37 @@ task check(private : region(ispace(int2d), point),
 where reads(private.{input, output}) do
   var expect_in = init + tsteps
   var expect_out = init
+  var num_input_failed : int64 = 0
   for i in interior do
     if private[i].input ~= expect_in then
-      c.printf("input (%lld,%lld): %.3f should be %lld\n",
-               i.x, i.y, private[i].input, expect_in)
+      if num_input_failed == 0 then
+        format.println("input ({},{}): {.3} should be {}",
+                       i.x, i.y, private[i].input, expect_in)
+      end
+      num_input_failed += 1
     end
   end
+  var num_output_failed : int64 = 0
   for i in interior do
     if private[i].output ~= expect_out then
-      c.printf("output (%lld,%lld): %.3f should be %lld\n",
-               i.x, i.y, private[i].output, expect_out)
+      if num_output_failed == 0 then
+        format.println("output ({},{}): {.3} should be {}",
+                       i.x, i.y, private[i].output, expect_out)
+      end
+      num_output_failed += 1
     end
   end
-  for i in interior do
-    regentlib.assert(private[i].input == expect_in, "test failed")
-    regentlib.assert(private[i].output == expect_out, "test failed")
+  if num_input_failed > 0 then
+    format.println("total number of bad input entries: {}",
+                   num_input_failed)
   end
-  c.printf("check completed successfully\n")
+  if num_output_failed > 0 then
+    format.println("total number of bad output entries: {}",
+                   num_output_failed)
+  end
+  regentlib.assert(num_input_failed == 0, "test failed: input mismatch")
+  regentlib.assert(num_output_failed == 0, "test failed: output mismatch")
+  format.println("check completed successfully")
 end
 
 task fill_(r : region(ispace(int2d), point), v : DTYPE)
@@ -504,22 +458,60 @@ task read_config()
   return common.read_config()
 end
 
-task get_elapsed(all_times : region(ispace(int1d), timestamp))
-where reads(all_times) do
+task begin_init(times : region(ispace(int1d), timestamp))
+where writes(times) do
+  var t = c.legion_get_current_time_in_micros()
+  for x in times do x.init_start = t end
+end
+
+task get_init_start(all_times : region(ispace(int1d), timestamp))
+where reads(all_times.init_start) do
+  var init_start = [int64:max()]
+
+  for t in all_times do
+    init_start min= t.init_start
+  end
+
+  return init_start
+end
+
+task get_init_stop(all_times : region(ispace(int1d), timestamp))
+where reads(all_times.init_stop) do
+  var init_stop = [int64:min()]
+
+  for t in all_times do
+    init_stop max= t.init_stop
+  end
+
+  return init_stop
+end
+
+task get_start(all_times : region(ispace(int1d), timestamp))
+where reads(all_times.start) do
   var start = [int64:max()]
-  var stop = [int64:min()]
 
   for t in all_times do
     start min= t.start
+  end
+
+  return start
+end
+
+task get_stop(all_times : region(ispace(int1d), timestamp))
+where reads(all_times.stop) do
+  var stop = [int64:min()]
+
+  for t in all_times do
     stop max= t.stop
   end
 
-  return 1e-6 * (stop - start)
+  return stop
 end
 
-task print_time(color : int, sim_time : double)
+task print_time(color : int, init_time : double, sim_time : double)
   if color == 0 then
-    c.printf("ELAPSED TIME = %7.3f s\n", sim_time)
+    format.println("INIT TIME = {7.3} s", init_time)
+    format.println("ELAPSED TIME = {7.3} s", sim_time)
   end
 end
 
@@ -539,6 +531,17 @@ task main()
   var nt2 = nt.x*nt.y
   var tiles = ispace(int1d, nt2)
 
+  var times = region(ispace(int1d, nt2), timestamp)
+  var p_times = partition(equal, times, ispace(int1d, nt2))
+  fill(times.{init_start, init_stop, start, stop}, 0)
+
+  __fence(__execution, __block)
+  __demand(__index_launch)
+  for i in tiles do
+    begin_init(p_times[i])
+  end
+  __fence(__execution, __block)
+
   var points = region(grid, point)
   var private = make_private_partition(points, tiles, n, nt, radius)
   var interior = make_interior_partition(points, tiles, n, nt, radius)
@@ -556,11 +559,6 @@ task main()
   var pxp_out = [make_ghost_x_partition(true)](xp, tiles, n, nt, radius, 0)
   var pym_out = [make_ghost_y_partition(true)](ym, tiles, n, nt, radius, 0)
   var pyp_out = [make_ghost_y_partition(true)](yp, tiles, n, nt, radius, 0)
-
-  var times = region(ispace(int1d, nt2), timestamp)
-  var p_times = partition(equal, times, ispace(int1d, nt2))
-
-  fill(times.{start, stop}, 0)
 
   fill(points.{input, output}, init)
   fill(xm.{input, output}, init)
@@ -598,22 +596,45 @@ task main()
     __demand(__trace)
     for t = 0, tsteps do
       -- __demand(__index_launch)
-      for i = 0, nt2 do
+      for i in tiles do
         stencil(private[i], interior[i], pxm_in[i], pxp_in[i], pym_in[i], pyp_in[i], p_times[i], t == tprune)
       end
       -- __demand(__index_launch)
-      for i = 0, nt2 do
-        increment(private[i], exterior[i], pxm_out[i], pxp_out[i], pym_out[i], pyp_out[i], p_times[i], t == tsteps - tprune - 1)
+      for i in tiles do
+        increment(private[i], exterior[i], pxm_out[i], pxp_out[i], pym_out[i], pyp_out[i], p_times[i], t == 0, t == tsteps - tprune - 1)
       end
     end
 
-    for i = 0, nt2 do
+    for i in tiles do
       check(private[i], interior[i], tsteps, init)
     end
   end
 
-  var sim_time = get_elapsed(times)
-  for i = 0, nt2 do print_time(i, sim_time) end
+  var init_start = [int64:max()]
+  var init_stop = [int64:min()]
+  var start = [int64:max()]
+  var stop = [int64:min()]
+
+  __demand(__index_launch)
+  for i in tiles do
+    init_start min= get_init_start(p_times[i])
+  end
+  __demand(__index_launch)
+  for i in tiles do
+    init_stop max= get_init_stop(p_times[i])
+  end
+  __demand(__index_launch)
+  for i in tiles do
+    start min= get_start(p_times[i])
+  end
+  __demand(__index_launch)
+  for i in tiles do
+    stop max= get_stop(p_times[i])
+  end
+
+  var init_time = 1e-6 * (init_stop - init_start)
+  var sim_time = 1e-6 * (stop - start)
+  for i = 0, nt2 do print_time(i, init_time, sim_time) end
 end
 
 else -- not use_python_main
@@ -623,21 +644,8 @@ main:set_task_id(2)
 
 end -- not use_python_main
 
-if os.getenv('SAVEOBJ') == '1' then
-  local root_dir = arg[0]:match(".*/") or "./"
-  local out_dir = (os.getenv('OBJNAME') and os.getenv('OBJNAME'):match('.*/')) or root_dir
-  local link_flags = terralib.newlist({"-L" .. out_dir, "-lstencil_mapper"})
-  if USE_FOREIGN then
-    link_flags:insert("-lstencil")
-  end
-
-  if os.getenv('STANDALONE') == '1' then
-    os.execute('cp ' .. os.getenv('LG_RT_DIR') .. '/../bindings/regent/' ..
-        regentlib.binding_library .. ' ' .. out_dir)
-  end
-
-  local exe = os.getenv('OBJNAME') or "stencil"
-  regentlib.saveobj(main, exe, "executable", cmapper.register_mappers, link_flags)
-else
-  regentlib.start(main, cmapper.register_mappers)
+local link_flags = terralib.newlist({"-lstencil_mapper"})
+if USE_FOREIGN then
+  link_flags:insert("-lstencil")
 end
+launcher.launch(main, "stencil", cmapper.register_mappers, link_flags)

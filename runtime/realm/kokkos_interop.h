@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,6 +28,7 @@ namespace Realm {
   namespace KokkosInterop {
 
     bool is_kokkos_cuda_enabled(void);
+    bool is_kokkos_hip_enabled(void);
     bool is_kokkos_openmp_enabled(void);
 
     // initializes the kokkos runtime, using the threads from local processors

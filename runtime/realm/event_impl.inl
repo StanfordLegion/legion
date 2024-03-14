@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -82,7 +82,7 @@ namespace Realm {
   inline Barrier BarrierImpl::current_barrier(Barrier::timestamp_t timestamp /*= 0*/) const
   {
     ID id(me);
-    gen_t gen = this->generation + 1;
+    gen_t gen = this->generation.load() + 1;
     if(gen > id.barrier_generation().MAXVAL)
       return Barrier::NO_BARRIER;
     id.barrier_generation() = gen;

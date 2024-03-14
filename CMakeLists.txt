@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------#
-# Copyright 2022 Kitware, Inc.
+# Copyright 2024 Kitware, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -14,8 +14,71 @@
 # limitations under the License.
 #------------------------------------------------------------------------------#
 
-cmake_minimum_required(VERSION 3.7)
-project(Legion)
+cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
+
+#------------------------------------------------------------------------------#
+# Version information
+#------------------------------------------------------------------------------#
+
+# the Legion/Realm version string is set by the first of these that works:
+# 1) a defined value for the cmake Legion_VERSION variable
+# 2) the output of `git describe`, if successful
+# 3) the contents of 'VERSION' (at the root of the source tree), if available
+# 4) "unknown", if all else fails
+
+set(Legion_VERSION "" CACHE STRING "string to use for Legion/Realm version")
+if(Legion_VERSION STREQUAL "")
+  find_package(Git)
+  if(GIT_FOUND)
+    execute_process(COMMAND ${GIT_EXECUTABLE} describe --dirty --match legion*
+      WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+      RESULT_VARIABLE _git_result
+      OUTPUT_VARIABLE Legion_VERSION
+      ERROR_QUIET
+      OUTPUT_STRIP_TRAILING_WHITESPACE)
+  else()
+    set(_git_result -1)
+  endif()
+  if(_git_result EQUAL 0)
+    message(STATUS "Version string from git: ${Legion_VERSION}")
+  else()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/VERSION)
+      file(READ ${CMAKE_CURRENT_SOURCE_DIR}/VERSION _file_contents)
+      string(STRIP "${_file_contents}" Legion_VERSION)
+      unset(_file_contents)
+      message(STATUS "Version string from VERSION file: ${Legion_VERSION}")
+    else()
+      set(Legion_VERSION "unknown")
+      message(WARNING "Could not determine version string - using 'unknown'")
+    endif()
+  endif()
+  unset(_git_result)
+endif()
+# these are the actual variables that are written into the headers
+set(LEGION_VERSION "${Legion_VERSION}")
+set(REALM_VERSION "${Legion_VERSION}")
+
+# Parse the major.minor.patch from (potentially non-semver) Legion_VERSION
+if(Legion_VERSION MATCHES "([0-9]+)\\.([0-9]+)\\.([0-9]+)") # get the CMake version
+  set(Legion_VERSION_MAJOR "${CMAKE_MATCH_1}")
+  set(Legion_VERSION_MINOR "${CMAKE_MATCH_2}")
+  set(Legion_VERSION_PATCH "${CMAKE_MATCH_3}")
+  if(NOT Legion_VERSION_MAJOR VERSION_EQUAL 0)
+    string(REGEX REPLACE "^0+" "" Legion_VERSION_MAJOR "${Legion_VERSION_MAJOR}")
+  endif()
+  if(NOT Legion_VERSION_MINOR VERSION_EQUAL 0)
+    string(REGEX REPLACE "^0+" "" Legion_VERSION_MINOR "${Legion_VERSION_MINOR}")
+  endif()
+  if(NOT Legion_VERSION_PATCH VERSION_EQUAL 0)
+    string(REGEX REPLACE "^0+" "" Legion_VERSION_PATCH "${Legion_VERSION_PATCH}")
+  endif()
+  set(Legion_VERSION "${Legion_VERSION_MAJOR}.${Legion_VERSION_MINOR}.${Legion_VERSION_PATCH}")
+else()
+  message(WARNING "Could not parse semver-compatible version from Legion version string '${Legion_VERSION}' - setting cmake package version to '0.0.0'")
+  set(Legion_VERSION "0.0.0")
+endif()
+
+project(Legion VERSION ${Legion_VERSION})
 
 #------------------------------------------------------------------------------#
 # Some boilerplate to setup nice output directories
@@ -39,51 +102,6 @@ endif()
 set(SOVERSION 1)
 
 set(INSTALL_SUFFIX "" CACHE STRING "Suffix to add to installed libraries and binaries")
-
-#------------------------------------------------------------------------------#
-# Version information
-#------------------------------------------------------------------------------#
-
-# the Legion/Realm version string is set by the first of these that works:
-# 1) a defined value for the cmake Legion_VERSION variable
-# 2) the output of `git describe`, if successful
-# 3) the contents of 'VERSION' (at the root of the source tree), if available
-# 4) "unknown", if all else fails
-
-if(NOT DEFINED Legion_VERSION)
-  find_package(Git)
-  if(GIT_FOUND)
-    execute_process(COMMAND ${GIT_EXECUTABLE} describe --dirty --match legion*
-      WORKING_DIRECTORY ${Legion_SOURCE_DIR}
-      RESULT_VARIABLE _git_result
-      OUTPUT_VARIABLE Legion_VERSION
-      ERROR_QUIET
-      OUTPUT_STRIP_TRAILING_WHITESPACE)
-  else()
-    set(_git_result -1)
-  endif()
-  if(_git_result EQUAL 0)
-    message(STATUS "Version string from git: ${Legion_VERSION}")
-  else()
-    if(EXISTS ${Legion_SOURCE_DIR}/VERSION)
-      file(READ ${Legion_SOURCE_DIR}/VERSION _file_contents)
-      string(STRIP "${_file_contents}" Legion_VERSION)
-      unset(_file_contents)
-      message(STATUS "Version string from VERSION file: ${Legion_VERSION}")
-    else()
-      set(Legion_VERSION "unknown")
-      message(WARNING "Could not determine version string - using 'unknown'")
-    endif()
-  endif()
-  unset(_git_result)
-else()
-  # it's just a "cache variable" right now, so turn into a normal variable
-  set(Legion_VERSION "$CACHE{Legion_VERSION}")
-endif()
-set(Legion_VERSION "${Legion_VERSION}" CACHE STRING "string to use for Legion/Realm version")
-# these are the actual variables that are written into the headers
-set(LEGION_VERSION "${Legion_VERSION}")
-set(REALM_VERSION "${Legion_VERSION}")
 
 #------------------------------------------------------------------------------#
 # Build type and shared vs static library
@@ -178,7 +196,9 @@ set(CMAKE_ENABLE_EXPORTS ON)
 # builds so we override the cmake defaults here for release, this changes
 # -O3 to -O2 and removes -DNDEBUG
 set(CMAKE_CXX_FLAGS_RELEASE "-O2")
+set(CMAKE_CUDA_FLAGS_RELEASE "-O2")
 set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O2 -g")
+set(CMAKE_CUDA_FLAGS_RELWITHDEBINFO "-O2 -g")
 
 # add build types for thread/ub sanitizer goodness
 set(CMAKE_CXX_FLAGS_TSAN
@@ -213,6 +233,17 @@ else()
   set(CXX_BUILD_WARNING_FLAGS "")
 endif()
 
+if ((MSVC) AND (MSVC_VERSION GREATER_EQUAL 1914))
+  check_cxx_compiler_flag("/Zc:__cplusplus" COMPILER_SUPPORTS_ZC_CPLUSPLUS)
+  if(COMPILER_SUPPORTS_ZC_CPLUSPLUS)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /Zc:__cplusplus")
+  else()
+    message(FATAL_ERROR "compiler (which appears to be msvc) did not accept /Zc:__cplusplus flag")
+  endif()
+endif()
+
+include(CheckFunctionExists)
+
 #------------------------------------------------------------------------------#
 # Minimum log level
 #------------------------------------------------------------------------------#
@@ -227,11 +258,19 @@ set(COMPILE_TIME_MIN_LEVEL LEVEL_${Legion_OUTPUT_LEVEL})
 #------------------------------------------------------------------------------#
 option(Legion_USE_OpenMP "Use OpenMP" OFF)
 if(Legion_USE_OpenMP)
+  option(Legion_OpenMP_SYSTEM_RUNTIME "Use system's OpenMP runtime instead of internal Realm version" OFF)
+  if(Legion_OpenMP_SYSTEM_RUNTIME)
+    find_package(OpenMP REQUIRED)
+  endif()
+
   option(Legion_OpenMP_GOMP_SUPPORT "Enable GOMP support for OpenMP" ON)
   option(Legion_OpenMP_KMP_SUPPORT "Enable KMP support for OpenMP" ON)
 
   # define variable for realm_defines.h
   set(REALM_USE_OPENMP ON)
+  if(Legion_OpenMP_SYSTEM_RUNTIME)
+    set(REALM_OPENMP_SYSTEM_RUNTIME ON)
+  endif()
   if(Legion_OpenMP_GOMP_SUPPORT)
     set(REALM_OPENMP_GOMP_SUPPORT ON)
   endif()
@@ -245,20 +284,18 @@ endif()
 #------------------------------------------------------------------------------#
 option(Legion_USE_Python "Use Python" OFF)
 if(Legion_USE_Python)
-  set(Legion_Python_Version "" CACHE STRING "Minimum Python version")
+  find_package(Python3 REQUIRED)
 
-  # Note: Legion now supports several versions, so no need to be so forceful
-  # set(Python_ADDITIONAL_VERSIONS 2.7)
-  find_package(PythonInterp ${Legion_Python_Version} REQUIRED) # Needed to invoke setup.py for install
-  find_package(PythonLibs ${Legion_Python_Version} REQUIRED)
+  # Unset empty Python3_ variables
+  get_cmake_property(_variableNames VARIABLES)
+  foreach (_variableName ${_variableNames})
+      if ((_variableName MATCHES "Python3_") AND (${_variableName} STREQUAL ""))
+          unset(${_variableName})
+      endif()
+  endforeach()
 
   # define variables for realm_defines.h
   set(REALM_USE_PYTHON ON)
-  set(REALM_PYTHON_LIB "${PYTHON_LIBRARIES}")
-  set(REALM_PYTHON_VERSION_MAJOR ${PYTHON_VERSION_MAJOR})
-
-  string(REPLACE "." ";" PYTHON_VERSION_SPLIT ${PYTHONLIBS_VERSION_STRING})
-  list(GET PYTHON_VERSION_SPLIT 0 PYTHON_VERSION_MAJOR)
 endif()
 
 set(BINDINGS_DEFAULT_MODULE "" CACHE STRING "module to load by default in Python bindings, if any")
@@ -268,16 +305,14 @@ set(BINDINGS_DEFAULT_MODULE "" CACHE STRING "module to load by default in Python
 #------------------------------------------------------------------------------#
 option(Legion_USE_Kokkos "Enable support for the Kokkos runtime" OFF)
 if(Legion_USE_Kokkos)
-  # the kokkos interop stuff uses target_link_options, which doesn't show up
-  #  until cmake 3.13
-  cmake_minimum_required(VERSION 3.13)
-
   # cmake uses -DKokkos_DIR=.../lib/cmake to look in non-standard locations
   #
   # starting with Kokkos 3.3.0, including a cuda-enabled Kokkos will mess with
   #  the global compilation settings unless you ask it not to by requesting
   #  the 'separable_compilation' component
   find_package(Kokkos REQUIRED OPTIONAL_COMPONENTS separable_compilation)
+
+  message(STATUS "Kokkos version: ${Kokkos_VERSION}")
 
   # in order to build using Kokkos' exported compile options, we need to use
   #  the same compiler - newer versions of Kokkos will tell us, but for older
@@ -297,121 +332,17 @@ if(Legion_USE_Kokkos)
 endif()
 
 #------------------------------------------------------------------------------#
-# CUDA configuration
+# libdl configuration
 #------------------------------------------------------------------------------#
-option(Legion_USE_CUDA "Enable support for the CUDA runtime" OFF)
-if(Legion_USE_CUDA)
-  set(Legion_CUDA_ARCH "" CACHE STRING "Comma-separated list of CUDA architectures to build for (e.g. 60,70)")
-  option(Legion_CUDA_DYNAMIC_LOAD "Load cuda libraries at runtime" OFF)
-
-  if(NOT BUILD_SHARED_LIBS)
-    set(CUDA_USE_STATIC_CUDA_RUNTIME ON)
-  else()
-    set(CUDA_USE_STATIC_CUDA_RUNTIME OFF)
-  endif()
-  find_package(CUDA REQUIRED)
-  install(FILES ${Legion_SOURCE_DIR}/cmake/FindCUDA.cmake
-    DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake
-  )
-  install(FILES ${Legion_SOURCE_DIR}/cmake/newcmake/FindCUDA.cmake
-    DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake/newcmake
-  )
-
-  # before cmake 3.13, the CUDAHOSTCXX env variable wasn't propagated to CUDA_HOST_COMPILER automatically
-  if(CMAKE_VERSION VERSION_LESS "3.13" AND DEFINED ENV{CUDAHOSTCXX})
-    set(CUDA_HOST_COMPILER $ENV{CUDAHOSTCXX} CACHE FILEPATH "Host side compiler used by NVCC" FORCE)
-  endif()
-
+# NOTE: although the name of the variable is "libdl", this is dynamic linking
+#  support on any system, even if it doesn't have a libdl
+option(Legion_USE_LIBDL "Enable run-time support for dynamic shared objects" ON)
+if(Legion_USE_LIBDL)
   # define variable for legion_defines.h
-  set(LEGION_USE_CUDA ON)
-
-  option(Legion_GPU_REDUCTIONS "Use tasks to perform reductions on GPU" OFF)
-  if(Legion_GPU_REDUCTIONS)
-    set(LEGION_GPU_REDUCTIONS ON)
-  endif()
-
+  set(LEGION_USE_LIBDL ON)
   # define variable for realm_defines.h
-  set(REALM_USE_CUDA ON)
-
-  # default is to use hijack unless Kokkos interop is enabled
-  if(Legion_USE_Kokkos)
-    option(Legion_HIJACK_CUDART "Hijack and rewrite application calls into the CUDA runtime" OFF)
-  else()
-    option(Legion_HIJACK_CUDART "Hijack and rewrite application calls into the CUDA runtime" ON)
-  endif()
-  if(Legion_HIJACK_CUDART)
-    set(REALM_USE_CUDART_HIJACK ON)
-  endif()
-  if(Legion_CUDA_DYNAMIC_LOAD)
-    # not compatible with runtime hijack
-    if(Legion_HIJACK_CUDART)
-      message(FATAL_ERROR "Dynamic CUDA library loading (Legion_CUDA_DYNAMIC_LOAD) is not compatible with CUDA runtime hijack (Legion_HIJACK_CUDART)")
-    endif()
-    set(REALM_CUDA_DYNAMIC_LOAD ON)
-  endif()
+  set(REALM_USE_LIBDL ON)
 endif()
-
-#------------------------------------------------------------------------------#
-# HIP configuration
-#------------------------------------------------------------------------------#
-option(Legion_USE_HIP "Enable support for the HIP runtime on AMD/NVIDIA GPU" OFF)
-set(Legion_HIP_TARGETS ROCM CUDA)
-set(Legion_HIP_TARGET "ROCM" CACHE STRING "Select HIP target ${Legion_HIP_TARGETS}")
-set_property(CACHE Legion_HIP_TARGET PROPERTY STRINGS ${Legion_HIP_TARGETS})
-if(Legion_USE_HIP)
-  if (Legion_HIP_TARGET STREQUAL "CUDA")
-    set(Legion_CUDA_ARCH "" CACHE STRING "Comma-separated list of CUDA architectures to build for (e.g. 60,70)")
-
-    if(NOT BUILD_SHARED_LIBS)
-      set(CUDA_USE_STATIC_CUDA_RUNTIME ON)
-    else()
-      set(CUDA_USE_STATIC_CUDA_RUNTIME OFF)
-    endif()
-    find_package(CUDA REQUIRED)
-    install(FILES ${Legion_SOURCE_DIR}/cmake/FindCUDA.cmake
-      DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake
-    )
-    install(FILES ${Legion_SOURCE_DIR}/cmake/newcmake/FindCUDA.cmake
-      DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake/newcmake
-    )
-    set(HIPCC_FLAGS "-D__HIP_PLATFORM_NVCC__")
-  endif()
-
-  if (Legion_HIP_TARGET STREQUAL "ROCM")
-    set(Legion_HIP_ARCH "" CACHE STRING "Comma-separated list of HIP architectures to build for (e.g. gfx906,gfx908)")
-
-    install(FILES ${Legion_SOURCE_DIR}/cmake/FindHIP.cmake
-      DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake
-    )
-    set(HIPCC_FLAGS "-fno-strict-aliasing")
-    if("${Legion_HIP_ARCH}" STREQUAL "")
-      set(HIP_GENCODE "")
-    else()
-      set(HIP_GENCODE "--amdgpu-target=${Legion_HIP_ARCH}")
-    endif()
-  endif()
-
-  # find the hip library
-  find_package(HIP REQUIRED)
-
-  # define variable for legion_defines.h
-  set(LEGION_USE_HIP ON)
-
-  option(Legion_GPU_REDUCTIONS "Support reductions natively on GPU" ON)
-  if(Legion_GPU_REDUCTIONS)
-    set(LEGION_GPU_REDUCTIONS ON)
-  endif()
-
-  # define variable for realm_defines.h
-  set(REALM_USE_HIP ON)
-
-  option(Legion_HIJACK_HIP "Enable HIJACK HIP" ON)
-  if(Legion_HIJACK_HIP)
-    set(REALM_USE_HIP_HIJACK ON)
-  endif()
-
-endif()
-
 
 #------------------------------------------------------------------------------#
 # network interface configuration
@@ -442,7 +373,7 @@ if("${Legion_NETWORKS}" MATCHES ".*gasnet(1|ex).*")
       "https://github.com/StanfordLegion/gasnet.git"
       CACHE STRING "URL for cloning StanfordLegion/gasnet repository")
     set(Legion_EMBED_GASNet_GITREF
-      "master"
+      "7630347069fb6c930d6678e55dd8f922bd2961db" # master as of 2024-03-12
       CACHE STRING "Branch/tag/commit to use from StanfordLegion/gasnet repository")
     set(Legion_EMBED_GASNet_LOCALSRC "" CACHE STRING "Path to local clone of stanfordlegion/gasnet repository")
     set(Legion_EMBED_GASNet_VERSION "" CACHE STRING "Override GASNet version to build")
@@ -474,11 +405,170 @@ endif()
 # MPI configuration
 #------------------------------------------------------------------------------#
 if("${Legion_NETWORKS}" MATCHES .*mpi.*)
-  cmake_minimum_required(VERSION 3.9)
   find_package(MPI REQUIRED)
   # define variable for realm_defines.h
   set(REALM_USE_MPI ON)
   set(Legion_MPI_INTEROP ON)
+endif()
+
+#------------------------------------------------------------------------------#
+# UCX configuration
+#------------------------------------------------------------------------------#
+if("${Legion_NETWORKS}" MATCHES .*ucx.*)
+  if (NOT REALM_USE_LIBDL)
+    message(FATAL_ERROR "UCX backend requires run-time support for dynamic shared objects")
+  endif()
+  find_package(ucx 1.14.0 REQUIRED CONFIG)
+  message(STATUS "Found UCX: ${UCX_INCLUDE_DIRS} ${UCX_LIBRARIES})")
+  find_package(MPI REQUIRED) # for MPI bootstrap plugin
+  # define variable for realm_defines.h
+  set(REALM_USE_UCX ON)
+  set(Legion_MPI_INTEROP ON)
+  option(Legion_UCX_DYNAMIC_LOAD "Load ucx libraries at runtime" OFF)
+  if(Legion_UCX_DYNAMIC_LOAD)
+    set(REALM_UCX_DYNAMIC_LOAD ON)
+  endif()
+endif()
+
+if (MPI_FOUND)
+  list(APPEND CMAKE_REQUIRED_LIBRARIES ${MPI_mpi_LIBRARY})
+  # Check if MPI has comm split type available
+  check_function_exists(MPI_Comm_split_type REALM_MPI_HAS_COMM_SPLIT_TYPE)
+  list(POP_BACK CMAKE_REQUIRED_LIBRARIES)
+endif()
+
+#------------------------------------------------------------------------------#
+# GPU configuration
+#------------------------------------------------------------------------------#
+option(Legion_USE_CUDA "Enable support for the CUDA runtime" OFF)
+option(Legion_USE_HIP "Enable support for the HIP runtime on AMD/NVIDIA GPU" OFF)
+
+set(Legion_HIP_TARGETS "ROCM" "CUDA")
+mark_as_advanced(Legion_HIP_TARGETS)
+set(Legion_HIP_TARGET "ROCM" CACHE STRING "Select HIP target ${Legion_HIP_TARGETS}")
+set_property(CACHE Legion_HIP_TARGET PROPERTY STRINGS ${Legion_HIP_TARGETS})
+
+if(Legion_USE_CUDA OR Legion_USE_HIP)
+
+  option(Legion_GPU_REDUCTIONS "Use tasks to perform reductions on GPU" OFF)
+  # define variable for legion_defines.h
+  set(LEGION_GPU_REDUCTIONS ${Legion_GPU_REDUCTIONS})
+
+  if(Legion_USE_CUDA OR (Legion_HIP_TARGET STREQUAL "CUDA"))
+
+    include(cmake/cuda_helpers.cmake)
+
+    # Read CMAKE_CUDA_STANDARD or CMAKE_CXX_STANDARD and store in Legion_CUDA_STANDARD
+    infer_cuda_standard(Legion_CUDA_STANDARD)
+
+    set(Legion_CUDA_STANDARD "${Legion_CUDA_STANDARD}" CACHE STRING
+      "The CUDA C++ standard to use (14, 17, 20, etc.)"
+      FORCE)
+
+    # Enable the CUDA language and find the CUDA toolkit
+    enable_cuda_language_and_find_cuda_toolkit()
+
+    # Populate the Legion_CUDA_ARCH list, defaulting to all major GPU archs if unset
+    populate_cuda_archs_list(Legion_CUDA_ARCH)
+
+    set(Legion_CUDA_ARCH "${Legion_CUDA_ARCH}" CACHE STRING
+      "Comma (or semicolon) separated list of CUDA architectures to build for (e.g. 60,70,80,90)"
+      FORCE)
+
+    #------------------------------------------------------------------------------#
+    # NVTX configuration
+    #------------------------------------------------------------------------------#
+    option(Legion_USE_NVTX "Enable profiling using NVTX" OFF)
+    # define variable for realm_defines.h
+    set(REALM_USE_NVTX ${Legion_USE_NVTX})
+    mark_as_advanced(REALM_USE_NVTX)
+
+    # Find the CUDA toolkit if we haven't already.
+    if(NOT CUDAToolkit_FOUND)
+      find_package(CUDAToolkit REQUIRED)
+    endif()
+
+    if("${CUDA_cuda_driver_LIBRARY}" MATCHES ".*stubs.*")
+      get_filename_component(_cuda_stubs_path "${CUDA_cuda_driver_LIBRARY}" DIRECTORY)
+      list(APPEND CMAKE_PLATFORM_IMPLICIT_LINK_DIRECTORIES "${_cuda_stubs_path}")
+      unset(_cuda_stubs_path)
+    endif()
+
+    # Install the vendored FindCUDAToolkit.cmake to support CMake < v3.19
+    install(FILES ${Legion_SOURCE_DIR}/cmake/FindCUDAToolkit.cmake
+      DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake
+    )
+    install(FILES ${Legion_SOURCE_DIR}/cmake/newcmake/FindCUDAToolkit.cmake
+      DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake/newcmake
+    )
+  endif()
+endif()
+
+#------------------------------------------------------------------------------#
+# CUDA configuration
+#------------------------------------------------------------------------------#
+if(Legion_USE_CUDA)
+
+  option(Legion_CUDA_DYNAMIC_LOAD "Load CUDA libraries at runtime" OFF)
+
+  # The default is to hijack unless Kokkos interop is enabled, or network is UCX.
+  if(Legion_USE_Kokkos OR "${Legion_NETWORKS}" MATCHES .*ucx.*)
+    option(Legion_HIJACK_CUDART "Hijack and rewrite application calls into the CUDA runtime" OFF)
+  else()
+    option(Legion_HIJACK_CUDART "Hijack and rewrite application calls into the CUDA runtime" ON)
+  endif()
+
+  if(Legion_CUDA_DYNAMIC_LOAD AND Legion_HIJACK_CUDART)
+    # not compatible with runtime hijack
+    message(FATAL_ERROR "Dynamic CUDA library loading (Legion_CUDA_DYNAMIC_LOAD) is not compatible with CUDA runtime hijack (Legion_HIJACK_CUDART)")
+  endif()
+
+  # define variable for legion_defines.h
+  set(LEGION_USE_CUDA ON)
+  # define variable for realm_defines.h
+  set(REALM_USE_CUDA ON)
+  set(REALM_CUDA_DYNAMIC_LOAD ${Legion_CUDA_DYNAMIC_LOAD})
+  set(REALM_USE_CUDART_HIJACK ${Legion_HIJACK_CUDART})
+endif()
+
+#------------------------------------------------------------------------------#
+# HIP configuration
+#------------------------------------------------------------------------------#
+if(Legion_USE_HIP)
+
+  set(HIPCC_FLAGS ${HIPCC_FLAGS})
+
+  if(Legion_HIP_TARGET STREQUAL "CUDA")
+    list(APPEND HIPCC_FLAGS -D__HIP_PLATFORM_NVCC__)
+  elseif(Legion_HIP_TARGET STREQUAL "ROCM")
+    # find the hip library
+    find_package(HIP REQUIRED)
+
+    set(Legion_HIP_ARCH "" CACHE STRING "Comma-separated list of HIP architectures to build for (e.g. gfx906,gfx908)")
+
+    set(HIPCC_FLAGS "-fno-strict-aliasing")
+    if("${Legion_HIP_ARCH}" STREQUAL "")
+      set(HIP_GENCODE "")
+    else()
+      set(HIP_GENCODE "--offload-arch=${Legion_HIP_ARCH}")
+    endif()
+
+    if(BUILD_SHARED_LIBS)
+      list(APPEND HIPCC_FLAGS -fPIC)
+    endif()
+
+    install(FILES ${Legion_SOURCE_DIR}/cmake/FindHIP.cmake
+      DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake
+    )
+  endif()
+
+  option(Legion_HIJACK_HIP "Enable HIJACK HIP" ON)
+
+  # define variable for legion_defines.h
+  set(LEGION_USE_HIP ON)
+  # define variable for realm_defines.h
+  set(REALM_USE_HIP ON)
+  set(REALM_USE_HIP_HIJACK ${Legion_HIJACK_HIP})
 endif()
 
 #------------------------------------------------------------------------------#
@@ -511,19 +601,6 @@ if(Legion_USE_HDF5)
   # define variable for both legion_defines.h and realm_defines.h
   set(LEGION_USE_HDF5 ON)
   set(REALM_USE_HDF5 ON)
-endif()
-
-#------------------------------------------------------------------------------#
-# libdl configuration
-#------------------------------------------------------------------------------#
-# NOTE: although the name of the variable is "libdl", this is dynamic linking
-#  support on any system, even if it doesn't have a libdl
-option(Legion_USE_LIBDL "Enable run-time support for dynamic shared objects" ON)
-if(Legion_USE_LIBDL)
-  # define variable for legion_defines.h
-  set(LEGION_USE_LIBDL ON)
-  # define variable for realm_defines.h
-  set(REALM_USE_LIBDL ON)
 endif()
 
 #------------------------------------------------------------------------------#
@@ -590,6 +667,20 @@ if(Legion_USE_Fortran)
 endif()
 
 #------------------------------------------------------------------------------#
+# Backtrace configuration
+#------------------------------------------------------------------------------#
+option(Legion_BACKTRACE_USE_UNWIND "Use unwind to capture backtrace" ON)
+if(Legion_BACKTRACE_USE_UNWIND)
+  set(REALM_USE_UNWIND ON)
+endif()
+
+option(Legion_BACKTRACE_USE_LIBDW "Use libdw to analyze backtrace" OFF)
+if(Legion_BACKTRACE_USE_LIBDW)
+  find_package(LIBDW)
+  set(REALM_USE_LIBDW ON)
+endif()
+
+#------------------------------------------------------------------------------#
 # Miscelaneous other options
 #------------------------------------------------------------------------------#
 set(Legion_MAX_DIM 3 CACHE STRING "Maximum number of dimensions")
@@ -604,6 +695,8 @@ set(REALM_MAX_DIM ${Legion_MAX_DIM})
 #  sure they're big enough for your use case
 set(Legion_MAX_FIELDS 512 CACHE STRING
     "Maximum number of fields allocated to a single field space -- MUST be a power of two.")
+set(Legion_DEFAULT_LOCAL_FIELDS 4 CACHE STRING
+    "Number of slots in a field space reserved for local fields -- MUST be smaller than or equal to Legion_MAX_FIELDS")
 set(Legion_MAX_NUM_NODES 1024 CACHE STRING
     "Maximum number of nodes supported by the runtime -- MUST be a power of two.")
 set(Legion_MAX_NUM_PROCS 64 CACHE STRING
@@ -627,6 +720,10 @@ if (NOT is_pow_two)
   message(FATAL_ERROR "Legion_MAX_FIELDS must be a power of two.")
 endif()
 
+if (${Legion_DEFAULT_LOCAL_FIELDS} GREATER ${Legion_MAX_FIELDS})
+  message(FATAL_ERROR "Legion_DEFAULT_LOCAL_FIELDS must be smaller than or equal to Legion_MAX_FIELDS.")
+endif()
+
 is_power_of_two(${Legion_MAX_NUM_NODES} is_pow_two)
 if (NOT is_pow_two)
   message(FATAL_ERROR "Legion_MAX_NUM_NODES must be a power of two.")
@@ -639,6 +736,7 @@ endif()
 
 # define variables for legion_defines.h
 set(LEGION_MAX_FIELDS ${Legion_MAX_FIELDS})
+set(LEGION_DEFAULT_LOCAL_FIELDS "(${Legion_DEFAULT_LOCAL_FIELDS})")
 set(LEGION_MAX_NUM_NODES ${Legion_MAX_NUM_NODES})
 set(LEGION_MAX_NUM_PROCS ${Legion_MAX_NUM_PROCS})
 
@@ -658,6 +756,22 @@ set(LEGION_PRIVILEGE_CHECKS ${Legion_PRIVILEGE_CHECKS})
 if(NOT WIN32)
   option(REALM_LIMIT_SYMBOL_VISIBILITY "hide private symbols in realm" ON)
 endif()
+
+# Only enable shm on linux and if GASNET1 is not available.
+# OSX is not well tested yet, so disable by default for the time being
+# GASNET1 does not allow communication before network attach, which is needed
+# in order to coordinate a job identifier required to set up named system
+# resources
+if (UNIX AND NOT APPLE AND NOT REALM_USE_GASNET1)
+  option(REALM_USE_SHM "Enable shared memory usage" ON)
+else()
+  option(REALM_USE_SHM "Enable shared memory usage" OFF)
+endif()
+
+if (UNIX)
+  # Look for posix_fallocate64 for better error reporting of file mapping
+  check_function_exists(posix_fallocate64 REALM_HAS_POSIX_FALLOCATE64)
+endif ()
 
 #------------------------------------------------------------------------------#
 # Hacks for building only Realm
@@ -698,6 +812,8 @@ endforeach()
 #------------------------------------------------------------------------------#
 # Build-tree package generation
 #------------------------------------------------------------------------------#
+include(CMakePackageConfigHelpers)
+
 export(EXPORT LegionTargets
   NAMESPACE Legion::
   FILE ${Legion_BINARY_DIR}/LegionTargets.cmake
@@ -721,6 +837,15 @@ configure_file(
   cmake/LegionConfig-build.cmake.in
   ${Legion_BINARY_DIR}/LegionConfig.cmake
   @ONLY
+)
+
+write_basic_package_version_file(
+  ${Legion_BINARY_DIR}/LegionConfig-version.cmake
+  VERSION ${Legion_VERSION}
+  COMPATIBILITY ExactVersion)
+
+install(FILES ${Legion_BINARY_DIR}/LegionConfig-version.cmake
+  DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake
 )
 
 install(FILES cmake/LegionConfig-install.cmake
@@ -748,7 +873,9 @@ option(Legion_BUILD_BINDINGS "Build Legion language bindings" OFF)
 option(Legion_BUILD_EXAMPLES "Build Legion examples" OFF)
 option(Legion_BUILD_TUTORIAL "Build Legion tutorial" OFF)
 option(Legion_BUILD_TESTS "Build Legion tests" OFF)
+option(Legion_BUILD_JUPYTER "Build Legion jupyter notebook support" OFF)
 option(Legion_ENABLE_TESTING "Build and copy testing stuff" OFF)
+option(Legion_BUILD_RUST_PROFILER "Build Rust version of Legion profiler" OFF)
 if(Legion_ENABLE_TESTING)
   enable_testing()
   # if Legion_TEST_LAUNCHER is set, split the string into a list
@@ -769,28 +896,6 @@ if(Legion_BUILD_ALL OR Legion_BUILD_APPS OR Legion_BUILD_BINDINGS OR Legion_BUIL
   add_library(Legion::Legion ALIAS Legion)
   add_library(Legion::Realm ALIAS Realm)
 
-  if(Legion_USE_CUDA)
-    # CUDA has some issues propogating target interface properties so we
-    # have to extract them from the target and manually add them to the nvcc
-    # flags
-    set(PROP $<TARGET_PROPERTY:Legion::Legion,INTERFACE_COMPILE_OPTIONS>)
-    set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} ${PROP}")
-    set(PROP $<TARGET_PROPERTY:Legion::Legion,INTERFACE_COMPILE_DEFINITIONS>)
-    set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} $<$<BOOL:${PROP}>:-D$<JOIN:${PROP}, -D>>")
-    set(PROP $<TARGET_PROPERTY:Legion::Legion,INTERFACE_INCLUDE_DIRECTORIES>)
-    set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} $<$<BOOL:${PROP}>:-I$<JOIN:${PROP}, -I>>")
-  endif()
-
-  if(Legion_HIP_TARGET STREQUAL "CUDA")
-    set(PROP $<TARGET_PROPERTY:Legion::Legion,INTERFACE_COMPILE_OPTIONS>)
-    set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} ${PROP}")
-    set(PROP $<TARGET_PROPERTY:Legion::Legion,INTERFACE_COMPILE_DEFINITIONS>)
-    set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} $<$<BOOL:${PROP}>:-D$<JOIN:${PROP}, -D>>")
-    set(PROP $<TARGET_PROPERTY:Legion::Legion,INTERFACE_INCLUDE_DIRECTORIES>)
-    set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} $<$<BOOL:${PROP}>:-I$<JOIN:${PROP}, -I>>")
-    set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} ${HIPCC_FLAGS}")
-  endif()
-
   if(Legion_HIP_TARGET STREQUAL "ROCM")
     set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} ${HIPCC_FLAGS} ${HIP_GENCODE}")
   endif()
@@ -810,10 +915,20 @@ if(Legion_BUILD_ALL OR Legion_BUILD_APPS OR Legion_BUILD_BINDINGS OR Legion_BUIL
   if(Legion_BUILD_ALL OR Legion_BUILD_TESTS)
     add_subdirectory(test)
   endif()
+  if(Legion_BUILD_ALL OR Legion_BUILD_JUPYTER)
+    add_subdirectory(jupyter_notebook)
+  endif()
 elseif(Legion_BUILD_REALM_TESTS)
   # temporary hackery to just enable the realm tests
   add_library(Legion::Realm ALIAS Realm)
   add_subdirectory(test/realm)
+elseif(Legion_BUILD_REALM_UNIT_TESTS)
+  if (BUILD_SHARED_LIBS)
+    add_library(Legion::RealmTests ALIAS RealmStatic)
+  else()
+    add_library(Legion::RealmTests ALIAS Realm)
+  endif()
+  add_subdirectory(test/realm/unit_tests)
 endif()
 
 #------------------------------------------------------------------------------#
@@ -839,6 +954,48 @@ if(Legion_REDOP_HALF)
 endif()
 mark_as_advanced(Legion_REDOP_HALF)
 
+if(Legion_REDOP_COMPLEX AND Legion_USE_HIP)
+  set(HIP_THRUST_ROOT_DIR "" CACHE STRING "Location of HIP THRUST library")
+  if(NOT HIP_THRUST_ROOT_DIR)
+    message(FATAL_ERROR "When using HIP, complex support requires that the HIP version of Thrust be installed")
+  endif()
+endif()
+
+#------------------------------------------------------------------------------#
+# Build and install legion_prof_rs
+#------------------------------------------------------------------------------#
+
+if(Legion_BUILD_ALL OR Legion_BUILD_RUST_PROFILER)
+  find_package(Corrosion 0.3.2 QUIET)
+
+  if(NOT Corrosion_FOUND)
+    include(FetchContent)
+    FetchContent_Declare(
+      Corrosion
+      GIT_REPOSITORY https://github.com/corrosion-rs/corrosion.git
+      GIT_TAG 020d11f092314a58942891f14b4cd20c0edff80a # v0.3.2
+    )
+    # Set any global configuration variables such as `Rust_TOOLCHAIN` before this line!
+    FetchContent_MakeAvailable(Corrosion)
+  endif()
+
+  corrosion_import_crate(
+    MANIFEST_PATH tools/legion_prof_rs/Cargo.toml
+    ALL_FEATURES
+    PROFILE release
+  )
+
+  install(
+    PROGRAMS
+      ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/legion_prof
+    TYPE
+      BIN
+    PERMISSIONS
+      OWNER_EXECUTE OWNER_WRITE OWNER_READ
+      GROUP_EXECUTE GROUP_WRITE GROUP_READ
+      WORLD_EXECUTE WORLD_READ)
+endif()
+
 #------------------------------------------------------------------------------#
 # Configure definition headers
 #------------------------------------------------------------------------------#
@@ -856,6 +1013,7 @@ install(FILES ${PROJECT_BINARY_DIR}/runtime/realm_defines.h
 install(
   FILES
     ${PROJECT_SOURCE_DIR}/tools/legion_prof.py
+    ${PROJECT_SOURCE_DIR}/tools/legion_util.py
     ${PROJECT_SOURCE_DIR}/tools/legion_spy.py
   DESTINATION
     ${CMAKE_INSTALL_BINDIR}

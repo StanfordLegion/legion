@@ -6,6 +6,7 @@
 #include <cassert>
 #include <cstring>
 #include <cmath>
+#include <iostream>
 
 #include "osdep.h"
 
@@ -16,6 +17,7 @@ Logger log_app("app");
 // Task IDs, some IDs are reserved so start at first available number
 enum {
   TOP_LEVEL_TASK = Processor::TASK_ID_FIRST_AVAILABLE+0,
+  INDIRECT_PROF_TASK,
   DYNAMIC_TASK_START,
 };
 
@@ -80,6 +82,22 @@ struct SpeedTestArgs {
   Machine::AffinityDetails affinity;
 };
 
+#define MAX_INSTS 32
+struct IndirectCopyProfResult {
+  UserEvent profile_done_event;
+  RegionInstance src_insts[MAX_INSTS];
+  RegionInstance dst_insts[MAX_INSTS];
+  size_t src_insts_size;
+  size_t dst_insts_size;
+  FieldID src_fid;
+  FieldID dst_fid;
+  RegionInstance src_indirection_inst = RegionInstance::NO_INST;
+  RegionInstance dst_indirection_inst = RegionInstance::NO_INST;
+  FieldID src_indirect_fid = 0;
+  FieldID dst_indirect_fid = 0;
+  int copy_type; // 0: gather, 1: scatter, 2: range_copy
+};
+
 typedef std::map<FieldID, size_t> FieldMap;
 
 // maybe type - used to handle cases where expected value is not known
@@ -120,14 +138,16 @@ public:
 	       FieldID src_id, FieldID dst_id,
 	       bool oor_possible,
 	       CustomSerdezID serdez_id,
-	       Event wait_on);
+	       Event wait_on,
+	       Processor p);
 
   template <typename FT, typename DST>
   Event scatter(IndexSpace<N,T> is, FieldID ptr_id, DST& dst,
 		FieldID src_id, FieldID dst_id,
 		bool oor_possible, bool aliasing_possible,
 		CustomSerdezID serdez_id,
-		Event wait_on) const;
+		Event wait_on,
+		Processor p) const;
 
   template <typename FT, typename SRC, typename DST>
   Event range_copy(IndexSpace<N,T> is, FieldID srcptr_id,
@@ -136,7 +156,8 @@ public:
 		   const DistributedData<N,T>& dstptr, FieldID dstptr_id,
 		   DST& dst, FieldID dst_id,
 		   bool dst_oor_possible, bool dst_aliasing_possible,
-		   Event wait_on) const;
+		   Event wait_on,
+		   Processor p) const;
 
   template <typename FT>
   bool verify(IndexSpace<N,T> is, FieldID fid, Event wait_on);
@@ -397,13 +418,48 @@ Event DistributedData<N,T>::fill(IndexSpace<N,T> is, FieldID fid, LAMBDA filler,
   return Event::merge_events(events);
 }
 
+void indirect_prof_task(const void *args, size_t arglen, 
+			const void *userdata, size_t userlen, Processor p)
+{
+  ProfilingResponse resp(args, arglen);
+  assert(resp.user_data_size() == sizeof(IndirectCopyProfResult));
+  const IndirectCopyProfResult *result = static_cast<const IndirectCopyProfResult *>(resp.user_data());
+
+  ProfilingMeasurements::OperationCopyInfo copy_info;
+  if(resp.get_measurement(copy_info)) {
+    assert(result->src_fid == copy_info.inst_info[0].src_fields[0]);
+    assert(result->dst_fid == copy_info.inst_info[0].dst_fields[0]);
+    assert(result->src_insts_size == copy_info.inst_info[0].src_insts.size());
+    for (size_t i = 0; i < result->src_insts_size; i++) {
+      assert(result->src_insts[i] == copy_info.inst_info[0].src_insts[i]);
+    }
+    assert(result->dst_insts_size == copy_info.inst_info[0].dst_insts.size());
+    for (size_t i = 0; i < result->dst_insts_size; i++) {
+      assert(result->dst_insts[i] == copy_info.inst_info[0].dst_insts[i]);
+    }
+    assert(result->src_indirection_inst == copy_info.inst_info[0].src_indirection_inst);
+    assert(result->dst_indirection_inst == copy_info.inst_info[0].dst_indirection_inst);
+    assert(result->src_indirect_fid == copy_info.inst_info[0].src_indirection_field);
+    assert(result->dst_indirect_fid == copy_info.inst_info[0].dst_indirection_field);
+    log_app.print() << "copy type " << result->copy_type
+                    << ", src_insts (" << PrettyVector<RegionInstance>(copy_info.inst_info[0].src_insts) << ") size " << copy_info.inst_info[0].src_insts.size()
+                    << ", dst_insts (" << PrettyVector<RegionInstance>(copy_info.inst_info[0].dst_insts) << ") size " << copy_info.inst_info[0].dst_insts.size()
+                    << ", src_fid " << copy_info.inst_info[0].src_fields[0]
+                    << ", dst_fid " << copy_info.inst_info[0].dst_fields[0]
+                    << ", src_indirect_inst " << copy_info.inst_info[0].src_indirection_inst << " fid " << copy_info.inst_info[0].src_indirection_field
+                    << ", dst_indirect_inst " << copy_info.inst_info[0].dst_indirection_inst << " fid " << copy_info.inst_info[0].dst_indirection_field;
+    result->profile_done_event.trigger();
+  }
+}
+
 template <int N, typename T>
 template <typename FT, typename SRC>
 Event DistributedData<N,T>::gather(IndexSpace<N,T> is, FieldID ptr_id, const SRC& src,
 				   FieldID src_id, FieldID dst_id,
 				   bool oor_possible,
 				   CustomSerdezID serdez_id,
-				   Event wait_on)
+				   Event wait_on,
+				   Processor p)
 {
   std::vector<Event> events;
   for(typename std::vector<Piece>::const_iterator it = pieces.begin();
@@ -419,6 +475,7 @@ Event DistributedData<N,T>::gather(IndexSpace<N,T> is, FieldID ptr_id, const SRC
     indirect.subfield_offset = 0;
     indirect.oor_possible = oor_possible;
     indirect.aliasing_possible = true; // doesn't matter for gather perf, so be sound
+    indirect.next_indirection = nullptr;
 
     std::vector<CopySrcDstField> srcs, dsts;
     srcs.resize(1);
@@ -444,10 +501,26 @@ Event DistributedData<N,T>::gather(IndexSpace<N,T> is, FieldID ptr_id, const SRC
 	indirect.insts[0] = it2->inst;
 
 	// if we had preimages, we could intersect against those
+        IndirectCopyProfResult result;
+        UserEvent profile_done_event = UserEvent::create_user_event();
+        result.profile_done_event = profile_done_event;
+        result.src_insts[0] = indirect.insts[0];
+        result.src_insts_size = 1;
+        result.dst_insts[0] = it->inst;
+        result.dst_insts_size = 1;
+        result.src_fid = src_id;
+        result.dst_fid = dst_id;
+        result.src_indirection_inst = it->inst;
+        result.src_indirect_fid = ptr_id;
+        result.copy_type = 0;
+        ProfilingRequestSet prs;
+        prs.add_request(p, INDIRECT_PROF_TASK, &result, sizeof(IndirectCopyProfResult))
+             .add_measurement<ProfilingMeasurements::OperationCopyInfo>();
 	Event e = isect.copy(srcs, dsts, 
 			     std::vector<const typename CopyIndirection<N,T>::Base *>(1, &indirect),
-			     ProfilingRequestSet(), wait_on);
+			     prs, wait_on);
 	events.push_back(e);
+	events.push_back(profile_done_event);
       }
     } else {
       for(typename std::vector<typename SRC::Piece>::const_iterator it2 = src.pieces.begin();
@@ -457,10 +530,29 @@ Event DistributedData<N,T>::gather(IndexSpace<N,T> is, FieldID ptr_id, const SRC
 	indirect.insts.push_back(it2->inst);
       }
 
+      assert(indirect.insts.size() <= MAX_INSTS);
+      IndirectCopyProfResult result;
+      UserEvent profile_done_event = UserEvent::create_user_event();
+      result.profile_done_event = profile_done_event;
+      for (size_t i = 0; i < indirect.insts.size(); i++) {
+        result.src_insts[i] = indirect.insts[i];
+      }
+      result.src_insts_size = indirect.insts.size();
+      result.dst_insts[0] = it->inst;
+      result.dst_insts_size = 1;
+      result.src_fid = src_id;
+      result.dst_fid = dst_id;
+      result.src_indirection_inst = it->inst;
+      result.src_indirect_fid = ptr_id;
+      result.copy_type = 0;
+      ProfilingRequestSet prs;
+      prs.add_request(p, INDIRECT_PROF_TASK, &result, sizeof(IndirectCopyProfResult))
+           .add_measurement<ProfilingMeasurements::OperationCopyInfo>();
       Event e = isect.copy(srcs, dsts, 
 			   std::vector<const typename CopyIndirection<N,T>::Base *>(1, &indirect),
-			   ProfilingRequestSet(), wait_on);
+			   prs, wait_on);
       events.push_back(e);
+      events.push_back(profile_done_event);
     }
   }
 
@@ -491,7 +583,8 @@ Event DistributedData<N,T>::scatter(IndexSpace<N,T> is, FieldID ptr_id, DST& dst
 				    FieldID src_id, FieldID dst_id,
 				    bool oor_possible, bool aliasing_possible,
 				    CustomSerdezID serdez_id,
-				    Event wait_on) const
+				    Event wait_on,
+				    Processor p) const
 {
   std::vector<Event> events;
   for(typename std::vector<Piece>::const_iterator it = pieces.begin();
@@ -507,6 +600,7 @@ Event DistributedData<N,T>::scatter(IndexSpace<N,T> is, FieldID ptr_id, DST& dst
     indirect.subfield_offset = 0;
     indirect.oor_possible = oor_possible;
     indirect.aliasing_possible = aliasing_possible;
+    indirect.next_indirection = nullptr;
 
     std::vector<CopySrcDstField> srcs, dsts;
     srcs.resize(1);
@@ -532,10 +626,26 @@ Event DistributedData<N,T>::scatter(IndexSpace<N,T> is, FieldID ptr_id, DST& dst
 	indirect.insts[0] = it2->inst;
 
 	// if we had preimages, we could intersect against those
+	IndirectCopyProfResult result;
+        UserEvent profile_done_event = UserEvent::create_user_event();
+        result.profile_done_event = profile_done_event;
+        result.src_insts[0] = it->inst;
+        result.src_insts_size = 1;
+        result.dst_insts[0] = indirect.insts[0];
+        result.dst_insts_size = 1;
+        result.src_fid = src_id;
+        result.dst_fid = dst_id;
+        result.dst_indirection_inst = it->inst;
+        result.dst_indirect_fid = ptr_id;
+        result.copy_type = 0;
+        ProfilingRequestSet prs;
+        prs.add_request(p, INDIRECT_PROF_TASK, &result, sizeof(IndirectCopyProfResult))
+             .add_measurement<ProfilingMeasurements::OperationCopyInfo>();
 	Event e = isect.copy(srcs, dsts, 
 			     std::vector<const typename CopyIndirection<N,T>::Base *>(1, &indirect),
-			     ProfilingRequestSet(), wait_on);
+			     prs, wait_on);
 	events.push_back(e);
+	events.push_back(profile_done_event);
       }
     } else {
       for(typename std::vector<typename DST::Piece>::const_iterator it2 = dst.pieces.begin();
@@ -545,10 +655,30 @@ Event DistributedData<N,T>::scatter(IndexSpace<N,T> is, FieldID ptr_id, DST& dst
 	indirect.insts.push_back(it2->inst);
       }
 
+      assert(indirect.insts.size() <= MAX_INSTS);
+      IndirectCopyProfResult result;
+      UserEvent profile_done_event = UserEvent::create_user_event();
+      result.profile_done_event = profile_done_event;
+      for (size_t i = 0; i < indirect.insts.size(); i++) {
+        result.dst_insts[i] = indirect.insts[i];
+      }
+      result.dst_insts_size = indirect.insts.size();
+      result.src_insts[0] = it->inst;
+      result.src_insts_size = 1;
+      result.src_fid = src_id;
+      result.dst_fid = dst_id;
+      result.dst_indirection_inst = it->inst;
+      result.dst_indirect_fid = ptr_id;
+      result.copy_type = 1;
+      ProfilingRequestSet prs;
+      prs.add_request(p, INDIRECT_PROF_TASK, &result, sizeof(IndirectCopyProfResult))
+           .add_measurement<ProfilingMeasurements::OperationCopyInfo>();
+
       Event e = isect.copy(srcs, dsts, 
 			   std::vector<const typename CopyIndirection<N,T>::Base *>(1, &indirect),
-			   ProfilingRequestSet(), wait_on);
+			   prs, wait_on);
       events.push_back(e);
+      events.push_back(profile_done_event);
     }
   }
 
@@ -588,7 +718,8 @@ Event DistributedData<N,T>::range_copy(IndexSpace<N,T> is, FieldID srcptr_id,
 				       const DistributedData<N,T>& dstptr, FieldID dstptr_id,
 				       DST& dst, FieldID dst_id,
 				       bool dst_oor_possible, bool dst_aliasing_possible,
-				       Event wait_on) const
+				       Event wait_on,
+				       Processor p) const
 {
   std::vector<Event> events;
   for(typename std::vector<Piece>::const_iterator it = pieces.begin();
@@ -614,6 +745,7 @@ Event DistributedData<N,T>::range_copy(IndexSpace<N,T> is, FieldID srcptr_id,
       src_ind.subfield_offset = 0;
       src_ind.oor_possible = src_oor_possible;
       src_ind.aliasing_possible = src_aliasing_possible;
+      src_ind.next_indirection = nullptr;
 
       typename CopyIndirection<N,T>::template Unstructured<DST::_N,typename DST::_T> dst_ind;
       dst_ind.field_id = dstptr_id;
@@ -622,6 +754,7 @@ Event DistributedData<N,T>::range_copy(IndexSpace<N,T> is, FieldID srcptr_id,
       dst_ind.subfield_offset = 0;
       dst_ind.oor_possible = dst_oor_possible;
       dst_ind.aliasing_possible = dst_aliasing_possible;
+      dst_ind.next_indirection = nullptr;
 
       std::vector<CopySrcDstField> srcs, dsts;
       srcs.resize(1);
@@ -648,9 +781,33 @@ Event DistributedData<N,T>::range_copy(IndexSpace<N,T> is, FieldID srcptr_id,
 	dst_ind.insts.push_back(it3->inst);
       }
 
+      assert(src_ind.insts.size() <= MAX_INSTS && dst_ind.insts.size() <= MAX_INSTS);
+      IndirectCopyProfResult result;
+      UserEvent profile_done_event = UserEvent::create_user_event();
+      result.profile_done_event = profile_done_event;
+      for (size_t i = 0; i < src_ind.insts.size(); i++) {
+        result.src_insts[i] = src_ind.insts[i];
+      }
+      result.src_insts_size = src_ind.insts.size();
+      for (size_t i = 0; i < dst_ind.insts.size(); i++) {
+        result.dst_insts[i] = dst_ind.insts[i];
+      }
+      result.dst_insts_size = dst_ind.insts.size();
+      result.src_fid = src_id;
+      result.dst_fid = dst_id;
+      result.src_indirection_inst = it->inst;
+      result.dst_indirection_inst = it2->inst;
+      result.src_indirect_fid = srcptr_id;
+      result.dst_indirect_fid = dstptr_id;
+      result.copy_type = 2;
+      ProfilingRequestSet prs;
+      prs.add_request(p, INDIRECT_PROF_TASK, &result, sizeof(IndirectCopyProfResult))
+           .add_measurement<ProfilingMeasurements::OperationCopyInfo>();
+
       Event e = isect2.copy(srcs, dsts, indirects,
-			    ProfilingRequestSet(), wait_on);
+			    prs, wait_on);
       events.push_back(e);
+      events.push_back(profile_done_event);
     }
   }
 
@@ -807,6 +964,7 @@ template <int N, typename T, int N2, typename T2, typename DT>
 bool scatter_gather_test(const std::vector<Memory>& mems,
 			 T size1, T2 size2,
 			 int pieces1, int pieces2,
+			 Processor p,
 			 CustomSerdezID serdez_id = 0)
 {
   Rect<N,T> r1;
@@ -852,7 +1010,7 @@ bool scatter_gather_test(const std::vector<Memory>& mems,
     region1.template gather<DT>(is1, FID_PTR1, region2, FID_DATA1, FID_DATA1,
 				false /*!oor_possible*/,
 				serdez_id,
-				Event::NO_EVENT).wait();
+				Event::NO_EVENT, p).wait();
 
     if(!region1.template verify<DT>(is1, FID_DATA1, Event::NO_EVENT))
       return false;
@@ -863,7 +1021,7 @@ bool scatter_gather_test(const std::vector<Memory>& mems,
 				 false /*!oor_possible*/,
 				 true /*aliasing_possible*/,
 				 serdez_id,
-				 Event::NO_EVENT).wait();
+				 Event::NO_EVENT, p).wait();
 
     if(!region2.template verify<DT>(is2, FID_DATA2, Event::NO_EVENT))
       return false;
@@ -1050,7 +1208,8 @@ protected:
 template <int N, typename T, int N2, typename T2, int N3, typename T3, typename DT>
 bool range_copy_test(const std::vector<Memory>& mems,
 		     T size1, T2 size2, T3 size3,
-		     int pieces1, int pieces2, int pieces3)
+		     int pieces1, int pieces2, int pieces3,
+		     Processor p)
 {
   Rect<N,T> r1;
   Rect<N2,T2> r2;
@@ -1139,7 +1298,7 @@ bool range_copy_test(const std::vector<Memory>& mems,
     false /*!src_oor_possible*/, true /*src_aliasing_possible*/,
     region1, FID_RANGE2, region3, FID_DATA1,
     false /*!dst_oor_possible*/, true /*dst_aliasing_possible*/,
-    Event::NO_EVENT).wait();
+    Event::NO_EVENT, p).wait();
 
   if(!region3.template verify<DT>(is3, FID_DATA1, Event::NO_EVENT))
     return false;
@@ -1181,7 +1340,8 @@ void top_level_task(const void *args, size_t arglen,
 						 TestConfig::size1,
 						 TestConfig::size2,
 						 TestConfig::pieces1,
-						 TestConfig::pieces2))
+						 TestConfig::pieces2,
+						 p))
     ok = false;
 
   // really big (non-power-of-2) fields
@@ -1190,7 +1350,8 @@ void top_level_task(const void *args, size_t arglen,
 						    TestConfig::size1,
 						    TestConfig::size2,
 						    TestConfig::pieces1,
-						    TestConfig::pieces2))
+						    TestConfig::pieces2,
+						    p))
     ok = false;
 
   // serdez
@@ -1200,6 +1361,7 @@ void top_level_task(const void *args, size_t arglen,
 						 TestConfig::size2,
 						 TestConfig::pieces1,
 						 TestConfig::pieces2,
+						 p,
 						 SERDEZ_WRAP_FLOAT))
     ok = false;
 
@@ -1207,7 +1369,8 @@ void top_level_task(const void *args, size_t arglen,
 						     4, 4, 4,
 						     1,
 						     1 /*TestConfig::pieces1*/,
-						     1 /*TestConfig::pieces2*/))
+						     1 /*TestConfig::pieces2*/,
+						     p))
     ok = false;
 
   if(ok)
@@ -1253,6 +1416,12 @@ int main(int argc, char **argv)
   rt.register_custom_serdez<WrappingSerdez<float> >(SERDEZ_WRAP_FLOAT);
 
   rt.register_task(TOP_LEVEL_TASK, top_level_task);
+
+  Processor::register_task_by_kind(Processor::LOC_PROC, false /*!global*/,
+				   INDIRECT_PROF_TASK,
+				   CodeDescriptor(indirect_prof_task),
+				   ProfilingRequestSet(),
+				   0, 0).wait();
 
   // select a processor to run the top level task on
   Processor p = Machine::ProcessorQuery(Machine::get_machine())

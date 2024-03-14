@@ -1,4 +1,4 @@
--- Copyright 2022 Stanford University
+-- Copyright 2024 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
 
 -- runs-with:
 -- [
---   ["-ll:cpu", "4", "-ll:py", "1", "-ll:pyimport", "stencil"]
+--   ["-ll:cpu", "4", "-ll:py", "1", "-ll:pyimport", "stencil", "-foverride-demand-cuda", "1"]
 -- ]
 
 package.terrapath = package.terrapath .. ";" .. (arg[0]:match(".*/") or "./") .. "../../../language/examples/?.rg"

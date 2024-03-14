@@ -1,4 +1,4 @@
--- Copyright 2022 Stanford University
+-- Copyright 2024 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -1192,7 +1192,7 @@ task toplevel()
     for _ = 0, par_init do
       -- __demand(__index_launch)
       for i = 0, npieces do
-        initialize_topology(conf, i, rz_all_p[i],
+        initialize_topology(conf, rz_all_p[i],
                             rp_all_private_p[i],
                             rp_all_shared_p[i],
                             rp_all_ghost_p[i],
@@ -1377,11 +1377,5 @@ task toplevel()
   -- write_output(conf, rz_all, rp_all, rs_all)
 end
 
-if os.getenv('SAVEOBJ') == '1' then
-  local root_dir = arg[0]:match(".*/") or "./"
-  local link_flags = {"-L" .. root_dir, "-lpennant"}
-  local exe = os.getenv('OBJNAME') or "pennant"
-  regentlib.saveobj(toplevel, exe, "executable", cpennant.register_mappers, link_flags)
-else
-  regentlib.start(toplevel, cpennant.register_mappers)
-end
+local launcher = require("std/launcher")
+launcher.launch(toplevel, "pennant", cpennant.register_mappers, {"-lpennant", "-lm"})

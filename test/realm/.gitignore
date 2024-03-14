@@ -9,6 +9,7 @@ barrier_reduce
 taskreg
 deppart
 memspeed
+memmodel
 idcheck
 inst_reuse
 transpose
@@ -22,3 +23,4 @@ large_tls
 coverings
 realm_reinit
 sparse_construct
+multiaffine

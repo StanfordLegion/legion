@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University
+/* Copyright 2024 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,9 +25,9 @@ class VariantMapper : public DefaultMapper
 public:
   VariantMapper(MapperRuntime *rt, Machine machine, Processor local,
                 const char *mapper_name);
-  virtual void default_policy_rank_processor_kinds(
+  void default_policy_rank_processor_kinds(
                                     MapperContext ctx, const Task &task, 
-                                    std::vector<Processor::Kind> &ranking);
+                                    std::vector<Processor::Kind> &ranking) override;
 };
 
 VariantMapper::VariantMapper(MapperRuntime *rt, Machine machine, Processor local,

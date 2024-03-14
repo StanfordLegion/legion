@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -49,15 +49,11 @@ namespace Legion {
   /*static*/ const complex<__half> DiffReduction<complex<__half> >::identity = complex<__half>(__half(0, false/*raw*/), __half(0, false/*raw*/));
   /*static*/ const complex<__half> ProdReduction<complex<__half> >::identity = complex<__half>(__half(1, false/*raw*/), __half(0, false/*raw*/));
   /*static*/ const complex<__half> DivReduction<complex<__half> >::identity = complex<__half>(__half(1, false/*raw*/), __half(0, false/*raw*/));
-  /*static*/ const complex<__half> MaxReduction<complex<__half> >::identity = complex<__half>(MaxReduction<__half>::identity, MaxReduction<__half>::identity);
-  /*static*/ const complex<__half> MinReduction<complex<__half> >::identity = complex<__half>(MinReduction<__half>::identity, MinReduction<__half>::identity);
 #endif
   /*static*/ const complex<float> SumReduction<complex<float> >::identity = complex<float>(0.f, 0.f);
   /*static*/ const complex<float> DiffReduction<complex<float> >::identity = complex<float>(0.f, 0.f);
   /*static*/ const complex<float> ProdReduction<complex<float> >::identity = complex<float>(1.f, 0.f);
   /*static*/ const complex<float> DivReduction<complex<float> >::identity = complex<float>(1.f, 0.f);
-  /*static*/ const complex<float> MaxReduction<complex<float> >::identity = complex<float>(MaxReduction<float>::identity, MaxReduction<float>::identity);
-  /*static*/ const complex<float> MinReduction<complex<float> >::identity = complex<float>(MinReduction<float>::identity, MinReduction<float>::identity);
 
   /*static*/ const complex<double> SumReduction<complex<double> >::identity = complex<double>(0.f, 0.f);
 #endif
@@ -67,17 +63,26 @@ namespace Legion {
       type >(), NULL, NULL, false);
 
   namespace Internal {
-#if defined(LEGION_USE_CUDA) && !defined(LEGION_GPU_REDUCTIONS)
+#if defined(LEGION_USE_CUDA)
     // Defined in legion_redop.cu
     extern void register_builtin_reduction_operators_cuda(void);
+#endif
+#if defined(LEGION_USE_HIP)
+    // Defined in legion_redop.cpp
+    extern void register_builtin_reduction_operators_hip(void);
 #endif
 
     /*static*/ void Runtime::register_builtin_reduction_operators(void)
     {
-#if defined(LEGION_USE_CUDA) && !defined(LEGION_GPU_REDUCTIONS)
-      // We need to register CUDA reductions with Realm, so that happens in
-      //  legion_redop.cu
+#if defined(LEGION_USE_CUDA) || defined(LEGION_USE_HIP)
+      // We need to register CUDA/HIP reductions with Realm, so that happens in
+      //  legion_redop.cu/cpp
+#ifdef LEGION_USE_CUDA
       register_builtin_reduction_operators_cuda();
+#endif
+#ifdef LEGION_USE_HIP
+      register_builtin_reduction_operators_hip();
+#endif      
 #else
       // Only CPU reductions are needed, so register them here
       LEGION_REDOP_LIST(REGISTER_BUILTIN_REDOP)

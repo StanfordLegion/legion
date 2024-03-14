@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University
+/* Copyright 2024 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -66,9 +66,18 @@ void CircuitMapper::map_task(const MapperContext      ctx,
       else
         target_memory = fbmem;
       const RegionRequirement &req = task.regions[idx];
-      map_circuit_region(ctx, req.region, task.target_proc, 
-                         target_memory, output.chosen_instances[idx], 
-                         req.privilege_fields, req.redop);
+      // Handle the case where we need to colocate fields
+      if (req.tag == COLOCATION_NEXT_TAG)
+        map_circuit_region(ctx, req.region, task.target_proc, 
+                           target_memory, output.chosen_instances[idx], 
+                           req.privilege_fields, req.redop,
+                           task.regions[idx+1].region);
+      else if (req.tag == COLOCATION_PREV_TAG)
+        output.chosen_instances[idx] = output.chosen_instances[idx-1];
+      else
+        map_circuit_region(ctx, req.region, task.target_proc, 
+                           target_memory, output.chosen_instances[idx], 
+                           req.privilege_fields, req.redop);
     }
     runtime->acquire_instances(ctx, output.chosen_instances);
   }
@@ -121,19 +130,19 @@ void CircuitMapper::map_circuit_region(const MapperContext ctx, LogicalRegion re
                                        Processor target_proc, Memory target,
                                        std::vector<PhysicalInstance> &instances,
                                        const std::set<FieldID> &privilege_fields,
-                                       ReductionOpID redop)
+                                       ReductionOpID redop, LogicalRegion colocation)
 {
-  const std::pair<LogicalRegion,Memory> key(region, target);
+  const MemoizationKey key(region, colocation, target);
   if (redop > 0) {
     assert(redop == REDUCE_ID);
-    std::map<std::pair<LogicalRegion,Memory>,PhysicalInstance>::const_iterator
+    std::map<MemoizationKey,PhysicalInstance>::const_iterator
       finder = reduction_instances.find(key);
     if (finder != reduction_instances.end()) {
       instances.push_back(finder->second);
       return;
     }
   } else {
-    std::map<std::pair<LogicalRegion,Memory>,PhysicalInstance>::const_iterator
+    std::map<MemoizationKey,PhysicalInstance>::const_iterator
       finder = local_instances.find(key);
     if (finder != local_instances.end()) {
       instances.push_back(finder->second);
@@ -142,6 +151,8 @@ void CircuitMapper::map_circuit_region(const MapperContext ctx, LogicalRegion re
   }
   // First time through, then we make an instance
   std::vector<LogicalRegion> regions(1, region);  
+  if (colocation.exists())
+    regions.push_back(colocation);
   LayoutConstraintSet layout_constraints;
   // No specialization
   if (redop > 0)
@@ -193,6 +204,22 @@ void CircuitMapper::map_circuit_region(const MapperContext ctx, LogicalRegion re
     reduction_instances[key] = result;
   else
     local_instances[key] = result;
+  if (colocation.exists())
+  {
+    // Save it in the non-colocation cases too
+    const MemoizationKey one(region, LogicalRegion::NO_REGION, target);
+    const MemoizationKey two(colocation, LogicalRegion::NO_REGION, target);
+    if (redop > 0)
+    {
+      reduction_instances[one] = result;
+      reduction_instances[two] = result;
+    }
+    else
+    {
+      local_instances[one] = result;
+      local_instances[two] = result;
+    }
+  }
 }
 
 void update_mappers(Machine machine, Runtime *runtime,

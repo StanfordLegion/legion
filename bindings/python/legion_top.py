@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# Copyright 2022 Stanford University, NVIDIA Corporation
+# Copyright 2024 Stanford University, NVIDIA Corporation
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -27,8 +27,15 @@ import readline
 import threading
 import importlib
 import traceback
+import warnings
 
 from legion_cffi import ffi, lib as c
+
+from legion_info import __version__
+
+#################################################################
+### Shared between Legion builtin Python and canonical Python ###
+#################################################################
 
 try:
     unicode # Python 2
@@ -40,8 +47,6 @@ try:
 except:
     FileNotFoundError = IOError # Python 2
 
-# This has to match the unique name in main.cc
-_unique_name = 'legion_python'
 
 # Storage for variables that apply to the top-level task.
 # IMPORTANT: They are valid ONLY in the top-level task.
@@ -54,7 +59,67 @@ top_level = threading.local()
 
 # This variable tracks all objects that need to be cleaned
 # up in any python process created by legion python
-cleanup_items = list()
+_cleanup_items = list()
+
+# This variable stores the set of modules that were already loaded at entry to
+# legion mode. At shutdown we will only remove any modules that were loaded
+# since then.
+_starting_modules = None
+
+
+def remove_added_modules():
+    for mod in set(sys.modules.keys()) - _starting_modules:
+        del sys.modules[mod]
+
+
+def add_cleanup_item(item):
+    _cleanup_items.append(item)
+
+
+# Helper class for deduplicating output streams with control replication
+class LegionOutputStream(object):
+    def __init__(self, stream):
+        # This is the original stream
+        self.stream = stream
+
+    def close(self):
+        self.stream.close()
+
+    def fileno(self):
+        return self.stream.fileno()
+
+    def flush(self):
+        self.stream.flush()
+
+    def write(self, string):
+        if self.print_local_shard():
+            self.stream.write(string)
+
+    def writelines(self, sequence):
+        if self.print_local_shard():
+            self.stream.writelines(sequence)
+
+    def isatty(self):
+        return self.stream.isatty()
+
+    def print_local_shard(self):
+        return c.legion_runtime_local_shard_without_context() == 0
+        
+    def set_parent(self, parent):
+        self.stream.set_parent(parent)
+
+# Replace the output stream with one that will deduplicate
+# printing for any control-replicated tasks
+sys.stdout = LegionOutputStream(sys.stdout)
+
+
+# Also direct output from the `warnings` module to this deduplicated
+# stdout. This avoids flooding of output in control replicated
+# applications that use `warnings`. This method of doing so
+# was taken from https://stackoverflow.com/a/858928.
+def customwarn(message, category, filename, lineno, file=None, line=None):
+    sys.stdout.write(warnings.formatwarning(message, category, filename, lineno))
+warnings.showwarning = customwarn
 
 
 def input_args(filter_runtime_options=False):
@@ -67,7 +132,17 @@ def input_args(filter_runtime_options=False):
     if filter_runtime_options:
         i = 1 # Skip program name
 
-        prefixes = ['-cuda:', '-numa:', '-dm:', '-bishop:']
+        # Legion & Realm will remove any flag that they consume, but we need to
+        # do some extra filtering on top of that in some cases, to make sure
+        # runtime arguments don't make it to the user code.
+        prefixes = [
+            # These flags are consumed by optional modules. If that module
+            # is not loaded, the flag will not be cleared.
+            '-cuda:', '-numa:', '-ucx:', '-gex:',
+            # These flags are read by other parts of the stack, which cannot
+            # remove the arguments they parse.
+            '-dm:', '-bishop:'
+        ]
         while i < len(args):
             match = False
             for prefix in prefixes:
@@ -87,6 +162,26 @@ def input_args(filter_runtime_options=False):
                 continue
             i += 1
     return args
+
+
+# In general we discourage the use of this function, but some libraries are
+# not safe to use with control replication so this will give them a way
+# to check whether they are running in a safe context or not
+def is_control_replicated():
+    try:
+        # We should only be doing something for this if we're the top-level task
+        return c.legion_context_get_num_shards(top_level.runtime[0],
+                top_level.context[0], True) > 1
+    except AttributeError:
+        raise RuntimeError('"is_control_replicated" must be called in a legion_python task')
+
+
+###########################################################
+################ Legion Python starts here ################
+###########################################################
+
+# This has to match the unique name in main.cc
+_unique_name = 'legion_python'
 
 
 # This code is borrowed from the Python docs:
@@ -140,9 +235,10 @@ def remove_all_aliases(to_delete):
         del sys.modules[name]
 
 
-def run_cmd(cmd, run_name=None):
-    import imp
-    module = imp.new_module(run_name)
+def run_cmd(cmd, run_name):
+    import importlib.util
+    module_spec = importlib.util.find_spec(run_name)
+    module = importlib.util.module_from_spec(module_spec)
     setattr(module, '__name__', run_name)
     setattr(module, '__package__', None)
 
@@ -180,9 +276,10 @@ def run_cmd(cmd, run_name=None):
 # We can't use runpy for this since runpy is aggressive about
 # cleaning up after itself and removes the module before execution
 # has completed.
-def run_path(filename, run_name=None):
-    import imp
-    module = imp.new_module(run_name)
+def run_path(filename, run_name):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(run_name, filename)
+    module = importlib.util.module_from_spec(spec)
     setattr(module, '__name__', run_name)
     setattr(module, '__file__', filename)
     setattr(module, '__loader__', None)
@@ -226,9 +323,9 @@ def run_path(filename, run_name=None):
     del module
 
 
-# This method will ensure that a module is globally imported across all 
+# This method will ensure that a module is globally imported across all
 # Python processors in a Legion job before returning. It cannot be called
-# within an import statement though without creating a deadlock with 
+# within an import statement though without creating a deadlock with
 # Python's import locks. Alternatively, the user can set the 'block'
 # parameter to 'False' which will return a future for when the global
 # import is complete and the function will return a handle to a future
@@ -258,7 +355,7 @@ def import_global(module, check_depth=True, block=True):
             ffi.buffer(c.legion_future_get_untyped_pointer(future),4))[0]
     c.legion_future_destroy(future)
     assert num_python_procs > 0
-    # Launch an index space task across all the python 
+    # Launch an index space task across all the python
     # processors to import the module in every interpreter
     task_id = c.legion_runtime_generate_library_task_ids(
             top_level.runtime[0], _unique_name.encode('utf-8'), 3) + 1
@@ -274,9 +371,9 @@ def import_global(module, check_depth=True, block=True):
     args[0].args = array
     args[0].arglen = arglen
     argmap = c.legion_argument_map_create()
-    launcher = c.legion_index_launcher_create(task_id, domain, 
+    launcher = c.legion_index_launcher_create(task_id, domain,
             args[0], argmap, c.legion_predicate_true(), False, mapper, 0)
-    future = c.legion_index_launcher_execute_reduction(top_level.runtime[0], 
+    future = c.legion_index_launcher_execute_reduction(top_level.runtime[0],
             top_level.context[0], launcher, c.LEGION_REDOP_SUM_INT32)
     c.legion_index_launcher_destroy(launcher)
     c.legion_argument_map_destroy(argmap)
@@ -291,14 +388,11 @@ def import_global(module, check_depth=True, block=True):
         return future
 
 
-# In general we discourage the use of this function, but some libraries are
-# not safe to use with control replication so this will give them a way
-# to check whether they are running in a safe context or not
-def is_control_replicated():
-    return False
-
-
 def legion_python_main(raw_args, user_data, proc):
+    # record modules loaded at the beginning of the run
+    global _starting_modules
+    _starting_modules = set(sys.modules.keys())
+
     raw_arg_ptr = ffi.new('char[]', bytes(raw_args))
     raw_arg_size = len(raw_args)
 
@@ -340,27 +434,39 @@ def legion_python_main(raw_args, user_data, proc):
     elif args[start] == '-c':
         if len(args) > (start+1):
             sys.argv = ['-c'] + list(args[start+2:])
-            run_cmd(args[start+1], run_name='__main__')
+            run_cmd(args[start+1], '__main__')
         else:
             print('Argument expected for the -c option')
             c.legion_runtime_set_return_code(1)
     elif args[start] == '-m':
         if len(args) > (start+1):
-            filename = args[start+1] + '.py'
+            mod_name = args[start+1]
+            mod_dir = mod_name.split(".")
+            if len(mod_dir) > 1:
+                prefix_path = os.path.join(*mod_dir[:-1])
+                mod_name = mod_dir[-1]
+            else:
+                prefix_path = ""
+            filename = mod_name + '.py'
             found = False
             for path in sys.path:
-                for root,dirs,files in os.walk(path):
-                    if filename not in files:
-                        continue
-                    module = os.path.join(root, filename)
-                    sys.argv = [module] + list(args[start+2:])
-                    run_path(module, run_name='__main__')
-                    found = True
-                    break
-                if found:
-                    break
+                path = os.path.join(path, prefix_path)
+                main_py_full_path = os.path.join(path, mod_name, '__main__.py')
+                filename_full_path = os.path.join(path, filename)
+                # first, check mod_name/__main__.py
+                if os.path.exists(main_py_full_path):
+                    module = main_py_full_path
+                # second, check mod_name.py
+                elif os.path.exists(filename_full_path):
+                    module = filename_full_path
+                else:
+                    continue
+                sys.argv = [module] + list(args[start+2:])
+                run_path(module, '__main__')
+                found = True
+                break
             if not found:
-                print('No module named '+args[start+1])
+                print('No module named ' + mod_name)
                 c.legion_runtime_set_return_code(1)
         else:
             print('Argument expected for the -m option')
@@ -368,13 +474,14 @@ def legion_python_main(raw_args, user_data, proc):
     else:
         assert start < len(args)
         sys.argv = list(args[start:])
-        run_path(args[start], run_name='__main__')
+        run_path(args[start], '__main__')
 
     if local_cleanup:
         # If we were control replicated then we just need to do our cleanup
         # Do it in reverse order so modules get FILO properties
-        for cleanup in reversed(cleanup_items):
+        for cleanup in reversed(_cleanup_items):
             cleanup()
+        remove_added_modules()
     else:
         # Otherwise, run a task on every node to perform the cleanup
         mapper = c.legion_runtime_generate_library_mapper_ids(
@@ -385,7 +492,7 @@ def legion_python_main(raw_args, user_data, proc):
                 ffi.buffer(c.legion_future_get_untyped_pointer(future),4))[0]
         c.legion_future_destroy(future)
         assert num_python_procs > 0
-        # Launch an index space task across all the python 
+        # Launch an index space task across all the python
         # processors to import the module in every interpreter
         task_id = c.legion_runtime_generate_library_task_ids(
                 top_level.runtime[0], _unique_name.encode('utf-8'), 3) + 2
@@ -397,7 +504,7 @@ def legion_python_main(raw_args, user_data, proc):
         args[0].args = ffi.NULL
         args[0].arglen = 0
         argmap = c.legion_argument_map_create()
-        launcher = c.legion_index_launcher_create(task_id, domain, 
+        launcher = c.legion_index_launcher_create(task_id, domain,
             args[0], argmap, c.legion_predicate_true(), False, mapper, 0)
         future_map = c.legion_index_launcher_execute(top_level.runtime[0],
                 top_level.context[0], launcher)
@@ -411,7 +518,7 @@ def legion_python_main(raw_args, user_data, proc):
     del top_level.context
     del top_level.task
 
-    # Force a garbage collection so that we know that all objects which can 
+    # Force a garbage collection so that we know that all objects which can
     # be collected are actually collected before we exit the top-level task
     gc.collect()
 
@@ -439,14 +546,15 @@ def legion_python_cleanup(raw_args, user_data, proc):
     top_level.runtime, top_level.context, top_level.task = runtime, context, task
 
     # Do it in reverse order so modules get FILO properties
-    for cleanup in reversed(cleanup_items):
+    for cleanup in reversed(_cleanup_items):
         cleanup()
+    remove_added_modules()
 
     del top_level.runtime
     del top_level.context
     del top_level.task
 
-    # Force a garbage collection so that we know that all objects which can 
+    # Force a garbage collection so that we know that all objects which can
     # be collected are actually collected before we exit this cleanup task
     gc.collect()
 
@@ -471,8 +579,8 @@ def legion_python_import_global(raw_args, user_data, proc):
 
     top_level.runtime, top_level.context, top_level.task = runtime, context, task
 
-    # Get the name of the task 
-    module_name = ffi.unpack(ffi.cast('char*', c.legion_task_get_args(task[0])), 
+    # Get the name of the task
+    module_name = ffi.unpack(ffi.cast('char*', c.legion_task_get_args(task[0])),
             c.legion_task_get_arglen(task[0])).decode('utf-8')
     try:
         globals()[module_name] = importlib.import_module(module_name)
@@ -488,3 +596,63 @@ def legion_python_import_global(raw_args, user_data, proc):
 
     c.legion_task_postamble(runtime[0], context[0], ffi.from_buffer(result), 4)
 
+
+###########################################################
+############## Canonical Python starts here ###############
+###########################################################
+
+# This variable is used to track how many times the legion_canonical_python_main
+# has been called. We only initialize the top level task when top_level_counter == 0
+_top_level_counter = 0
+
+# Since we are not able to shut down and re-start Legion, we use this variable to
+# track if Legion has been inited
+_legion_inited = False
+
+
+def legion_canonical_python_main(sys_argv=None):
+    # record modules loaded at the beginning of the run
+    global _starting_modules
+    _starting_modules = set(sys.modules.keys())
+
+    # Do not init top level task if it has been initialized
+    global _top_level_counter
+    _top_level_counter += 1
+    if _top_level_counter > 1:
+        return
+    global _legion_inited
+    assert _legion_inited == False
+
+    if sys_argv is None:
+        sys_argv = sys.argv
+    argv = []
+    for arg in sys_argv:
+        argv.append(ffi.new("char[]", arg.encode('ascii')))
+    c.legion_canonical_python_begin_top_level_task(len(argv), argv)
+    context = c.legion_runtime_get_context()
+    runtime = c.legion_runtime_get_runtime()
+    top_level.runtime, top_level.context, top_level.task = [runtime], [context], [None]
+    _legion_inited = True
+
+def legion_canonical_python_cleanup():
+    global _top_level_counter
+    _top_level_counter -= 1
+    if _top_level_counter > 0:
+        return
+    global _legion_inited
+    assert _legion_inited == True
+    # add an execution fence to make sure all previous tasks are done
+    future = c.legion_runtime_issue_execution_fence(
+               top_level.runtime[0], top_level.context[0])
+    c.legion_future_wait(future, True, ffi.NULL)
+    c.legion_future_destroy(future)
+    # clean up modules
+    for cleanup in reversed(_cleanup_items):
+        cleanup()
+    remove_added_modules()
+    # clean up context
+    c.legion_context_destroy(top_level.context[0])
+    c.legion_canonical_python_end_top_level_task()
+    del top_level.context
+    del top_level.runtime
+    gc.collect()

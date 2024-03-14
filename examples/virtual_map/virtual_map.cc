@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -160,7 +160,7 @@ void make_data_task(const Task *task,
                     Context ctx, Runtime *runtime)
 {
   const MakeDataTaskArgs& args = *static_cast<const MakeDataTaskArgs *>(task->args);
-  int subregion_index = task->index_point.get_point<1>();
+  int subregion_index = task->index_point[0];
 
   // we should _NOT_ have a mapping of our region
   assert(!regions[0].is_mapped());
@@ -199,7 +199,7 @@ void make_data_task(const Task *task,
   // now we get the name of the logical subregion we just created and inline map
   // it to generate our output
   LogicalPartition alloc_lp = runtime->get_logical_partition(my_lr, alloc_ip);
-  IndexSpace alloc_is = runtime->get_index_subspace(alloc_ip, DomainPoint::from_point<1>(0));
+  IndexSpace alloc_is = runtime->get_index_subspace(alloc_ip, DomainPoint(Point<1>(0)));
   LogicalRegion alloc_lr = runtime->get_logical_subregion(alloc_lp, alloc_is);
 
   log_app.debug() << "created subregion " << alloc_lr;
@@ -238,7 +238,7 @@ void use_data_task(const Task *task,
 		   const std::vector<PhysicalRegion> &regions,
 		   Context ctx, Runtime *runtime)
 {
-  int subregion_index = task->index_point.get_point<1>();
+  int subregion_index = task->index_point[0];
 
   PhysicalRegion pr = regions[0];
   Rect<1> my_bounds;
@@ -254,7 +254,7 @@ void use_data_task(const Task *task,
     // getting from the index partition to the logical subregion is identical to 
     // what was done in make_data_task()
     LogicalPartition alloc_lp = runtime->get_logical_partition(my_lr, alloc_ip);
-    IndexSpace alloc_is = runtime->get_index_subspace(alloc_ip, DomainPoint::from_point<1>(0));
+    IndexSpace alloc_is = runtime->get_index_subspace(alloc_ip, DomainPoint(Point<1>(0)));
     LogicalRegion alloc_lr = runtime->get_logical_subregion(alloc_lp, alloc_is);
 
     log_app.debug() << "looked up subregion " << alloc_lr;
@@ -368,6 +368,7 @@ int main(int argc, char **argv)
   {
     TaskVariantRegistrar top_level_registrar(TOP_LEVEL_TASK_ID);
     top_level_registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+    top_level_registrar.set_replicable();
     Runtime::preregister_task_variant<top_level_task>(top_level_registrar, 
                                                       "Top Level Task");
     Runtime::set_top_level_task_id(TOP_LEVEL_TASK_ID);

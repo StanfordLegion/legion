@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -161,7 +161,7 @@ namespace Realm {
       if(((nmask[i >> 3] >> (i & 7)) & 1) != 0) {
 	// free information comes from /sys...
 	char fname[80];
-	sprintf(fname, "/sys/devices/system/node/node%d/meminfo", i);
+	snprintf(fname, sizeof fname, "/sys/devices/system/node/node%d/meminfo", i);
 	FILE *f = fopen(fname, "r");
 	if(!f) {
 	  fprintf(stderr, "can't read '%s': %s\n", fname, strerror(errno));
@@ -227,7 +227,7 @@ namespace Realm {
 	  continue;
 	// find the node symlink to determine the node
 	char path2[256];
-	sprintf(path2, "/sys/devices/system/cpu/%.16s", de->d_name);
+	snprintf(path2, sizeof path2, "/sys/devices/system/cpu/%.16s", de->d_name);
 	DIR *d2 = opendir(path2);
 	if(!d2) {
 	  fprintf(stderr, "couldn't read '%s': %s\n", path2, strerror(errno));
@@ -319,7 +319,7 @@ namespace Realm {
       std::vector<int>& v = saved_distances[node1];
 
       char fname[256];
-      sprintf(fname, "/sys/devices/system/node/node%d/distance", node1);
+      snprintf(fname, sizeof fname, "/sys/devices/system/node/node%d/distance", node1);
       FILE *f = fopen(fname, "r");
       if(!f) {
 	fprintf(stderr, "can't read '%s': %s\n", fname, strerror(errno));

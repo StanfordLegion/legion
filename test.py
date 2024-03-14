@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# Copyright 2022 Stanford University
+# Copyright 2024 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@
 from __future__ import print_function
 import argparse, datetime, glob, json, multiprocessing, os, platform, shlex, shutil, subprocess, sys, traceback, tempfile
 import signal
+from pathlib import Path
 
 make_exe = os.environ.get('MAKE', 'make')
 
@@ -67,14 +68,68 @@ legion_cxx_tests = [
     ['examples/attach_index_space/index_space_attach', []],
     ['examples/predication/predication', []],
     ['examples/layout_constraints/transpose', []],
+    ['examples/padded_instances/padded_instances', []],
     ['examples/inline_tasks/inline_tasks', []],
+    ['examples/allreduce/allreduce', []],
+    ['examples/tree_collectives/tree_collectives', []],
     ['examples/local_function_tasks/local_function_tasks', []],
+    ['examples/provenance/provenance', []],
+    ['examples/tiling/tiling', []],
+    ['examples/machine_config/machine_config', []],
+    ['examples/future_map_transforms/future_map_transforms', []],
+    ['examples/collective_writes/collective_writes', ['-ll:cpu', '4']],
+    ['examples/concurrent_tasks/concurrent', ['-ll:cpu', '4']],
     # Comment this test out until it works everywhere
     #['examples/implicit_top_task/implicit_top_task', []],
 
     # Tests
     ['test/rendering/rendering', ['-i', '2', '-n', '64', '-ll:cpu', '4']],
-    ['test/legion_stl/test_stl', []],
+    ['test/output_requirements/output_requirements', []],
+    ['test/output_requirements/output_requirements', ['-replicate']],
+    ['test/output_requirements/output_requirements', ['-index']],
+    ['test/output_requirements/output_requirements', ['-index', '-replicate']],
+    ['test/output_requirements/output_requirements', ['-empty']],
+    ['test/output_requirements/output_requirements', ['-empty', '-replicate']],
+    ['test/output_requirements/output_requirements', ['-empty', '-index']],
+    ['test/output_requirements/output_requirements', ['-empty', '-index', '-replicate']],
+    ['test/disjoint_complete/disjoint_complete', []],
+    ['test/reduce_future/reduce_future', ['-ll:cpu', '4']],
+    ['test/nested_replication/nested_replication', ['-ll:cpu', '4']],
+    ['test/ctrl_repl_safety/ctrl_repl_safety', [':0:0', '-ll:cpu', '4']],
+    ['test/ctrl_repl_safety/ctrl_repl_safety', [':0:1', '-ll:cpu', '4', '-lg:safe_ctrlrepl', '1']],
+    ['test/ctrl_repl_safety/ctrl_repl_safety', [':1:0', '-ll:cpu', '4']],
+    ['test/ctrl_repl_safety/ctrl_repl_safety', [':1:1', '-ll:cpu', '4', '-lg:safe_ctrlrepl', '1']],
+
+    # Tutorial/realm
+    ['tutorial/realm/hello_world/realm_hello_world', []],
+    ['tutorial/realm/machine_model/realm_machine_model', []],
+    ['tutorial/realm/events/realm_events', []],
+    ['tutorial/realm/region_instances/realm_region_instances', []],
+    ['tutorial/realm/deferred_allocation/realm_deferred_allocation', []],
+    ['tutorial/realm/index_space_ops/realm_index_space_ops', []],
+    ['tutorial/realm/index_space_copy_fill/realm_index_space_copy_fill', []],
+    ['tutorial/realm/reductions/realm_reductions', []],
+    ['tutorial/realm/barrier/realm_barrier', []],
+    ['tutorial/realm/subgraph/realm_subgraph', []],
+    ['tutorial/realm/reservation/realm_reservation', []],
+    ['tutorial/realm/completion_queue/realm_completion_queue', []],
+    ['tutorial/realm/profiling/realm_profiling', []],
+]
+
+if 'USE_CUDA' in os.environ and os.environ['USE_CUDA'] == 1:
+    legion_cxx_tests += [
+        ['tutorial/realm/cuda_interop/realm_cuda_interop', []],
+    ]
+
+legion_cxx_prof_tests = [
+    ['examples/provenance/provenance', []],
+    ['test/gather_perf/gather_perf', ['-m', '1']],
+    ['test/gather_perf/gather_perf', ['-m', '2']],
+    ['test/gather_perf/gather_perf', ['-m', '3']],
+    ['test/gather_perf/gather_perf', ['-m', '4']],
+    ['test/gather_perf/gather_perf', ['-m', '5']],
+    ['test/gather_perf/gather_perf', ['-m', '6']],
+    ['test/gather_perf/gather_perf', ['-m', '7']],
 ]
 
 legion_fortran_tests = [
@@ -100,7 +155,7 @@ if platform.system() != 'Darwin':
 legion_network_cxx_tests = [
     # Examples
     ['examples/mpi_interop/mpi_interop', []],
-
+    ['examples/mpi_with_ctrl_repl/mpi_with_ctrl_repl', []],
     # Tests
     ['test/bug954/bug954', ['-ll:rsize', '1024']],
 ]
@@ -151,6 +206,10 @@ legion_python_cxx_tests = [
     ['bindings/python/legion_python', ['tests/pass/print_once.py', '-ll:py', '1', '-ll:cpu', '0']],
     ['bindings/python/legion_python', ['tests/pass/privileges.py', '-ll:py', '1', '-ll:cpu', '0']],
     ['bindings/python/legion_python', ['tests/pass/no_access.py', '-ll:py', '1', '-ll:cpu', '0']],
+
+    # Tests for Package Import
+    ['bindings/python/legion_python', ['-m', 'tests.pass.test_package1.a.b.c', '-ll:py', '1', '-ll:cpu', '0']],
+    ['bindings/python/legion_python', ['-m', 'tests.pass.test_package2.a.b.c', '-ll:py', '1', '-ll:cpu', '0']],
 
     # Examples
     ['examples/python_interop/python_interop', ['-ll:py', '1']],
@@ -229,6 +288,19 @@ def cmd(command, env=None, cwd=None, timelimit=None):
     else:
         return subprocess.check_call(command, env=env, cwd=cwd)
 
+def clone_github(namespace, repository, output_dir, tmp_dir, branch='master'):
+    # GitHub clones fail regularly, so we need to replace "git clone"
+    # with fetching the repository tarball.
+
+    # cmd(['git', 'clone', '-b', branch, 'https://github.com/%s/%s.git' % (namespace, repository), output_dir])
+
+    url = 'https://github.com/%s/%s/archive/refs/heads/%s.tar.gz' % (namespace, repository, branch)
+    wget = subprocess.Popen(['wget', '-nv', '-O', '-', url], stdout=subprocess.PIPE)
+    subprocess.check_call(['tar', '-zxf', '-'], stdin=wget.stdout, cwd=tmp_dir)
+    if wget.wait() != 0:
+        raise Exception('Fetching URL failed: %s' % url)
+    os.rename(os.path.join(tmp_dir, '%s-%s' % (repository, branch)), output_dir)
+
 def run_test_regent(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     cmd([sys.executable, os.path.join(root_dir, 'language/travis.py')], env=env)
 
@@ -273,7 +345,7 @@ def precompile_regent(tests, flags, launcher, root_dir, env, thread_count):
 
 def run_test_legion_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit):
     flags = ['-logfile', 'out_%.log']
-    if env['USE_CUDA'] == '1':
+    if env['USE_CUDA'] == '1' or env['USE_HIP'] == '1':
         flags.extend(['-ll:gpu', '1'])
     if (env['USE_KOKKOS'] == '1') and (env['USE_OPENMP'] == '1'):
         flags.extend(['-ll:ocpu', '1', '-ll:onuma', '0' ])
@@ -281,7 +353,7 @@ def run_test_legion_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count,
 
 def run_test_legion_network_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit):
     flags = ['-logfile', 'out_%.log']
-    if env['USE_CUDA'] == '1':
+    if env['USE_CUDA'] == '1' or env['USE_HIP'] == '1':
         flags.extend(['-ll:gpu', '1'])
     if (env['USE_KOKKOS'] == '1') and (env['USE_OPENMP'] == '1'):
         flags.extend(['-ll:ocpu', '1', '-ll:onuma', '0' ])
@@ -289,7 +361,7 @@ def run_test_legion_network_cxx(launcher, root_dir, tmp_dir, bin_dir, env, threa
 
 def run_test_legion_openmp_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit):
     flags = ['-logfile', 'out_%.log']
-    if env['USE_CUDA'] == '1':
+    if env['USE_CUDA'] == '1' or env['USE_HIP'] == '1':
         flags.extend(['-ll:gpu', '1'])
     if (env['USE_KOKKOS'] == '1') and (env['USE_OPENMP'] == '1'):
         flags.extend(['-ll:ocpu', '1', '-ll:onuma', '0' ])
@@ -297,7 +369,7 @@ def run_test_legion_openmp_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread
 
 def run_test_legion_kokkos_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit):
     flags = ['-logfile', 'out_%.log']
-    if env['USE_CUDA'] == '1':
+    if env['USE_CUDA'] == '1' or env['USE_HIP'] == '1':
         flags.extend(['-ll:gpu', '1'])
     if (env['USE_KOKKOS'] == '1') and (env['USE_OPENMP'] == '1'):
         flags.extend(['-ll:ocpu', '1', '-ll:onuma', '0' ])
@@ -309,18 +381,60 @@ def run_test_legion_python_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread
     python_dir = os.path.join(root_dir, 'bindings', 'python')
     # Hack: Fix up the environment so that Python can find all the examples.
     env = dict(list(env.items()) + [
-        ('PYTHONPATH', ':'.join([python_dir])),
-        ('LD_LIBRARY_PATH', ':'.join([python_dir])),
+        # In Make, this is where all Python files lives.
+        # In CMake, we still need this, but only for tests.
+        ('PYTHONPATH', ':'.join([env.get('PYTHONPATH'), python_dir])),
     ])
-    # Clean up around python because we are going to make shared objects
-    # which is not something that anyone else does
-    cmd([make_exe, '-C', python_dir, 'clean'], env=env)
+    if bin_dir is None:
+        env['LD_LIBRARY_PATH'] = python_dir
+    # If we're not already using shared libraries, clean up because
+    # we're going to force them
+    if bin_dir is None and env['SHARED_OBJECTS'] != '1':
+        cmd([make_exe, '-C', python_dir, 'clean'], env=env)
     run_cxx(legion_python_cxx_tests, flags, launcher, root_dir, bin_dir, env, thread_count, timelimit)
-    cmd([make_exe, '-C', python_dir, 'clean'], env=env)
+    if bin_dir is None and env['SHARED_OBJECTS'] != '1':
+        cmd([make_exe, '-C', python_dir, 'clean'], env=env)
+
+def run_test_legion_jupyter_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit):
+    # Hack: legion_python currently requires the module name to come first
+    flags = [] # ['-logfile', 'out_%.log']
+    python_dir = os.path.join(root_dir, 'bindings', 'python')
+    env = env.copy()
+    if bin_dir is None:
+        env['LD_LIBRARY_PATH'] = python_dir
+    # If we're not already using shared libraries, clean up because
+    # we're going to force them
+    if bin_dir is None and env['SHARED_OBJECTS'] != '1':
+        cmd([make_exe, '-C', python_dir, 'clean'], env=env)
+    if bin_dir is None:
+        cmd([make_exe, '-C', python_dir, '-j', str(thread_count)], env=env)
+    jupyter_dir = os.path.join(root_dir, 'jupyter_notebook')
+    jupyter_install_cmd = [sys.executable, './install_jupyter.py', '--legion-prefix', python_dir, '--verbose']
+    cmd(jupyter_install_cmd, env=env, cwd=jupyter_dir)
+    jupyter_test_file = os.path.join(root_dir, 'jupyter_notebook', 'ci_test.py')
+    jupyter_test_cmd = ['jupyter', 'run', '--kernel', 'legion_kernel_nocr', jupyter_test_file]
+    cmd(jupyter_test_cmd, env=env)
+    canonical_jupyter_test_file = os.path.join(root_dir, 'jupyter_notebook', 'test_canonical.py')
+    canonical_jupyter_test_cmd = ['jupyter', 'run', '--kernel', 'python3', canonical_jupyter_test_file]
+    cmd(canonical_jupyter_test_cmd, env=env)
+    canonical_python_test_cmd = [sys.executable, canonical_jupyter_test_file]
+    cmd(canonical_python_test_cmd, env=env)
+    if bin_dir is None and env['SHARED_OBJECTS'] != '1':
+        cmd([make_exe, '-C', python_dir, 'clean'], env=env)
+
+def run_test_legion_prof_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit):
+    flags = ['-lg:prof','1', '-lg:prof_logfile', 'prof_%.gz']
+    from tools.test_prof import run_prof_test
+    for test_file, test_flags in legion_cxx_prof_tests:
+        prof_test = [[test_file, test_flags],]
+        run_cxx(prof_test, flags, launcher, root_dir, bin_dir, env, thread_count, timelimit)
+        test_file_path = Path(os.path.join(root_dir, test_file))
+        test_dir = test_file_path.parent.absolute()
+        run_prof_test(root_dir, test_dir, tmp_dir)
 
 def run_test_legion_hdf_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit):
     flags = ['-logfile', 'out_%.log']
-    if env['USE_CUDA'] == '1':
+    if env['USE_CUDA'] == '1' or env['USE_HIP'] == '1':
         flags.extend(['-ll:gpu', '1'])
     if (env['USE_KOKKOS'] == '1') and (env['USE_OPENMP'] == '1'):
         flags.extend(['-ll:ocpu', '1', '-ll:onuma', '0' ])
@@ -328,14 +442,14 @@ def run_test_legion_hdf_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_co
 
 def run_test_legion_fortran(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit):
     flags = ['-logfile', 'out_%.log']
-    if env['USE_CUDA'] == '1':
+    if env['USE_CUDA'] == '1' or env['USE_HIP'] == '1':
         flags.extend(['-ll:gpu', '1'])
     run_cxx(legion_fortran_tests, flags, launcher, root_dir, bin_dir, env, thread_count, timelimit)
 
 def run_test_fuzzer(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     env = dict(list(env.items()) + [('WARN_AS_ERROR', '0')])
     fuzz_dir = os.path.join(tmp_dir, 'fuzz-tester')
-    cmd(['git', 'clone', 'https://github.com/StanfordLegion/fuzz-tester', fuzz_dir])
+    clone_github('StanfordLegion', 'fuzz-tester', fuzz_dir, tmp_dir)
     # TODO; Merge deppart branch into master after this makes it to stable Legion branch
     cmd(['git', 'checkout', 'deppart'], cwd=fuzz_dir)
     cmd(['python3', 'main.py'], env=env, cwd=fuzz_dir)
@@ -358,8 +472,8 @@ def run_test_external1(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, 
     # Fast Direct Solver
     # Contact: Chao Chen <cchen10@stanford.edu>
     solver_dir = os.path.join(tmp_dir, 'fastSolver2')
-    cmd(['git', 'clone', 'https://github.com/Charles-Chao-Chen/fastSolver2.git', solver_dir])
-    # cmd(['git', 'checkout', '4c7a59de63dd46a0abcc7f296fa3b0f511e5e6d2', ], cwd=solver_dir)
+    # clone_github('Charles-Chao-Chen', 'fastSolver2', solver_dir, tmp_dir)
+    clone_github('elliottslaughter', 'fastSolver2', solver_dir, tmp_dir, branch='modernize-legion')
     solver = [[os.path.join(solver_dir, 'spmd_driver/solver'),
         ['-machine', '1', '-core', '8', '-mtxlvl', '6', '-ll:cpu', '8', '-ll:csize', '1024']]]
     run_cxx(solver, flags, launcher, root_dir, None, env, thread_count, timelimit)
@@ -367,7 +481,7 @@ def run_test_external1(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, 
     # Parallel Research Kernels: Stencil
     # Contact: Wonchan Lee <wonchan@cs.stanford.edu>
     prk_dir = os.path.join(tmp_dir, 'prk')
-    cmd(['git', 'clone', 'https://github.com/magnatelee/PRK.git', prk_dir])
+    clone_github('lightsighter', 'PRK', prk_dir, tmp_dir)
     # This uses a custom Makefile that requires additional
     # configuration. Rather than go to that trouble it's easier to
     # just use a copy of the standard Makefile template.
@@ -382,52 +496,52 @@ def run_test_external1(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, 
     cmd([make_exe, '-f', makefile, '-C', stencil_dir, '-j', str(thread_count)], env=stencil_env)
     stencil = os.path.join(stencil_dir, 'stencil')
     # HACK: work around stencil mapper issue with -ll:ext_sysmem 0
-    cmd([stencil, '4', '10', '1000', '-ll:ext_sysmem', '0'], timelimit=timelimit)
+    cmd([stencil, '4', '10', '1000', '-ll:ext_sysmem', '0'], env=env, timelimit=timelimit)
 
     # SNAP
     # Contact: Mike Bauer <mbauer@nvidia.com>
     snap_dir = os.path.join(tmp_dir, 'snap')
-    cmd(['git', 'clone', 'https://github.com/StanfordLegion/Legion-SNAP.git', snap_dir])
+    # TODO: Merge deppart branch into master after this makes it to stable Legion branch
+    clone_github('StanfordLegion', 'Legion-SNAP', snap_dir, tmp_dir, branch='ctrlrepl')
     # This can't handle flags before application arguments, so place
     # them after.
     snap = [[os.path.join(snap_dir, 'src/snap'),
              [os.path.join(snap_dir, 'input/mms.in')] + flags]]
-    run_cxx(snap, [], launcher, root_dir, None, env, thread_count, timelimit)
+    run_cxx(snap, [], launcher, root_dir, None, env, thread_count, timelimit) 
 
-    # Soleil-X
-    # Contact: Manolis Papadakis <mpapadak@stanford.edu>
-    soleil_dir = os.path.join(tmp_dir, 'soleil-x')
-    cmd(['git', 'clone', 'https://github.com/stanfordhpccenter/soleil-x.git', soleil_dir])
-    soleil_env = dict(list(env.items()) + [
-        ('LEGION_DIR', root_dir),
-        ('SOLEIL_DIR', soleil_dir),
-        ('CC', 'gcc'),
-    ])
-    cmd([make_exe, '-C', os.path.join(soleil_dir, 'src')], env=soleil_env)
-    # FIXME: Actually run it
-
-def run_test_external2(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit):
+def run_test_external2(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit, use_cuda):
     # HTR
     # Contact: Mario Di Renzo <direnzo.mario1@gmail.com>
     htr_dir = os.path.join(tmp_dir, 'htr')
-    # cmd(['git', 'clone', 'https://github.com/stanfordhpccenter/HTR-solver.git', htr_dir])
+    # clone_github('stanfordhpccenter', 'HTR-solver', htr_dir, tmp_dir)
     # NOTE: the legion-ci branch currently requires g++ (not clang) to build and
     #  is REALLY slow unless you set DEBUG=0
-    cmd(['git', 'clone', '-b', 'legion-ci', 'git@gitlab.com:mario.direnzo/Prometeo.git', htr_dir])
+    cmd(['git', 'clone', '-b', 'legion-ci', 'git@gitlab.com:insieme1/htr/htr-solver.git', htr_dir])
     htr_env = dict(list(env.items()) + [
         ('LEGION_DIR', root_dir),
-        ('LD_LIBRARY_PATH', os.path.join(root_dir, 'bindings', 'regent')),
+        ('LD_LIBRARY_PATH', '%s:%s' % (env.get('LD_LIBRARY_PATH', ''), os.path.join(root_dir, 'bindings', 'regent'))),
         ('HTR_DIR', htr_dir),
         ('CC', 'gcc'),
         ('CXX', 'g++'),
         ('DEBUG', '0'),
     ])
+
+    # Try to auto-detect the runner's GPU_ARCH for the test
+    if env['USE_CUDA'] == '1' and 'GPU_ARCH' not in env:
+        try:
+            device_query = subprocess.check_output(['nvidia-smi', '-i', '0', '-q']).decode('utf-8').splitlines()
+            htr_env['GPU_ARCH'] = [line.split()[-1].lower() for line in device_query if line.strip().startswith('Product Architecture')][0]
+            print("Auto-detected GPU_ARCH='%s'" % htr_env['GPU_ARCH'])
+        except OSError:
+            print('Command failed: %s' % cmd, file=sys.stderr, flush=True)
+            raise
+
     cmd(['python3', os.path.join(htr_dir, 'unitTests', 'testAll.py')], env=htr_env)
 
     # TaskAMR
     # Contact: Jonathan Graham <jgraham@lanl.gov>
     task_amr_dir = os.path.join(tmp_dir, 'task_amr')
-    cmd(['git', 'clone', 'https://github.com/lanl/TaskAMR.git', task_amr_dir])
+    clone_github('lanl', 'TaskAMR', task_amr_dir, tmp_dir)
     task_amr_env = dict(list(env.items()) + [
         ('LEGION_ROOT', root_dir),
     ])
@@ -436,7 +550,7 @@ def run_test_external2(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, 
     # Barnes-Hut
     # Contact: Haithem Turki <turki.haithem@gmail.com>
     barnes_hut_dir = os.path.join(tmp_dir, 'barnes_hut')
-    cmd(['git', 'clone', 'https://github.com/StanfordLegion/barnes-hut.git', barnes_hut_dir])
+    clone_github('StanfordLegion', 'barnes-hut', barnes_hut_dir, tmp_dir)
     regent_path = os.path.join(root_dir, 'language', 'regent.py')
     cmd([sys.executable, regent_path, 'hdf5_converter.rg',
          '-i', 'input/bodies-16384-blitz.csv',
@@ -445,10 +559,6 @@ def run_test_external2(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, 
         cwd=barnes_hut_dir,
         env=env,
         timelimit=timelimit)
-    # work around search path that doesn't include bindings/regent
-    for hdr in ('legion_defines.h', 'realm_defines.h'):
-        os.symlink(os.path.join(root_dir, 'bindings', 'regent', hdr),
-                   os.path.join(root_dir, 'runtime', hdr))
     cmd([sys.executable, regent_path, 'barnes_hut.rg',
          '-i', 'bodies-16384-blitz.h5',
          '-n', '16384'],
@@ -456,28 +566,41 @@ def run_test_external2(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, 
         env=env,
         timelimit=timelimit)
 
+    # Since we're not actually testing this, don't both building on GPUs currently
+    if not use_cuda:
+        # Soleil-X
+        # Contact: Manolis Papadakis <mpapadak@stanford.edu>
+        soleil_dir = os.path.join(tmp_dir, 'soleil-x')
+        clone_github('stanfordhpccenter', 'soleil-x', soleil_dir, tmp_dir)
+        soleil_env = dict(list(env.items()) + [
+            ('LEGION_DIR', root_dir),
+            ('SOLEIL_DIR', soleil_dir),
+            ('CC', 'gcc'),
+        ])
+        cmd([make_exe, '-C', os.path.join(soleil_dir, 'src')], env=soleil_env)
+        # FIXME: Actually run it
+
 def run_test_private(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit):
     flags = ['-logfile', 'out_%.log']
 
     # MiniAero
     # Contact: Wonchan Lee <wonchan@cs.stanford.edu>
-    miniaero_dir = os.path.join(tmp_dir, 'miniaero-spmd')
-    cmd(['git', 'clone', '-b', 'spmd_flattened_superblocks',
-         'git@github.com:magnatelee/miniaero-spmd.git', miniaero_dir])
-    cmd([make_exe, '-C', miniaero_dir, '-j', str(thread_count)], env=env,
-        cwd=miniaero_dir)
-    for test in ['3D_Sod', '3D_Sod_2nd_Order'
-                 # These tests take a long time so skip them by default.
-                 # , 'FlatPlate', 'Ramp'
-                ]:
-        test_dir = os.path.join(miniaero_dir, 'tests', test)
-        cmd([os.path.join(test_dir, 'test.sh')], env=env, cwd=test_dir, timelimit=timelimit)
+    #miniaero_dir = os.path.join(tmp_dir, 'miniaero-spmd')
+    #cmd(['git', 'clone', '-b', 'spmd_flattened_superblocks',
+    #     'git@github.com:magnatelee/miniaero-spmd.git', miniaero_dir])
+    #cmd([make_exe, '-C', miniaero_dir, '-j', str(thread_count)], env=env,
+    #    cwd=miniaero_dir)
+    #for test in ['3D_Sod', '3D_Sod_2nd_Order'
+    #             # These tests take a long time so skip them by default.
+    #             # , 'FlatPlate', 'Ramp'
+    #            ]:
+    #    test_dir = os.path.join(miniaero_dir, 'tests', test)
+    #    cmd([os.path.join(test_dir, 'test.sh')], env=env, cwd=test_dir, timelimit=timelimit)
 
     # PENNANT
     # Contact: Galen Shipman <gshipman@lanl.gov>
     pennant_dir = os.path.join(tmp_dir, 'pennant')
-    cmd(['git', 'clone', '-b', 'spmdv2',
-         'git@github.com:gshipman/pennant-legion.git', pennant_dir])
+    clone_github('StanfordLegion', 'pennant-legion', pennant_dir, tmp_dir)
     # This uses a custom Makefile that requires additional
     # configuration. Rather than go to that trouble it's easier to
     # just use a copy of the standard Makefile template.
@@ -494,7 +617,8 @@ def run_test_private(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, ti
     cmd([make_exe, '-f', makefile, '-C', pennant_dir, 'clean'], env=pennant_env)
     cmd([make_exe, '-f', makefile, '-C', pennant_dir, '-j', str(thread_count)], env=pennant_env)
     pennant = os.path.join(pennant_dir, 'pennant')
-    cmd([pennant, str(app_cores), 'test/sedovsmall/sedovsmall.pnt', '-ll:cpu', str(app_cores)],
+    cmd([pennant, '-n', str(app_cores), '-f', 'test/sedov/sedov.pnt', '-ll:cpu', str(app_cores)],
+        env=env,
         cwd=pennant_dir,
         timelimit=timelimit)
 
@@ -503,13 +627,27 @@ def run_test_ctest(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, time
     build_dir = os.path.join(tmp_dir, 'build')
     args = ['ctest', '--output-on-failure']
     # do not run tests in parallel if they use GPUs - might not all fit
-    if env['USE_CUDA'] != '1':
+    if env['USE_CUDA'] != '1' and env['USE_HIP'] != '1':
         args.extend(['-j', str(thread_count)])
     if timelimit:
         args.extend(['--timeout', str(timelimit)])
     cmd(args,
         env=env,
         cwd=build_dir)
+
+def run_test_legion_prof_mypy(root_dir):
+    mypy_cmd = [
+        "mypy",
+        "--disallow-any-unimported",
+        "--disallow-any-explicit",
+        "--disallow-untyped-defs",
+        "--disallow-incomplete-defs",
+        "--warn-redundant-casts",
+        "--warn-unused-ignores",
+        os.path.join(root_dir, 'tools', 'legion_prof.py'),
+    ]
+    print('Running mypy test:', cmd)
+    cmd(mypy_cmd)
 
 def hostname():
     return subprocess.check_output(['hostname']).strip()
@@ -706,6 +844,12 @@ def build_cmake(root_dir, tmp_dir, env, thread_count,
     cmdline.append('-DLegion_USE_CUDA=%s' % ('ON' if env['USE_CUDA'] == '1' else 'OFF'))
     if 'GPU_ARCH' in env:
         cmdline.append('-DLegion_CUDA_ARCH=%s' % env['GPU_ARCH'])
+    cmdline.append('-DLegion_USE_HIP=%s' % ('ON' if env['USE_HIP'] == '1' else 'OFF'))
+    if 'HIP_ARCH' in env:
+        cmdline.append('-DLegion_HIP_ARCH=%s' % env['HIP_ARCH'])
+    if 'THRUST_PATH' in env and env['USE_COMPLEX'] == '1':
+        cmdline.append('-DHIP_THRUST_ROOT_DIR=%s' % env['THRUST_PATH'])
+    cmdline.append('-DLegion_USE_NVTX=%s' % ('ON' if env['USE_NVTX'] == '1' else 'OFF'))
     cmdline.append('-DLegion_USE_OpenMP=%s' % ('ON' if env['USE_OPENMP'] == '1' else 'OFF'))
     cmdline.append('-DLegion_USE_Kokkos=%s' % ('ON' if env['USE_KOKKOS'] == '1' else 'OFF'))
     cmdline.append('-DLegion_USE_Python=%s' % ('ON' if env['USE_PYTHON'] == '1' else 'OFF'))
@@ -716,14 +860,15 @@ def build_cmake(root_dir, tmp_dir, env, thread_count,
     cmdline.append('-DLegion_BOUNDS_CHECKS=%s' % ('ON' if env['BOUNDS_CHECKS'] == '1' else 'OFF'))
     cmdline.append('-DLegion_PRIVILEGE_CHECKS=%s' % ('ON' if env['PRIVILEGE_CHECKS'] == '1' else 'OFF'))
     cmdline.append('-DLegion_REDOP_COMPLEX=%s' % ('ON' if env['USE_COMPLEX'] == '1' else 'OFF'))
+    cmdline.append('-DLegion_BACKTRACE_USE_LIBDW=%s' % ('ON' if env['REALM_BACKTRACE_USE_LIBDW'] == '1' else 'OFF'))
     if 'LEGION_WARNINGS_FATAL' in env:
         cmdline.append('-DLegion_WARNINGS_FATAL=%s' % ('ON' if env['LEGION_WARNINGS_FATAL'] == '1' else 'OFF'))
     if test_ctest:
         cmdline.append('-DLegion_ENABLE_TESTING=ON')
         if 'LAUNCHER' in env:
             cmdline.append('-DLegion_TEST_LAUNCHER=%s' % env['LAUNCHER'])
-        if env['USE_CUDA'] == '1':
-            cmdline.append('-DLegion_TEST_ARGS=-ll:gpu 1')
+        if env['USE_CUDA'] == '1' or env['USE_HIP'] == '1':
+            cmdline.append('-DLegion_TEST_ARGS=-ll:gpu 1 -ll:fsize 1024')
     else:
         cmdline.append('-DLegion_ENABLE_TESTING=OFF')
     if test_regent or (test_legion_cxx and (env['USE_PYTHON'] == '1')):
@@ -742,6 +887,9 @@ def build_cmake(root_dir, tmp_dir, env, thread_count,
     # if MARCH is set in the environment, give that to cmake as BUILD_MARCH
     if 'MARCH' in env:
         cmdline.append('-DBUILD_MARCH=' + env['MARCH'])
+    # add cxx standard
+    if 'CXX_STANDARD' in env:
+        cmdline.append('-DCMAKE_CXX_STANDARD=' + env['CXX_STANDARD'])
     # cmake before 3.16 doesn't know how to look for CUDAHOSTCXX
     if 'CUDAHOSTCXX' in env:
         cmdline.append('-DCMAKE_CUDA_HOST_COMPILER=' + env['CUDAHOSTCXX'])
@@ -752,16 +900,34 @@ def build_cmake(root_dir, tmp_dir, env, thread_count,
     cmdline.append(root_dir)
 
     cmd(cmdline, env=env, cwd=build_dir)
-    cmd([make_exe, '-C', build_dir, '-j', str(thread_count)], env=env)
+    verbose_env=env.copy()
+    verbose_env['VERBOSE'] = '1'
+    cmd([make_exe, '-C', build_dir, '-j', str(thread_count)], env=verbose_env)
     cmd([make_exe, '-C', build_dir, 'install'], env=env)
-    return os.path.join(build_dir, 'bin')
+
+    bin_dir = os.path.join(build_dir, 'bin')
+    python_dir = None
+    if env['USE_PYTHON'] == '1':
+        for dir_entry in os.scandir(os.path.join(install_dir, 'lib')):
+            if dir_entry.name.startswith('python'):
+                site_packages = os.path.join(dir_entry.path, 'site-packages')
+                if os.path.exists(site_packages):
+                    python_dir = site_packages
+        if python_dir is None:
+            raise Exception('Unable to find Python site-packages in installation directory')
+    return bin_dir, python_dir
 
 def build_legion_prof_rs(root_dir, tmp_dir, env):
+    legion_prof_dir = os.path.join(root_dir, 'tools', 'legion_prof_rs')
     cmd(['cargo', 'install',
+         '--all-features',
          '--locked',
-         '--path', os.path.join(root_dir, 'tools', 'legion_prof_rs'),
+         '--debug', # Enables debug checks. Still optimizes like -O2.
+         '--path', legion_prof_dir,
          '--root', tmp_dir],
         env=env)
+    cmd(['cargo', 'test', '--all-features'], env=env, cwd=legion_prof_dir)
+    cmd(['cargo', 'fmt', '--all', '--', '--check'], env=env, cwd=legion_prof_dir)
 
 def build_regent(root_dir, env):
     cmd([os.path.join(root_dir, 'language/travis.py'), '--install-only'], env=env)
@@ -782,6 +948,34 @@ def build_make_clean(root_dir, env, thread_count, test_legion_cxx, test_perf,
         clean_cxx(legion_cxx_tests, root_dir, env, thread_count)
     if test_legion_cxx and env['LEGION_USE_FORTRAN'] == '1':
         clean_cxx(legion_fortran_tests, root_dir, env, thread_count)
+
+def build_make(root_dir, tmp_dir, env, thread_count, networks):
+    build_dir = os.path.join(tmp_dir, 'build')
+    install_dir = os.path.join(tmp_dir, 'install')
+    os.mkdir(build_dir)
+    os.mkdir(install_dir)
+    makefile = os.path.join(build_dir, 'Makefile')
+    shutil.copyfile(os.path.join(root_dir, 'apps', 'Makefile.template'), makefile)
+    # We'll just always for shared objects here for performance
+    env['SHARED_OBJECTS'] = '1'
+    # If we have networks always turn on the use of the network
+    if networks:
+        env['USE_NETWORK'] = '1'
+    local_env = dict(list(env.items()) + [
+        ('PREFIX', install_dir),
+    ])
+    cmd([make_exe, '-C', build_dir, 'install', '-j', str(thread_count)], env=local_env)
+    # Setup the LEGION_DIR for the Makefile to use that instead of building everything from source
+    env['LG_INSTALL_DIR'] = install_dir
+    if platform.system() == 'Darwin':
+        # Be aware this doesn't really work on subprocessses on MacOS systems that have their system
+        # integrity protections enabled which will prevent this from having any effect
+        # https://stackoverflow.com/questions/35568122/why-isnt-dyld-library-path-being-propagated-here
+        ld_path = env.get('DYLD_LIBRARY_PATH', '')
+        env['DYLD_LIBRARY_PATH'] = ld_path+':'+os.path.join(install_dir,'lib')
+    else:
+        ld_path = env.get('LD_LIBRARY_PATH', '')
+        env['LD_LIBRARY_PATH'] = ld_path+':'+os.path.join(install_dir,'lib')
 
 def option_enabled(option, options, default, envprefix='', envname=None):
     if options is not None: return option in options
@@ -818,12 +1012,12 @@ class Stage(object):
 def report_mode(debug, max_dim, launcher,
                 test_regent, test_legion_cxx, test_fuzzer, test_realm,
                 test_external1, test_external2, test_private,
-                test_perf, test_ctest, networks,
-                use_cuda, use_openmp, use_kokkos, use_python, use_llvm,
+                test_perf, test_ctest, test_jupyter, networks,
+                use_cuda, use_hip, use_openmp, use_kokkos, use_python, use_llvm,
                 use_hdf, use_fortran, use_spy, use_prof,
                 use_bounds_checks, use_privilege_checks, use_complex,
                 use_shared_objects,
-                use_gcov, use_cmake, use_rdir):
+                use_gcov, use_cmake, use_rdir, use_nvtx, use_libdw, cxx_standard):
     print()
     print('#'*60)
     print('### Test Suite Configuration')
@@ -844,10 +1038,12 @@ def report_mode(debug, max_dim, launcher,
     print('###   * Private:    %s' % test_private)
     print('###   * Perf:       %s' % test_perf)
     print('###   * CTest:      %s' % test_ctest)
+    print('###   * Jupyter:    %s' % test_jupyter)
     print('###')
     print('### Build Flags:')
     print('###   * Networks:   %s' % networks)
     print('###   * CUDA:       %s' % use_cuda)
+    print('###   * HIP:        %s' % use_hip)
     print('###   * OpenMP:     %s' % use_openmp)
     print('###   * Kokkos:     %s' % use_kokkos)
     print('###   * Python:     %s' % use_python)
@@ -863,7 +1059,10 @@ def report_mode(debug, max_dim, launcher,
     print('###   * Gcov:       %s' % use_gcov)
     print('###   * CMake:      %s' % use_cmake)
     print('###   * RDIR:       %s' % use_rdir)
+    print('###   * NVTX:       %s' % use_nvtx)
+    print('###   * LIBDW:      %s' % use_libdw)
     print('###   * Max DIM:    %s' % max_dim)
+    print('###   * CXX STD:    %s' % cxx_standard)
     print('#'*60)
     print()
     sys.stdout.flush()
@@ -876,6 +1075,7 @@ def run_tests(test_modules=None,
               launcher=None,
               thread_count=None,
               root_dir=None,
+              tmp_dir=None,
               check_ownership=False,
               keep_tmp_dir=False,
               timelimit=None,
@@ -908,12 +1108,14 @@ def run_tests(test_modules=None,
     test_private = module_enabled('private', False)
     test_perf = module_enabled('perf', False)
     test_ctest = module_enabled('ctest', False)
+    test_jupyter = module_enabled('jupyter', False)
 
     # Determine which features to build with.
     def feature_enabled(feature, default=True, prefix='USE_', **kwargs):
         return option_enabled(feature, use_features, default,
                               envprefix=prefix, **kwargs)
     use_cuda = feature_enabled('cuda', False)
+    use_hip = feature_enabled('hip', False)
     use_openmp = feature_enabled('openmp', False)
     use_kokkos = feature_enabled('kokkos', False)
     use_python = feature_enabled('python', False)
@@ -930,6 +1132,8 @@ def run_tests(test_modules=None,
     use_gcov = feature_enabled('gcov', False)
     use_cmake = feature_enabled('cmake', False)
     use_rdir = feature_enabled('rdir', True)
+    use_nvtx = feature_enabled('nvtx', False)
+    use_libdw = feature_enabled('libdw', False, prefix='REALM_BACKTRACE_USE_')
     use_shared_objects = feature_enabled('shared', False,
                                          envname='SHARED_OBJECTS')
 
@@ -951,9 +1155,22 @@ def run_tests(test_modules=None,
     if test_ctest and not use_cmake:
         raise Exception('CTest cannot be used without CMake')
 
+    if test_jupyter and not use_python:
+        raise Exception('Jupyter requires Python')
+
     if networks and launcher is None:
         raise Exception('Network(s) is enabled but launcher is not set (use --launcher or LAUNCHER)')
     launcher = launcher.split() if launcher is not None else []
+
+    # CXX Standard
+    cxx_standard = os.environ['CXX_STANDARD'] if 'CXX_STANDARD' in os.environ else ''
+    # if not use cmake, let's add -std=c++NN to CXXFLAGS
+    if use_cmake == False:
+        if cxx_standard != '':
+            if 'CXX_STANDARD' in os.environ:
+                os.environ['CXXFLAGS'] += " -std=c++" + os.environ['CXX_STANDARD']
+            else:
+                os.environ['CXXFLAGS'] = " -std=c++" + os.environ['CXX_STANDARD']
 
     gcov_flags = ' -ftest-coverage -fprofile-arcs'
 
@@ -964,15 +1181,21 @@ def run_tests(test_modules=None,
     report_mode(debug, max_dim, launcher,
                 test_regent, test_legion_cxx, test_fuzzer, test_realm,
                 test_external1, test_external2, test_private,
-                test_perf, test_ctest,
+                test_perf, test_ctest, test_jupyter,
                 networks,
-                use_cuda, use_openmp, use_kokkos, use_python, use_llvm,
+                use_cuda, use_hip, use_openmp, use_kokkos, use_python, use_llvm,
                 use_hdf, use_fortran, use_spy, use_prof,
                 use_bounds_checks, use_privilege_checks, use_complex,
                 use_shared_objects,
-                use_gcov, use_cmake, use_rdir)
+                use_gcov, use_cmake, use_rdir, use_nvtx, use_libdw, cxx_standard)
 
-    tmp_dir = tempfile.mkdtemp(dir=root_dir)
+    if not tmp_dir:
+        tmp_dir = tempfile.mkdtemp(dir=root_dir)
+    else:
+        if os.path.exists(tmp_dir):
+            shutil.rmtree(tmp_dir)
+        os.mkdir(tmp_dir)
+
     if verbose:
         print('Using build directory: %s' % tmp_dir)
         print()
@@ -984,6 +1207,8 @@ def run_tests(test_modules=None,
         ('REALM_NETWORKS', networks),
         ('USE_CUDA', '1' if use_cuda else '0'),
         ('TEST_CUDA', '1' if use_cuda else '0'),
+        ('USE_HIP', '1' if use_hip else '0'),
+        ('TEST_HIP', '1' if use_hip else '0'),
         ('USE_OPENMP', '1' if use_openmp else '0'),
         ('TEST_OPENMP', '1' if use_openmp else '0'),
         ('USE_KOKKOS', '1' if use_kokkos else '0'),
@@ -1005,6 +1230,8 @@ def run_tests(test_modules=None,
         ('SHARED_OBJECTS', '1' if use_shared_objects else '0'),
         ('TEST_GCOV', '1' if use_gcov else '0'),
         ('USE_RDIR', '1' if use_rdir else '0'),
+        ('USE_NVTX', '1' if use_nvtx else '0'),
+        ('REALM_BACKTRACE_USE_LIBDW', '1' if use_libdw else '0'),
         ('MAX_DIM', str(max_dim)),
         ('LG_RT_DIR', os.path.join(root_dir, 'runtime')),
         ('DEFINE_HEADERS_DIR', os.path.join(root_dir, 'runtime')),
@@ -1022,10 +1249,16 @@ def run_tests(test_modules=None,
     try:
         # Build tests.
         with Stage('build'):
-            if use_prof:
+            if use_prof or use_spy:
                 build_legion_prof_rs(root_dir, tmp_dir, env)
+            if use_prof:
+                run_test_legion_prof_mypy(root_dir)
             if use_cmake:
-                bin_dir = build_cmake(
+                # We should always be using ctest if we're building with
+                # cmake, except for some unusual cases with Regent
+                # (ask @eslaught for details about Regent cases)
+                assert test_ctest or test_regent
+                bin_dir, python_dir = build_cmake(
                     root_dir, tmp_dir, env, thread_count,
                     test_regent, test_legion_cxx, test_external1,
                     test_external2,
@@ -1036,7 +1269,17 @@ def run_tests(test_modules=None,
                     root_dir, env, thread_count, test_legion_cxx, test_perf,
                     # These configurations also need to be cleaned first.
                     test_external1, test_external2, test_private)
+                # Build just one copy of the runtime unless we're running regent tests
+                if not test_regent and not test_external2:
+                    build_make(root_dir, tmp_dir, env, thread_count, networks)
                 bin_dir = None
+                python_dir = None
+                if use_python:
+                    python_dir = os.path.join(root_dir, 'bindings', 'python')
+
+        # Set PYTHONPATH for Python tests.
+        if use_python:
+            env['PYTHONPATH'] = python_dir
 
         # Run tests.
         if test_regent:
@@ -1045,6 +1288,8 @@ def run_tests(test_modules=None,
         if test_legion_cxx:
             with Stage('legion_cxx'):
                 run_test_legion_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit)
+                if use_prof:
+                    run_test_legion_prof_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit)
                 if networks:
                     run_test_legion_network_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit)
                 if use_openmp:
@@ -1065,14 +1310,12 @@ def run_tests(test_modules=None,
                 run_test_realm(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit)
         if test_external1:
             with Stage('external1'):
-                if not test_regent:
-                    build_regent(root_dir, env)
                 run_test_external1(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit)
         if test_external2:
             with Stage('external2'):
                 if not test_regent:
                     build_regent(root_dir, env)
-                run_test_external2(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit)
+                run_test_external2(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit, use_cuda)
         if test_private:
             with Stage('private'):
                 run_test_private(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit)
@@ -1082,6 +1325,9 @@ def run_tests(test_modules=None,
         if test_ctest:
             with Stage('ctest'):
                 run_test_ctest(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit)
+        if test_jupyter:
+            with Stage('jupyter'):
+                run_test_legion_jupyter_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit)
     finally:
         if keep_tmp_dir:
             print('Leaving build directory:')
@@ -1133,7 +1379,7 @@ def driver():
         '--test', dest='test_modules', action=ExtendAction,
         choices=MultipleChoiceList('regent', 'legion_cxx', 'fuzzer',
                                    'realm', 'external1', 'external2',
-                                   'private', 'perf', 'ctest'),
+                                   'private', 'perf', 'ctest', 'jupyter'),
         type=lambda s: s.split(','),
         default=None,
         help='Test modules to run (also via TEST_*).')
@@ -1152,10 +1398,10 @@ def driver():
         help='Maximum number of dimensions (also via MAX_DIM).')
     parser.add_argument(
         '--use', dest='use_features', action=ExtendAction,
-        choices=MultipleChoiceList('gasnet', 'cuda', 'openmp', 'kokkos',
+        choices=MultipleChoiceList('gasnet', 'cuda', 'hip', 'openmp', 'kokkos',
                                    'python', 'llvm', 'hdf', 'fortran', 'spy', 'prof',
                                    'bounds', 'privilege', 'complex',
-                                   'gcov', 'cmake', 'rdir'),
+                                   'gcov', 'cmake', 'rdir', 'nvtx'),
         type=lambda s: s.split(','),
         default=None,
         help='Build Legion with features (also via USE_*).')
@@ -1171,6 +1417,10 @@ def driver():
     parser.add_argument(
         '-C', '--directory', dest='root_dir', metavar='DIR', action='store', required=False,
         help='Legion root directory.')
+
+    parser.add_argument(
+        '--tmp-dir', dest='tmp_dir', metavar='DIR', action='store', required=False,
+        help='Temporary directory path for out-of-source builds')
 
     parser.add_argument(
         '-j', dest='thread_count', nargs='?', type=int,

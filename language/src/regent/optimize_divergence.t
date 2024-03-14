@@ -1,4 +1,4 @@
--- Copyright 2022 Stanford University
+-- Copyright 2024 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@
 -- generation.
 
 local ast = require("regent/ast")
+local data = require("common/data")
 local std = require("regent/std")
 local union_find = require("regent/union_find")
 
@@ -75,11 +76,11 @@ local function analyze_region_divergence(cx, node)
 end
 
 local function invert_forest(forest)
-  local result = {}
+  local result = data.newmap()
   local ks = forest:keys()
   for _, k in ipairs(ks) do
     local root = forest:find_key(k)
-    if not rawget(result, root) then
+    if not result[root] then
       result[root] = terralib.newlist()
     end
     result[root]:insert(k)

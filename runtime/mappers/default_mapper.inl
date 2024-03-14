@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -61,26 +61,6 @@ namespace Legion {
           slices.push_back(slice);
         }
       }
-    }
-
-    //--------------------------------------------------------------------------
-    template<int DIM>
-    /*static*/ void DefaultMapper::default_decompose_points(
-                               const LegionRuntime::Arrays::Rect<DIM> &rect,
-                               const std::vector<Processor> &targets,
-                               const LegionRuntime::Arrays::Point<DIM> &blocks,
-                               bool recurse, bool stealable,
-                               std::vector<TaskSlice> &slices)
-    //--------------------------------------------------------------------------
-    {
-      const Domain dom_rect = Domain::from_rect<DIM>(rect);
-      const DomainT<DIM,coord_t> point_space = dom_rect;
-
-      const DomainPoint dom_point = DomainPoint::from_point<DIM>(blocks);
-      const Point<DIM,coord_t> num_blocks = dom_point;
-
-      default_decompose_points(point_space, targets, num_blocks, 
-                               recurse, stealable, slices);
     }
 
     //--------------------------------------------------------------------------
@@ -190,12 +170,13 @@ namespace Legion {
           FieldConstraint(missing_fields,
                           false/*contig*/, false/*inorder*/));
       instances.resize(instances.size() + 1);
+      size_t footprint = 0;
       if (!default_make_instance(ctx, target_memory, 
-            creation_constraints, instances.back(), 
-            COPY_MAPPING, force_new_instances, true/*meets*/, req))
+            creation_constraints, instances.back(), COPY_MAPPING,
+            force_new_instances, true/*meets*/, req, &footprint))
       {
         // If we failed to make it that is bad
-        fprintf(stderr,"Default mapper failed allocation for "
+        fprintf(stderr,"Default mapper failed allocation of %zd bytes for "
                        "%s region requirement %d of explicit "
                        "region-to-region copy operation in task %s "
                        "(ID %lld) in memory " IDFMT " for processor "
@@ -206,7 +187,7 @@ namespace Legion {
                        "choices: ask Realm to allocate more memory, "
                        "write a custom mapper to better manage working "
                        "sets, or find a bigger machine. Good luck!",
-                       IS_SRC ? "source" : "destination", idx, 
+                       footprint, IS_SRC ? "source" : "destination", idx,
                        copy.parent_task->get_task_name(),
                        copy.parent_task->get_unique_id(),
 		       target_memory.id,

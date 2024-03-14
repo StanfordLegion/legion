@@ -22,12 +22,11 @@
 #cmakedefine REALM_MAX_DIM @REALM_MAX_DIM@
 
 #cmakedefine REALM_USE_OPENMP
+#cmakedefine REALM_OPENMP_SYSTEM_RUNTIME
 #cmakedefine REALM_OPENMP_GOMP_SUPPORT
 #cmakedefine REALM_OPENMP_KMP_SUPPORT
 
 #cmakedefine REALM_USE_PYTHON
-#cmakedefine REALM_PYTHON_VERSION_MAJOR @REALM_PYTHON_VERSION_MAJOR@
-#cmakedefine REALM_PYTHON_LIB "@REALM_PYTHON_LIB@"
 
 #cmakedefine REALM_USE_CUDA
 #cmakedefine REALM_USE_CUDART_HIJACK
@@ -51,8 +50,13 @@
 #cmakedefine GASNET_CONDUIT_GEMINI 1
 #cmakedefine GASNET_CONDUIT_PSM 1
 #cmakedefine GASNET_CONDUIT_UCX 1
+#cmakedefine GASNET_CONDUIT_OFI 1
 
 #cmakedefine REALM_USE_MPI
+#cmakedefine REALM_MPI_HAS_COMM_SPLIT_TYPE
+
+#cmakedefine REALM_USE_UCX
+#cmakedefine REALM_UCX_DYNAMIC_LOAD
 
 #cmakedefine REALM_USE_LLVM
 #cmakedefine REALM_ALLOW_MISSING_LLVM_LIBS
@@ -65,5 +69,14 @@
 #cmakedefine REALM_USE_HWLOC
 
 #cmakedefine REALM_USE_PAPI
+
+#cmakedefine REALM_USE_NVTX
+
+#cmakedefine REALM_USE_UNWIND
+
+#cmakedefine REALM_USE_LIBDW
+
+#cmakedefine REALM_USE_SHM
+#cmakedefine REALM_HAS_POSIX_FALLOCATE64
 
 #cmakedefine REALM_RESPONSIVE_TIMELIMIT @REALM_RESPONSIVE_TIMELIMIT@

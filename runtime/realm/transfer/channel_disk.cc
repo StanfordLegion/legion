@@ -1,5 +1,5 @@
-/* Copyright 2022 Stanford University
- * Copyright 2022 Los Alamos National Laboratory
+/* Copyright 2024 Stanford University
+ * Copyright 2024 Los Alamos National Laboratory
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -277,7 +277,9 @@ namespace Realm {
 					  const std::vector<XferDesPortInfo>& outputs_info,
 					  int priority,
 					  XferDesRedopInfo redop_info,
-					  const void *fill_data, size_t fill_size)
+					  const void *fill_data,
+                                          size_t fill_size,
+                                          size_t fill_total)
     {
       assert(redop_info.id == 0);
       assert(fill_size == 0);
@@ -343,7 +345,9 @@ namespace Realm {
 					  const std::vector<XferDesPortInfo>& outputs_info,
 					  int priority,
 					  XferDesRedopInfo redop_info,
-					  const void *fill_data, size_t fill_size)
+					  const void *fill_data,
+                                          size_t fill_size,
+                                          size_t fill_total)
     {
       assert(redop_info.id == 0);
       assert(fill_size == 0);

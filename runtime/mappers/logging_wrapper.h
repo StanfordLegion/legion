@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -46,48 +46,68 @@ namespace Mapping {
  * Assumes that sharding functors are pure, and calls them an additional number
  * of times compared to normal execution.
  *
- * Currently only supports task and inline mapping API calls.
+ * Currently only supports task, inline mapping and copy API calls.
  */
 // TODO:
 // - Include other mapping calls.
 // - Provide some control over the level of detail.
 class LoggingWrapper : public ForwardingMapper {
  public:
-  LoggingWrapper(Mapper* mapper);
+  LoggingWrapper(Mapper* mapper, Logger* logger = NULL);
   virtual ~LoggingWrapper();
- public:
 #ifndef NO_LEGION_CONTROL_REPLICATION
-  virtual void map_replicate_task(const MapperContext ctx,
-                                  const Task& task,
-                                  const MapTaskInput& input,
-                                  const MapTaskOutput& default_output,
-                                  MapReplicateTaskOutput& output);
+ private:
+  template<typename OPERATION>
+  void select_sharding_functor_impl(const MapperContext ctx,
+                                    const OPERATION& op,
+                                    const SelectShardingFunctorInput& input,
+                                    SelectShardingFunctorOutput& output);
+ public:
+  void replicate_task(MapperContext               ctx,
+                      const Task&                 task,
+                      const ReplicateTaskInput&   input,
+                            ReplicateTaskOutput&  output) override;
   using ForwardingMapper::select_sharding_functor;
-  virtual void select_sharding_functor(const MapperContext ctx,
-                                       const Task& task,
-                                       const SelectShardingFunctorInput& input,
-                                       SelectShardingFunctorOutput& output);
+  void select_sharding_functor(const MapperContext ctx,
+                               const Task& task,
+                               const SelectShardingFunctorInput& input,
+                               SelectShardingFunctorOutput& output) override;
+  void select_sharding_functor(const MapperContext ctx,
+                               const Copy& copy,
+                               const SelectShardingFunctorInput& input,
+                               SelectShardingFunctorOutput& output) override;
 #endif // NO_LEGION_CONTROL_REPLICATION
-  virtual void slice_task(const MapperContext ctx,
-                          const Task& task,
-                          const SliceTaskInput& input,
-                          SliceTaskOutput& output);
-  virtual void map_task(const MapperContext ctx,
-                        const Task& task,
-                        const MapTaskInput& input,
-                        MapTaskOutput& output);
-  virtual void select_task_sources(const MapperContext ctx,
-                                   const Task& task,
-                                   const SelectTaskSrcInput& input,
-                                   SelectTaskSrcOutput& output);
-  virtual void map_inline(const MapperContext ctx,
-                          const InlineMapping& inline_op,
-                          const MapInlineInput& input,
-                          MapInlineOutput& output);
-  virtual void select_inline_sources(const MapperContext ctx,
-                                     const InlineMapping& inline_op,
-                                     const SelectInlineSrcInput& input,
-                                     SelectInlineSrcOutput& output);
+ public:
+  void slice_task(const MapperContext ctx,
+                  const Task& task,
+                  const SliceTaskInput& input,
+                  SliceTaskOutput& output) override;
+  void map_task(const MapperContext ctx,
+                const Task& task,
+                const MapTaskInput& input,
+                MapTaskOutput& output) override;
+  void select_task_sources(const MapperContext ctx,
+                           const Task& task,
+                           const SelectTaskSrcInput& input,
+                           SelectTaskSrcOutput& output) override;
+  void map_inline(const MapperContext ctx,
+                  const InlineMapping& inline_op,
+                  const MapInlineInput& input,
+                  MapInlineOutput& output) override;
+  void select_inline_sources(const MapperContext ctx,
+                             const InlineMapping& inline_op,
+                             const SelectInlineSrcInput& input,
+                             SelectInlineSrcOutput& output) override;
+  void map_copy(const MapperContext ctx,
+                const Copy& copy,
+                const MapCopyInput& input,
+                MapCopyOutput& output) override;
+  void select_copy_sources(const MapperContext ctx,
+                           const Copy& copy,
+                           const SelectCopySrcInput& input,
+                           SelectCopySrcOutput& output) override;
+ private:
+  Logger* logger;
 };
 
 }; // namespace Mapping

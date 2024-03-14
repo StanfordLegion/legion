@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------#
-# Copyright 2022 Kitware, Inc.
+# Copyright 2024 Kitware, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
 # limitations under the License.
 #------------------------------------------------------------------------------#
 
-cmake_minimum_required(VERSION 3.1)
+cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
 project(LegionExample_04_logical_regions)
 
 # Only search if were building stand-alone and not as part of Legion
@@ -24,6 +24,7 @@ endif()
 
 add_executable(logical_regions logical_regions.cc)
 target_link_libraries(logical_regions Legion::Legion)
+target_compile_options(logical_regions PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
 if(Legion_ENABLE_TESTING)
   add_test(NAME logical_regions COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:logical_regions> ${Legion_TEST_ARGS})
 endif()

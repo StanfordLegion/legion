@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,6 +27,7 @@
 #include "legion/legion_views.h"
 #include "legion/legion_analysis.h"
 #include "legion/legion_trace.h"
+#include "legion/legion_replication.h"
 
 #ifndef INST_N1
   #error INST_N1 must be defined!
@@ -68,47 +69,66 @@ namespace Legion {
   template ApEvent IndexSpaceNodeT<INST_N1,T1>:: \
     create_by_domain_helper<INST_N2,T2>(Operation *,    \
                                      IndexPartNode *,     \
-                                     FutureMapImpl *,     \
+                                     const std::map<DomainPoint,FutureImpl*>&, \
+                                     const Domain&, \
                                      bool); \
   template ApEvent IndexSpaceNodeT<INST_N1,T1>:: \
     create_by_weight_helper<INST_N2,T2>(Operation *,    \
                                      IndexPartNode *,   \
-                                     FutureMapImpl *,   \
+                                     const std::map<DomainPoint,FutureImpl*>&, \
                                      size_t); \
   template ApEvent IndexSpaceNodeT<INST_N1,T1>:: \
     create_by_field_helper<INST_N2,T2>(Operation *,	\
+                                     FieldID,             \
 				     IndexPartNode *,	  \
 				     const std::vector<FieldDataDescriptor> &, \
+                                     std::vector<DeppartResult>*, \
 				     ApEvent); \
   template ApEvent IndexSpaceNodeT<INST_N1,T1>:: \
     create_by_image_helper<INST_N2,T2>(Operation *, \
+                                     FieldID,         \
 				     IndexPartNode *, \
 				     IndexPartNode *, \
-				     const std::vector<FieldDataDescriptor> &, \
-				     ApEvent); \
+				     std::vector<FieldDataDescriptor> &, \
+                                     ApEvent); \
   template ApEvent IndexSpaceNodeT<INST_N1,T1>:: \
     create_by_image_range_helper<INST_N2,T2>(Operation *, \
+                                     FieldID,           \
 				     IndexPartNode *,	\
 				     IndexPartNode *,		\
-				     const std::vector<FieldDataDescriptor> &, \
-				     ApEvent); \
+				     std::vector<FieldDataDescriptor> &, \
+                                     ApEvent); \
   template ApEvent IndexSpaceNodeT<INST_N1,T1>:: \
     create_by_preimage_helper<INST_N2,T2>(Operation *, \
+                                     FieldID,           \
 				     IndexPartNode *,	\
 				     IndexPartNode *,		\
 				     const std::vector<FieldDataDescriptor> &, \
+                                     const std::map<DomainPoint,Domain>*, \
+                                     std::vector<DeppartResult>*, \
 				     ApEvent);		\
   template ApEvent IndexSpaceNodeT<INST_N1,T1>:: \
     create_by_preimage_range_helper<INST_N2,T2>(Operation *, \
+                                     FieldID,           \
 				     IndexPartNode *,	\
 				     IndexPartNode *,	\
 				     const std::vector<FieldDataDescriptor> &, \
+                                     const std::map<DomainPoint,Domain>*, \
+                                     std::vector<DeppartResult>*, \
 				     ApEvent); \
   template ApEvent IndexSpaceNodeT<INST_N1,T1>:: \
     create_association_helper<INST_N2,T2>(Operation *, \
+                                     FieldID,          \
 				     IndexSpaceNode *, \
 				     const std::vector<FieldDataDescriptor> &, \
-				     ApEvent);
+				     ApEvent); \
+  template ApEvent CopyAcrossUnstructuredT<INST_N1,T1>:: \
+    perform_compute_preimages<INST_N2,T2>(std::vector<DomainT<INST_N1,T1> >&, \
+                                     Operation*, \
+                                     ApEvent, \
+                                     const bool); \
+  template bool CopyAcrossUnstructuredT<INST_N1,T1>:: \
+    rebuild_indirections<INST_N2,T2>(const bool);
 
   FOREACH_TT(DOIT_TT)
 #else
@@ -119,7 +139,7 @@ namespace Legion {
   template class Internal::IndexSpaceUnion<INST_N1,T>; \
   template class Internal::IndexSpaceIntersection<INST_N1,T>; \
   template class Internal::IndexSpaceDifference<INST_N1,T>; \
-  template class Internal::InstanceExpression<INST_N1,T>; \
+  template class Internal::InternalExpression<INST_N1,T>; \
   template class Internal::RemoteExpression<INST_N1,T>;
   
 

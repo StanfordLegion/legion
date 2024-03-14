@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -36,7 +36,7 @@ namespace Realm {
     class ProcessorImpl;
   
     // information for a task launch
-    class Task : public Operation {
+    class Task final : public Operation {
     public:
       Task(Processor _proc,
 	   Processor::TaskFuncID _func_id,
@@ -51,6 +51,9 @@ namespace Realm {
       virtual ~Task(void);
 
     public:
+      static void *operator new(size_t size);
+      static void operator delete(void *ptr);
+
       virtual bool mark_ready(void);
       virtual bool mark_started(void);
 
@@ -127,9 +130,10 @@ namespace Realm {
     public:
       TaskQueue(void);
 
-      // we used most of the signed integer range for priorities - we do borrow a 
-      //  few of the extreme values to make sure we have "infinity" and "negative infinity"
-      //  and that we don't run into problems with -INT_MIN
+      // we used most of the signed integer range for priorities - we do borrow
+      // a
+      //  few of the extreme values to make sure we have "infinity" and
+      //  "negative infinity" and that we don't run into problems with -INT_MIN
       typedef int priority_t;
       static const priority_t PRI_MAX_FINITE = INT_MAX - 1;
       static const priority_t PRI_MIN_FINITE = -(INT_MAX - 1);
@@ -138,16 +142,20 @@ namespace Realm {
 
       class NotificationCallback {
       public:
-	virtual void item_available(priority_t item_priority) = 0;
+        virtual void item_available(priority_t item_priority) = 0;
       };
 
-      Mutex mutex;
+      // starvation seems to be a problem on shared task queues
+      atomic<priority_t> top_priority;
+      atomic<size_t> task_count;
+      FIFOMutex mutex;
       Task::TaskList ready_task_list;
       std::vector<NotificationCallback *> callbacks;
       std::vector<priority_t> callback_priorities;
       ProfilingGauges::AbsoluteRangeGauge<int> *task_count_gauge;
 
-      void add_subscription(NotificationCallback *callback, priority_t higher_than = PRI_NEG_INF);
+      void add_subscription(NotificationCallback *callback,
+                            priority_t higher_than = PRI_NEG_INF);
 
       void remove_subscription(NotificationCallback *callback);
 
@@ -155,11 +163,14 @@ namespace Realm {
 
       void free_gauge();
       // gets highest priority task available from any task queue in list
-      static Task *get_best_task(const std::vector<TaskQueue *>& queues,
-				 int& task_priority);
+      static Task *get_best_task(const std::vector<TaskQueue *> &queues,
+                                 int &task_priority);
 
       void enqueue_task(Task *task);
-      void enqueue_tasks(Task::TaskList& tasks, size_t num_tasks);
+      void enqueue_tasks(Task::TaskList &tasks, size_t num_tasks);
+      bool empty() const { return task_count.load() == 0; }
+      private:
+      void enqueue_ready_task(Task *task, bool front = false);
     };
 
     // an internal task is an arbitrary blob of work that needs to happen on
@@ -246,7 +257,10 @@ namespace Realm {
       // gets highest priority task available from any task queue
       Task *get_best_ready_task(int& task_priority);
 
-      Mutex lock;
+      // TODO: switch this to DelegatingMutex - goal is that callers of
+      //  things like thread_ready() should not have to block on
+      //  contention
+      FIFOMutex lock;
       std::vector<TaskQueue *> task_queues;
       std::vector<Thread *> idle_workers;
       std::set<Thread *> blocked_workers;
@@ -406,8 +420,8 @@ namespace Realm {
       std::set<Thread *> all_workers;
       std::set<Thread *> active_workers;
       std::set<Thread *> terminating_workers;
-      std::map<Thread *, Mutex::CondVar *> sleeping_threads;
-      Mutex::CondVar shutdown_condvar;
+      std::map<Thread *, FIFOMutex::CondVar *> sleeping_threads;
+      FIFOMutex::CondVar shutdown_condvar;
     };
 
 #ifdef REALM_USE_USER_THREADS
@@ -456,7 +470,7 @@ namespace Realm {
       std::set<Thread *> all_workers;
 
       int host_startups_remaining;
-      Mutex::CondVar host_startup_condvar;
+      FIFOMutex::CondVar host_startup_condvar;
 
     public:
       int cfg_num_host_threads;

@@ -1,4 +1,4 @@
--- Copyright 2022 Stanford University
+-- Copyright 2024 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -14,11 +14,13 @@
 
 -- Union Find
 
+local data = require("common/data")
+
 local union_find = {}
 union_find.__index = union_find
 
 function union_find.new()
-  return setmetatable({forest = {}}, union_find)
+  return setmetatable({forest = data.newmap()}, union_find)
 end
 
 function union_find:union_keys(a, b)
@@ -29,7 +31,7 @@ function union_find:union_keys(a, b)
 end
 
 function union_find:find_key(k)
-  if not rawget(self.forest, k) then
+  if not self.forest[k] then
     self.forest[k] = k
   end
 
@@ -51,7 +53,7 @@ end
 
 function union_find:keys()
   local result = terralib.newlist()
-  for k, _ in pairs(self.forest) do
+  for _, k in self.forest:keys() do
     result:insert(k)
   end
   return result

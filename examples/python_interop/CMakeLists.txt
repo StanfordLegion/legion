@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------#
-# Copyright 2022 Stanford University
+# Copyright 2024 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
 # limitations under the License.
 #------------------------------------------------------------------------------#
 
-cmake_minimum_required(VERSION 3.1)
+cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
 project(LegionExample_python_interop)
 
 # Only search if were building stand-alone and not as part of Legion
@@ -25,6 +25,7 @@ endif()
 add_executable(python_interop python_interop.cc)
 target_compile_definitions(python_interop PRIVATE PYTHON_MODULES_PATH="${CMAKE_INSTALL_FULL_DATADIR}/Legion/python:${CMAKE_INSTALL_FULL_DATADIR}/Legion/python/tests")
 target_link_libraries(python_interop Legion::Legion)
+target_compile_options(python_interop PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
 install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/python_interop.py
   DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/python/tests
 )

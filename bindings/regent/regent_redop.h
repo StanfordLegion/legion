@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -59,6 +59,22 @@ struct ArrayReduction {
       ELEM_REDOP::template fold<EXCL>((&rhs1)[i], (&rhs2)[i]);
   }
 #endif
+
+#ifdef __HIPCC__
+  template <bool EXCL>
+  __device__ void apply_hip(LHS& lhs, const RHS& rhs) const
+  {
+    for (unsigned i = 0; i < N; i++)
+      ELEM_REDOP::template apply<EXCL>((&lhs)[i], (&rhs)[i]);
+  }
+
+  template <bool EXCL>
+  __device__ void fold_hip(RHS& rhs1, const RHS& rhs2) const
+  {
+    for (unsigned i = 0; i < N; i++)
+      ELEM_REDOP::template fold<EXCL>((&rhs1)[i], (&rhs2)[i]);
+  }
+#endif
 };
 
 template <typename ELEM_REDOP>
@@ -87,6 +103,8 @@ protected:
     cpu_fold_nonexcl_fn = &Realm::ReductionKernels::cpu_fold_wrapper<ArrayReduction<ELEM_REDOP>, false>;
 #if defined(LEGION_USE_CUDA) && defined(__CUDACC__)
     Realm::Cuda::add_cuda_redop_kernels<ArrayReduction<ELEM_REDOP> >(this);
+#elif defined(LEGION_USE_HIP) && defined(__HIPCC__)
+    Realm::Hip::add_hip_redop_kernels<ArrayReduction<ELEM_REDOP> >(this);
 #endif
   }
 

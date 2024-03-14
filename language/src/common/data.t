@@ -1,4 +1,4 @@
--- Copyright 2022 Stanford University
+-- Copyright 2024 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -14,60 +14,102 @@
 
 -- Data Structures
 
--- Elliott: The more I write in Lua, the more I feel like I'm
--- reimplementing Python piece by piece. Several limitations in Lua
--- (e.g. no __hash metamethod) can bite hard if you try to go without
--- properly engineered data structures. (Exercise for the reader: try
--- to write a fully general purpose memoize function in plain Lua.)
+-- Core libraries for common, useful data structures not included in
+-- Lua(JIT). Includes:
 --
--- Note: In the code below, whenever an interface exists in plain Lua
--- (and can be hijacked with existing Lua metamethods), those
--- metamethods are used. In all other cases, the metatable is left
--- alone, and regular functions and methods are used instead. So for
--- example:
---
---   * Using metamethods:
---     x + y        -- addition (via __add)
---     x .. y       -- concatenation (via __concat)
---     x[k]         -- key lookup (via __index)
---     x[k] = v     -- key assignment (via __newindex)
---     tostring(x)  -- stringification (via __tostring)
---
---   * Using regular methods and functions:
---     x:items()    -- key, value iterator (__pairs does not exist in LuaJIT)
---     x:keys()     -- key iterator
---     x:values()   -- value iterator
---     data.hash(x) -- calls x:hash() if supported, otherwise returns x
---
--- This means that, for example the [] operator, and the pairs
--- function, may or may not work with a given data structure, since it
--- depends on the internal representation of that data structure.
+--   * data.map: an insertion-ordered map data structure
+--   * data.default_map: same, but with defaults
+--   * data.tuple: an immutable, list-like data structure with some nice features
+--   * data.vector: mutable, list-like data structure intended for numerical vectors
+--   * various list methods not included in Lua/Terra
 
 local data = {}
+
+if os.getenv("REGENT_SAFE_COMPILER") == "1" then
+  -- Elliott: I got tired of finding these mistakes by hand, so here
+  -- are a bunch of checks that try to avoid common problems (like
+  -- calling pairs on data.map). They may be expensive, so we'll
+  -- probably only run them in CI.
+  terralib.newlist.__tostring = nil
+
+  local old_ipairs = ipairs
+  local old_pairs = pairs
+  function ipairs(x)
+    assert(not data.is_map(x))
+    assert(not data.is_default_map(x))
+    if not terralib.islist(x) and not data.is_tuple(x) then
+      local max_k = #x
+      for k, v in old_pairs(x) do
+        if type(k) ~= "number" then
+          assert(false, "ipairs on table with of type '" .. tostring(type(k)) .. "': " .. tostring(k))
+        end
+        if k > max_k then
+          assert(false, "ipairs on table with key " .. tostring(k) .. " above table's size " .. max_k)
+        end
+      end
+    end
+    return old_ipairs(x)
+  end
+
+  function pairs(x, k)
+    assert(not data.is_map(x))
+    assert(not data.is_default_map(x))
+    return old_pairs(x, k)
+  end
+
+  local old_next = next
+  function next(x, k)
+    assert(not data.is_map(x))
+    assert(not data.is_default_map(x))
+    return old_next(x, k)
+  end
+
+  local old_rawget = rawget
+  function rawget(x, k)
+    assert(not data.is_map(x))
+    assert(not data.is_default_map(x))
+    return old_rawget(x, k)
+  end
+
+  local old_rawset = rawset
+  function rawset(x, k, v)
+    assert(not data.is_map(x))
+    assert(not data.is_default_map(x))
+    return old_rawset(x, k, v)
+  end
+end
 
 -- Utility for figuring out if we're in LuaJIT or PUC Lua.
 function data.is_luajit()
   return type(rawget(_G,"jit")) == "table"
 end
 
--- #####################################
--- ## Hashing
--- #################
+function data.new_weak_key_table()
+  return setmetatable({}, {__mode = "k"})
+end
 
--- Note: Unlike a normal hash function, it is important that the
--- values returned by this function are unique. This is because the
--- hash values are frequently used in Lua tables as the keys
--- themselves---thus, they get treated as if they were the values. Lua
--- itself has no alternative (there is no __hash metamethod), so this
--- is the best you can do without building your own separate-chaining
--- hash map, which would either be slow (if you did it in Lua) or
--- would require extensions (if you did it in C).
-
-function data.hash(x)
-  if type(x) == "table" and x.hash then
-    return x:hash()
-  else
-    return x
+function data.weak_memoize(fn)
+  local info = debug.getinfo(fn,'u')
+  local nparams = not info.isvararg and info.nparams
+  local cachekey = data.new_weak_key_table()
+  local values = data.new_weak_key_table()
+  local nilkey = {} --key to use in place of nil when a nil value is seen
+  return function(...)
+    local key = cachekey
+    for i = 1,nparams or select('#',...) do
+      local e = select(i,...)
+      if e == nil then e = nilkey end
+      local n = key[e]
+      if not n then
+        n = data.new_weak_key_table(); key[e] = n
+      end
+      key = n
+    end
+    local v = values[key]
+    if not v then
+      v = fn(...); values[key] = v
+    end
+    return v
   end
 end
 
@@ -217,6 +259,17 @@ function data.take(n, list)
 end
 
 function data.dict(list)
+  local result = data.newmap()
+  for _, pair in ipairs(list) do
+    result[pair[1]] = pair[2]
+  end
+  return result
+end
+
+-- The resulting dict is unordered---the resulting keys may be
+-- returned in a non-deterministic. Be very careful what you do with
+-- this!
+function data.unordered_dict(list)
   local result = {}
   for _, pair in ipairs(list) do
     result[pair[1]] = pair[2]
@@ -235,7 +288,7 @@ function data.find_key(dict, val)
 end
 
 function data.set(list)
-  local result = {}
+  local result = data.newmap()
   for _, k in ipairs(list) do
     result[k] = true
   end
@@ -249,6 +302,20 @@ end
 data.tuple = {}
 setmetatable(data.tuple, { __index = terralib.newlist })
 data.tuple.__index = data.tuple
+
+-- Tuples have to remain immutable, or else interning won't work.
+function data.tuple:__newindex(_, _)
+  error("tuples are immutable", 2)
+end
+function data.tuple:insert(_)
+  error("tuples are immutable", 2)
+end
+function data.tuple:insertall(_)
+  error("tuples are immutable", 2)
+end
+function data.tuple:remove(_)
+  error("tuples are immutable", 2)
+end
 
 function data.tuple.__eq(a, b)
   if not data.is_tuple(a) or not data.is_tuple(b) then
@@ -267,21 +334,21 @@ end
 
 function data.tuple.__concat(a, b)
   assert(data.is_tuple(a) and (not b or data.is_tuple(b)))
-  local result = data.newtuple()
+  local result = terralib.newlist()
   result:insertall(a)
   if not b then
     return result
   end
   result:insertall(b)
-  return result
+  return data.newtuple(unpack(result))
 end
 
 function data.tuple:slice(start --[[ inclusive ]], stop --[[ inclusive ]])
-  local result = data.newtuple()
+  local result = terralib.newlist()
   for i = start, stop do
     result:insert(self[i])
   end
-  return result
+  return data.newtuple(unpack(result))
 end
 
 function data.tuple:starts_with(t)
@@ -310,12 +377,11 @@ function data.tuple:__tostring()
   return self:mkstring("<", ".", ">")
 end
 
-function data.tuple:hash()
-  return "data.tuple" .. tostring(self)
-end
+local newtuple_intern = data.weak_memoize(
+  function(...) return setmetatable({...}, data.tuple) end)
 
 function data.newtuple(...)
-  return setmetatable({...}, data.tuple)
+  return newtuple_intern(...)
 end
 
 function data.is_tuple(x)
@@ -327,7 +393,7 @@ end
 -- #################
 
 data.vector = {}
-setmetatable(data.vector, { __index = data.tuple })
+setmetatable(data.vector, { __index = terralib.newlist })
 data.vector.__index = data.vector
 
 function data.vector.__eq(a, b)
@@ -399,12 +465,18 @@ function data.vector.__mul(a, b)
   assert(false) -- At least one should have been a vector
 end
 
-function data.vector:__tostring()
-  return self:mkstring("[", ",", "]")
+function data.vector:mkstring(first, sep, last)
+  if first and sep and last then
+    return first .. self:map(tostring):concat(sep) .. last
+  elseif first and sep then
+    return first .. self:map(tostring):concat(sep)
+  else
+    return self:map(tostring):concat(first)
+  end
 end
 
-function data.vector:hash()
-  return "data.vector" .. tostring(self)
+function data.vector:__tostring()
+  return self:mkstring("[", ",", "]")
 end
 
 function data.newvector(...)
@@ -419,10 +491,59 @@ end
 -- ## Maps
 -- #################
 
+-- This is an insertion ordered map data structure. It supports the
+-- following operations:
+--
+--  * Put: O(1)
+--  * Get: O(1)
+--  * Iterate keys: O(M)
+--  * Iterate values: O(M)
+--  * Iterate key/value pairs: O(M)
+--
+-- Where N is the number of live entries, and M is the number of total
+-- (live + dead) entries. Right now there isn't any effort to do
+-- compaction (to reduce iteration from O(M) to O(N)), but this could
+-- be added in the future if it is determined to be an important use
+-- case.
+--
+-- The following APIs are supported on a map M:
+--
+--     M[k]                   -- equivalent to M:get(k)
+--     M[k] = v               -- equivalent to M:put(k, v)
+--     M:get(k)
+--     M:has(k)               -- equivalent to M:get(k) (but see default_map)
+--     M:put(k, v)
+--     for _, k in M:keys()   -- note that the _ is undefined
+--     for _, v in M:values() -- note that the _ is undefined
+--     for k, v in M:items()
+--     M:is_empty()
+--     M:copy()               -- note: a shallow copy
+--     M:map(fn)              -- map fn over k, v pairs and return a map
+--     M:map_list(fn)         -- map fn over k, v pairs and return a list
+--     tostring(M)            -- human readable representation of the map
+--
+-- The following APIs are NOT SUPPORTED:
+--
+--     for k, v in pairs(M)   -- DON'T DO THIS: IT WON'T WORK
+--     for k, v in ipairs(M)  -- DON'T DO THIS: IT WON'T WORK
+
 data.map = {}
 
+do
+-- Sentinels that won't accidentally collide with keys supplied by the user.
+local values_by_key = {}
+local next_insertion_index = {}
+local key_by_insertion_index = {}
+local insertion_index_by_key = {}
+
 function data.newmap()
-  return setmetatable({ __keys_by_hash = {}, __values_by_hash = {} }, data.map)
+  return setmetatable(
+    {
+      [values_by_key] = {},
+      [next_insertion_index] = 1,
+      [key_by_insertion_index] = {},
+      [insertion_index_by_key] = {},
+    }, data.map)
 end
 
 function data.map_from_table(t)
@@ -438,7 +559,11 @@ function data.is_map(x)
 end
 
 function data.map:__index(k)
-  return self.__values_by_hash[data.hash(k)] or data.map[k]
+  local v = self[values_by_key][k]
+  if v ~= nil then
+    return v
+  end
+  return data.map[k]
 end
 
 function data.map:__newindex(k, v)
@@ -446,48 +571,99 @@ function data.map:__newindex(k, v)
 end
 
 function data.map:has(k)
-  return self.__values_by_hash[data.hash(k)]
+  return self[values_by_key][k]
 end
 
 function data.map:get(k)
-  return self.__values_by_hash[data.hash(k)]
+  return self[values_by_key][k]
 end
 
 function data.map:put(k, v)
-  local kh = data.hash(k)
-  if v == nil then
-    k = nil
+  local idx = self[insertion_index_by_key][k]
+  if not idx and v ~= nil then
+    idx = self[next_insertion_index]
+    self[next_insertion_index] = idx + 1
   end
-  self.__keys_by_hash[kh] = k
-  self.__values_by_hash[kh] = v
+
+  self[values_by_key][k] = v
+  if v ~= nil then
+    self[insertion_index_by_key][k] = idx
+  else
+    self[insertion_index_by_key][k] = nil
+  end
+  if idx then
+    if v ~= nil then
+      self[key_by_insertion_index][idx] = k
+    else
+      self[key_by_insertion_index][idx] = nil
+    end
+  end
 end
 
-function data.map:next_item(k)
-  local next_kh, next_k = next(self.__keys_by_hash, data.hash(k))
-  if next_kh == nil then
-    return
-  end
-  return next_k, self.__values_by_hash[next_kh]
+function data.map:next_item(last_k)
+  local idx = last_k ~= nil and
+    self[insertion_index_by_key][last_k] or 0
+
+  local k, v
+  repeat
+    idx = idx + 1
+    k = self[key_by_insertion_index][idx]
+    if k ~= nil then
+      v = self[values_by_key][k]
+    else
+      v = nil
+    end
+  until k ~= nil or idx + 1 >= self[next_insertion_index]
+  return k, v
 end
 
 function data.map:items()
   return data.map.next_item, self, nil
 end
 
+function data.map:next_key(idx)
+  local k
+  repeat
+    idx = idx + 1
+    k = self[key_by_insertion_index][idx]
+  until k ~= nil or idx + 1 >= self[next_insertion_index]
+  return k ~= nil and idx or nil, k
+end
+
 function data.map:keys()
-  return pairs(self.__keys_by_hash)
+  return data.map.next_key, self, 0
+end
+
+function data.map:next_value(idx)
+  local v
+  repeat
+    idx = idx + 1
+    local k = self[key_by_insertion_index][idx]
+    if k ~= nil then
+      v = self[values_by_key][k]
+    else
+      v = nil
+    end
+  until v ~= nil or idx + 1 >= self[next_insertion_index]
+  return v ~= nil and idx or nil, v
 end
 
 function data.map:values()
-  return pairs(self.__values_by_hash)
+  return data.map.next_value, self, 0
 end
 
 function data.map:is_empty()
-  return next(self.__values_by_hash) == nil
+  return next(self[values_by_key]) == nil
 end
 
 function data.map:copy()
   return self:map(function(k, v) return v end)
+end
+
+function data.map:insertall(m)
+  for k, v in m:items() do
+    self:put(k, v)
+  end
 end
 
 function data.map:map(fn)
@@ -506,6 +682,22 @@ function data.map:map_list(fn)
   return result
 end
 
+function data.map:map_keys(fn)
+  local result = terralib.newlist()
+  for _, k in self:keys() do
+    result:insert(fn(k))
+  end
+  return result
+end
+
+function data.map:map_values(fn)
+  local result = terralib.newlist()
+  for _, v in self:values() do
+    result:insert(fn(v))
+  end
+  return result
+end
+
 function data.map:__tostring()
   return "{" .. self:map_list(
     function(k, v)
@@ -513,9 +705,42 @@ function data.map:__tostring()
     end):concat(",") .. "}"
 end
 
+function data.map:inspect()
+  print("values_by_key:")
+  for k, v in pairs(self[values_by_key]) do
+    print("", k, v)
+  end
+  print("insertion_index_by_key:")
+  for k, v in pairs(self[insertion_index_by_key]) do
+    print("", k, v)
+  end
+  print("key_by_insertion_index:")
+  for k, v in pairs(self[key_by_insertion_index]) do
+    print("", k, v)
+  end
+  print("next_insertion_index:", self[next_insertion_index])
+end
+end -- data.map
+
 -- #####################################
 -- ## Default Maps
 -- #################
+
+-- Default maps are like maps with the following differences:
+--
+-- The factory, supplied to data.new_default_map is called to
+-- construct new keys on the following API calls:
+--
+--     M:get(k) -- returns factory(k) if value does not exist
+--     M[k]     -- equivalent to M:get(k)
+--
+-- The following API calls DO NOT construct default values:
+--
+--     M:has(k) -- returns nil if the value does not exist
+
+do
+-- Sentinels that won't accidentally collide with keys supplied by the user.
+local default_factory = {}
 
 data.default_map = setmetatable(
   {
@@ -526,14 +751,13 @@ data.default_map = setmetatable(
     __index = data.map,
 })
 
-function data.new_default_map(default)
-  return setmetatable(
-    {
-      __keys_by_hash = {},
-      __values_by_hash = {},
-      __default = default,
-    },
-    data.default_map)
+function data.new_default_map(factory)
+  local map = data.newmap()
+  if os.getenv("REGENT_SAFE_COMPILER") == "1" then
+    setmetatable(map, nil) -- workaround for rawset safety check
+  end
+  rawset(map, default_factory, factory)
+  return setmetatable(map, data.default_map)
 end
 
 local function make_recursive_map(depth)
@@ -555,7 +779,7 @@ end
 function data.default_map:__index(k)
   local lookup = data.map.get(self, k) or data.default_map[k]
   if lookup == nil then
-    lookup = self.__default(k)
+    lookup = self[default_factory](k)
     if lookup ~= nil then self:put(k, lookup) end
   end
   return lookup
@@ -568,10 +792,11 @@ end
 function data.default_map:get(k)
   local lookup = data.map.get(self, k)
   if lookup == nil then
-    lookup = self.__default(k)
+    lookup = self[default_factory](k)
     if lookup ~= nil then self:put(k, lookup) end
   end
   return lookup
 end
+end -- data.default_map
 
 return data

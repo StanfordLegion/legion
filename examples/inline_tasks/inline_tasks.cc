@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University
+/* Copyright 2024 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -292,9 +292,9 @@ public:
   InlineMapper(Machine machine, Runtime *rt, Processor local)
     : DefaultMapper(rt->get_mapper_runtime(), machine, local) { }
 public:
-  virtual void select_task_options(const MapperContext ctx,
-                                   const Task &task,
-                                         TaskOptions &output)
+  void select_task_options(const MapperContext ctx,
+                           const Task &task,
+                                 TaskOptions &output) override
   {
     DefaultMapper::select_task_options(ctx, task, output);
     // For this example we inline all the tasks that are not the top-level task

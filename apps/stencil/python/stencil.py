@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# Copyright 2022 Stanford University
+# Copyright 2024 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -114,7 +114,7 @@ stencil = extern_task(
 
 increment = extern_task(
     task_id=10002,
-    argument_types=[Region, Region, Region, Region, Region, Region, Region, pygion.bool_],
+    argument_types=[Region, Region, Region, Region, Region, Region, Region, pygion.bool_, pygion.bool_],
     privileges=[RW('input'), N, RW('input'), RW('input'), RW('input'), RW('input'), RW],
     return_type=pygion.void,
     calling_convention='regent')
@@ -167,6 +167,8 @@ def main():
     pyp_out = make_ghost_y_partition(yp, tiles, n, nt, 0)
 
     timestamp = Fspace(OrderedDict([
+        ('init_start', pygion.int64),
+        ('init_stop', pygion.int64),
         ('start', pygion.int64),
         ('stop', pygion.int64),
     ]))
@@ -179,8 +181,8 @@ def main():
     for r in [points, xm, xp, ym, yp]:
         for f in ['input', 'output']:
             pygion.fill(r, f, init)
-    pygion.fill(times, 'start', 0)
-    pygion.fill(times, 'stop', 0)
+    for f in ['init_start', 'init_stop', 'start', 'stop']:
+        pygion.fill(times, f, 0)
 
     tsteps = conf.tsteps + 2 * conf.tprune
     tprune = conf.tprune
@@ -193,12 +195,12 @@ def main():
         with trace:
             if _constant_time_launches:
                 index_launch(tiles, stencil, private[ID], interior[ID], pxm_in[ID], pxp_in[ID], pym_in[ID], pyp_in[ID], p_times[ID], False)
-                index_launch(tiles, increment, private[ID], exterior[ID], pxm_out[ID], pxp_out[ID], pym_out[ID], pyp_out[ID], p_times[ID], False)
+                index_launch(tiles, increment, private[ID], exterior[ID], pxm_out[ID], pxp_out[ID], pym_out[ID], pyp_out[ID], p_times[ID], False, False)
             else:
                 for i in IndexLaunch(tiles):
                     stencil(private[i], interior[i], pxm_in[i], pxp_in[i], pym_in[i], pyp_in[i], p_times[i], False)
                 for i in IndexLaunch(tiles):
-                    increment(private[i], exterior[i], pxm_out[i], pxp_out[i], pym_out[i], pyp_out[i], p_times[i], False)
+                    increment(private[i], exterior[i], pxm_out[i], pxp_out[i], pym_out[i], pyp_out[i], p_times[i], False, False)
         if t == tsteps - tprune - 1:
             pygion.execution_fence(block=True)
             stop_time = pygion.c.legion_get_current_time_in_nanos()

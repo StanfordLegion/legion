@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -140,12 +140,13 @@ namespace Realm {
     return io;
   }
   
-  /*static*/ inline TransferGraph::XDTemplate::IO TransferGraph::XDTemplate::mk_fill(unsigned _fill_start, unsigned _fill_size)
+  /*static*/ inline TransferGraph::XDTemplate::IO TransferGraph::XDTemplate::mk_fill(unsigned _fill_start, unsigned _fill_size, size_t _fill_total)
   {
     IO io;
     io.iotype = IO_FILL_DATA;
     io.fill.fill_start = _fill_start;
     io.fill.fill_size = _fill_size;
+    io.fill.fill_total = _fill_total;
     return io;
   }
 
@@ -167,6 +168,7 @@ namespace Realm {
     , dsts(_dsts)
     , prs(requests)
     , analysis_complete(false)
+    , analysis_successful(false)
     , fill_data(0)
     , fill_size(0)
   {

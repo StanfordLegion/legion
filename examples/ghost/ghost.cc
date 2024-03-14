@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University
+/* Copyright 2024 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -133,7 +133,7 @@ void top_level_task(const Task *task,
   {
     // Get each of the subspaces
     IndexSpaceT<1> subspace(runtime->get_index_subspace(ctx, disjoint_ip, color));
-    sprintf(buf, "disjoint_subspace_%d", color);
+    snprintf(buf, sizeof buf, "disjoint_subspace_%d", color);
     runtime->attach_name(subspace, buf);
     Domain dom = runtime->get_index_space_domain(ctx, subspace);
     Rect<1> rect = dom; 
@@ -143,7 +143,7 @@ void top_level_task(const Task *task,
     transform[0][0] = (rect.hi[0]-(ORDER-1)) - rect.lo[0];
     IndexPartition ghost_ip = runtime->create_partition_by_restriction(ctx,
         subspace, ghost_color_is, transform, extent, DISJOINT_KIND);
-    sprintf(buf, "ghost_ip_%d", color);
+    snprintf(buf, sizeof buf, "ghost_ip_%d", color);
     runtime->attach_name(ghost_ip, buf);
     // Make explicit logical regions for each of the ghost spaces
     for (int idx = GHOST_LEFT; idx <= GHOST_RIGHT; idx++)
@@ -151,7 +151,7 @@ void top_level_task(const Task *task,
       IndexSpace ghost_space = runtime->get_index_subspace(ctx, ghost_ip, idx);
       LogicalRegion ghost_lr = 
         runtime->create_logical_region(ctx, ghost_space, ghost_fs);  
-      sprintf(buf, "ghost_lr_%d_%s", color, parts[idx]);
+      snprintf(buf, sizeof buf, "ghost_lr_%d_%s", color, parts[idx]);
       runtime->attach_name(ghost_lr, buf);
       if (idx == GHOST_LEFT)
         ghost_left.push_back(ghost_lr);
@@ -257,6 +257,8 @@ void top_level_task(const Task *task,
       DomainPoint point(color);
       must_epoch_launcher.add_single_task(point, spmd_launcher);
     }
+    // Specify our launch domain
+    must_epoch_launcher.launch_domain = Domain(Point<1>(0), Point<1>(num_subregions-1)); 
     FutureMap fm = runtime->execute_must_epoch(ctx, must_epoch_launcher);
     // wait for completion at least
     fm.wait_all_results();
@@ -312,7 +314,7 @@ void spmd_task(const Task *task,
     IndexPartition ghost_ip = runtime->get_parent_index_partition(ctx, ghost_is);
     IndexSpace local_is = runtime->get_parent_index_space(ctx, ghost_ip);
     local_fs = runtime->create_field_space(ctx);
-    sprintf(buf, "local_fs_%lld", task->index_point[0]);
+    snprintf(buf, sizeof buf, "local_fs_%lld", task->index_point[0]);
     runtime->attach_name(local_fs, buf);
     FieldAllocator allocator = 
       runtime->create_field_allocator(ctx, local_fs);
@@ -321,7 +323,7 @@ void spmd_task(const Task *task,
     allocator.allocate_field(sizeof(double),FID_DERIV);
     runtime->attach_name(local_fs, FID_DERIV, "DERIV");
     local_lr = runtime->create_logical_region(ctx, local_is, local_fs);
-    sprintf(buf, "local_lr_%lld", task->index_point[0]);
+    snprintf(buf, sizeof buf, "local_lr_%lld", task->index_point[0]);
     runtime->attach_name(local_lr, buf);
   }
   // Run a bunch of steps
@@ -618,6 +620,7 @@ int main(int argc, char **argv)
   {
     TaskVariantRegistrar registrar(TOP_LEVEL_TASK_ID, "top_level");
     registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+    registrar.set_replicable();
     Runtime::preregister_task_variant<top_level_task>(registrar, "top_level");
   }
 

@@ -1,4 +1,4 @@
--- Copyright 2022 Stanford University, NVIDIA Corporation
+-- Copyright 2024 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -37,14 +37,19 @@ function context:__newindex (field, value)
   error ("context has no field '" .. field .. "' (in assignment)", 2)
 end
 
-function context:new_stat_scope()
+function context:new_stat_scope(has_conds)
+  local conds = self.conds
+  if has_conds then
+    conds = terralib.newlist()
+    conds:insertall(self.conds)
+  end
   local cx = {
     task_is_leaf = self.task_is_leaf,
     local_symbols = self.local_symbols,
     var_flows = self.var_flows,
     var_futures = self.var_futures,
     var_symbols = self.var_symbols,
-    conds = self.conds,
+    conds = conds,
     spills = terralib.newlist(),
   }
   return setmetatable(cx, context)
@@ -71,9 +76,9 @@ function context:new_task_scope(task_is_leaf)
   local cx = {
     task_is_leaf = task_is_leaf,
     local_symbols = data.newmap(),
-    var_flows = {},
-    var_futures = {},
-    var_symbols = {},
+    var_flows = data.newmap(),
+    var_futures = data.newmap(),
+    var_symbols = data.newmap(),
     conds = terralib.newlist(),
   }
   return setmetatable(cx, context)
@@ -85,8 +90,8 @@ function context.new_global_scope()
 end
 
 function context:get_flow(v)
-  if not rawget(self.var_flows, v) then
-    self.var_flows[v] = {}
+  if not self.var_flows[v] then
+    self.var_flows[v] = data.newmap()
   end
   return self.var_flows[v]
 end
@@ -111,19 +116,23 @@ end
 local analyze_var_flow = {}
 
 function flow_empty()
-  return {}
+  return data.newmap()
 end
 
 function flow_future()
-  return {[true] = true} -- Represents an unconditional future r-value
+  local result = data.newmap()
+  result[true] = true -- Represents an unconditional future r-value
+  return result
 end
 
 function flow_var(v)
-  return {[v] = true} -- Represents a variable
+  local result = data.newmap()
+  result[v] = true -- Represents a variable
+  return result
 end
 
 function flow_future_into(cx, lhs) -- Unconditionally flow future into l-value
-  for v, _ in pairs(lhs) do
+  for _, v in lhs:keys() do
     local var_flow = cx:get_flow(v)
     var_flow[true] = true
   end
@@ -131,24 +140,24 @@ end
 
 function flow_value_into_var(cx, symbol, value) -- Flow r-value into variable
   local var_flow = cx:get_flow(symbol)
-  for v, _ in pairs(value) do
+  for _, v in value:keys() do
     var_flow[v] = true
   end
 end
 
 function flow_value_into(cx, lhs, rhs) -- Flow r-value into l-value
-  for lhv, _ in pairs(lhs) do
+  for _, lhv in lhs:keys() do
     local lhv_flow = cx:get_flow(lhv)
-    for rhv, _ in pairs(rhs) do
+    for _, rhv in rhs:keys() do
       lhv_flow[rhv] = true
       end
   end
 end
 
 function meet_flow(...)
-  local flow = {}
+  local flow = data.newmap()
   for _, a in ipairs({...}) do
-    for v, _ in pairs(a) do
+    for _, v in a:keys() do
       flow[v] = true
     end
   end
@@ -295,7 +304,11 @@ end
 
 function analyze_var_flow.stat_if(cx, node)
   local cond = analyze_var_flow.expr(cx, node.cond)
-  local cx = cx:new_local_scope(cond)
+  -- In order to introduce oportunities for predication, we need to
+  -- lift all variables inside of conditions to futures
+  if std.config["predicate"] then
+    cx = cx:new_local_scope(cond)
+  end
   analyze_var_flow.block(cx, node.then_block)
   node.elseif_blocks:map(
     function(block) return analyze_var_flow.stat_elseif(cx, block) end)
@@ -308,7 +321,11 @@ end
 
 function analyze_var_flow.stat_while(cx, node)
   local cond = analyze_var_flow.expr(cx, node.cond)
-  local cx = cx:new_local_scope(cond)
+  -- In order to introduce oportunities for predication, we need to
+  -- lift all variables inside of conditions to futures
+  if std.config["predicate"] then
+    cx = cx:new_local_scope(cond)
+  end
   analyze_var_flow.block(cx, node.block)
 end
 
@@ -365,7 +382,7 @@ function analyze_var_flow.stat_assignment(cx, node)
   if not (std.is_list(lhs_type) or std.is_phase_barrier(lhs_type) or std.is_dynamic_collective(lhs_type)) then
     -- Make sure any dominating conditions flow into this assignment.
     local lhs_symbol = node.lhs:is(ast.typed.expr.ID) and node.lhs.value
-    for i, cond in pairs(cx.conds) do
+    for i, cond in ipairs(cx.conds) do
       if not cx.local_symbols[lhs_symbol] or i > cx.local_symbols[lhs_symbol] then
         flow_value_into(cx, lhs, cond)
       end
@@ -384,7 +401,7 @@ function analyze_var_flow.stat_reduce(cx, node)
   if not (std.is_list(lhs_type) or std.is_phase_barrier(lhs_type) or std.is_dynamic_collective(lhs_type)) then
     -- Make sure any dominating conditions flow into this assignment.
     local lhs_symbol = node.lhs:is(ast.typed.expr.ID) and node.lhs.value
-    for i, cond in pairs(cx.conds) do
+    for i, cond in ipairs(cx.conds) do
       if not cx.local_symbols[lhs_symbol] or i > cx.local_symbols[lhs_symbol] then
         flow_value_into(cx, lhs, cond)
       end
@@ -456,11 +473,11 @@ function analyze_var_flow.stat(cx, node)
 end
 
 local function compute_var_futures(cx)
-  local inflow = {}
-  for v1, flow in pairs(cx.var_flows) do
-    for v2, _ in pairs(flow) do
-      if not rawget(inflow, v2) then
-        inflow[v2] = {}
+  local inflow = data.newmap()
+  for v1, flow in cx.var_flows:items() do
+    for _, v2 in flow:keys() do
+      if not inflow[v2] then
+        inflow[v2] = data.newmap()
       end
       inflow[v2][v1] = true
     end
@@ -470,10 +487,10 @@ local function compute_var_futures(cx)
   var_futures[true] = true
   repeat
     local changed = false
-    for v1, _ in pairs(var_futures) do
-      if rawget(inflow, v1) then
-        for v2, _ in pairs(inflow[v1]) do
-          if not rawget(var_futures, v2) then
+    for _, v1 in var_futures:keys() do
+      if inflow[v1] then
+        for _, v2 in inflow[v1]:keys() do
+          if not var_futures[v2] then
             var_futures[v2] = true
             changed = true
           end
@@ -484,7 +501,7 @@ local function compute_var_futures(cx)
 end
 
 local function compute_var_symbols(cx)
-  for v, is_future in pairs(cx.var_futures) do
+  for v, is_future in cx.var_futures:items() do
     if std.is_symbol(v) and is_future then
       assert(terralib.types.istype(v:hastype()) and not std.is_future(v:gettype()))
       cx.var_symbols[v] = std.newsymbol(std.future(v:gettype()), v:hasname())
@@ -496,50 +513,21 @@ local optimize_futures = {}
 
 -- Normalize all sub-expressions that could be lifted to tasks.
 -- This will help us track futures from those lifted tasks accurately.
-local function normalize_compound_expr(cx, expr)
-  if expr:is(ast.typed.expr.Cast) or
-     expr:is(ast.typed.expr.Unary) or
-     expr:is(ast.typed.expr.Binary) or
-     expr:is(ast.typed.expr.Call) or
-     expr:is(ast.typed.expr.Future) or
-     expr:is(ast.typed.expr.DynamicCollectiveGetResult)
-  then
-    local temp_var = std.newsymbol(expr.expr_type, "__normalized_in_future_opt")
+local function normalize_compound_expr(cx, node)
+  if not node:is(ast.typed.expr.ID) and std.is_future(std.as_read(node.expr_type)) then
+    local temp_var = std.newsymbol(node.expr_type, "__normalized_in_future_opt")
     cx:add_spill(ast.typed.stat.Var {
       symbol = temp_var,
-      type = expr.expr_type,
-      value = expr,
-      span = expr.span,
+      type = node.expr_type,
+      value = node,
+      span = node.span,
       annotations = ast.default_annotations(),
     })
     return ast.typed.expr.ID {
       value = temp_var,
-      expr_type = expr.expr_type,
-      span = expr.span,
+      expr_type = node.expr_type,
+      span = node.span,
       annotations = ast.default_annotations(),
-    }
-  else
-    return expr
-  end
-end
-
-local function normalize(cx, node)
-  if node:is(ast.typed.expr.Binary) then
-    local lhs = normalize_compound_expr(cx, normalize(cx, node.lhs))
-    local rhs = normalize_compound_expr(cx, normalize(cx, node.rhs))
-    return node {
-      lhs = lhs,
-      rhs = rhs,
-    }
-  elseif node:is(ast.typed.expr.Unary) then
-    local rhs = normalize_compound_expr(cx, normalize(cx, node.rhs))
-    return node {
-      rhs = rhs,
-    }
-  elseif node:is(ast.typed.expr.Cast) then
-    local arg = normalize_compound_expr(cx, normalize(cx, node.arg))
-    return node {
-      arg = arg,
     }
   else
     return node
@@ -550,7 +538,7 @@ local function concretize(cx, node)
   local expr_type = std.as_read(node.expr_type)
   if std.is_future(expr_type) then
     if not node:is(ast.typed.expr.ID) then
-      node = normalize_compound_expr(cx, normalize(cx, node))
+      node = normalize_compound_expr(cx, node)
     end
     return ast.typed.expr.FutureGetResult {
       value = node,
@@ -567,18 +555,17 @@ local function promote(cx, node, expected_type)
 
   local expr_type = std.as_read(node.expr_type)
   if not std.is_future(expr_type) then
-    return normalize_compound_expr(cx,
-      ast.typed.expr.Future {
-        value = node,
-        expr_type = expected_type,
-        annotations = node.annotations,
-        span = node.span,
-      })
+    return ast.typed.expr.Future {
+      value = node,
+      expr_type = expected_type,
+      annotations = node.annotations,
+      span = node.span,
+    }
   elseif not std.type_eq(expr_type, expected_type) then
     -- FIXME: This requires a cast. For now, just concretize and re-promote.
     return promote(cx, concretize(cx, node), expected_type)
   end
-  return normalize(cx, node)
+  return node
 end
 
 function optimize_futures.expr_region_root(cx, node)
@@ -699,6 +686,7 @@ function optimize_futures.expr_cast(cx, node)
 
   local expr_type = node.expr_type
   if std.is_future(arg_type) then
+    arg = normalize_compound_expr(cx, arg)
     expr_type = std.future(expr_type)
   end
 
@@ -1148,6 +1136,7 @@ function optimize_futures.expr_unary(cx, node)
 
   local expr_type = node.expr_type
   if std.is_future(rhs_type) then
+    rhs = normalize_compound_expr(cx, rhs)
     expr_type = std.future(expr_type)
   end
 
@@ -1198,6 +1187,8 @@ function optimize_futures.expr_binary(cx, node)
 
   local expr_type = node.expr_type
   if std.is_future(lhs_type) or std.is_future(rhs_type) then
+    lhs = normalize_compound_expr(cx, lhs)
+    rhs = normalize_compound_expr(cx, rhs)
     expr_type = std.future(expr_type)
   end
 
@@ -1481,8 +1472,13 @@ function optimize_futures.block(cx, node)
 end
 
 function optimize_futures.stat_if(cx, node)
-  local cx = cx:new_stat_scope()
-  local cond = concretize(cx, optimize_futures.expr(cx, node.cond))
+  local cx = cx:new_stat_scope(true)
+  local cond = optimize_futures.expr(cx, node.cond)
+  if std.config["predicate"] and std.is_future(std.as_read(cond.expr_type)) then
+    cx.conds:insert(cond)
+  end
+  -- Always concretize, if we predicate later we'll strip this off
+  cond = concretize(cx, cond)
   local then_block = optimize_futures.block(cx, node.then_block)
   local else_block = node.else_block
   for idx = #node.elseif_blocks, 1, -1 do
@@ -1521,9 +1517,17 @@ end
 function optimize_futures.stat_while(cx, node)
   -- This is guaranteed by the normalizer
   assert(node.cond:is(ast.typed.expr.ID))
+
+  local cx = cx:new_stat_scope(true)
+  local cond = optimize_futures.expr(cx, node.cond)
+  if std.config["predicate"] and std.is_future(std.as_read(cond.expr_type)) then
+    cx.conds:insert(cond)
+  end
+  -- Always concretize, if we predicate later we'll strip this off
+  cond = concretize(cx, cond)
   return terralib.newlist({
     node {
-      cond = concretize(cx, optimize_futures.expr(cx, node.cond)),
+      cond = cond,
       block = optimize_futures.block(cx, node.block),
     }
   })
@@ -1848,6 +1852,10 @@ function optimize_futures.stat_assignment(cx, node)
   local lhs_type = std.as_read(lhs.expr_type)
   if std.is_future(lhs_type) then
     normalized_rhs = promote(cx, rhs, lhs_type)
+    if #cx.conds > 0 then
+      -- This might get predicated, so normalize preemptively
+      normalized_rhs = normalize_compound_expr(cx, normalized_rhs)
+    end
   else
     normalized_rhs = concretize(cx, rhs)
   end
@@ -1874,7 +1882,7 @@ function optimize_futures.stat_reduce(cx, node)
   local normalized_rhs
   local lhs_type = std.as_read(lhs.expr_type)
   if std.is_future(lhs_type) then
-    normalized_rhs = promote(cx, rhs, lhs_type)
+    normalized_rhs = normalize_compound_expr(cx, promote(cx, rhs, lhs_type))
 
     return cx:add_spill(
       ast.typed.stat.Assignment {

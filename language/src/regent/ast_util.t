@@ -1,4 +1,4 @@
--- Copyright 2022 Stanford University
+-- Copyright 2024 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -404,6 +404,21 @@ function ast_util.render(expr)
   elseif expr:is(ast.typed.stat) then
     return pretty.entry_stat(expr)
   end
+end
+
+function ast_util.get_base_indexed_node(node, previous_index)
+  if node:is(ast.typed.expr.IndexAccess) then
+    return ast_util.get_base_indexed_node(node.value, node.index)
+  end
+  return node, previous_index
+end
+
+function ast_util.replace_base_indexed_node(node, replacement)
+  if node:is(ast.typed.expr.IndexAccess) then
+    return node { value = ast_util.replace_base_indexed_node(node.value, replacement) }
+  end
+  assert(std.type_eq(std.as_read(node.expr_type), std.as_read(replacement.expr_type)))
+  return replacement
 end
 
 return ast_util

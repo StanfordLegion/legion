@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -52,6 +52,8 @@ namespace Realm {
 
     virtual void reset(void) = 0;
     virtual bool done(void) = 0;
+    virtual size_t get_base_offset(void) const;
+    virtual size_t get_address_size(void) const;
 
     // flag bits to control iterators
     enum {
@@ -93,6 +95,7 @@ namespace Realm {
       //  strict ordering rules
       virtual int set_rect(const RegionInstanceImpl *inst,
                            const InstanceLayoutPieceBase *piece,
+                           size_t field_size, size_t field_offset,
                            int ndims,
                            const int64_t lo[/*ndims*/],
                            const int64_t hi[/*ndims*/],
@@ -109,7 +112,8 @@ namespace Realm {
     virtual void confirm_step(void) = 0;
     virtual void cancel_step(void) = 0;
 
-    virtual bool get_addresses(AddressList &addrlist) = 0;
+    virtual bool get_addresses(AddressList &addrlist,
+                               const InstanceLayoutPieceBase *&nonaffine) = 0;
   };
 
   class TransferDomain {
@@ -167,12 +171,14 @@ namespace Realm {
   //  intermediate buffers
   struct TransferGraph {
     struct XDTemplate {
+      // TODO(apryakhin@): Remove target_node
       NodeID target_node;
       //XferDesKind kind;
       XferDesFactory *factory;
       int gather_control_input;
       int scatter_control_input;
       XferDesRedopInfo redop;
+      Channel *channel = nullptr;
 
       enum IOType {
 	IO_INST,
@@ -199,6 +205,7 @@ namespace Realm {
 	  struct {
 	    unsigned fill_start;
 	    unsigned fill_size;
+            size_t fill_total;
 	  } fill;
 	};
       };
@@ -208,7 +215,8 @@ namespace Realm {
 			    RegionInstance _inst,
 			    unsigned _fld_start, unsigned _fld_count);
       static IO mk_edge(unsigned _edge);
-      static IO mk_fill(unsigned _fill_start, unsigned _fill_size);
+      static IO mk_fill(unsigned _fill_start, unsigned _fill_size,
+                        size_t _fill_total);
 
       std::vector<IO> inputs;  // TODO: short vectors
       std::vector<IO> outputs;
@@ -259,6 +267,7 @@ namespace Realm {
 
     void check_analysis_preconditions();
     void perform_analysis();
+    void cancel_analysis(Event failed_precondition);
 
     class DeferredAnalysis : public EventWaiter {
     public:
@@ -267,8 +276,8 @@ namespace Realm {
       virtual void print(std::ostream& os) const;
       virtual Event get_finish_event(void) const;
 
-    protected:
       TransferDesc *desc;
+      Event precondition;
     };
     DeferredAnalysis deferred_analysis;
 
@@ -281,6 +290,7 @@ namespace Realm {
 
     Mutex mutex;
     atomic<bool> analysis_complete;
+    bool analysis_successful;
     std::vector<TransferOperation *> pending_ops;
     TransferGraph graph;
     std::vector<int> dim_order;
@@ -320,13 +330,16 @@ namespace Realm {
 
     virtual RegionInstance get_pointer_instance(void) const = 0;
 
+    virtual const std::vector<RegionInstance>* get_instances(void) const = 0;
+
+    virtual FieldID get_field(void) const = 0;
+
     virtual TransferIterator *create_address_iterator(RegionInstance peer) const = 0;
 
-    virtual TransferIterator *create_indirect_iterator(Memory addrs_mem,
-						       RegionInstance inst,
-						       const std::vector<FieldID>& fields,
-						       const std::vector<size_t>& fld_offsets,
-						       const std::vector<size_t>& fld_sizes) const = 0;
+    virtual TransferIterator *create_indirect_iterator(
+        Memory addrs_mem, RegionInstance inst, const std::vector<FieldID> &fields,
+        const std::vector<size_t> &fld_offsets, const std::vector<size_t> &fld_sizes,
+        Channel *channel = nullptr) const = 0;
 
     virtual void print(std::ostream& os) const = 0;
   };
@@ -340,7 +353,8 @@ namespace Realm {
     TransferOperation(TransferDesc& _desc,
 		      Event _precondition,
 		      GenEventImpl *_finish_event,
-		      EventImpl::gen_t _finish_gen);
+		      EventImpl::gen_t _finish_gen,
+		      int priority);
 
     ~TransferOperation();
 
@@ -380,8 +394,8 @@ namespace Realm {
       virtual void print(std::ostream& os) const;
       virtual Event get_finish_event(void) const;
 
-    protected:
       TransferOperation *op;
+      Event precondition;
     };
     DeferredStart deferred_start;
 

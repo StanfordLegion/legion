@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,6 +24,8 @@ namespace Realm {
 
   class IndexSpaceGenericImpl {
   public:
+    IndexSpaceGenericImpl() = default;
+
     virtual ~IndexSpaceGenericImpl();
 
     virtual IndexSpaceGenericImpl *clone_at(void *dst) const = 0;
@@ -33,7 +35,22 @@ namespace Realm {
 		       const void *indirects_data,
 		       size_t indirect_len,
 		       const ProfilingRequestSet &requests,
-		       Event wait_on) const = 0;
+		       Event wait_on,
+		       int priority) const = 0;
+
+    // given an instance layout, attempts to provide bounds (start relative to
+    //  the base of the instance and relative limit - i.e. first nonaccessibly
+    //  offset) on affine accesses via elements in this index space - returns
+    //  true if successful, false if not
+    virtual bool compute_affine_bounds(const InstanceLayoutGeneric *ilg,
+                                       FieldID fid,
+                                       uintptr_t& rel_base,
+                                       uintptr_t& limit) const = 0;
+
+    IndexSpaceGenericImpl(const IndexSpaceGenericImpl &) = default;
+    IndexSpaceGenericImpl &operator=(const IndexSpaceGenericImpl &) = default;
+    IndexSpaceGenericImpl(IndexSpaceGenericImpl &&) noexcept = default;
+    IndexSpaceGenericImpl &operator=(IndexSpaceGenericImpl &&) noexcept = default;
   };
 
   template <int N, typename T>
@@ -48,7 +65,13 @@ namespace Realm {
 		       const void *indirects_data,
 		       size_t indirect_len,
 		       const ProfilingRequestSet &requests,
-		       Event wait_on) const;
+		       Event wait_on,
+		       int priority) const;
+
+    virtual bool compute_affine_bounds(const InstanceLayoutGeneric *ilg,
+                                       FieldID fid,
+                                       uintptr_t& rel_base,
+                                       uintptr_t& limit) const;
 
     IndexSpace<N,T> space;
   };

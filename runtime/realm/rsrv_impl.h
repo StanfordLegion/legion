@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -56,15 +56,7 @@ namespace Realm {
 
       static const ID::ID_Types ID_TYPE = ID::ID_LOCK;
 
-      void init(Reservation _me, unsigned _init_owner, size_t _data_size = 0);
-
-      template <class T>
-      void set_local_data(T *data)
-      {
-	local_data = data;
-	local_data_size = sizeof(T);
-        own_local = false;
-      }
+      void init(Reservation _me, unsigned _init_owner);
 
       //protected:
       Reservation me;
@@ -97,11 +89,6 @@ namespace Realm {
       };
       std::map<unsigned, RetryInfo> retries;
       bool requested; // do we have a request for the lock in flight?
-
-      // local data protected by lock
-      void *local_data;
-      size_t local_data_size;
-      bool own_local;
 
       static Mutex freelist_mutex;
       static ReservationImpl *first_free;
@@ -165,6 +152,7 @@ namespace Realm {
   struct DestroyLockMessage {
     Reservation actual;
     Reservation dummy;
+    Event wait_on;
 
     static void handle_message(NodeID sender,const DestroyLockMessage &msg,
 			       const void *data, size_t datalen);

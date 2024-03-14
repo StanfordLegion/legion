@@ -1,5 +1,5 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
- * Copyright 2022 Los Alamos National Laboratory
+/* Copyright 2024 Stanford University, NVIDIA Corporation
+ * Copyright 2024 Los Alamos National Laboratory
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@
 #include "realm/transfer/transfer.h"
 #include "realm/transfer/channel_disk.h"
 #include "realm/transfer/ib_memory.h"
+#include "realm/utils.h"
 
 #include <errno.h>
 // included for file memory data transfer
@@ -201,20 +202,66 @@ namespace Realm {
 
     void PosixAIOWrite::launch(void)
     {
-      log_aio.debug("write issued: op=%p cb=%p", this, &cb);
-#ifndef NDEBUG
-      int ret =
+      log_aio.debug("write issued: op=%p cb=%p", static_cast<void *>(this),
+                    static_cast<void *>(&cb));
+#ifdef REALM_ON_MACOS
+      constexpr unsigned MAX_ATTEMPTS = 8;
+#else
+      constexpr unsigned MAX_ATTEMPTS = 1;
 #endif
-	aio_write(&cb);
-      assert(ret == 0);
+      for (unsigned idx = 0; idx < MAX_ATTEMPTS; idx++)
+      {
+        int ret = aio_write(&cb);
+        if (ret == 0)
+          return;
+        switch (errno)
+        {
+          case EAGAIN:
+            continue;
+          default:
+            {
+              const char *message = realm_strerror(errno);
+              log_aio.fatal("Failed asynchronous IO write [%d]: %s", errno, message);
+              abort();
+            }
+        }
+      }
+      log_aio.warning("exceeeded max aio write attempts %d, switching to synchronous mode", MAX_ATTEMPTS);
+      const uint8_t *buffer = (const uint8_t*)cb.aio_buf;
+      while (cb.aio_nbytes) {
+        ssize_t ret = pwrite(cb.aio_fildes, (const void*)buffer, cb.aio_nbytes, cb.aio_offset);
+        if (ret < 0) {
+          const char *message = realm_strerror(errno);
+          log_aio.fatal("Failed synchronous IO write [%d]: %s", errno, message);
+          abort();
+        } else if (ret) {
+          assert(((size_t)ret) <= cb.aio_nbytes);
+          buffer += ret;
+          cb.aio_offset += ret;
+          cb.aio_nbytes -= ret;
+        } else {
+          log_aio.fatal("Synchronous IO write failed to make forward progress");
+          abort();
+        } 
+      }
+      completed = true;
     }
 
     bool PosixAIOWrite::check_completion(void)
     {
-      int ret = aio_error(&cb);
-      if(ret == EINPROGRESS) return false;
-      log_aio.debug("write returned: op=%p cb=%p ret=%d", this, &cb, ret);
-      assert(ret == 0);
+      if (!completed)
+      {
+        int ret = aio_error(&cb);
+        if(ret == EINPROGRESS) return false;
+        log_aio.debug("write returned: op=%p cb=%p ret=%d", static_cast<void *>(this),
+                      static_cast<void *>(&cb), ret);
+        if (ret != 0)
+        {
+          const char *message = realm_strerror(errno);
+          log_aio.fatal("Failed asynchronous IO write [%d]: %s", errno, message);
+          abort();
+        }
+      }
       return true;
     }
 
@@ -243,20 +290,66 @@ namespace Realm {
 
     void PosixAIORead::launch(void)
     {
-      log_aio.debug("read issued: op=%p cb=%p", this, &cb);
-#ifndef NDEBUG
-      int ret =
+      log_aio.debug("read issued: op=%p cb=%p", static_cast<void *>(this),
+                    static_cast<void *>(&cb));
+#ifdef REALM_ON_MACOS
+      constexpr unsigned MAX_ATTEMPTS = 8;
+#else
+      constexpr unsigned MAX_ATTEMPTS = 1;
 #endif
-	aio_read(&cb);
-      assert(ret == 0);
+      for (unsigned idx = 0; idx < MAX_ATTEMPTS; idx++)
+      {
+        int ret = aio_read(&cb);
+        if (ret == 0)
+          return;
+        switch (errno)
+        {
+          case EAGAIN:
+            continue;
+          default:
+            {
+              const char *message = realm_strerror(errno);
+              log_aio.fatal("Failed asynchronous IO read [%d]: %s", errno, message);
+              abort();
+            }
+        }
+      }
+      log_aio.warning("exceeeded max aio read attempts %d, switching to synchronous mode", MAX_ATTEMPTS);
+      uint8_t *buffer = (uint8_t*)cb.aio_buf;
+      while (cb.aio_nbytes) {
+        ssize_t ret = pread(cb.aio_fildes, (void*)buffer, cb.aio_nbytes, cb.aio_offset);
+        if (ret < 0) {
+          const char *message = realm_strerror(errno);
+          log_aio.fatal("Failed synchronous IO read [%d]: %s", errno, message);
+          abort();
+        } else if (ret) {
+          assert(((size_t)ret) <= cb.aio_nbytes);
+          buffer += ret;
+          cb.aio_offset += ret;
+          cb.aio_nbytes -= ret;
+        } else {
+          log_aio.fatal("Synchronous IO read failed to make forward progress");
+          abort();
+        }
+      }
+      completed = true;
     }
 
     bool PosixAIORead::check_completion(void)
     {
-      int ret = aio_error(&cb);
-      if(ret == EINPROGRESS) return false;
-      log_aio.debug("read returned: op=%p cb=%p ret=%d", this, &cb, ret);
-      assert(ret == 0);
+      if (!completed)
+      {
+        int ret = aio_error(&cb);
+        if(ret == EINPROGRESS) return false;
+        log_aio.debug("read returned: op=%p cb=%p ret=%d", static_cast<void *>(this),
+                      static_cast<void *>(&cb), ret);
+        if (ret != 0)
+        {
+          const char *message = realm_strerror(errno);
+          log_aio.fatal("Failed asynchronous IO read [%d]: %s", errno, message);
+          abort();
+        }
+      }
       return true;
     }
 #endif
@@ -289,14 +382,16 @@ namespace Realm {
 
     void AIOFenceOp::launch(void)
     {
-      log_aio.debug("fence launched: op=%p req=%p", this, req);
+      log_aio.debug("fence launched: op=%p req=%p", static_cast<void *>(this),
+                    static_cast<void *>(req));
       completed = true;
     }
 
     bool AIOFenceOp::check_completion(void)
     {
       assert(completed);
-      log_aio.debug("fence completed: op=%p req=%p", this, req);
+      log_aio.debug("fence completed: op=%p req=%p", static_cast<void *>(this),
+                    static_cast<void *>(req));
       f->mark_finished(true /*successful*/);
       return true;
     }
@@ -440,7 +535,7 @@ namespace Realm {
       while(!launched_operations.empty()) {
 	AIOOperation *op = launched_operations.front();
 	if(!op->check_completion()) break;
-	log_aio.debug("aio op completed: op=%p", op);
+        log_aio.debug("aio op completed: op=%p", static_cast<void *>(op));
         // <NEW_DMA>
         if (op->req != NULL) {
           Request* request = (Request*)(op->req);
@@ -495,8 +590,8 @@ namespace Realm {
 	while(!work_until.is_expired()) {
 	  AIOOperation *op = launched_operations.front();
 	  if(!op->check_completion()) break;
-	  log_aio.debug("aio op completed: op=%p", op);
-	  // <NEW_DMA>
+          log_aio.debug("aio op completed: op=%p", static_cast<void *>(op));
+          // <NEW_DMA>
 	  if (op->req != NULL) {
 	    Request* request = (Request*)(op->req);
 	    request->xd->notify_request_read_done(request);
@@ -556,7 +651,7 @@ namespace Realm {
 	  ++it) {
 	unsigned bw = 0;
 	unsigned latency = 0;
-	if((*it)->supports_path(src_mem, dst_mem,
+	if((*it)->supports_path(ChannelCopyInfo{src_mem, dst_mem},
 				src_serdez_id, dst_serdez_id,
 				redop_id,
                                 0, 0, 0, // FIXME
@@ -574,7 +669,7 @@ namespace Realm {
 	    ++it) {
 	  unsigned bw = 0;
 	  unsigned latency = 0;
-	  if((*it)->supports_path(src_mem, dst_mem,
+	  if((*it)->supports_path(ChannelCopyInfo{src_mem, dst_mem},
 				  src_serdez_id, dst_serdez_id,
 				  redop_id,
                                   0, 0, 0, // FIXME
@@ -733,6 +828,8 @@ namespace Realm {
     return false;
   }
 
+  size_t WrappingFIFOIterator::get_base_offset(void) const { return 0; }
+
   size_t WrappingFIFOIterator::step(size_t max_bytes, AddressInfo &info,
 				    unsigned flags,
 				    bool tentative /*= false*/)
@@ -784,18 +881,29 @@ namespace Realm {
     tentative_valid = false;
   }
 
-  bool WrappingFIFOIterator::get_addresses(AddressList &addrlist)
+  bool WrappingFIFOIterator::get_addresses(AddressList &addrlist,
+                                           const InstanceLayoutPieceBase *&nonaffine)
   {
-    // just add a single copy of our range, on the assumption it's much
-    //  bigger than what the caller actually needs right now
-    size_t *data = addrlist.begin_nd_entry(1 /*dim*/);
+    nonaffine = 0;
+
+    // add a very tall 2d "rectangle" that uses a stride of 0 for the
+    //  line pitch (flow control will prevent any given copy from touching
+    //  the same location twice)
+    size_t lines = std::max<size_t>((1 << 30) / size, 1);
+    int dim = (lines > 1) ? 2 : 1;
+    size_t *data = addrlist.begin_nd_entry(dim);
     if(!data)
       return true;  // can't add more until some is consumed
 
+
     // 1-D span from [base,base+size)
-    data[0] = (size << 4) + 1 /*dim*/;
+    data[0] = (size << 4) + 2 /*dim*/;
     data[1] = base;
-    addrlist.commit_nd_entry(1 /*dim*/, size);
+    if(dim == 2) {
+      data[2] = lines;
+      data[3] = 0; // stride
+    }
+    addrlist.commit_nd_entry(dim, size * lines);
 
     return false;  // we can add more if asked
   }

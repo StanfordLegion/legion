@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,6 +13,9 @@
  * limitations under the License.
  */
 
+// Useful for IDEs 
+#include "legion/legion_redop.h"
+
 #include <array>
 
 #ifndef __MAX__
@@ -25,7 +28,7 @@
 
 namespace Legion {
 
-#if __cplusplus < 202002L
+#if !defined(__cpp_lib_atomic_ref) || (__cpp_lib_atomic_ref < 201806L)
   // We only need this crap if we're using a version of c++ < 20
   // Starting with c++20 we can do all this the right way with atomic_ref
   namespace TypePunning {
@@ -520,8 +523,8 @@ namespace Legion {
       newval = atomicCAS(ptr, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -564,7 +567,7 @@ namespace Legion {
       newval = atomicCAS(ptr, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -650,7 +653,7 @@ namespace Legion {
   void SumReduction<int16_t>::apply<false>(LHS &lhs, RHS rhs)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = lhs, oldval;
     // Type punning like this is illegal in C++ but the
     // CUDA manual has an example just like it so fuck it
@@ -706,7 +709,7 @@ namespace Legion {
   void SumReduction<int16_t>::fold<false>(RHS &rhs1, RHS rhs2)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = rhs1, oldval;
     // Type punning like this is illegal in C++ but the
     // CUDA manual has an example just like it so fuck it
@@ -902,7 +905,7 @@ namespace Legion {
   void SumReduction<uint16_t>::apply<false>(LHS &lhs, RHS rhs)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = lhs, oldval;
     do {
       oldval = newval;
@@ -954,7 +957,7 @@ namespace Legion {
   void SumReduction<uint16_t>::fold<false>(RHS &rhs1, RHS rhs2)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = rhs1, oldval;
     do {
       oldval = newval;
@@ -1071,7 +1074,7 @@ namespace Legion {
   void SumReduction<__half>::apply<false>(LHS &lhs, RHS rhs)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     atomicAdd(&lhs,rhs);
 #else
     // 16-bit atomics are not supported prior to volta
@@ -1104,8 +1107,8 @@ namespace Legion {
     }
 #endif
 #else
-#if __cplusplus >= 202002L
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -1138,7 +1141,7 @@ namespace Legion {
   void SumReduction<__half>::fold<false>(RHS &rhs1, RHS rhs2)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     atomicAdd(&rhs1, rhs2);
 #else
     // 16-bit atomics are not supported prior to volta
@@ -1171,7 +1174,7 @@ namespace Legion {
     }
 #endif
 #else
-#if __cplusplus >= 202002L
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -1208,8 +1211,8 @@ namespace Legion {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     atomicAdd(&lhs, rhs);
 #else
-#if __cplusplus >= 202002L
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -1240,7 +1243,7 @@ namespace Legion {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     atomicAdd(&rhs1, rhs2);
 #else
-#if __cplusplus >= 202002L
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -1285,8 +1288,8 @@ namespace Legion {
     } while (oldval != newval);
 #endif
 #else
-#if __cplusplus >= 202002L
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -1330,7 +1333,7 @@ namespace Legion {
     } while (oldval != newval);
 #endif
 #else
-#if __cplusplus >= 202002L
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -1373,8 +1376,8 @@ namespace Legion {
             __complex_as_uint(oldval), __complex_as_uint(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -1413,7 +1416,7 @@ namespace Legion {
             __complex_as_uint(oldval), __complex_as_uint(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -1454,8 +1457,8 @@ namespace Legion {
             __complex_as_ulonglong(oldval), __complex_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -1494,7 +1497,7 @@ namespace Legion {
             __complex_as_ulonglong(oldval), __complex_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -1549,8 +1552,8 @@ namespace Legion {
     } while (oldval != newval);
 #endif
 #else
-#if __cplusplus >= 202002L
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -1606,7 +1609,7 @@ namespace Legion {
     } while (oldval != newval);
 #endif
 #else
-#if __cplusplus >= 202002L
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -1680,7 +1683,7 @@ namespace Legion {
       newval = atomicCAS(ptr, oldval, newval);
     } while (oldval != newval);
 #else
-    __sync_fetch_and_add(&rhs1, rhs2);
+    __sync_fetch_and_sub(&rhs1, rhs2);
 #endif
   }
 
@@ -1694,7 +1697,7 @@ namespace Legion {
   void DiffReduction<int16_t>::apply<false>(LHS &lhs, RHS rhs)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = lhs, oldval;
     // Type punning like this is illegal in C++ but the
     // CUDA manual has an example just like it so fuck it
@@ -1743,14 +1746,14 @@ namespace Legion {
   template<> __CUDA_HD__ inline
   void DiffReduction<int16_t>::fold<true>(RHS &rhs1, RHS rhs2)
   {
-    rhs1 += rhs2;
+    rhs1 -= rhs2;
   }
 
   template<> __CUDA_HD__ inline
   void DiffReduction<int16_t>::fold<false>(RHS &rhs1, RHS rhs2)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = rhs1, oldval;
     // Type punning like this is illegal in C++ but the
     // CUDA manual has an example just like it so fuck it
@@ -1792,7 +1795,7 @@ namespace Legion {
     }
 #endif
 #else
-    __sync_fetch_and_add(&rhs1, rhs2);
+    __sync_fetch_and_sub(&rhs1, rhs2);
 #endif
   }
 
@@ -1824,7 +1827,7 @@ namespace Legion {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     atomicSub(&rhs1, rhs2);
 #else
-    __sync_fetch_and_add(&rhs1, rhs2);
+    __sync_fetch_and_sub(&rhs1, rhs2);
 #endif
   }
 
@@ -1876,7 +1879,7 @@ namespace Legion {
             __longlong_as_ulonglong(oldval), __longlong_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
-    __sync_fetch_and_add(&rhs1, rhs2);
+    __sync_fetch_and_sub(&rhs1, rhs2);
 #endif
   }
 
@@ -1932,7 +1935,7 @@ namespace Legion {
       newval = atomicCAS(ptr, oldval, newval);
     } while (oldval != newval);
 #else
-    __sync_fetch_and_add(&rhs1, rhs2);
+    __sync_fetch_and_sub(&rhs1, rhs2);
 #endif
   }
 
@@ -1946,7 +1949,7 @@ namespace Legion {
   void DiffReduction<uint16_t>::apply<false>(LHS &lhs, RHS rhs)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = lhs, oldval;
     do {
       oldval = newval;
@@ -1998,7 +2001,7 @@ namespace Legion {
   void DiffReduction<uint16_t>::fold<false>(RHS &rhs1, RHS rhs2)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = rhs1, oldval;
     do {
       oldval = newval;
@@ -2036,7 +2039,7 @@ namespace Legion {
     }
 #endif
 #else
-    __sync_fetch_and_add(&rhs1, rhs2);
+    __sync_fetch_and_sub(&rhs1, rhs2);
 #endif
   }
 
@@ -2068,7 +2071,7 @@ namespace Legion {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     atomicSub(&rhs1, rhs2);
 #else
-    __sync_fetch_and_add(&rhs1, rhs2);
+    __sync_fetch_and_sub(&rhs1, rhs2);
 #endif
   }
 
@@ -2114,7 +2117,7 @@ namespace Legion {
       newval = atomicCAS(target, oldval, newval);
     } while (oldval != newval);
 #else
-    __sync_fetch_and_add(&rhs1, rhs2);
+    __sync_fetch_and_sub(&rhs1, rhs2);
 #endif
   }
 
@@ -2129,7 +2132,7 @@ namespace Legion {
   void DiffReduction<__half>::apply<false>(LHS &lhs, RHS rhs)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = lhs, oldval;
     // Type punning like this is illegal in C++ but the
     // CUDA manual has an example just like it so fuck it
@@ -2171,8 +2174,8 @@ namespace Legion {
     }
 #endif
 #else
-#if __cplusplus >= 202002L
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -2205,7 +2208,7 @@ namespace Legion {
   void DiffReduction<__half>::fold<false>(RHS &rhs1, RHS rhs2)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = rhs1, oldval;
     // Type punning like this is illegal in C++ but the
     // CUDA manual has an example just like it so fuck it
@@ -2247,7 +2250,7 @@ namespace Legion {
     }
 #endif
 #else
-#if __cplusplus >= 202002L
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -2293,8 +2296,8 @@ namespace Legion {
             __float_as_int(oldval), __float_as_int(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -2334,7 +2337,7 @@ namespace Legion {
             __float_as_int(oldval), __float_as_int(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -2375,8 +2378,8 @@ namespace Legion {
             __double_as_ulonglong(oldval), __double_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -2416,7 +2419,7 @@ namespace Legion {
             __double_as_ulonglong(oldval), __double_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -2459,8 +2462,8 @@ namespace Legion {
             __complex_as_uint(oldval), __complex_as_uint(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -2499,7 +2502,7 @@ namespace Legion {
             __complex_as_uint(oldval), __complex_as_uint(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -2540,8 +2543,8 @@ namespace Legion {
             __complex_as_ulonglong(oldval), __complex_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -2580,7 +2583,7 @@ namespace Legion {
             __complex_as_ulonglong(oldval), __complex_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -2624,8 +2627,8 @@ namespace Legion {
       newval = atomicCAS(ptr, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -2668,7 +2671,7 @@ namespace Legion {
       newval = atomicCAS(ptr, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -2712,8 +2715,8 @@ namespace Legion {
       newval = atomicCAS(ptr, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -2755,7 +2758,7 @@ namespace Legion {
       newval = atomicCAS(ptr, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -2784,7 +2787,7 @@ namespace Legion {
   void ProdReduction<int16_t>::apply<false>(LHS &lhs, RHS rhs)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = lhs, oldval;
     // Type punning like this is illegal in C++ but the
     // CUDA manual has an example just like it so fuck it
@@ -2826,8 +2829,8 @@ namespace Legion {
     }
 #endif
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -2855,7 +2858,7 @@ namespace Legion {
   void ProdReduction<int16_t>::fold<false>(RHS &rhs1, RHS rhs2)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = rhs1, oldval;
     // Type punning like this is illegal in C++ but the
     // CUDA manual has an example just like it so fuck it
@@ -2897,7 +2900,7 @@ namespace Legion {
     }
 #endif
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -2934,8 +2937,8 @@ namespace Legion {
       newval = atomicCAS(target, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -2971,7 +2974,7 @@ namespace Legion {
       newval = atomicCAS(target, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -3012,8 +3015,8 @@ namespace Legion {
             __longlong_as_ulonglong(oldval), __longlong_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -3053,7 +3056,7 @@ namespace Legion {
             __longlong_as_ulonglong(oldval), __longlong_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -3096,8 +3099,8 @@ namespace Legion {
       newval = atomicCAS(ptr, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -3139,7 +3142,7 @@ namespace Legion {
       newval = atomicCAS(ptr, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -3168,7 +3171,7 @@ namespace Legion {
   void ProdReduction<uint16_t>::apply<false>(LHS &lhs, RHS rhs)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = lhs, oldval;
     do {
       oldval = newval;
@@ -3206,8 +3209,8 @@ namespace Legion {
     }
 #endif
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -3235,7 +3238,7 @@ namespace Legion {
   void ProdReduction<uint16_t>::fold<false>(RHS &rhs1, RHS rhs2)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = rhs1, oldval;
     do {
       oldval = newval;
@@ -3273,7 +3276,7 @@ namespace Legion {
     }
 #endif
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -3310,8 +3313,8 @@ namespace Legion {
       newval = atomicCAS(target, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -3347,7 +3350,7 @@ namespace Legion {
       newval = atomicCAS(target, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -3384,8 +3387,8 @@ namespace Legion {
       newval = atomicCAS(target, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -3421,7 +3424,7 @@ namespace Legion {
       newval = atomicCAS(target, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -3451,7 +3454,7 @@ namespace Legion {
   void ProdReduction<__half>::apply<false>(LHS &lhs, RHS rhs)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = lhs, oldval;
     // Type punning like this is illegal in C++ but the
     // CUDA manual has an example just like it so fuck it
@@ -3493,8 +3496,8 @@ namespace Legion {
     }
 #endif
 #else
-#if __cplusplus >= 202002L
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -3527,7 +3530,7 @@ namespace Legion {
   void ProdReduction<__half>::fold<false>(RHS &rhs1, RHS rhs2)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = rhs1, oldval;
     // Type punning like this is illegal in C++ but the
     // CUDA manual has an example just like it so fuck it
@@ -3569,7 +3572,7 @@ namespace Legion {
     }
 #endif
 #else
-#if __cplusplus >= 202002L
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -3615,8 +3618,8 @@ namespace Legion {
             __float_as_int(oldval), __float_as_int(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -3656,7 +3659,7 @@ namespace Legion {
             __float_as_int(oldval), __float_as_int(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -3697,8 +3700,8 @@ namespace Legion {
             __double_as_ulonglong(oldval), __double_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -3738,7 +3741,7 @@ namespace Legion {
             __double_as_ulonglong(oldval), __double_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -3781,8 +3784,8 @@ namespace Legion {
             __complex_as_uint(oldval), __complex_as_uint(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -3821,7 +3824,7 @@ namespace Legion {
             __complex_as_uint(oldval), __complex_as_uint(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -3862,8 +3865,8 @@ namespace Legion {
             __complex_as_ulonglong(oldval), __complex_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -3902,7 +3905,7 @@ namespace Legion {
             __complex_as_ulonglong(oldval), __complex_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -3946,8 +3949,8 @@ namespace Legion {
       newval = atomicCAS(ptr, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -3968,7 +3971,7 @@ namespace Legion {
   template<> __CUDA_HD__ inline
   void DivReduction<int8_t>::fold<true>(RHS &rhs1, RHS rhs2)
   {
-    rhs1 *= rhs2;
+    rhs1 /= rhs2;
   }
 
   template<> __CUDA_HD__ inline
@@ -3989,7 +3992,7 @@ namespace Legion {
       newval = atomicCAS(ptr, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -4018,7 +4021,7 @@ namespace Legion {
   void DivReduction<int16_t>::apply<false>(LHS &lhs, RHS rhs)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = lhs, oldval;
     // Type punning like this is illegal in C++ but the
     // CUDA manual has an example just like it so fuck it
@@ -4060,8 +4063,8 @@ namespace Legion {
     }
 #endif
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -4082,14 +4085,14 @@ namespace Legion {
   template<> __CUDA_HD__ inline
   void DivReduction<int16_t>::fold<true>(RHS &rhs1, RHS rhs2)
   {
-    rhs1 *= rhs2;
+    rhs1 /= rhs2;
   }
 
   template<> __CUDA_HD__ inline
   void DivReduction<int16_t>::fold<false>(RHS &rhs1, RHS rhs2)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = rhs1, oldval;
     // Type punning like this is illegal in C++ but the
     // CUDA manual has an example just like it so fuck it
@@ -4131,7 +4134,7 @@ namespace Legion {
     }
 #endif
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -4168,8 +4171,8 @@ namespace Legion {
       newval = atomicCAS(target, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -4190,7 +4193,7 @@ namespace Legion {
   template<> __CUDA_HD__ inline
   void DivReduction<int32_t>::fold<true>(RHS &rhs1, RHS rhs2)
   {
-    rhs1 *= rhs2;
+    rhs1 /= rhs2;
   }
 
   template<> __CUDA_HD__ inline
@@ -4205,7 +4208,7 @@ namespace Legion {
       newval = atomicCAS(target, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -4246,8 +4249,8 @@ namespace Legion {
             __longlong_as_ulonglong(oldval), __longlong_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -4268,7 +4271,7 @@ namespace Legion {
   template<> __CUDA_HD__ inline
   void DivReduction<int64_t>::fold<true>(RHS &rhs1, RHS rhs2)
   {
-    rhs1 *= rhs2;
+    rhs1 /= rhs2;
   }
 
   template<> __CUDA_HD__ inline
@@ -4287,7 +4290,7 @@ namespace Legion {
             __longlong_as_ulonglong(oldval), __longlong_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -4330,8 +4333,8 @@ namespace Legion {
       newval = atomicCAS(ptr, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -4352,7 +4355,7 @@ namespace Legion {
   template<> __CUDA_HD__ inline
   void DivReduction<uint8_t>::fold<true>(RHS &rhs1, RHS rhs2)
   {
-    rhs1 *= rhs2;
+    rhs1 /= rhs2;
   }
 
   template<> __CUDA_HD__ inline
@@ -4373,7 +4376,7 @@ namespace Legion {
       newval = atomicCAS(ptr, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -4402,7 +4405,7 @@ namespace Legion {
   void DivReduction<uint16_t>::apply<false>(LHS &lhs, RHS rhs)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = lhs, oldval;
     do {
       oldval = newval;
@@ -4440,8 +4443,8 @@ namespace Legion {
     }
 #endif
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -4462,14 +4465,14 @@ namespace Legion {
   template<> __CUDA_HD__ inline
   void DivReduction<uint16_t>::fold<true>(RHS &rhs1, RHS rhs2)
   {
-    rhs1 *= rhs2;
+    rhs1 /= rhs2;
   }
 
   template<> __CUDA_HD__ inline
   void DivReduction<uint16_t>::fold<false>(RHS &rhs1, RHS rhs2)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = rhs1, oldval;
     do {
       oldval = newval;
@@ -4507,7 +4510,7 @@ namespace Legion {
     }
 #endif
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -4544,8 +4547,8 @@ namespace Legion {
       newval = atomicCAS(target, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -4566,7 +4569,7 @@ namespace Legion {
   template<> __CUDA_HD__ inline
   void DivReduction<uint32_t>::fold<true>(RHS &rhs1, RHS rhs2)
   {
-    rhs1 *= rhs2;
+    rhs1 /= rhs2;
   }
 
   template<> __CUDA_HD__ inline
@@ -4581,7 +4584,7 @@ namespace Legion {
       newval = atomicCAS(target, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -4618,8 +4621,8 @@ namespace Legion {
       newval = atomicCAS(target, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -4640,7 +4643,7 @@ namespace Legion {
   template<> __CUDA_HD__ inline
   void DivReduction<uint64_t>::fold<true>(RHS &rhs1, RHS rhs2)
   {
-    rhs1 *= rhs2;
+    rhs1 /= rhs2;
   }
 
   template<> __CUDA_HD__ inline
@@ -4655,7 +4658,7 @@ namespace Legion {
       newval = atomicCAS(target, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -4685,7 +4688,7 @@ namespace Legion {
   void DivReduction<__half>::apply<false>(LHS &lhs, RHS rhs)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = lhs, oldval;
     // Type punning like this is illegal in C++ but the
     // CUDA manual has an example just like it so fuck it
@@ -4727,8 +4730,8 @@ namespace Legion {
     }
 #endif
 #else
-#if __cplusplus >= 202002L
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -4754,14 +4757,14 @@ namespace Legion {
   template<> __CUDA_HD__ inline
   void DivReduction<__half>::fold<true>(RHS &rhs1, RHS rhs2)
   {
-    rhs1 = rhs1 * rhs2;
+    rhs1 = rhs1 / rhs2;
   }
 
   template<> __CUDA_HD__ inline
   void DivReduction<__half>::fold<false>(RHS &rhs1, RHS rhs2)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = rhs1, oldval;
     // Type punning like this is illegal in C++ but the
     // CUDA manual has an example just like it so fuck it
@@ -4803,7 +4806,7 @@ namespace Legion {
     }
 #endif
 #else
-#if __cplusplus >= 202002L
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -4849,8 +4852,8 @@ namespace Legion {
             __float_as_int(oldval), __float_as_int(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -4872,7 +4875,7 @@ namespace Legion {
   template<> __CUDA_HD__ inline
   void DivReduction<float>::fold<true>(RHS &rhs1, RHS rhs2)
   {
-    rhs1 *= rhs2;
+    rhs1 /= rhs2;
   }
 
   template<> __CUDA_HD__ inline
@@ -4890,7 +4893,7 @@ namespace Legion {
             __float_as_int(oldval), __float_as_int(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -4931,8 +4934,8 @@ namespace Legion {
             __double_as_ulonglong(oldval), __double_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -4954,7 +4957,7 @@ namespace Legion {
   template<> __CUDA_HD__ inline
   void DivReduction<double>::fold<true>(RHS &rhs1, RHS rhs2)
   {
-    rhs1 *= rhs2;
+    rhs1 /= rhs2;
   }
 
   template<> __CUDA_HD__ inline
@@ -4972,7 +4975,7 @@ namespace Legion {
             __double_as_ulonglong(oldval), __double_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -5015,8 +5018,8 @@ namespace Legion {
             __complex_as_uint(oldval), __complex_as_uint(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -5037,7 +5040,7 @@ namespace Legion {
   template<> __CUDA_HD__ inline
   void DivReduction<complex<__half> >::fold<true>(RHS &rhs1, RHS rhs2)
   {
-    rhs1 *= rhs2;
+    rhs1 /= rhs2;
   }
 
   template<> __CUDA_HD__ inline
@@ -5055,7 +5058,7 @@ namespace Legion {
             __complex_as_uint(oldval), __complex_as_uint(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -5096,8 +5099,8 @@ namespace Legion {
             __complex_as_ulonglong(oldval), __complex_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -5118,7 +5121,7 @@ namespace Legion {
   template<> __CUDA_HD__ inline
   void DivReduction<complex<float> >::fold<true>(RHS &rhs1, RHS rhs2)
   {
-    rhs1 *= rhs2;
+    rhs1 /= rhs2;
   }
 
   template<> __CUDA_HD__ inline
@@ -5136,7 +5139,7 @@ namespace Legion {
             __complex_as_ulonglong(oldval), __complex_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -5181,8 +5184,8 @@ namespace Legion {
       newval = atomicCAS(ptr, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -5226,7 +5229,7 @@ namespace Legion {
       newval = atomicCAS(ptr, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -5271,8 +5274,8 @@ namespace Legion {
       newval = atomicCAS(ptr, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -5315,7 +5318,7 @@ namespace Legion {
       newval = atomicCAS(ptr, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -5345,7 +5348,7 @@ namespace Legion {
   void MaxReduction<int16_t>::apply<false>(LHS &lhs, RHS rhs)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = lhs, oldval;
     // Type punning like this is illegal in C++ but the
     // CUDA manual has an example just like it so fuck it
@@ -5387,8 +5390,8 @@ namespace Legion {
     }
 #endif
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -5417,7 +5420,7 @@ namespace Legion {
   void MaxReduction<int16_t>::fold<false>(RHS &rhs1, RHS rhs2)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = rhs1, oldval;
     // Type punning like this is illegal in C++ but the
     // CUDA manual has an example just like it so fuck it
@@ -5459,7 +5462,7 @@ namespace Legion {
     }
 #endif
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -5491,8 +5494,8 @@ namespace Legion {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     atomicMax(&lhs, rhs);
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -5523,7 +5526,7 @@ namespace Legion {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     atomicMax(&rhs1, rhs2);  
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -5565,8 +5568,8 @@ namespace Legion {
             __longlong_as_ulonglong(oldval), __longlong_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -5607,7 +5610,7 @@ namespace Legion {
             __longlong_as_ulonglong(oldval), __longlong_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -5651,8 +5654,8 @@ namespace Legion {
       newval = atomicCAS(ptr, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -5695,7 +5698,7 @@ namespace Legion {
       newval = atomicCAS(ptr, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -5725,7 +5728,7 @@ namespace Legion {
   void MaxReduction<uint16_t>::apply<false>(LHS &lhs, RHS rhs)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = lhs, oldval;
     do {
       oldval = newval;
@@ -5763,8 +5766,8 @@ namespace Legion {
     }
 #endif
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -5793,7 +5796,7 @@ namespace Legion {
   void MaxReduction<uint16_t>::fold<false>(RHS &rhs1, RHS rhs2)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = rhs1, oldval;
     do {
       oldval = newval;
@@ -5831,7 +5834,7 @@ namespace Legion {
     }
 #endif
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -5863,8 +5866,8 @@ namespace Legion {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     atomicMax(&lhs, rhs);
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -5895,7 +5898,7 @@ namespace Legion {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     atomicMax(&rhs1, rhs2); 
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -5938,8 +5941,8 @@ namespace Legion {
     atomicMax((unsigned long long*)&lhs, (unsigned long long)rhs);
 #endif
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -5981,7 +5984,7 @@ namespace Legion {
     atomicMax((unsigned long long*)&rhs1, (unsigned long long)rhs2);
 #endif
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -6012,7 +6015,7 @@ namespace Legion {
   void MaxReduction<__half>::apply<false>(LHS &lhs, RHS rhs)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = lhs, oldval;
     // Type punning like this is illegal in C++ but the
     // CUDA manual has an example just like it so fuck it
@@ -6054,8 +6057,8 @@ namespace Legion {
     }
 #endif
 #else
-#if __cplusplus >= 202002L
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -6089,7 +6092,7 @@ namespace Legion {
   void MaxReduction<__half>::fold<false>(RHS &rhs1, RHS rhs2)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = rhs1, oldval;
     // Type punning like this is illegal in C++ but the
     // CUDA manual has an example just like it so fuck it
@@ -6131,7 +6134,7 @@ namespace Legion {
     }
 #endif
 #else
-#if __cplusplus >= 202002L
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -6178,8 +6181,8 @@ namespace Legion {
             __float_as_int(oldval), __float_as_int(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -6220,7 +6223,7 @@ namespace Legion {
             __float_as_int(oldval), __float_as_int(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -6262,8 +6265,8 @@ namespace Legion {
             __double_as_ulonglong(oldval), __double_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -6304,7 +6307,7 @@ namespace Legion {
             __double_as_ulonglong(oldval), __double_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -6323,174 +6326,6 @@ namespace Legion {
 #endif
 #endif
   }
-
-#ifdef LEGION_REDOP_COMPLEX
-#ifdef LEGION_REDOP_HALF
-  template<> __CUDA_HD__ inline
-  void MaxReduction<complex<__half> >::apply<true>(LHS &lhs, RHS rhs)
-  {
-    if (rhs > lhs)
-      lhs = rhs;
-  }
-
-  template<> __CUDA_HD__ inline
-  void MaxReduction<complex<__half> >::apply<false>(LHS &lhs, RHS rhs)
-  {
-#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-    RHS newval = lhs, oldval;
-    // Type punning like this is illegal in C++ but the
-    // CUDA manual has an example just like it so fuck it
-    unsigned int *ptr = (unsigned int*)&lhs;
-    do {
-      oldval = newval;
-      newval = __MAX__(newval, rhs);
-      newval = __uint_as_complex(atomicCAS(ptr,
-            __complex_as_uint(oldval), __complex_as_uint(newval)));
-    } while (oldval != newval);
-#else
-#if __cplusplus >= 202002L
-    std::atomic_ref<RHS> atomic(lhs);
-    RHS oldval = atomic.load();
-    RHS newval;
-    do {
-      newval = __MAX__(oldval, rhs);
-    } while (!atomic.compare_exchange_weak(oldval, newval));
-#else
-    TypePunning::Alias<int32_t,complex<__half> > oldval, newval;
-    TypePunning::Pointer<int32_t> pointer((void*)&lhs);
-    do {
-      oldval.load(pointer);
-      newval = __MAX__(oldval.as_two(), rhs);
-    } while (!__sync_bool_compare_and_swap((int32_t*)pointer,
-                      oldval.as_one(), newval.as_one()));
-#endif
-#endif
-  }
-
-  template<> __CUDA_HD__ inline
-  void MaxReduction<complex<__half> >::fold<true>(RHS &rhs1, RHS rhs2)
-  {
-    if (rhs2 > rhs1)
-      rhs1 = rhs2;
-  }
-
-  template<> __CUDA_HD__ inline
-  void MaxReduction<complex<__half> >::fold<false>(RHS &rhs1, RHS rhs2)
-  {
-#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-    RHS newval = rhs1, oldval;
-    // Type punning like this is illegal in C++ but the
-    // CUDA manual has an example just like it so fuck it
-    unsigned int *ptr = (unsigned int*)&rhs1;
-    do {
-      oldval = newval;
-      newval = __MAX__(newval, rhs2);
-      newval = __uint_as_complex(atomicCAS(ptr,
-            __complex_as_uint(oldval), __complex_as_uint(newval)));
-    } while (oldval != newval);
-#else
-#if __cplusplus >= 202002L
-    std::atomic_ref<RHS> atomic(rhs1);
-    RHS oldval = atomic.load();
-    RHS newval;
-    do {
-      newval = __MAX__(oldval, rhs2);
-    } while (!atomic.compare_exchange_weak(oldval, newval));
-#else
-    TypePunning::Alias<int32_t,complex<__half> > oldval, newval;
-    TypePunning::Pointer<int32_t> pointer((void*)&rhs1);
-    do {
-      oldval.load(pointer);
-      newval = __MAX__(oldval.as_two(), rhs2);
-    } while (!__sync_bool_compare_and_swap((int32_t*)pointer,
-                      oldval.as_one(), newval.as_one()));
-#endif
-#endif
-  }
-#endif // LEGION_REDOP_HALF
-
-  template<> __CUDA_HD__ inline
-  void MaxReduction<complex<float> >::apply<true>(LHS &lhs, RHS rhs)
-  {
-    if (rhs > lhs)
-      lhs = rhs;
-  }
-
-  template<> __CUDA_HD__ inline
-  void MaxReduction<complex<float> >::apply<false>(LHS &lhs, RHS rhs)
-  {
-#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-    RHS newval = lhs, oldval;
-    // Type punning like this is illegal in C++ but the
-    // CUDA manual has an example just like it so fuck it
-    unsigned long long *ptr = (unsigned long long*)&lhs;
-    do {
-      oldval = newval;
-      newval = __MAX__(newval, rhs);
-      newval = __ulonglong_as_complex(atomicCAS(ptr,
-            __complex_as_ulonglong(oldval), __complex_as_ulonglong(newval)));
-    } while (oldval != newval);
-#else
-#if __cplusplus >= 202002L
-    std::atomic_ref<RHS> atomic(lhs);
-    RHS oldval = atomic.load();
-    RHS newval;
-    do {
-      newval = __MAX__(oldval, rhs);
-    } while (!atomic.compare_exchange_weak(oldval, newval));
-#else
-    TypePunning::Alias<int64_t,complex<float> > oldval, newval;
-    TypePunning::Pointer<int64_t> pointer((void*)&lhs);
-    do {
-      oldval.load(pointer);
-      newval = __MAX__(oldval.as_two(), rhs);
-    } while (!__sync_bool_compare_and_swap((int64_t*)pointer,
-                      oldval.as_one(), newval.as_one()));
-#endif
-#endif
-  }
-
-  template<> __CUDA_HD__ inline
-  void MaxReduction<complex<float> >::fold<true>(RHS &rhs1, RHS rhs2)
-  {
-    if (rhs2 > rhs1)
-      rhs1 = rhs2;
-  }
-
-  template<> __CUDA_HD__ inline
-  void MaxReduction<complex<float> >::fold<false>(RHS &rhs1, RHS rhs2)
-  {
-#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-    RHS newval = rhs1, oldval;
-    // Type punning like this is illegal in C++ but the
-    // CUDA manual has an example just like it so fuck it
-    unsigned long long *ptr = (unsigned long long*)&rhs1;
-    do {
-      oldval = newval;
-      newval = __MAX__(newval, rhs2);
-      newval = __ulonglong_as_complex(atomicCAS(ptr,
-            __complex_as_ulonglong(oldval), __complex_as_ulonglong(newval)));
-    } while (oldval != newval);
-#else
-#if __cplusplus >= 202002L
-    std::atomic_ref<RHS> atomic(rhs1);
-    RHS oldval = atomic.load();
-    RHS newval;
-    do {
-      newval = __MAX__(oldval, rhs2);
-    } while (!atomic.compare_exchange_weak(oldval, newval));
-#else
-    TypePunning::Alias<int64_t,complex<float> > oldval, newval;
-    TypePunning::Pointer<int64_t> pointer((void*)&rhs1);
-    do {
-      oldval.load(pointer);
-      newval = __MAX__(oldval.as_two(), rhs2);
-    } while (!__sync_bool_compare_and_swap((int64_t*)pointer,
-                      oldval.as_one(), newval.as_one()));
-#endif
-#endif
-  }
-#endif // LEGION_REDOP_COMPLEX
 
   template<> __CUDA_HD__ inline
   void MinReduction<bool>::apply<true>(LHS &lhs, RHS rhs)
@@ -6517,8 +6352,8 @@ namespace Legion {
       newval = atomicCAS(ptr, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -6562,7 +6397,7 @@ namespace Legion {
       newval = atomicCAS(ptr, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -6607,8 +6442,8 @@ namespace Legion {
       newval = atomicCAS(ptr, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -6651,7 +6486,7 @@ namespace Legion {
       newval = atomicCAS(ptr, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -6681,7 +6516,7 @@ namespace Legion {
   void MinReduction<int16_t>::apply<false>(LHS &lhs, RHS rhs)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = lhs, oldval;
     // Type punning like this is illegal in C++ but the
     // CUDA manual has an example just like it so fuck it
@@ -6723,8 +6558,8 @@ namespace Legion {
     }
 #endif
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -6753,7 +6588,7 @@ namespace Legion {
   void MinReduction<int16_t>::fold<false>(RHS &rhs1, RHS rhs2)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = rhs1, oldval;
     // Type punning like this is illegal in C++ but the
     // CUDA manual has an example just like it so fuck it
@@ -6795,7 +6630,7 @@ namespace Legion {
     }
 #endif
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -6827,8 +6662,8 @@ namespace Legion {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     atomicMin(&lhs, rhs);
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -6859,7 +6694,7 @@ namespace Legion {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     atomicMin(&rhs1, rhs2);
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -6901,8 +6736,8 @@ namespace Legion {
             __longlong_as_ulonglong(oldval), __longlong_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -6943,7 +6778,7 @@ namespace Legion {
             __longlong_as_ulonglong(oldval), __longlong_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -6987,8 +6822,8 @@ namespace Legion {
       newval = atomicCAS(ptr, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -7031,7 +6866,7 @@ namespace Legion {
       newval = atomicCAS(ptr, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -7061,7 +6896,7 @@ namespace Legion {
   void MinReduction<uint16_t>::apply<false>(LHS &lhs, RHS rhs)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = lhs, oldval;
     do {
       oldval = newval;
@@ -7099,8 +6934,8 @@ namespace Legion {
     }
 #endif
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -7129,7 +6964,7 @@ namespace Legion {
   void MinReduction<uint16_t>::fold<false>(RHS &rhs1, RHS rhs2)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = rhs1, oldval;
     do {
       oldval = newval;
@@ -7167,7 +7002,7 @@ namespace Legion {
     }
 #endif
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -7199,8 +7034,8 @@ namespace Legion {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     atomicMin(&lhs, rhs); 
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -7231,7 +7066,7 @@ namespace Legion {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     atomicMin(&rhs1, rhs2); 
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -7274,8 +7109,8 @@ namespace Legion {
     atomicMin((unsigned long long*)&lhs, (unsigned long long)rhs);
 #endif
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -7317,7 +7152,7 @@ namespace Legion {
     atomicMin((unsigned long long*)&rhs1, (unsigned long long)rhs2);
 #endif
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -7348,7 +7183,7 @@ namespace Legion {
   void MinReduction<__half>::apply<false>(LHS &lhs, RHS rhs)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = lhs, oldval;
     // Type punning like this is illegal in C++ but the
     // CUDA manual has an example just like it so fuck it
@@ -7390,8 +7225,8 @@ namespace Legion {
     }
 #endif
 #else
-#if __cplusplus >= 202002L
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -7430,7 +7265,7 @@ namespace Legion {
   void MinReduction<__half>::fold<false>(RHS &rhs1, RHS rhs2)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = rhs1, oldval;
     // Type punning like this is illegal in C++ but the
     // CUDA manual has an example just like it so fuck it
@@ -7472,7 +7307,7 @@ namespace Legion {
     }
 #endif
 #else
-#if __cplusplus >= 202002L
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -7519,8 +7354,8 @@ namespace Legion {
             __float_as_int(oldval), __float_as_int(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -7561,7 +7396,7 @@ namespace Legion {
             __float_as_int(oldval), __float_as_int(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -7603,8 +7438,8 @@ namespace Legion {
             __double_as_ulonglong(oldval), __double_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -7645,7 +7480,7 @@ namespace Legion {
             __double_as_ulonglong(oldval), __double_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -7664,174 +7499,6 @@ namespace Legion {
 #endif
 #endif
   }
-
-#ifdef LEGION_REDOP_COMPLEX
-#ifdef LEGION_REDOP_HALF
-  template<> __CUDA_HD__ inline
-  void MinReduction<complex<__half> >::apply<true>(LHS &lhs, RHS rhs)
-  {
-    if (rhs < lhs)
-      lhs = rhs;
-  }
-
-  template<> __CUDA_HD__ inline
-  void MinReduction<complex<__half> >::apply<false>(LHS &lhs, RHS rhs)
-  {
-#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-    RHS newval = lhs, oldval;
-    // Type punning like this is illegal in C++ but the
-    // CUDA manual has an example just like it so fuck it
-    unsigned int *ptr = (unsigned int*)&lhs;
-    do {
-      oldval = newval;
-      newval = __MIN__(newval, rhs);
-      newval = __uint_as_complex(atomicCAS(ptr,
-            __complex_as_uint(oldval), __complex_as_uint(newval)));
-    } while (oldval != newval);
-#else
-#if __cplusplus >= 202002L
-    std::atomic_ref<RHS> atomic(lhs);
-    RHS oldval = atomic.load();
-    RHS newval;
-    do {
-      newval = __MIN__(oldval, rhs);
-    } while (!atomic.compare_exchange_weak(oldval, newval));
-#else
-    TypePunning::Alias<int32_t,complex<__half> > oldval, newval;
-    TypePunning::Pointer<int32_t> pointer((void*)&lhs);
-    do {
-      oldval.load(pointer);
-      newval = __MIN__(oldval.as_two(), rhs);
-    } while (!__sync_bool_compare_and_swap((int32_t*)pointer,
-                      oldval.as_one(), newval.as_one()));
-#endif
-#endif
-  }
-
-  template<> __CUDA_HD__ inline
-  void MinReduction<complex<__half> >::fold<true>(RHS &rhs1, RHS rhs2)
-  {
-    if (rhs2 < rhs1)
-      rhs1 = rhs2;
-  }
-
-  template<> __CUDA_HD__ inline
-  void MinReduction<complex<__half> >::fold<false>(RHS &rhs1, RHS rhs2)
-  {
-#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-    RHS newval = rhs1, oldval;
-    // Type punning like this is illegal in C++ but the
-    // CUDA manual has an example just like it so fuck it
-    unsigned int *ptr = (unsigned int*)&rhs1;
-    do {
-      oldval = newval;
-      newval = __MIN__(newval, rhs2);
-      newval = __uint_as_complex(atomicCAS(ptr,
-            __complex_as_uint(oldval), __complex_as_uint(newval)));
-    } while (oldval != newval);
-#else
-#if __cplusplus >= 202002L
-    std::atomic_ref<RHS> atomic(rhs1);
-    RHS oldval = atomic.load();
-    RHS newval;
-    do {
-      newval = __MIN__(oldval, rhs2);
-    } while (!atomic.compare_exchange_weak(oldval, newval));
-#else
-    TypePunning::Alias<int32_t,complex<__half> > oldval, newval;
-    TypePunning::Pointer<int32_t> pointer((void*)&rhs1);
-    do {
-      oldval.load(pointer);
-      newval = __MIN__(oldval.as_two(), rhs2);
-    } while (!__sync_bool_compare_and_swap((int32_t*)pointer,
-                      oldval.as_one(), newval.as_one()));
-#endif
-#endif
-  }
-#endif // LEGION_REDOP_HALF
-
-  template<> __CUDA_HD__ inline
-  void MinReduction<complex<float> >::apply<true>(LHS &lhs, RHS rhs)
-  {
-    if (rhs < lhs)
-      lhs = rhs;
-  }
-
-  template<> __CUDA_HD__ inline
-  void MinReduction<complex<float> >::apply<false>(LHS &lhs, RHS rhs)
-  {
-#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-    RHS newval = lhs, oldval;
-    // Type punning like this is illegal in C++ but the
-    // CUDA manual has an example just like it so fuck it
-    unsigned long long *ptr = (unsigned long long*)&lhs;
-    do {
-      oldval = newval;
-      newval = __MIN__(newval, rhs);
-      newval = __ulonglong_as_complex(atomicCAS(ptr,
-            __complex_as_ulonglong(oldval), __complex_as_ulonglong(newval)));
-    } while (oldval != newval);
-#else
-#if __cplusplus >= 202002L
-    std::atomic_ref<RHS> atomic(lhs);
-    RHS oldval = atomic.load();
-    RHS newval;
-    do {
-      newval = __MIN__(oldval, rhs);
-    } while (!atomic.compare_exchange_weak(oldval, newval));
-#else
-    TypePunning::Alias<int64_t,complex<float> > oldval, newval;
-    TypePunning::Pointer<int64_t> pointer((void*)&lhs);
-    do {
-      oldval.load(pointer);
-      newval = __MIN__(oldval.as_two(), rhs);
-    } while (!__sync_bool_compare_and_swap((int64_t*)pointer,
-                      oldval.as_one(), newval.as_one()));
-#endif
-#endif
-  }
-
-  template<> __CUDA_HD__ inline
-  void MinReduction<complex<float> >::fold<true>(RHS &rhs1, RHS rhs2)
-  {
-    if (rhs2 < rhs1)
-      rhs1 = rhs2;
-  }
-
-  template<> __CUDA_HD__ inline
-  void MinReduction<complex<float> >::fold<false>(RHS &rhs1, RHS rhs2)
-  {
-#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-    RHS newval = rhs1, oldval;
-    // Type punning like this is illegal in C++ but the
-    // CUDA manual has an example just like it so fuck it
-    unsigned long long *ptr = (unsigned long long*)&rhs1;
-    do {
-      oldval = newval;
-      newval = __MIN__(newval, rhs2);
-      newval = __ulonglong_as_complex(atomicCAS(ptr,
-            __complex_as_ulonglong(oldval), __complex_as_ulonglong(newval)));
-    } while (oldval != newval);
-#else
-#if __cplusplus >= 202002L
-    std::atomic_ref<RHS> atomic(rhs1);
-    RHS oldval = atomic.load();
-    RHS newval;
-    do {
-      newval = __MIN__(oldval, rhs2);
-    } while (!atomic.compare_exchange_weak(oldval, newval));
-#else
-    TypePunning::Alias<int64_t,complex<float> > oldval, newval;
-    TypePunning::Pointer<int64_t> pointer((void*)&rhs1);
-    do {
-      oldval.load(pointer);
-      newval = __MIN__(oldval.as_two(), rhs2);
-    } while (!__sync_bool_compare_and_swap((int64_t*)pointer,
-                      oldval.as_one(), newval.as_one()));
-#endif
-#endif
-  }
-#endif // LEGION_REDOP_COMPLEX
 
   template<> __CUDA_HD__ inline
   void OrReduction<int8_t>::apply<true>(LHS &lhs, RHS rhs)
@@ -7857,8 +7524,8 @@ namespace Legion {
       newval = atomicCAS(ptr, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -7900,7 +7567,7 @@ namespace Legion {
       newval = atomicCAS(ptr, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -7929,7 +7596,7 @@ namespace Legion {
   void OrReduction<int16_t>::apply<false>(LHS &lhs, RHS rhs)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = lhs, oldval;
     // Type punning like this is illegal in C++ but the
     // CUDA manual has an example just like it so fuck it
@@ -7971,8 +7638,8 @@ namespace Legion {
     }
 #endif
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -8000,7 +7667,7 @@ namespace Legion {
   void OrReduction<int16_t>::fold<false>(RHS &rhs1, RHS rhs2)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = rhs1, oldval;
     // Type punning like this is illegal in C++ but the
     // CUDA manual has an example just like it so fuck it
@@ -8042,7 +7709,7 @@ namespace Legion {
     }
 #endif
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -8073,8 +7740,8 @@ namespace Legion {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     atomicOr(&lhs, rhs);
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -8104,7 +7771,7 @@ namespace Legion {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     atomicOr(&rhs1, rhs2); 
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -8145,8 +7812,8 @@ namespace Legion {
             __longlong_as_ulonglong(oldval), __longlong_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -8186,7 +7853,7 @@ namespace Legion {
             __longlong_as_ulonglong(oldval), __longlong_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -8229,8 +7896,8 @@ namespace Legion {
       newval = atomicCAS(ptr, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -8272,7 +7939,7 @@ namespace Legion {
       newval = atomicCAS(ptr, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -8301,7 +7968,7 @@ namespace Legion {
   void OrReduction<uint16_t>::apply<false>(LHS &lhs, RHS rhs)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = lhs, oldval;
     do {
       oldval = newval;
@@ -8339,8 +8006,8 @@ namespace Legion {
     }
 #endif
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -8368,7 +8035,7 @@ namespace Legion {
   void OrReduction<uint16_t>::fold<false>(RHS &rhs1, RHS rhs2)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = rhs1, oldval;
     do {
       oldval = newval;
@@ -8406,7 +8073,7 @@ namespace Legion {
     }
 #endif
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -8437,8 +8104,8 @@ namespace Legion {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     atomicOr(&lhs, rhs);
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -8468,7 +8135,7 @@ namespace Legion {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     atomicOr(&rhs1, rhs2); 
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -8510,8 +8177,8 @@ namespace Legion {
     atomicOr((unsigned long long*)&lhs, (unsigned long long)rhs);
 #endif
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -8552,7 +8219,7 @@ namespace Legion {
     atomicOr((unsigned long long*)&rhs1, (unsigned long long)rhs2);
 #endif
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -8595,8 +8262,8 @@ namespace Legion {
       newval = atomicCAS(ptr, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -8638,7 +8305,7 @@ namespace Legion {
       newval = atomicCAS(ptr, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -8667,7 +8334,7 @@ namespace Legion {
   void AndReduction<int16_t>::apply<false>(LHS &lhs, RHS rhs)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = lhs, oldval;
     // Type punning like this is illegal in C++ but the
     // CUDA manual has an example just like it so fuck it
@@ -8709,8 +8376,8 @@ namespace Legion {
     }
 #endif
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -8738,7 +8405,7 @@ namespace Legion {
   void AndReduction<int16_t>::fold<false>(RHS &rhs1, RHS rhs2)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = rhs1, oldval;
     // Type punning like this is illegal in C++ but the
     // CUDA manual has an example just like it so fuck it
@@ -8780,7 +8447,7 @@ namespace Legion {
     }
 #endif
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -8811,8 +8478,8 @@ namespace Legion {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     atomicAnd(&lhs, rhs); 
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -8842,7 +8509,7 @@ namespace Legion {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     atomicAnd(&rhs1, rhs2); 
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -8883,8 +8550,8 @@ namespace Legion {
             __longlong_as_ulonglong(oldval), __longlong_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -8924,7 +8591,7 @@ namespace Legion {
             __longlong_as_ulonglong(oldval), __longlong_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -8967,8 +8634,8 @@ namespace Legion {
       newval = atomicCAS(ptr, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -9010,7 +8677,7 @@ namespace Legion {
       newval = atomicCAS(ptr, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -9039,7 +8706,7 @@ namespace Legion {
   void AndReduction<uint16_t>::apply<false>(LHS &lhs, RHS rhs)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = lhs, oldval;
     do {
       oldval = newval;
@@ -9077,8 +8744,8 @@ namespace Legion {
     }
 #endif   
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -9106,7 +8773,7 @@ namespace Legion {
   void AndReduction<uint16_t>::fold<false>(RHS &rhs1, RHS rhs2)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = rhs1, oldval;
     do {
       oldval = newval;
@@ -9144,7 +8811,7 @@ namespace Legion {
     }
 #endif
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -9175,8 +8842,8 @@ namespace Legion {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     atomicAnd(&lhs, rhs); 
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -9206,7 +8873,7 @@ namespace Legion {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     atomicAnd(&rhs1, rhs2); 
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -9248,8 +8915,8 @@ namespace Legion {
     atomicAnd((unsigned long long*)&lhs, (unsigned long long)rhs);
 #endif
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -9290,7 +8957,7 @@ namespace Legion {
     atomicAnd((unsigned long long*)&rhs1, (unsigned long long)rhs2);
 #endif
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -9333,8 +9000,8 @@ namespace Legion {
       newval = atomicCAS(ptr, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -9377,7 +9044,7 @@ namespace Legion {
       newval = atomicCAS(ptr, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -9421,8 +9088,8 @@ namespace Legion {
       newval = atomicCAS(ptr, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -9464,7 +9131,7 @@ namespace Legion {
       newval = atomicCAS(ptr, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -9493,7 +9160,7 @@ namespace Legion {
   void XorReduction<int16_t>::apply<false>(LHS &lhs, RHS rhs)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = lhs, oldval;
     // Type punning like this is illegal in C++ but the
     // CUDA manual has an example just like it so fuck it
@@ -9535,8 +9202,8 @@ namespace Legion {
     }
 #endif
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -9564,7 +9231,7 @@ namespace Legion {
   void XorReduction<int16_t>::fold<false>(RHS &rhs1, RHS rhs2)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = rhs1, oldval;
     // Type punning like this is illegal in C++ but the
     // CUDA manual has an example just like it so fuck it
@@ -9606,7 +9273,7 @@ namespace Legion {
     }
 #endif
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -9637,8 +9304,8 @@ namespace Legion {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     atomicXor(&lhs, rhs);
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -9668,7 +9335,7 @@ namespace Legion {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     atomicXor(&rhs1, rhs2); 
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -9709,8 +9376,8 @@ namespace Legion {
             __longlong_as_ulonglong(oldval), __longlong_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -9750,7 +9417,7 @@ namespace Legion {
             __longlong_as_ulonglong(oldval), __longlong_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -9793,8 +9460,8 @@ namespace Legion {
       newval = atomicCAS(ptr, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -9836,7 +9503,7 @@ namespace Legion {
       newval = atomicCAS(ptr, oldval, newval);
     } while (oldval != newval);
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -9865,7 +9532,7 @@ namespace Legion {
   void XorReduction<uint16_t>::apply<false>(LHS &lhs, RHS rhs)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = lhs, oldval;
     do {
       oldval = newval;
@@ -9903,8 +9570,8 @@ namespace Legion {
     }
 #endif
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -9932,7 +9599,7 @@ namespace Legion {
   void XorReduction<uint16_t>::fold<false>(RHS &rhs1, RHS rhs2)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = rhs1, oldval;
     do {
       oldval = newval;
@@ -9970,7 +9637,7 @@ namespace Legion {
     }
 #endif
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -10001,8 +9668,8 @@ namespace Legion {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     atomicXor(&lhs, rhs); 
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -10032,7 +9699,7 @@ namespace Legion {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     atomicXor(&rhs1, rhs2); 
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;
@@ -10074,8 +9741,8 @@ namespace Legion {
     atomicXor((unsigned long long*)&lhs, (unsigned long long)rhs);
 #endif
 #else
-#if __cplusplus >= 202002L 
-    std::atomic_ref<RHS> atomic(lhs);
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
+    std::atomic_ref<LHS> atomic(lhs);
     RHS oldval = atomic.load();
     RHS newval;
     do {
@@ -10116,7 +9783,7 @@ namespace Legion {
     atomicXor((unsigned long long*)&rhs1, (unsigned long long)rhs2);
 #endif
 #else
-#if __cplusplus >= 202002L 
+#if defined(__cpp_lib_atomic_ref) && (__cpp_lib_atomic_ref >= 201806L)
     std::atomic_ref<RHS> atomic(rhs1);
     RHS oldval = atomic.load();
     RHS newval;

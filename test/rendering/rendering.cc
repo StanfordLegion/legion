@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University
+/* Copyright 2024 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,9 +25,8 @@
 #include "legion.h"
 #include "shim_mapper.h"
 
-using namespace LegionRuntime::HighLevel;
-using namespace LegionRuntime::Accessor;
-using namespace LegionRuntime::Arrays;
+using namespace Legion;
+using namespace Legion::Mapping;
 
 enum TaskIDs {
   TOP_LEVEL_TASK_ID,
@@ -54,7 +53,7 @@ int num_cpus = 0;
 
 class RenderingMapper : public ShimMapper {
 public:
-  RenderingMapper(Machine machine, HighLevelRuntime *runtime, Processor local)
+  RenderingMapper(Machine machine, Runtime *runtime, Processor local)
     : ShimMapper(machine, runtime, runtime->get_mapper_runtime(), local)
   {
     std::set<Memory> all_mem;
@@ -133,7 +132,7 @@ public:
   std::vector<Processor> worker_cpu_procs;
 };
 
-static void update_mappers(Machine machine, HighLevelRuntime *rt,
+static void update_mappers(Machine machine, Runtime *rt,
                            const std::set<Processor> &local_procs)
 {
   for (std::set<Processor>::const_iterator it = local_procs.begin();
@@ -212,7 +211,7 @@ private:
 
 void top_level_task(const Task *task,
                     const std::vector<PhysicalRegion> &regions,
-                    Context ctx, HighLevelRuntime *runtime)
+                    Context ctx, Runtime *runtime)
 {
   srand(123456);
   int nsize = 64;
@@ -222,7 +221,7 @@ void top_level_task(const Task *task,
   bool cache_optimization = false;
   // Check for any command line arguments
   {
-    const InputArgs &command_args = HighLevelRuntime::get_input_args();
+    const InputArgs &command_args = Runtime::get_input_args();
     for (int i = 1; i < command_args.argc; i++)
     {
       if (!strcmp(command_args.argv[i],"-n"))
@@ -239,8 +238,7 @@ void top_level_task(const Task *task,
   assert(npar == num_cpus);
   
   Rect<1> rect_A(Point<1>(0), Point<1>(nsize - 1));
-  IndexSpace is_A = runtime->create_index_space(ctx,
-                          Domain::from_rect<1>(rect_A));
+  IndexSpace is_A = runtime->create_index_space(ctx, rect_A);
   FieldSpace fs_A = runtime->create_field_space(ctx);
   {
     FieldAllocator allocator = 
@@ -279,7 +277,7 @@ void top_level_task(const Task *task,
 
 void init_task(const Task *task,
                const std::vector<PhysicalRegion> &regions,
-               Context ctx, HighLevelRuntime *runtime)
+               Context ctx, Runtime *runtime)
 {
   assert(regions.size() == 1);
   assert(task->regions.size() == 1);
@@ -287,12 +285,10 @@ void init_task(const Task *task,
 
   FieldID fid_A = *(task->regions[0].privilege_fields.begin());
 
-  RegionAccessor<AccessorType::Generic, Object*> acc_A =
-    regions[0].get_field_accessor(fid_A).typeify<Object*>();
-  Domain dom = runtime->get_index_space_domain(ctx,
+  FieldAccessor<LEGION_WRITE_DISCARD,Object*,1> acc_A(regions[0], fid_A);
+  Rect<1> rect_A = runtime->get_index_space_domain(ctx,
       task->regions[0].region.get_index_space());
-  Rect<1> rect_A = dom.get_rect<1>();
-  for (GenericPointInRectIterator<1> pir(rect_A); pir; pir++) {
+  for (PointInRectIterator<1> pir(rect_A); pir(); pir++) {
     Object* new_rect = new Object();
     for (int x = 0; x < Object::dim_size; x++)
       for (int y = 0; y < Object::dim_size; y++) {
@@ -300,13 +296,13 @@ void init_task(const Task *task,
         new_rect->texture[x * Object::dim_size + y].g = GREEN;
         new_rect->texture[x * Object::dim_size + y].b = BLUE;
       }
-    acc_A.write(DomainPoint::from_point<1>(pir.p), new_rect);
+    acc_A[*pir] = new_rect;
   }
 }
 
 void main_task(const Task *task,
                const std::vector<PhysicalRegion> &regions,
-               Context ctx, HighLevelRuntime *runtime)
+               Context ctx, Runtime *runtime)
 {
   assert(regions.size() == 1);
   assert(task->regions.size() == 1);
@@ -318,23 +314,26 @@ void main_task(const Task *task,
   int niter = config.niter;
   int npar = config.npar;
   int iters_per_check = config.iters_per_check;
-  Domain dom = runtime->get_index_space_domain(ctx,
+  Rect<1> rect_A = runtime->get_index_space_domain(ctx,
       task->regions[0].region.get_index_space());
-  Rect<1> rect_A = dom.get_rect<1>();
   printf("Running graph rendering with nsize = %zd\n", rect_A.volume());
   printf("Generating iterations = %d\n", niter);
   printf("Num of partitions = %d\n", npar);
 
   Rect<1> color_bounds(Point<1>(0),Point<1>(npar-1));
-  Domain color_domain = Domain::from_rect<1>(color_bounds);
-  DomainColoring coloring;
+  Domain color_domain = color_bounds;
+  IndexSpace color_space = runtime->create_index_space(ctx, color_domain);
+
+  std::map<DomainPoint,Domain> coloring;
   for (int color = 0; color < npar; color ++) {
-    int left = color * (rect_A.volume() / npar);
-    int right = left + rect_A.volume() / npar - 1;
-    Rect<1> sub_rect(make_point(left), make_point(right));
-    coloring[color] = Domain::from_rect<1>(sub_rect);
+    Point<1> left = color * (rect_A.volume() / npar);
+    Point<1> right = left + rect_A.volume() / npar - 1;
+    Rect<1> sub_rect(left, right);
+    coloring[DomainPoint(color)] = Domain(sub_rect);
   }
-  IndexPartition ip = runtime->create_index_partition(ctx, lr_A.get_index_space(), color_domain, coloring, true);
+  IndexPartition ip = 
+    runtime->create_partition_by_domain(ctx, lr_A.get_index_space(),
+        coloring, color_space, true/*intersections*/, LEGION_DISJOINT_KIND);
   LogicalPartition lp =
     runtime->get_logical_partition(ctx, lr_A, ip);
 
@@ -402,7 +401,7 @@ void main_task(const Task *task,
 
 void worker_task(const Task *task,
                  const std::vector<PhysicalRegion> &regions,
-                 Context ctx, HighLevelRuntime *runtime)
+                 Context ctx, Runtime *runtime)
 {
   assert(regions.size() == 1);
   assert(task->regions.size() == 1);
@@ -410,14 +409,12 @@ void worker_task(const Task *task,
   //printf("worker_task: node = %d, idx = %d\n", gasnet_mynode(), task->index_point.point_data[0]);
   FieldID fid_A = *(task->regions[0].privilege_fields.begin());
 
-  RegionAccessor<AccessorType::Generic, Object*> acc_A =
-    regions[0].get_field_accessor(fid_A).typeify<Object*>();
-  Domain dom = runtime->get_index_space_domain(ctx,
+  FieldAccessor<LEGION_READ_ONLY,Object*,1> acc_A(regions[0], fid_A);
+  Rect<1> rect_A = runtime->get_index_space_domain(ctx,
       task->regions[0].region.get_index_space());
-  Rect<1> rect_A = dom.get_rect<1>();
   RGB* bg = (RGB*) calloc(Object::dim_size * Object::dim_size, sizeof(RGB));
-  for (GenericPointInRectIterator<1> pir(rect_A); pir; pir++) {
-    Object* obj = acc_A.read(DomainPoint::from_point<1>(pir.p));
+  for (PointInRectIterator<1> pir(rect_A); pir(); pir++) {
+    Object* obj = acc_A[*pir];
     for (int x = 0; x < Object::dim_size; x++)
       for (int y = 0; y < Object::dim_size; y++) {
         bg[x * Object::dim_size + y].r += obj->texture[x * Object::dim_size + y].r;
@@ -433,23 +430,23 @@ void worker_task(const Task *task,
 
 int main(int argc, char **argv)
 {
-  HighLevelRuntime::set_top_level_task_id(TOP_LEVEL_TASK_ID);
-  HighLevelRuntime::register_legion_task<top_level_task>(TOP_LEVEL_TASK_ID,
+  Runtime::set_top_level_task_id(TOP_LEVEL_TASK_ID);
+  Runtime::register_legion_task<top_level_task>(TOP_LEVEL_TASK_ID,
       Processor::LOC_PROC, true/*single*/, false/*index*/,
       AUTO_GENERATE_ID, TaskConfigOptions(false/*leaf task*/), "top_level_task");
-  HighLevelRuntime::register_legion_task<init_task>(INIT_TASK_ID,
+  Runtime::register_legion_task<init_task>(INIT_TASK_ID,
       Processor::LOC_PROC, true/*single*/, false/*index*/,
       AUTO_GENERATE_ID, TaskConfigOptions(true/*leaf task*/), "init_task");
-  HighLevelRuntime::register_legion_task<main_task>(MAIN_TASK_ID,
+  Runtime::register_legion_task<main_task>(MAIN_TASK_ID,
       Processor::LOC_PROC, true/*single*/, false/*index*/,
       AUTO_GENERATE_ID, TaskConfigOptions(false/*leaf task*/), "main_task");
-  HighLevelRuntime::register_legion_task<worker_task>(WORKER_TASK_ID,
+  Runtime::register_legion_task<worker_task>(WORKER_TASK_ID,
       Processor::LOC_PROC, true/*single*/, true/*index*/,
       AUTO_GENERATE_ID, TaskConfigOptions(true/*leaf task*/), "worker_task");
 
   // Register custom mappers
-  HighLevelRuntime::set_registration_callback(update_mappers);
-  HighLevelRuntime::register_custom_serdez_op<Realm::SerdezObject<Object> >(SERDEZ_ID);
-  return HighLevelRuntime::start(argc, argv);
+  Runtime::set_registration_callback(update_mappers);
+  Runtime::register_custom_serdez_op<Realm::SerdezObject<Object> >(SERDEZ_ID);
+  return Runtime::start(argc, argv);
 }
 

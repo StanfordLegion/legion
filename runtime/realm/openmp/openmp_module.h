@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,14 +17,26 @@
 #define REALM_OPENMP_MODULE_H
 
 #include "realm/module.h"
-#include "realm/proc_impl.h"
-#include "realm/mem_impl.h"
-
-#include <set>
 
 namespace Realm {
 
   namespace OpenMP {
+
+    class OpenMPModuleConfig : public ModuleConfig {
+      friend class OpenMPModule;
+    protected:
+      OpenMPModuleConfig(void);
+
+    public:
+      virtual void configure_from_cmdline(std::vector<std::string>& cmdline);
+
+    protected:
+      int cfg_num_openmp_cpus = 0;
+      int cfg_num_threads_per_cpu = 1;
+      bool cfg_use_numa = true;
+      bool cfg_fake_cpukind = false;
+      size_t cfg_stack_size = 2 << 20;
+    };
 
     // our interface to the rest of the runtime
     class OpenMPModule : public Module {
@@ -34,7 +46,9 @@ namespace Realm {
     public:
       virtual ~OpenMPModule(void);
 
-      static Module *create_module(RuntimeImpl *runtime, std::vector<std::string>& cmdline);
+      static ModuleConfig *create_module_config(RuntimeImpl *runtime);
+
+      static Module *create_module(RuntimeImpl *runtime);
 
       // do any general initialization - this is called after all configuration is
       //  complete
@@ -60,13 +74,10 @@ namespace Realm {
       virtual void cleanup(void);
 
     public:
-      int cfg_num_openmp_cpus;
-      int cfg_num_threads_per_cpu;
-      bool cfg_use_numa;
-      bool cfg_fake_cpukind;
-      size_t cfg_stack_size;
-
       std::vector<int> active_numa_domains;
+
+    protected:
+      OpenMPModuleConfig *config;
     };
 
   }; // namespace OpenMP

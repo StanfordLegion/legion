@@ -1,5 +1,5 @@
-/* Copyright 2022 Stanford University
- * Copyright 2022 Los Alamos National Laboratory
+/* Copyright 2024 Stanford University
+ * Copyright 2024 Los Alamos National Laboratory
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -164,10 +164,10 @@ void copy_values_task(const Task *task,
   
   int x_min = 0, y_min = 0, 
     x_max = 0, y_max = 0;
-  x_min = dom.get_rect<2>().lo.x[0];
-  y_min = dom.get_rect<2>().lo.x[1];
-  x_max = dom.get_rect<2>().hi.x[0];
-  y_max = dom.get_rect<2>().hi.x[1];
+  x_min = dom.lo()[0];
+  y_min = dom.lo()[1];
+  x_max = dom.hi()[0];
+  y_max = dom.hi()[1];
   
   std::cout << "domain rect is: [[" << x_min << "," << y_min
             << "],[" << x_max  << "," << y_max << "]] writing to file "
@@ -378,13 +378,14 @@ void PersistentRegion::create_persistent_subregions(Context ctx,
       case 2:
         {
           ds_name_stream <<  pieces[i].dp[0] << "-" << pieces[i].dp[1];
-          sprintf(pieces[i].shard_name, "%lld-%lld-%s",
+          snprintf(pieces[i].shard_name, sizeof pieces[i].shard_name,
+              "%lld-%lld-%s",
               pieces[i].dp[0], pieces[i].dp[1], name); 
 
-          x_min = d.get_rect<2>().lo.x[0];
-          y_min = d.get_rect<2>().lo.x[1];
-          x_max = d.get_rect<2>().hi.x[0];
-          y_max = d.get_rect<2>().hi.x[1];
+          x_min = d.lo()[0];
+          y_min = d.lo()[1];
+          x_max = d.hi()[0];
+          y_max = d.hi()[1];
 
 #ifdef IO_TESTER_VERBOSE 
           std::cout << "domain rect is: [[" << x_min << "," << y_min
@@ -412,16 +413,17 @@ void PersistentRegion::create_persistent_subregions(Context ctx,
         {
           ds_name_stream <<  pieces[i].dp[0] << "-" <<
             pieces[i].dp[1] << "-" << pieces[i].dp[2];
-          sprintf(pieces[i].shard_name, "%lld-%lld-%lld-%s",
+          snprintf(pieces[i].shard_name, sizeof pieces[i].shard_name,
+              "%lld-%lld-%lld-%s",
               pieces[i].dp[0], pieces[i].dp[1],
               pieces[i].dp[2], name);
 
-          x_min = d.get_rect<3>().lo.x[0];
-          y_min = d.get_rect<3>().lo.x[1];
-          z_min = d.get_rect<3>().lo.x[2];
-          x_max = d.get_rect<3>().hi.x[0];
-          y_max = d.get_rect<3>().hi.x[1];
-          z_max = d.get_rect<3>().hi.x[2];
+          x_min = d.lo()[0];
+          y_min = d.lo()[1];
+          z_min = d.lo()[2];
+          x_max = d.hi()[0];
+          y_max = d.hi()[1];
+          z_max = d.hi()[2];
 
           hsize_t dims[3];
           dims[0] = x_max-x_min+1;

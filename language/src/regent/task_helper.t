@@ -1,4 +1,4 @@
--- Copyright 2022 Stanford University, NVIDIA Corporation
+-- Copyright 2024 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -44,7 +44,7 @@ local function make_task(name, symbols, expr)
     privileges = terralib.newlist(),
     coherence_modes = data.newmap(),
     flags = data.newmap(),
-    conditions = {},
+    conditions = data.newmap(),
     constraints = terralib.newlist(),
     body = ast.typed.Block {
       stats = terralib.newlist({
@@ -72,14 +72,14 @@ local function make_task(name, symbols, expr)
   task:set_type(
     terralib.types.functype(symbols:map(function(symbol) return symbol:gettype() end), expr_type, false))
   task:set_privileges(node.privileges)
-  task:set_conditions({})
+  task:set_conditions(data.newmap())
   task:set_param_constraints(node.constraints)
-  task:set_constraints({})
+  task:set_constraints(data.newmap())
   task:set_region_universe(data.newmap())
   return codegen.entry(node)
 end
 
-local make_identity_task_helper = terralib.memoize(
+local make_identity_task_helper = data.weak_memoize(
   function(value_type)
     local name = "__identity"
     local value = std.newsymbol(value_type, "value")
@@ -101,7 +101,7 @@ function task_helper.make_identity_task(value_type)
   return make_identity_task_helper(value_type)
 end
 
-local make_cast_task_helper = terralib.memoize(
+local make_cast_task_helper = data.weak_memoize(
   function (from_type, to_type)
     local name = "__cast_" .. tostring(from_type) .. "_" .. tostring(to_type)
     local from_symbol = std.newsymbol(from_type, "from")
@@ -139,7 +139,7 @@ function task_helper.make_cast_task(from_type, to_type)
   return make_cast_task_helper(from_type, to_type)
 end
 
-local make_unary_task_helper = terralib.memoize(
+local make_unary_task_helper = data.weak_memoize(
   function (op, rhs_type, expr_type)
     local name = "__unary_" .. tostring(rhs_type) .. "_" .. tostring(op)
     local rhs_symbol = std.newsymbol(rhs_type, "rhs")
@@ -171,7 +171,7 @@ function task_helper.make_unary_task(op, rhs_type, expr_type)
   return make_unary_task_helper(op, rhs_type, expr_type)
 end
 
-local make_binary_task_helper = terralib.memoize(
+local make_binary_task_helper = data.weak_memoize(
   function (op, lhs_type, rhs_type, expr_type)
     local name = "__binary_" .. tostring(lhs_type) .. "_" ..
       tostring(rhs_type) .. "_" .. tostring(op)

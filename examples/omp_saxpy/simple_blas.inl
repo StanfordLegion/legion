@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University
+/* Copyright 2024 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,14 +18,17 @@
 
 template <typename T>
 inline BlasArrayRef<T>::BlasArrayRef(LogicalRegion _region,
+                                     LogicalPartition _logical_partition,
 				     FieldID _fid /*= DEFAULT_FID*/)
   : region(_region)
+  , logical_partition(_logical_partition)
   , fid(_fid)
 {}
 
 template <typename T>
 inline BlasArrayRef<T>::BlasArrayRef(const BlasArrayRef<T>& copy_from)
   : region(copy_from.region)
+  , logical_partition(copy_from.logical_partition)
   , fid(copy_from.fid)
 {}
 
@@ -35,9 +38,10 @@ inline BlasArrayRef<T>::~BlasArrayRef(void)
 
 template <typename T>
 inline /*static*/ BlasArrayRef<T> BlasArrayRef<T>::create(Runtime *runtime,
-							  Context ctx,
-							  IndexSpace is,
-							  FieldID fid /*= DEFAULT_FID*/)
+                                                          Context ctx,
+                                                          IndexSpace is,
+                                                          IndexSpace cs,
+                                                          FieldID fid /*= DEFAULT_FID*/)
 {
   FieldSpace fs = runtime->create_field_space(ctx);
   {
@@ -46,8 +50,10 @@ inline /*static*/ BlasArrayRef<T> BlasArrayRef<T>::create(Runtime *runtime,
   }
 
   LogicalRegion region = runtime->create_logical_region(ctx, is, fs);
+  IndexPartition ipartition = runtime->create_equal_partition(ctx, is, cs);
+  LogicalPartition lpartition = runtime->get_logical_partition(ctx, region, ipartition);
 
-  return BlasArrayRef<T>(region, fid);
+  return BlasArrayRef<T>(region, lpartition, fid);
 }
 
 template <typename T>
@@ -68,28 +74,36 @@ inline void BlasArrayRef<T>::fill(Runtime *runtime, Context ctx, T fill_val)
 template <typename T>
 template <typename LT>
 inline void BlasArrayRef<T>::add_requirement(LT& launcher, PrivilegeMode mode,
-					     CoherenceProperty prop /*= EXCLUSIVE*/) const
+                                             CoherenceProperty prop /*= EXCLUSIVE*/,
+                                             bool is_index_launcher /*= false*/) const
 {
-  launcher.add_region_requirement(RegionRequirement(region, mode, prop, region)
-				  .add_field(fid));
+  if (is_index_launcher) {
+    launcher.add_region_requirement(RegionRequirement(logical_partition, 0, mode, prop, region)
+                                    .add_field(fid));
+  } else {
+    launcher.add_region_requirement(RegionRequirement(region, mode, prop, region)
+                                    .add_field(fid));
+  }
 }
 
 template <typename T>
 inline void axpy(Runtime *runtime, Context ctx,
-		 T alpha, const BlasArrayRef<T>& x, BlasArrayRef<T> y,
-		 IndexPartition distpart /*= IndexPartition::NO_PART*/)
+                 T alpha, const BlasArrayRef<T>& x, BlasArrayRef<T> y,
+                 IndexSpace cs)
 {
-  TaskLauncher launcher(blas_impl_s.axpy_task_id,
-			TaskArgument(&alpha, sizeof(T)));
-  x.add_requirement(launcher, READ_ONLY);
-  y.add_requirement(launcher, READ_WRITE);
-  runtime->execute_task(ctx, launcher);
+  ArgumentMap arg_map;
+  IndexLauncher launcher(blas_impl_s.axpy_task_id, cs,
+			TaskArgument(&alpha, sizeof(T)), arg_map);
+//   TaskLauncher launcher(blas_impl_s.axpy_task_id
+//    			TaskArgument(&alpha, sizeof(T)));
+  x.add_requirement(launcher, READ_ONLY, EXCLUSIVE, true);
+  y.add_requirement(launcher, READ_WRITE, EXCLUSIVE, true);
+  runtime->execute_index_space(ctx, launcher);
 }
 
 template <typename T>
 inline T dot(Runtime *runtime, Context ctx,
-	     const BlasArrayRef<T>& x, BlasArrayRef<T> y,
-	     IndexPartition distpart /*= IndexPartition::NO_PART*/)
+	     const BlasArrayRef<T>& x, BlasArrayRef<T> y)
 {
   TaskLauncher launcher(blas_impl_s.dot_task_id,
 			TaskArgument(0, 0));
@@ -121,7 +135,7 @@ inline void BlasTaskImplementations<T>::preregister_tasks(void)
 #else
     tvr.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
 #endif
-    Runtime::preregister_task_variant<T, BlasTaskImplementations<T>::dot_task_cpu>(tvr, "dot (cpu)");
+    Runtime::preregister_task_variant<T, &BlasTaskImplementations<T>::dot_task_cpu>(tvr, "dot (cpu)");
   }
 }
 

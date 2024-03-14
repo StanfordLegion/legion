@@ -1,5 +1,5 @@
-/* Copyright 2022 Stanford University
- * Copyright 2022 Los Alamos National Laboratory
+/* Copyright 2024 Stanford University
+ * Copyright 2024 Los Alamos National Laboratory
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -49,7 +49,7 @@ namespace Realm {
 
   inline unsigned XferDes::current_progress(void)
   {
-    unsigned val = progress_counter.load();
+    unsigned val = progress_counter.load_acquire();
     return val;
   }
 
@@ -66,12 +66,9 @@ namespace Realm {
   // updates the progress counter, waking up the xd if needed
   inline void XferDes::update_progress(void)
   {
-    // no point in doing an update on an xd that's known to be done
-    if(transfer_completed.load()) return;
-
     // add 2 to the counter (i.e. preserving the LSB) - if LSB was/is set,
     //  attempt to add 1 to clear it and if successful, wake up the xd
-    unsigned prev = progress_counter.fetch_add(2);
+    unsigned prev = progress_counter.fetch_add_acqrel(2);
     if((prev & 1) != 0) {
       prev += 2;  // since we added 2 above
       if(progress_counter.compare_exchange(prev, prev + 1)) {
@@ -152,7 +149,7 @@ namespace Realm {
       // now process this transfer request, paying attention to our deadline
 
       while(true) {
-	if(!xd->is_completed()) {
+	if(!xd->transfer_completed.load_acquire()) {
 	  // take a snapshot of the xd's progress counter before we work
 	  //  on it
 	  unsigned progress = xd->current_progress();
@@ -163,7 +160,7 @@ namespace Realm {
 	  // if we didn't do any work, and we're not done (i.e. by
 	  //  concluding there wasn't any work to actually do), re-check
 	  //  the progress counter and sleep the xd if needed
-	  if(!did_work && !xd->is_completed()) {
+	  if(!did_work && !xd->transfer_completed.load_acquire()) {
 	    if(!xd->check_for_progress(progress)) {
 	      // just drop the xd here (i.e. do not re-enqueue) - somebody
 	      //  else will (or already has) when new data comes in
@@ -174,7 +171,7 @@ namespace Realm {
 	  }
 	}
 
-	if(xd->is_completed()) {
+	if(xd->transfer_completed.load_acquire()) {
 	  xd->flush();
 	  log_new_dma.info("Finish XferDes : id(" IDFMT ")", xd->guid);
 	  xd->mark_completed();

@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -82,7 +82,6 @@ namespace Realm {
       {
 	// SOA - each field is its own "group"
 	field_groups.resize(field_sizes.size());
-	size_t offset = 0;
 	for(size_t i = 0; i < field_sizes.size(); i++) {
 	  field_groups[i].resize(1);
 	  field_groups[i][0].field_id = field_ids[i];
@@ -90,7 +89,6 @@ namespace Realm {
 	  field_groups[i][0].offset = 0;
 	  field_groups[i][0].size = field_sizes[i];
 	  field_groups[i][0].alignment = field_sizes[i]; // natural alignment 
-	  offset += field_sizes[i];
 	}
 	break;
       }
@@ -100,14 +98,12 @@ namespace Realm {
 	// AOS - all field_groups in same group
 	field_groups.resize(1);
 	field_groups[0].resize(field_sizes.size());
-	size_t offset = 0;
 	for(size_t i = 0; i < field_sizes.size(); i++) {
 	  field_groups[0][i].field_id = field_ids[i];
 	  field_groups[0][i].fixed_offset = false;
 	  field_groups[0][i].offset = 0;
 	  field_groups[0][i].size = field_sizes[i];
 	  field_groups[0][i].alignment = field_sizes[i]; // natural alignment 
-	  offset += field_sizes[i];
 	}
 	break;
       }

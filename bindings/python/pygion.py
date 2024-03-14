@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# Copyright 2022 Stanford University
+# Copyright 2024 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -433,6 +433,13 @@ class Future(object):
         value_size = c.legion_future_get_untyped_size(self.handle)
         return ffi.buffer(value_ptr, value_size)
 
+    def is_ready(self):
+        self.resolve_handle()
+
+        if self.handle is None:
+            return True
+        return c.legion_future_is_ready(self.handle)
+
 class FutureMap(object):
     __slots__ = ['handle', 'value_type']
     def __init__(self, handle, value_type=None):
@@ -472,6 +479,9 @@ class Type(object):
     def __reduce__(self):
         return (Type, (self.numpy_type, self.cffi_type))
 
+    def __repr__(self):
+        return 'Type(%s,%s)' % (repr(self.numpy_type), repr(self.cffi_type))
+
 # Pre-defined Types
 void = Type(None, None)
 bool_ = Type(numpy.bool_, 'bool')
@@ -488,11 +498,29 @@ uint16 = Type(numpy.uint16, 'uint16_t')
 uint32 = Type(numpy.uint32, 'uint32_t')
 uint64 = Type(numpy.uint64, 'uint64_t')
 
+_type_semantic_tag = 54321 # keep in sync with Regent std_base.t
+_type_ids = {
+    101: int8,
+    102: int16,
+    103: int32,
+    104: int64,
+    105: uint8,
+    106: uint16,
+    107: uint32,
+    108: uint64,
+    109: float32,
+    110: float64,
+    111: bool_,
+}
+
 _rect_types = []
+_base_id = max(_type_ids)
 for dim in xrange(1, _max_dim + 1):
-    globals()["int{}d".format(dim)] = Type(
+    itype = Type(
         numpy.dtype([('x', numpy.int64, (dim,))], align=True),
         'legion_point_{}d_t'.format(dim))
+    globals()["int{}d".format(dim)] = itype
+    _type_ids[_base_id + dim] = itype
     rtype = Type(
         numpy.dtype([('lo', numpy.int64, (dim,)), ('hi', numpy.int64, (dim,))], align=True),
         'legion_rect_{}d_t'.format(dim))
@@ -880,6 +908,10 @@ class Ispace(object):
     def raw_value(self):
         return self.handle[0]
 
+    @staticmethod
+    def from_raw(handle):
+        return _Ispace_unpickle(handle.tid, handle.id, handle.type_tag, False)
+
 # Hack: Can't pickle static methods.
 def _Fspace_unpickle(fspace_id, field_ids, field_types, owned):
     handle = ffi.new('legion_field_space_t *')
@@ -965,6 +997,38 @@ class Fspace(object):
     def raw_value(self):
         return self.handle[0]
 
+    @staticmethod
+    def from_raw(handle):
+        size = ffi.new('size_t *')
+        raw_field_ids = c.legion_field_space_get_fields(
+            _my.ctx.runtime, _my.ctx.context, handle, size)
+
+        names = []
+        raw_name = ffi.new('const char **')
+        for i in range(size[0]):
+            field_id = raw_field_ids[i]
+            c.legion_field_id_retrieve_name(
+                _my.ctx.runtime, handle, field_id, raw_name)
+            names.append(ffi.string(raw_name[0]).decode('utf-8'))
+
+        field_ids = collections.OrderedDict()
+        for i, name in enumerate(names):
+            field_ids[name] = raw_field_ids[i]
+
+        field_types = collections.OrderedDict()
+        raw_tag = ffi.new('const void **')
+        tag_size = ffi.new('size_t *')
+        for i, name in enumerate(names):
+            field_id = field_ids[name]
+            ok = c.legion_field_id_retrieve_semantic_information(
+                _my.ctx.runtime, handle, field_id, _type_semantic_tag, raw_tag, tag_size, True, True)
+            if ok:
+                assert tag_size[0] == ffi.sizeof('uint32_t')
+                tag = ffi.cast('uint32_t *', raw_tag[0])[0]
+                field_types[name] = _type_ids[tag]
+
+        return _Fspace_unpickle(handle.id, field_ids, field_types, False)
+
     def keys(self):
         return self.field_ids.keys()
 
@@ -1047,6 +1111,12 @@ class Region(object):
         del self.handle
         del self.ispace
         del self.fspace
+
+    @staticmethod
+    def from_raw(handle):
+        ispace = Ispace.from_raw(handle.index_space)
+        fspace = Fspace.from_raw(handle.field_space)
+        return _Region_unpickle(ispace, fspace, handle.tree_id, False)
 
     def raw_value(self):
         return self.handle[0]
@@ -1384,7 +1454,7 @@ class Ipartition(object):
             region.raw_value(),
             region.parent.raw_value() if region.parent is not None else region.raw_value(),
             region.fspace.field_ids[field],
-            color_space.raw_value(), color, 0, 0, disjoint.value)
+            color_space.raw_value(), color, 0, 0, disjoint.value, [ffi.cast("void*", 0), 0])
         return Ipartition(handle, region.ispace, color_space)
 
     @staticmethod
@@ -1404,7 +1474,7 @@ class Ipartition(object):
             ispace.raw_value(), projection.raw_value(),
             parent.parent.raw_value() if parent.parent is not None else parent.raw_value(),
             parent.fspace.field_ids[field],
-            color_space.raw_value(), part_kind.value, color, 0, 0)
+            color_space.raw_value(), part_kind.value, color, 0, 0, [ffi.cast("void*", 0), 0])
         return Ipartition(handle, parent.ispace, color_space)
 
     @staticmethod
@@ -1423,7 +1493,7 @@ class Ipartition(object):
             projection.raw_value(), region.raw_value(),
             region.parent.raw_value() if region.parent is not None else region.raw_value(),
             region.fspace.field_ids[field],
-            color_space.raw_value(), part_kind.value, color, 0, 0)
+            color_space.raw_value(), part_kind.value, color, 0, 0, [ffi.cast("void*", 0), 0])
         return Ipartition(handle, region.ispace, color_space)
 
     @staticmethod
@@ -1498,7 +1568,7 @@ class Partition(object):
             assert isinstance(parent, Region)
             assert isinstance(ipartition, Ipartition)
             handle = c.legion_logical_partition_create(
-                _my.ctx.runtime, _my.ctx.context, parent.raw_value(), ipartition.raw_value())
+                _my.ctx.runtime, parent.raw_value(), ipartition.raw_value())
 
         # Important: Copy handle. Do NOT assume ownership.
         assert handle is not None
@@ -1590,7 +1660,7 @@ class Partition(object):
     def raw_value(self):
         return self.handle[0]
 
-def define_regent_argument_struct(task_id, argument_types, privileges, return_type, arguments):
+def define_regent_argument_struct(task_id, argument_types, privileges, return_type, arguments=None):
     if argument_types is None:
         raise Exception('Arguments must be typed in extern Regent tasks')
 
@@ -1602,9 +1672,10 @@ def define_regent_argument_struct(task_id, argument_types, privileges, return_ty
     for i, arg_type in enumerate(argument_types):
         arg_name = '__arg_%s' % i
         fields.append('%s %s;' % (arg_type.cffi_type, arg_name))
-    for i, arg in enumerate(arguments):
-        if isinstance(arg, Region) or (isinstance(arg, SymbolicExpr) and arg.is_region()):
-            fields.append('legion_field_id_t __arg_%s_fields[%s];' % (i, len(arg.fspace.field_types)))
+    if arguments is not None:
+        for i, arg in enumerate(arguments):
+            if isinstance(arg, Region) or (isinstance(arg, SymbolicExpr) and arg.is_region()):
+                fields.append('legion_field_id_t __arg_%s_fields[%s];' % (i, len(arg.fspace.field_types)))
 
     struct = 'typedef struct %s { %s } %s;' % (struct_name, ' '.join(fields), struct_name)
     ffi.cdef(struct)
@@ -1625,7 +1696,7 @@ class ExternTask(object):
         self.task_id = task_id
         self._argument_struct = None
 
-    def argument_struct(self, args):
+    def argument_struct(self, args=None):
         if self.calling_convention == 'regent' and self._argument_struct is None:
             self._argument_struct = define_regent_argument_struct(
                 self.task_id, self.argument_types, self.privileges, self.return_type, args)
@@ -1696,27 +1767,36 @@ def _postprocess(arg, point):
     return arg
 
 class Task (object):
-    __slots__ = ['body', 'privileges', 'layout', 'return_type',
-                 'leaf', 'inner', 'idempotent', 'replicable',
-                 'calling_convention', 'argument_struct',
-                 'task_id', 'registered']
+    __slots__ = ['body', 'privileges', 'layout', 'argument_types',
+                 'return_type', 'leaf', 'inner', 'idempotent',
+                 'replicable', 'calling_convention', 'task_id',
+                 'registered', '_argument_struct']
 
-    def __init__(self, body, privileges=None, layout=None, return_type=None,
+    def __init__(self, body, privileges=None, layout=None,
+                 argument_types=None, return_type=None,
                  leaf=False, inner=False, idempotent=False, replicable=False,
+                 calling_convention='python',
                  register=True, task_id=None, top_level=False):
+        if calling_convention == 'regent':
+            if argument_types is None:
+                raise Exception('when calling_convention is "regent", argument_types must be defined')
+            if return_type is None:
+                raise Exception('when calling_convention is "regent", return_type must be defined')
         self.body = body
         self.privileges = privileges
         self.layout = layout
+        self.argument_types = argument_types
         self.return_type = return_type
         self.leaf = bool(leaf)
         self.inner = bool(inner)
         self.idempotent = bool(idempotent)
         self.replicable = bool(replicable)
-        self.calling_convention = 'python'
-        self.argument_struct = None
+        self.calling_convention = calling_convention
         self.task_id = None
+        self._argument_struct = None
         if register:
             self.register(task_id, top_level)
+        self.argument_struct()
 
     def __call__(self, *args, **kwargs):
         # Hack: This entrypoint needs to be able to handle both being
@@ -1731,6 +1811,12 @@ class Task (object):
             return self.execute_task(*args, **kwargs)
         else:
             return self.spawn_task(*args, **kwargs)
+
+    def argument_struct(self, args=None):
+        if self.calling_convention == 'regent' and self._argument_struct is None:
+            self._argument_struct = define_regent_argument_struct(
+                self.task_id, self.argument_types, self.privileges, self.return_type, args)
+        return self._argument_struct
 
     def spawn_task(self, *args, **kwargs):
         if _my.ctx.current_launch:
@@ -1751,18 +1837,6 @@ class Task (object):
             raw_arg_ptr, raw_arg_size, proc,
             task, raw_regions, num_regions, context, runtime)
 
-        # Decode arguments from Pickle format.
-        arg_ptr = ffi.cast('char *', c.legion_task_get_args(task[0]))
-        arg_size = c.legion_task_get_arglen(task[0])
-        if c.legion_task_get_is_index_space(task[0]) and arg_size == 0:
-            arg_ptr = ffi.cast('char *', c.legion_task_get_local_args(task[0]))
-            arg_size = c.legion_task_get_local_arglen(task[0])
-
-        if arg_size > 0 and c.legion_task_get_depth(task[0]) > 0:
-            args = pickle.loads(ffi.unpack(arg_ptr, arg_size))
-        else:
-            args = ()
-
         # Unpack regions.
         regions = []
         for i in xrange(num_regions[0]):
@@ -1782,6 +1856,43 @@ class Task (object):
 
         # Store context in thread-local storage.
         _my.ctx = ctx
+
+        # Decode arguments from Pickle format.
+        arg_ptr = ffi.cast('char *', c.legion_task_get_args(task[0]))
+        arg_size = c.legion_task_get_arglen(task[0])
+        if c.legion_task_get_is_index_space(task[0]) and arg_size == 0:
+            arg_ptr = ffi.cast('char *', c.legion_task_get_local_args(task[0]))
+            arg_size = c.legion_task_get_local_arglen(task[0])
+
+        if self.calling_convention == 'python':
+            if arg_size > 0 and c.legion_task_get_depth(task[0]) > 0:
+                args = pickle.loads(ffi.unpack(arg_ptr, arg_size))
+            else:
+                args = ()
+        elif self.calling_convention == 'regent':
+            if len(self.argument_types) == 0:
+                args = ()
+            else:
+                arg_struct = self.argument_struct()
+                # We're not going to be able to unpack the field IDs
+                # because we don't have the type info. So we'll just
+                # unpack the initial struct and try to work from there.
+                assert arg_size >= ffi.sizeof(arg_struct)
+                arg_data = ffi.cast('%s *' % arg_struct, arg_ptr)
+                future_map = getattr(arg_data, '__map')
+                args = []
+                for i, arg_type in enumerate(self.argument_types):
+                    future = future_map[i // 64] & (1 << (i % 64)) != 0
+                    if future:
+                        assert False
+                    else:
+                        arg_name = '__arg_%s' % i
+                        arg_value = getattr(arg_data, arg_name)
+                        if hasattr(arg_type, 'from_raw'):
+                            arg_value = arg_type.from_raw(arg_value)
+                        args.append(arg_value)
+        else:
+            assert False
 
         # Postprocess arguments.
         point = DomainPoint(None, _handle=c.legion_task_get_index_point(task[0]))
@@ -2518,7 +2629,7 @@ if is_script:
     def _cleanup():
         del _my.ctx
 
-    legion_top.cleanup_items.append(_cleanup)
+    legion_top.add_cleanup_item(_cleanup)
 
     # FIXME: Really this should be the number of control replicated shards at this level
     c.legion_runtime_enable_scheduler_lock()

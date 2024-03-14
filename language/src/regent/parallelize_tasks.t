@@ -1,4 +1,4 @@
--- Copyright 2022 Stanford University
+-- Copyright 2024 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -837,7 +837,6 @@ function parallel_param.new(params)
     __primary_partitions = false,
     __constraints = false,
     __block_id = false,
-    __hash = false,
   }
   if params.dop ~= nil then tbl.__dop = params.dop end
   if params.primary_partitions ~= nil then
@@ -850,28 +849,6 @@ function parallel_param.new(params)
     tbl.__block_id = params.block_id
   end
   return setmetatable(tbl, parallel_param)
-end
-
-function parallel_param:hash()
-  if not self.__hash then
-    local str = ""
-    if self.__dop then str = str .. "dop" .. tostring(self.__dop) end
-    if self.__primary_partitions then
-      for idx = 1, #self.__primary_partitions do
-        str = str .. "#" .. tostring(self.__primary_partitions[idx])
-      end
-    end
-    if self.__constraints then
-      for idx = 1, #self.__constraints do
-        str = str .. "#" .. ast_util.render(self.__constraints[idx])
-      end
-    end
-    if self.__block_id then
-      str = str .. "#" .. tostring(self.__block_id)
-    end
-    self.__hash = str
-  end
-  return self.__hash
 end
 
 function parallel_param:find_primary_partition_for(region_type)
@@ -3293,12 +3270,12 @@ function parallelize_tasks.top_task(global_cx, node)
   --end)
   privileges:insertall(orig_privileges)
   -- FIXME: Workaround for the current limitation in SPMD transformation
-  local field_set = {}
+  local field_set = data.newmap()
   for idx = 1, #task_cx.stencils do
                 task_cx.stencils[idx]:fields():map(function(field) field_set[field] = true end)
   end
   local fields = terralib.newlist()
-  for field, _ in pairs(field_set) do fields:insert(field) end
+  for _, field in field_set:keys() do fields:insert(field) end
 
   for idx = 1, #task_cx.stencils do
     local stencil = task_cx.stencils[idx]

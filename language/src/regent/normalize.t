@@ -1,4 +1,4 @@
--- Copyright 2022 Stanford University, NVIDIA Corporation
+-- Copyright 2024 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -28,7 +28,7 @@ local function pass_through_expr(stats, expr) return expr end
 
 local function unreachable(stats, node) assert(false) end
 
-local normalize_expr_factory = terralib.memoize(function(field, is_list, read)
+local normalize_expr_factory = data.weak_memoize(function(field, is_list, read)
   assert(field ~= nil)
   assert(is_list ~= nil)
   assert(read ~= nil)
@@ -55,7 +55,7 @@ local normalize_expr_factory_full = function(field_list, read_list)
       local field, read = unpack(pair)
       return expr[field] and normalize.expr(stats, expr[field], read)
     end)
-    local subst = data.dict(data.zip(field_list, normalized_fields))
+    local subst = data.unordered_dict(data.zip(field_list, normalized_fields))
     return expr(subst)
   end
 end
@@ -107,7 +107,7 @@ local predicates = {
     end
 }
 
-normalize.normalized = terralib.memoize(function(expr)
+normalize.normalized = data.weak_memoize(function(expr)
   local predicate = predicates[expr.node_type]
   return predicate and predicate(expr) or false
 end)

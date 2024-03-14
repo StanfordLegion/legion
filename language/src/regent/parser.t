@@ -1,4 +1,4 @@
--- Copyright 2022 Stanford University, NVIDIA Corporation
+-- Copyright 2024 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -1381,8 +1381,8 @@ function parser.expr_prefix(p)
     local list = parser.expr_list(p)
     p:expect(")")
 
-    if #list < 4 then
-      p:error("__import_cross_product needs at least 4 arguments, got " .. #list)
+    if #list < 3 then
+      p:error("__import_cross_product needs at least 3 arguments, got " .. #list)
     end
 
     return ast.unspecialized.expr.ImportCrossProduct {

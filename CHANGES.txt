@@ -1,6 +1,238 @@
 This file lists the major changes as they appear in the stable branch.  No
 attempt is made to keep this list accurate for the master branch.
 
+Version 24.03.0 (March ??, 2024)
+  * Legion
+    - Support for control replication has been merged
+    - Support for discarding region contents on task completion
+    - Long-deprecated APIs, such as the old HighLevel namespace, have
+       been removed
+  * Mappers
+    - Default mapper support for control replication
+    - Default and null mapper now use C++ `override` keyword
+  * Regent
+    - Support for pure projection functors that capture arguments
+  * Tools
+    - The profiler now correctly recognizes the logger format version
+       and throws an error if it does not match
+    - Many profiler fixes for correctly rendering runtime and mapper calls
+    - Profiler now renders GPU device and host execution separately
+    - Rust profiler now requires at least Rust 1.74
+  * Realm
+    - Support for registration of dynamically allocated buffers
+    - Support for handling poisoned events for reservation
+    - Refactor CUDA allocation and IPC paths
+    - Support for querying CUDA device information (GPU UUID and ID),
+       process information (process ID, hostname, host ID) and timer
+       calibration error from the profiler
+    - Remove address alignment from serializer and deserializer
+    - Support for creating network shared peers using IPC mailbox
+    - Support OMP thread binding and allow for multiple OMP parallel
+       sections when enabling system OMP runtime
+    - Add Realm unit tests
+    - Fixes for Realm tests, sparsity map, MemoryQuery, dynamic framebuffer
+       memory and memcpy channel
+
+Version 23.12.0 (December 14, 2023)
+  * Regent
+    - Support for HIP multi-GPU per runtime
+  * Realm
+    - Improve scalability of startup by replacing point-to-point
+       communication with allgatherv for machine model announcements
+    - Support shared memory communication for system memory
+    - Provide sanity check for GPU tasks to detect any leak of CUDA streams
+    - Support for GPU transposes in CUDA-DMA
+    - Bug fixes for CUDA-DMA
+
+Version 23.09.0 (September 28, 2023)
+  * Regent
+    - Elide future maps in index launches
+    - Improvements to Pygion interop
+  * Realm
+    - Add a machine configuration API that allows applications to configure
+       the machine model without using the command line
+    - Expose Realm managed CUDA/HIP stream to applications to launch GPU tasks
+       without device-wise synchronization when hijack is disabled
+    - Change timers to use rdtsc
+    - Improve performance for getting highest priority task available in any
+       task queue
+    - Implement framebuffer memory with `cuMemMap`
+    - Initial work for moving STL dependencies to header only
+
+Version 23.06.0 (June 28, 2023)
+  * Build
+    - Fixes for CMake build on macOS
+    - Fixes for HIP build when arch is specified
+  * Realm
+    - Support for better backtraces via libdw and libunwind
+    - Improve scalability and performance in task spawning by caching
+       the triggering operation of an event if one is provided
+    - Fix a minor issue with affinity queries to properly clear the
+       user-provided vector before populating it
+    - Add more accurate GPU memory bandwidth affinity calculations if
+       NVML is available
+    - Refactor CPU core topology enumeration to serve systems without
+       NUMA capabilities (like Jetson ARM systems)
+    - Improve scalability and performance of task spawning by moving event
+       reuse freelists to be per-processor, reducing lock contention
+    - Add a microbenchmark for measuring task throughput more accurately
+    - Add a series of Realm API tutorials
+    - Replace `CU_EVENT_DEFAULT` with `CU_EVENT_DISABLE_TIMING` for better
+       performance of CUDA events
+    - Support Kokkos interop for the HIP module
+    - Fixes for Realm tests on macOS
+  * Tools
+    - Legion Prof now supports search in the new profiler UI
+    - Legion Prof now supports an HTTP client/server interface. Launch the
+       server with `--serve` (on port 8080 by default) and attach a client to
+       it with `--attach http://127.0.0.1:8080`
+    - Legion Prof now supports a new achival mode via the `--archive`
+       flag. Generate an offline profile and view it either via `--attach` or
+       by uploading it to a server and navigating to
+       `https://legion.stanford.edu/prof-viewer/?url=...`
+    - Legion Prof modes (client/server/viewer) are now parallel by
+       default, and perform heavy computations off the UI thread for
+       better responsiveness
+    - Add support for rendering indirect copies (i.e., gather/scatter)
+    - Fix rendering of profiles over HTTP with old profiler UI
+    - Fix profiling of copies with different numbers of hops between instances
+
+Version 23.03.0 (March 27, 2023)
+  * Build
+    - Minimum supported CMake version is now 3.16. (Some optional features may
+       continue to require even newer versions.)
+    - Minimum supported GCC version is now 8.
+    - Minimum supported CUDA version is now 10.
+  * Legion
+    - Added support for padded layout constraints to provide scratch space
+       in instances for tasks to use (see examples/padded_instances).
+    - Added support for tiled layout constraints to provide an ability to
+       layout instances by breaking down dimensions (see examples/tiling).
+  * Realm
+    - An experimental UCX network backend has been added.
+    - Updated the Kokkos interop to support Kokkos 4.0.
+  * Python
+    - Support loading Legion as a library from a stock Python interpreter.
+  * Regent
+    - Fixes to avoid leaking futures.
+    - Improvements to Regent's predicate optimization.
+  * Tools
+    - Legion Prof now supports a native viewer UI. Enable it with the `viewer`
+       feature (e.g., `cargo run --features=viewer`) and use the flag
+       `--view`.
+    - Legion Prof now has better support for rendering a subset of available
+       nodes. Pass all log files (from all nodes) into Legion Prof and add the
+       `--subnodes` flag to specify which ones to render. This ensures all
+       copies in/out of those nodes will be shown correctly.
+
+Version 22.12.0 (December 30, 2022)
+  * Regent
+    - Support for nested predication of `if` and `while` statements
+  * Realm
+    - Support priorities for Copy operations
+    - Support building with multiple network backends enabled, and use
+       -ll:networks (gasnetex/gasnet1/mpi/none) to pick which one to use
+       during runtime
+    - Separate CUDA runtime from Realm by removing all references to CUDA
+       runtime and relying only on driver API, which fixes an issue when
+       mixing static and dynamic cudart across an application and improves
+       Realm’s compatibility across driver versions
+  * Tools
+    - Legion Prof support visualization of Channel of indirect copy, and
+       Instances being used by different operations including Task, Copy
+       and Fill
+
+Version 22.09.0 (September 30, 2022)
+  * Python
+     - Support for running packages via `legion_python -m`
+     - Support for Jupyter Notebook on single node execution.
+  * Regent
+     - Deprecated support for LLVM versions less than 11 in
+       `setup_env.py`. These versions will be removed in the next
+       release. LLVM 13 is recommended, except on ARM where LLVM 11 is
+       currently required
+     - Added support for provenance for all launcher operations
+     - Debug info is no longer generated by default in order to
+       optimize compile times. To re-enable it, run with
+       `-fdebuginfo 1`
+  * Legion
+     - Most Legion APIs now support passing a provenance string.
+       This provenance information is passed through to tools like
+       Legion Spy and Legion Prof so users can map what they are
+       seeing back to their source code. In the future, provenance
+       strings will also be used by all Legion error messages as well.
+  * Realm
+     - Support for fills of arbitrary instances (via multi-hop paths where
+        needed)
+     - Fixed crashes when using external instances and network-registered
+        memory at the same time
+     - Removed all direct references to CUDA runtime library in CUDA module
+     - Caching of minimum-cost data transfer path for repeated copies
+     - Dependent partitioning support for image and preimage using structured
+        (~affine) transforms in addition to existing unstructured (field-based)
+        images/preimages
+
+Version 22.06.0 (June 29, 2022)
+  * Regent
+     - Support for cross-products in index launches, as well as
+        multi-level projection functors.
+     - Support for HIP on AMD GPUs has been added. All tasks marked with
+        `__demand(__cuda)` are automatically eligible. Note that the name of
+        the annotation may change in the future to something more general, but
+        for now no change is being made. Some CUDA flags have migrated to more
+        general names. See below.
+     - The flag `-fcuda 1` is deprecated. Use `-fgpu cuda` instead.
+     - The flag `-fcuda-offline` is deprecated. Use `-fgpu-offline` instead.
+     - The flag `-fcuda-arch` is deprecated. Use `-fgpu-arch` instead.
+     - Enable HIP support with `-fgpu hip` and use the `-fgpu-offline` and
+        `-fgpu-arch` flags as necessary/appropriate.
+     - Support for new flag `-ffast-math 1` which enables fast-math
+        optimizations on CPU and GPU. By default, CPU code has this
+        disabled, and GPU code uses only the `contract` flag in LLVM
+        to generate FMA instructions. For compute-intensive
+        applications, additional performance can sometimes be unlocked
+        by enabling the full suite of optimizations with `-ffast-math 1`,
+        at the cost of numerical accuracy.
+     - Performance improvements for CUDA allow recent LLVM versions
+        (e.g., 13) to match or exceed the performance of LLVM
+        3.8. Previously, performance regressions made LLVM 3.8 the
+        most performant version for use with CUDA. The recommended
+        LLVM version moving forward is 13, and `setup_env.py` has been
+        updated to set this on all platforms.
+     - The versions of GASNet and Terra are now pinned by default in
+        `setup_env.py`. You can choose versions explicitly with
+        `GASNET_VERSION` (as before, though the previous default was
+        unpinned) and `--terra-branch`, respectively.
+  * Realm
+     - Allow use of system OpenMP runtime (instead of Realm-provided one) with
+        `-DLegion_OpenMP_SYSTEM_RUNTIME=ON`.  This allows inter-operation with
+        libraries that have already been linked to the system runtime, but
+        limits each process to a single OMP processor.
+
+Version 22.03.0 (March 27, 2022)
+  * Build
+     - Minimum supported cmake version is now 3.7.  (Some optional features
+        continue to require even newer versions.)
+  * Realm
+     - Numerous bug fixes in the `gasnetex` network layer
+     - CUDA and HIP support allow direct specification of which gpus to
+        use via `-ll:gpu_ids` command-line option
+     - Added support for copy paths using Cuda IPC between gpus on the same
+        physical node
+     - For applications using CUDA without the runtime API hijack AND only
+        submitting work to the default CUDA stream, `-cuda:legacysync 1`
+        improves the overhead of detecting the completion of device-side work
+        launched by a task
+     - Realm reduction copies may now indicate exclusive access to the
+        destination instance, improving performance by allowing simple
+        load/store instead of atomic operations
+     - Custom reduction operations (including Legion's built-in ones) can
+        provide HIP implementations, permitting in-place reductions in
+        HIP device memory
+  * Regent
+     - Support for custom serialization of types in task parameters and results
+     - New experimental timing library under std/timing
+
 Version 21.12.0 (December 31, 2021)
   * Realm
      - Performance improvements for multi-dimensional copies, especially
@@ -99,7 +331,7 @@ Version 21.03.0 (March 30, 2021)
       sub-trees should be used for performing the analysis. Disjoint and
       complete partitions are especially helpful in aiding the runtime.
     - There is a new implementation of the index space math inside of the
-      runtime that now soundly and precisely detect congruences between 
+      runtime that now soundly and precisely detect congruences between
       index space math operations. This fixes a long-running class of bugs
       that would cause memory explosions in the physical analysis.
     - In the control replication branch users can now map future values into
@@ -251,11 +483,11 @@ Version 20.03.0 (March 31, 2020)
     - Reduction in memory usage of Realm internal data structures
   * Tools
     - There is a now a generic launcher script for running Python code
-        with Legion that will execute an aribtrary Python program in the 
+        with Legion that will execute an aribtrary Python program in the
         top-level task of a Legion program. This script mirrors the interface
-        to CPython as closely as possible. 
+        to CPython as closely as possible.
     - Legion Spy now supports verification and rendering of indirection copies
-    - Legion Prof supports Instance layout constraints related to dimension 
+    - Legion Prof supports Instance layout constraints related to dimension
         ordering and field alignnment
     - Legion Prof contains a menu option for viewing ready state of operations
 
@@ -306,7 +538,7 @@ Version 19.12.0 (December 31, 2019)
         programs will get faster; programs that create many partitions
         frequently on the fly may get slower. The later case will be fixed
         in an upcoming release.
-    - Added support for indirect copy operations such as gather and 
+    - Added support for indirect copy operations such as gather and
         scatter onto existing copy launchers
   * Realm
     - `Event::subscribe` allows polling via `Event::has_triggered` to
@@ -397,7 +629,7 @@ Version 19.04.0 (April 30, 2019)
         (or -DLegion_MAX_DIM in CMake) to build with any number of
         dimensions up to 9.
     - Change VariantID to 32 bits to match AUTO_GENERATE_ID
-    - Improved mapper interfaces for instance allocation and 
+    - Improved mapper interfaces for instance allocation and
       failed instance allocation due to layout constraint conflicts
   * Regent
     - Support for index fills
@@ -601,8 +833,8 @@ Version 17.02.0 (February 14, 2017)
   * Legion Prof
     - Added a stats view of processors grouped by node and processor type
     - Added ability to collapse/expand each processor/channel/memory in
-        a timeline. To collapse/expand a row, click the name. To 
-        collapse/expand the children of a row, click on the triangle 
+        a timeline. To collapse/expand a row, click the name. To
+        collapse/expand the children of a row, click on the triangle
         next to the name.
     - Grouped the processor timelines to be child elements under the stats
         views

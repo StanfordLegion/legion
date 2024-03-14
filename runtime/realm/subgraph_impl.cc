@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,7 +27,7 @@ namespace Realm {
   //
   // class Subgraph
 
-  /*static*/ const Subgraph Subgraph::NO_SUBGRAPH = { 0 };
+  /*static*/ const Subgraph Subgraph::NO_SUBGRAPH = {/* zero-initialization */};
 
   /*static*/ Event Subgraph::create_subgraph(Subgraph& subgraph,
 					     const SubgraphDefinition& defn,

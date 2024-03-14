@@ -275,8 +275,8 @@ contains
     color_bounds = FRect1D(0, num_subregions-1)
     color_is = runtime%create_index_space(ctx, color_bounds)
     ip = runtime%create_equal_partition(ctx, is, color_is)
-    input_lp = runtime%get_logical_partition(ctx, input_lr, ip)
-    output_lp = runtime%get_logical_partition(ctx, output_lr, ip)
+    input_lp = runtime%get_logical_partition(input_lr, ip)
+    output_lp = runtime%get_logical_partition(output_lr, ip)
     
     arg_map = FArgumentMap()
     

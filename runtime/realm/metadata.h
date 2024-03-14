@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -55,7 +55,7 @@ namespace Realm {
       void handle_invalidate(void);
 
       // these return true once all remote copies have been invalidated
-      bool initiate_cleanup(ID::IDType id);
+      bool initiate_cleanup(ID::IDType id, bool local_only = false);
       bool handle_inval_ack(int sender);
 
     protected:

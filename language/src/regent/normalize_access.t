@@ -1,4 +1,4 @@
--- Copyright 2022 Stanford University
+-- Copyright 2024 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -31,7 +31,7 @@ local function unreachable(cx, node) assert(false) end
 
 function normalize_access.pass_through_expr(stats, expr) return expr end
 
-local normalize_expr_factory = terralib.memoize(function(field, read)
+local normalize_expr_factory = data.weak_memoize(function(field, read)
   assert(field ~= nil)
   assert(read ~= nil)
   return function(stats, expr)
@@ -68,7 +68,7 @@ local normalized_predicates = {
     end,
 }
 
-normalize_access.normalized = terralib.memoize(function(expr)
+normalize_access.normalized = data.weak_memoize(function(expr)
   local predicate = normalized_predicates[expr.node_type]
   return predicate and predicate(expr) or false
 end)

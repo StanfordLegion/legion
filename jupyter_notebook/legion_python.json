@@ -1,0 +1,71 @@
+{
+    "name": "Legion_Python",
+    "kernel_name": "legion_kernel_nocr",
+    "legion_prefix": null,
+    "exe": "legion_python",
+    "cpus": {
+        "cmd": "-ll:cpu", 
+        "value": 1
+    },
+    "gpus": {
+        "cmd": "-ll:gpu",
+        "value": 0
+    },
+    "omps": {
+        "cmd": "-ll:ocpu", 
+        "value": 0
+    },
+    "ompthreads": {
+        "cmd": "-ll:othr", 
+        "value": 4
+    },
+    "utility": {
+        "cmd": "-ll:util", 
+        "value": 1
+    },
+    "sysmem": {
+        "cmd": "-ll:csize", 
+        "value": 256
+    },
+    "numamem": {
+        "cmd": "-ll:nsize", 
+        "value": 0
+    },
+    "fbmem": {
+        "cmd": "-ll:fsize", 
+        "value": 4096
+    },
+    "zcmem": {
+        "cmd": "-ll:zsize", 
+        "value": null
+    },
+    "regmem": {
+        "cmd": "-ll:rsize", 
+        "value": null
+    },
+    "not_control_replicable": {
+        "action": "store_true",
+        "cmd": "--nocr", 
+        "value": null
+    },
+    "nodes": {
+        "cmd": "-n", 
+        "value": 1
+    },
+    "ranks_per_node": {
+        "cmd": "--npernode", 
+        "value": 1
+    },
+    "launcher": {
+        "type": "generic",
+        "cmd": "--launcher",
+        "value": null,
+        "launcher_extra": null
+    },
+    "other_options": [
+        {
+            "cmd": "-ll:py", 
+            "value": 1
+        }
+    ]
+}

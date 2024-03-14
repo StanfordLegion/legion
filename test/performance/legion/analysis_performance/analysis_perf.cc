@@ -1,4 +1,4 @@
-/* Copyright 2022 NVIDIA Corporation
+/* Copyright 2024 NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -175,28 +175,28 @@ class PerfMapper : public DefaultMapper
 
     virtual ~PerfMapper();
 
-    virtual Mapper::MapperSyncModel get_mapper_sync_model(void) const;
+    Mapper::MapperSyncModel get_mapper_sync_model(void) const override;
 
-    virtual void select_task_options(const MapperContext ctx,
-                                     const Task&         task,
-                                           TaskOptions&  output);
+    void select_task_options(const MapperContext ctx,
+                             const Task&         task,
+                                   TaskOptions&  output) override;
 
-    virtual void default_policy_select_target_processors(MapperContext ctx,
-                                                         const Task &task,
-                                               vector<Processor> &target_procs);
+    void default_policy_select_target_processors(MapperContext ctx,
+                                                 const Task &task,
+                                      vector<Processor> &target_procs) override;
 
-    virtual void slice_task(const MapperContext      ctx,
-                            const Task&              task,
-                            const SliceTaskInput&    input,
-                                  SliceTaskOutput&   output);
+    void slice_task(const MapperContext      ctx,
+                    const Task&              task,
+                    const SliceTaskInput&    input,
+                          SliceTaskOutput&   output) override;
 
-    virtual void map_task(const MapperContext  ctx,
-                          const Task&          task,
-                          const MapTaskInput&  input,
-                                MapTaskOutput& output);
+    void map_task(const MapperContext  ctx,
+                  const Task&          task,
+                  const MapTaskInput&  input,
+                        MapTaskOutput& output) override;
 
-    virtual bool default_policy_select_close_virtual(const MapperContext ctx,
-                                                     const Close &close);
+    bool default_policy_select_close_virtual(const MapperContext ctx,
+                                             const Close &close) override;
 
   private:
     typedef vector<vector<PhysicalInstance> > CachedMapping;
@@ -618,8 +618,10 @@ void create_index_partitions(Context ctx, Runtime *runtime, IndexSpace is,
     colors[0] = fanout - 1;
     for (unsigned idx = 1; idx < DIM; ++idx) colors[idx] = 0;
 
-    Domain color_space(Rect<DIM>(Point<DIM>::ZEROES(), colors));
-    DomainPointColoring coloring;
+    Domain color_domain(Rect<DIM>(Point<DIM>::ZEROES(), colors));
+    IndexSpace color_space = runtime->create_index_space(ctx, color_domain);
+
+    std::map<DomainPoint,Domain> coloring;
     Point<DIM> rect_lo = rect.lo;
     Point<DIM> rect_hi = rect.hi;
     Point<DIM> start = rect.lo;
@@ -639,8 +641,8 @@ void create_index_partitions(Context ctx, Runtime *runtime, IndexSpace is,
               pt_max(start, rect_lo), pt_min(rect_hi, end)));
       start = end - one;
     }
-    ip = runtime->create_index_partition(ctx, is, color_space, coloring,
-      ALIASED_KIND, part_color);
+    ip = runtime->create_partition_by_domain(ctx, is, coloring, color_space,
+        true/*perform intersections*/, LEGION_ALIASED_KIND, part_color);
   }
   else
   {

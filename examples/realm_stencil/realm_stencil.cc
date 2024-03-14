@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University
+/* Copyright 2024 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -218,26 +218,6 @@ void dump(RegionInstance inst, FieldID fid, Rect2 bounds, const char *prefix)
   }
 }
 
-DTYPE *get_weights()
-{
-  static bool init = false;
-  static DTYPE weights[(2*RADIUS + 1) * (2*RADIUS + 1)] = {0};
-
-  if (!init) {
-#define WEIGHT(i, j) weights[(j + RADIUS) * (2 * RADIUS + 1) + (i + RADIUS)]
-    for (coord_t i = 1; i <= RADIUS; i++) {
-      WEIGHT( 0,  i) =  1.0/(2.0*i*RADIUS);
-      WEIGHT( i,  0) =  1.0/(2.0*i*RADIUS);
-      WEIGHT( 0, -i) = -1.0/(2.0*i*RADIUS);
-      WEIGHT(-i,  0) = -1.0/(2.0*i*RADIUS);
-    }
-    init = true;
-#undef WEIGHT
-  }
-
-  return weights;
-}
-
 void inline_copy(RegionInstance src_inst, RegionInstance dst_inst, FieldID fid,
                  Rect2 bounds)
 {
@@ -308,7 +288,7 @@ void stencil_task(const void *args, size_t arglen,
     inline_copy(a.ym_inst, a.private_inst, FID_INPUT,
                 a.ym_inst.get_indexspace<2, coord_t>().bounds);
 
-  DTYPE *weights = get_weights();
+  DTYPE *weights = a.weights;
 
   stencil(private_base_input, private_base_output, weights,
           private_stride_input/sizeof(DTYPE),
@@ -446,26 +426,38 @@ void shard_task(const void *args, size_t arglen,
       RegionInstance::create_instance(private_inst, a.sysmem,
                                       a.exterior_bounds, field_sizes,
                                       0 /*SOA*/, ProfilingRequestSet()));
-    if (a.xp_inst_out.exists())
+    if (a.xp_inst_out.exists()) {
+      Event e = a.xp_inst_out.fetch_metadata(p);
+      e.wait();
       events.push_back(
         RegionInstance::create_instance(xp_inst_out_local, a.regmem,
                                         a.xp_inst_out.get_indexspace<2, coord_t>(), field_sizes,
                                         0 /*SOA*/, ProfilingRequestSet()));
-    if (a.xm_inst_out.exists())
+    }
+    if (a.xm_inst_out.exists()) {
+      Event e = a.xm_inst_out.fetch_metadata(p);
+      e.wait();
       events.push_back(
         RegionInstance::create_instance(xm_inst_out_local, a.regmem,
                                         a.xm_inst_out.get_indexspace<2, coord_t>(), field_sizes,
                                         0 /*SOA*/, ProfilingRequestSet()));
-    if (a.yp_inst_out.exists())
+    }
+    if (a.yp_inst_out.exists()) {
+      Event e = a.yp_inst_out.fetch_metadata(p);
+      e.wait();
       events.push_back(
         RegionInstance::create_instance(yp_inst_out_local, a.regmem,
                                         a.yp_inst_out.get_indexspace<2, coord_t>(), field_sizes,
                                         0 /*SOA*/, ProfilingRequestSet()));
-    if (a.ym_inst_out.exists())
+    }
+    if (a.ym_inst_out.exists()) {
+      Event e = a.ym_inst_out.fetch_metadata(p);
+      e.wait();
       events.push_back(
         RegionInstance::create_instance(ym_inst_out_local, a.regmem,
                                         a.ym_inst_out.get_indexspace<2, coord_t>(), field_sizes,
                                         0 /*SOA*/, ProfilingRequestSet()));
+    }
     Event::merge_events(events).wait();
   }
 
@@ -483,6 +475,20 @@ void shard_task(const void *args, size_t arglen,
     if (a.ym_inst_in.exists()) events.push_back(fill(a.ym_inst_in, FID_OUTPUT, a.init));
     Event::merge_events(events).wait();
   }
+
+  // Init the weights
+  size_t weights_size = (2*RADIUS + 1) * (2*RADIUS + 1);
+  DTYPE *weights = (DTYPE*)malloc(sizeof(DTYPE) * weights_size);
+  memset(weights, 0, sizeof(DTYPE) * weights_size);
+
+#define WEIGHT(i, j) weights[(j + RADIUS) * (2 * RADIUS + 1) + (i + RADIUS)]
+  for (coord_t i = 1; i <= RADIUS; i++) {
+    WEIGHT( 0,  i) =  1.0/(2.0*i*RADIUS);
+    WEIGHT( i,  0) =  1.0/(2.0*i*RADIUS);
+    WEIGHT( 0, -i) = -1.0/(2.0*i*RADIUS);
+    WEIGHT(-i,  0) = -1.0/(2.0*i*RADIUS);
+  }
+#undef WEIGHT
 
   // Barrier
   // Warning: If you're used to Legion barriers, please note that
@@ -529,6 +535,7 @@ void shard_task(const void *args, size_t arglen,
       args.yp_inst = a.yp_inst_in;
       args.ym_inst = a.ym_inst_in;
       args.interior_bounds = a.interior_bounds;
+      args.weights = weights;
       Event precondition = Event::merge_events(
         increment_done,
         (xp_full_in.exists() ? xp_full_in.get_previous_phase() : Event::NO_EVENT),
@@ -628,6 +635,8 @@ void shard_task(const void *args, size_t arglen,
   // Make sure all operations are done before returning
   Event::merge_events(
     xp_copy_done, xm_copy_done, yp_copy_done, ym_copy_done).wait();
+
+  free(weights);
 }
 
 void top_level_task(const void *args, size_t arglen,
@@ -719,6 +728,8 @@ void top_level_task(const void *args, size_t arglen,
     std::map<FieldID, size_t> field_sizes;
     field_sizes[FID_INPUT] = sizeof(DTYPE);
     field_sizes[FID_OUTPUT] = sizeof(DTYPE);
+
+    
 
     std::vector<Event> events;
     for (PointInRectIterator<2, coord_t> it(shards); it.valid; it.step()) {
@@ -881,6 +892,21 @@ void top_level_task(const void *args, size_t arglen,
       assert(args.xm_inst_in.exists() == args.xm_inst_out.exists());
       assert(args.yp_inst_in.exists() == args.yp_inst_out.exists());
       assert(args.ym_inst_in.exists() == args.ym_inst_out.exists());
+
+      {
+        std::vector<Event> events;
+
+        if (args.xp_inst_in.exists()) events.push_back(args.xp_inst_in.fetch_metadata(p));
+        if (args.xm_inst_in.exists()) events.push_back(args.xm_inst_in.fetch_metadata(p));
+        if (args.yp_inst_in.exists()) events.push_back(args.yp_inst_in.fetch_metadata(p));
+        if (args.ym_inst_in.exists()) events.push_back(args.ym_inst_in.fetch_metadata(p));
+
+        if (args.xp_inst_out.exists()) events.push_back(args.xp_inst_out.fetch_metadata(p));
+        if (args.xm_inst_out.exists()) events.push_back(args.xm_inst_out.fetch_metadata(p));
+        if (args.yp_inst_out.exists()) events.push_back(args.yp_inst_out.fetch_metadata(p));
+        if (args.ym_inst_out.exists()) events.push_back(args.ym_inst_out.fetch_metadata(p));
+        Event::merge_events(events).wait();
+      }
 
       if (args.xp_inst_in.exists()) assert(exterior_bounds.contains(args.xp_inst_in.get_indexspace<2, coord_t>().bounds));
       if (args.xm_inst_in.exists()) assert(exterior_bounds.contains(args.xm_inst_in.get_indexspace<2, coord_t>().bounds));

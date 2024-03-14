@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,28 +20,6 @@
 #include "realm/logging.h"
 #include "realm/utils.h"
 #include "realm/numa/numasysif.h"
-
-static unsigned ctz(uint64_t v)
-{
-#ifdef REALM_ON_WINDOWS
-  unsigned long index;
-#ifdef _WIN64
-  if(_BitScanForward64(&index, v))
-    return index;
-#else
-  unsigned v_lo = v;
-  unsigned v_hi = v >> 32;
-  if(_BitScanForward(&index, v_lo))
-    return index;
-  else if(_BitScanForward(&index, v_hi))
-    return index + 32;
-#endif
-  else
-    return 0;
-#else
-  return __builtin_ctzll(v);
-#endif
-}
 
 namespace Realm {
 
@@ -158,7 +136,7 @@ namespace Realm {
           continue;
       }
 
-      log_bgwork.info() << "dedicated worker sleeping - worker=" << this;
+      log_bgwork.debug() << "dedicated worker sleeping - worker=" << this;
       {
         Doorbell *db = Doorbell::get_thread_doorbell();
         db->prepare();
@@ -169,7 +147,7 @@ namespace Realm {
           db->cancel();
         }
       }
-      log_bgwork.info() << "dedicated worker awake - worker=" << this;
+      log_bgwork.debug() << "dedicated worker awake - worker=" << this;
     }
 
     log_bgwork.info() << "dedicated worker terminating - worker=" << this;
@@ -417,9 +395,9 @@ namespace Realm {
   void BackgroundWorkItem::make_active(void)
   {
     if(!manager) return;
-    log_bgwork.info() << "work advertised: manager=" << manager
-		      << " item=" << this
-		      << " slot=" << index;
+    log_bgwork.debug() << "work advertised: manager=" << manager
+		       << " item=" << this
+		       << " slot=" << index;
 #ifdef DEBUG_REALM
     State old_state = state.exchange(STATE_ACTIVE);
     if(old_state != STATE_IDLE) {
@@ -596,7 +574,7 @@ namespace Realm {
           manager->worker_state.fetch_sub(1 << BackgroundWorkManager::STATE_ACTIVE_ITEMS_SHIFT);
 
 	  unsigned slot = ((elem * BITMASK_BITS) + ctz(target_bit));
-	  log_bgwork.info() << "work claimed: manager=" << manager
+	  log_bgwork.debug() << "work claimed: manager=" << manager
 			    << " slot=" << slot
 			    << " worker=" << this;
 	  long long t_start = Clock::current_time_in_nanoseconds(true /*absolute*/);

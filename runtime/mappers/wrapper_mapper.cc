@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -1361,12 +1361,6 @@ namespace Legion {
       dmapper->select_task_sources(ctx, task, input, output);
     }
 
-    void WrapperMapper::speculate(const MapperContext      ctx,
-	const Task&              task,
-	SpeculativeOutput& output){
-      dmapper->speculate(ctx, task, output);
-    }
-
     void WrapperMapper::report_profiling(const MapperContext      ctx,
 	const Task&              task,
 	const TaskProfilingInfo& input){
@@ -1407,12 +1401,6 @@ namespace Legion {
       dmapper->select_copy_sources(ctx, copy, input, output);
     }
 
-    void WrapperMapper::speculate(const MapperContext      ctx,
-	const Copy& copy,
-	SpeculativeOutput& output){
-      dmapper->speculate(ctx, copy, output);
-    }
-
     void WrapperMapper::report_profiling(const MapperContext      ctx,
 	const Copy&              copy,
 	const CopyProfilingInfo& input){
@@ -1439,12 +1427,6 @@ namespace Legion {
       dmapper->map_acquire(ctx, acquire, input, output);
     }
 
-    void WrapperMapper::speculate(const MapperContext         ctx,
-	const Acquire&              acquire,
-	SpeculativeOutput&    output){
-      dmapper->speculate(ctx, acquire, output);			
-    }
-
     void WrapperMapper::report_profiling(const MapperContext         ctx,
 	const Acquire&              acquire,
 	const AcquireProfilingInfo& input){
@@ -1463,12 +1445,6 @@ namespace Legion {
 	const SelectReleaseSrcInput&   input,
 	SelectReleaseSrcOutput&  output){
       dmapper->select_release_sources(ctx, release, input, output);
-    }
-
-    void WrapperMapper::speculate(const MapperContext         ctx,
-	const Release&              release,
-	SpeculativeOutput&    output){
-      dmapper->speculate(ctx, release, output);
     }
 
     void WrapperMapper::report_profiling(const MapperContext         ctx,

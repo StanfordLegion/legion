@@ -1,4 +1,4 @@
--- Copyright 2022 Stanford University
+-- Copyright 2024 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -18,8 +18,7 @@ import "regent"
 
 local c = regentlib.c
 
-local min = regentlib.fmin
-local max = regentlib.fmax
+local fabs = regentlib.fabs(double)
 
 fspace point {
   input : double,
@@ -121,22 +120,22 @@ task check(points : region(ispace(int2d), point), tsteps : int64, init : int64)
 where reads(points.{input, output}) do
   var expect_in = init + tsteps
   var expect_out = init
+  var fail = false
   for i in points do
-    if points[i].input ~= expect_in then
-      for i2 in points do
-        c.printf("input (%lld,%lld): %.0f should be %lld\n",
-                 i2.x, i2.y, points[i2].input, expect_in)
-      end
+    if fabs(points[i].input - expect_in) > 0.00001 then
+      c.printf("input (%lld,%lld): %.5f should be %lld\n",
+               i.x, i.y, points[i].input, expect_in)
+      fail = true
+      break
     end
-    regentlib.assert(points[i].input == expect_in, "test failed")
-    if points[i].output ~= expect_out then
-      for i2 in points do
-        c.printf("output (%lld,%lld): %.0f should be %lld\n",
-                 i2.x, i2.y, points[i2].output, expect_out)
-      end
+    if fabs(points[i].output - expect_out) > 0.00001 then
+      c.printf("output (%lld,%lld): %.5f should be %lld\n",
+               i.x, i.y, points[i].output, expect_out)
+      fail = true
+      break
     end
-    regentlib.assert(points[i].output == expect_out, "test failed")
   end
+  regentlib.assert(not fail, "test failed")
 end
 
 task main()

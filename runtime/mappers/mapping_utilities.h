@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -300,6 +300,10 @@ namespace Legion {
 
       std::string to_string(MapperRuntime* runtime,
                             const MapperContext ctx,
+                            LogicalRegion lr);
+
+      std::string to_string(MapperRuntime* runtime,
+                            const MapperContext ctx,
                             IndexSpace is);
 
       std::string to_string(MapperRuntime* runtime,
@@ -325,22 +329,19 @@ namespace Legion {
                             const Task& task,
                             bool include_index_point = true);
 
+      std::string to_string(MapperRuntime* runtime,
+                            const MapperContext ctx,
+                            const InlineMapping& inline_op);
+
+      std::string to_string(MapperRuntime* runtime,
+                            const MapperContext ctx,
+                            const Copy& copy,
+                            bool include_index_point = true);
+
       /** @} */
 
     }; // namespace Utilities
   }; // namespace Mapping
 }; // namespace Legion
-
-// For backwards compatbility
-namespace LegionRuntime {
-  namespace HighLevel {
-    namespace MappingUtilities {
-      typedef Legion::Mapping::Utilities::MachineQueryInterface
-        MachineQueryInterface;
-      typedef Legion::Mapping::Utilities::MappingMemoizer MappingMemoizer;
-      typedef Legion::Mapping::Utilities::MappingProfiler MappingProfiler;
-    };
-  };
-};
 
 #endif // __MAPPING_UTILITIES__

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# Copyright 2022 Stanford University
+# Copyright 2024 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -18,7 +18,23 @@
 from __future__ import print_function
 
 import pygion
+from pygion import Region, RW, int32, void
 
-@pygion.task(task_id=2)
+@pygion.task(task_id=2,
+    argument_types=[],
+    return_type=int32,
+    calling_convention='regent')
 def hello():
     print('hello from Python')
+    return 123
+
+@pygion.task(
+    task_id=3,
+    argument_types=[Region, int32],
+    privileges=[RW],
+    return_type=void,
+    calling_convention='regent')
+def inc(R, x):
+    print(R.x)
+    R.x[:] += x
+    print(R.x)

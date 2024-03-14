@@ -1,0 +1,102 @@
+variables:
+  USE_HIP: "1"
+  ROCM_VERSION: "5.4.3"
+  HIP_ARCH: "gfx90a" # for runtime.mk
+  GPU_ARCH: "gfx90a" # for Regent
+
+  REALM_NETWORKS: "gasnetex"
+  GASNET_CONDUIT: "ofi-slingshot11"
+  CONDUIT: "ofi"
+
+  CXXFLAGS: "-std=c++11"
+  CXX_STANDARD: "11"
+
+  SCHEDULER_PARAMETERS: "-A UMS036 -t 2:00:00 -N 2 -n 2 -c 56 -p batch"
+  EXTERNAL_WORKDIR: /lustre/orion/proj-shared/csc335/ci/${CI_PIPELINE_ID}
+  GIT_SUBMODULE_STRATEGY: recursive
+
+  THREADS: 16 # for parallel build
+
+.legion: &legion
+  TEST_REGENT: "0"
+  LEGION_WARNINGS_FATAL: "1"
+  DEBUG: "0"
+
+.regent: &regent
+  TEST_LEGION_CXX: "0"
+  TEST_REALM: "0"
+  TEST_FUZZER: "0"
+  NO_PRETTY: "1"
+  CXXFLAGS: "-std=c++11 -D__HIP_PLATFORM_AMD__"
+
+.cmake: &cmake
+  USE_CMAKE: "1"
+
+.ctest: &ctest
+  TEST_CTEST: "1"
+
+.tests: &tests
+  script:
+    - .gitlab/test_script.sh
+  retry:
+    max: 0
+    when:
+      - runner_system_failure
+      - unknown_failure
+
+stages:
+  - prep
+  - test
+  - clean
+
+prep:
+  stage: prep
+  script:
+    - .gitlab/prep_script.sh
+  tags:
+    - shell
+    - crusher
+
+legion:
+  <<: [*tests]
+  stage: test
+  tags:
+    - slurm
+    - crusher
+  variables:
+    <<: [*legion]
+
+legion_cmake:
+  <<: [*tests]
+  stage: test
+  tags:
+    - slurm
+    - crusher
+  variables:
+    <<: [*legion, *cmake, *ctest]
+
+regent:
+  <<: [*tests]
+  stage: test
+  tags:
+    - slurm
+    - crusher
+  variables:
+    <<: [*regent]
+
+regent_cmake:
+  <<: [*tests]
+  stage: test
+  tags:
+    - slurm
+    - crusher
+  variables:
+    <<: [*regent, *cmake]
+
+clean:
+  stage: clean
+  script:
+    - rm -rf ${EXTERNAL_WORKDIR}*
+  tags:
+    - shell
+    - crusher

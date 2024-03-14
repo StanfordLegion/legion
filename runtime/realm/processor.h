@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -64,9 +64,10 @@ namespace Realm {
       AddressSpace address_space(void) const;
 
       REALM_ATTR_DEPRECATED("use ProcessorGroup::create_group instead",
-      static Processor create_group(const std::vector<Processor>& members));
+      static Processor create_group(const span<const Processor>& members));
 
-      void get_group_members(std::vector<Processor>& members) const;
+      void get_group_members(Processor *member_list, size_t &num_members) const;
+      void get_group_members(std::vector<Processor>& member_list) const;
 
       int get_num_cores(void) const;
 
@@ -175,15 +176,17 @@ namespace Realm {
     //  only a single node/rank in a distributed setting
     class REALM_PUBLIC_API ProcessorGroup : public Processor {
     public:
-      static ProcessorGroup create_group(const std::vector<Processor>& members);
-
+      static ProcessorGroup create_group(const Processor* members, size_t num_members);
+      /// Creates a group with \p members as the members of the groups.
+      /// \p members will also (efficiently) accept a std::vector.
+      static ProcessorGroup create_group(const span<const Processor>& members) {
+        return create_group(members.data(), members.size());
+      }
       void destroy(Event wait_on = Event::NO_EVENT) const;
 
       static const ProcessorGroup NO_PROC_GROUP;
     };
 
-    inline std::ostream& operator<<(std::ostream& os, Processor p) { return os << std::hex << p.id << std::dec; }
-	
 }; // namespace Realm
 
 #include "realm/processor.inl"

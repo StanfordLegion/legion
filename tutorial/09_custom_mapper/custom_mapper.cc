@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University
+/* Copyright 2024 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -359,7 +359,10 @@ AdversarialMapper::AdversarialMapper(Machine m,
             break;
           }
         default:
-          assert(false);
+	  {
+	    printf("  Memory " IDFMT " is unknown (kind=%d)\n", it->id, it->kind());
+	    break;
+	  }
       }
     }
 

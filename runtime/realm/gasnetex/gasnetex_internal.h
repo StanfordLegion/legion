@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -71,6 +71,17 @@
   #if defined(GASNET_CONDUIT_IBV) || defined(GASNET_CONDUIT_ARIES) || defined(GASNET_CONDUIT_SMP) || defined(GASNET_CONDUIT_MPI)
     #define GASNET_NATIVE_NP_ALLOC_REQ_MEDIUM
   #endif
+#endif
+
+// the GASNet-EX API defines the GEX_FLAG_IMMEDIATE flag to be a best-effort
+//  thing, with calls that accept the flag still being allowed to block -
+//  as of 2022.3.0, for any conduit other than aries "best effort" is actually
+//  "no effort" for RMA operations and we want to avoid using them in
+//  immediate-mode situations
+// NOTE: as with the NPAM stuff above, we'll pretend that MPI honors it as
+//  well so that we get code coverage in CI tests
+#if defined(GASNET_CONDUIT_ARIES) || defined(GASNET_CONDUIT_MPI)
+  #define REALM_GEX_RMA_HONORS_IMMEDIATE_FLAG
 #endif
 
 // eliminate GASNet warnings for unused static functions
@@ -411,6 +422,13 @@ namespace Realm {
 
     void enqueue_put_header(PendingPutHeader *put);
 
+    // adds the xpair to the injector ready list or the poller critical
+    //  pair list as appropriate, eventually resulting in a call to
+    //  push_packets - MUST NOT be called until the push_packets
+    //  that resulted from the previous enqueue is done-ish (i.e. not going
+    //  to push anything else)
+    void request_push(bool force_critical);
+
     void push_packets(bool immediate_mode, TimeLimit work_until);
 
     long long time_since_failure() const;
@@ -456,6 +474,9 @@ namespace Realm {
     gex_EP_Index_t tgt_ep_index;
     atomic<size_t> packets_reserved, packets_sent;
     Mutex mutex;
+    // we don't hold the mutex while pushing packets, but we need definitely
+    //  don't want multiple threads trying to push for the same src/dst pair
+    MutexChecker push_mutex_check;
     atomic<OutbufMetadata *> first_pbuf;  // read without mutex
     OutbufMetadata *cur_pbuf;
     atomic<unsigned> imm_fail_count;
@@ -512,6 +533,8 @@ namespace Realm {
     GASNetEXEvent& set_rget(PendingReverseGet *_rget);
     GASNetEXEvent& set_put(PendingPutHeader *_put);
     GASNetEXEvent& set_leaf(GASNetEXEvent *_leaf);
+
+    void propagate_to_leaves();
 
     void trigger(GASNetEXInternal *internal);
 
@@ -576,6 +599,23 @@ namespace Realm {
     Mutex::CondVar pollwait_cond;
     XmitSrcDestPair::XmitPairList critical_xpairs;
     GASNetEXEvent::EventList pending_events;
+  };
+
+  class GASNetEXCompleter : public BackgroundWorkItem {
+  public:
+    GASNetEXCompleter(GASNetEXInternal *_internal);
+
+    void add_ready_events(GASNetEXEvent::EventList& newly_ready);
+
+    bool has_work_remaining();
+
+    virtual bool do_work(TimeLimit work_until);
+
+  protected:
+    GASNetEXInternal *internal;
+    Mutex mutex;
+    atomic<bool> has_work;  // can be read without mutex
+    GASNetEXEvent::EventList ready_events;
   };
 
   struct PendingPutHeader {
@@ -670,9 +710,12 @@ namespace Realm {
 
     void detach();
 
+    void get_shared_peers(Realm::NodeSet &shared_peers);
     void barrier();
     void broadcast(gex_Rank_t root, const void *val_in, void *val_out, size_t bytes);
     void gather(gex_Rank_t root, const void *val_in, void *vals_out, size_t bytes);
+    void allgatherv(const char *val_in, size_t bytes, std::vector<char> &vals_out,
+                    std::vector<size_t> &lengths);
 
     size_t sample_messages_received_count();
     bool check_for_quiescence(size_t sampled_receive_count);
@@ -733,6 +776,7 @@ namespace Realm {
     friend class XmitSrcDestPair;
     friend class GASNetEXEvent;
     friend class GASNetEXPoller;
+    friend class GASNetEXCompleter;
 
     // callbacks from IncomingMessageManager
     static void short_message_complete(NodeID sender, uintptr_t objptr,
@@ -771,6 +815,7 @@ namespace Realm {
 
     GASNetEXPoller poller;
     GASNetEXInjector injector;
+    GASNetEXCompleter completer;
     ReverseGetter rgetter;
     PendingCompletionManager compmgr;
     OutbufManager obmgr;

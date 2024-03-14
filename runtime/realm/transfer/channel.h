@@ -1,5 +1,5 @@
-/* Copyright 2022 Stanford University
- * Copyright 2022 Los Alamos National Laboratory
+/* Copyright 2024 Stanford University
+ * Copyright 2024 Los Alamos National Laboratory
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -39,6 +39,7 @@
 #include "realm/inst_impl.h"
 #include "realm/bgwork.h"
 #include "realm/utils.h"
+#include "realm/transfer/address_list.h"
 
 namespace Realm {
 
@@ -52,7 +53,8 @@ namespace Realm {
 
     typedef unsigned long long XferDesID;
 
-    enum XferDesKind {
+    enum XferDesKind
+    {
       XFER_NONE,
       XFER_DISK_READ,
       XFER_DISK_WRITE,
@@ -72,6 +74,8 @@ namespace Realm {
       XFER_FILE_WRITE,
       XFER_ADDR_SPLIT,
       XFER_MEM_FILL,
+      XFER_GPU_SC_IN_FB,
+      XFER_GPU_SC_PEER_FB,
     };
 
     class Request {
@@ -190,52 +194,6 @@ namespace Realm {
       : id(_id), is_fold(_is_fold), in_place(_in_place), is_exclusive(_is_exclusive) {}
     };
 
-    class AddressList {
-    public:
-      AddressList();
-
-      size_t *begin_nd_entry(int max_dim);
-      void commit_nd_entry(int act_dim, size_t bytes);
-
-      size_t bytes_pending() const;
-      
-    protected:
-      friend class AddressListCursor;
-
-      const size_t *read_entry();
-
-      size_t total_bytes;
-      unsigned write_pointer;
-      unsigned read_pointer;
-      static const size_t MAX_ENTRIES = 1000;
-      size_t data[MAX_ENTRIES];
-    };
-
-    class AddressListCursor {
-    public:
-      AddressListCursor();
-
-      void set_addrlist(AddressList *_addrlist);
-
-      int get_dim();
-      uintptr_t get_offset();
-      uintptr_t get_stride(int dim);
-      size_t remaining(int dim);
-      void advance(int dim, size_t amount);
-
-      void skip_bytes(size_t bytes);
-      
-    protected:
-      AddressList *addrlist;
-      bool partial;
-      // we need to be one larger than any index space realm supports, since
-      //  we use the contiguous bytes within a field as a "dimension" in some
-      //  cases
-      static const int MAX_DIM = REALM_MAX_DIM + 1;
-      int partial_dim;
-      size_t pos[MAX_DIM];
-    };
-
     // a control port is used to steer inputs/outputs of transfer descriptors -
     //   the information is encoded into 32b packets which may be read/written
     //   at different times due to flow control, so the encoder and decoder
@@ -299,6 +257,7 @@ namespace Realm {
       NodeID launch_node;
       //uint64_t /*bytes_submit, */bytes_read, bytes_write/*, bytes_total*/;
       atomic<bool> iteration_completed;
+      atomic<int64_t> bytes_write_pending;
       atomic<bool> transfer_completed;
       // current input and output port mask
       uint64_t current_in_port_mask, current_out_port_mask;
@@ -417,7 +376,9 @@ namespace Realm {
       void update_pre_bytes_total(int port_idx, size_t pre_bytes_total);
       void update_next_bytes_read(int port_idx, size_t offset, size_t size);
 
-      bool is_completed(void);
+      // called once iteration is complete, but we need to track in flight
+      //  writes, flush byte counts, etc.
+      void begin_completion();
 
       void mark_completed();
 
@@ -512,6 +473,9 @@ namespace Realm {
       // as a side effect, the input/output control information is updated - the
       //  actual input/output ports involved in the next transfer are stored there
       size_t get_addresses(size_t min_xfer_size, ReadSequenceCache *rseqcache);
+      size_t get_addresses(size_t min_xfer_size, ReadSequenceCache *rseqcache,
+                           const InstanceLayoutPieceBase *&in_nonaffine,
+                           const InstanceLayoutPieceBase *&out_nonaffine);
 
       // after a call to 'get_addresses', this call updates the various data
       //  structures to record that transfers for 'total_{read,write}_bytes' bytes
@@ -561,7 +525,8 @@ namespace Realm {
 		     const std::vector<XferDesPortInfo>& inputs_info,
 		     const std::vector<XferDesPortInfo>& outputs_info,
 		     int _priority,
-		     const void *_fill_data, size_t _fill_size);
+		     const void *_fill_data, size_t _fill_size,
+                     size_t _fill_total);
 
       long get_requests(Request** requests, long nr);
 
@@ -682,7 +647,8 @@ namespace Realm {
 				   const std::vector<XferDesPortInfo>& outputs_info,
 				   int priority,
 				   XferDesRedopInfo redop_info,
-				   const void *fill_data, size_t fill_size) = 0;
+				   const void *fill_data, size_t fill_size,
+                                   size_t fill_total) = 0;
     };
 
     struct XferDesCreateMessageBase {
@@ -716,7 +682,8 @@ namespace Realm {
 				   const std::vector<XferDesPortInfo>& outputs_info,
 				   int priority,
 				   XferDesRedopInfo redop_info,
-				   const void *fill_data, size_t fill_size);
+				   const void *fill_data, size_t fill_size,
+                                   size_t fill_total);
 
     protected:
       uintptr_t channel;
@@ -724,6 +691,30 @@ namespace Realm {
 
     class RemoteChannelInfo;
     class RemoteChannel;
+
+    struct ChannelCopyInfo {
+      ChannelCopyInfo(Memory _src_mem, Memory _dst_mem,
+                      Memory _ind_mem = Memory::NO_MEMORY, size_t _num_spaces = 1,
+                      bool _is_scatter = false, bool _is_ranges = false,
+                      bool _is_direct = true, size_t _addr_size = 0)
+        : src_mem(_src_mem)
+        , dst_mem(_dst_mem)
+        , ind_mem(_ind_mem)
+        , num_spaces(_num_spaces)
+        , is_scatter(_is_scatter)
+        , is_ranges(_is_ranges)
+        , is_direct(_is_direct)
+        , addr_size(_addr_size)
+      {}
+      Memory src_mem;
+      Memory dst_mem;
+      Memory ind_mem;
+      size_t num_spaces;
+      bool is_scatter;
+      bool is_ranges;
+      bool is_direct;
+      size_t addr_size;
+    };
 
     class Channel {
     public:
@@ -819,7 +810,7 @@ namespace Realm {
       // returns 0 if the path is not supported, or a strictly-positive
       //  estimate of the time required (in nanoseconds) to transfer data
       //  along a supported path
-      virtual uint64_t supports_path(Memory src_mem, Memory dst_mem,
+      virtual uint64_t supports_path(ChannelCopyInfo channel_copy_info,
                                      CustomSerdezID src_serdez_id,
                                      CustomSerdezID dst_serdez_id,
                                      ReductionOpID redop_id,
@@ -829,6 +820,10 @@ namespace Realm {
                                      XferDesKind *kind_ret = 0,
                                      unsigned *bw_ret = 0,
                                      unsigned *lat_ret = 0);
+
+      virtual Memory suggest_ib_memories(Memory memory) const;
+
+      virtual bool needs_wrapping_iterator() const { return false; }
 
       virtual RemoteChannelInfo *construct_remote_info() const;
 
@@ -883,7 +878,8 @@ namespace Realm {
 				       const std::vector<XferDesPortInfo>& outputs_info,
 				       int priority,
 				       XferDesRedopInfo redop_info,
-				       const void *fill_data, size_t fill_size) = 0;
+				       const void *fill_data, size_t fill_size,
+                                       size_t fill_total) = 0;
 
       virtual XferDesFactory *get_factory();
 
@@ -960,7 +956,7 @@ namespace Realm {
        */
       virtual long available();
 
-      virtual uint64_t supports_path(Memory src_mem, Memory dst_mem,
+      virtual uint64_t supports_path(ChannelCopyInfo channel_copy_info,
                                      CustomSerdezID src_serdez_id,
                                      CustomSerdezID dst_serdez_id,
                                      ReductionOpID redop_id,
@@ -1031,7 +1027,7 @@ namespace Realm {
       //  on the cpu in the current process
       static void enumerate_local_cpu_memories(std::vector<Memory>& mems);
 
-      virtual uint64_t supports_path(Memory src_mem, Memory dst_mem,
+      virtual uint64_t supports_path(ChannelCopyInfo channel_copy_info,
                                      CustomSerdezID src_serdez_id,
                                      CustomSerdezID dst_serdez_id,
                                      ReductionOpID redop_id,
@@ -1049,7 +1045,8 @@ namespace Realm {
 				       const std::vector<XferDesPortInfo>& outputs_info,
 				       int priority,
 				       XferDesRedopInfo redop_info,
-				       const void *fill_data, size_t fill_size);
+				       const void *fill_data, size_t fill_size,
+                                       size_t fill_total);
 
       virtual long submit(Request** requests, long nr);
 
@@ -1072,7 +1069,8 @@ namespace Realm {
 				       const std::vector<XferDesPortInfo>& outputs_info,
 				       int priority,
 				       XferDesRedopInfo redop_info,
-				       const void *fill_data, size_t fill_size);
+				       const void *fill_data, size_t fill_size,
+                                       size_t fill_total);
 
       virtual long submit(Request** requests, long nr);
 
@@ -1087,7 +1085,7 @@ namespace Realm {
       static const bool is_ordered = false;
 
       // override because we don't want to claim non-reduction copies
-      virtual uint64_t supports_path(Memory src_mem, Memory dst_mem,
+      virtual uint64_t supports_path(ChannelCopyInfo channel_copy_info,
                                      CustomSerdezID src_serdez_id,
                                      CustomSerdezID dst_serdez_id,
                                      ReductionOpID redop_id,
@@ -1105,7 +1103,8 @@ namespace Realm {
 				       const std::vector<XferDesPortInfo>& outputs_info,
 				       int priority,
 				       XferDesRedopInfo redop_info,
-				       const void *fill_data, size_t fill_size);
+				       const void *fill_data, size_t fill_size,
+                                       size_t fill_total);
 
       virtual long submit(Request** requests, long nr);
 
@@ -1127,7 +1126,8 @@ namespace Realm {
 				       const std::vector<XferDesPortInfo>& outputs_info,
 				       int priority,
 				       XferDesRedopInfo redop_info,
-				       const void *fill_data, size_t fill_size);
+				       const void *fill_data, size_t fill_size,
+                                       size_t fill_total);
 
       long submit(Request** requests, long nr);
     };
@@ -1147,7 +1147,8 @@ namespace Realm {
 				       const std::vector<XferDesPortInfo>& outputs_info,
 				       int priority,
 				       XferDesRedopInfo redop_info,
-				       const void *fill_data, size_t fill_size);
+				       const void *fill_data, size_t fill_size,
+                                       size_t fill_total);
 
       long submit(Request** requests, long nr);
     };
@@ -1187,7 +1188,8 @@ namespace Realm {
 				       const std::vector<XferDesPortInfo>& outputs_info,
 				       int priority,
 				       XferDesRedopInfo redop_info,
-				       const void *fill_data, size_t fill_size) { assert(0); return 0; }
+				       const void *fill_data, size_t fill_size,
+                                       size_t fill_total) { assert(0); return 0; }
 
       virtual long submit(Request** requests, long nr) { assert(0); return 0; }
 
@@ -1208,6 +1210,7 @@ namespace Realm {
       static void send_request(NodeID target, TransferOperation *op, XferDesID xd_id);
     };
 
+#if 0 // TODO: DELETE
     struct XferDesRemoteWriteMessage {
       RemoteWriteRequest *req;
       XferDesID next_xd_guid;
@@ -1282,6 +1285,7 @@ namespace Realm {
 	amsg.commit();
       }
     };
+#endif
 
     struct XferDesDestroyMessage {
       XferDesID guid;

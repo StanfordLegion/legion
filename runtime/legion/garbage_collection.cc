@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,93 +20,10 @@
 #include "legion/legion_tasks.h"
 #include "legion/region_tree.h"
 #include "legion/garbage_collection.h"
+#include "legion/legion_replication.h"
 
 namespace Legion {
   namespace Internal {
-
-    /////////////////////////////////////////////////////////////
-    // LocalReferenceMutator 
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    LocalReferenceMutator::LocalReferenceMutator(
-                                               const LocalReferenceMutator &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    LocalReferenceMutator::~LocalReferenceMutator(void)
-    //--------------------------------------------------------------------------
-    {
-      if (!mutation_effects.empty())
-      {
-        RtEvent wait_on = Runtime::merge_events(mutation_effects);
-        wait_on.wait();
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    LocalReferenceMutator& LocalReferenceMutator::operator=(
-                                               const LocalReferenceMutator &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    void LocalReferenceMutator::record_reference_mutation_effect(RtEvent event)
-    //--------------------------------------------------------------------------
-    {
-      mutation_effects.insert(event);
-    }
-
-    //--------------------------------------------------------------------------
-    RtEvent LocalReferenceMutator::get_done_event(void)
-    //--------------------------------------------------------------------------
-    {
-      if (mutation_effects.empty())
-        return RtEvent::NO_RT_EVENT;
-      RtEvent result = Runtime::merge_events(mutation_effects);
-      // Can clear this since the user caller takes responsibility for waiting
-      mutation_effects.clear();
-      return result;
-    }
-
-    /////////////////////////////////////////////////////////////
-    // WrapperReferenceMutator 
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    WrapperReferenceMutator::WrapperReferenceMutator(
-                                             const WrapperReferenceMutator &rhs)
-      : mutation_effects(rhs.mutation_effects)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    WrapperReferenceMutator& WrapperReferenceMutator::operator=(
-                                             const WrapperReferenceMutator &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    void WrapperReferenceMutator::record_reference_mutation_effect(RtEvent ev)
-    //--------------------------------------------------------------------------
-    {
-      mutation_effects.insert(ev);
-    }
 
     /////////////////////////////////////////////////////////////
     // ImplicitReferenceTracker
@@ -129,35 +46,35 @@ namespace Legion {
     //--------------------------------------------------------------------------
     DistributedCollectable::DistributedCollectable(Runtime *rt,
                                                    DistributedID id,
-                                                   AddressSpaceID own_space,
-                                                   bool do_registration)
-      : runtime(rt), did(id), owner_space(own_space), 
-        local_space(rt->address_space), 
-        current_state(INACTIVE_STATE), has_gc_references(false),
-        has_valid_references(false), has_resource_references(false), 
-        reentrant_update(false), gc_references(0), valid_references(0), 
-        resource_references(0), registered_with_runtime(do_registration)
+                                                   bool do_registration,
+                                                   CollectiveMapping *mapping,
+                                                   State initial_state)
+      : runtime(rt), did(id), owner_space(runtime->determine_owner(did)),
+        local_space(rt->address_space), collective_mapping(mapping),
+        current_state(initial_state), gc_references(0),
+        resource_references(0), downgrade_owner(owner_space),
+        notready_owner(owner_space), sent_global_references(0),
+        received_global_references(0), total_sent_references(0),
+        total_received_references(0), remaining_responses(0),
+        registered_with_runtime(false)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      if (did > 0)
-        assert(runtime->determine_owner(did) == owner_space);
-#endif
-      if (do_registration)
-        runtime->register_distributed_collectable(did, this);
-      if (!is_owner())
+      if (collective_mapping != NULL)
       {
-        remote_instances.add(owner_space);
-        // Add a base resource ref that will be held until
-        // the owner node removes it with an unregister message
-        add_base_resource_ref(REMOTE_DID_REF);
+#ifdef DEBUG_LEGION
+        assert(collective_mapping->contains(owner_space));
+#endif
+        collective_mapping->add_reference();
       }
+      if (do_registration)
+        register_with_runtime();
     }
 
     //--------------------------------------------------------------------------
     DistributedCollectable::DistributedCollectable(
                                               const DistributedCollectable &rhs)
-      : runtime(NULL), did(0), owner_space(0), local_space(0)
+      : runtime(NULL), did(0), owner_space(0), local_space(0), 
+        collective_mapping(NULL)
     //--------------------------------------------------------------------------
     {
       // Should never be called
@@ -170,1394 +87,425 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(gc_references == 0);
-      assert(valid_references == 0);
       assert(resource_references == 0);
 #endif
-      if (is_owner() && registered_with_runtime)
-        unregister_with_runtime();
+      if ((collective_mapping != NULL) && 
+          collective_mapping->remove_reference())
+        delete collective_mapping;
 #ifdef LEGION_GC
       log_garbage.info("GC Deletion %lld %d", 
           LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
 #endif
+    } 
+
+    //--------------------------------------------------------------------------
+    template<bool NEED_LOCK>
+    bool DistributedCollectable::is_global(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (NEED_LOCK)
+      {
+        AutoLock gc(gc_lock);
+        return (current_state == VALID_REF_STATE) || 
+                (current_state == GLOBAL_REF_STATE) ||
+                (current_state == PENDING_LOCAL_REF_STATE) ||
+                (current_state == PENDING_GLOBAL_REF_STATE);
+      }
+      else
+        return (current_state == VALID_REF_STATE) || 
+                (current_state == GLOBAL_REF_STATE) ||
+                (current_state == PENDING_LOCAL_REF_STATE) ||
+                (current_state == PENDING_GLOBAL_REF_STATE);
+    }
+
+    template bool DistributedCollectable::is_global<true>(void) const;
+    template bool DistributedCollectable::is_global<false>(void) const;
+
+    //--------------------------------------------------------------------------
+    void DistributedCollectable::add_gc_reference(int cnt)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock gc(gc_lock);
+#ifdef DEBUG_LEGION
+      assert(is_global<false/*need lock*/>());
+#endif
+      // Promote the current state back up if we had a pending downgrade
+      if (current_state == PENDING_LOCAL_REF_STATE)
+        current_state = GLOBAL_REF_STATE;
+#ifdef DEBUG_LEGION_GC
+      gc_references += cnt;
+#else
+      gc_references.fetch_add(cnt);
+#endif
+    }
+
+#ifndef DEBUG_LEGION_GC
+    //--------------------------------------------------------------------------
+    bool DistributedCollectable::remove_gc_reference(int cnt)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock gc(gc_lock);
+#ifdef DEBUG_LEGION
+      assert(is_global<false/*need lock*/>());
+      assert(gc_references.load() >= cnt);
+#endif
+      if (gc_references.fetch_sub(cnt) == cnt)
+        return can_delete(gc);
+      else
+        return false;
+    } 
+
+    //--------------------------------------------------------------------------
+    void DistributedCollectable::add_resource_reference(int cnt)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock gc(gc_lock);
+#ifdef DEBUG_LEGION
+      assert(current_state != DELETED_REF_STATE);
+#endif
+      resource_references.fetch_add(cnt);
     }
 
     //--------------------------------------------------------------------------
-    void DistributedCollectable::add_gc_reference(ReferenceMutator *mutator)
+    bool DistributedCollectable::remove_resource_reference(int cnt)
     //--------------------------------------------------------------------------
     {
+      AutoLock gc(gc_lock);
 #ifdef DEBUG_LEGION
-      assert(current_state != DELETED_STATE);
+      assert(current_state != DELETED_REF_STATE);
+      assert(resource_references.load() >= cnt);
 #endif
-      RtEvent wait_for;
-      bool need_activate = false;
-      bool need_validate = false;
-      bool need_invalidate = false;
-      bool need_deactivate = false;
-      bool do_deletion = false;
-      bool done = false;
-      bool first = true;
-      while (!done)
+      if (resource_references.fetch_sub(cnt) == cnt)
+        return can_delete(gc);
+      else
+        return false;
+    }
+#endif // not defined DEBUG_LEGION_GC 
+
+    //--------------------------------------------------------------------------
+#ifdef DEBUG_LEGION_GC
+    template<typename T>
+    bool DistributedCollectable::acquire_global(int cnt,
+                              T source, std::map<T,int> &detailed_gc_references)
+#else
+    bool DistributedCollectable::acquire_global(int cnt)
+#endif
+    //--------------------------------------------------------------------------
+    {
+      AddressSpaceID current_owner;
       {
-        if (need_activate)
-        {
-          notify_active(mutator);
-          need_activate = false;
-        }
-        if (need_validate)
-        {
-          notify_valid(mutator);
-          need_validate = false;
-        }
-        if (need_invalidate)
-        {
-          notify_invalid(mutator);
-          need_invalidate = false;
-        }
-        if (need_deactivate)
-        {
-          notify_inactive(mutator);
-          need_deactivate = false;
-        }
-        if (wait_for.exists() && !wait_for.has_triggered())
-          wait_for.wait();
         AutoLock gc(gc_lock);
-        if (first)
+        // Check to see if we lost the race and somebody else already
+        // added the references in which case we are done
+        if (gc_references > 0)
         {
-          bool reentrant = false;
-          wait_for = check_for_transition_event(reentrant);
-          if (wait_for.exists())
-            continue;
-          // Wait for any state transitions to be finished
-          // before we attempt to update the state
-#ifdef DEBUG_LEGION
-          // Should have at least one reference here
-          assert(__sync_fetch_and_add(&gc_references, 0) > 0);
+#ifdef DEBUG_LEGION_GC
+          gc_references += cnt;
+          typename std::map<T,int>::iterator finder =
+            detailed_gc_references.find(source);
+          if (finder == detailed_gc_references.end())
+            detailed_gc_references[source] = cnt;
+          else
+            finder->second += cnt;
+#else
+          gc_references.fetch_add(cnt);
 #endif
-          has_gc_references = true;
-          if (reentrant)
+          return true;
+        }
+        switch (current_state)
+        {
+          case GLOBAL_REF_STATE:
+          case VALID_REF_STATE:
+          case PENDING_GLOBAL_REF_STATE:
+            {
+              // No downgrade in progress so we can just add the references
+#ifdef DEBUG_LEGION
+              // Can only be in a pending state if we're not the owner
+              assert((current_state != PENDING_GLOBAL_REF_STATE) ||
+                      (downgrade_owner != local_space));
+#endif
+#ifdef DEBUG_LEGION_GC
+              gc_references += cnt;
+              typename std::map<T,int>::iterator finder =
+                detailed_gc_references.find(source);
+              if (finder == detailed_gc_references.end())
+                detailed_gc_references[source] = cnt;
+              else
+                finder->second += cnt;
+#else
+              gc_references.fetch_add(cnt);
+#endif
+              return true;
+            }
+          case PENDING_LOCAL_REF_STATE:
+            {
+#ifdef DEBUG_LEGION
+              // Can only be in a pending state if we're not the owner
+              assert(downgrade_owner != local_space);
+#endif
+              // Not safe to increment the references since we might
+              // race with the downgrade request, so we need to send
+              // a message to the downgrade owner to see if we can
+              break;
+            }
+          case LOCAL_REF_STATE:
+          case DELETED_REF_STATE:
+            {
+              return false;
+            }
+          default:
+            assert(false);
+        }
+        current_owner = downgrade_owner;
+      }
+      // Send the message to the downgrade owner to try to acquire the reference
+      std::atomic<bool> result(false);
+      const RtUserEvent ready = Runtime::create_rt_user_event();
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(did);
+        rez.serialize(this);
+        rez.serialize(local_space);
+        rez.serialize(cnt);
+        rez.serialize(&result);
+        rez.serialize(ready);
+      }
+      runtime->send_did_acquire_global_request(current_owner, rez);
+      ready.wait();
+      if (result.load())
+      {
+#ifdef DEBUG_LEGION_GC
+        AutoLock gc(gc_lock);
+        typename std::map<T,int>::iterator finder =
+          detailed_gc_references.find(source);
+        if (finder == detailed_gc_references.end())
+          detailed_gc_references[source] = cnt;
+        else
+          finder->second += cnt;
+#endif
+        return true;
+      }
+      else
+        return false;
+    }
+
+#ifdef DEBUG_LEGION_GC
+    template bool DistributedCollectable::acquire_global<ReferenceSource>(
+        int, ReferenceSource, std::map<ReferenceSource,int>&);
+    template bool DistributedCollectable::acquire_global<DistributedID>(
+        int, DistributedID, std::map<DistributedID,int>&);
+#endif
+
+    //--------------------------------------------------------------------------
+    bool DistributedCollectable::acquire_global_remote(AddressSpaceID &current,
+                                               int count, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock gc(gc_lock);
+      if (is_global<false/*need lock*/>())
+      {
+        if (downgrade_owner == local_space)
+        {
+          // We succeeded
+          if (source == local_space)
           {
-            reentrant_update = true;
-            break;
+            // If we're local we can add the references now
+#ifdef DEBUG_LEGION_GC
+            gc_references += count;
+#else
+            gc_references.fetch_add(count);
+#endif
           }
-          first = false;
+          else // Otherwise pack a reference to send back
+            sent_global_references++;
+          return true;
         }
-        done = update_state(need_activate, need_validate,
-                            need_invalidate, need_deactivate, do_deletion);
+        else
+          current = downgrade_owner;
       }
-      if (do_deletion)
-      {
-        // If we get here it is probably a race in reference counting
-        // scheme above, so mark it is as such
-        assert(false);
-        delete this;
-      }
+      return false;
     }
 
     //--------------------------------------------------------------------------
-    bool DistributedCollectable::remove_gc_reference(ReferenceMutator *mutator)
+    /*static*/ void DistributedCollectable::handle_global_acquire_request(
+                                          Runtime *runtime, Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(current_state != DELETED_STATE);
-#endif
-      RtEvent wait_for;
-      bool need_activate = false;
-      bool need_validate = false;
-      bool need_invalidate = false;
-      bool need_deactivate = false;
-      bool do_deletion = false;
-      bool done = false;
-      bool first = true;
-      while (!done)
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      DistributedCollectable *remote;
+      derez.deserialize(remote);
+      AddressSpaceID source;
+      derez.deserialize(source);
+      int count;
+      derez.deserialize(count);
+      std::atomic<bool> *result;
+      derez.deserialize(result);
+      RtUserEvent ready;
+      derez.deserialize(ready);
+
+      DistributedCollectable *dc = 
+        runtime->weak_find_distributed_collectable(did);
+      if (dc != NULL)
       {
-        if (need_activate)
+        AddressSpaceID current_owner = dc->local_space;
+        if (dc->acquire_global_remote(current_owner, count, source))
         {
-          notify_active(mutator);
-          need_activate = false;
-        }
-        if (need_validate)
-        {
-          notify_valid(mutator);
-          need_validate = false;
-        }
-        if (need_invalidate)
-        {
-          notify_invalid(mutator);
-          need_invalidate = false;
-        }
-        if (need_deactivate)
-        {
-          notify_inactive(mutator);
-          need_deactivate = false;
-        }
-        if (wait_for.exists() && !wait_for.has_triggered())
-          wait_for.wait();
-        AutoLock gc(gc_lock);
-        if (first)
-        {
-          bool reentrant = false;
-          wait_for = check_for_transition_event(reentrant); 
-          if (wait_for.exists())
-            continue;
-          // Check to see if we lost the race for changing state
-          if (has_gc_references && 
-              (__sync_fetch_and_add(&gc_references, 0) == 0))
-            has_gc_references = false;
+          // Successfully acquired (packed) a global reference
+          if (source != dc->local_space)
+          {
+            Serializer rez;
+            {
+              RezCheck z2(rez);
+              rez.serialize(remote);
+              rez.serialize(count);
+              rez.serialize(result);
+              rez.serialize(ready);
+            }
+            runtime->send_did_acquire_global_response(source, rez);
+          }
           else
           {
-            if (!reentrant)
-              reentrant_event = RtEvent::NO_RT_EVENT;
-            break;
+            // Might have been sent back to ourself eventually
+            result->store(true);
+            Runtime::trigger_event(ready);
           }
-          if (reentrant)
-          {
-            reentrant_update = true;
-            break;
-          }
-          first = false;
         }
-        done = update_state(need_activate, need_validate,
-                            need_invalidate, need_deactivate, do_deletion);
+        else if (current_owner != dc->local_space)
+        {
+          // Not the owner anymore, so forward and keep chasing
+          Serializer rez;
+          {
+            RezCheck z2(rez);
+            rez.serialize(did);
+            rez.serialize(remote);
+            rez.serialize(source);
+            rez.serialize(count);
+            rez.serialize(result);
+            rez.serialize(ready);
+          }
+          runtime->send_did_acquire_global_request(current_owner, rez);
+        }
+        else
+          // Failed so trigger the event
+          Runtime::trigger_event(ready);
+        if (dc->remove_base_resource_ref(RUNTIME_REF))
+          delete dc;
       }
-      return do_deletion;
+      else
+        // Failed so trigger the event
+        Runtime::trigger_event(ready);
     }
 
     //--------------------------------------------------------------------------
-    void DistributedCollectable::add_valid_reference(ReferenceMutator *mutator)
+    /*static*/ void DistributedCollectable::handle_global_acquire_response(
+                                                            Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(current_state != DELETED_STATE);
-#endif
-      RtEvent wait_for;
-      bool need_activate = false;
-      bool need_validate = false;
-      bool need_invalidate = false;
-      bool need_deactivate = false;
-      bool do_deletion = false;
-      bool done = false;
-      bool first = true;
-      while (!done)
-      {
-        if (need_activate)
-        {
-          notify_active(mutator);
-          need_activate = false;
-        }
-        if (need_validate)
-        {
-          notify_valid(mutator);
-          need_validate = false;
-        }
-        if (need_invalidate)
-        {
-          notify_invalid(mutator);
-          need_invalidate = false;
-        }
-        if (need_deactivate)
-        {
-          notify_inactive(mutator);
-          need_deactivate = false;
-        }
-        if (wait_for.exists() && !wait_for.has_triggered())
-          wait_for.wait();
-        AutoLock gc(gc_lock);
-        if (first)
-        {
-          bool reentrant = false;
-          wait_for = check_for_transition_event(reentrant); 
-          if (wait_for.exists())
-            continue;
-#ifdef DEBUG_LEGION
-          // Should have at least one reference here
-          assert(__sync_fetch_and_add(&valid_references, 0) > 0);
-#endif
-          has_valid_references = true;
-          if (reentrant)
-          {
-            reentrant_update = true;
-            break;
-          }
-          first = false;
-        }
-        done = update_state(need_activate, need_validate,
-                            need_invalidate, need_deactivate, do_deletion);
-      }
-      if (do_deletion)
-      {
-        // This probably indicates a race in reference counting algorithm
-        assert(false);
-        delete this;
-      }
+      DerezCheck z(derez);
+      DistributedCollectable *local;
+      derez.deserialize(local);
+      int count;
+      derez.deserialize(count);
+      std::atomic<bool> *result;
+      derez.deserialize(result);
+      RtUserEvent ready;
+      derez.deserialize(ready);
+
+      // Just add the valid reference for now
+      local->add_gc_reference(count);
+      // Unpack the global reference added by acquire_global_remote
+      local->unpack_global_ref();
+      result->store(true);
+      Runtime::trigger_event(ready);
     }
 
+#ifdef DEBUG_LEGION_GC
     //--------------------------------------------------------------------------
-    bool DistributedCollectable::remove_valid_reference(
-                                                      ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(current_state != DELETED_STATE);
-#endif
-      RtEvent wait_for;
-      bool need_activate = false;
-      bool need_validate = false;
-      bool need_invalidate = false;
-      bool need_deactivate = false;
-      bool do_deletion = false;
-      bool done = false;
-      bool first = true;
-      while (!done)
-      {
-        if (need_activate)
-        {
-          notify_active(mutator);
-          need_activate = false;
-        }
-        if (need_validate)
-        {
-          notify_valid(mutator);
-          need_validate = false;
-        }
-        if (need_invalidate)
-        {
-          notify_invalid(mutator);
-          need_invalidate = false;
-        }
-        if (need_deactivate)
-        {
-          notify_inactive(mutator);
-          need_deactivate = false;
-        }
-        if (wait_for.exists() && !wait_for.has_triggered())
-          wait_for.wait();
-        AutoLock gc(gc_lock);
-        if (first)
-        {
-          bool reentrant = false;
-          wait_for = check_for_transition_event(reentrant); 
-          if (wait_for.exists())
-            continue;
-          // Check to see if we lost the race for changing state
-          if (has_valid_references &&
-              (__sync_fetch_and_add(&valid_references, 0) == 0))
-            has_valid_references = false;
-          else
-          {
-            if (!reentrant)
-              reentrant_event = RtEvent::NO_RT_EVENT;
-            break;
-          }
-          if (reentrant)
-          {
-            reentrant_update = true;
-            break;
-          }
-          first = false;
-        }
-        done = update_state(need_activate, need_validate,
-                            need_invalidate, need_deactivate, do_deletion);
-      }
-      return do_deletion;
-    }
-
-    //--------------------------------------------------------------------------
-    bool DistributedCollectable::check_valid_and_increment(
+    void DistributedCollectable::add_base_gc_ref_internal(
                                                 ReferenceSource source, int cnt)
     //--------------------------------------------------------------------------
     {
       AutoLock gc(gc_lock);
-      if (current_state != VALID_STATE)
-        return false;
 #ifdef DEBUG_LEGION
-      assert(cnt >= 0);
+      assert(is_global<false/*need lock*/>());
 #endif
-#ifdef LEGION_GC
-      log_base_ref<true>(VALID_REF_KIND, did, local_space, source, cnt);
-#endif
-#ifndef DEBUG_LEGION_GC
-      int previous = __sync_fetch_and_add(&valid_references, cnt);
-#ifdef DEBUG_LEGION
-      assert(previous >= 0);
-#endif
-      if (previous == 0)
-        has_valid_references = true;
-#else
-      valid_references++;
-      std::map<ReferenceSource,int>::iterator finder = 
-        detailed_base_valid_references.find(source);
-      if (finder == detailed_base_valid_references.end())
-        detailed_base_valid_references[source] = cnt;
-      else
-        finder->second += cnt;
-      if (valid_references > cnt)
-        return true;
-#ifdef DEBUG_LEGION
-      assert(!has_valid_references);
-#endif
-      has_valid_references = true;
-#endif
-      return true;
-    }
-
-    //--------------------------------------------------------------------------
-    bool DistributedCollectable::check_valid_and_increment(
-                                                  DistributedID source, int cnt)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock gc(gc_lock);
-      if (current_state != VALID_STATE)
-        return false;
-#ifdef DEBUG_LEGION
-      assert(cnt >= 0);
-#endif
-#ifdef LEGION_GC
-      log_nested_ref<true>(VALID_REF_KIND, did, local_space, source, cnt);
-#endif
-#ifndef DEBUG_LEGION_GC
-      int previous = __sync_fetch_and_add(&valid_references, cnt);
-#ifdef DEBUG_LEGION
-      assert(previous >= 0);
-#endif
-      if (previous == 0)
-        has_valid_references = true;
-#else
-      valid_references++;
-      source = LEGION_DISTRIBUTED_ID_FILTER(source);
-      std::map<DistributedID,int>::iterator finder = 
-        detailed_nested_valid_references.find(source);
-      if (finder == detailed_nested_valid_references.end())
-        detailed_nested_valid_references[source] = cnt;
-      else
-        finder->second += cnt;
-      if (valid_references > cnt)
-        return true;
-#ifdef DEBUG_LEGION
-      assert(!has_valid_references);
-#endif
-      has_valid_references = true;
-#endif
-      return true;
-    }
-
-    //--------------------------------------------------------------------------
-    bool DistributedCollectable::check_gc_and_increment(
-                                                ReferenceSource source, int cnt)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock gc(gc_lock);
-      if ((current_state == INACTIVE_STATE) || 
-          (current_state == DELETED_STATE) || 
-          (current_state == PENDING_ACTIVE_STATE) || 
-          (current_state == PENDING_INACTIVE_STATE) ||
-          (current_state == PENDING_INACTIVE_INVALID_STATE))
-        return false;
-#ifdef DEBUG_LEGION
-      assert(cnt >= 0);
-#endif
-#ifdef LEGION_GC
-      log_base_ref<true>(GC_REF_KIND, did, local_space, source, cnt);
-#endif
-#ifndef DEBUG_LEGION_GC
-      int previous = __sync_fetch_and_add(&gc_references, cnt);
-#ifdef DEBUG_LEGION
-      assert(previous >= 0);
-#endif
-      if (previous == 0)
-        has_gc_references = true;
-#else
-      gc_references++;
+      gc_references += cnt;
       std::map<ReferenceSource,int>::iterator finder = 
         detailed_base_gc_references.find(source);
       if (finder == detailed_base_gc_references.end())
         detailed_base_gc_references[source] = cnt;
       else
         finder->second += cnt;
-      if (gc_references > cnt)
-        return true;
-#ifdef DEBUG_LEGION
-      assert(!has_gc_references);
-#endif
-      has_gc_references = true;
-#endif
-      return true;
     }
 
     //--------------------------------------------------------------------------
-    bool DistributedCollectable::check_gc_and_increment(
+    void DistributedCollectable::add_nested_gc_ref_internal(
                                                   DistributedID source, int cnt)
     //--------------------------------------------------------------------------
     {
       AutoLock gc(gc_lock);
-      if ((current_state == INACTIVE_STATE) || 
-          (current_state == DELETED_STATE) || 
-          (current_state == PENDING_ACTIVE_STATE) || 
-          (current_state == PENDING_INACTIVE_STATE) ||
-          (current_state == PENDING_INACTIVE_INVALID_STATE))
-        return false;
 #ifdef DEBUG_LEGION
-      assert(cnt >= 0);
+      assert(is_global<false/*need lock*/>());
 #endif
-#ifdef LEGION_GC
-      log_nested_ref<true>(GC_REF_KIND, did, local_space, source, cnt);
-#endif
-#ifndef DEBUG_LEGION_GC
-      int previous = __sync_fetch_and_add(&gc_references, cnt);
-#ifdef DEBUG_LEGION
-      assert(previous >= 0);
-#endif
-      if (previous == 0)
-        has_gc_references = true;
-#else
-      gc_references++;
-      source = LEGION_DISTRIBUTED_ID_FILTER(source);
+      gc_references += cnt;
       std::map<DistributedID,int>::iterator finder = 
         detailed_nested_gc_references.find(source);
       if (finder == detailed_nested_gc_references.end())
         detailed_nested_gc_references[source] = cnt;
       else
         finder->second += cnt;
-      if (gc_references > cnt)
-        return true;
-#ifdef DEBUG_LEGION
-      assert(!has_gc_references);
-#endif
-      has_gc_references = true;
-#endif
-      return true;
-    }
-
-    //--------------------------------------------------------------------------
-    bool DistributedCollectable::check_resource_and_increment(
-                                                ReferenceSource source, int cnt)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock gc(gc_lock);
-      if (current_state == DELETED_STATE)
-        return false;
-#ifdef DEBUG_LEGION
-      assert(cnt >= 0);
-#endif
-#ifdef LEGION_GC
-      log_base_ref<true>(RESOURCE_REF_KIND, did, local_space, source, cnt);
-#endif
-#ifndef DEBUG_LEGION_GC
-      int previous = __sync_fetch_and_add(&resource_references, cnt);
-#ifdef DEBUG_LEGION
-      assert(previous >= 0);
-#endif
-      if (previous == 0)
-        has_resource_references = true;
-#else
-      resource_references++;
-      std::map<ReferenceSource,int>::iterator finder = 
-        detailed_base_resource_references.find(source);
-      if (finder == detailed_base_resource_references.end())
-        detailed_base_resource_references[source] = cnt;
-      else
-        finder->second += cnt;
-      if (resource_references > cnt)
-        return true;
-#ifdef DEBUG_LEGION
-      assert(!has_resource_references);
-#endif
-      has_resource_references = true;
-#endif
-      return true;
-    }
-
-    //--------------------------------------------------------------------------
-    bool DistributedCollectable::check_resource_and_increment(
-                                                  DistributedID source, int cnt)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock gc(gc_lock);
-      if (current_state == DELETED_STATE)
-        return false;
-#ifdef DEBUG_LEGION
-      assert(cnt >= 0);
-#endif
-#ifdef LEGION_GC
-      log_nested_ref<true>(RESOURCE_REF_KIND, did, local_space, source, cnt);
-#endif
-#ifndef DEBUG_LEGION_GC
-      int previous = __sync_fetch_and_add(&resource_references, cnt);
-#ifdef DEBUG_LEGION
-      assert(previous >= 0);
-#endif
-      if (previous == 0)
-        has_resource_references = true;
-#else
-      resource_references++;
-      source = LEGION_DISTRIBUTED_ID_FILTER(source);
-      std::map<DistributedID,int>::iterator finder = 
-        detailed_nested_resource_references.find(source);
-      if (finder == detailed_nested_resource_references.end())
-        detailed_nested_resource_references[source] = cnt;
-      else
-        finder->second += cnt;
-      if (resource_references > cnt)
-        return true;
-#ifdef DEBUG_LEGION
-      assert(!has_resource_references);
-#endif
-      has_resource_references = true;
-#endif
-      return true;
-    }
-
-    //--------------------------------------------------------------------------
-    void DistributedCollectable::add_resource_reference(void)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock gc(gc_lock);
-#ifdef DEBUG_LEGION
-      // Should have at least one reference here
-      assert(__sync_fetch_and_add(&resource_references, 0) > 0);
-#endif
-      has_resource_references = true;
-    }
-
-    //--------------------------------------------------------------------------
-    bool DistributedCollectable::remove_resource_reference(void)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock gc(gc_lock);
-      // Check to see if we lost the race for changing state
-      if (__sync_fetch_and_add(&resource_references, 0) == 0)
-      {
-        has_resource_references = false;
-        return can_delete();
-      }
-      else
-        return false;
-    }
-
-#ifdef USE_REMOTE_REFERENCES
-    //--------------------------------------------------------------------------
-    bool DistributedCollectable::add_create_reference(AddressSpaceID source,
-           ReferenceMutator *mutator, AddressSpaceID target, ReferenceKind kind)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(is_owner());
-      assert(source != owner_space);
-      assert(current_state != DELETED_STATE);
-      assert((kind == GC_REF_KIND) || (kind == VALID_REF_KIND));
-#endif
-      RtEvent wait_for;
-      bool need_activate = false;
-      bool need_validate = false;
-      bool need_invalidate = false;
-      bool need_deactivate = false;
-      bool do_deletion = false;
-      bool done = false;
-      bool first = true;
-      while (!done)
-      {
-        if (need_activate)
-        {
-          notify_active(mutator);
-          need_activate = false;
-        }
-        if (need_validate)
-        {
-          notify_valid(mutator);
-          need_validate = false;
-        }
-        if (need_invalidate)
-        {
-          notify_invalid(mutator);
-          need_invalidate = false;
-        }
-        if (need_deactivate)
-        {
-          notify_inactive(mutator);
-          need_deactivate = false;
-        }
-        if (wait_for.exists() && !wait_for.has_triggered())
-          wait_for.wait();
-        AutoLock gc(gc_lock);
-        if (first)
-        {
-          bool reentrant = false;
-          wait_for = check_for_transition_event(reentrant); 
-          if (wait_for.exists())
-            continue;
-          std::pair<AddressSpaceID,AddressSpaceID> key(source, target);
-          if (kind == VALID_REF_KIND)
-          {
-            std::map<std::pair<AddressSpaceID,AddressSpaceID>,int>::iterator 
-              finder = create_valid_refs.find(key);
-            if (finder != create_valid_refs.end())
-            {
-              finder->second += 1;
-              if (finder->second == 0)
-                create_valid_refs.erase(finder);
-            }
-            else
-              create_valid_refs[key] = 1;
-          }
-          else
-          {
-            std::map<std::pair<AddressSpaceID,AddressSpaceID>,int>::iterator 
-              finder = create_gc_refs.find(key);
-            if (finder != create_gc_refs.end())
-            {
-              finder->second += 1;
-              if (finder->second == 0)
-                create_gc_refs.erase(finder);
-            }
-            else
-              create_gc_refs[key] = 1;
-          }
-          if (reentrant)
-          {
-            reentrant_update = true;
-            break;
-          }
-          first = false;
-        }
-        done = update_state(need_activate, need_validate,
-                            need_invalidate, need_deactivate, do_deletion);
-      }
-      return do_deletion;
-    }
-
-    //--------------------------------------------------------------------------
-    bool DistributedCollectable::remove_create_reference(AddressSpaceID source,
-           ReferenceMutator *mutator, AddressSpaceID target, ReferenceKind kind)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(is_owner());
-      assert(source != owner_space);
-      assert((kind == GC_REF_KIND) || (kind == VALID_REF_KIND));
-#endif
-      RtEvent wait_for;
-      bool need_activate = false;
-      bool need_validate = false;
-      bool need_invalidate = false;
-      bool need_deactivate = false;
-      bool do_deletion = false;
-      bool done = false;
-      bool first = true;
-      while (!done)
-      {
-        if (need_activate)
-        {
-          notify_active(mutator);
-          need_activate = false;
-        }
-        if (need_validate)
-        {
-          notify_valid(mutator);
-          need_validate = false;
-        }
-        if (need_invalidate)
-        {
-          notify_invalid(mutator);
-          need_invalidate = false;
-        }
-        if (need_deactivate)
-        {
-          notify_inactive(mutator);
-          need_deactivate = false;
-        }
-        if (wait_for.exists() && !wait_for.has_triggered())
-          wait_for.wait();
-        AutoLock gc(gc_lock);
-        if (first)
-        {
-          bool reentrant = false;
-          wait_for = check_for_transition_event(reentrant); 
-          if (wait_for.exists())
-            continue;
-          std::pair<AddressSpaceID,AddressSpaceID> key(source, target);
-          if (kind == VALID_REF_KIND)
-          {
-            std::map<std::pair<AddressSpaceID,AddressSpaceID>,int>::iterator 
-              finder = create_valid_refs.find(key);
-            if (finder != create_valid_refs.end())
-            {
-              finder->second -= 1;
-              if (finder->second == 0)
-                create_valid_refs.erase(finder);
-            }
-            else
-              create_valid_refs[key] = -1;
-          }
-          else
-          {
-            std::map<std::pair<AddressSpaceID,AddressSpaceID>,int>::iterator 
-              finder = create_gc_refs.find(key);
-            if (finder != create_gc_refs.end())
-            {
-              finder->second -= 1;
-              if (finder->second == 0)
-                create_gc_refs.erase(finder);
-            }
-            else
-              create_gc_refs[key] = -1;
-          }
-          if (reentrant)
-          {
-            reentrant_update = true;
-            break;
-          }
-          first = false;
-        }
-        done = update_state(need_activate, need_validate,
-                            need_invalidate, need_deactivate, do_deletion);
-      }
-      return do_deletion;
-    }
-#endif // USE_REMOTE_REFERENCES
-
-#ifdef DEBUG_LEGION_GC
-    //--------------------------------------------------------------------------
-    void DistributedCollectable::add_base_gc_ref_internal(
-                     ReferenceSource source, ReferenceMutator *mutator, int cnt)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(current_state != DELETED_STATE);
-#endif
-      RtEvent wait_for;
-      bool need_activate = false;
-      bool need_validate = false;
-      bool need_invalidate = false;
-      bool need_deactivate = false;
-      bool do_deletion = false;
-      bool done = false;
-      bool first = true;
-      while (!done)
-      {
-        if (need_activate)
-        {
-          notify_active(mutator);
-          need_activate = false;
-        }
-        if (need_validate)
-        {
-          notify_valid(mutator);
-          need_validate = false;
-        }
-        if (need_invalidate)
-        {
-          notify_invalid(mutator);
-          need_invalidate = false;
-        }
-        if (need_deactivate)
-        {
-          notify_inactive(mutator);
-          need_deactivate = false;
-        }
-        if (wait_for.exists() && !wait_for.has_triggered())
-          wait_for.wait();
-        AutoLock gc(gc_lock);
-        if (first)
-        {
-          bool reentrant = false;
-          wait_for = check_for_transition_event(reentrant); 
-          if (wait_for.exists())
-            continue;
-          gc_references += cnt;
-          std::map<ReferenceSource,int>::iterator finder = 
-            detailed_base_gc_references.find(source);
-          if (finder == detailed_base_gc_references.end())
-            detailed_base_gc_references[source] = cnt;
-          else
-            finder->second += cnt;
-          if (gc_references > cnt)
-          {
-            if (!reentrant)
-              reentrant_event = RtEvent::NO_RT_EVENT;
-            return;
-          }
-#ifdef DEBUG_LEGION
-          assert(!has_gc_references);
-#endif
-          has_gc_references = true;
-          if (reentrant)
-          {
-            reentrant_update = true;
-            break;
-          }
-          first = false;
-        }
-        done = update_state(need_activate, need_validate,
-                            need_invalidate, need_deactivate, do_deletion);
-      }
-      if (do_deletion)
-      {
-        // If we get here it is probably a race in reference counting
-        // scheme above, so mark it is as such
-        assert(false);
-        delete this;
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void DistributedCollectable::add_nested_gc_ref_internal (
-                          DistributedID did, ReferenceMutator *mutator, int cnt)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(current_state != DELETED_STATE);
-#endif
-      RtEvent wait_for;
-      bool need_activate = false;
-      bool need_validate = false;
-      bool need_invalidate = false;
-      bool need_deactivate = false;
-      bool do_deletion = false;
-      bool done = false;
-      bool first = true;
-      while (!done)
-      {
-        if (need_activate)
-        {
-          notify_active(mutator);
-          need_activate = false;
-        }
-        if (need_validate)
-        {
-          notify_valid(mutator);
-          need_validate = false;
-        }
-        if (need_invalidate)
-        {
-          notify_invalid(mutator);
-          need_invalidate = false;
-        }
-        if (need_deactivate)
-        {
-          notify_inactive(mutator);
-          need_deactivate = false;
-        }
-        if (wait_for.exists() && !wait_for.has_triggered())
-          wait_for.wait();
-        AutoLock gc(gc_lock);
-        if (first)
-        {
-          bool reentrant = false;
-          wait_for = check_for_transition_event(reentrant); 
-          if (wait_for.exists())
-            continue;
-          gc_references++;
-          std::map<DistributedID,int>::iterator finder = 
-            detailed_nested_gc_references.find(did);
-          if (finder == detailed_nested_gc_references.end())
-            detailed_nested_gc_references[did] = cnt;
-          else
-            finder->second += cnt;
-          if (gc_references > cnt)
-          {
-            if (!reentrant)
-              reentrant_event = RtEvent::NO_RT_EVENT;
-            return;
-          }
-#ifdef DEBUG_LEGION
-          assert(!has_gc_references);
-#endif
-          has_gc_references = true;
-          if (reentrant)
-          {
-            reentrant_update = true;
-            break;
-          }
-          first = false;
-        }
-        done = update_state(need_activate, need_validate,
-                            need_invalidate, need_deactivate, do_deletion);
-      }
-      if (do_deletion)
-      {
-        // If we get here it is probably a race in reference counting
-        // scheme above, so mark it is as such
-        assert(false);
-        delete this;
-      }
     }
 
     //--------------------------------------------------------------------------
     bool DistributedCollectable::remove_base_gc_ref_internal(
-                     ReferenceSource source, ReferenceMutator *mutator, int cnt)
+                                                ReferenceSource source, int cnt)
     //--------------------------------------------------------------------------
     {
+      AutoLock gc(gc_lock);
 #ifdef DEBUG_LEGION
-      assert(current_state != DELETED_STATE);
+      assert(is_global<false/*need lock*/>());
+      assert(gc_references >= cnt);
 #endif
-      RtEvent wait_for;
-      bool need_activate = false;
-      bool need_validate = false;
-      bool need_invalidate = false;
-      bool need_deactivate = false;
-      bool do_deletion = false;
-      bool done = false;
-      bool first = true;
-      while (!done)
-      {
-        if (need_activate)
-        {
-          notify_active(mutator);
-          need_activate = false;
-        }
-        if (need_validate)
-        {
-          notify_valid(mutator);
-          need_validate = false;
-        }
-        if (need_invalidate)
-        {
-          notify_invalid(mutator);
-          need_invalidate = false;
-        }
-        if (need_deactivate)
-        {
-          notify_inactive(mutator);
-          need_deactivate = false;
-        }
-        AutoLock gc(gc_lock);
-        if (first)
-        {
-          bool reentrant = false;
-          wait_for = check_for_transition_event(reentrant); 
-          if (wait_for.exists())
-            continue;
-#ifdef DEBUG_LEGION
-          assert(gc_references >= cnt);
-          assert(has_gc_references);
-#endif
-          gc_references -= cnt;
-          std::map<ReferenceSource,int>::iterator finder = 
-            detailed_base_gc_references.find(source);
-          assert(finder != detailed_base_gc_references.end());
-          assert(finder->second >= cnt);
-          finder->second -= cnt;
-          if (finder->second == 0)
-            detailed_base_gc_references.erase(finder);
-          if (gc_references > 0)
-          {
-            if (!reentrant)
-              reentrant_event = RtEvent::NO_RT_EVENT;
-            return false;
-          }
-          has_gc_references = false;
-          if (reentrant)
-          {
-            reentrant_update = true;
-            break;
-          }
-          first = false;
-        }
-        done = update_state(need_activate, need_validate,
-                            need_invalidate, need_deactivate, do_deletion);
-      }
-      return do_deletion;
+      gc_references -= cnt;
+      std::map<ReferenceSource,int>::iterator finder = 
+        detailed_base_gc_references.find(source);
+      assert(finder != detailed_base_gc_references.end());
+      assert(finder->second >= cnt);
+      finder->second -= cnt;
+      if (finder->second == 0)
+        detailed_base_gc_references.erase(finder);
+      if (gc_references == 0)
+        return can_delete(gc);
+      else
+        return false;
     }
 
     //--------------------------------------------------------------------------
     bool DistributedCollectable::remove_nested_gc_ref_internal(
-                          DistributedID did, ReferenceMutator *mutator, int cnt)
+                                                  DistributedID source, int cnt)
     //--------------------------------------------------------------------------
     {
+      AutoLock gc(gc_lock);
 #ifdef DEBUG_LEGION
-      assert(current_state != DELETED_STATE);
+      assert(is_global<false/*need lock*/>());
+      assert(gc_references >= cnt);
 #endif
-      RtEvent wait_for;
-      bool need_activate = false;
-      bool need_validate = false;
-      bool need_invalidate = false;
-      bool need_deactivate = false;
-      bool do_deletion = false;
-      bool done = false;
-      bool first = true;
-      while (!done)
-      {
-        if (need_activate)
-        {
-          notify_active(mutator);
-          need_activate = false;
-        }
-        if (need_validate)
-        {
-          notify_valid(mutator);
-          need_validate = false;
-        }
-        if (need_invalidate)
-        {
-          notify_invalid(mutator);
-          need_invalidate = false;
-        }
-        if (need_deactivate)
-        {
-          notify_inactive(mutator);
-          need_deactivate = false;
-        }
-        if (wait_for.exists() && !wait_for.has_triggered())
-          wait_for.wait();
-        AutoLock gc(gc_lock);
-        if (first)
-        {
-          bool reentrant = false;
-          wait_for = check_for_transition_event(reentrant); 
-          if (wait_for.exists())
-            continue;
-#ifdef DEBUG_LEGION
-          assert(gc_references >= cnt);
-          assert(has_gc_references);
-#endif
-          gc_references--;
-          std::map<DistributedID,int>::iterator finder = 
-            detailed_nested_gc_references.find(did);
-          assert(finder != detailed_nested_gc_references.end());
-          assert(finder->second >= cnt);
-          finder->second -= cnt;
-          if (finder->second == 0)
-            detailed_nested_gc_references.erase(finder);
-          if (gc_references > 0)
-          {
-            if (!reentrant)
-              reentrant_event = RtEvent::NO_RT_EVENT;
-            return false;
-          }
-          has_gc_references = false;
-          if (reentrant)
-          {
-            reentrant_update = true;
-            break;
-          }
-          first = false;
-        }
-        done = update_state(need_activate, need_validate,
-                            need_invalidate, need_deactivate, do_deletion);
-      }
-      return do_deletion;
-    }
-
-    //--------------------------------------------------------------------------
-    void DistributedCollectable::add_base_valid_ref_internal(
-                     ReferenceSource source, ReferenceMutator *mutator, int cnt)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(current_state != DELETED_STATE);
-#endif
-      RtEvent wait_for;
-      bool need_activate = false;
-      bool need_validate = false;
-      bool need_invalidate = false;
-      bool need_deactivate = false;
-      bool do_deletion = false;
-      bool done = false;
-      bool first = true;
-      while (!done)
-      {
-        if (need_activate)
-        {
-          notify_active(mutator);
-          need_activate = false;
-        }
-        if (need_validate)
-        {
-          notify_valid(mutator);
-          need_validate = false;
-        }
-        if (need_invalidate)
-        {
-          notify_invalid(mutator);
-          need_invalidate = false;
-        }
-        if (need_deactivate)
-        {
-          notify_inactive(mutator);
-          need_deactivate = false;
-        }
-        if (wait_for.exists() && !wait_for.has_triggered())
-          wait_for.wait();
-        AutoLock gc(gc_lock);
-        if (first)
-        {
-          bool reentrant = false;
-          wait_for = check_for_transition_event(reentrant); 
-          if (wait_for.exists())
-            continue;
-          valid_references += cnt;
-          std::map<ReferenceSource,int>::iterator finder = 
-            detailed_base_valid_references.find(source);
-          if (finder == detailed_base_valid_references.end())
-            detailed_base_valid_references[source] = cnt;
-          else
-            finder->second += cnt;
-          if (valid_references > cnt)
-          {
-            if (!reentrant)
-              reentrant_event = RtEvent::NO_RT_EVENT;
-            return;
-          }
-#ifdef DEBUG_LEGION
-          assert(!has_valid_references);
-#endif
-          has_valid_references = true;
-          if (reentrant)
-          {
-            reentrant_update = true;
-            break;
-          }
-          first = false;
-        }
-        done = update_state(need_activate, need_validate,
-                            need_invalidate, need_deactivate, do_deletion);
-      }
-      if (do_deletion)
-      {
-        // This probably indicates a race in reference counting algorithm
-        assert(false);
-        delete this;
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void DistributedCollectable::add_nested_valid_ref_internal (
-                          DistributedID did, ReferenceMutator *mutator, int cnt)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(current_state != DELETED_STATE);
-#endif
-      RtEvent wait_for;
-      bool need_activate = false;
-      bool need_validate = false;
-      bool need_invalidate = false;
-      bool need_deactivate = false;
-      bool do_deletion = false;
-      bool done = false;
-      bool first = true;
-      while (!done)
-      {
-        if (need_activate)
-        {
-          notify_active(mutator);
-          need_activate = false;
-        }
-        if (need_validate)
-        {
-          notify_valid(mutator);
-          need_validate = false;
-        }
-        if (need_invalidate)
-        {
-          notify_invalid(mutator);
-          need_invalidate = false;
-        }
-        if (need_deactivate)
-        {
-          notify_inactive(mutator);
-          need_deactivate = false;
-        }
-        if (wait_for.exists() && !wait_for.has_triggered())
-          wait_for.wait();
-        AutoLock gc(gc_lock);
-        if (first)
-        {
-          bool reentrant = false;
-          wait_for = check_for_transition_event(reentrant); 
-          if (wait_for.exists())
-            continue;
-          valid_references += cnt;
-          std::map<DistributedID,int>::iterator finder = 
-            detailed_nested_valid_references.find(did);
-          if (finder == detailed_nested_valid_references.end())
-            detailed_nested_valid_references[did] = cnt;
-          else
-            finder->second += cnt;
-          if (valid_references > cnt)
-          {
-            if (!reentrant)
-              reentrant_event = RtEvent::NO_RT_EVENT;
-            return;
-          }
-#ifdef DEBUG_LEGION
-          assert(!has_valid_references);
-#endif
-          has_valid_references = true;
-          if (reentrant)
-          {
-            reentrant_update = true;
-            break;
-          }
-          first = false;
-        }
-        done = update_state(need_activate, need_validate,
-                            need_invalidate, need_deactivate, do_deletion);
-      }
-      if (do_deletion)
-      {
-        // This probably indicates a race in reference counting algorithm
-        assert(false);
-        delete this;
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    bool DistributedCollectable::remove_base_valid_ref_internal(
-                     ReferenceSource source, ReferenceMutator *mutator, int cnt)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(current_state != DELETED_STATE);
-#endif
-      RtEvent wait_for;
-      bool need_activate = false;
-      bool need_validate = false;
-      bool need_invalidate = false;
-      bool need_deactivate = false;
-      bool do_deletion = false;
-      bool done = false;
-      bool first = true;
-      while (!done)
-      {
-        if (need_activate)
-        {
-          notify_active(mutator);
-          need_activate = false;
-        }
-        if (need_validate)
-        {
-          notify_valid(mutator);
-          need_validate = false;
-        }
-        if (need_invalidate)
-        {
-          notify_invalid(mutator);
-          need_invalidate = false;
-        }
-        if (need_deactivate)
-        {
-          notify_inactive(mutator);
-          need_deactivate = false;
-        }
-        if (wait_for.exists() && !wait_for.has_triggered())
-          wait_for.wait();
-        AutoLock gc(gc_lock);
-        if (first)
-        {
-          bool reentrant = false;
-          wait_for = check_for_transition_event(reentrant); 
-          if (wait_for.exists())
-            continue;
-#ifdef DEBUG_LEGION
-          assert(valid_references >= cnt);
-          assert(has_valid_references);
-#endif
-          valid_references -= cnt;
-          std::map<ReferenceSource,int>::iterator finder = 
-            detailed_base_valid_references.find(source);
-          assert(finder != detailed_base_valid_references.end());
-          assert(finder->second >= cnt);
-          finder->second -= cnt;
-          if (finder->second == 0)
-            detailed_base_valid_references.erase(finder);
-          if (valid_references > 0)
-          {
-            if (!reentrant)
-              reentrant_event = RtEvent::NO_RT_EVENT;
-            return false;
-          }
-          has_valid_references = false;
-          if (reentrant)
-          {
-            reentrant_update = true;
-            break;
-          }
-          first = false;
-        }
-        done = update_state(need_activate, need_validate,
-                            need_invalidate, need_deactivate, do_deletion);
-      }
-      return do_deletion;
-    }
-
-    //--------------------------------------------------------------------------
-    bool DistributedCollectable::remove_nested_valid_ref_internal(
-                          DistributedID did, ReferenceMutator *mutator, int cnt)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(current_state != DELETED_STATE);
-#endif
-      RtEvent wait_for;
-      bool need_activate = false;
-      bool need_validate = false;
-      bool need_invalidate = false;
-      bool need_deactivate = false;
-      bool do_deletion = false;
-      bool done = false;
-      bool first = true;
-      while (!done)
-      {
-        if (need_activate)
-        {
-          notify_active(mutator);
-          need_activate = false;
-        }
-        if (need_validate)
-        {
-          notify_valid(mutator);
-          need_validate = false;
-        }
-        if (need_invalidate)
-        {
-          notify_invalid(mutator);
-          need_invalidate = false;
-        }
-        if (need_deactivate)
-        {
-          notify_inactive(mutator);
-          need_deactivate = false;
-        }
-        if (wait_for.exists() && !wait_for.has_triggered())
-          wait_for.wait();
-        AutoLock gc(gc_lock);
-        if (first)
-        {
-          bool reentrant = false;
-          wait_for = check_for_transition_event(reentrant); 
-          if (wait_for.exists())
-            continue;
-#ifdef DEBUG_LEGION
-          assert(valid_references >= cnt);
-          assert(has_valid_references);
-#endif
-          valid_references -= cnt;
-          std::map<DistributedID,int>::iterator finder = 
-            detailed_nested_valid_references.find(did);
-          assert(finder != detailed_nested_valid_references.end());
-          assert(finder->second >= cnt);
-          finder->second -= cnt;
-          if (finder->second == 0)
-            detailed_nested_valid_references.erase(finder);
-          if (valid_references > 0)
-          {
-            if (!reentrant)
-              reentrant_event = RtEvent::NO_RT_EVENT;
-            return false;
-          }
-          has_valid_references = false;
-          if (reentrant)
-          {
-            reentrant_update = true;
-            break;
-          }
-          first = false;
-        }
-        done = update_state(need_activate, need_validate,
-                            need_invalidate, need_deactivate, do_deletion);
-      }
-      return do_deletion;
-    }
+      gc_references -= cnt;
+      std::map<DistributedID,int>::iterator finder = 
+        detailed_nested_gc_references.find(source);
+      assert(finder != detailed_nested_gc_references.end());
+      assert(finder->second >= cnt);
+      finder->second -= cnt;
+      if (finder->second == 0)
+        detailed_nested_gc_references.erase(finder);
+      if (gc_references == 0)
+        return can_delete(gc);
+      else
+        return false;
+    } 
 
     //--------------------------------------------------------------------------
     void DistributedCollectable::add_base_resource_ref_internal(
@@ -1565,40 +513,34 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock gc(gc_lock);
-      resource_references++;
+#ifdef DEBUG_LEGION
+      assert(current_state != DELETED_REF_STATE);
+#endif
+      resource_references += cnt;
       std::map<ReferenceSource,int>::iterator finder = 
         detailed_base_resource_references.find(source);
       if (finder == detailed_base_resource_references.end())
         detailed_base_resource_references[source] = cnt;
       else
         finder->second += cnt;
-      if (resource_references > cnt)
-        return;
-#ifdef DEBUG_LEGION
-      assert(!has_resource_references);
-#endif
-      has_resource_references = true;
     }
 
     //--------------------------------------------------------------------------
     void DistributedCollectable::add_nested_resource_ref_internal (
-                                                     DistributedID did, int cnt)
+                                                  DistributedID source, int cnt)
     //--------------------------------------------------------------------------
     {
       AutoLock gc(gc_lock);
-      resource_references++;
+#ifdef DEBUG_LEGION
+      assert(current_state != DELETED_REF_STATE);
+#endif
+      resource_references += cnt;
       std::map<DistributedID,int>::iterator finder = 
-        detailed_nested_resource_references.find(did);
+        detailed_nested_resource_references.find(source);
       if (finder == detailed_nested_resource_references.end())
-        detailed_nested_resource_references[did] = cnt;
+        detailed_nested_resource_references[source] = cnt;
       else
         finder->second += cnt;
-      if (resource_references > cnt)
-        return;
-#ifdef DEBUG_LEGION
-      assert(!has_resource_references);
-#endif
-      has_resource_references = true;
     }
 
     //--------------------------------------------------------------------------
@@ -1608,10 +550,10 @@ namespace Legion {
     {
       AutoLock gc(gc_lock);
 #ifdef DEBUG_LEGION
+      assert(current_state != DELETED_REF_STATE);
       assert(resource_references >= cnt);
-      assert(has_resource_references);
 #endif
-      resource_references--;
+      resource_references -= cnt;
       std::map<ReferenceSource,int>::iterator finder = 
         detailed_base_resource_references.find(source);
       assert(finder != detailed_base_resource_references.end());
@@ -1619,34 +561,34 @@ namespace Legion {
       finder->second -= cnt;
       if (finder->second == 0)
         detailed_base_resource_references.erase(finder);
-      if (resource_references > 0)
+      if (resource_references == 0)
+        return can_delete(gc);
+      else
         return false;
-      has_resource_references = false;
-      return can_delete();
     }
 
     //--------------------------------------------------------------------------
     bool DistributedCollectable::remove_nested_resource_ref_internal(
-                                                     DistributedID did, int cnt)
+                                                  DistributedID source, int cnt)
     //--------------------------------------------------------------------------
     {
       AutoLock gc(gc_lock);
 #ifdef DEBUG_LEGION
+      assert(current_state != DELETED_REF_STATE);
       assert(resource_references >= cnt);
-      assert(has_resource_references);
 #endif
       resource_references -= cnt;
       std::map<DistributedID,int>::iterator finder = 
-        detailed_nested_resource_references.find(did);
+        detailed_nested_resource_references.find(source);
       assert(finder != detailed_nested_resource_references.end());
       assert(finder->second >= cnt);
       finder->second -= cnt;
       if (finder->second == 0)
         detailed_nested_resource_references.erase(finder);
-      if (resource_references > 0)
+      if (resource_references == 0)
+        return can_delete(gc);
+      else
         return false;
-      has_resource_references = false;
-      return can_delete();
     }
 #endif // DEBUG_LEGION_GC
 
@@ -1664,7 +606,37 @@ namespace Legion {
                                                      AddressSpaceID remote_inst)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      // Should not be recording things we already know about
+      assert(remote_inst != owner_space);
+      assert(remote_inst != local_space);
+      // should not be recording things in the collective mapping
+      assert((collective_mapping == NULL) || 
+              !collective_mapping->contains(remote_inst));
+      // should only be recording on the owner or one of the
+      // nodes in the collective mapping
+      assert(is_owner() || ((collective_mapping != NULL) && 
+            collective_mapping->contains(local_space)));
+#endif
       AutoLock gc(gc_lock);
+      // Handle a very unusual case here were we weren't able to perform the
+      // deletion because there was a packed reference, but we didn't know
+      // where to send it to yet
+      if (is_owner() && remote_instances.empty() && 
+          (collective_mapping == NULL) && 
+          (sent_global_references != received_global_references))
+      {
+#ifdef DEBUG_LEGION
+        assert(downgrade_owner == local_space);
+        assert((current_state == VALID_REF_STATE) || 
+            (current_state == GLOBAL_REF_STATE));
+#endif
+        Serializer rez;
+        rez.serialize(did);
+        rez.serialize(current_state);
+        runtime->send_did_downgrade_update(remote_inst, rez);
+        downgrade_owner = remote_inst;
+      }
       remote_instances.add(remote_inst);
     }
 
@@ -1678,8 +650,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DistributedCollectable::register_with_runtime(
-                                                      ReferenceMutator *mutator)
+    void DistributedCollectable::register_with_runtime(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1687,103 +658,10 @@ namespace Legion {
 #endif
       registered_with_runtime = true;
       runtime->register_distributed_collectable(did, this);
-      if (!is_owner() && (mutator != NULL))
-        send_remote_registration(mutator);
     }
 
     //--------------------------------------------------------------------------
-    void DistributedCollectable::unregister_with_runtime(void) const
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(is_owner());
-      assert(registered_with_runtime);
-#endif
-      runtime->unregister_distributed_collectable(did);
-      if (!remote_instances.empty())
-        runtime->recycle_distributed_id(did, send_unregister_messages());
-      else
-        runtime->recycle_distributed_id(did, RtEvent::NO_RT_EVENT);
-    }
-
-    //--------------------------------------------------------------------------
-    void DistributedCollectable::UnregisterFunctor::apply(AddressSpaceID target)
-    //--------------------------------------------------------------------------
-    {
-      RtUserEvent done_event = Runtime::create_rt_user_event();
-      Serializer rez;
-      rez.serialize(did);
-      rez.serialize(done_event); 
-      runtime->send_did_remote_unregister(target, rez);
-      done_events.insert(done_event);
-    }
-
-    //--------------------------------------------------------------------------
-    DistributedCollectable::DeferRemoteUnregisterArgs::
-      DeferRemoteUnregisterArgs(DistributedID id, const NodeSet &n)
-      : LgTaskArgs<DeferRemoteUnregisterArgs>(implicit_provenance),
-        done(Runtime::create_rt_user_event()), did(id), nodes(new NodeSet(n))
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    RtEvent DistributedCollectable::send_unregister_messages(void) const
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(is_owner());
-      assert(!remote_instances.empty());
-#endif
-      // handle the unusual case where the derived type has some precondition
-      // on sending out any unregsiter messages, see the comment on the
-      // 'reentrant_event' member for why we are using it here to detect
-      // this particular event precondition
-      if (reentrant_event.exists() && !reentrant_event.has_triggered())
-      {
-        DeferRemoteUnregisterArgs args(did, remote_instances);
-        runtime->issue_runtime_meta_task(args,
-            LG_LATENCY_MESSAGE_PRIORITY, reentrant_event);
-        return args.done;
-      }
-      std::set<RtEvent> done_events;
-      UnregisterFunctor functor(runtime, did, done_events); 
-      // No need for the lock since we're being destroyed
-      remote_instances.map(functor);
-      return Runtime::merge_events(done_events);
-    }
-
-    //--------------------------------------------------------------------------
-    void DistributedCollectable::unregister_collectable(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!is_owner());
-      assert(registered_with_runtime);
-#endif
-      runtime->unregister_distributed_collectable(did);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void DistributedCollectable::handle_unregister_collectable(
-                                          Runtime *runtime, Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      DistributedID did;
-      derez.deserialize(did);
-      RtUserEvent done_event;
-      derez.deserialize(done_event);
-      DistributedCollectable *dc = runtime->find_distributed_collectable(did);
-      dc->unregister_collectable();
-      Runtime::trigger_event(done_event);
-      // Now remove the resource reference we were holding
-      if (dc->remove_base_resource_ref(REMOTE_DID_REF))
-        delete dc;
-    }
-
-    //--------------------------------------------------------------------------
-    void DistributedCollectable::send_remote_registration(
-                                                      ReferenceMutator *mutator)
+    RtEvent DistributedCollectable::send_remote_registration(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1798,218 +676,8 @@ namespace Legion {
         rez.serialize(registered_event);
       }
       runtime->send_did_remote_registration(owner_space, rez);     
-      mutator->record_reference_mutation_effect(registered_event);
+      return registered_event;
     }
-
-    //--------------------------------------------------------------------------
-    RtEvent DistributedCollectable::send_remote_valid_increment(
-                               AddressSpaceID target, ReferenceMutator *mutator,
-                               RtEvent precondition, unsigned count)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(count != 0);
-      assert(registered_with_runtime);
-#endif
-      RtUserEvent done_event;
-      if (mutator != NULL)
-      {
-        done_event = Runtime::create_rt_user_event();
-        mutator->record_reference_mutation_effect(done_event);
-      }
-      const int signed_count = count;
-      if (precondition.exists() && !precondition.has_triggered())
-      {
-        DeferRemoteReferenceUpdateArgs args(this, target, done_event,
-                                            signed_count, true/*valid*/);
-        return runtime->issue_runtime_meta_task(args, 
-            LG_LATENCY_MESSAGE_PRIORITY, precondition);
-      }
-      Serializer rez;
-      {
-        RezCheck z(rez);
-        rez.serialize(did);
-        rez.serialize(signed_count);
-        rez.serialize<bool>(target == owner_space);
-        rez.serialize(done_event);
-      }
-      runtime->send_did_remote_valid_update(target, rez);
-      return RtEvent::NO_RT_EVENT;
-    }
-
-    //--------------------------------------------------------------------------
-    RtEvent DistributedCollectable::send_remote_valid_decrement(
-                               AddressSpaceID target, ReferenceMutator *mutator,
-                               RtEvent precondition, unsigned count)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(count != 0);
-      assert(registered_with_runtime);
-#endif 
-      RtUserEvent done_event;
-      if (mutator != NULL)
-      {
-        done_event = Runtime::create_rt_user_event();
-        mutator->record_reference_mutation_effect(done_event);
-      }
-      const int signed_count = -(int(count));
-      if (precondition.exists() && !precondition.has_triggered())
-      {
-        DeferRemoteReferenceUpdateArgs args(this, target, done_event,
-                                            signed_count, true/*valid*/);
-        return runtime->issue_runtime_meta_task(args,
-            LG_LATENCY_MESSAGE_PRIORITY, precondition);
-      }
-      Serializer rez;
-      {
-        RezCheck z(rez);
-        rez.serialize(did);
-        rez.serialize(signed_count);
-        rez.serialize<bool>(target == owner_space);
-        rez.serialize(done_event);
-      }
-      runtime->send_did_remote_valid_update(target, rez);
-      return RtEvent::NO_RT_EVENT;
-    }
-
-    //--------------------------------------------------------------------------
-    RtEvent DistributedCollectable::send_remote_gc_increment(
-                               AddressSpaceID target, ReferenceMutator *mutator,
-                               RtEvent precondition, unsigned count)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(count != 0);
-      assert(registered_with_runtime);
-#endif
-      RtUserEvent done_event;
-      if (mutator != NULL)
-      {
-        done_event = Runtime::create_rt_user_event();
-        mutator->record_reference_mutation_effect(done_event);
-      }
-      const int signed_count = count;
-      if (precondition.exists() && !precondition.has_triggered())
-      {
-        DeferRemoteReferenceUpdateArgs args(this, target, done_event,
-                                            signed_count, false/*valid*/);
-        return runtime->issue_runtime_meta_task(args,
-            LG_LATENCY_MESSAGE_PRIORITY, precondition);
-      }
-      Serializer rez;
-      {
-        RezCheck z(rez);
-        rez.serialize(did);
-        rez.serialize(signed_count);
-        rez.serialize<bool>(target == owner_space);
-        rez.serialize(done_event);
-      }
-      runtime->send_did_remote_gc_update(target, rez);
-      return RtEvent::NO_RT_EVENT;
-    }
-
-    //--------------------------------------------------------------------------
-    RtEvent DistributedCollectable::send_remote_gc_decrement(
-                               AddressSpaceID target, ReferenceMutator *mutator,
-                               RtEvent precondition, unsigned count)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(count != 0);
-      assert(registered_with_runtime);
-#endif
-      RtUserEvent done_event;
-      if (mutator != NULL)
-      {
-        done_event = Runtime::create_rt_user_event();
-        mutator->record_reference_mutation_effect(done_event);
-      }
-      const int signed_count = -(int(count));
-      if (precondition.exists() && !precondition.has_triggered())
-      {
-        DeferRemoteReferenceUpdateArgs args(this, target, done_event,
-                                            signed_count, false/*valid*/);
-        return runtime->issue_runtime_meta_task(args,
-            LG_LATENCY_MESSAGE_PRIORITY, precondition);
-      }
-      Serializer rez;
-      {
-        RezCheck z(rez);
-        rez.serialize(did);
-        rez.serialize(signed_count);
-        rez.serialize<bool>(target == owner_space);
-        rez.serialize(done_event);
-      }
-      runtime->send_did_remote_gc_update(target, rez);
-      return RtEvent::NO_RT_EVENT;
-    }
-
-#ifdef USE_REMOTE_REFERENCES
-    //--------------------------------------------------------------------------
-    ReferenceKind DistributedCollectable::send_create_reference(
-                                                          AddressSpaceID target)
-    //--------------------------------------------------------------------------
-    {
-      // If the target is the owner then no need to do anything
-      if (target == owner_space)
-        return GC_REF_KIND;
-      // Sample our current state, it's up to the caller to make sure
-      // this is a good state for this object
-      State copy = current_state;
-      // We better be holding a gc reference or a valid reference when
-      // we are doing this operation
-#ifdef DEBUG_LEGION
-      assert((copy == ACTIVE_INVALID_STATE) || (copy == VALID_STATE) ||
-             (copy == PENDING_VALID_STATE) || (copy == PENDING_INVALID_STATE));
-#endif
-      ReferenceKind result; 
-      if (copy == VALID_STATE)
-        result = VALID_REF_KIND;
-      else
-        result = GC_REF_KIND;
-      if (is_owner())
-      {
-        if (result == VALID_REF_KIND)
-          add_base_valid_ref(REMOTE_CREATE_REF);
-        else
-          add_base_gc_ref(REMOTE_CREATE_REF);
-      }
-      else
-      {
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(did);
-          rez.serialize(local_space);
-          rez.serialize(target);
-          rez.serialize(result);
-        }
-        runtime->send_did_add_create_reference(owner_space, rez);
-      }
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    void DistributedCollectable::post_create_reference(ReferenceKind kind,
-                                              AddressSpaceID target, bool flush)
-    //--------------------------------------------------------------------------
-    {
-      // No need to do anything if we are sending stuff to the owner
-      if (target == owner_space)
-        return;
-      Serializer rez;
-      {
-        RezCheck z(rez);
-        rez.serialize(did);
-        rez.serialize(local_space);
-        rez.serialize(target);
-        rez.serialize(owner_space);
-        rez.serialize(kind);
-      }
-      runtime->send_did_remove_create_reference(target, rez, flush);
-    }
-#endif // USE_REMOTE_REFERENCES
 
     //--------------------------------------------------------------------------
     /*static*/ void DistributedCollectable::handle_did_remote_registration(
@@ -2026,539 +694,1287 @@ namespace Legion {
       target->update_remote_instances(source);
       Runtime::trigger_event(done_event);
     }
+
+    //--------------------------------------------------------------------------
+    void DistributedCollectable::pack_global_ref(unsigned cnt)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock gc(gc_lock);
+#ifdef DEBUG_LEGION
+      assert(is_global<false/*need lock*/>());
+#endif
+      sent_global_references += cnt;
+    }
+
+    //--------------------------------------------------------------------------
+    void DistributedCollectable::unpack_global_ref(unsigned cnt)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock gc(gc_lock);
+#ifdef DEBUG_LEGION
+      assert(is_global<false/*need lock*/>());
+#endif
+      received_global_references += cnt;
+      // No need to send any notifications if a downgrade is in process
+      if (remaining_responses == 0)
+      {
+        if (downgrade_owner == local_space)
+        {
+          // We're the downgrade owner so check to see if we can resume
+          // doing collections or we can wait for the next removal
+          check_for_downgrade_restart(local_space);
+        }
+        else if (current_state == PENDING_LOCAL_REF_STATE)
+        {
+          // Send a notification to the downgrade owner to check if it
+          // needs to resume collections now that this reference has 
+          // been unpacked. This is not just a performance optimization.
+          // It is vital to forward progress as it removes the necessity
+          // to poll on downgrades while we are waiting for references
+          // to be unpacked from whatever message they are in. Note that
+          // you can't even check whether it is safe to downgrade this
+          // node or not since we're not the downgrade owner so we have
+          // to notify the downgrade owner about the unpacked references
+          Serializer rez;
+          rez.serialize(did);
+          runtime->send_did_downgrade_restart(downgrade_owner, rez);
+        }
+      }
+    }
     
     //--------------------------------------------------------------------------
-    /*static*/ void DistributedCollectable::handle_did_remote_valid_update(
-                                         Runtime *runtime, Deserializer &derez)
+    bool DistributedCollectable::can_delete(AutoLock &gc)
     //--------------------------------------------------------------------------
     {
-      DerezCheck z(derez);
-      DistributedID did;
-      derez.deserialize(did);
-      int count;
-      derez.deserialize(count);
-      bool is_owner;
-      derez.deserialize(is_owner);
-      RtUserEvent done_event;
-      derez.deserialize(done_event);
-      DistributedCollectable *target = NULL;
-      if (!is_owner)
+      switch (current_state)
       {
-        RtEvent ready;
-        target = runtime->find_distributed_collectable(did, ready);
-        if (ready.exists() && !ready.has_triggered())
-          ready.wait();
+        case VALID_REF_STATE:
+        case GLOBAL_REF_STATE:
+        case PENDING_LOCAL_REF_STATE:
+        case PENDING_GLOBAL_REF_STATE:
+          {
+            if (!can_downgrade())
+              return false;
+            // If we're not the downgrade owner then nothing for us to do
+            if (downgrade_owner != local_space)
+              return false;
+            // We're the downgrade owner, so start the process to check to
+            // see if all the nodes are ready to perform the deletion
+            if (!is_owner() || !remote_instances.empty() || 
+                ((collective_mapping != NULL) && 
+                 (collective_mapping->size() > 1)) || 
+                (sent_global_references != received_global_references))
+            {
+              // If we're already checking for a downgrade but are awaiting
+              // responses, then there is nothing to do
+              if (remaining_responses > 0)
+                return false;
+              // Send messages to see if we can perform the deletion
+              check_for_downgrade(downgrade_owner);
+              return false;
+            }
+            else
+            {
+              // No messages to send so we can downgrade the state now
+              return perform_downgrade(gc);
+            }
+          }
+        case LOCAL_REF_STATE:
+          {
+            if (resource_references == 0)
+            {
+              current_state = DELETED_REF_STATE;
+              return true;
+            }
+            break;
+          }
+        default:
+          assert(false);
       }
-      else
-        target = runtime->find_distributed_collectable(did);
-      if (done_event.exists())
-      {
-        std::set<RtEvent> mutator_events;
-        WrapperReferenceMutator mutator(mutator_events);
-        if (count > 0)
-          target->add_base_valid_ref(REMOTE_DID_REF, &mutator, unsigned(count));
-        else if (target->remove_base_valid_ref(REMOTE_DID_REF, &mutator, 
-                                               unsigned(-count)))
-          delete target;
-        if (!mutator_events.empty())
-          Runtime::trigger_event(done_event, 
-              Runtime::merge_events(mutator_events));
-        else
-          Runtime::trigger_event(done_event);
-      }
-      else
-      {
-        if (count > 0)
-          target->add_base_valid_ref(REMOTE_DID_REF, NULL, unsigned(count));
-        else if(target->remove_base_valid_ref(REMOTE_DID_REF, NULL, 
-                                              unsigned(-count)))
-          delete target;
-      }
+      return false;
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void DistributedCollectable::handle_did_remote_gc_update(
-                                         Runtime *runtime, Deserializer &derez)
+    bool DistributedCollectable::can_downgrade(void) const
     //--------------------------------------------------------------------------
     {
-      DerezCheck z(derez);
-      DistributedID did;
-      derez.deserialize(did);
-      int count;
-      derez.deserialize(count);
-      bool is_owner;
-      derez.deserialize(is_owner);
-      RtUserEvent done_event;
-      derez.deserialize(done_event);
-      DistributedCollectable *target = NULL;
-      if (!is_owner)
-      {
-        RtEvent ready;
-        target = runtime->find_distributed_collectable(did, ready);
-        if (ready.exists() && !ready.has_triggered())
-          ready.wait();
-      }
-      else
-        target = runtime->find_distributed_collectable(did);
-      if (done_event.exists())
-      {
-        std::set<RtEvent> mutator_events;
-        WrapperReferenceMutator mutator(mutator_events);
-        if (count > 0)
-          target->add_base_gc_ref(REMOTE_DID_REF, &mutator, unsigned(count));
-        else if (target->remove_base_gc_ref(REMOTE_DID_REF, &mutator, 
-                                            unsigned(-count)))
-          delete target;
-        if (!mutator_events.empty())
-          Runtime::trigger_event(done_event, 
-              Runtime::merge_events(mutator_events));
-        else
-          Runtime::trigger_event(done_event);
-      }
-      else
-      {
-        if (count > 0)
-          target->add_base_gc_ref(REMOTE_DID_REF, NULL, unsigned(count));
-        else if(target->remove_base_gc_ref(REMOTE_DID_REF, NULL, 
-                                           unsigned(-count)))
-          delete target;
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void 
-      DistributedCollectable::handle_defer_remote_reference_update(
-                                             Runtime *runtime, const void *args)
-    //--------------------------------------------------------------------------
-    {
-      const DeferRemoteReferenceUpdateArgs *dargs = 
-        (const DeferRemoteReferenceUpdateArgs*)args;
-      Serializer rez;
-      {
-        RezCheck z(rez);
-        rez.serialize(dargs->did);
-        rez.serialize(dargs->count);
-        rez.serialize<bool>(dargs->owner);
-        rez.serialize(dargs->done_event);
-      }
-      if (dargs->valid)
-        runtime->send_did_remote_valid_update(dargs->target, rez);
-      else
-        runtime->send_did_remote_gc_update(dargs->target, rez);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void DistributedCollectable::handle_defer_remote_unregister(
-                                             Runtime *runtime, const void *args)
-    //--------------------------------------------------------------------------
-    {
-      const DeferRemoteUnregisterArgs *dargs = 
-        (const DeferRemoteUnregisterArgs*)args;
-      std::set<RtEvent> done_events;
-      UnregisterFunctor functor(runtime, dargs->did, done_events);
-      dargs->nodes->map(functor);
-      if (!done_events.empty())
-        Runtime::trigger_event(dargs->done, Runtime::merge_events(done_events));
-      else
-        Runtime::trigger_event(dargs->done);
-      delete dargs->nodes;
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void DistributedCollectable::handle_did_add_create(
-                                         Runtime *runtime, Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-#ifdef USE_REMOTE_REFERENCES
-      DerezCheck z(derez);
-      DistributedID did;
-      derez.deserialize(did);
-      AddressSpaceID source;
-      derez.deserialize(source);
-      AddressSpaceID target;
-      derez.deserialize(target);
-      ReferenceKind kind;
-      derez.deserialize(kind);
-      DistributedCollectable *dist = 
-        runtime->find_distributed_collectable(did);
-      if (dist->add_create_reference(source, target, kind))
-        delete dist;
-#else
-      assert(false);
+#ifdef DEBUG_LEGION
+      assert((current_state == GLOBAL_REF_STATE) || 
+          (current_state == PENDING_LOCAL_REF_STATE));
 #endif
+      return (gc_references == 0);  
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void DistributedCollectable::handle_did_remove_create(
-                                         Runtime *runtime, Deserializer &derez)
+    void DistributedCollectable::send_downgrade_notifications(State downgrade)
     //--------------------------------------------------------------------------
     {
-#ifdef USE_REMOTE_REFERENCES
-      DerezCheck z(derez);
-      DistributedID did;
-      derez.deserialize(did);
-      AddressSpaceID source;
-      derez.deserialize(source);
-      AddressSpaceID target;
-      derez.deserialize(target);
-      AddressSpaceID owner;
-      derez.deserialize(owner);
-      ReferenceKind kind;
-      derez.deserialize(kind);
-      // Check to see if we are on the owner node or whether we should
-      // keep forwarding this message onto the owner
-      if (runtime->address_space == owner)
+      // Ready to downgrade, send the messages
+      if (is_owner() || ((collective_mapping != NULL) &&
+            collective_mapping->contains(local_space)))
       {
-        // We're the owner so handle it
-        DistributedCollectable *dist = 
-          runtime->find_distributed_collectable(did);
-        if (source == owner)
+        if (collective_mapping != NULL)
+        {
+          std::vector<AddressSpaceID> children;
+          if (collective_mapping->contains(downgrade_owner))
+            collective_mapping->get_children(downgrade_owner, local_space,
+                                             children);
+          else
+            collective_mapping->get_children(owner_space, local_space,
+                                             children);
+          if (!children.empty())
+          {
+            Serializer rez;
+            rez.serialize(did);
+            rez.serialize(downgrade);
+            for (std::vector<AddressSpaceID>::const_iterator it =
+                  children.begin(); it != children.end(); it++)
+              runtime->send_did_downgrade_success(*it, rez);
+          }
+        }
+        if (!remote_instances.empty())
+        {
+          Serializer rez;
+          rez.serialize(did);
+          rez.serialize(downgrade);
+          struct {
+            void apply(AddressSpaceID space)
+            { 
+              if (space != owner) 
+                runtime->send_did_downgrade_success(space, *rez); 
+            }
+            Serializer *rez;
+            Runtime *runtime;
+            AddressSpaceID owner;
+          } downgrade_functor;
+          downgrade_functor.rez = &rez;
+          downgrade_functor.runtime = runtime;
+          downgrade_functor.owner = downgrade_owner;
+          remote_instances.map(downgrade_functor);
+        }
+      }
+      else if (downgrade_owner == local_space)
+      {
+        // If we're the owner then we have to send it to the owner_space
+        // to get all the remote instances
+        Serializer rez;
+        rez.serialize(did);
+        rez.serialize(downgrade);
+        runtime->send_did_downgrade_success(owner_space, rez);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    bool DistributedCollectable::perform_downgrade(AutoLock &gc)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(gc_references == 0);
+      // Should be in the GLOBAL_REF_STATE on the owner and
+      // PENDING_LOCAL_REF_STATE if we're not the downgrade owner
+      assert(((current_state == GLOBAL_REF_STATE) && 
+              (downgrade_owner == local_space)) ||
+             ((current_state == PENDING_LOCAL_REF_STATE) &&
+              (downgrade_owner != local_space)));
+#endif
+      // Downgrade the state first so that we don't duplicate the callback
+      current_state = LOCAL_REF_STATE;
+      // Add a resource reference here to prevent collection while we
+      // release the lock to perform the callback
+#ifdef DEBUG_LEGION_GC
+      resource_references++;
+#else
+      resource_references.fetch_add(1);
+#endif
+      gc.release();
+      // Can do this without holding the lock as the remote_instances data
+      // structure should no longer be changing
+      send_downgrade_notifications(GLOBAL_REF_STATE);
+      notify_local();
+      // Unregister this with the runtime
+      if (registered_with_runtime)
+        runtime->unregister_distributed_collectable(did);
+      gc.reacquire();
+#ifdef DEBUG_LEGION
+      assert(resource_references > 0);
+#endif
+      // Remove the guard resource reference that we added before 
+#ifdef DEBUG_LEGION_GC
+      if (--resource_references == 0)
+#else
+      if (resource_references.fetch_sub(1) == 1)
+#endif
+        return can_delete(gc);
+      else
+        return false;
+    }
+
+    //--------------------------------------------------------------------------
+    void DistributedCollectable::check_for_downgrade(AddressSpaceID owner)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(remaining_responses == 0);
+#endif
+      // Update the downgrade owner
+      downgrade_owner = owner;
+      if (can_downgrade())
+      {
+        // We're ready to be downgraded
+        // Send messages and count how many responses we expect to see
+        if (is_owner() || ((collective_mapping != NULL) && 
+              collective_mapping->contains(local_space)))
+        {
+          if (collective_mapping != NULL)
+          {
+            std::vector<AddressSpaceID> children;
+            if (collective_mapping->contains(owner))
+              collective_mapping->get_children(owner, local_space, children);
+            else
+              collective_mapping->get_children(owner_space, local_space,
+                                               children);
+            if (!children.empty())
+            {
+              Serializer rez;
+              {
+                RezCheck z(rez);
+                rez.serialize(did);
+                // If we're in a pending state send the downgrade
+                // for the non-pending version of this state
+                if ((current_state == PENDING_LOCAL_REF_STATE) ||
+                    (current_state == PENDING_GLOBAL_REF_STATE))
+                  rez.serialize(current_state+1);
+                else
+                  rez.serialize(current_state);
+                rez.serialize(owner);
+              }
+              for (std::vector<AddressSpaceID>::const_iterator it =
+                    children.begin(); it != children.end(); it++)
+                runtime->send_did_downgrade_request(*it, rez);
+              remaining_responses += children.size();
+            }
+          }
+          if (!remote_instances.empty())
+          {
+            Serializer rez;
+            {
+              RezCheck z(rez);
+              rez.serialize(did);
+              // If we're in a pending state send the downgrade
+              // for the non-pending version of this state
+              if ((current_state == PENDING_LOCAL_REF_STATE) ||
+                  (current_state == PENDING_GLOBAL_REF_STATE))
+                rez.serialize(current_state+1);
+              else
+                rez.serialize(current_state);
+              rez.serialize(owner);
+            }
+            struct {
+              void apply(AddressSpaceID space)
+              { 
+                if (space != owner) 
+                  runtime->send_did_downgrade_request(space, *rez);
+                else
+                  skipped++;
+              }
+              Serializer *rez;
+              Runtime *runtime;
+              AddressSpaceID owner;
+              unsigned skipped;
+            } downgrade_functor;
+            downgrade_functor.rez = &rez;
+            downgrade_functor.runtime = runtime;
+            downgrade_functor.owner = downgrade_owner;
+            downgrade_functor.skipped = 0;
+            remote_instances.map(downgrade_functor);
+            remaining_responses += 
+              (remote_instances.size() - downgrade_functor.skipped);
+          } 
+        }
+        else if (owner == local_space)
         {
 #ifdef DEBUG_LEGION
-          assert((kind == GC_REF_KIND) || (kind == VALID_REF_KIND));
+          // Should be in a non-pending state if we're the owner
+          assert((current_state == GLOBAL_REF_STATE) ||
+                  (current_state == VALID_REF_STATE));
 #endif
-          if (kind == VALID_REF_KIND)
+          // If we're the owner then we have to send it to the owner_space
+          // to get all the remote instances
+          Serializer rez;
           {
-            if (dist->remove_base_valid_ref(REMOTE_CREATE_REF))
-              delete dist;
+            RezCheck z(rez);
+            rez.serialize(did);
+            rez.serialize(current_state);
+            rez.serialize(owner);
           }
+          runtime->send_did_downgrade_request(owner_space, rez);
+          remaining_responses++;
+        }
+        // Initialize the downgrade state
+        notready_owner = owner;
+        total_sent_references = 0;
+        total_received_references = 0;
+        if (remaining_responses == 0)
+        {
+          // Send the response now
+          if (owner != local_space)
+          {
+            // Mark that we're in the pending downgrade state
+            accumulate_local_references();
+            const AddressSpaceID target = get_downgrade_target(owner);
+            Serializer rez;
+            {
+              RezCheck z(rez);
+              rez.serialize(did);
+              rez.serialize(owner); // owner is special bottom value
+              rez.serialize(total_sent_references);
+              rez.serialize(total_received_references);
+            }
+            runtime->send_did_downgrade_response(target, rez);
+            record_pending_downgrade();
+          }
+#ifdef DEBUG_LEGION
           else
           {
-            if (dist->remove_base_gc_ref(REMOTE_CREATE_REF))
-              delete dist;
+            // We only get here if we're the owner and we don't know
+            // about any remote instances yet. The only way that 
+            // should happen is if we have some sent global references
+            // There's nothing to do yet since we know we can't be
+            // deleted yet
+            assert(sent_global_references > 0);
+            assert(sent_global_references != received_global_references);
           }
-        }
-        else
-        {
-          if (dist->remove_create_reference(source, target, kind))
-            delete dist;
+#endif
         }
       }
-      else
+      else if (local_space != owner)
       {
-        // Keep forwarding on to the owner
+        const AddressSpaceID target = get_downgrade_target(owner);
         Serializer rez;
         {
           RezCheck z(rez);
           rez.serialize(did);
-          rez.serialize(source);
-          rez.serialize(target);
-          rez.serialize(owner);
-          rez.serialize(kind);
+          rez.serialize(local_space);
+          rez.serialize<uint64_t>(0); // sent global references
+          rez.serialize<uint64_t>(0); // received global references
         }
-        runtime->send_did_remove_create_reference(owner, rez);
+        runtime->send_did_downgrade_response(target, rez);
       }
-#else
-      assert(false);
-#endif
     }
 
     //--------------------------------------------------------------------------
-    RtEvent DistributedCollectable::check_for_transition_event(bool &reentrant)
+    void DistributedCollectable::check_for_downgrade_restart(
+                                                       AddressSpaceID new_owner)
     //--------------------------------------------------------------------------
     {
-      // If we already have a transition event then return it
-      if (transition_event.exists())
+      // If we're no longer the downgrade owner there is nothing to do
+      if (downgrade_owner != local_space)
+        return;
+      // If there is a downgrade in progress there's nothing for us to do
+      if (remaining_responses > 0)
+        return;
+      // If we can't downgrade then we'll restart the downgrade proces
+      if ((current_state == LOCAL_REF_STATE) || !can_downgrade())
+        return;
+      // If we get here then it should be because we were just waiting for
+      // an unpack somewhere and we've finally been told where it is
+#ifdef DEBUG_LEGION
+      assert(notready_owner == local_space);
+      assert((current_state == VALID_REF_STATE) || 
+            (current_state == GLOBAL_REF_STATE));
+#endif
+      // Restart the downgrade process
+      if (new_owner != local_space)
       {
-        // external tasks can't handle reentrant cases
-        if (!Processor::get_executing_processor().exists())
-          return transition_event;
-        // Check for whether we are reentrant
-        const RtEvent finish_event(Processor::get_current_finish_event());
-        if (finish_event == reentrant_event)
-        {
-          reentrant = true;
-          return RtEvent::NO_RT_EVENT;
-        }
-        else
-          return transition_event;
-      }
-      // Otherwise check to see if we are in the middle of a transition
-      if ((current_state == PENDING_ACTIVE_STATE) ||
-          (current_state == PENDING_INACTIVE_STATE) ||
-          (current_state == PENDING_VALID_STATE) ||
-          (current_state == PENDING_INVALID_STATE) || 
-          (current_state == PENDING_ACTIVE_VALID_STATE) ||
-          (current_state == PENDING_INACTIVE_INVALID_STATE))
-      {
-        // external implicit tasks can't handle being reentrant
-        if (!Processor::get_executing_processor().exists())
-        {
-          transition_event = Runtime::create_rt_user_event();
-          return transition_event;
-        }
-        // Check to see if we are reentrant
-        const RtEvent finish_event(Processor::get_current_finish_event());
-        if (finish_event == reentrant_event)
-        {
-          reentrant = true;
-          return RtEvent::NO_RT_EVENT;
-        }
-        else
-          transition_event = Runtime::create_rt_user_event();
-      }
-      else if (Processor::get_executing_processor().exists())
-      {
-#ifdef DEBUG_LEGION
-        assert(!reentrant_event.exists());
-#endif
-        // Save the reentrant event since we're going to iterate
-        reentrant_event = RtEvent(Processor::get_current_finish_event());
-      }
-      return transition_event;
-    }
-
-    //--------------------------------------------------------------------------
-    bool DistributedCollectable::update_state(bool &need_activate, 
-                                              bool &need_validate,
-                                              bool &need_invalidate,
-                                              bool &need_deactivate,
-                                              bool &do_deletion)
-    //--------------------------------------------------------------------------
-    {
-      // Better be called while holding the lock
-      switch (current_state)
-      {
-        case INACTIVE_STATE:
-          {
-#ifdef DEBUG_LEGION
-            assert(!reentrant_update);
-#endif
-            // See if we have any reason to be active
-#ifdef USE_REMOTE_REFERENCES
-            if (has_valid_references || (!create_valid_refs.empty()))
-#else
-            if (has_valid_references)
-#endif
-            {
-              current_state = PENDING_ACTIVE_VALID_STATE;
-              need_activate = true;
-              need_validate = true;
-            }
-#ifdef USE_REMOTE_REFERENCES
-            else if (has_gc_references || !create_gc_refs.empty())
-#else
-            else if (has_gc_references)
-#endif
-            {
-              current_state = PENDING_ACTIVE_STATE;
-              need_activate = true;
-            }
-            break;
-          }
-        case ACTIVE_INVALID_STATE:
-          {
-#ifdef DEBUG_LEGION
-            assert(!reentrant_update);
-#endif
-            // See if we have a reason to be valid
-#ifdef USE_REMOTE_REFERENCES
-            if (has_valid_references || !create_valid_refs.empty())
-#else
-            if (has_valid_references)
-#endif
-            {
-              // Move to a pending valid state
-              current_state = PENDING_VALID_STATE;
-              need_validate = true;
-            }
-            // See if we have a reason to be inactive
-#ifdef USE_REMOTE_REFERENCES
-            else if (!has_gc_references  && create_gc_refs.empty())
-#else
-            else if (!has_gc_references)
-#endif
-            {
-              current_state = PENDING_INACTIVE_STATE;
-              need_deactivate = true;
-            }
-            break;
-          }
-        case VALID_STATE:
-          {
-#ifdef DEBUG_LEGION
-            assert(!reentrant_update);
-#endif
-            // See if we have a reason to be invalid
-#ifdef USE_REMOTE_REFERENCES
-            if (!has_valid_references && create_valid_refs.empty())
-#else
-            if (!has_valid_references)
-#endif
-            {
-              need_invalidate = true;
-#ifdef USE_REMOTE_REFERENCES
-              if (!has_gc_references && create_gc_refs.empty())
-#else
-              if (!has_gc_references)
-#endif
-              {
-                current_state = PENDING_INACTIVE_INVALID_STATE;
-                need_deactivate = true;
-              }
-              else 
-                current_state = PENDING_INVALID_STATE;
-            }
-            break;
-          }
-        case DELETED_STATE:
-          {
-            // Hitting this is universally bad
-            assert(false);
-            break;
-          }
-        case PENDING_ACTIVE_STATE:
-          {
-            current_state = ACTIVE_INVALID_STATE;
-            if (reentrant_update)
-            {
-              reentrant_update = false;
-              return update_state(need_activate, need_validate,
-                  need_invalidate, need_deactivate, do_deletion); 
-            }
-#ifdef DEBUG_LEGION
-#ifdef USE_REMOTE_REFERENCES
-            assert(!has_valid_references && create_valid_refs.empty());
-            assert(has_gc_references || !create_gc_refs.empty());
-#else
-            assert(!has_valid_references);
-            assert(has_gc_references);
-#endif
-#endif
-            break;
-          }
-        case PENDING_INACTIVE_STATE:
-          {
-            current_state = INACTIVE_STATE;
-            if (reentrant_update)
-            {
-              reentrant_update = false;
-              return update_state(need_activate, need_validate,
-                  need_invalidate, need_deactivate, do_deletion); 
-            }
-#ifdef DEBUG_LEGION
-#ifdef USE_REMOTE_REFERENCES
-            assert(!has_valid_references && create_valid_refs.empty());
-            assert(!has_gc_references && create_gc_refs.empty());
-#else
-            assert(!has_valid_references);
-            assert(!has_gc_references);
-#endif
-#endif
-            break;
-          }
-        case PENDING_VALID_STATE:
-          {
-            current_state = VALID_STATE;
-            if (reentrant_update)
-            {
-              reentrant_update = false;
-              return update_state(need_activate, need_validate,
-                  need_invalidate, need_deactivate, do_deletion); 
-            }
-#ifdef DEBUG_LEGION
-#ifdef USE_REMOTE_REFERENCES
-            assert(has_valid_references || create_valid_refs.empty());
-#else
-            assert(has_valid_references);
-#endif
-#endif
-            break;
-          }
-        case PENDING_INVALID_STATE:
-          {
-            current_state = ACTIVE_INVALID_STATE;
-            if (reentrant_update)
-            {
-              reentrant_update = false;
-              return update_state(need_activate, need_validate,
-                  need_invalidate, need_deactivate, do_deletion); 
-            }
-#ifdef DEBUG_LEGION
-#ifdef USE_REMOTE_REFERENCES
-            assert(!has_valid_references && create_valid_refs.empty());
-            assert(has_gc_references || !create_gc_refs.empty());
-#else
-            assert(!has_valid_references);
-            assert(has_gc_references);
-#endif
-#endif
-            break;
-          }
-        case PENDING_ACTIVE_VALID_STATE:
-          {
-            current_state = VALID_STATE;
-            if (reentrant_update)
-            {
-              reentrant_update = false;
-              return update_state(need_activate, need_validate,
-                  need_invalidate, need_deactivate, do_deletion); 
-            }
-#ifdef USE_REMOTE_REFERENCES
-            assert(has_valid_references || !create_valid_refs.empty());
-#else
-            assert(has_valid_references);
-#endif
-            break;
-          }
-        case PENDING_INACTIVE_INVALID_STATE:
-          {
-            current_state = INACTIVE_STATE;
-            if (reentrant_update)
-            {
-              reentrant_update = false;
-              return update_state(need_activate, need_validate,
-                  need_invalidate, need_deactivate, do_deletion); 
-            }
-#ifdef DEBUG_LEGION
-#ifdef USE_REMOTE_REFERENCES
-            assert(!has_valid_references && !create_valid_refs.empty());
-            assert(!has_gc_references && !create_gc_refs.empty());
-#else
-            assert(!has_valid_references);
-            assert(!has_gc_references);
-#endif
-#endif
-            break;
-          }
-        default:
-          assert(false); // should never get here
-      }
-      const bool done = !(need_activate || need_validate || 
-                          need_invalidate || need_deactivate);
-      if (done)
-      {
-        do_deletion = can_delete();
-        reentrant_event = RtEvent::NO_RT_EVENT;
-        if (transition_event.exists())
-        {
-          Runtime::trigger_event(transition_event);
-          transition_event = RtUserEvent::NO_RT_USER_EVENT;
-        }
+        downgrade_owner = new_owner;
+        Serializer rez;
+        rez.serialize(did);
+        rez.serialize(current_state);
+        runtime->send_did_downgrade_update(new_owner, rez);
       }
       else
-        do_deletion = false;
-      return done;
+        check_for_downgrade(new_owner);
     }
 
     //--------------------------------------------------------------------------
-    bool DistributedCollectable::can_delete(void)
+    void DistributedCollectable::accumulate_local_references(void)
     //--------------------------------------------------------------------------
     {
-      // Better be called while holding the lock
-#ifdef USE_REMOTE_REFERENCES
-      bool result = (!has_resource_references && !has_gc_references &&
-              !has_valid_references && create_gc_refs.empty() && 
-              create_valid_refs.empty() && 
-              ((current_state == INACTIVE_STATE) || 
-               (current_state == DELETED_STATE)));
-#else
-      bool result = (!has_resource_references && !has_gc_references &&
-              !has_valid_references && 
-              ((current_state == INACTIVE_STATE) || 
-               (current_state == DELETED_STATE)));
+      total_sent_references += sent_global_references;
+      total_received_references += received_global_references;
+    }
+
+    //--------------------------------------------------------------------------
+    void DistributedCollectable::record_pending_downgrade(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(downgrade_owner != local_space);
+      assert((current_state == GLOBAL_REF_STATE) || 
+          (current_state == PENDING_LOCAL_REF_STATE));
 #endif
-      return result;
+      current_state = PENDING_LOCAL_REF_STATE;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void DistributedCollectable::handle_downgrade_request(
+                   Runtime *runtime, Deserializer &derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      State to_check;
+      derez.deserialize(to_check);
+      AddressSpaceID downgrade_owner;
+      derez.deserialize(downgrade_owner);
+
+      // It's possible for this to race with the creation of this
+      // distributed collectable so wait until it is ready
+      DistributedCollectable *dc = runtime->find_distributed_collectable(did);
+      dc->process_downgrade_request(downgrade_owner, to_check);
+    }
+
+    //--------------------------------------------------------------------------
+    void DistributedCollectable::process_downgrade_request(AddressSpaceID owner,
+                                                           State to_check)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(owner != local_space); // we should be remote here
+      assert((to_check == GLOBAL_REF_STATE) || (to_check == VALID_REF_STATE));
+#endif
+      AutoLock gc(gc_lock);
+      // If the owner is asking us to downgrade a state that is less than
+      // our current state then that is because the downgrade from our 
+      // current state has already been done on the owner and we should
+      // perform our local down grade to reflect that first
+      while (to_check < current_state)
+        perform_downgrade(gc);
+#ifdef DEBUG_LEGION
+      assert(LOCAL_REF_STATE < current_state);
+#endif
+      check_for_downgrade(owner);
+    }
+
+    //--------------------------------------------------------------------------
+    AddressSpaceID DistributedCollectable::get_downgrade_target(
+                                                     AddressSpaceID owner) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(owner != local_space);
+#endif
+      if (collective_mapping == NULL)
+      {
+        if (local_space == owner_space)
+          return owner;
+        else
+          return owner_space;
+      }
+      if (!collective_mapping->contains(local_space))
+      {
+#ifdef DEBUG_LEGION
+        assert(!is_owner());
+#endif
+        return collective_mapping->find_nearest(local_space);
+      }
+      if (!collective_mapping->contains(owner))
+      {
+        if (is_owner())
+          return owner;
+        else
+          return collective_mapping->get_parent(owner_space, local_space);
+      }
+      return collective_mapping->get_parent(owner, local_space);
+    }
+
+    //--------------------------------------------------------------------------
+    bool DistributedCollectable::process_downgrade_response(
+          AddressSpaceID notready, uint64_t total_sent, uint64_t total_received)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock gc(gc_lock);
+#ifdef DEBUG_LEGION
+      assert(remaining_responses > 0);
+#endif
+      if (notready != downgrade_owner)
+        notready_owner = notready;
+      else if (notready_owner == downgrade_owner)
+      {
+        // Everything still ready for downgrade
+        total_sent_references += total_sent;
+        total_received_references += total_received;
+      }
+      if (--remaining_responses == 0)
+      {
+        // Accumulate our local sent and received references
+        accumulate_local_references();
+        if (downgrade_owner == local_space)
+        {
+#ifdef DEBUG_LEGION
+          assert((current_state == VALID_REF_STATE) || 
+            (current_state == GLOBAL_REF_STATE));
+#endif
+          // See if it safe to downgrade
+          // Make sure to check ourselves again to handle any 
+          // check_*_and_increment methods
+          if (can_downgrade() && (notready_owner == downgrade_owner) &&
+              (total_sent_references == total_received_references))
+          {
+            // Then perform our local downgrade
+            return perform_downgrade(gc);
+          }
+          else
+          {
+            // Not ready to downgrade
+            if (notready_owner != downgrade_owner)
+            {
+              // Update the new owner responsible for checking for downgrades
+              downgrade_owner = notready_owner;
+              Serializer rez;
+              rez.serialize(did);
+              rez.serialize(current_state);
+              runtime->send_did_downgrade_update(notready_owner, rez);
+            }
+            // else: we used to do this, but the polling aspect of continuing
+            // to check for downgrades can cause priority inversions in the
+            // network traffic (despite setting low priorities because the
+            // networking hardware ignores our priorities). Therefore we stopped
+            // doing this and now we instead send notifications whenever we
+            // do an unpack that might need to restart this process. The first
+            // one to get here will restart the downgrade process.
+            // See the calls to check_for_downgrade_restart to see where
+            // progress comes from now
+            //{
+              // This is a strange case: all the nodes are ready to downgrade
+              // but there are still packed references in flight so we need
+              // to keep trying to perform the downgrade until we find one
+              // of these nodes and find the reference
+              //check_for_downgrade(downgrade_owner);
+            //}
+          }
+        }
+        else
+        {
+          const AddressSpaceID target = get_downgrade_target(downgrade_owner);
+          // We had to release the lock to send the requests to our upstream
+          // nodes so we need to check again to see if it is still safe to
+          // perform the downgrade on this node or not atomically with 
+          // accumulating our sent and received references
+          Serializer rez;
+          if (can_downgrade())
+          {
+            RezCheck z(rez);
+            rez.serialize(did);
+            rez.serialize(notready_owner);
+            rez.serialize(total_sent_references);
+            rez.serialize(total_received_references);
+            // Record that we're in the pending downgrade state
+            record_pending_downgrade();
+          }
+          else
+          {
+            RezCheck z(rez);
+            rez.serialize(did);
+            rez.serialize(local_space);
+            rez.serialize<uint64_t>(0); // sent global references
+            rez.serialize<uint64_t>(0); // received global references
+          }
+          runtime->send_did_downgrade_response(target, rez);
+        }
+      }
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void DistributedCollectable::handle_downgrade_response(
+                                          Runtime *runtime, Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      AddressSpaceID notready;
+      derez.deserialize(notready);
+      uint64_t total_sent, total_received;
+      derez.deserialize(total_sent);
+      derez.deserialize(total_received);
+
+      DistributedCollectable *dc = runtime->find_distributed_collectable(did);
+      if (dc->process_downgrade_response(notready, total_sent, total_received))
+        delete dc;
+    }
+
+    //--------------------------------------------------------------------------
+    void DistributedCollectable::process_downgrade_success(State to_downgrade)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock gc(gc_lock);
+      // Check to see if this state has already been downgraded already
+      // because a check_for_downgrade got here first
+      if ((to_downgrade == current_state) || 
+          ((current_state+1) == to_downgrade))
+        perform_downgrade(gc);
+#ifdef DEBUG_LEGION
+      else
+        assert(current_state < to_downgrade);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void DistributedCollectable::handle_downgrade_success(
+                                          Runtime *runtime, Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DistributedID did;
+      derez.deserialize(did);
+      State to_downgrade;
+      derez.deserialize(to_downgrade);
+
+      // These can race with checks for downgrades from other states and
+      // therefore it's possible for these to arrive even after the object
+      // itself has been deleted so we need a weak find here
+      DistributedCollectable *dc =
+        runtime->weak_find_distributed_collectable(did);
+      if (dc != NULL)
+      {
+        dc->process_downgrade_success(to_downgrade);
+        if (dc->remove_base_resource_ref(RUNTIME_REF))
+          delete dc;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void DistributedCollectable::process_downgrade_update(AutoLock &gc,
+                                                          State to_check)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(downgrade_owner != local_space);
+      assert(to_check == GLOBAL_REF_STATE);
+#endif
+      // It's possible we get this notification before the update saying
+      // that the downgrade from the previous state has been successful
+      // so make sure to update accordingly
+      while (to_check < current_state)
+        perform_downgrade(gc);
+      if (current_state < to_check)
+        current_state = to_check;
+      downgrade_owner = local_space;
+      if (gc_references == 0)
+        check_for_downgrade(downgrade_owner);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void DistributedCollectable::handle_downgrade_update(
+                                          Runtime *runtime, Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DistributedID did;
+      derez.deserialize(did);
+      State state;
+      derez.deserialize(state);
+
+      // It's possible for this to race with the creation and registration
+      // of this distributed collectable so wait for it to be ready
+      DistributedCollectable *dc = runtime->find_distributed_collectable(did);
+      AutoLock gc(dc->gc_lock);
+      dc->process_downgrade_update(gc, state);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void DistributedCollectable::handle_downgrade_restart(
+                   Runtime *runtime, Deserializer &derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DistributedID did;
+      derez.deserialize(did);
+      // It's possible for these messages to race with actual downgrades and
+      // destruction of the collectable object so we have to check to see if
+      // it is still here, if it's not then it's already been cleaned up and
+      // there is nothing more for us to do
+      DistributedCollectable *dc =
+        runtime->weak_find_distributed_collectable(did);
+      if (dc != NULL)
+      {
+        {
+          AutoLock gc(dc->gc_lock);
+          dc->check_for_downgrade_restart(source);
+        }
+        if (dc->remove_base_resource_ref(RUNTIME_REF))
+          delete dc;
+      }
+    }
+
+    /////////////////////////////////////////////////////////////
+    // ValidDistributedCollectable
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ValidDistributedCollectable::ValidDistributedCollectable(Runtime *rt,
+                                                  DistributedID id, 
+                                                  bool do_registration, 
+                                                  CollectiveMapping *map,
+                                                  bool start_in_valid_state)
+      : DistributedCollectable(rt, id, do_registration, map,
+          start_in_valid_state ? VALID_REF_STATE : GLOBAL_REF_STATE),
+        valid_references(0), sent_valid_references(0),
+        received_valid_references(0)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ValidDistributedCollectable::ValidDistributedCollectable(
+                                         const ValidDistributedCollectable &rhs)
+      : DistributedCollectable(rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    ValidDistributedCollectable::~ValidDistributedCollectable(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    template<bool NEED_LOCK>
+    bool ValidDistributedCollectable::is_valid(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (NEED_LOCK)
+      {
+        AutoLock gc(gc_lock);
+        return (current_state == VALID_REF_STATE) ||
+                (current_state == PENDING_GLOBAL_REF_STATE);
+      }
+      else
+        return (current_state == VALID_REF_STATE) ||
+                (current_state == PENDING_GLOBAL_REF_STATE);
+    }
+
+    template bool ValidDistributedCollectable::is_valid<true>(void) const;
+    template bool ValidDistributedCollectable::is_valid<false>(void) const;
+
+    //--------------------------------------------------------------------------
+    void ValidDistributedCollectable::add_valid_reference(int cnt)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock gc(gc_lock);
+#ifdef DEBUG_LEGION
+      assert(is_valid<false/*need lock*/>());
+#endif
+      // Promote the current state back up if we had a pending downgrade
+      if (current_state == PENDING_GLOBAL_REF_STATE)
+        current_state = VALID_REF_STATE;
+#ifdef DEBUG_LEGION_GC
+      valid_references += cnt;
+#else
+      valid_references.fetch_add(cnt);
+#endif
+    }
+
+#ifndef DEBUG_LEGION_GC
+    //--------------------------------------------------------------------------
+    bool ValidDistributedCollectable::remove_valid_reference(int cnt)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock gc(gc_lock);
+#ifdef DEBUG_LEGION
+      assert(is_valid<false/*need lock*/>());
+      assert(valid_references.load() >= cnt);
+#endif
+      if (valid_references.fetch_sub(cnt) == cnt)
+        return can_delete(gc);
+      else
+        return false;
+    }
+#else // ifndef DEBUG_LEGION_GC
+    //--------------------------------------------------------------------------
+    void ValidDistributedCollectable::add_base_valid_ref_internal(
+                                                ReferenceSource source, int cnt)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock gc(gc_lock);
+#ifdef DEBUG_LEGION
+      assert(is_valid<false/*need lock*/>());
+#endif
+      valid_references += cnt;
+      std::map<ReferenceSource,int>::iterator finder = 
+        detailed_base_valid_references.find(source);
+      if (finder == detailed_base_valid_references.end())
+        detailed_base_valid_references[source] = cnt;
+      else
+        finder->second += cnt;
+    }
+
+    //--------------------------------------------------------------------------
+    void ValidDistributedCollectable::add_nested_valid_ref_internal(
+                                                  DistributedID source, int cnt)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock gc(gc_lock);
+#ifdef DEBUG_LEGION
+      assert(is_valid<false/*need lock*/>());
+#endif
+      valid_references += cnt;
+      std::map<DistributedID,int>::iterator finder = 
+        detailed_nested_valid_references.find(source);
+      if (finder == detailed_nested_valid_references.end())
+        detailed_nested_valid_references[source] = cnt;
+      else
+        finder->second += cnt;
+    }
+
+    //--------------------------------------------------------------------------
+    bool ValidDistributedCollectable::remove_base_valid_ref_internal(
+                                                ReferenceSource source, int cnt)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock gc(gc_lock);
+#ifdef DEBUG_LEGION
+      assert(is_valid<false/*need lock*/>());
+      assert(valid_references >= cnt);
+#endif
+      valid_references -= cnt;
+      std::map<ReferenceSource,int>::iterator finder = 
+        detailed_base_valid_references.find(source);
+      assert(finder != detailed_base_valid_references.end());
+      assert(finder->second >= cnt);
+      finder->second -= cnt;
+      if (finder->second == 0)
+        detailed_base_valid_references.erase(finder);
+      if (valid_references == 0)
+        return can_delete(gc);
+      else
+        return false;
+    }
+
+    //--------------------------------------------------------------------------
+    bool ValidDistributedCollectable::remove_nested_valid_ref_internal(
+                                                  DistributedID source, int cnt)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock gc(gc_lock);
+#ifdef DEBUG_LEGION
+      assert(is_valid<false/*need lock*/>());
+      assert(valid_references >= cnt);
+#endif
+      valid_references -= cnt;
+      std::map<DistributedID,int>::iterator finder = 
+        detailed_nested_valid_references.find(source);
+      assert(finder != detailed_nested_valid_references.end());
+      assert(finder->second >= cnt);
+      finder->second -= cnt;
+      if (finder->second == 0)
+        detailed_nested_valid_references.erase(finder);
+      if (valid_references == 0)
+        return can_delete(gc);
+      else
+        return false;
+    }
+#endif
+
+    //--------------------------------------------------------------------------
+#ifdef DEBUG_LEGION_GC
+    template<typename T>
+    bool ValidDistributedCollectable::acquire_valid(int cnt,
+                           T source, std::map<T,int> &detailed_valid_references)
+#else
+    bool ValidDistributedCollectable::acquire_valid(int cnt)
+#endif
+    //--------------------------------------------------------------------------
+    {
+      AddressSpaceID current_owner;
+      {
+        AutoLock gc(gc_lock);
+        // Check to see if we lost the race and somebody else already
+        // added the references in which case we are done
+        if (valid_references > 0)
+        {
+#ifdef DEBUG_LEGION_GC
+          valid_references += cnt;
+          typename std::map<T,int>::iterator finder =
+            detailed_valid_references.find(source);
+          if (finder == detailed_valid_references.end())
+            detailed_valid_references[source] = cnt;
+          else
+            finder->second += cnt;
+#else
+          valid_references.fetch_add(cnt);
+#endif
+          return true;
+        }
+        switch (current_state)
+        {
+          case VALID_REF_STATE:
+            {
+              // No downgrade in progress so we can just add the references
+#ifdef DEBUG_LEGION_GC
+              valid_references += cnt;
+              typename std::map<T,int>::iterator finder =
+                detailed_valid_references.find(source);
+              if (finder == detailed_valid_references.end())
+                detailed_valid_references[source] = cnt;
+              else
+                finder->second += cnt;
+#else
+              valid_references.fetch_add(cnt);
+#endif
+              return true;
+            }
+          case PENDING_GLOBAL_REF_STATE:
+            {
+#ifdef DEBUG_LEGION
+              // Can only be in a pending state if we're not the owner
+              assert(downgrade_owner != local_space);
+#endif
+              // Not safe to increment the references since we might
+              // race with the downgrade request, so we need to send
+              // a message to the downgrade owner to see if we can
+              break;
+            }
+          case GLOBAL_REF_STATE:
+          case PENDING_LOCAL_REF_STATE:
+          case LOCAL_REF_STATE:
+          case DELETED_REF_STATE:
+            {
+              return false;
+            }
+          default:
+            assert(false);
+        }
+        current_owner = downgrade_owner;
+      }
+      // Send the message to the downgrade owner to try to acquire the reference
+      std::atomic<bool> result(false);
+      const RtUserEvent ready = Runtime::create_rt_user_event();
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(did);
+        rez.serialize(this);
+        rez.serialize(local_space);
+        rez.serialize(cnt);
+        rez.serialize(&result);
+        rez.serialize(ready);
+      }
+      runtime->send_did_acquire_valid_request(current_owner, rez);
+      ready.wait();
+      if (result.load())
+      {
+#ifdef DEBUG_LEGION_GC
+        AutoLock gc(gc_lock);
+        typename std::map<T,int>::iterator finder =
+          detailed_valid_references.find(source);
+        if (finder == detailed_valid_references.end())
+          detailed_valid_references[source] = cnt;
+        else
+          finder->second += cnt;
+#endif
+        return true;
+      }
+      else
+        return false;
+    }
+
+#ifdef DEBUG_LEGION_GC
+    template bool ValidDistributedCollectable::acquire_valid<ReferenceSource>(
+        int, ReferenceSource, std::map<ReferenceSource,int>&);
+    template bool ValidDistributedCollectable::acquire_valid<DistributedID>(
+        int, DistributedID, std::map<DistributedID,int>&);
+#endif
+
+    //--------------------------------------------------------------------------
+    bool ValidDistributedCollectable::acquire_valid_remote(
+                      AddressSpaceID &current, int count, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock gc(gc_lock);
+      if (is_valid<false/*need lock*/>())
+      {
+        if (downgrade_owner == local_space)
+        {
+          // We succeeded
+          if (source == local_space)
+          {
+            // If we're local we can add the references now
+#ifdef DEBUG_LEGION_GC
+            valid_references += count;
+#else
+            valid_references.fetch_add(count);
+#endif
+          }
+          else // Otherwise pack a reference to send back
+            sent_valid_references++;
+          return true;
+        }
+        else
+          current = downgrade_owner;
+      }
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ValidDistributedCollectable::handle_valid_acquire_request(
+                                          Runtime *runtime, Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      ValidDistributedCollectable *remote;
+      derez.deserialize(remote);
+      AddressSpaceID source;
+      derez.deserialize(source);
+      int count;
+      derez.deserialize(count);
+      std::atomic<bool> *result;
+      derez.deserialize(result);
+      RtUserEvent ready;
+      derez.deserialize(ready);
+
+      ValidDistributedCollectable *dc = 
+        static_cast<ValidDistributedCollectable*>(
+            runtime->weak_find_distributed_collectable(did));
+      if (dc != NULL)
+      {
+        AddressSpaceID current_owner = dc->local_space;
+        if (dc->acquire_valid_remote(current_owner, count, source))
+        {
+          if (source != dc->local_space)
+          {
+            // Successfully acquired (packed) a valid reference
+            Serializer rez;
+            {
+              RezCheck z2(rez);
+              rez.serialize(remote);
+              rez.serialize(count);
+              rez.serialize(result);
+              rez.serialize(ready);
+            }
+            runtime->send_did_acquire_valid_response(source, rez);
+          }
+          else
+          {
+            // Might have been sent back to ourself eventually
+            result->store(true);
+            Runtime::trigger_event(ready);
+          }
+        }
+        else if (current_owner != dc->local_space)
+        {
+          // Not the owner anymore, so forward and keep chasing
+          Serializer rez;
+          {
+            RezCheck z2(rez);
+            rez.serialize(did);
+            rez.serialize(remote);
+            rez.serialize(source);
+            rez.serialize(count);
+            rez.serialize(result);
+            rez.serialize(ready);
+          }
+          runtime->send_did_acquire_valid_request(current_owner, rez);
+        }
+        else
+          // Failed so trigger the event
+          Runtime::trigger_event(ready);
+        if (dc->remove_base_resource_ref(RUNTIME_REF))
+          delete dc;
+      }
+      else
+        // Failed so trigger the event
+        Runtime::trigger_event(ready);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ValidDistributedCollectable::handle_valid_acquire_response(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      ValidDistributedCollectable *local;
+      derez.deserialize(local);
+      int count;
+      derez.deserialize(count);
+      std::atomic<bool> *result;
+      derez.deserialize(result);
+      RtUserEvent ready;
+      derez.deserialize(ready);
+
+      // Just add the valid reference for now
+      local->add_valid_reference(count);
+      // Unpack the valid reference packed by acquire_valid_remote
+      local->unpack_valid_ref();
+      result->store(true);
+      Runtime::trigger_event(ready);
+    }
+
+    //--------------------------------------------------------------------------
+    void ValidDistributedCollectable::pack_valid_ref(unsigned cnt)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock gc(gc_lock);
+#ifdef DEBUG_LEGION
+      assert(is_valid<false/*need lock*/>());
+#endif
+      sent_valid_references += cnt;
+    }
+
+    //--------------------------------------------------------------------------
+    void ValidDistributedCollectable::unpack_valid_ref(unsigned cnt)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock gc(gc_lock);
+#ifdef DEBUG_LEGION
+      assert(is_valid<false/*need lock*/>());
+#endif
+      received_valid_references += cnt;
+      // No need to send any notifications if a downgrade is in process
+      if (remaining_responses == 0)
+      {
+        if (downgrade_owner == local_space)
+        {
+          // We're the downgrade owner so check to see if we can resume
+          // doing collections or we can wait for the next removal
+          check_for_downgrade_restart(local_space);
+        }
+        else if (current_state == PENDING_GLOBAL_REF_STATE)
+        {
+          // Send a notification to the downgrade owner to check if it
+          // needs to resume collections now that this reference has 
+          // been unpacked. This is not just a performance optimization.
+          // It is vital to forward progress as it removes the necessity
+          // to poll on downgrades while we are waiting for references
+          // to be unpacked from whatever message they are in. Note that
+          // you can't even check whether it is safe to downgrade this
+          // node or not since we're not the downgrade owner so we have
+          // to notify the downgrade owner about the unpacked references
+          Serializer rez;
+          rez.serialize(did);
+          runtime->send_did_downgrade_restart(downgrade_owner, rez);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    bool ValidDistributedCollectable::can_downgrade(void) const
+    //--------------------------------------------------------------------------
+    {
+      if ((current_state == VALID_REF_STATE) ||
+          (current_state == PENDING_GLOBAL_REF_STATE))
+        return (valid_references == 0);
+      else
+        return DistributedCollectable::can_downgrade();
+    }
+
+    //--------------------------------------------------------------------------
+    bool ValidDistributedCollectable::perform_downgrade(AutoLock &gc)
+    //--------------------------------------------------------------------------
+    {
+      if ((current_state == VALID_REF_STATE) || 
+          (current_state == PENDING_GLOBAL_REF_STATE))
+      {
+#ifdef DEBUG_LEGION
+        assert(valid_references == 0);
+        // Should be in the GLOBAL_REF_STATE on the owner and
+        // PENDING_LOCAL_REF_STATE if we're not the downgrade owner
+        assert(((current_state == VALID_REF_STATE) && 
+                (downgrade_owner == local_space)) ||
+               ((current_state == PENDING_GLOBAL_REF_STATE) &&
+                (downgrade_owner != local_space)));
+#endif
+        // Send messages while holding the lock because the remote_instances
+        // data structure might still be changing
+        send_downgrade_notifications(VALID_REF_STATE);
+        // Downgrade the state first so that we don't duplicate the callback
+        current_state = GLOBAL_REF_STATE;
+        // Add a gc reference here prevent downgrades from the global ref
+        // state until we are done performing the callback
+#ifdef DEBUG_LEGION_GC
+        gc_references++;
+#else
+        gc_references.fetch_add(1);
+#endif
+        gc.release();
+        notify_invalid();
+        gc.reacquire();
+#ifdef DEBUG_LEGION
+        assert(gc_references > 0);
+#endif
+        // Remove the guard reference that we added before
+#ifdef DEBUG_LEGION_GC
+        if (--gc_references == 0)
+#else
+        if (gc_references.fetch_sub(1) == 1)
+#endif
+          return can_delete(gc);
+        else
+          return false;
+      }
+      else
+        return DistributedCollectable::perform_downgrade(gc); 
+    }
+
+    //--------------------------------------------------------------------------
+    void ValidDistributedCollectable::process_downgrade_update(AutoLock &gc,
+                                                               State to_check)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(downgrade_owner != local_space);
+      assert((to_check == VALID_REF_STATE) || (to_check == GLOBAL_REF_STATE));
+#endif
+      // It's possible we get this notification before the update saying
+      // that the downgrade from the previous state has been successful
+      // so make sure to update accordingly
+      while (to_check < current_state)
+        perform_downgrade(gc);
+      if ((current_state == VALID_REF_STATE) ||
+          (current_state == PENDING_GLOBAL_REF_STATE))
+      {
+        downgrade_owner = local_space;
+        current_state = VALID_REF_STATE;
+        if (valid_references == 0)
+          check_for_downgrade(downgrade_owner);
+      }
+      else
+        DistributedCollectable::process_downgrade_update(gc, to_check);
+    }
+
+    //--------------------------------------------------------------------------
+    void ValidDistributedCollectable::accumulate_local_references(void)
+    //--------------------------------------------------------------------------
+    {
+      if ((current_state == VALID_REF_STATE) ||
+          (current_state == PENDING_GLOBAL_REF_STATE))
+      {
+        total_sent_references += sent_valid_references;
+        total_received_references += received_valid_references;
+      }
+      else
+        DistributedCollectable::accumulate_local_references();
+    }
+
+    //--------------------------------------------------------------------------
+    void ValidDistributedCollectable::record_pending_downgrade(void)
+    //--------------------------------------------------------------------------
+    {
+      if ((current_state == VALID_REF_STATE) || 
+          (current_state == PENDING_GLOBAL_REF_STATE))
+      {
+#ifdef DEBUG_LEGION
+        assert(downgrade_owner != local_space);
+#endif
+        current_state = PENDING_GLOBAL_REF_STATE;
+      }
+      else
+        DistributedCollectable::record_pending_downgrade();
     }
 
   }; // namespace Internal 

@@ -1,16 +1,31 @@
-use std::cmp::{max, Reverse};
+use std::cmp::{max, Ordering, Reverse};
 use std::collections::{BTreeMap, BTreeSet, BinaryHeap};
 use std::convert::TryFrom;
 use std::fmt;
+use std::sync::OnceLock;
 
 use derive_more::{Add, From, LowerHex, Sub};
+use nonmax::NonMaxU64;
 use num_enum::TryFromPrimitive;
 
 use rayon::prelude::*;
 
+use serde::Serialize;
+
+use slice_group_by::GroupBy;
+
+use crate::backend::common::{CopyInstInfoVec, FillInstInfoVec, InstPretty, SizePretty};
+use crate::num_util::Postincrement;
 use crate::serialize::Record;
+use crate::spy;
 
 const TASK_GRANULARITY_THRESHOLD: Timestamp = Timestamp::from_us(10);
+
+#[derive(Debug, Clone)]
+pub enum Records {
+    Prof(Vec<Record>),
+    Spy(Vec<spy::serialize::Record>),
+}
 
 // Make sure this is up to date with lowlevel.h
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, TryFromPrimitive)]
@@ -43,6 +58,8 @@ pub enum MemKind {
     L3Cache = 10,
     L2Cache = 11,
     L1Cache = 12,
+    GPUManaged = 13,
+    GPUDynamic = 14,
 }
 
 impl fmt::Display for MemKind {
@@ -128,22 +145,139 @@ pub enum DimKind {
     OuterDimR = 27,
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Default, Add, Sub, From)]
-pub struct Timestamp(pub u64 /* ns */);
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum DeviceKind {
+    Device,
+    Host,
+}
+
+// the class used to save configurations
+#[derive(Debug, PartialEq)]
+pub struct Config {
+    filter_input: bool,
+    verbose: bool,
+    all_logs: bool,
+}
+
+// CONFIG can be only accessed by Config::name_of_the_member()
+static CONFIG: OnceLock<Config> = OnceLock::new();
+
+impl Config {
+    // this function can be only called once, and it will be called in main
+    pub fn set_config(filter_input: bool, verbose: bool, all_logs: bool) {
+        let config = Config {
+            filter_input,
+            verbose,
+            all_logs,
+        };
+        assert_eq!(CONFIG.set(config), Ok(()));
+    }
+    // return the singleton of CONFIG, usually we do not need to call it unless
+    // we want to retrieve multiple members from the CONFIG
+    pub fn global() -> &'static Config {
+        let config = CONFIG.get();
+        config.expect("config was not set")
+    }
+    pub fn filter_input() -> bool {
+        let config = Config::global();
+        config.filter_input
+    }
+    pub fn verbose() -> bool {
+        let config = Config::global();
+        config.verbose
+    }
+    pub fn all_logs() -> bool {
+        let config = Config::global();
+        config.all_logs
+    }
+}
+
+#[macro_export]
+macro_rules! conditional_assert {
+    ($cond:expr, $mode:expr, $($arg:tt)*) => (
+        if !$cond {
+            if $mode {
+                panic!("Error: {}", format_args!($($arg)*));
+            } else {
+                if Config::verbose() {
+                    eprintln!("Warning: {}", format_args!($($arg)*));
+                }
+            }
+        }
+    )
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Default, Serialize, From)]
+pub struct Timestamp(NonMaxU64 /* ns */);
 
 impl Timestamp {
+    pub const MAX: Timestamp = Timestamp(NonMaxU64::MAX);
+    pub const MIN: Timestamp = Timestamp(NonMaxU64::ZERO);
+    pub const ZERO: Timestamp = Timestamp(NonMaxU64::ZERO);
+    pub const ONE: Timestamp = Timestamp(NonMaxU64::ONE);
     pub const fn from_us(microseconds: u64) -> Timestamp {
-        Timestamp(microseconds * 1000)
+        Timestamp(unwrap_option(NonMaxU64::new(microseconds * 1000)))
+    }
+    pub const fn from_ns(nanoseconds: u64) -> Timestamp {
+        Timestamp(unwrap_option(NonMaxU64::new(nanoseconds)))
     }
     pub fn to_us(&self) -> f64 {
-        self.0 as f64 / 1000.0
+        self.0.get() as f64 / 1000.0
+    }
+    pub const fn to_ns(&self) -> u64 {
+        self.0.get()
+    }
+}
+
+// This is a horrible, but currently supported, way of unwrapping an
+// Option in a const function in safe code. Once Rust supports unwrap
+// directly this can be removed.
+//
+// Note: this will hit an array access out of bounds, so the code
+// never reaches the infinite loop
+//
+// from: https://users.rust-lang.org/t/compile-time-const-unwrapping/51619/7
+const fn unwrap_option(opt: Option<NonMaxU64>) -> NonMaxU64 {
+    match opt {
+        Some(x) => x,
+        None => {
+            #[allow(unconditional_panic)]
+            ["You tried to unwrap a None!"][10];
+            loop {}
+        }
+    }
+}
+
+impl std::ops::Add for Timestamp {
+    type Output = Timestamp;
+    fn add(self, rhs: Timestamp) -> Timestamp {
+        Timestamp::from_ns(self.to_ns() + rhs.to_ns())
+    }
+}
+
+impl std::ops::AddAssign for Timestamp {
+    fn add_assign(&mut self, rhs: Timestamp) {
+        *self = *self + rhs;
+    }
+}
+
+impl std::ops::Sub for Timestamp {
+    type Output = Timestamp;
+    fn sub(self, rhs: Timestamp) -> Timestamp {
+        Timestamp::from_ns(self.to_ns() - rhs.to_ns())
+    }
+}
+
+impl std::ops::SubAssign for Timestamp {
+    fn sub_assign(&mut self, rhs: Timestamp) {
+        *self = *self - rhs;
     }
 }
 
 impl fmt::Display for Timestamp {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // Time is stored in nanoseconds. But it is displayed in microseconds.
-        let nanoseconds = self.0;
+        let nanoseconds = self.to_ns();
         let divisor = 1000;
         let microseconds = nanoseconds / divisor;
         let remainder = nanoseconds % divisor;
@@ -151,14 +285,10 @@ impl fmt::Display for Timestamp {
     }
 }
 
-#[derive(Debug, Copy, Clone)]
-pub enum ProcEntry {
-    Task(OpID),
-    MetaTask(OpID, VariantID, usize),
-    MapperCall(usize),
-    RuntimeCall(usize),
-    ProfTask(usize),
-}
+#[derive(
+    Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Default, Serialize, Add, Sub, From,
+)]
+pub struct TimestampDelta(pub i64 /* ns */);
 
 #[derive(Debug, Copy, Clone)]
 pub struct TimePoint<Entry, Secondary>
@@ -185,24 +315,242 @@ where
             time,
             entry,
             first,
-            secondary_sort_key: secondary_sort_key,
+            secondary_sort_key,
         }
     }
     pub fn time_key(&self) -> (u64, u8, Secondary) {
         (
-            self.time.0,
+            self.time.to_ns(),
             if self.first { 0 } else { 1 },
             self.secondary_sort_key,
         )
     }
 }
 
-pub type ProcPoint = TimePoint<ProcEntry, u64>;
+// Common methods that apply to Proc, Mem, Chan
+pub trait Container {
+    type E: std::marker::Copy + std::fmt::Debug;
+    type S: std::marker::Copy + std::fmt::Debug;
+    type Entry: ContainerEntry;
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, LowerHex)]
-pub struct ProcID(pub u64);
+    fn max_levels(&self, device: Option<DeviceKind>) -> u32;
+    fn max_levels_ready(&self, device: Option<DeviceKind>) -> u32;
+    fn time_points(&self, device: Option<DeviceKind>) -> &Vec<TimePoint<Self::E, Self::S>>;
+    fn time_points_stacked(
+        &self,
+        device: Option<DeviceKind>,
+    ) -> &Vec<Vec<TimePoint<Self::E, Self::S>>>;
+    fn util_time_points(&self, device: Option<DeviceKind>) -> &Vec<TimePoint<Self::E, Self::S>>;
+    fn entry(&self, entry: Self::E) -> &Self::Entry;
+    fn entry_mut(&mut self, entry: Self::E) -> &mut Self::Entry;
+
+    // For internal use only
+    fn stack(
+        &self,
+        time_points: Vec<TimePoint<Self::E, Self::S>>,
+        max_levels: u32,
+    ) -> Vec<Vec<TimePoint<Self::E, Self::S>>> {
+        let mut stacked = Vec::new();
+        stacked.resize_with(max_levels as usize + 1, Vec::new);
+        for point in time_points {
+            let level = self.entry(point.entry).base().level;
+            stacked[level.unwrap() as usize].push(point);
+        }
+        stacked
+    }
+}
+
+// Common methods that apply to ProcEntry, MemEntry, ChanEntry
+pub trait ContainerEntry {
+    fn base(&self) -> &Base;
+    fn base_mut(&mut self) -> &mut Base;
+    fn time_range(&self) -> TimeRange;
+    fn time_range_mut(&mut self) -> &mut TimeRange;
+    fn waiters(&self) -> Option<&Waiters>;
+    fn initiation(&self) -> Option<OpID>;
+    fn creator(&self) -> Option<EventID>;
+
+    // Methods that require State access
+    fn name(&self, state: &State) -> String;
+    fn color(&self, state: &State) -> Color;
+    fn provenance<'a, 'b>(&'a self, state: &'b State) -> Option<&'b str>;
+}
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ProcEntryKind {
+    Task(TaskID, VariantID),
+    MetaTask(VariantID),
+    MapperCall(MapperCallKindID),
+    RuntimeCall(RuntimeCallKindID),
+    GPUKernel(TaskID, VariantID),
+    ProfTask,
+}
+
+#[derive(Debug)]
+pub struct ProcEntry {
+    pub base: Base,
+    pub op_id: Option<OpID>,
+    pub initiation_op: Option<OpID>,
+    pub kind: ProcEntryKind,
+    pub time_range: TimeRange,
+    pub creator: EventID,
+    pub fevent: EventID,
+    pub waiters: Waiters,
+    pub subcalls: Vec<(ProfUID, Timestamp, Timestamp)>,
+}
+
+impl ProcEntry {
+    fn new(
+        base: Base,
+        op_id: Option<OpID>,
+        initiation_op: Option<OpID>,
+        kind: ProcEntryKind,
+        time_range: TimeRange,
+        creator: EventID,
+        fevent: EventID,
+    ) -> Self {
+        ProcEntry {
+            base,
+            op_id,
+            initiation_op,
+            kind,
+            time_range,
+            creator,
+            fevent,
+            waiters: Waiters::new(),
+            subcalls: Vec::new(),
+        }
+    }
+    fn trim_time_range(&mut self, start: Timestamp, stop: Timestamp) -> bool {
+        self.time_range.trim_time_range(start, stop)
+    }
+}
+
+impl ContainerEntry for ProcEntry {
+    fn base(&self) -> &Base {
+        &self.base
+    }
+
+    fn base_mut(&mut self) -> &mut Base {
+        &mut self.base
+    }
+
+    fn time_range(&self) -> TimeRange {
+        self.time_range
+    }
+
+    fn time_range_mut(&mut self) -> &mut TimeRange {
+        &mut self.time_range
+    }
+
+    fn waiters(&self) -> Option<&Waiters> {
+        Some(&self.waiters)
+    }
+
+    fn initiation(&self) -> Option<OpID> {
+        self.initiation_op
+    }
+
+    fn creator(&self) -> Option<EventID> {
+        Some(self.creator)
+    }
+
+    fn name(&self, state: &State) -> String {
+        let (op_id, initiation_op) = (self.op_id, self.initiation_op);
+
+        match self.kind {
+            ProcEntryKind::Task(task_id, variant_id) => {
+                let task_name = &state.task_kinds.get(&task_id).unwrap().name;
+                let variant_name = &state.variants.get(&(task_id, variant_id)).unwrap().name;
+                match task_name {
+                    Some(task_name) => {
+                        if task_name != variant_name {
+                            format!("{} [{}] <{}>", task_name, variant_name, op_id.unwrap().0)
+                        } else {
+                            format!("{} <{}>", task_name, op_id.unwrap().0)
+                        }
+                    }
+                    None => variant_name.clone(),
+                }
+            }
+            ProcEntryKind::MetaTask(variant_id) => {
+                state.meta_variants.get(&variant_id).unwrap().name.clone()
+            }
+            ProcEntryKind::MapperCall(kind) => {
+                let name = &state.mapper_call_kinds.get(&kind).unwrap().name;
+                if let Some(initiation_op_id) = initiation_op {
+                    format!("Mapper Call {} for {}", name, initiation_op_id.0)
+                } else {
+                    format!("Mapper Call {}", name)
+                }
+            }
+            ProcEntryKind::RuntimeCall(kind) => {
+                state.runtime_call_kinds.get(&kind).unwrap().name.clone()
+            }
+            ProcEntryKind::GPUKernel(task_id, variant_id) => {
+                let task_name = &state.task_kinds.get(&task_id).unwrap().name;
+                let variant_name = &state.variants.get(&(task_id, variant_id)).unwrap().name;
+                match task_name {
+                    Some(task_name) => {
+                        if task_name != variant_name {
+                            format!(
+                                "GPU Kernel(s) for {} [{}] <{}>",
+                                task_name,
+                                variant_name,
+                                op_id.unwrap().0
+                            )
+                        } else {
+                            format!("GPU Kernel(s) for {} <{}>", task_name, op_id.unwrap().0)
+                        }
+                    }
+                    None => format!("GPU Kernel(s) for {}", variant_name.clone()),
+                }
+            }
+            ProcEntryKind::ProfTask => {
+                format!("ProfTask <{:?}>", initiation_op.unwrap().0)
+            }
+        }
+    }
+
+    fn color(&self, state: &State) -> Color {
+        match self.kind {
+            ProcEntryKind::Task(task_id, variant_id)
+            | ProcEntryKind::GPUKernel(task_id, variant_id) => state
+                .variants
+                .get(&(task_id, variant_id))
+                .unwrap()
+                .color
+                .unwrap(),
+            ProcEntryKind::MetaTask(variant_id) => {
+                state.meta_variants.get(&variant_id).unwrap().color.unwrap()
+            }
+            ProcEntryKind::MapperCall(kind) => {
+                state.mapper_call_kinds.get(&kind).unwrap().color.unwrap()
+            }
+            ProcEntryKind::RuntimeCall(kind) => {
+                state.runtime_call_kinds.get(&kind).unwrap().color.unwrap()
+            }
+            ProcEntryKind::ProfTask => {
+                // FIXME don't hardcode this here
+                Color(0xFFC0CB)
+            }
+        }
+    }
+
+    fn provenance<'a, 'b>(&'a self, state: &'b State) -> Option<&'b str> {
+        if let Some(op_id) = self.op_id {
+            return state.find_op_provenance(op_id);
+        }
+        None
+    }
+}
+
+pub type ProcPoint = TimePoint<ProfUID, Timestamp>;
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, LowerHex)]
+pub struct ProcID(pub u64);
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct NodeID(pub u64);
 
 impl ProcID {
@@ -222,15 +570,20 @@ impl ProcID {
 pub struct Proc {
     pub proc_id: ProcID,
     pub kind: ProcKind,
-    pub tasks: BTreeMap<OpID, Task>,
-    pub meta_tasks: BTreeMap<(OpID, VariantID), Vec<MetaTask>>,
-    pub mapper_calls: Vec<MapperCall>,
-    pub runtime_calls: Vec<RuntimeCall>,
-    pub prof_tasks: Vec<ProfTask>,
-    pub max_levels: u32,
-    pub max_levels_ready: u32,
-    pub time_points: Vec<ProcPoint>,
-    pub util_time_points: Vec<ProcPoint>,
+    entries: BTreeMap<ProfUID, ProcEntry>,
+    tasks: BTreeMap<OpID, ProfUID>,
+    meta_tasks: BTreeMap<(OpID, VariantID), Vec<ProfUID>>,
+    max_levels: u32,
+    max_levels_ready: u32,
+    time_points: Vec<ProcPoint>,
+    time_points_stacked: Vec<Vec<ProcPoint>>,
+    util_time_points: Vec<ProcPoint>,
+    max_levels_device: u32,
+    max_levels_ready_device: u32,
+    time_points_device: Vec<ProcPoint>,
+    time_points_stacked_device: Vec<Vec<ProcPoint>>,
+    util_time_points_device: Vec<ProcPoint>,
+    visible: bool,
 }
 
 impl Proc {
@@ -238,114 +591,208 @@ impl Proc {
         Proc {
             proc_id,
             kind,
+            entries: BTreeMap::new(),
             tasks: BTreeMap::new(),
             meta_tasks: BTreeMap::new(),
-            mapper_calls: Vec::new(),
-            runtime_calls: Vec::new(),
-            prof_tasks: Vec::new(),
             max_levels: 0,
             max_levels_ready: 0,
             time_points: Vec::new(),
+            time_points_stacked: Vec::new(),
             util_time_points: Vec::new(),
+            max_levels_device: 0,
+            max_levels_ready_device: 0,
+            time_points_device: Vec::new(),
+            time_points_stacked_device: Vec::new(),
+            util_time_points_device: Vec::new(),
+            visible: true,
         }
+    }
+
+    fn create_proc_entry(
+        &mut self,
+        base: Base,
+        op: Option<OpID>,
+        initiation_op: Option<OpID>,
+        kind: ProcEntryKind,
+        time_range: TimeRange,
+        creator: EventID,
+        fevent: EventID,
+        op_prof_uid: &mut BTreeMap<OpID, ProfUID>,
+        prof_uid_proc: &mut BTreeMap<ProfUID, ProcID>,
+        fevents: &mut BTreeMap<EventID, ProfUID>,
+    ) -> &mut ProcEntry {
+        if let Some(op_id) = op {
+            op_prof_uid.insert(op_id, base.prof_uid);
+        }
+        prof_uid_proc.insert(base.prof_uid, self.proc_id);
+        // Insert the fevents for tasks into the data structure
+        match kind {
+            ProcEntryKind::Task(_, _) | ProcEntryKind::MetaTask(_) | ProcEntryKind::ProfTask => {
+                // We should only see an event once
+                assert!(!fevents.contains_key(&fevent));
+                fevents.insert(fevent, base.prof_uid);
+            }
+            _ => {}
+        }
+        match kind {
+            ProcEntryKind::Task(_, _) => {
+                self.tasks.insert(op.unwrap(), base.prof_uid);
+            }
+            ProcEntryKind::MetaTask(variant_id) => {
+                self.meta_tasks
+                    .entry((initiation_op.unwrap(), variant_id))
+                    .or_insert_with(Vec::new)
+                    .push(base.prof_uid);
+            }
+            // If we don't need to look up later... don't bother building the index
+            _ => {}
+        }
+        self.entries.entry(base.prof_uid).or_insert_with(|| {
+            ProcEntry::new(base, op, initiation_op, kind, time_range, creator, fevent)
+        })
+    }
+
+    pub fn find_task(&self, op_id: OpID) -> Option<&ProcEntry> {
+        let prof_uid = self.tasks.get(&op_id)?;
+        self.entries.get(prof_uid)
+    }
+
+    pub fn find_task_mut(&mut self, op_id: OpID) -> Option<&mut ProcEntry> {
+        let prof_uid = self.tasks.get(&op_id)?;
+        self.entries.get_mut(prof_uid)
+    }
+
+    pub fn find_last_meta(&self, op_id: OpID, variant_id: VariantID) -> Option<&ProcEntry> {
+        let prof_uid = self.meta_tasks.get(&(op_id, variant_id))?.last()?;
+        self.entries.get(prof_uid)
+    }
+
+    pub fn find_last_meta_mut(
+        &mut self,
+        op_id: OpID,
+        variant_id: VariantID,
+    ) -> Option<&mut ProcEntry> {
+        let prof_uid = self.meta_tasks.get(&(op_id, variant_id))?.last()?;
+        self.entries.get_mut(prof_uid)
+    }
+
+    pub fn find_entry(&self, prof_uid: ProfUID) -> Option<&ProcEntry> {
+        self.entries.get(&prof_uid)
     }
 
     pub fn is_empty(&self) -> bool {
-        self.tasks.is_empty()
-            && self.meta_tasks.is_empty()
-            && self.mapper_calls.is_empty()
-            && self.runtime_calls.is_empty()
-            && self.prof_tasks.is_empty()
+        self.entries.is_empty()
     }
 
-    pub fn entry(&self, entry: ProcEntry) -> (&Base, &TimeRange, &Waiters) {
-        match entry {
-            ProcEntry::Task(op_id) => {
-                let task = self.tasks.get(&op_id).unwrap();
-                (&task.base, &task.time_range, &task.waiters)
-            }
-            ProcEntry::MetaTask(op_id, variant_id, idx) => {
-                let task = &self.meta_tasks.get(&(op_id, variant_id)).unwrap()[idx];
-                (&task.base, &task.time_range, &task.waiters)
-            }
-            ProcEntry::MapperCall(idx) => {
-                let call = &self.mapper_calls[idx];
-                (&call.base, &call.time_range, &call.waiters)
-            }
-            ProcEntry::RuntimeCall(idx) => {
-                let call = &self.runtime_calls[idx];
-                (&call.base, &call.time_range, &call.waiters)
-            }
-            ProcEntry::ProfTask(idx) => {
-                let task = &self.prof_tasks.get(idx).unwrap();
-                (&task.base, &task.time_range, &task.waiters)
-            }
-        }
-    }
-
-    pub fn entry_mut(&mut self, entry: ProcEntry) -> (&mut Base, &mut TimeRange, &mut Waiters) {
-        match entry {
-            ProcEntry::Task(op_id) => {
-                let task = self.tasks.get_mut(&op_id).unwrap();
-                (&mut task.base, &mut task.time_range, &mut task.waiters)
-            }
-            ProcEntry::MetaTask(op_id, variant_id, idx) => {
-                let task = &mut self.meta_tasks.get_mut(&(op_id, variant_id)).unwrap()[idx];
-                (&mut task.base, &mut task.time_range, &mut task.waiters)
-            }
-            ProcEntry::MapperCall(idx) => {
-                let call = &mut self.mapper_calls[idx];
-                (&mut call.base, &mut call.time_range, &mut call.waiters)
-            }
-            ProcEntry::RuntimeCall(idx) => {
-                let call = &mut self.runtime_calls[idx];
-                (&mut call.base, &mut call.time_range, &mut call.waiters)
-            }
-            ProcEntry::ProfTask(idx) => {
-                let task = self.prof_tasks.get_mut(idx).unwrap();
-                (&mut task.base, &mut task.time_range, &mut task.waiters)
-            }
-        }
-    }
-
-    pub fn entry_base(&self, entry: ProcEntry) -> &Base {
-        self.entry(entry).0
-    }
-
-    pub fn entry_base_mut(&mut self, entry: ProcEntry) -> &mut Base {
-        self.entry_mut(entry).0
+    pub(crate) fn entries(&self) -> impl Iterator<Item = &ProcEntry> {
+        self.entries.values()
     }
 
     fn trim_time_range(&mut self, start: Timestamp, stop: Timestamp) {
-        // BTreeMap::retain requires Rust 1.53
-        let mut removed_tasks = Vec::new();
-        for (op_id, task) in self.tasks.iter_mut() {
-            task.trim_time_range(start, stop);
-            if task.time_range.was_removed {
-                removed_tasks.push(*op_id);
-            }
-        }
-        for op_id in removed_tasks {
-            self.tasks.remove(&op_id);
-        }
-        for mapper_call in &mut self.mapper_calls {
-            mapper_call.trim_time_range(start, stop);
-        }
-        self.mapper_calls.retain(|t| !t.time_range.was_removed);
-        for runtime_call in &mut self.runtime_calls {
-            runtime_call.trim_time_range(start, stop);
-        }
-        self.runtime_calls.retain(|t| !t.time_range.was_removed);
-        for prof_task in &mut self.prof_tasks {
-            prof_task.trim_time_range(start, stop);
-        }
-        self.prof_tasks.retain(|t| !t.time_range.was_removed);
+        self.entries.retain(|_, t| !t.trim_time_range(start, stop));
     }
 
-    fn sort_time_range(&mut self) {
+    fn sort_calls_and_waits(&mut self, fevents: &BTreeMap<EventID, ProfUID>) {
+        // Before we sort things, we need to rearrange the waiters from
+        // any tasks into the appropriate runtime/mapper calls and make the
+        // runtime/mapper calls appear as waiters in the original tasks
+        let mut subcalls = BTreeMap::new();
+        for (uid, entry) in self.entries.iter() {
+            match entry.kind {
+                ProcEntryKind::MapperCall(_) | ProcEntryKind::RuntimeCall(_) => {
+                    let task_uid = fevents.get(&entry.fevent).unwrap();
+                    let call_start = entry.time_range.start.unwrap();
+                    let call_stop = entry.time_range.stop.unwrap();
+                    assert!(call_start <= call_stop);
+                    subcalls
+                        .entry(*task_uid)
+                        .or_insert_with(Vec::new)
+                        .push((*uid, call_start, call_stop));
+                }
+                _ => {}
+            }
+        }
+        for (task_uid, calls) in subcalls.iter_mut() {
+            // Remove the old entry from the map to keep the borrow checker happy
+            let mut task_entry = self.entries.remove(&task_uid).unwrap();
+            // Sort subcalls by their size from smallest to largest
+            calls.sort_by_key(|a| a.2 - a.1);
+            // Push waits into the smallest subcall we can find
+            let mut to_remove = Vec::new();
+            for (idx, wait) in task_entry.waiters.wait_intervals.iter().enumerate() {
+                // Find the smallest containing call
+                for (call_uid, call_start, call_stop) in calls.iter() {
+                    if (*call_start <= wait.start) && (wait.end <= *call_stop) {
+                        let call_entry = self.entries.get_mut(call_uid).unwrap();
+                        call_entry
+                            .waiters
+                            .wait_intervals
+                            .push(WaitInterval::new(wait.start, wait.ready, wait.end));
+                        to_remove.push(idx);
+                        break;
+                    } else {
+                        // Waits should not be partially overlapping with calls
+                        assert!((wait.end <= *call_start) || (*call_stop <= wait.start));
+                    }
+                }
+            }
+            // Remove any waits that we moved into a call
+            for idx in to_remove.iter().rev() {
+                task_entry.waiters.wait_intervals.remove(*idx);
+            }
+            // For each subcall find the next largest subcall that dominates
+            // it and add a wait for it, if one isn't found then we add the
+            // wait to the task for that subcall
+            for (idx1, (call_uid, call_start, call_stop)) in calls.iter().enumerate() {
+                let mut found = false;
+                for idx2 in idx1 + 1..calls.len() {
+                    let (next_uid, next_start, next_stop) = calls[idx2];
+                    if (next_start <= *call_start) && (*call_stop <= next_stop) {
+                        let next_entry = self.entries.get_mut(&next_uid).unwrap();
+                        next_entry.waiters.wait_intervals.push(WaitInterval::new(
+                            *call_start,
+                            *call_stop,
+                            *call_stop,
+                        ));
+                        found = true;
+                        break;
+                    } else {
+                        // Calls should not be partially overlapping with eachother
+                        assert!((*call_stop <= next_start) || (next_stop <= *call_start));
+                    }
+                }
+                if !found {
+                    task_entry.waiters.wait_intervals.push(WaitInterval::new(
+                        *call_start,
+                        *call_stop,
+                        *call_stop,
+                    ));
+                }
+                // Update the operation info for the calls
+                let call_entry = self.entries.get_mut(&call_uid).unwrap();
+                match task_entry.kind {
+                    ProcEntryKind::Task(_, _) => {
+                        call_entry.initiation_op = task_entry.op_id;
+                    }
+                    ProcEntryKind::MetaTask(_) | ProcEntryKind::ProfTask => {
+                        call_entry.initiation_op = task_entry.initiation_op;
+                    }
+                    _ => {
+                        panic!("bad processor entry kind");
+                    }
+                }
+            }
+            // Save any calls on the proc entry
+            std::mem::swap(&mut task_entry.subcalls, calls);
+            // Finally add the task entry back in now that we're done mutating it
+            self.entries.insert(*task_uid, task_entry);
+        }
+    }
+
+    fn sort_time_range(&mut self, fevents: &BTreeMap<EventID, ProfUID>) {
         fn add(
             time: &TimeRange,
-            entry: ProcEntry,
+            prof_uid: ProfUID,
             all_points: &mut Vec<ProcPoint>,
             points: &mut Vec<ProcPoint>,
             util_points: &mut Vec<ProcPoint>,
@@ -353,114 +800,229 @@ impl Proc {
             let start = time.start.unwrap();
             let stop = time.stop.unwrap();
             let ready = time.ready;
-            if stop - start > TASK_GRANULARITY_THRESHOLD && !ready.is_none() {
-                all_points.push(ProcPoint::new(ready.unwrap(), entry, true, start.0));
-                all_points.push(ProcPoint::new(stop, entry, false, 0));
+            if stop - start > TASK_GRANULARITY_THRESHOLD && ready.is_some() {
+                all_points.push(ProcPoint::new(ready.unwrap(), prof_uid, true, start));
+                all_points.push(ProcPoint::new(stop, prof_uid, false, Timestamp::ZERO));
             } else {
-                all_points.push(ProcPoint::new(start, entry, true, 0));
-                all_points.push(ProcPoint::new(stop, entry, false, 0));
+                all_points.push(ProcPoint::new(start, prof_uid, true, Timestamp::MAX - stop));
+                all_points.push(ProcPoint::new(stop, prof_uid, false, Timestamp::ZERO));
             }
 
-            points.push(ProcPoint::new(start, entry, true, 0));
-            points.push(ProcPoint::new(stop, entry, false, 0));
+            points.push(ProcPoint::new(start, prof_uid, true, Timestamp::MAX - stop));
+            points.push(ProcPoint::new(stop, prof_uid, false, Timestamp::ZERO));
 
-            util_points.push(ProcPoint::new(start, entry, true, 0));
-            util_points.push(ProcPoint::new(stop, entry, false, 0));
+            util_points.push(ProcPoint::new(start, prof_uid, true, Timestamp::MAX - stop));
+            util_points.push(ProcPoint::new(stop, prof_uid, false, Timestamp::ZERO));
         }
-        fn add_waiters(waiters: &Waiters, entry: ProcEntry, util_points: &mut Vec<ProcPoint>) {
+        fn add_waiters(waiters: &Waiters, prof_uid: ProfUID, util_points: &mut Vec<ProcPoint>) {
             for wait in &waiters.wait_intervals {
-                util_points.push(ProcPoint::new(wait.start, entry, false, 0));
-                util_points.push(ProcPoint::new(wait.end, entry, true, 0));
+                util_points.push(ProcPoint::new(
+                    wait.start,
+                    prof_uid,
+                    false,
+                    Timestamp::MAX - wait.end,
+                ));
+                util_points.push(ProcPoint::new(wait.end, prof_uid, true, Timestamp::ZERO));
             }
         }
+
+        // Before we do anything sort the runtime/mapper calls and waiters
+        self.sort_calls_and_waits(fevents);
 
         let mut all_points = Vec::new();
         let mut points = Vec::new();
         let mut util_points = Vec::new();
 
-        for task in self.tasks.values() {
-            let time = &task.time_range;
-            let entry = ProcEntry::Task(task.op_id);
-            add(&time, entry, &mut all_points, &mut points, &mut util_points);
-            add_waiters(&task.waiters, entry, &mut util_points);
-        }
-        for tasks in self.meta_tasks.values() {
-            for (idx, task) in tasks.iter().enumerate() {
-                let time = &task.time_range;
-                let entry = ProcEntry::MetaTask(task.op_id, task.variant_id, idx);
-                add(&time, entry, &mut all_points, &mut points, &mut util_points);
-                add_waiters(&task.waiters, entry, &mut util_points);
+        let mut all_points_device = Vec::new();
+        let mut points_device = Vec::new();
+        let mut util_points_device = Vec::new();
+
+        if self.kind == ProcKind::GPU {
+            // On GPUs, split the entries between GPU kernels (which
+            // we put on the device timeline) and other tasks (which
+            // we put on the host timeline).
+            for (uid, entry) in &self.entries {
+                let time = &entry.time_range;
+                match entry.kind {
+                    ProcEntryKind::GPUKernel(_, _) => {
+                        add(
+                            time,
+                            *uid,
+                            &mut all_points_device,
+                            &mut points_device,
+                            &mut util_points_device,
+                        );
+                        add_waiters(&entry.waiters, *uid, &mut util_points_device);
+                    }
+                    _ => {
+                        add(time, *uid, &mut all_points, &mut points, &mut util_points);
+                        add_waiters(&entry.waiters, *uid, &mut util_points);
+                    }
+                }
             }
-        }
-        for (idx, mapper_call) in self.mapper_calls.iter().enumerate() {
-            let time = &mapper_call.time_range;
-            let entry = ProcEntry::MapperCall(idx);
-            add(&time, entry, &mut all_points, &mut points, &mut util_points);
-            add_waiters(&mapper_call.waiters, entry, &mut util_points);
-        }
-        for (idx, runtime_call) in self.runtime_calls.iter().enumerate() {
-            let time = &runtime_call.time_range;
-            let entry = ProcEntry::RuntimeCall(idx);
-            add(&time, entry, &mut all_points, &mut points, &mut util_points);
-            add_waiters(&runtime_call.waiters, entry, &mut util_points);
-        }
-
-        for (idx, prof_task) in self.prof_tasks.iter().enumerate() {
-            let time = &prof_task.time_range;
-            let entry = ProcEntry::ProfTask(idx);
-            add(&time, entry, &mut all_points, &mut points, &mut util_points);
-            add_waiters(&prof_task.waiters, entry, &mut util_points);
-        }
-
-        points.sort_by(|a, b| a.time_key().cmp(&b.time_key()));
-        util_points.sort_by(|a, b| a.time_key().cmp(&b.time_key()));
-
-        // Hack: This is a max heap so reverse the values as they go in.
-        let mut free_levels = BinaryHeap::<Reverse<u32>>::new();
-        for point in &points {
-            if point.first {
-                let level = if let Some(level) = free_levels.pop() {
-                    level.0
-                } else {
-                    self.max_levels += 1;
-                    self.max_levels
-                };
-                self.entry_base_mut(point.entry).set_level(level);
-            } else {
-                let level = self.entry_base(point.entry).level.unwrap();
-                free_levels.push(Reverse(level));
+        } else {
+            for (uid, entry) in &self.entries {
+                let time = &entry.time_range;
+                add(time, *uid, &mut all_points, &mut points, &mut util_points);
+                add_waiters(&entry.waiters, *uid, &mut util_points);
             }
         }
 
-        all_points.sort_by(|a, b| a.time_key().cmp(&b.time_key()));
+        let mut sort_and_stack =
+            |max_levels: &mut u32,
+             max_levels_ready: &mut u32,
+             all_points: &mut Vec<ProcPoint>,
+             points: &mut Vec<ProcPoint>,
+             util_points: &mut Vec<ProcPoint>| {
+                points.sort_by_key(|a| a.time_key());
+                util_points.sort_by_key(|a| a.time_key());
 
-        // Hack: This is a max heap so reverse the values as they go in.
-        let mut free_levels_ready = BinaryHeap::<Reverse<u32>>::new();
-        for point in &all_points {
-            if point.first {
-                let level = if let Some(level) = free_levels_ready.pop() {
-                    level.0
-                } else {
-                    self.max_levels_ready += 1;
-                    self.max_levels_ready
-                };
-                self.entry_base_mut(point.entry).set_level_ready(level);
-            } else {
-                let level = self.entry_base(point.entry).level_ready.unwrap();
-                free_levels_ready.push(Reverse(level));
-            }
-        }
+                // Hack: This is a max heap so reverse the values as they go in.
+                let mut free_levels = BinaryHeap::<Reverse<u32>>::new();
+                for point in points.iter() {
+                    if point.first {
+                        let level = if let Some(level) = free_levels.pop() {
+                            level.0
+                        } else {
+                            max_levels.postincrement()
+                        };
+                        self.entry_mut(point.entry).base.set_level(level);
+                    } else {
+                        let level = self.entry(point.entry).base.level.unwrap();
+                        free_levels.push(Reverse(level));
+                    }
+                }
 
+                all_points.sort_by_key(|a| a.time_key());
+
+                // Hack: This is a max heap so reverse the values as they go in.
+                let mut free_levels_ready = BinaryHeap::<Reverse<u32>>::new();
+                for point in all_points {
+                    if point.first {
+                        let level = if let Some(level) = free_levels_ready.pop() {
+                            level.0
+                        } else {
+                            max_levels_ready.postincrement()
+                        };
+                        self.entry_mut(point.entry).base.set_level_ready(level);
+                    } else {
+                        let level = self.entry(point.entry).base.level_ready.unwrap();
+                        free_levels_ready.push(Reverse(level));
+                    }
+                }
+
+                // Rendering of the profile will never use non-first points, so we can
+                // throw those away now.
+                points.retain(|p| p.first);
+            };
+
+        let mut max_levels = 0;
+        let mut max_levels_ready = 0;
+        let mut max_levels_device = 0;
+        let mut max_levels_ready_device = 0;
+        sort_and_stack(
+            &mut max_levels,
+            &mut max_levels_ready,
+            &mut all_points,
+            &mut points,
+            &mut util_points,
+        );
+        sort_and_stack(
+            &mut max_levels_device,
+            &mut max_levels_ready_device,
+            &mut all_points_device,
+            &mut points_device,
+            &mut util_points_device,
+        );
+
+        self.max_levels = max_levels;
+        self.max_levels_ready = max_levels_ready;
         self.time_points = points;
         self.util_time_points = util_points;
+
+        self.max_levels_device = max_levels_device;
+        self.max_levels_ready_device = max_levels_ready_device;
+        self.time_points_device = points_device;
+        self.util_time_points_device = util_points_device;
+    }
+
+    fn stack_time_points(&mut self) {
+        let mut time_points = Vec::new();
+        std::mem::swap(&mut time_points, &mut self.time_points);
+        self.time_points_stacked = self.stack(time_points, self.max_levels);
+
+        let mut time_points_device = Vec::new();
+        std::mem::swap(&mut time_points_device, &mut self.time_points_device);
+        self.time_points_stacked_device = self.stack(time_points_device, self.max_levels_device);
+    }
+
+    pub fn is_visible(&self) -> bool {
+        self.visible
     }
 }
 
-pub type MemEntry = (InstID, OpID);
+impl Container for Proc {
+    type E = ProfUID;
+    type S = Timestamp;
+    type Entry = ProcEntry;
 
-pub type MemPoint = TimePoint<MemEntry, ()>;
+    fn max_levels(&self, device: Option<DeviceKind>) -> u32 {
+        match device {
+            Some(DeviceKind::Device) => self.max_levels_device,
+            Some(DeviceKind::Host) => self.max_levels,
+            None => self.max_levels,
+        }
+    }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, LowerHex)]
+    fn max_levels_ready(&self, device: Option<DeviceKind>) -> u32 {
+        match device {
+            Some(DeviceKind::Device) => self.max_levels_ready_device,
+            Some(DeviceKind::Host) => self.max_levels_ready,
+            None => self.max_levels_ready,
+        }
+    }
+
+    fn time_points(&self, device: Option<DeviceKind>) -> &Vec<TimePoint<Self::E, Self::S>> {
+        match device {
+            Some(DeviceKind::Device) => &self.time_points_device,
+            Some(DeviceKind::Host) => &self.time_points,
+            None => &self.time_points,
+        }
+    }
+
+    fn time_points_stacked(
+        &self,
+        device: Option<DeviceKind>,
+    ) -> &Vec<Vec<TimePoint<Self::E, Self::S>>> {
+        match device {
+            Some(DeviceKind::Device) => &self.time_points_stacked_device,
+            Some(DeviceKind::Host) => &self.time_points_stacked,
+            None => &self.time_points_stacked,
+        }
+    }
+
+    fn util_time_points(&self, device: Option<DeviceKind>) -> &Vec<TimePoint<Self::E, Self::S>> {
+        match device {
+            Some(DeviceKind::Device) => &self.util_time_points_device,
+            Some(DeviceKind::Host) => &self.util_time_points,
+            None => &self.util_time_points,
+        }
+    }
+
+    fn entry(&self, prof_uid: ProfUID) -> &ProcEntry {
+        self.entries.get(&prof_uid).unwrap()
+    }
+
+    fn entry_mut(&mut self, prof_uid: ProfUID) -> &mut ProcEntry {
+        self.entries.get_mut(&prof_uid).unwrap()
+    }
+}
+
+pub type MemEntry = Inst;
+
+pub type MemPoint = TimePoint<InstUID, Timestamp>;
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, LowerHex)]
 pub struct MemID(pub u64);
 
 impl MemID {
@@ -480,9 +1042,12 @@ pub struct Mem {
     pub mem_id: MemID,
     pub kind: MemKind,
     pub capacity: u64,
-    pub insts: BTreeMap<(InstID, OpID), Inst>,
-    pub time_points: Vec<MemPoint>,
-    pub max_live_insts: u32,
+    pub insts: BTreeMap<InstUID, Inst>,
+    time_points: Vec<MemPoint>,
+    time_points_stacked: Vec<Vec<MemPoint>>,
+    util_time_points: Vec<MemPoint>,
+    max_live_insts: u32,
+    visible: bool,
 }
 
 impl Mem {
@@ -493,8 +1058,15 @@ impl Mem {
             capacity,
             insts: BTreeMap::new(),
             time_points: Vec::new(),
+            time_points_stacked: Vec::new(),
+            util_time_points: Vec::new(),
             max_live_insts: 0,
+            visible: true,
         }
+    }
+
+    fn add_inst(&mut self, inst: Inst) {
+        self.insts.insert(inst.inst_uid, inst);
     }
 
     pub fn is_empty(&self) -> bool {
@@ -502,40 +1074,46 @@ impl Mem {
     }
 
     fn trim_time_range(&mut self, start: Timestamp, stop: Timestamp) {
-        // BTreeMap::retain requires Rust 1.53
-        let mut removed_insts = Vec::new();
-        for (key, inst) in self.insts.iter_mut() {
-            inst.trim_time_range(start, stop);
-            if inst.time_range.was_removed {
-                removed_insts.push(*key);
-            }
-        }
-        for op_id in removed_insts {
-            self.insts.remove(&op_id);
-        }
+        self.insts.retain(|_, i| !i.trim_time_range(start, stop));
     }
 
     fn sort_time_range(&mut self) {
+        let mut time_points = Vec::new();
+        let mut time_points_level = Vec::new();
+
         for (key, inst) in &self.insts {
-            self.time_points.push(MemPoint::new(
+            time_points.push(MemPoint::new(
                 inst.time_range.start.unwrap(),
                 *key,
                 true,
-                (),
+                Timestamp::MAX - inst.time_range.stop.unwrap(),
             ));
-            self.time_points.push(MemPoint::new(
+            time_points.push(MemPoint::new(
                 inst.time_range.stop.unwrap(),
                 *key,
                 false,
-                (),
-            ))
+                Timestamp::ZERO,
+            ));
+
+            time_points_level.push(MemPoint::new(
+                inst.time_range.create.unwrap(),
+                *key,
+                true,
+                Timestamp::MAX - inst.time_range.stop.unwrap(),
+            ));
+            time_points_level.push(MemPoint::new(
+                inst.time_range.stop.unwrap(),
+                *key,
+                false,
+                Timestamp::ZERO,
+            ));
         }
-        self.time_points
-            .sort_by(|a, b| a.time_key().cmp(&b.time_key()));
+        time_points.sort_by_key(|a| a.time_key());
+        time_points_level.sort_by_key(|a| a.time_key());
 
         // Hack: This is a max heap so reverse the values as they go in.
         let mut free_levels = BinaryHeap::<Reverse<u32>>::new();
-        for point in &self.time_points {
+        for point in &time_points_level {
             if point.first {
                 let level = if let Some(level) = free_levels.pop() {
                     level.0
@@ -553,40 +1131,230 @@ impl Mem {
                 free_levels.push(Reverse(level));
             }
         }
+
+        // Rendering of the profile will never use non-first points, so we can
+        // throw those away now.
+        self.time_points = time_points.iter().filter(|p| p.first).copied().collect();
+        self.util_time_points = time_points;
+    }
+
+    fn stack_time_points(&mut self) {
+        let mut time_points = Vec::new();
+        std::mem::swap(&mut time_points, &mut self.time_points);
+        self.time_points_stacked = self.stack(time_points, self.max_live_insts);
+    }
+
+    pub fn is_visible(&self) -> bool {
+        self.visible
+    }
+}
+
+impl Container for Mem {
+    type E = InstUID;
+    type S = Timestamp;
+    type Entry = Inst;
+
+    fn max_levels(&self, device: Option<DeviceKind>) -> u32 {
+        assert!(device.is_none());
+        self.max_live_insts
+    }
+
+    fn max_levels_ready(&self, _device: Option<DeviceKind>) -> u32 {
+        unreachable!()
+    }
+
+    fn time_points(&self, device: Option<DeviceKind>) -> &Vec<TimePoint<Self::E, Self::S>> {
+        assert!(device.is_none());
+        &self.time_points
+    }
+
+    fn time_points_stacked(
+        &self,
+        device: Option<DeviceKind>,
+    ) -> &Vec<Vec<TimePoint<Self::E, Self::S>>> {
+        assert!(device.is_none());
+        &self.time_points_stacked
+    }
+
+    fn util_time_points(&self, device: Option<DeviceKind>) -> &Vec<TimePoint<Self::E, Self::S>> {
+        assert!(device.is_none());
+        &self.util_time_points
+    }
+
+    fn entry(&self, inst_uid: InstUID) -> &Inst {
+        self.insts.get(&inst_uid).unwrap()
+    }
+
+    fn entry_mut(&mut self, inst_uid: InstUID) -> &mut Inst {
+        self.insts.get_mut(&inst_uid).unwrap()
     }
 }
 
 #[derive(Debug)]
 pub struct MemProcAffinity {
-    mem_id: MemID,
-    pub proc_ids: Vec<ProcID>,
+    _mem_id: MemID,
+    bandwidth: u32,
+    latency: u32,
+    pub best_aff_proc: ProcID,
 }
 
 impl MemProcAffinity {
-    fn new(mem_id: MemID) -> Self {
+    fn new(mem_id: MemID, bandwidth: u32, latency: u32, best_aff_proc: ProcID) -> Self {
         MemProcAffinity {
-            mem_id,
-            proc_ids: Vec::new(),
+            _mem_id: mem_id,
+            bandwidth,
+            latency,
+            best_aff_proc,
         }
     }
-    fn add_proc_id(&mut self, proc_id: ProcID) {
-        self.proc_ids.push(proc_id);
+    fn update_best_aff(&mut self, proc_id: ProcID, b: u32, l: u32) {
+        if b > self.bandwidth {
+            self.best_aff_proc = proc_id;
+            self.bandwidth = b;
+            self.latency = l;
+        }
     }
 }
 
 #[derive(Debug, Copy, Clone)]
-pub enum ChanEntry {
-    Copy(usize),
-    Fill(usize),
-    DepPart(usize),
+pub enum ChanEntryKind {
+    Copy(EventID),
+    Fill(EventID),
+    DepPart(OpID, usize),
 }
 
-pub type ChanPoint = TimePoint<ChanEntry, ()>;
+#[derive(Debug)]
+pub enum ChanEntry {
+    Copy(Copy),
+    Fill(Fill),
+    DepPart(DepPart),
+}
+
+impl ChanEntry {
+    fn trim_time_range(&mut self, start: Timestamp, stop: Timestamp) -> bool {
+        self.time_range_mut().trim_time_range(start, stop)
+    }
+}
+
+impl ContainerEntry for ChanEntry {
+    fn base(&self) -> &Base {
+        match self {
+            ChanEntry::Copy(copy) => &copy.base,
+            ChanEntry::Fill(fill) => &fill.base,
+            ChanEntry::DepPart(deppart) => &deppart.base,
+        }
+    }
+
+    fn base_mut(&mut self) -> &mut Base {
+        match self {
+            ChanEntry::Copy(copy) => &mut copy.base,
+            ChanEntry::Fill(fill) => &mut fill.base,
+            ChanEntry::DepPart(deppart) => &mut deppart.base,
+        }
+    }
+
+    fn time_range(&self) -> TimeRange {
+        match self {
+            ChanEntry::Copy(copy) => copy.time_range,
+            ChanEntry::Fill(fill) => fill.time_range,
+            ChanEntry::DepPart(deppart) => deppart.time_range,
+        }
+    }
+
+    fn time_range_mut(&mut self) -> &mut TimeRange {
+        match self {
+            ChanEntry::Copy(copy) => &mut copy.time_range,
+            ChanEntry::Fill(fill) => &mut fill.time_range,
+            ChanEntry::DepPart(deppart) => &mut deppart.time_range,
+        }
+    }
+
+    fn waiters(&self) -> Option<&Waiters> {
+        None
+    }
+
+    fn initiation(&self) -> Option<OpID> {
+        match self {
+            ChanEntry::Copy(copy) => Some(copy.op_id),
+            ChanEntry::Fill(fill) => Some(fill.op_id),
+            ChanEntry::DepPart(deppart) => Some(deppart.op_id),
+        }
+    }
+
+    fn creator(&self) -> Option<EventID> {
+        match self {
+            ChanEntry::Copy(copy) => Some(copy.creator),
+            ChanEntry::Fill(fill) => Some(fill.creator),
+            ChanEntry::DepPart(deppart) => Some(deppart.creator),
+        }
+    }
+
+    fn name(&self, state: &State) -> String {
+        match self {
+            ChanEntry::Copy(copy) => {
+                let nreqs = copy.copy_inst_infos.len();
+                if nreqs > 0 {
+                    format!(
+                        "{}: size={}, num reqs={}{}",
+                        copy.copy_kind.unwrap(),
+                        SizePretty(copy.size),
+                        nreqs,
+                        CopyInstInfoVec(&copy.copy_inst_infos, state)
+                    )
+                } else {
+                    format!("Copy: size={}, num reqs={}", SizePretty(copy.size), nreqs,)
+                }
+            }
+            ChanEntry::Fill(fill) => {
+                let nreqs = fill.fill_inst_infos.len();
+                if nreqs > 0 {
+                    format!(
+                        "Fill: num reqs={}{}",
+                        nreqs,
+                        FillInstInfoVec(&fill.fill_inst_infos, state)
+                    )
+                } else {
+                    format!("Fill: num reqs={}", nreqs)
+                }
+            }
+            ChanEntry::DepPart(deppart) => format!("{}", deppart.part_op),
+        }
+    }
+
+    fn color(&self, state: &State) -> Color {
+        let initiation = self.initiation().unwrap();
+        state.get_op_color(initiation)
+    }
+
+    fn provenance<'a, 'b>(&'a self, state: &'b State) -> Option<&'b str> {
+        let initiation = self.initiation().unwrap();
+        state.find_op_provenance(initiation)
+    }
+}
+
+pub type ChanPoint = TimePoint<ProfUID, Timestamp>;
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, TryFromPrimitive)]
+#[repr(u32)]
+pub enum ChanKind {
+    Copy = 0,
+    Fill = 1,
+    Gather = 2,
+    Scatter = 3,
+    DepPart = 4,
+}
+
+impl fmt::Display for ChanKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ChanID {
     pub src: Option<MemID>,
     pub dst: Option<MemID>,
+    pub channel_kind: ChanKind,
 }
 
 impl ChanID {
@@ -594,18 +1362,35 @@ impl ChanID {
         ChanID {
             src: Some(src),
             dst: Some(dst),
+            channel_kind: ChanKind::Copy,
         }
     }
     fn new_fill(dst: MemID) -> Self {
         ChanID {
             src: None,
             dst: Some(dst),
+            channel_kind: ChanKind::Fill,
+        }
+    }
+    fn new_gather(dst: MemID) -> Self {
+        ChanID {
+            src: None,
+            dst: Some(dst),
+            channel_kind: ChanKind::Gather,
+        }
+    }
+    fn new_scatter(src: MemID) -> Self {
+        ChanID {
+            src: Some(src),
+            dst: None,
+            channel_kind: ChanKind::Scatter,
         }
     }
     fn new_deppart() -> Self {
         ChanID {
             src: None,
             dst: None,
+            channel_kind: ChanKind::DepPart,
         }
     }
 
@@ -621,113 +1406,151 @@ impl ChanID {
 #[derive(Debug)]
 pub struct Chan {
     pub chan_id: ChanID,
-    pub copies: Vec<Copy>,
-    pub fills: Vec<Fill>,
-    pub depparts: Vec<DepPart>,
-    pub time_points: Vec<ChanPoint>,
-    pub max_levels: u32,
+    entries: BTreeMap<ProfUID, ChanEntry>,
+    copies: BTreeMap<EventID, ProfUID>,
+    fills: BTreeMap<EventID, ProfUID>,
+    depparts: BTreeMap<OpID, Vec<ProfUID>>,
+    time_points: Vec<ChanPoint>,
+    time_points_stacked: Vec<Vec<ChanPoint>>,
+    util_time_points: Vec<ChanPoint>,
+    max_levels: u32,
+    visible: bool,
 }
 
 impl Chan {
     fn new(chan_id: ChanID) -> Self {
         Chan {
             chan_id,
-            copies: Vec::new(),
-            fills: Vec::new(),
-            depparts: Vec::new(),
+            entries: BTreeMap::new(),
+            copies: BTreeMap::new(),
+            fills: BTreeMap::new(),
+            depparts: BTreeMap::new(),
             time_points: Vec::new(),
+            time_points_stacked: Vec::new(),
+            util_time_points: Vec::new(),
             max_levels: 0,
+            visible: true,
         }
+    }
+
+    fn add_copy(&mut self, copy: Copy) {
+        self.copies.insert(copy.fevent, copy.base.prof_uid);
+        self.entries
+            .entry(copy.base.prof_uid)
+            .or_insert(ChanEntry::Copy(copy));
+    }
+
+    fn add_fill(&mut self, fill: Fill) {
+        self.fills.insert(fill.fevent, fill.base.prof_uid);
+        self.entries
+            .entry(fill.base.prof_uid)
+            .or_insert(ChanEntry::Fill(fill));
+    }
+
+    fn add_deppart(&mut self, deppart: DepPart) {
+        self.depparts
+            .entry(deppart.op_id)
+            .or_insert_with(Vec::new)
+            .push(deppart.base.prof_uid);
+        self.entries
+            .entry(deppart.base.prof_uid)
+            .or_insert(ChanEntry::DepPart(deppart));
     }
 
     pub fn is_empty(&self) -> bool {
-        self.copies.is_empty() && self.fills.is_empty() && self.depparts.is_empty()
+        self.entries.is_empty()
     }
 
     fn trim_time_range(&mut self, start: Timestamp, stop: Timestamp) {
-        for copy in &mut self.copies {
-            copy.trim_time_range(start, stop);
-        }
-        self.copies.retain(|t| !t.time_range.was_removed);
-        for fill in &mut self.fills {
-            fill.trim_time_range(start, stop);
-        }
-        self.fills.retain(|t| !t.time_range.was_removed);
-        for deppart in &mut self.depparts {
-            deppart.trim_time_range(start, stop);
-        }
-        self.depparts.retain(|t| !t.time_range.was_removed);
+        self.entries.retain(|_, e| !e.trim_time_range(start, stop));
     }
 
     fn sort_time_range(&mut self) {
-        fn add(time: &TimeRange, entry: ChanEntry, points: &mut Vec<ChanPoint>) {
+        fn add(time: TimeRange, prof_uid: ProfUID, points: &mut Vec<ChanPoint>) {
             let start = time.start.unwrap();
             let stop = time.stop.unwrap();
-            points.push(ChanPoint::new(start, entry, true, ()));
-            points.push(ChanPoint::new(stop, entry, false, ()));
+            points.push(ChanPoint::new(start, prof_uid, true, Timestamp::MAX - stop));
+            points.push(ChanPoint::new(stop, prof_uid, false, Timestamp::ZERO));
         }
 
-        let points = &mut self.time_points;
+        let mut points = Vec::new();
 
-        for (idx, copy) in self.copies.iter().enumerate() {
-            let time = &copy.time_range;
-            let entry = ChanEntry::Copy(idx);
-            add(&time, entry, points);
-        }
-        for (idx, fill) in self.fills.iter().enumerate() {
-            let time = &fill.time_range;
-            let entry = ChanEntry::Fill(idx);
-            add(&time, entry, points);
-        }
-        for (idx, deppart) in self.depparts.iter().enumerate() {
-            let time = &deppart.time_range;
-            let entry = ChanEntry::DepPart(idx);
-            add(&time, entry, points);
+        for (prof_uid, entry) in &self.entries {
+            let time = entry.time_range();
+            add(time, *prof_uid, &mut points);
         }
 
-        points.sort_by(|a, b| a.time_key().cmp(&b.time_key()));
+        points.sort_by_key(|a| a.time_key());
 
         // Hack: This is a max heap so reverse the values as they go in.
         let mut free_levels = BinaryHeap::<Reverse<u32>>::new();
-        for point in points {
+        for point in &points {
             if point.first {
                 let level = if let Some(level) = free_levels.pop() {
                     level.0
                 } else {
-                    self.max_levels += 1;
-                    self.max_levels
+                    self.max_levels.postincrement()
                 };
-                match point.entry {
-                    ChanEntry::Copy(idx) => self.copies[idx].base.set_level(level),
-                    ChanEntry::Fill(idx) => self.fills[idx].base.set_level(level),
-                    ChanEntry::DepPart(idx) => self.depparts[idx].base.set_level(level),
-                };
+                self.entry_mut(point.entry).base_mut().set_level(level);
             } else {
-                let level = match point.entry {
-                    ChanEntry::Copy(idx) => self.copies[idx].base.level.unwrap(),
-                    ChanEntry::Fill(idx) => self.fills[idx].base.level.unwrap(),
-                    ChanEntry::DepPart(idx) => self.depparts[idx].base.level.unwrap(),
-                };
+                let level = self.entry(point.entry).base().level.unwrap();
                 free_levels.push(Reverse(level));
             }
         }
+
+        self.time_points = points.iter().filter(|p| p.first).copied().collect();
+        self.util_time_points = points;
     }
 
-    pub fn entry(&self, entry: ChanEntry) -> (&Base, &TimeRange, &InitiationDependencies) {
-        match entry {
-            ChanEntry::Copy(idx) => {
-                let copy = &self.copies[idx];
-                (&copy.base, &copy.time_range, &copy.deps)
-            }
-            ChanEntry::Fill(idx) => {
-                let fill = &self.fills[idx];
-                (&fill.base, &fill.time_range, &fill.deps)
-            }
-            ChanEntry::DepPart(idx) => {
-                let deppart = &self.depparts[idx];
-                (&deppart.base, &deppart.time_range, &deppart.deps)
-            }
-        }
+    fn stack_time_points(&mut self) {
+        let mut time_points = Vec::new();
+        std::mem::swap(&mut time_points, &mut self.time_points);
+        self.time_points_stacked = self.stack(time_points, self.max_levels);
+    }
+
+    pub fn is_visible(&self) -> bool {
+        self.visible
+    }
+}
+
+impl Container for Chan {
+    type E = ProfUID;
+    type S = Timestamp;
+    type Entry = ChanEntry;
+
+    fn max_levels(&self, device: Option<DeviceKind>) -> u32 {
+        assert!(device.is_none());
+        self.max_levels
+    }
+
+    fn max_levels_ready(&self, _device: Option<DeviceKind>) -> u32 {
+        unreachable!()
+    }
+
+    fn time_points(&self, device: Option<DeviceKind>) -> &Vec<TimePoint<Self::E, Self::S>> {
+        assert!(device.is_none());
+        &self.time_points
+    }
+
+    fn time_points_stacked(
+        &self,
+        device: Option<DeviceKind>,
+    ) -> &Vec<Vec<TimePoint<Self::E, Self::S>>> {
+        assert!(device.is_none());
+        &self.time_points_stacked
+    }
+
+    fn util_time_points(&self, device: Option<DeviceKind>) -> &Vec<TimePoint<Self::E, Self::S>> {
+        assert!(device.is_none());
+        &self.util_time_points
+    }
+
+    fn entry(&self, prof_uid: ProfUID) -> &ChanEntry {
+        self.entries.get(&prof_uid).unwrap()
+    }
+
+    fn entry_mut(&mut self, prof_uid: ProfUID) -> &mut ChanEntry {
+        self.entries.get_mut(&prof_uid).unwrap()
     }
 }
 
@@ -753,7 +1576,7 @@ pub struct ISpaceSize {
     pub is_sparse: bool,
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct ISpaceID(pub u64);
 
 #[derive(Debug)]
@@ -780,15 +1603,15 @@ impl ISpace {
     // sparse instance. In this case the bounds will NOT be
     // accurate. But we don't use bounds in such cases anyway since we
     // refer to the dense/sparse sizes.
-    fn set_point(&mut self, dim: u32, values: &Vec<u64>) -> &mut Self {
+    fn set_point(&mut self, dim: u32, values: &[u64]) -> &mut Self {
         let new_bounds = Bounds::Point {
-            point: values.clone(),
+            point: values.to_owned(),
             dim,
         };
         self.bounds = new_bounds;
         self
     }
-    fn set_rect(&mut self, dim: u32, values: &Vec<u64>, max_dim: i32) -> &mut Self {
+    fn set_rect(&mut self, dim: u32, values: &[u64], max_dim: i32) -> &mut Self {
         let new_bounds = Bounds::Rect {
             lo: values[0..(dim as usize)].to_owned(),
             hi: values[(max_dim as usize)..(max_dim as usize) + (dim as usize)].to_owned(),
@@ -803,7 +1626,7 @@ impl ISpace {
         self
     }
 
-    fn set_name(&mut self, name: &String) -> &mut Self {
+    fn set_name(&mut self, name: &str) -> &mut Self {
         assert!(self.name.is_none());
         self.name = Some(name.to_owned());
         self
@@ -824,12 +1647,12 @@ impl ISpace {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct IPartID(pub u64);
 
 #[derive(Debug)]
 pub struct IPart {
-    ipart_id: IPartID,
+    _ipart_id: IPartID,
     name: Option<String>,
     pub parent: Option<ISpaceID>,
     disjoint: Option<bool>,
@@ -839,14 +1662,14 @@ pub struct IPart {
 impl IPart {
     fn new(ipart_id: IPartID) -> Self {
         IPart {
-            ipart_id,
+            _ipart_id: ipart_id,
             name: None,
             parent: None,
             disjoint: None,
             point0: None,
         }
     }
-    fn set_name(&mut self, name: &String) -> &mut Self {
+    fn set_name(&mut self, name: &str) -> &mut Self {
         assert!(self.name.as_ref().map_or(true, |x| x == name));
         self.name = Some(name.to_owned());
         self
@@ -868,7 +1691,7 @@ impl IPart {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct FSpaceID(pub u64);
 
 #[derive(Debug)]
@@ -886,130 +1709,110 @@ impl FSpace {
             fields: BTreeMap::new(),
         }
     }
-    fn set_name(&mut self, name: &String) -> &mut Self {
-        let new_name = Some(name.to_owned());
-        assert!(self.name.is_none() || self.name == new_name);
-        self.name = new_name;
+    fn set_name(&mut self, name: &str) -> &mut Self {
+        assert!(self.name.as_ref().map_or(true, |n| n == name));
+        self.name = Some(name.to_owned());
         self
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct FieldID(pub u32);
 
 #[derive(Debug)]
 pub struct Field {
-    fspace_id: FSpaceID,
-    field_id: FieldID,
-    size: u64,
+    _fspace_id: FSpaceID,
+    _field_id: FieldID,
+    _size: u64,
     pub name: String,
 }
 
 impl Field {
-    fn new(fspace_id: FSpaceID, field_id: FieldID, size: u64, name: &String) -> Self {
+    fn new(fspace_id: FSpaceID, field_id: FieldID, size: u64, name: &str) -> Self {
         Field {
-            fspace_id,
-            field_id,
-            size,
+            _fspace_id: fspace_id,
+            _field_id: field_id,
+            _size: size,
             name: name.to_owned(),
         }
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct TreeID(pub u32);
 
 #[derive(Debug)]
 pub struct Region {
-    ispace_id: ISpaceID,
-    fspace_id: FSpaceID,
-    tree_id: TreeID,
-    name: String,
+    _ispace_id: ISpaceID,
+    _fspace_id: FSpaceID,
+    _tree_id: TreeID,
+    _name: String,
 }
 
 impl Region {
-    fn new(ispace_id: ISpaceID, fspace_id: FSpaceID, tree_id: TreeID, name: &String) -> Self {
+    fn new(ispace_id: ISpaceID, fspace_id: FSpaceID, tree_id: TreeID, name: &str) -> Self {
         Region {
-            ispace_id,
-            fspace_id,
-            tree_id,
-            name: name.to_owned(),
-        }
-    }
-}
-
-#[derive(Debug)]
-pub struct PathRange {
-    start: u64,
-    stop: u64,
-    path: Vec<()>,
-}
-
-impl PathRange {
-    fn new() -> Self {
-        PathRange {
-            start: 0,
-            stop: 0,
-            path: Vec::new(),
+            _ispace_id: ispace_id,
+            _fspace_id: fspace_id,
+            _tree_id: tree_id,
+            _name: name.to_owned(),
         }
     }
 }
 
 #[derive(Debug)]
 pub struct Dependencies {
-    deps_in: BTreeSet<()>,
-    deps_out: BTreeSet<()>,
-    deps_parent: BTreeSet<()>,
-    deps_children: BTreeSet<()>,
-    path: PathRange,
-    visited: bool,
+    pub in_: BTreeSet<ProfUID>,
+    pub out: BTreeSet<ProfUID>,
+    pub parent: BTreeSet<ProfUID>,
+    pub children: BTreeSet<ProfUID>,
 }
 
 impl Dependencies {
     fn new() -> Self {
         Dependencies {
-            deps_in: BTreeSet::new(),
-            deps_out: BTreeSet::new(),
-            deps_parent: BTreeSet::new(),
-            deps_children: BTreeSet::new(),
-            path: PathRange::new(),
-            visited: false,
+            in_: BTreeSet::new(),
+            out: BTreeSet::new(),
+            parent: BTreeSet::new(),
+            children: BTreeSet::new(),
         }
     }
 }
 
 #[derive(Debug)]
-pub struct InitiationDependencies {
-    deps: Dependencies,
-    pub op_id: OpID,
+pub struct SpyEvent {
+    preconditions: BTreeSet<EventID>,
+    postconditions: BTreeSet<EventID>,
 }
 
-impl InitiationDependencies {
-    fn new(op_id: OpID) -> Self {
-        InitiationDependencies {
-            deps: Dependencies::new(),
-            op_id,
-        }
-    }
-}
-
-#[derive(Debug)]
-pub struct NoDependencies {
-    deps: Dependencies,
-}
-
-impl NoDependencies {
+impl SpyEvent {
     fn new() -> Self {
-        NoDependencies {
-            deps: Dependencies::new(),
+        SpyEvent {
+            preconditions: BTreeSet::new(),
+            postconditions: BTreeSet::new(),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct SpyOp {
+    precondition: EventID,
+    postcondition: EventID,
+}
+
+impl SpyOp {
+    fn new(precondition: EventID, postcondition: EventID) -> Self {
+        SpyOp {
+            precondition,
+            postcondition,
         }
     }
 }
 
 #[derive(Debug)]
 pub struct Align {
-    field_id: FieldID,
-    eqk: u32,
+    _field_id: FieldID,
+    _eqk: u32,
     pub align_desc: u32,
     pub has_align: bool,
 }
@@ -1017,70 +1820,79 @@ pub struct Align {
 impl Align {
     fn new(field_id: FieldID, eqk: u32, align_desc: u32, has_align: bool) -> Self {
         Align {
-            field_id,
-            eqk,
+            _field_id: field_id,
+            _eqk: eqk,
             align_desc,
             has_align,
         }
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct InstID(pub u64);
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct Dim(pub u32);
 
 #[derive(Debug)]
 pub struct Inst {
     pub base: Base,
-    pub inst_id: InstID,
+    pub inst_uid: InstUID,
+    pub inst_id: Option<InstID>,
+    pub op_id: Option<OpID>,
     mem_id: Option<MemID>,
     pub size: Option<u64>,
     pub time_range: TimeRange,
-    pub deps: InitiationDependencies,
     pub ispace_ids: Vec<ISpaceID>,
     pub fspace_ids: Vec<FSpaceID>,
     tree_id: Option<TreeID>,
     pub fields: BTreeMap<FSpaceID, Vec<FieldID>>,
     pub align_desc: BTreeMap<FSpaceID, Vec<Align>>,
     pub dim_order: BTreeMap<Dim, DimKind>,
+    pub creator: Option<EventID>,
 }
 
 impl Inst {
-    fn new(base: Base, inst_id: InstID, op_id: OpID) -> Self {
+    fn new(base: Base, inst_uid: InstUID) -> Self {
         Inst {
             base,
-            inst_id,
+            inst_uid,
+            inst_id: None,
+            op_id: None,
             mem_id: None,
             size: None,
             time_range: TimeRange::new_empty(),
-            deps: InitiationDependencies::new(op_id),
             ispace_ids: Vec::new(),
             fspace_ids: Vec::new(),
             tree_id: None,
             fields: BTreeMap::new(),
             align_desc: BTreeMap::new(),
             dim_order: BTreeMap::new(),
+            creator: None,
         }
     }
+    fn set_inst_id(&mut self, inst_id: InstID) -> &mut Self {
+        assert!(self.inst_id.map_or(true, |i| i == inst_id));
+        self.inst_id = Some(inst_id);
+        self
+    }
+    fn set_op_id(&mut self, op_id: OpID) -> &mut Self {
+        assert!(self.op_id.map_or(true, |i| i == op_id));
+        self.op_id = Some(op_id);
+        self
+    }
     fn set_mem(&mut self, mem_id: MemID) -> &mut Self {
+        assert!(self.mem_id.map_or(true, |i| i == mem_id));
         self.mem_id = Some(mem_id);
         self
     }
     fn set_size(&mut self, size: u64) -> &mut Self {
+        assert!(self.size.map_or(true, |s| s == size));
         self.size = Some(size);
         self
     }
-    fn set_start_stop(&mut self, start: Timestamp, stop: Timestamp) -> &mut Self {
-        self.time_range = TimeRange::new_start(start, stop);
-        self
-    }
-    fn set_start(&mut self, start: Timestamp) -> &mut Self {
-        // don't overwrite if we have already captured the (more precise) timeline info
-        if self.time_range.stop.is_none() {
-            self.time_range.start = Some(start);
-        }
+    fn set_start_stop(&mut self, start: Timestamp, ready: Timestamp, stop: Timestamp) -> &mut Self {
+        self.time_range = TimeRange::new_full(start, ready, ready, stop);
         self
     }
     fn add_ispace(&mut self, ispace_id: ISpaceID) -> &mut Self {
@@ -1089,16 +1901,14 @@ impl Inst {
     }
     fn add_fspace(&mut self, fspace_id: FSpaceID) -> &mut Self {
         self.fspace_ids.push(fspace_id);
-        self.fields.entry(fspace_id).or_insert_with(|| Vec::new());
-        self.align_desc
-            .entry(fspace_id)
-            .or_insert_with(|| Vec::new());
+        self.fields.entry(fspace_id).or_insert_with(Vec::new);
+        self.align_desc.entry(fspace_id).or_insert_with(Vec::new);
         self
     }
     fn add_field(&mut self, fspace_id: FSpaceID, field_id: FieldID) -> &mut Self {
         self.fields
             .entry(fspace_id)
-            .or_insert_with(|| Vec::new())
+            .or_insert_with(Vec::new)
             .push(field_id);
         self
     }
@@ -1112,7 +1922,7 @@ impl Inst {
     ) -> &mut Self {
         self.align_desc
             .entry(fspace_id)
-            .or_insert_with(|| Vec::new())
+            .or_insert_with(Vec::new)
             .push(Align::new(field_id, eqk, align_desc, has_align));
         self
     }
@@ -1121,29 +1931,123 @@ impl Inst {
         self
     }
     fn set_tree(&mut self, tree_id: TreeID) -> &mut Self {
+        assert!(self.tree_id.map_or(true, |t| t == tree_id));
         self.tree_id = Some(tree_id);
         self
     }
-    fn trim_time_range(&mut self, start: Timestamp, stop: Timestamp) {
-        self.time_range.trim_time_range(start, stop);
+    fn trim_time_range(&mut self, start: Timestamp, stop: Timestamp) -> bool {
+        self.time_range.trim_time_range(start, stop)
+    }
+    fn set_creator(&mut self, creator: EventID) -> &mut Self {
+        assert!(self.creator.map_or(true, |c| c == creator));
+        self.creator = Some(creator);
+        self
+    }
+}
+
+impl Ord for Inst {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.base.prof_uid.cmp(&other.base.prof_uid)
+    }
+}
+
+impl PartialOrd for Inst {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl PartialEq for Inst {
+    fn eq(&self, other: &Self) -> bool {
+        self.base.prof_uid == other.base.prof_uid
+    }
+}
+
+impl Eq for Inst {}
+
+impl ContainerEntry for Inst {
+    fn base(&self) -> &Base {
+        &self.base
+    }
+
+    fn base_mut(&mut self) -> &mut Base {
+        &mut self.base
+    }
+
+    fn time_range(&self) -> TimeRange {
+        self.time_range
+    }
+
+    fn time_range_mut(&mut self) -> &mut TimeRange {
+        &mut self.time_range
+    }
+
+    fn waiters(&self) -> Option<&Waiters> {
+        None
+    }
+
+    fn initiation(&self) -> Option<OpID> {
+        self.op_id
+    }
+
+    fn creator(&self) -> Option<EventID> {
+        self.creator
+    }
+
+    fn name(&self, state: &State) -> String {
+        format!("{}", InstPretty(self, state))
+    }
+
+    fn color(&self, state: &State) -> Color {
+        let initiation = self.op_id;
+        state.get_op_color(initiation.unwrap())
+    }
+
+    fn provenance<'a, 'b>(&'a self, state: &'b State) -> Option<&'b str> {
+        if let Some(initiation) = self.op_id {
+            return state.find_op_provenance(initiation);
+        }
+        None
     }
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, LowerHex)]
 pub struct Color(pub u32);
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+impl Color {
+    pub fn new(r: u8, g: u8, b: u8) -> Self {
+        let r = r as u32;
+        let g = g as u32;
+        let b = b as u32;
+        Color((r << 16) | (g << 8) | b)
+    }
+
+    // These are HTML colors. Values are determined empirically by fiddling
+    // with CSS styles in Firefox. As best I can tell (by visual comparison)
+    // they seem to be sRGB (note: this is gamma space, not linear).
+    pub const BLACK: Color = Color(0x000000);
+    pub const BLUE: Color = Color(0x0000FF);
+    pub const CRIMSON: Color = Color(0xDC143C);
+    pub const DARKGOLDENROD: Color = Color(0xB8860B);
+    pub const DARKMAGENTA: Color = Color(0x8B008B);
+    pub const OLIVEDRAB: Color = Color(0x6B8E23);
+    pub const ORANGERED: Color = Color(0xFF4500);
+    pub const STEELBLUE: Color = Color(0x4682B4);
+    pub const GRAY: Color = Color(0x808080);
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct MapperCallKindID(pub u32);
 
 #[derive(Debug)]
 pub struct MapperCallKind {
-    kind: MapperCallKindID,
+    pub kind: MapperCallKindID,
     pub name: String,
     pub color: Option<Color>,
 }
 
 impl MapperCallKind {
-    fn new(kind: MapperCallKindID, name: &String) -> Self {
+    fn new(kind: MapperCallKindID, name: &str) -> Self {
         MapperCallKind {
             kind,
             name: name.to_owned(),
@@ -1156,18 +2060,18 @@ impl MapperCallKind {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct RuntimeCallKindID(pub u32);
 
 #[derive(Debug)]
 pub struct RuntimeCallKind {
-    kind: RuntimeCallKindID,
+    pub kind: RuntimeCallKindID,
     pub name: String,
     pub color: Option<Color>,
 }
 
 impl RuntimeCallKind {
-    fn new(kind: RuntimeCallKindID, name: &String) -> Self {
+    fn new(kind: RuntimeCallKindID, name: &str) -> Self {
         RuntimeCallKind {
             kind,
             name: name.to_owned(),
@@ -1180,12 +2084,12 @@ impl RuntimeCallKind {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct TaskID(pub u32);
 
 #[derive(Debug)]
 pub struct TaskKind {
-    task_id: TaskID,
+    pub task_id: TaskID,
     pub name: Option<String>,
 }
 
@@ -1196,14 +2100,14 @@ impl TaskKind {
             name: None,
         }
     }
-    fn set_name(&mut self, name: &String, overwrite: bool) {
+    fn set_name(&mut self, name: &str, overwrite: bool) {
         if self.name.is_none() || overwrite {
             self.name = Some(name.to_owned());
         }
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct VariantID(pub u32);
 
 #[derive(Debug)]
@@ -1217,7 +2121,7 @@ pub struct Variant {
 }
 
 impl Variant {
-    fn new(variant_id: VariantID, message: bool, ordered_vc: bool, name: &String) -> Self {
+    fn new(variant_id: VariantID, message: bool, ordered_vc: bool, name: &str) -> Self {
         Variant {
             variant_id,
             message,
@@ -1228,10 +2132,7 @@ impl Variant {
         }
     }
     fn set_task(&mut self, task_id: TaskID) -> &mut Self {
-        match self.task_id {
-            Some(id) => assert_eq!(id, task_id),
-            None => {} // ok
-        }
+        assert!(self.task_id.map_or(true, |t| t == task_id));
         self.task_id = Some(task_id);
         self
     }
@@ -1259,25 +2160,23 @@ impl Base {
         }
     }
     fn set_level(&mut self, level: u32) -> &mut Self {
-        assert_eq!(self.level, None);
+        assert!(self.level.is_none());
         self.level = Some(level);
         self
     }
     fn set_level_ready(&mut self, level_ready: u32) -> &mut Self {
-        assert_eq!(self.level_ready, None);
+        assert!(self.level_ready.is_none());
         self.level_ready = Some(level_ready);
         self
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct TimeRange {
     pub create: Option<Timestamp>,
     pub ready: Option<Timestamp>,
     pub start: Option<Timestamp>,
     pub stop: Option<Timestamp>,
-    trimmed: bool,
-    was_removed: bool,
 }
 
 impl TimeRange {
@@ -1290,8 +2189,6 @@ impl TimeRange {
             ready: Some(ready),
             start: Some(start),
             stop: Some(stop),
-            trimmed: false,
-            was_removed: false,
         }
     }
     fn new_start(start: Timestamp, stop: Timestamp) -> Self {
@@ -1301,8 +2198,6 @@ impl TimeRange {
             ready: None,
             start: Some(start),
             stop: Some(stop),
-            trimmed: false,
-            was_removed: false,
         }
     }
     fn new_empty() -> Self {
@@ -1311,30 +2206,27 @@ impl TimeRange {
             ready: None,
             start: None,
             stop: None,
-            trimmed: false,
-            was_removed: false,
         }
     }
-    fn trim_time_range(&mut self, start: Timestamp, stop: Timestamp) {
+    fn trim_time_range(&mut self, start: Timestamp, stop: Timestamp) -> bool {
         let clip = |value| {
-            let value = value - start;
-            if value < 0.into() {
-                0.into()
-            } else if value > stop - start {
+            if value <= start {
+                Timestamp::ZERO
+            } else if value - start > stop - start {
                 stop - start
             } else {
-                value
+                value - start
             }
         };
 
         if self.stop.map_or(false, |x| x < start) || self.start.map_or(false, |x| x > stop) {
-            self.was_removed = true;
-            return;
+            return true;
         }
         self.create = self.create.map(clip);
         self.ready = self.ready.map(clip);
         self.start = self.start.map(clip);
         self.stop = self.stop.map(clip);
+        false
     }
 }
 
@@ -1370,38 +2262,34 @@ impl Waiters {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct OpID(pub u64);
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+pub struct OpID(pub NonMaxU64);
 
-#[derive(Debug)]
-pub struct Task {
-    pub base: Base,
-    pub op_id: OpID,
-    pub task_id: TaskID,
-    pub variant_id: VariantID,
-    pub time_range: TimeRange,
-    pub waiters: Waiters,
+impl OpID {
+    pub const ZERO: OpID = OpID(NonMaxU64::ZERO);
 }
 
-impl Task {
-    fn new(
-        base: Base,
-        op_id: OpID,
-        task_id: TaskID,
-        variant_id: VariantID,
-        time_range: TimeRange,
-    ) -> Self {
-        Task {
-            base,
-            op_id,
-            task_id,
-            variant_id,
-            time_range,
-            waiters: Waiters::new(),
-        }
+impl From<spy::serialize::UniqueID> for OpID {
+    fn from(e: spy::serialize::UniqueID) -> Self {
+        OpID(NonMaxU64::new(e.0).unwrap())
     }
-    fn trim_time_range(&mut self, start: Timestamp, stop: Timestamp) {
-        self.time_range.trim_time_range(start, stop);
+}
+
+impl From<spy::serialize::ContextID> for OpID {
+    fn from(e: spy::serialize::ContextID) -> Self {
+        OpID(NonMaxU64::new(e.0).unwrap())
+    }
+}
+
+#[derive(Debug)]
+pub struct MultiTask {
+    pub op_id: OpID,
+    pub task_id: TaskID,
+}
+
+impl MultiTask {
+    fn new(op_id: OpID, task_id: TaskID) -> Self {
+        MultiTask { op_id, task_id }
     }
 }
 
@@ -1425,246 +2313,324 @@ impl OpKind {
 }
 
 #[derive(Debug)]
+pub struct OperationInstInfo {
+    pub inst_uid: InstUID,
+    _index: u32,
+    _field_id: FieldID,
+}
+
+impl OperationInstInfo {
+    fn new(inst_uid: InstUID, index: u32, field_id: FieldID) -> Self {
+        OperationInstInfo {
+            inst_uid,
+            _index: index,
+            _field_id: field_id,
+        }
+    }
+}
+
+#[derive(Debug)]
 pub struct Operation {
-    base: Base,
-    op_id: OpID,
+    pub base: Base,
+    pub parent_id: Option<OpID>,
     pub kind: Option<OpKindID>,
-    // owner: Option<OpID>,
+    pub provenance: Option<String>,
+    pub operation_inst_infos: Vec<OperationInstInfo>,
 }
 
 impl Operation {
-    fn new(base: Base, op_id: OpID) -> Self {
+    fn new(base: Base) -> Self {
         Operation {
             base,
-            op_id,
+            parent_id: None,
             kind: None,
-            // owner: None,
+            provenance: None,
+            operation_inst_infos: Vec::new(),
         }
     }
+    fn set_parent_id(&mut self, parent_id: Option<OpID>) -> &mut Self {
+        assert!(self.parent_id.is_none() || self.parent_id == parent_id);
+        self.parent_id = parent_id;
+        self
+    }
     fn set_kind(&mut self, kind: OpKindID) -> &mut Self {
-        assert_eq!(self.kind, None);
+        assert!(self.kind.is_none());
         self.kind = Some(kind);
         self
     }
-    // fn set_owner(&mut self, owner: OpID) -> &mut Self {
-    //     assert_eq!(self.owner, None);
-    //     self.owner = Some(owner);
-    //     self
-    // }
-}
-
-#[derive(Debug)]
-pub struct MetaTask {
-    base: Base,
-    op_id: OpID,
-    pub variant_id: VariantID,
-    time_range: TimeRange,
-    pub deps: InitiationDependencies,
-    waiters: Waiters,
-}
-
-impl MetaTask {
-    fn new(base: Base, op_id: OpID, variant_id: VariantID, time_range: TimeRange) -> Self {
-        MetaTask {
-            base,
-            op_id,
-            variant_id,
-            time_range,
-            deps: InitiationDependencies::new(op_id),
-            waiters: Waiters::new(),
-        }
+    fn set_provenance(&mut self, provenance: &str) -> &mut Self {
+        self.provenance = Some(provenance.to_owned());
+        self
     }
 }
 
-#[derive(Debug)]
-pub struct MapperCall {
-    pub base: Base,
-    pub kind: MapperCallKindID,
-    op_id: OpID,
-    pub time_range: TimeRange,
-    pub deps: InitiationDependencies,
-    pub waiters: Waiters,
-}
-
-impl MapperCall {
-    fn new(base: Base, kind: MapperCallKindID, op_id: OpID, time_range: TimeRange) -> Self {
-        MapperCall {
-            base,
-            kind,
-            op_id,
-            time_range,
-            deps: InitiationDependencies::new(op_id),
-            waiters: Waiters::new(),
-        }
-    }
-    fn trim_time_range(&mut self, start: Timestamp, stop: Timestamp) {
-        self.time_range.trim_time_range(start, stop);
-    }
-}
-
-#[derive(Debug)]
-pub struct RuntimeCall {
-    pub base: Base,
-    pub kind: RuntimeCallKindID,
-    pub time_range: TimeRange,
-    deps: NoDependencies,
-    pub waiters: Waiters,
-}
-
-impl RuntimeCall {
-    fn new(base: Base, kind: RuntimeCallKindID, time_range: TimeRange) -> Self {
-        RuntimeCall {
-            base,
-            kind,
-            time_range,
-            deps: NoDependencies::new(),
-            waiters: Waiters::new(),
-        }
-    }
-    fn trim_time_range(&mut self, start: Timestamp, stop: Timestamp) {
-        self.time_range.trim_time_range(start, stop);
-    }
-}
-
-#[derive(Debug)]
-pub struct ProfTask {
-    base: Base,
-    pub op_id: OpID,
-    time_range: TimeRange,
-    deps: NoDependencies,
-    waiters: Waiters,
-}
-
-impl ProfTask {
-    fn new(base: Base, op_id: OpID, time_range: TimeRange) -> Self {
-        ProfTask {
-            base,
-            op_id,
-            time_range,
-            deps: NoDependencies::new(),
-            waiters: Waiters::new(),
-        }
-    }
-    fn trim_time_range(&mut self, start: Timestamp, stop: Timestamp) {
-        self.time_range.trim_time_range(start, stop);
-    }
-}
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct EventID(pub u64);
 
-#[derive(Debug)]
-pub struct CopyInfo {
-    src_inst: InstID,
-    dst_inst: InstID,
-    fevent: EventID,
-    num_fields: u32,
-    request_type: u32,
-    num_hops: u32,
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+pub struct InstUID(pub u64);
+
+impl From<spy::serialize::EventID> for EventID {
+    fn from(e: spy::serialize::EventID) -> Self {
+        EventID(e.0 .0)
+    }
 }
 
-impl fmt::Display for CopyInfo {
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, TryFromPrimitive)]
+#[repr(u32)]
+pub enum CopyKind {
+    Copy = 0,
+    Gather = 1,
+    Scatter = 2,
+    GatherScatter = 3,
+}
+
+impl fmt::Display for CopyKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "src_inst=0x{:x}, dst_inst=0x{:x}, fields={}, type={}, hops={}",
-            self.src_inst.0,
-            self.dst_inst.0,
-            self.num_fields,
-            match self.request_type {
-                0 => "fill",
-                1 => "reduc",
-                2 => "copy",
-                _ => unreachable!(),
-            },
-            self.num_hops
-        )
+        write!(f, "{:?}", self)
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct CopyInstInfo {
+    src: Option<MemID>,
+    dst: Option<MemID>,
+    pub src_fid: FieldID,
+    pub dst_fid: FieldID,
+    pub src_inst_uid: InstUID,
+    pub dst_inst_uid: InstUID,
+    _fevent: EventID,
+    pub num_hops: u32,
+    pub indirect: bool,
+}
+
+impl CopyInstInfo {
+    fn new(
+        src: Option<MemID>,
+        dst: Option<MemID>,
+        src_fid: FieldID,
+        dst_fid: FieldID,
+        src_inst_uid: InstUID,
+        dst_inst_uid: InstUID,
+        fevent: EventID,
+        num_hops: u32,
+        indirect: bool,
+    ) -> Self {
+        CopyInstInfo {
+            src,
+            dst,
+            src_fid,
+            dst_fid,
+            src_inst_uid,
+            dst_inst_uid,
+            _fevent: fevent,
+            num_hops,
+            indirect,
+        }
     }
 }
 
 #[derive(Debug)]
 pub struct Copy {
     base: Base,
-    src: MemID,
-    dst: MemID,
-    pub size: u64,
-    time_range: TimeRange,
-    pub deps: InitiationDependencies,
+    creator: EventID,
     fevent: EventID,
-    num_requests: u32,
-    pub copy_info: Vec<CopyInfo>,
+    time_range: TimeRange,
+    chan_id: Option<ChanID>,
+    pub op_id: OpID,
+    pub size: u64,
+    pub collective: u32,
+    pub copy_kind: Option<CopyKind>,
+    pub copy_inst_infos: Vec<CopyInstInfo>,
 }
 
 impl Copy {
     fn new(
         base: Base,
-        src: MemID,
-        dst: MemID,
-        size: u64,
-        op_id: OpID,
         time_range: TimeRange,
+        op_id: OpID,
+        size: u64,
+        creator: EventID,
         fevent: EventID,
-        num_requests: u32,
-        copy_info: Vec<CopyInfo>,
+        collective: u32,
     ) -> Self {
         Copy {
             base,
-            src,
-            dst,
-            size,
-            time_range,
-            deps: InitiationDependencies::new(op_id),
+            creator,
             fevent,
-            num_requests,
-            copy_info,
+            time_range,
+            chan_id: None,
+            op_id,
+            size,
+            collective,
+            copy_kind: None,
+            copy_inst_infos: Vec::new(),
         }
     }
-    fn trim_time_range(&mut self, start: Timestamp, stop: Timestamp) {
-        self.time_range.trim_time_range(start, stop);
+
+    fn add_copy_inst_info(&mut self, copy_inst_info: CopyInstInfo) {
+        self.copy_inst_infos.push(copy_inst_info);
+    }
+
+    fn split_by_channel(mut self, allocator: &mut ProfUIDAllocator) -> Vec<Self> {
+        assert!(self.chan_id.is_none());
+        assert!(self.copy_kind.is_none());
+
+        // Assumptions:
+        //
+        //  1. A given Copy will always be entirely direct or entirely indirect.
+        //
+        //  2. A direct copy can have multiple CopyInstInfos with different
+        //     src/dst memories/instances.
+        //
+        //  3. An indirect copy will have exactly one indirect field. However
+        //     it might have multiple direct fields, and those direct fields could
+        //     have different src/dst memories/instances.
+
+        // Find the indirect field (if any). There is always at most one.
+        let indirect = self
+            .copy_inst_infos
+            .iter()
+            .position(|i| i.indirect)
+            .map(|idx| self.copy_inst_infos.remove(idx));
+        assert!(self.copy_inst_infos.iter().all(|i| !i.indirect));
+
+        // Figure out which side we're indirect on, if any.
+        let indirect_src = indirect.map_or(false, |i| i.src.is_some());
+        let indirect_dst = indirect.map_or(false, |i| i.dst.is_some());
+
+        let mut result = Vec::new();
+
+        let groups = self.copy_inst_infos.linear_group_by(|a, b| {
+            (indirect_src || a.src == b.src) && (indirect_dst || a.dst == b.dst)
+        });
+        for group in groups {
+            let info = group.first().unwrap();
+            let copy_kind = match (indirect_src, indirect_dst) {
+                (false, false) => CopyKind::Copy,
+                (true, false) => CopyKind::Gather,
+                (false, true) => CopyKind::Scatter,
+                (true, true) => CopyKind::GatherScatter,
+            };
+
+            let chan_id = match (indirect_src, indirect_dst, info.src, info.dst) {
+                (false, false, Some(src), Some(dst)) => ChanID::new_copy(src, dst),
+                (true, false, _, Some(dst)) => ChanID::new_gather(dst),
+                (false, true, Some(src), _) => ChanID::new_scatter(src),
+                (true, true, _, _) => unimplemented!("can't assign GatherScatter channel"),
+                _ => unreachable!("invalid copy kind"),
+            };
+
+            let mut group = group.to_owned();
+            // Hack: currently we just always force the indirect field to go
+            // first, which matches the current Legion implementation, but is
+            // not guaranteed.
+            indirect.map(|i| group.insert(0, i));
+            result.push(Copy {
+                base: Base::new(allocator),
+                copy_kind: Some(copy_kind),
+                chan_id: Some(chan_id),
+                copy_inst_infos: group,
+                ..self
+            })
+        }
+        result
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct FillInstInfo {
+    _dst: MemID,
+    pub fid: FieldID,
+    pub dst_inst_uid: InstUID,
+    _fevent: EventID,
+}
+
+impl FillInstInfo {
+    fn new(dst: MemID, fid: FieldID, dst_inst_uid: InstUID, fevent: EventID) -> Self {
+        FillInstInfo {
+            _dst: dst,
+            fid,
+            dst_inst_uid,
+            _fevent: fevent,
+        }
     }
 }
 
 #[derive(Debug)]
 pub struct Fill {
     base: Base,
-    dst: MemID,
+    creator: EventID,
+    fevent: EventID,
     time_range: TimeRange,
-    pub deps: InitiationDependencies,
+    chan_id: Option<ChanID>,
+    pub op_id: OpID,
+    pub size: u64,
+    pub fill_inst_infos: Vec<FillInstInfo>,
 }
 
 impl Fill {
-    fn new(base: Base, dst: MemID, op_id: OpID, time_range: TimeRange) -> Self {
+    fn new(
+        base: Base,
+        time_range: TimeRange,
+        op_id: OpID,
+        size: u64,
+        creator: EventID,
+        fevent: EventID,
+    ) -> Self {
         Fill {
             base,
-            dst,
+            creator,
+            fevent,
             time_range,
-            deps: InitiationDependencies::new(op_id),
+            chan_id: None,
+            op_id,
+            size,
+            fill_inst_infos: Vec::new(),
         }
     }
-    fn trim_time_range(&mut self, start: Timestamp, stop: Timestamp) {
-        self.time_range.trim_time_range(start, stop);
+
+    fn add_fill_inst_info(&mut self, fill_inst_info: FillInstInfo) {
+        self.fill_inst_infos.push(fill_inst_info);
+    }
+
+    fn add_channel(&mut self) {
+        // sanity check
+        assert!(self.chan_id.is_none());
+        assert!(!self.fill_inst_infos.is_empty());
+        let chan_dst = self.fill_inst_infos[0]._dst;
+        for fill_inst_info in &self.fill_inst_infos {
+            assert!(fill_inst_info._dst == chan_dst);
+        }
+        let chan_id = ChanID::new_fill(chan_dst);
+        self.chan_id = Some(chan_id);
     }
 }
 
 #[derive(Debug)]
 pub struct DepPart {
     base: Base,
+    creator: EventID,
     pub part_op: DepPartKind,
     time_range: TimeRange,
-    pub deps: InitiationDependencies,
+    pub op_id: OpID,
 }
 
 impl DepPart {
-    fn new(base: Base, part_op: DepPartKind, op_id: OpID, time_range: TimeRange) -> Self {
+    fn new(
+        base: Base,
+        part_op: DepPartKind,
+        time_range: TimeRange,
+        op_id: OpID,
+        creator: EventID,
+    ) -> Self {
         DepPart {
             base,
+            creator,
             part_op,
             time_range,
-            deps: InitiationDependencies::new(op_id),
+            op_id,
         }
-    }
-    fn trim_time_range(&mut self, start: Timestamp, stop: Timestamp) {
-        self.time_range.trim_time_range(start, stop);
     }
 }
 
@@ -1705,10 +2671,10 @@ fn compute_color(step: u32, num_steps: u32) -> Color {
     } else {
         unreachable!();
     }
-    let r = (r * 255.0).floor() as u32;
-    let g = (g * 255.0).floor() as u32;
-    let b = (b * 255.0).floor() as u32;
-    Color((r << 16) | (g << 8) | b)
+    let r = (r * 255.0).floor() as u8;
+    let g = (g * 255.0).floor() as u8;
+    let b = (b * 255.0).floor() as u8;
+    Color::new(r, g, b)
 }
 
 #[derive(Debug)]
@@ -1753,7 +2719,7 @@ impl LFSR {
         for t in &self.taps {
             xor += (self.register >> (self.bits - t)) & 1;
         }
-        xor = xor & 1;
+        xor &= 1;
         self.register = ((self.register >> 1) | (xor << (self.bits - 1))) & ((1 << self.bits) - 1);
         self.register
     }
@@ -1775,6 +2741,9 @@ impl ProfUIDAllocator {
 pub struct State {
     prof_uid_allocator: ProfUIDAllocator,
     max_dim: i32,
+    pub num_nodes: u32,
+    pub zero_time: TimestampDelta,
+    pub _calibration_err: i64,
     pub procs: BTreeMap<ProcID, Proc>,
     pub mems: BTreeMap<MemID, Mem>,
     pub mem_proc_affinity: BTreeMap<MemID, MemProcAffinity>,
@@ -1785,19 +2754,22 @@ pub struct State {
     meta_tasks: BTreeMap<(OpID, VariantID), ProcID>,
     pub op_kinds: BTreeMap<OpKindID, OpKind>,
     pub operations: BTreeMap<OpID, Operation>,
-    prof_uid_map: BTreeMap<u64, u64>,
+    op_prof_uid: BTreeMap<OpID, ProfUID>,
+    pub prof_uid_proc: BTreeMap<ProfUID, ProcID>,
     pub tasks: BTreeMap<OpID, ProcID>,
+    pub multi_tasks: BTreeMap<OpID, MultiTask>,
     pub last_time: Timestamp,
     pub mapper_call_kinds: BTreeMap<MapperCallKindID, MapperCallKind>,
     pub runtime_call_kinds: BTreeMap<RuntimeCallKindID, RuntimeCallKind>,
-    pub insts: BTreeMap<(InstID, OpID), MemID>,
+    pub insts: BTreeMap<InstUID, MemID>,
     pub index_spaces: BTreeMap<ISpaceID, ISpace>,
     pub index_partitions: BTreeMap<IPartID, IPart>,
     logical_regions: BTreeMap<(ISpaceID, FSpaceID, TreeID), Region>,
     pub field_spaces: BTreeMap<FSpaceID, FSpace>,
-    copy_map: BTreeMap<EventID, (ChanID, usize)>,
-    has_spy_data: bool,
-    spy_state: (), // TODO
+    pub has_prof_data: bool,
+    pub visible_nodes: Vec<NodeID>,
+    pub source_locator: Vec<String>,
+    pub fevents: BTreeMap<EventID, ProfUID>,
 }
 
 impl State {
@@ -1805,11 +2777,43 @@ impl State {
         let alloc = &mut self.prof_uid_allocator;
         self.operations
             .entry(op_id)
-            .or_insert_with(|| Operation::new(Base::new(alloc), op_id))
+            .or_insert_with(|| Operation::new(Base::new(alloc)))
     }
 
     pub fn find_op(&self, op_id: OpID) -> Option<&Operation> {
         self.operations.get(&op_id)
+    }
+
+    fn find_op_mut(&mut self, op_id: OpID) -> Option<&mut Operation> {
+        self.operations.get_mut(&op_id)
+    }
+
+    fn find_op_provenance(&self, op_id: OpID) -> Option<&str> {
+        self.find_op(op_id).and_then(|op| op.provenance.as_deref())
+    }
+
+    pub fn get_op_color(&self, op_id: OpID) -> Color {
+        if let Some(task) = self.find_task(op_id) {
+            match task.kind {
+                ProcEntryKind::Task(task_id, variant_id) => {
+                    return self
+                        .variants
+                        .get(&(task_id, variant_id))
+                        .unwrap()
+                        .color
+                        .unwrap()
+                }
+                _ => unreachable!(),
+            }
+        }
+
+        if let Some(op) = self.find_op(op_id) {
+            if let Some(kind) = op.kind {
+                return self.op_kinds.get(&kind).unwrap().color.unwrap();
+            }
+        }
+
+        Color::BLACK
     }
 
     fn create_task(
@@ -1819,28 +2823,39 @@ impl State {
         task_id: TaskID,
         variant_id: VariantID,
         time_range: TimeRange,
-    ) -> &mut Task {
-        self.create_op(op_id);
+        creator: EventID,
+        fevent: EventID,
+    ) -> &mut ProcEntry {
+        // Hack: we have to do this in two places, because we don't know what
+        // order the logger calls are going to come in. If the operation gets
+        // logged first, this will come back Some(_) and we'll store it below.
+        let parent_id = self.create_op(op_id).parent_id;
         self.tasks.insert(op_id, proc_id);
         let alloc = &mut self.prof_uid_allocator;
-        self.procs
-            .get_mut(&proc_id)
-            .unwrap()
-            .tasks
-            .entry(op_id)
-            .or_insert_with(|| Task::new(Base::new(alloc), op_id, task_id, variant_id, time_range))
+        let proc = self.procs.get_mut(&proc_id).unwrap();
+        proc.create_proc_entry(
+            Base::new(alloc),
+            Some(op_id),
+            parent_id,
+            ProcEntryKind::Task(task_id, variant_id),
+            time_range,
+            creator,
+            fevent,
+            &mut self.op_prof_uid,
+            &mut self.prof_uid_proc,
+            &mut self.fevents,
+        )
     }
 
-    fn find_task_mut(&mut self, op_id: OpID) -> Option<&mut Task> {
-        self.create_op(op_id);
-        self.procs
-            .get_mut(self.tasks.get(&op_id)?)?
-            .tasks
-            .get_mut(&op_id)
+    pub fn find_task(&self, op_id: OpID) -> Option<&ProcEntry> {
+        let proc = self.procs.get(self.tasks.get(&op_id)?)?;
+        proc.find_task(op_id)
     }
 
-    pub fn find_task(&self, op_id: OpID) -> Option<&Task> {
-        self.procs.get(self.tasks.get(&op_id)?)?.tasks.get(&op_id)
+    fn find_task_mut(&mut self, op_id: OpID) -> Option<&mut ProcEntry> {
+        self.create_op(op_id); // FIXME: Elliott: do we REALLY need this? (and if so, yuck)
+        let proc = self.procs.get_mut(self.tasks.get(&op_id)?)?;
+        proc.find_task_mut(op_id)
     }
 
     fn create_meta(
@@ -1849,32 +2864,32 @@ impl State {
         variant_id: VariantID,
         proc_id: ProcID,
         time_range: TimeRange,
-    ) -> &mut MetaTask {
+        creator: EventID,
+        fevent: EventID,
+    ) -> &mut ProcEntry {
         self.create_op(op_id);
         self.meta_tasks.insert((op_id, variant_id), proc_id);
-        let tasks = self
-            .procs
-            .get_mut(&proc_id)
-            .unwrap()
-            .meta_tasks
-            .entry((op_id, variant_id))
-            .or_insert_with(|| Vec::new());
         let alloc = &mut self.prof_uid_allocator;
-        tasks.push(MetaTask::new(
+        let proc = self.procs.get_mut(&proc_id).unwrap();
+        proc.create_proc_entry(
             Base::new(alloc),
-            op_id,
-            variant_id,
+            None,
+            Some(op_id), // FIXME: should really make this None if op_id == 0 but backwards compatibilty with Python is hard
+            ProcEntryKind::MetaTask(variant_id),
             time_range,
-        ));
-        tasks.last_mut().unwrap()
+            creator,
+            fevent,
+            &mut self.op_prof_uid,
+            &mut self.prof_uid_proc,
+            &mut self.fevents,
+        )
     }
 
-    fn find_meta_mut(&mut self, op_id: OpID, variant_id: VariantID) -> Option<&mut MetaTask> {
-        self.procs
-            .get_mut(self.meta_tasks.get(&(op_id, variant_id))?)?
-            .meta_tasks
-            .get_mut(&(op_id, variant_id))?
-            .last_mut()
+    fn find_last_meta_mut(&mut self, op_id: OpID, variant_id: VariantID) -> Option<&mut ProcEntry> {
+        let proc = self
+            .procs
+            .get_mut(self.meta_tasks.get(&(op_id, variant_id))?)?;
+        proc.find_last_meta_mut(op_id, variant_id)
     }
 
     fn create_mapper_call(
@@ -1883,14 +2898,27 @@ impl State {
         proc_id: ProcID,
         op_id: OpID,
         time_range: TimeRange,
-    ) {
+        fevent: EventID,
+    ) -> &mut ProcEntry {
         self.create_op(op_id);
         let alloc = &mut self.prof_uid_allocator;
-        self.procs
-            .get_mut(&proc_id)
-            .unwrap()
-            .mapper_calls
-            .push(MapperCall::new(Base::new(alloc), kind, op_id, time_range));
+        let proc = self.procs.get_mut(&proc_id).unwrap();
+        proc.create_proc_entry(
+            Base::new(alloc),
+            None,
+            if op_id != OpID::ZERO {
+                Some(op_id)
+            } else {
+                None
+            },
+            ProcEntryKind::MapperCall(kind),
+            time_range,
+            fevent,
+            fevent,
+            &mut self.op_prof_uid,
+            &mut self.prof_uid_proc,
+            &mut self.fevents,
+        )
     }
 
     fn create_runtime_call(
@@ -1898,86 +2926,128 @@ impl State {
         kind: RuntimeCallKindID,
         proc_id: ProcID,
         time_range: TimeRange,
-    ) {
-        let alloc = &mut self.prof_uid_allocator;
-        self.procs
-            .get_mut(&proc_id)
-            .unwrap()
-            .runtime_calls
-            .push(RuntimeCall::new(Base::new(alloc), kind, time_range));
-    }
-
-    fn create_prof_task(&mut self, proc_id: ProcID, op_id: OpID, time_range: TimeRange) {
-        let alloc = &mut self.prof_uid_allocator;
-        self.procs
-            .get_mut(&proc_id)
-            .unwrap()
-            .prof_tasks
-            .push(ProfTask::new(Base::new(alloc), op_id, time_range));
-    }
-
-    fn create_copy(
-        &mut self,
-        op_id: OpID,
-        src: MemID,
-        dst: MemID,
-        size: u64,
-        time_range: TimeRange,
         fevent: EventID,
-        num_requests: u32,
-    ) {
-        self.create_op(op_id);
-        let base = Base::new(&mut self.prof_uid_allocator); // FIXME: construct here to avoid mutability conflict
-
-        let chan_id = ChanID::new_copy(src, dst);
-        let chan = self.find_chan_mut(chan_id);
-
-        let copy_id = chan.copies.len();
-        chan.copies.push(Copy::new(
-            base,
-            src,
-            dst,
-            size,
-            op_id,
+    ) -> &mut ProcEntry {
+        let alloc = &mut self.prof_uid_allocator;
+        let proc = self.procs.get_mut(&proc_id).unwrap();
+        proc.create_proc_entry(
+            Base::new(alloc),
+            None,
+            None,
+            ProcEntryKind::RuntimeCall(kind),
             time_range,
             fevent,
-            num_requests,
-            Vec::new(),
-        ));
-
-        self.copy_map
-            .entry(fevent)
-            .or_insert_with(|| (chan_id, copy_id));
+            fevent,
+            &mut self.op_prof_uid,
+            &mut self.prof_uid_proc,
+            &mut self.fevents,
+        )
     }
 
-    fn find_copy_mut(&mut self, fevent: EventID) -> Option<&mut Copy> {
-        let (chan_id, copy_idx) = *self.copy_map.get(&fevent)?;
-        Some(&mut self.find_chan_mut(chan_id).copies[copy_idx])
+    fn create_gpu_kernel(
+        &mut self,
+        op_id: OpID,
+        proc_id: ProcID,
+        task_id: TaskID,
+        variant_id: VariantID,
+        time_range: TimeRange,
+        fevent: EventID,
+    ) -> &mut ProcEntry {
+        let alloc = &mut self.prof_uid_allocator;
+        let proc = self.procs.get_mut(&proc_id).unwrap();
+        proc.create_proc_entry(
+            Base::new(alloc),
+            Some(op_id),
+            None,
+            ProcEntryKind::GPUKernel(task_id, variant_id),
+            time_range,
+            fevent,
+            fevent,
+            &mut self.op_prof_uid,
+            &mut self.prof_uid_proc,
+            &mut self.fevents,
+        )
     }
 
-    fn create_fill(&mut self, op_id: OpID, dst: MemID, time_range: TimeRange) {
-        self.create_op(op_id);
-        let base = Base::new(&mut self.prof_uid_allocator); // FIXME: construct here to avoid mutability conflict
-        let chan = self.find_fill_chan_mut(dst);
-        chan.fills.push(Fill::new(base, dst, op_id, time_range));
+    fn create_prof_task(
+        &mut self,
+        proc_id: ProcID,
+        op_id: OpID,
+        time_range: TimeRange,
+        creator: EventID,
+        fevent: EventID,
+    ) -> &mut ProcEntry {
+        let alloc = &mut self.prof_uid_allocator;
+        let proc = self.procs.get_mut(&proc_id).unwrap();
+        proc.create_proc_entry(
+            Base::new(alloc),
+            None,
+            Some(op_id), // FIXME: should really make this None if op_id == 0 but backwards compatibilty with Python is hard
+            ProcEntryKind::ProfTask,
+            time_range,
+            creator,
+            fevent,
+            &mut self.op_prof_uid,
+            &mut self.prof_uid_proc,
+            &mut self.fevents,
+        )
     }
 
-    fn create_deppart(&mut self, op_id: OpID, part_op: DepPartKind, time_range: TimeRange) {
+    fn create_copy<'a>(
+        &'a mut self,
+        time_range: TimeRange,
+        op_id: OpID,
+        size: u64,
+        creator: EventID,
+        fevent: EventID,
+        collective: u32,
+        copies: &'a mut BTreeMap<EventID, Copy>,
+    ) -> &'a mut Copy {
+        let alloc = &mut self.prof_uid_allocator;
+        assert!(!copies.contains_key(&fevent));
+        copies.entry(fevent).or_insert_with(|| {
+            Copy::new(
+                Base::new(alloc),
+                time_range,
+                op_id,
+                size,
+                creator,
+                fevent,
+                collective,
+            )
+        })
+    }
+
+    fn create_fill<'a>(
+        &'a mut self,
+        time_range: TimeRange,
+        op_id: OpID,
+        size: u64,
+        creator: EventID,
+        fevent: EventID,
+        fills: &'a mut BTreeMap<EventID, Fill>,
+    ) -> &'a mut Fill {
+        let alloc = &mut self.prof_uid_allocator;
+        assert!(!fills.contains_key(&fevent));
+        fills.entry(fevent).or_insert_with(|| {
+            Fill::new(Base::new(alloc), time_range, op_id, size, creator, fevent)
+        })
+    }
+
+    fn create_deppart(
+        &mut self,
+        op_id: OpID,
+        part_op: DepPartKind,
+        time_range: TimeRange,
+        creator: EventID,
+    ) {
         self.create_op(op_id);
         let base = Base::new(&mut self.prof_uid_allocator); // FIXME: construct here to avoid mutability conflict
         let chan = self.find_deppart_chan_mut();
-        chan.depparts
-            .push(DepPart::new(base, part_op, op_id, time_range));
+        chan.add_deppart(DepPart::new(base, part_op, time_range, op_id, creator));
     }
 
     fn find_chan_mut(&mut self, chan_id: ChanID) -> &mut Chan {
-        self.chans
-            .entry(chan_id)
-            .or_insert_with(|| Chan::new(chan_id))
-    }
-
-    fn find_fill_chan_mut(&mut self, dst: MemID) -> &mut Chan {
-        let chan_id = ChanID::new_fill(dst);
         self.chans
             .entry(chan_id)
             .or_insert_with(|| Chan::new(chan_id))
@@ -1992,15 +3062,19 @@ impl State {
 
     fn create_inst<'a>(
         &'a mut self,
-        inst_id: InstID,
-        op_id: OpID,
-        insts: &'a mut BTreeMap<(InstID, OpID), Inst>,
+        inst_uid: InstUID,
+        insts: &'a mut BTreeMap<InstUID, Inst>,
     ) -> &'a mut Inst {
-        self.create_op(op_id);
         let alloc = &mut self.prof_uid_allocator;
         insts
-            .entry((inst_id, op_id))
-            .or_insert_with(|| Inst::new(Base::new(alloc), inst_id, op_id))
+            .entry(inst_uid)
+            .or_insert_with(|| Inst::new(Base::new(alloc), inst_uid))
+    }
+
+    pub fn find_inst(&self, inst_uid: InstUID) -> Option<&Inst> {
+        let mem_id = self.insts.get(&inst_uid)?;
+        let mem = self.mems.get(mem_id)?;
+        mem.insts.get(&inst_uid)
     }
 
     fn find_index_space_mut(&mut self, ispace_id: ISpaceID) -> &mut ISpace {
@@ -2025,34 +3099,86 @@ impl State {
         self.last_time = max(value, self.last_time);
     }
 
-    pub fn process_records(&mut self, records: &Vec<Record>) {
+    pub fn process_records(&mut self, records: &Vec<Record>, call_threshold: Timestamp) {
         // We need a separate table here because instances can't be
         // immediately linked to their associated memory from the
         // logs. Therefore we defer this process until all records
         // have been processed.
         let mut insts = BTreeMap::new();
+        let mut copies = BTreeMap::new();
+        let mut fills = BTreeMap::new();
         for record in records {
-            process_record(record, self, &mut insts);
+            process_record(
+                record,
+                self,
+                &mut insts,
+                &mut copies,
+                &mut fills,
+                call_threshold,
+            );
         }
-        for (key, inst) in insts {
+        // put inst into memories
+        for inst in insts.into_values() {
             if let Some(mem_id) = inst.mem_id {
                 let mem = self.mems.get_mut(&mem_id).unwrap();
-                mem.insts.insert(key, inst);
+                mem.add_inst(inst);
             } else {
                 unreachable!();
             }
         }
+        // put fills into channels
+        for mut fill in fills.into_values() {
+            if !fill.fill_inst_infos.is_empty() {
+                fill.add_channel();
+                if let Some(chan_id) = fill.chan_id {
+                    let chan = self.find_chan_mut(chan_id);
+                    chan.add_fill(fill);
+                } else {
+                    unreachable!();
+                }
+            }
+        }
+        // put copies into channels
+        for copy in copies.into_values() {
+            if !copy.copy_inst_infos.is_empty() {
+                let split = copy.split_by_channel(&mut self.prof_uid_allocator);
+                for elt in split {
+                    if let Some(chan_id) = elt.chan_id {
+                        let chan = self.find_chan_mut(chan_id);
+                        chan.add_copy(elt);
+                    } else {
+                        unreachable!();
+                    }
+                }
+            }
+        }
+        self.has_prof_data = true;
+    }
+
+    fn compute_duration(&self, prof_uid: ProfUID) -> u64 {
+        if let Some(proc_id) = self.prof_uid_proc.get(&prof_uid) {
+            let proc = self.procs.get(proc_id).unwrap();
+            let entry = &proc.entry(prof_uid);
+            let mut total = 0u64;
+            let mut start = entry.time_range.start.unwrap().to_ns();
+            for wait in &entry.waiters.wait_intervals {
+                total += wait.start.to_ns() - start;
+                start = wait.end.to_ns();
+            }
+            total += entry.time_range.stop.unwrap().to_ns() - start;
+            return total;
+        }
+        0
     }
 
     pub fn trim_time_range(&mut self, start: Option<Timestamp>, stop: Option<Timestamp>) {
         if start.is_none() && stop.is_none() {
             return;
         }
-        let start = start.unwrap_or(0.into());
+        let start = start.unwrap_or(Timestamp::ZERO);
         let stop = stop.unwrap_or(self.last_time);
 
         assert!(start <= stop);
-        assert!(start >= 0.into());
         assert!(stop <= self.last_time);
 
         for proc in self.procs.values_mut() {
@@ -2070,19 +3196,20 @@ impl State {
 
     pub fn check_message_latencies(&self, threshold: f64 /* us */, warn_percentage: f64) {
         assert!(threshold >= 0.0);
-        assert!(warn_percentage >= 0.0 && warn_percentage < 100.0);
+        assert!((0.0..100.0).contains(&warn_percentage));
 
         let mut total_messages = 0;
         let mut bad_messages = 0;
         let mut longest_latency = Timestamp::from_us(0);
         for proc in self.procs.values() {
             for ((_, variant_id), meta_tasks) in &proc.meta_tasks {
-                let variant = self.meta_variants.get(&variant_id).unwrap();
+                let variant = self.meta_variants.get(variant_id).unwrap();
                 if !variant.message || variant.ordered_vc {
                     continue;
                 }
                 total_messages += meta_tasks.len();
-                for meta_task in meta_tasks {
+                for meta_uid in meta_tasks {
+                    let meta_task = proc.entry(*meta_uid);
                     let latency =
                         meta_task.time_range.ready.unwrap() - meta_task.time_range.create.unwrap();
                     if threshold <= latency.to_us() {
@@ -2125,13 +3252,25 @@ impl State {
     pub fn sort_time_range(&mut self) {
         self.procs
             .par_iter_mut()
-            .for_each(|(_, proc)| proc.sort_time_range());
+            .for_each(|(_, proc)| proc.sort_time_range(&self.fevents));
         self.mems
             .par_iter_mut()
             .for_each(|(_, mem)| mem.sort_time_range());
         self.chans
             .par_iter_mut()
             .for_each(|(_, chan)| chan.sort_time_range());
+    }
+
+    pub fn stack_time_points(&mut self) {
+        self.procs
+            .par_iter_mut()
+            .for_each(|(_, proc)| proc.stack_time_points());
+        self.mems
+            .par_iter_mut()
+            .for_each(|(_, mem)| mem.stack_time_points());
+        self.chans
+            .par_iter_mut()
+            .for_each(|(_, chan)| chan.stack_time_points());
     }
 
     pub fn assign_colors(&mut self) {
@@ -2166,9 +3305,459 @@ impl State {
             kind.set_color(compute_color(lfsr.next(), num_colors));
         }
     }
+
+    pub fn filter_output(&mut self) {
+        if self.visible_nodes.is_empty() {
+            return;
+        }
+        for (_, proc) in self.procs.iter_mut() {
+            let node_id = proc.proc_id.node_id();
+            if !self.visible_nodes.contains(&node_id) {
+                proc.visible = false;
+            }
+        }
+
+        let mut memid_to_be_deleted: Vec<MemID> = Vec::new();
+        for (mem_id, mem) in self.mems.iter_mut() {
+            let node_id = mem.mem_id.node_id();
+            if !self.visible_nodes.contains(&node_id) {
+                mem.visible = false;
+                memid_to_be_deleted.push(*mem_id);
+            }
+        }
+
+        for (_, chan) in self.chans.iter_mut() {
+            let mut src_node_id: Option<NodeID> = None;
+            let mut dst_node_id: Option<NodeID> = None;
+            if let Some(src_mem) = chan.chan_id.src {
+                src_node_id = Some(src_mem.node_id());
+            }
+            if let Some(dst_mem) = chan.chan_id.dst {
+                dst_node_id = Some(dst_mem.node_id());
+            }
+            // DepPart
+            if src_node_id.is_none() && dst_node_id.is_none() {
+                continue;
+            } else {
+                if !src_node_id.map_or(false, |n| self.visible_nodes.contains(&n))
+                    && !dst_node_id.map_or(false, |n| self.visible_nodes.contains(&n))
+                {
+                    chan.visible = false;
+                } else {
+                    // we need to keep memory if it is chan.src/dst
+                    if let Some(src_mem) = chan.chan_id.src {
+                        memid_to_be_deleted.retain(|value| *value != src_mem);
+                    }
+                    if let Some(dst_mem) = chan.chan_id.dst {
+                        memid_to_be_deleted.retain(|value| *value != dst_mem);
+                    }
+                }
+            }
+        }
+
+        // if filter input is enabled, we remove invisible proc/mem/chan
+        // otherwise, we keep a full state
+        if Config::filter_input() {
+            self.procs.retain(|_, proc| proc.visible);
+        }
+        if Config::filter_input() {
+            self.mems
+                .retain(|&mem_id, _| !memid_to_be_deleted.contains(&mem_id));
+            self.mem_proc_affinity
+                .retain(|&mem_id, _| !memid_to_be_deleted.contains(&mem_id));
+        }
+        if Config::filter_input() {
+            self.chans.retain(|_, chan| chan.visible);
+        }
+    }
+
+    pub fn is_on_visible_nodes<'a>(visible_nodes: &'a Vec<NodeID>, node_id: NodeID) -> bool {
+        visible_nodes.is_empty() || visible_nodes.contains(&node_id)
+    }
 }
 
-fn process_record(record: &Record, state: &mut State, insts: &mut BTreeMap<(InstID, OpID), Inst>) {
+#[derive(Debug, Default)]
+pub struct SpyState {
+    has_spy_data: bool,
+    spy_ops: BTreeMap<OpID, SpyOp>,
+    spy_op_by_precondition: BTreeMap<EventID, BTreeSet<OpID>>,
+    spy_op_by_postcondition: BTreeMap<EventID, BTreeSet<OpID>>,
+    spy_op_parent: BTreeMap<OpID, OpID>,
+    spy_op_children: BTreeMap<OpID, BTreeSet<OpID>>,
+    pub spy_op_deps: BTreeMap<ProfUID, Dependencies>,
+    spy_events: BTreeMap<EventID, SpyEvent>,
+    pub critical_path: Vec<ProfUID>,
+}
+
+impl SpyState {
+    fn create_spy_event_depencence(&mut self, pre: EventID, post: EventID) {
+        assert!(pre != post);
+        self.spy_events
+            .entry(post)
+            .or_insert_with(SpyEvent::new)
+            .preconditions
+            .insert(pre);
+        self.spy_events
+            .entry(pre)
+            .or_insert_with(SpyEvent::new)
+            .postconditions
+            .insert(post);
+    }
+
+    fn create_spy_op(&mut self, op: OpID, pre: EventID, post: EventID) {
+        let old = self.spy_ops.insert(op, SpyOp::new(pre, post));
+        // Apparently we can end up with duplicate logging containing NO_EVENTs
+        if let Some(SpyOp {
+            precondition,
+            postcondition,
+        }) = old
+        {
+            assert!(precondition == pre || precondition.0 == 0);
+            assert!(postcondition == post || postcondition.0 == 0);
+        }
+        self.spy_op_by_precondition
+            .entry(pre)
+            .or_insert_with(BTreeSet::new)
+            .insert(op);
+        self.spy_op_by_postcondition
+            .entry(post)
+            .or_insert_with(BTreeSet::new)
+            .insert(op);
+    }
+
+    fn create_spy_op_parent(&mut self, parent: OpID, child: OpID) {
+        if let Some(old) = self.spy_op_parent.insert(child, parent) {
+            assert!(old == parent);
+        }
+        self.spy_op_children
+            .entry(parent)
+            .or_insert_with(BTreeSet::new)
+            .insert(child);
+    }
+
+    pub fn process_spy_records(&mut self, records: &Vec<spy::serialize::Record>) {
+        for record in records {
+            process_spy_record(record, self);
+        }
+        assert!(self.has_spy_data, "no Legion Spy logs in logfile");
+    }
+
+    fn traverse_dag_pre<V, N, F>(root: V, neighbors: N, mut pre: F)
+    where
+        V: std::marker::Copy + Ord,
+        N: Fn(&mut Vec<V>, V),
+        F: FnMut(V),
+    {
+        let mut visited = BTreeSet::new();
+        let mut stack = Vec::new();
+        stack.push(root);
+        while let Some(node) = stack.pop() {
+            if visited.contains(&node) {
+                continue;
+            }
+            visited.insert(node);
+
+            neighbors(&mut stack, node);
+
+            pre(node);
+        }
+    }
+
+    fn traverse_dag_post<V, I, J, N, F>(roots: I, neighbors: N, mut post: F)
+    where
+        V: std::marker::Copy + Ord,
+        I: Iterator<Item = V>,
+        J: Iterator<Item = V>,
+        N: Fn(V) -> J,
+        F: FnMut(V),
+    {
+        let mut visited = BTreeSet::new();
+        let mut stack = Vec::new();
+        for root in roots {
+            stack.push((root, true));
+            while let Some((node, first_pass)) = stack.pop() {
+                if first_pass {
+                    if visited.contains(&node) {
+                        continue;
+                    }
+                    visited.insert(node);
+                    stack.push((node, false));
+                    stack.extend(neighbors(node).map(|x| (x, true)));
+                } else {
+                    post(node);
+                }
+            }
+        }
+    }
+
+    fn compute_op_preconditions(
+        op: &SpyOp,
+        deps: &mut Dependencies,
+        op_prof_uid: &BTreeMap<OpID, ProfUID>,
+        spy_op_by_postcondition: &BTreeMap<EventID, BTreeSet<OpID>>,
+        spy_events: &BTreeMap<EventID, SpyEvent>,
+    ) {
+        let neighbors = |stack: &mut Vec<_>, event_id| {
+            if let Some(event) = spy_events.get(&event_id) {
+                stack.extend(event.preconditions.iter());
+            }
+        };
+        let visit = |event_id| {
+            if let Some(op_ids) = spy_op_by_postcondition.get(&event_id) {
+                for op_id in op_ids {
+                    if let Some(prof_uid) = op_prof_uid.get(op_id) {
+                        deps.in_.insert(*prof_uid);
+                    }
+                }
+            }
+        };
+        Self::traverse_dag_pre(op.precondition, neighbors, visit);
+    }
+
+    fn compute_op_postconditions(
+        op: &SpyOp,
+        deps: &mut Dependencies,
+        op_prof_uid: &BTreeMap<OpID, ProfUID>,
+        spy_op_by_precondition: &BTreeMap<EventID, BTreeSet<OpID>>,
+        spy_events: &BTreeMap<EventID, SpyEvent>,
+    ) {
+        let neighbors = |stack: &mut Vec<_>, event_id| {
+            if let Some(event) = spy_events.get(&event_id) {
+                stack.extend(event.postconditions.iter());
+            }
+        };
+        let visit = |event_id| {
+            if let Some(op_ids) = spy_op_by_precondition.get(&event_id) {
+                for op_id in op_ids {
+                    if let Some(prof_uid) = op_prof_uid.get(op_id) {
+                        deps.out.insert(*prof_uid);
+                    }
+                }
+            }
+        };
+        Self::traverse_dag_pre(op.postcondition, neighbors, visit);
+    }
+
+    fn compute_op_parent(
+        op_id: OpID,
+        deps: &mut Dependencies,
+        op_prof_uid: &BTreeMap<OpID, ProfUID>,
+        spy_op_parent: &BTreeMap<OpID, OpID>,
+    ) {
+        let mut stack = Vec::new();
+        stack.push(op_id);
+        while let Some(node) = stack.pop() {
+            if let Some(parent) = spy_op_parent.get(&node) {
+                if let Some(parent_uid) = op_prof_uid.get(parent) {
+                    deps.parent.insert(*parent_uid);
+                } else {
+                    stack.push(*parent);
+                }
+            }
+        }
+    }
+
+    fn compute_op_children(
+        op_id: OpID,
+        deps: &mut Dependencies,
+        op_prof_uid: &BTreeMap<OpID, ProfUID>,
+        spy_op_children: &BTreeMap<OpID, BTreeSet<OpID>>,
+    ) {
+        let mut stack = Vec::new();
+        stack.push(op_id);
+        while let Some(node) = stack.pop() {
+            if let Some(children) = spy_op_children.get(&node) {
+                for child in children {
+                    if let Some(child_uid) = op_prof_uid.get(child) {
+                        deps.children.insert(*child_uid);
+                    } else {
+                        stack.push(*child);
+                    }
+                }
+            }
+        }
+    }
+
+    fn toposort_graph(&mut self) -> Vec<ProfUID> {
+        let mut postorder = Vec::new();
+        let neighbors = |node| {
+            let deps = self.spy_op_deps.get(&node).unwrap();
+            deps.in_.iter().copied()
+        };
+        let visit = |node| {
+            postorder.push(node);
+        };
+        Self::traverse_dag_post(self.spy_op_deps.keys().copied(), neighbors, visit);
+        postorder
+    }
+
+    fn transitive_reduce_graph(&mut self, toposort: &Vec<ProfUID>) {
+        // TODO: Elliott: legion_spy.py computes this with a bit set,
+        // which may be more efficient.
+        let mut reachable: BTreeMap<ProfUID, BTreeSet<ProfUID>> = BTreeMap::new();
+        for root in toposort {
+            // Compute the reachable sets in topological order to
+            // minimize the size of the graph we have to traverse
+            let mut root_reachable = BTreeSet::new();
+            let deps = self.spy_op_deps.get(root).unwrap();
+            for node in &deps.in_ {
+                // Ok to unwrap here as we're walking in toposort
+                // order to make sure this has been precomputed
+                let node_reachable = reachable.get(node).unwrap();
+                root_reachable.extend(node_reachable.iter());
+            }
+
+            let mut to_remove = Vec::new();
+            for node in &deps.in_ {
+                if root_reachable.contains(node) {
+                    to_remove.push(*node);
+                } else {
+                    root_reachable.insert(*node);
+                }
+            }
+            reachable.insert(*root, root_reachable);
+
+            for node in to_remove {
+                let root_deps = self.spy_op_deps.get_mut(root).unwrap();
+                assert!(root_deps.in_.remove(&node));
+                let node_deps = self.spy_op_deps.get_mut(&node).unwrap();
+                assert!(node_deps.out.remove(root));
+            }
+        }
+    }
+
+    fn simplify_spy_graph(&mut self) {
+        let toposort = self.toposort_graph();
+
+        self.transitive_reduce_graph(&toposort);
+    }
+
+    fn compute_critical_path(&mut self, state: &State) {
+        // Postorder DFS walking both in and child edges, computing the
+        // longest path at each node based on the sum of the longest input and
+        // longest child
+        type Path = (u64, Vec<ProfUID>);
+        fn path_max<'a>(a: &'a Path, b: &'a Path) -> &'a Path {
+            if a.0 > b.0 {
+                a
+            } else {
+                b
+            }
+        }
+
+        let empty_path = (0, Vec::new());
+
+        let mut longest_paths = BTreeMap::<ProfUID, Path>::new();
+        let neighbors = |node| {
+            let deps = self.spy_op_deps.get(&node).unwrap();
+            let children = deps.children.iter().copied();
+            children.chain(deps.in_.iter().copied())
+        };
+        let visit = |node| {
+            let deps = self.spy_op_deps.get(&node).unwrap();
+            let path = |dep| longest_paths.get(dep).unwrap();
+            let long_in = deps.in_.iter().map(path).fold(&empty_path, path_max);
+            let long_child = deps.children.iter().map(path).fold(&empty_path, path_max);
+            let duration = long_in.0 + long_child.0 + state.compute_duration(node);
+            let mut path = long_in.1.to_owned();
+            path.extend(long_child.1.iter());
+            path.push(node);
+            longest_paths.insert(node, (duration, path));
+        };
+        Self::traverse_dag_post(self.spy_op_deps.keys().copied(), neighbors, visit);
+        self.critical_path = longest_paths
+            .values()
+            .fold(&empty_path, path_max)
+            .1
+            .to_owned();
+    }
+
+    pub fn postprocess_spy_records(&mut self, state: &State) {
+        if !self.has_spy_data {
+            println!("No Legion Spy data, skipping postprocess step");
+            return;
+        }
+
+        // Process tasks first
+        for op_id in state.tasks.keys() {
+            let prof_uid = state.op_prof_uid.get(op_id).unwrap();
+            let deps = self
+                .spy_op_deps
+                .entry(*prof_uid)
+                .or_insert_with(Dependencies::new);
+            let op = self.spy_ops.get(op_id).expect("missing dependecies for op");
+            Self::compute_op_preconditions(
+                op,
+                deps,
+                &state.op_prof_uid,
+                &self.spy_op_by_postcondition,
+                &self.spy_events,
+            );
+            Self::compute_op_postconditions(
+                op,
+                deps,
+                &state.op_prof_uid,
+                &self.spy_op_by_precondition,
+                &self.spy_events,
+            );
+            Self::compute_op_parent(*op_id, deps, &state.op_prof_uid, &self.spy_op_parent);
+            Self::compute_op_children(*op_id, deps, &state.op_prof_uid, &self.spy_op_children);
+        }
+
+        // Now add the implicit dependencies on meta tasks/mapper calls/etc.
+        for proc in state.procs.values() {
+            for (uid, entry) in &proc.entries {
+                if let ProcEntryKind::ProfTask = entry.kind {
+                    // FIXME: Elliott: legion_prof.py seems to think ProfTask
+                    // has an op_id not an initiation_op, so we have to work
+                    // around that here
+                    continue;
+                }
+                if let (Some(initiation_op), None) = (entry.initiation_op, entry.op_id) {
+                    if let Some(task) = state.find_task(initiation_op) {
+                        let task_stop = task.time_range.stop;
+                        let task_uid = task.base.prof_uid;
+                        let before = entry.time_range.stop < task_stop;
+
+                        let task_deps = self
+                            .spy_op_deps
+                            .entry(task_uid)
+                            .or_insert_with(Dependencies::new);
+                        if before {
+                            task_deps.in_.insert(*uid);
+                        } else {
+                            task_deps.out.insert(*uid);
+                        }
+
+                        let entry_deps = self
+                            .spy_op_deps
+                            .entry(*uid)
+                            .or_insert_with(Dependencies::new);
+                        if before {
+                            entry_deps.out.insert(task_uid);
+                        } else {
+                            entry_deps.in_.insert(task_uid);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Reduce the graph
+        self.simplify_spy_graph();
+
+        self.compute_critical_path(state);
+    }
+}
+
+fn process_record(
+    record: &Record,
+    state: &mut State,
+    insts: &mut BTreeMap<InstUID, Inst>,
+    copies: &mut BTreeMap<EventID, Copy>,
+    fills: &mut BTreeMap<EventID, Fill>,
+    call_threshold: Timestamp,
+) {
     match record {
         Record::MapperCallDesc { kind, name } => {
             state
@@ -2200,7 +3789,19 @@ fn process_record(record: &Record, state: &mut State, insts: &mut BTreeMap<(Inst
                 .entry(kind)
                 .or_insert_with(|| OpKind::new(name.clone()));
         }
-        Record::ProcDesc { proc_id, kind } => {
+        Record::MaxDimDesc { max_dim } => {
+            state.max_dim = *max_dim;
+        }
+        Record::MachineDesc { num_nodes, .. } => {
+            state.num_nodes = *num_nodes;
+        }
+        Record::ZeroTime { zero_time } => {
+            state.zero_time = TimestampDelta(*zero_time);
+        }
+        Record::CalibrationErr { calibration_err } => {
+            state._calibration_err = *calibration_err;
+        }
+        Record::ProcDesc { proc_id, kind, .. } => {
             let kind = match ProcKind::try_from(*kind) {
                 Ok(x) => x,
                 Err(_) => panic!("bad processor kind"),
@@ -2209,9 +3810,6 @@ fn process_record(record: &Record, state: &mut State, insts: &mut BTreeMap<(Inst
                 .procs
                 .entry(*proc_id)
                 .or_insert_with(|| Proc::new(*proc_id, kind));
-        }
-        Record::MaxDimDesc { max_dim } => {
-            state.max_dim = *max_dim;
         }
         Record::MemDesc {
             mem_id,
@@ -2227,12 +3825,17 @@ fn process_record(record: &Record, state: &mut State, insts: &mut BTreeMap<(Inst
                 .entry(*mem_id)
                 .or_insert_with(|| Mem::new(*mem_id, kind, *capacity));
         }
-        Record::ProcMDesc { proc_id, mem_id } => {
+        Record::ProcMDesc {
+            proc_id,
+            mem_id,
+            bandwidth,
+            latency,
+        } => {
             state
                 .mem_proc_affinity
                 .entry(*mem_id)
-                .or_insert_with(|| MemProcAffinity::new(*mem_id))
-                .add_proc_id(*proc_id);
+                .or_insert_with(|| MemProcAffinity::new(*mem_id, *bandwidth, *latency, *proc_id))
+                .update_best_aff(*proc_id, *bandwidth, *latency);
         }
         Record::IndexSpacePointDesc {
             ispace_id,
@@ -2322,8 +3925,7 @@ fn process_record(record: &Record, state: &mut State, insts: &mut BTreeMap<(Inst
                 .or_insert_with(|| Region::new(*ispace_id, fspace_id, *tree_id, name));
         }
         Record::PhysicalInstRegionDesc {
-            op_id,
-            inst_id,
+            inst_uid,
             ispace_id,
             fspace_id,
             tree_id,
@@ -2331,14 +3933,13 @@ fn process_record(record: &Record, state: &mut State, insts: &mut BTreeMap<(Inst
             let fspace_id = FSpaceID(*fspace_id as u64);
             state.find_field_space_mut(fspace_id);
             state
-                .create_inst(*inst_id, *op_id, insts)
+                .create_inst(*inst_uid, insts)
                 .add_ispace(*ispace_id)
                 .add_fspace(fspace_id)
                 .set_tree(*tree_id);
         }
         Record::PhysicalInstLayoutDesc {
-            op_id,
-            inst_id,
+            inst_uid,
             field_id,
             fspace_id,
             has_align,
@@ -2348,13 +3949,12 @@ fn process_record(record: &Record, state: &mut State, insts: &mut BTreeMap<(Inst
             let fspace_id = FSpaceID(*fspace_id as u64);
             state.find_field_space_mut(fspace_id);
             state
-                .create_inst(*inst_id, *op_id, insts)
+                .create_inst(*inst_uid, insts)
                 .add_field(fspace_id, *field_id)
                 .add_align_desc(fspace_id, *field_id, *eqk, *align_desc, *has_align);
         }
         Record::PhysicalInstDimOrderDesc {
-            op_id,
-            inst_id,
+            inst_uid,
             dim,
             dim_kind,
         } => {
@@ -2364,8 +3964,22 @@ fn process_record(record: &Record, state: &mut State, insts: &mut BTreeMap<(Inst
                 Err(_) => unreachable!("bad dim kind"),
             };
             state
-                .create_inst(*inst_id, *op_id, insts)
+                .create_inst(*inst_uid, insts)
                 .add_dim_order(dim, dim_kind);
+        }
+        Record::PhysicalInstanceUsage {
+            inst_uid,
+            op_id,
+            index_id,
+            field_id,
+        } => {
+            state.create_op(*op_id);
+            let operation_inst_info = OperationInstInfo::new(*inst_uid, *index_id, *field_id);
+            state
+                .find_op_mut(*op_id)
+                .unwrap()
+                .operation_inst_infos
+                .push(operation_inst_info);
         }
         Record::TaskKind {
             task_id,
@@ -2389,16 +4003,34 @@ fn process_record(record: &Record, state: &mut State, insts: &mut BTreeMap<(Inst
                 .or_insert_with(|| Variant::new(*variant_id, false, false, name))
                 .set_task(*task_id);
         }
-        Record::OperationInstance { op_id, kind } => {
+        Record::OperationInstance {
+            op_id,
+            parent_id,
+            kind,
+            provenance,
+        } => {
             let kind = OpKindID(*kind);
-            state.create_op(*op_id).set_kind(kind);
+            state
+                .create_op(*op_id)
+                .set_parent_id(*parent_id)
+                .set_kind(kind)
+                .set_provenance(provenance);
+            // Hack: we have to do this in two places, because we don't know what
+            // order the logger calls are going to come in. If the task gets
+            // logged first, this will come back Some(_) and we'll store it below.
+            if let Some(task) = state.find_task_mut(*op_id) {
+                task.initiation_op = *parent_id;
+            }
         }
-        Record::MultiTask { op_id, .. } => {
+        Record::MultiTask { op_id, task_id } => {
             state.create_op(*op_id);
-            // .set_op_impl(OpImpl::Multi(Multi::new(*task_id)));
+            state
+                .multi_tasks
+                .entry(*op_id)
+                .or_insert_with(|| MultiTask::new(*op_id, *task_id));
         }
         Record::SliceOwner { parent_id, op_id } => {
-            let parent_id = OpID(*parent_id);
+            let parent_id = OpID(NonMaxU64::new(*parent_id).unwrap());
             state.create_op(parent_id);
             state.create_op(*op_id); //.set_owner(parent_id);
         }
@@ -2424,7 +4056,7 @@ fn process_record(record: &Record, state: &mut State, insts: &mut BTreeMap<(Inst
         } => {
             state.create_op(*op_id);
             state
-                .find_meta_mut(*op_id, *lg_id)
+                .find_last_meta_mut(*op_id, *lg_id)
                 .unwrap()
                 .waiters
                 .add_wait_interval(WaitInterval::new(*start, *ready, *end));
@@ -2438,9 +4070,19 @@ fn process_record(record: &Record, state: &mut State, insts: &mut BTreeMap<(Inst
             ready,
             start,
             stop,
+            creator,
+            fevent,
         } => {
             let time_range = TimeRange::new_full(*create, *ready, *start, *stop);
-            state.create_task(*op_id, *proc_id, *task_id, *variant_id, time_range);
+            state.create_task(
+                *op_id,
+                *proc_id,
+                *task_id,
+                *variant_id,
+                time_range,
+                *creator,
+                *fevent,
+            );
             state.update_last_time(*stop);
         }
         Record::GPUTaskInfo {
@@ -2450,13 +4092,33 @@ fn process_record(record: &Record, state: &mut State, insts: &mut BTreeMap<(Inst
             proc_id,
             create,
             ready,
+            start,
+            stop,
             gpu_start,
             gpu_stop,
-            ..
+            creator,
+            fevent,
         } => {
-            let time_range = TimeRange::new_full(*create, *ready, *gpu_start, *gpu_stop);
-            state.create_task(*op_id, *proc_id, *task_id, *variant_id, time_range);
-            state.update_last_time(*gpu_stop);
+            // it is possible that gpu_start is larger than gpu_stop when cuda hijack is disabled,
+            // because the cuda event completions of these two timestamp may be out of order when
+            // they are not in the same stream. Usually, when it happened, it means the GPU task is tiny.
+            let mut gpu_start = *gpu_start;
+            if gpu_start > *gpu_stop {
+                gpu_start = *gpu_stop - Timestamp::ONE;
+            }
+            let gpu_range = TimeRange::new_start(gpu_start, *gpu_stop);
+            state.create_gpu_kernel(*op_id, *proc_id, *task_id, *variant_id, gpu_range, *fevent);
+            let time_range = TimeRange::new_full(*create, *ready, *start, *stop);
+            state.create_task(
+                *op_id,
+                *proc_id,
+                *task_id,
+                *variant_id,
+                time_range,
+                *creator,
+                *fevent,
+            );
+            state.update_last_time(max(*stop, *gpu_stop));
         }
         Record::MetaInfo {
             op_id,
@@ -2466,103 +4128,109 @@ fn process_record(record: &Record, state: &mut State, insts: &mut BTreeMap<(Inst
             ready,
             start,
             stop,
+            creator,
+            fevent,
         } => {
             let time_range = TimeRange::new_full(*create, *ready, *start, *stop);
-            state.create_meta(*op_id, *lg_id, *proc_id, time_range);
+            state.create_meta(*op_id, *lg_id, *proc_id, time_range, *creator, *fevent);
             state.update_last_time(*stop);
         }
         Record::CopyInfo {
             op_id,
-            src,
-            dst,
             size,
             create,
             ready,
             start,
             stop,
+            creator,
             fevent,
-            num_requests,
+            collective,
         } => {
             let time_range = TimeRange::new_full(*create, *ready, *start, *stop);
+            state.create_op(*op_id);
             state.create_copy(
-                *op_id,
-                *src,
-                *dst,
-                *size,
                 time_range,
+                *op_id,
+                *size,
+                *creator,
                 *fevent,
-                *num_requests,
+                *collective,
+                copies,
             );
             state.update_last_time(*stop);
         }
         Record::CopyInstInfo {
+            src,
+            dst,
+            src_fid,
+            dst_fid,
             src_inst,
             dst_inst,
             fevent,
-            num_fields,
-            request_type,
             num_hops,
-            ..
+            indirect,
         } => {
-            let copy_info = CopyInfo {
-                src_inst: *src_inst,
-                dst_inst: *dst_inst,
-                fevent: *fevent,
-                num_fields: *num_fields,
-                request_type: *request_type,
-                num_hops: *num_hops,
-            };
-            state
-                .find_copy_mut(*fevent)
-                .unwrap()
-                .copy_info
-                .push(copy_info);
+            let copy = copies.get_mut(fevent).unwrap();
+            let mut src_mem = None;
+            if *src != MemID(0) {
+                src_mem = Some(*src);
+            }
+            let mut dst_mem = None;
+            if *dst != MemID(0) {
+                dst_mem = Some(*dst);
+            }
+            let copy_inst_info = CopyInstInfo::new(
+                src_mem, dst_mem, *src_fid, *dst_fid, *src_inst, *dst_inst, *fevent, *num_hops,
+                *indirect,
+            );
+            copy.add_copy_inst_info(copy_inst_info);
         }
         Record::FillInfo {
             op_id,
-            dst,
+            size,
             create,
             ready,
             start,
             stop,
+            creator,
+            fevent,
         } => {
             let time_range = TimeRange::new_full(*create, *ready, *start, *stop);
-            state.create_fill(*op_id, *dst, time_range);
+            state.create_op(*op_id);
+            state.create_fill(time_range, *op_id, *size, *creator, *fevent, fills);
             state.update_last_time(*stop);
         }
-        Record::InstCreateInfo {
-            op_id,
-            inst_id,
-            create,
+        Record::FillInstInfo {
+            dst,
+            fid,
+            dst_inst,
+            fevent,
         } => {
-            state
-                .create_inst(*inst_id, *op_id, insts)
-                .set_start(*create);
+            let fill_inst_info = FillInstInfo::new(*dst, *fid, *dst_inst, *fevent);
+            let fill = fills.get_mut(fevent).unwrap();
+            fill.add_fill_inst_info(fill_inst_info);
         }
-        Record::InstUsageInfo {
-            op_id,
+        Record::InstTimelineInfo {
+            inst_uid,
             inst_id,
             mem_id,
             size,
-        } => {
-            state
-                .insts
-                .entry((*inst_id, *op_id))
-                .or_insert_with(|| *mem_id);
-            state
-                .create_inst(*inst_id, *op_id, insts)
-                .set_mem(*mem_id)
-                .set_size(*size);
-        }
-        Record::InstTimelineInfo {
             op_id,
-            inst_id,
             create,
+            ready,
             destroy,
+            creator,
         } => {
+            state.create_op(*op_id);
+            state.insts.entry(*inst_uid).or_insert_with(|| *mem_id);
             state
-                .create_inst(*inst_id, *op_id, insts)
-                .set_start_stop(*create, *destroy);
+                .create_inst(*inst_uid, insts)
+                .set_inst_id(*inst_id)
+                .set_op_id(*op_id)
+                .set_start_stop(*create, *ready, *destroy)
+                .set_mem(*mem_id)
+                .set_size(*size)
+                .set_creator(*creator);
             state.update_last_time(*destroy);
         }
         Record::PartitionInfo {
@@ -2572,13 +4240,14 @@ fn process_record(record: &Record, state: &mut State, insts: &mut BTreeMap<(Inst
             ready,
             start,
             stop,
+            creator,
         } => {
             let part_op = match DepPartKind::try_from(*part_op) {
                 Ok(x) => x,
                 Err(_) => panic!("bad deppart kind"),
             };
             let time_range = TimeRange::new_full(*create, *ready, *start, *stop);
-            state.create_deppart(*op_id, part_op, time_range);
+            state.create_deppart(*op_id, part_op, time_range, *creator);
             state.update_last_time(*stop);
         }
         Record::MapperCallInfo {
@@ -2587,36 +4256,102 @@ fn process_record(record: &Record, state: &mut State, insts: &mut BTreeMap<(Inst
             start,
             stop,
             proc_id,
+            fevent,
         } => {
-            assert!(state.mapper_call_kinds.contains_key(kind));
-            assert!(*start <= *stop);
-            // For now we'll only add very expensive mapper calls (more than 100 us)
-            if *stop - *start >= Timestamp::from_us(100) {
+            // Check to make sure it is above the call threshold
+            if call_threshold <= (*stop - *start) {
+                assert!(state.mapper_call_kinds.contains_key(kind));
                 let time_range = TimeRange::new_start(*start, *stop);
-                state.create_mapper_call(*kind, *proc_id, *op_id, time_range);
+                state.create_mapper_call(*kind, *proc_id, *op_id, time_range, *fevent);
                 state.update_last_time(*stop);
-            };
+            }
         }
         Record::RuntimeCallInfo {
             kind,
             start,
             stop,
             proc_id,
+            fevent,
         } => {
-            assert!(state.runtime_call_kinds.contains_key(kind));
-            let time_range = TimeRange::new_start(*start, *stop);
-            state.create_runtime_call(*kind, *proc_id, time_range);
-            state.update_last_time(*stop);
+            // Check to make sure that it is above the call threshold
+            if call_threshold <= (*stop - *start) {
+                assert!(state.runtime_call_kinds.contains_key(kind));
+                let time_range = TimeRange::new_start(*start, *stop);
+                state.create_runtime_call(*kind, *proc_id, time_range, *fevent);
+                state.update_last_time(*stop);
+            }
         }
         Record::ProfTaskInfo {
             proc_id,
             op_id,
             start,
             stop,
+            creator,
+            fevent,
         } => {
             let time_range = TimeRange::new_start(*start, *stop);
-            state.create_prof_task(*proc_id, *op_id, time_range);
+            state.create_prof_task(*proc_id, *op_id, time_range, *creator, *fevent);
             state.update_last_time(*stop);
         }
+    }
+}
+
+fn process_spy_record(record: &spy::serialize::Record, state: &mut SpyState) {
+    use spy::serialize::Record;
+
+    match record {
+        Record::SpyLogging => unimplemented!("legion_prof_rs requires detailed Legion Spy logging"),
+        Record::SpyDetailedLogging => {
+            state.has_spy_data = true;
+        }
+        Record::EventDependence { id1, id2 } => {
+            state.create_spy_event_depencence((*id1).into(), (*id2).into());
+        }
+
+        Record::OperationEvents { uid, pre, post } => {
+            state.create_spy_op((*uid).into(), (*pre).into(), (*post).into());
+        }
+        Record::RealmCopy { pre, post, .. } => {
+            state.create_spy_event_depencence((*pre).into(), (*post).into());
+        }
+        Record::IndirectCopy { pre, post, .. } => {
+            state.create_spy_event_depencence((*pre).into(), (*post).into());
+        }
+        Record::RealmFill { pre, post, .. } => {
+            state.create_spy_event_depencence((*pre).into(), (*post).into());
+        }
+        Record::RealmDepPart { preid, postid, .. } => {
+            state.create_spy_event_depencence((*preid).into(), (*postid).into());
+        }
+
+        Record::TopTask { ctx, uid, .. } => {
+            state.create_spy_op_parent((*ctx).into(), (*uid).into());
+        }
+        Record::IndividualTask { ctx, uid, .. } => {
+            state.create_spy_op_parent((*ctx).into(), (*uid).into());
+        }
+        Record::IndexTask { ctx, uid, .. } => {
+            state.create_spy_op_parent((*ctx).into(), (*uid).into());
+        }
+        Record::IndexSlice { index, slice, .. } => {
+            state.create_spy_op_parent((*index).into(), (*slice).into());
+        }
+        Record::SliceSlice { slice1, slice2, .. } => {
+            state.create_spy_op_parent((*slice1).into(), (*slice2).into());
+        }
+        Record::SlicePoint {
+            slice, point_id, ..
+        } => {
+            state.create_spy_op_parent((*slice).into(), (*point_id).into());
+        }
+        Record::PointPoint { point1, point2, .. } => {
+            state.create_spy_op_parent((*point1).into(), (*point2).into());
+        }
+        Record::IndexPoint {
+            index, point_id, ..
+        } => {
+            state.create_spy_op_parent((*index).into(), (*point_id).into());
+        }
+        _ => {} // ok, ignore everything else
     }
 }

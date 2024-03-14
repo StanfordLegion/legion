@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,14 +18,6 @@
 #include "realm/logging.h"
 #include "realm/event_impl.h"
 #include "realm/runtime_impl.h"
-
-#if defined(__SSE__)
-// technically pause is an "SSE2" instruction, but it's defined in xmmintrin
-#include <xmmintrin.h>
-static void mm_pause(void) { _mm_pause(); }
-#else
-static void mm_pause(void) { /* do nothing */ }
-#endif
 
 namespace Realm {
 
@@ -163,7 +155,8 @@ namespace Realm {
   // class Reservation
   //
 
-    /*static*/ const Reservation Reservation::NO_RESERVATION = { 0 };
+    /*static*/ const Reservation Reservation::NO_RESERVATION = {
+        /* zero-initialization */};
 
     Event Reservation::acquire(unsigned mode /* = 0 */, bool exclusive /* = true */,
 		     Event wait_on /* = Event::NO_EVENT */) const
@@ -171,18 +164,29 @@ namespace Realm {
       //printf("LOCK(" IDFMT ", %d, %d, " IDFMT ") -> ", id, mode, exclusive, wait_on.id);
       // early out - if the event has obviously triggered (or is NO_EVENT)
       //  don't build up continuation
-      if(wait_on.has_triggered()) {
-	Event e = get_runtime()->get_lock_impl(*this)->acquire(mode, exclusive,
-							       ReservationImpl::ACQUIRE_BLOCKING);
-	log_reservation.info() << "reservation acquire: rsrv=" << *this << " finish=" << e;
-	//printf("(" IDFMT "/%d)\n", e.id, e.gen);
-	return e;
+      bool poisoned = false;
+      if(wait_on.has_triggered_faultaware(poisoned)) {
+        if(poisoned) {
+          log_reservation.info()
+              << "reservation:" << *this
+              << " cannot be acquired due to poisoned precondition finish=" << wait_on;
+          return wait_on;
+        } else {
+          Event e = get_runtime()->get_lock_impl(*this)->acquire(
+              mode, exclusive, ReservationImpl::ACQUIRE_BLOCKING);
+          log_reservation.info()
+              << "reservation acquire: rsrv=" << *this << " finish=" << e;
+          return e;
+        }
+        // printf("(" IDFMT "/%d)\n", e.id, e.gen);
       } else {
-	Event after_lock = GenEventImpl::create_genevent()->current_event();
-	log_reservation.info() << "reservation acquire: rsrv=" << *this << " finish=" << after_lock << " wait_on=" << wait_on;
-	EventImpl::add_waiter(wait_on, new DeferredLockRequest(*this, mode, exclusive, after_lock));
-	//printf("*(" IDFMT "/%d)\n", after_lock.id, after_lock.gen);
-	return after_lock;
+        Event after_lock = GenEventImpl::create_genevent()->current_event();
+        log_reservation.info() << "reservation acquire: rsrv=" << *this
+                               << " finish=" << after_lock << " wait_on=" << wait_on;
+        EventImpl::add_waiter(
+            wait_on, new DeferredLockRequest(*this, mode, exclusive, after_lock));
+        // printf("*(" IDFMT "/%d)\n", after_lock.id, after_lock.gen);
+        return after_lock;
       }
     }
 
@@ -215,17 +219,24 @@ namespace Realm {
     {
       // early out - if the event has obviously triggered (or is NO_EVENT)
       //  don't build up continuation
-      if(wait_on.has_triggered()) {
-	log_reservation.info() << "reservation release: rsrv=" << *this;
-	get_runtime()->get_lock_impl(*this)->release(TimeLimit::responsive());
+
+      bool poisoned = false;
+      if(wait_on.has_triggered_faultaware(poisoned)) {
+        if(!poisoned) {
+          log_reservation.info() << "reservation release: rsrv=" << *this;
+          get_runtime()->get_lock_impl(*this)->release(TimeLimit::responsive());
+        } else {
+          log_reservation.info() << "reservation release: rsrv=" << *this << " dropped";
+        }
       } else {
-	log_reservation.info() << "reservation release: rsrv=" << *this << " wait_on=" << wait_on;
-	EventImpl::add_waiter(wait_on, new DeferredUnlockRequest(*this));
+        log_reservation.info() << "reservation release: rsrv=" << *this
+                               << " wait_on=" << wait_on;
+        EventImpl::add_waiter(wait_on, new DeferredUnlockRequest(*this));
       }
     }
 
     // Create a new lock, destroy an existing lock
-    /*static*/ Reservation Reservation::create_reservation(size_t _data_size /*= 0*/)
+    /*static*/ Reservation Reservation::create_reservation()
     {
       // see if the freelist has an event we can reuse
       ReservationImpl *impl = get_runtime()->local_reservation_free_list->alloc_entry();
@@ -252,7 +263,7 @@ namespace Realm {
       return Reservation::NO_RESERVATION;
     }
 
-    void Reservation::destroy_reservation()
+    void Reservation::destroy_reservation(Event wait_on)
     {
       log_reservation.info() << "reservation destroyed: rsrv=" << *this;
 
@@ -261,16 +272,17 @@ namespace Realm {
 	ActiveMessage<DestroyLockMessage> amsg(ID(*this).rsrv_creator_node());
 	amsg->actual = *this;
 	amsg->dummy = *this;
+        amsg->wait_on = wait_on;
 	amsg.commit();
 	return;
       }
 
       // to destroy a local lock, we first must lock it (exclusively)
-      ReservationImpl *lock_impl = get_runtime()->get_lock_impl(*this);
-      Event e = lock_impl->acquire(0, true, ReservationImpl::ACQUIRE_BLOCKING);
+      Event e = acquire(0/*mode*/, true/*exclusive*/, wait_on);
       if(!e.has_triggered()) {
 	EventImpl::add_waiter(e, new DeferredLockDestruction(*this));
       } else {
+        ReservationImpl *lock_impl = get_runtime()->get_lock_impl(*this);
 	// got grant immediately - can release reservation now
 	lock_impl->release_reservation();
       }
@@ -286,27 +298,18 @@ namespace Realm {
       init(Reservation::NO_RESERVATION, (unsigned)-1);
     }
 
-    void ReservationImpl::init(Reservation _me, unsigned _init_owner,
-			  size_t _data_size /*= 0*/)
+    void ReservationImpl::init(Reservation _me, unsigned _init_owner)
     {
       me = _me;
       owner = _init_owner;
       count = ZERO_COUNT;
-      log_reservation.spew("count init " IDFMT "=[%p]=%d", me.id, &count, count);
+      log_reservation.spew("count init " IDFMT "=[%p]=%d", me.id,
+                           static_cast<void *>(&count), count);
       mode = 0;
       in_use = false;
       remote_waiter_mask = NodeSet(); 
       remote_sharer_mask = NodeSet();
       requested = false;
-      if(_data_size) {
-	local_data = malloc(_data_size);
-	local_data_size = _data_size;
-        own_local = true;
-      } else {
-        local_data = 0;
-	local_data_size = 0;
-        own_local = false;
-      }
     }
 
     /*static*/ void LockReleaseMessage::handle_message(NodeID sender, const LockReleaseMessage &msg,
@@ -338,14 +341,10 @@ namespace Realm {
 	const int *pos = (const int *)data;
 
 	size_t waiter_count = *pos++;
-	assert(datalen == (((waiter_count+1) * sizeof(int)) + impl->local_data_size));
+	assert(datalen == ((waiter_count+1) * sizeof(int)));
 	impl->remote_waiter_mask.clear();
 	for(size_t i = 0; i < waiter_count; i++)
 	  impl->remote_waiter_mask.add(*pos++);
-
-	// is there local data to grab?
-	if(impl->local_data_size > 0)
-          memcpy(impl->local_data, pos, impl->local_data_size);
 
 	if(args.mode == 0) // take ownership if given exclusive access
 	  impl->owner = Network::my_node_id;
@@ -411,8 +410,9 @@ namespace Realm {
 	       local_shared.begin()->first > mode))) {
 	    mode = new_mode;
 	    count++;
-	    log_reservation.spew("count ++(1) [%p]=%d", &count, count);
-	    got_lock = true;
+            log_reservation.spew("count ++(1) [%p]=%d", static_cast<void *>(&count),
+                                 count);
+            got_lock = true;
 #ifdef DEBUG_REALM
 	    // if this is a shared mode, there should be no waiters or retry
 	    //  events for that mode
@@ -432,8 +432,9 @@ namespace Realm {
 	    assert(mode != MODE_EXCL);
 	    if(mode == new_mode) {
 	      count++;
-	      log_reservation.spew("count ++(2) [%p]=%d", &count, count);
-	      got_lock = true;
+              log_reservation.spew("count ++(2) [%p]=%d", static_cast<void *>(&count),
+                                   count);
+              got_lock = true;
 	    }
 	  }
 	
@@ -672,7 +673,7 @@ namespace Realm {
       {
         // Make a buffer for storing our waiter mask and the the local data
 	size_t waiter_count = copy_waiters.size();
-        size_t payload_size = ((waiter_count+1) * sizeof(int)) + local_data_size;
+        size_t payload_size = ((waiter_count+1) * sizeof(int));
         int *payload = (int*)malloc(payload_size);
 	int *pos = payload;
 	*pos++ = waiter_count;
@@ -680,10 +681,6 @@ namespace Realm {
 	    it != copy_waiters.end();
 	    ++it)
 	  *pos++ = *it;
-	//for(int i = 0; i < MAX_NUM_NODES; i++)
-	//  if(copy_waiters.contains(i))
-	//    *pos++ = i;
-        memcpy(pos, local_data, local_data_size);
 	ActiveMessage<LockGrantMessage> amsg(grant_target, payload_size);
 	amsg->lock = me;
 	amsg->mode = 0; // TODO: figure out shared cases
@@ -734,12 +731,6 @@ namespace Realm {
 	assert(local_shared.empty());
 	assert(retries.empty());
 	assert(in_use);
-        // Mark that we no longer own our data
-        if (own_local)
-          free(local_data);
-        local_data = NULL;
-        local_data_size = 0;
-        own_local = false;
       	in_use = false;
 	count = ZERO_COUNT;
       }
@@ -752,7 +743,7 @@ namespace Realm {
 						       const void *data, size_t datalen)
     {
       Reservation a = args.actual;
-      a.destroy_reservation();
+      a.destroy_reservation(args.wait_on);
     }
 
 
@@ -965,7 +956,7 @@ namespace Realm {
 	  state.compare_exchange(cur_state,
 				 cur_state | STATE_WRITER_WAITING);
 
-	  mm_pause();
+	  REALM_SPIN_YIELD();
 	  continue;
 	}
 
@@ -1185,7 +1176,7 @@ namespace Realm {
 	// if it failed and we've been asked to spin, assume this is regular
 	//  contention and try again shortly
 	if((mode == SPIN) || (mode == ALWAYS_SPIN)) {
-	  mm_pause();
+	  REALM_SPIN_YIELD();
 	  continue;
 	}
 
@@ -1539,7 +1530,7 @@ namespace Realm {
       {
         // Make a buffer for storing our waiter mask and the the local data
 	size_t waiter_count = copy_waiters.size();
-        size_t payload_size = ((waiter_count+1) * sizeof(int)) + impl->local_data_size;
+        size_t payload_size = ((waiter_count+1) * sizeof(int));
         int *payload = (int*)malloc(payload_size);
 	int *pos = payload;
 	*pos++ = waiter_count;
@@ -1547,10 +1538,6 @@ namespace Realm {
 	    it != copy_waiters.end();
 	    ++it)
 	  *pos++ = *it;
-	//for(int i = 0; i < MAX_NUM_NODES; i++)
-	//  if(copy_waiters.contains(i))
-	//    *pos++ = i;
-        memcpy(pos, impl->local_data, impl->local_data_size);
 	ActiveMessage<LockGrantMessage> amsg(grant_target, payload_size);
 	amsg->lock = args.lock;
 	amsg->mode = 0; // always grant exclusive for now

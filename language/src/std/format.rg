@@ -1,4 +1,4 @@
--- Copyright 2022 Stanford University
+-- Copyright 2024 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -84,6 +84,16 @@ local std = require("regent/std")
 
 local format = {}
 
+local terra convert_bool(x : bool)
+  if x then
+    return "true"
+  else
+    return "false"
+  end
+end
+convert_bool:setinlined(true)
+convert_bool.replicable = true
+
 local format_string_mapping = {
   [int8]      = { [""] =   "d", x =   "x", allow_precision = false },
   [int16]     = { [""] =   "d", x =   "x", allow_precision = false },
@@ -96,6 +106,7 @@ local format_string_mapping = {
   [float]     = { [""] =   "f", e =   "e", allow_precision = true },
   [double]    = { [""] =   "f", e =   "e", allow_precision = true },
   [rawstring] = { [""] =   "s",            allow_precision = false },
+  [bool]      = { [""] =   "s",            convert = convert_bool },
 }
 
 local function format_string(macro_name, node, value, value_type, modifiers)
@@ -106,6 +117,7 @@ local function format_string(macro_name, node, value, value_type, modifiers)
   if string.len(modifiers.precision) > 0 and not format_str.allow_precision then
     report.error(node, macro_name .. " does not support precision specifier on a value of type " .. tostring(value_type))
   end
+  local convert = format_str.convert
   format_str = format_str[modifiers.style]
   if not format_str then
     report.error(node, macro_name .. " does not support format style " .. modifiers.style .. " on a value of type " .. tostring(value_type))
@@ -113,7 +125,7 @@ local function format_string(macro_name, node, value, value_type, modifiers)
   if string.len(modifiers.precision) > 0 then
     format_str = "." .. modifiers.precision  .. format_str
   end
-  return "%" .. modifiers.padding .. format_str
+  return "%" .. modifiers.padding .. format_str, convert
 end
 
 local function format_value(macro_name, node, value, value_type, modifiers)
@@ -150,7 +162,11 @@ local function format_value(macro_name, node, value, value_type, modifiers)
   elseif std.is_string(value_type) then
     return format_value(macro_name, node, rexpr [rawstring](value) end, rawstring, modifiers)
   else
-    format_str = format_string(macro_name, node, value, value_type, modifiers)
+    local convert
+    format_str, convert = format_string(macro_name, node, value, value_type, modifiers)
+    if convert then
+      value = rexpr convert(value) end
+    end
     format_args:insert(value)
   end
 

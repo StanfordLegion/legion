@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University
+/* Copyright 2024 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,6 +19,12 @@
 int blas_thread_count = 0;
 bool blas_do_parallel = true;
 
+extern "C" {
+  int omp_get_thread_num(void);
+};
+
+extern Realm::Logger log_app;
+
 // single-precision float
 
 /*extern*/ BlasTaskImplementations<float> blas_impl_s;
@@ -38,6 +44,11 @@ void BlasTaskImplementations<float>::axpy_task_cpu(const Task *task,
           Realm::AffineAccessor<float,1,coord_t> > fa_x(regions[0], task->regions[0].instance_fields[0]);
   const FieldAccessor<READ_WRITE,float,1,coord_t,
           Realm::AffineAccessor<float,1,coord_t> > fa_y(regions[1], task->regions[1].instance_fields[0]);
+
+#pragma omp parallel
+  {
+    log_app.print() << "saxpy on proc=" << Realm::Processor::get_executing_processor() << " thread=" << omp_get_thread_num();
+  }
 
 #pragma omp parallel for if(blas_do_parallel)
   for(int i = bounds.lo[0]; i <= bounds.hi[0]; i++)

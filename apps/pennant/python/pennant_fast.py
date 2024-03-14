@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# Copyright 2022 Stanford University
+# Copyright 2024 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -51,31 +51,30 @@ def create_partition(is_disjoint, region, c_partition, color_space):
     return Partition(region, ipart)
 
 read_config = pygion.extern_task(
-    task_id=10000,
+    task_id=10005,
     argument_types=[],
     privileges=[],
     return_type=config,
     calling_convention='regent')
 
 read_partitions = pygion.extern_task(
-    task_id=10001,
+    task_id=10006,
     argument_types=[Region, Region, Region, config],
     privileges=[N, N, N],
     return_type=mesh_partitions,
     calling_convention='regent')
 
 initialize_spans = pygion.extern_task(
-    task_id=10002,
+    task_id=10007,
     argument_types=[config, pygion.int64, Region, Region, Region, Region],
     privileges=[None, None, RW, RW, RW, RW],
     return_type=pygion.void,
     calling_convention='regent')
 
 initialize_topology = pygion.extern_task(
-    task_id=10003,
-    argument_types=[config, pygion.int64, Region, Region, Region, Region, Region],
+    task_id=10008,
+    argument_types=[config, Region, Region, Region, Region, Region],
     privileges=[
-        None,
         None,
         RW('znump'),
         RW('px_x', 'px_y', 'has_bcx', 'has_bcy'),
@@ -86,21 +85,21 @@ initialize_topology = pygion.extern_task(
     calling_convention='regent')
 
 init_pointers = pygion.extern_task(
-    task_id=10012,
+    task_id=10017,
     argument_types=[Region, Region, Region, Region, Region],
     privileges=[N, N, N, RW('mapsp1', 'mapsp1_r', 'mapsp2', 'mapsp2_r'), R],
     return_type=pygion.void,
     calling_convention='regent')
 
 init_mesh_zones = pygion.extern_task(
-    task_id=10013,
+    task_id=10018,
     argument_types=[Region, Region],
     privileges=[RW('zx_x', 'zx_y', 'zarea', 'zvol'), R],
     return_type=pygion.void,
     calling_convention='regent')
 
 calc_centers_full = pygion.extern_task(
-    task_id=10014,
+    task_id=10019,
     argument_types=[Region, Region, Region, Region, Region, pygion.bool_],
     privileges=[
         R('znump') + RW('zx_x', 'zx_y'),
@@ -112,7 +111,7 @@ calc_centers_full = pygion.extern_task(
     calling_convention='regent')
 
 calc_volumes_full = pygion.extern_task(
-    task_id=10015,
+    task_id=10020,
     argument_types=[Region, Region, Region, Region, Region, pygion.bool_],
     privileges=[
         R('zx_x', 'zx_y', 'znump') + RW('zarea', 'zvol'),
@@ -124,7 +123,7 @@ calc_volumes_full = pygion.extern_task(
     calling_convention='regent')
 
 init_side_fracs = pygion.extern_task(
-    task_id=10016,
+    task_id=10021,
     argument_types=[Region, Region, Region, Region, Region],
     privileges=[
         R('zarea'),
@@ -136,7 +135,7 @@ init_side_fracs = pygion.extern_task(
     calling_convention='regent')
 
 init_hydro = pygion.extern_task(
-    task_id=10017,
+    task_id=10022,
     argument_types=[Region, Region, pygion.float64, pygion.float64, pygion.float64, pygion.float64, pygion.float64, pygion.float64, pygion.float64, pygion.float64],
     privileges=[
         R('zx_x', 'zx_y', 'zvol') + RW('zr', 'ze', 'zwrate', 'zm', 'zetot'),
@@ -145,7 +144,7 @@ init_hydro = pygion.extern_task(
     calling_convention='regent')
 
 init_radial_velocity = pygion.extern_task(
-    task_id=10018,
+    task_id=10023,
     argument_types=[Region, Region, pygion.float64],
     privileges=[
         R('px_x', 'px_y') + RW('pu_x', 'pu_y'),
@@ -154,7 +153,7 @@ init_radial_velocity = pygion.extern_task(
     calling_convention='regent')
 
 adv_pos_half = pygion.extern_task(
-    task_id=10019,
+    task_id=10024,
     argument_types=[Region, Region, pygion.float64, pygion.bool_, pygion.bool_],
     privileges=[
         R('px_x', 'px_y', 'pu_x', 'pu_y') + RW('px0_x', 'px0_y', 'pxp_x', 'pxp_y', 'pu0_x', 'pu0_y', 'pmaswt', 'pf_x', 'pf_y'),
@@ -163,7 +162,7 @@ adv_pos_half = pygion.extern_task(
     calling_convention='regent')
 
 calc_everything = pygion.extern_task(
-    task_id=10020,
+    task_id=10025,
     argument_types=[Region, Region, Region, Region, Region, Region, pygion.float64, pygion.float64, pygion.float64, pygion.float64, pygion.float64, pygion.float64, pygion.bool_],
     privileges=[
         R('zm', 'zvol', 'zr', 'znump', 'zwrate', 'ze') + RW('zp', 'zxp_x', 'zuc_y', 'zvol0', 'zvolp', 'z0tmp', 'zxp_y', 'zrp', 'zuc_x', 'zdu', 'zss', 'zareap', 'zdl'),
@@ -176,7 +175,7 @@ calc_everything = pygion.extern_task(
     calling_convention='regent')
 
 adv_pos_full = pygion.extern_task(
-    task_id=10021,
+    task_id=10026,
     argument_types=[Region, Region, pygion.float64, pygion.bool_],
     privileges=[
         R('px0_x', 'px0_y', 'pmaswt', 'has_bcx', 'has_bcy') + RW('px_x', 'px_y', 'pu_x', 'pu_y', 'pu0_x', 'pu0_y', 'pf_x', 'pf_y'),
@@ -185,7 +184,7 @@ adv_pos_full = pygion.extern_task(
     calling_convention='regent')
 
 calc_everything_full = pygion.extern_task(
-    task_id=10022,
+    task_id=10027,
     argument_types=[Region, Region, Region, Region, Region, Region, pygion.float64, pygion.bool_],
     privileges=[
         R('zm', 'zvol0', 'znump', 'zp') + RW('ze', 'zx_x', 'zwrate', 'zetot', 'zx_y', 'zw', 'zarea', 'zvol', 'zr'),
@@ -198,7 +197,7 @@ calc_everything_full = pygion.extern_task(
     calling_convention='regent')
 
 calc_dt_hydro = pygion.extern_task(
-    task_id=10023,
+    task_id=10028,
     argument_types=[Region, Region, pygion.float64, pygion.float64, pygion.float64, pygion.float64, pygion.bool_, pygion.bool_],
     privileges=[
         R('zdl', 'zvol0', 'zvol', 'zss', 'zdu'),
@@ -207,14 +206,14 @@ calc_dt_hydro = pygion.extern_task(
     calling_convention='regent')
 
 calc_global_dt = pygion.extern_task(
-    task_id=10024,
+    task_id=10029,
     argument_types=[pygion.float64, pygion.float64, pygion.float64, pygion.float64, pygion.float64, pygion.float64, pygion.float64, pygion.int64],
     privileges=[],
     return_type=pygion.float64,
     calling_convention='regent')
 
 validate_output_sequential = pygion.extern_task(
-    task_id=10028,
+    task_id=10033,
     argument_types=[Region, Region, Region, config],
     privileges=[R, R, R],
     return_type=pygion.void,
@@ -379,7 +378,7 @@ def main():
     if conf.par_init:
         for i in IndexLaunch(pieces):
             initialize_topology(
-                conf, int(i),
+                conf,
                 zones_part[i],
                 private_part[i],
                 shared_part[i],

@@ -1,5 +1,5 @@
-/* Copyright 2022 Stanford University
- * Copyright 2022 Los Alamos National Laboratory 
+/* Copyright 2024 Stanford University
+ * Copyright 2024 Los Alamos National Laboratory 
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,7 +16,14 @@
 
 #include "task_throughput.h"
 
+#ifdef REALM_USE_CUDA
 #include <cuda_runtime.h>
+#endif
+
+#ifdef REALM_USE_HIP
+#include "hip_cuda_compat/hip_cuda.h"
+#include "realm/hip/hiphijack_api.h"
+#endif
 
 __global__ void dummy_kernel()
 {}
@@ -26,7 +33,11 @@ void dummy_gpu_task(const void *args, size_t arglen,
 {
   int threads = 1;
   int blocks = 1;
-  dummy_kernel<<<blocks, threads>>>();
+  dummy_kernel<<<blocks, threads
+#ifdef REALM_USE_HIP
+                 , 0, hipGetTaskStream()
+#endif
+              >>>();
 
   dummy_task_body(args, arglen, userdata, userlen, p);
 }

@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -72,6 +72,11 @@ legion_terra_index_cross_product_create_multi(
   legion_color_t *colors, // output
   size_t npartitions);
 
+legion_terra_index_cross_product_t
+legion_terra_index_cross_product_import(
+  legion_index_partition_t first_partition,
+  legion_color_t second_color);
+
 void
 legion_terra_index_cross_product_create_list(
   legion_runtime_t runtime,
@@ -107,7 +112,6 @@ legion_terra_index_cross_product_get_partition(
 legion_index_partition_t
 legion_terra_index_cross_product_get_subpartition_by_color_domain_point(
   legion_runtime_t runtime,
-  legion_context_t ctx,
   legion_terra_index_cross_product_t prod,
   legion_domain_point_t color_);
 

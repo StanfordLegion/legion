@@ -1,4 +1,4 @@
--- Copyright 2022 Stanford University
+-- Copyright 2024 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -17,15 +17,9 @@ import "regent"
 -- This tests the various loop optimizations supported by the
 -- compiler.
 
-local c = regentlib.c
-
 task g(r : region(int)) : int
-where reads(r), writes(r) do
+where reads writes(r) do
   return 5
-end
-
-terra compute_index(i : int, j : int)
-  return i
 end
 
 task main()

@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------#
-# Copyright 2022 Stanford University
+# Copyright 2024 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
 # limitations under the License.
 #------------------------------------------------------------------------------#
 
-cmake_minimum_required(VERSION 3.1)
+cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
 project(LegionBindings_regent)
 
 # Only search if were building stand-alone and not as part of Legion
@@ -35,6 +35,10 @@ if(Legion_USE_CUDA)
     regent_cudart_hijack.h regent_cudart_hijack.cc
     regent_cuda.cu
   )
+elseif(Legion_USE_HIP)
+  list(APPEND REGENT_SRC
+    regent_cuda.cu
+  )
 endif()
 
 # Bishop bindings
@@ -48,20 +52,43 @@ list(APPEND REGENT_SRC
   murmur_hash3.h  murmur_hash3.cc
 )
 
-if(Legion_USE_CUDA)
-  cuda_add_library(Regent ${REGENT_SRC})
+if(Legion_USE_HIP)
+  hip_add_library(Regent SHARED ${REGENT_SRC})
 else()
-  add_library(Regent ${REGENT_SRC})
+  add_library(Regent SHARED ${REGENT_SRC})
 endif()
-target_link_libraries(Regent Legion::Legion)
+add_library(Legion::Regent ALIAS Regent)
+target_link_libraries(Regent PUBLIC Legion::Legion)
+target_compile_options(Regent PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
 
 if(Legion_USE_CUDA)
-  target_include_directories(Regent PRIVATE ${CUDA_INCLUDE_DIRS})
+  target_link_libraries(Regent PRIVATE CUDA::toolkit)
+  set_target_cuda_standard(Regent STANDARD ${Legion_CUDA_STANDARD})
+  set_target_cuda_architectures(Regent ARCHITECTURES ${Legion_CUDA_ARCH})
+  set_target_cuda_warnings_and_errors(Regent WARN_AS_ERROR ${Legion_BUILD_WARN_AS_ERROR})
+elseif(Legion_USE_HIP)
+  target_include_directories(Regent PRIVATE ${HIP_INCLUDE_DIRS})
+  if (Legion_HIP_TARGET STREQUAL "CUDA")
+    target_compile_definitions(Regent PRIVATE __HIP_PLATFORM_NVIDIA__)
+  else()
+    target_compile_definitions(Regent PRIVATE __HIP_PLATFORM_AMD__)
+  endif()
+endif()
+
+if(Legion_USE_HIP)
+  target_include_directories(Regent PRIVATE ${HIP_INCLUDE_DIRS})
 endif()
 
 set_target_properties(Regent PROPERTIES POSITION_INDEPENDENT_CODE ON)
 set_target_properties(Regent PROPERTIES OUTPUT_NAME "regent${INSTALL_SUFFIX}")
 set_target_properties(Regent PROPERTIES SOVERSION ${SOVERSION})
+if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  set_target_properties(Regent PROPERTIES BUILD_RPATH "\$ORIGIN")
+  set_target_properties(Regent PROPERTIES INSTALL_RPATH "\$ORIGIN")
+elseif (CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+  set_target_properties(Regent PROPERTIES BUILD_RPATH "@loader_path")
+  set_target_properties(Regent PROPERTIES INSTALL_RPATH "@loader_path")
+endif ()
 
 install(TARGETS Regent EXPORT LegionTargets
   LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}

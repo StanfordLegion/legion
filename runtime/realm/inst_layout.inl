@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -370,7 +370,11 @@ namespace Realm {
   template <int N, typename T>
   void AffineLayoutPiece<N,T>::print(std::ostream& os) const
   {
-    os << this->bounds << "->affine(" << strides << "+" << offset << ")";
+    // even though we do unsigned math with 'offset', it's more intuitive to
+    //  humans to display it as a signed value
+    os << this->bounds << "->affine(" << strides
+       << std::showpos << static_cast<int64_t>(offset) << std::noshowpos
+       << ")";
   }
 
   template <int N, typename T>
@@ -1113,20 +1117,8 @@ namespace Realm {
       // if the subrect isn't empty, compute the bounding box of the image
       //  of the subrectangle through the transform - this is a bit ugly
       //  to account for negative elements in the matrix
-      Rect<N2,T2> subrect_image(offset, offset);
-      for(int i = 0; i < N2; i++)
-	for(int j = 0; j < N; j++) {
-	  T2 e = transform.rows[i][j];
-	  if(e > 0) {
-	    subrect_image.lo[i] += e * subrect.lo[j];
-	    subrect_image.hi[i] += e * subrect.hi[j];
-	  }
-	  if(e < 0) {
-	    subrect_image.lo[i] += e * subrect.hi[j];
-	    subrect_image.hi[i] += e * subrect.lo[j];
-	  }
-	}
-    
+      Rect<N2, T2> subrect_image = subrect.apply_transform(transform, offset);
+
       // find the piece that holds the lo corner of the subrect and insist it
       //  exists, covers the whole subrect, and is affine
       const InstanceLayoutPiece<N2,T2> *ilp = ipl.find_piece(subrect_image.lo);
@@ -1333,11 +1325,23 @@ namespace Realm {
       bool found = false;
       for (int j = 0; j < N; j++) {
         if ((used_mask >> j) & 1) continue;
-        if (strides[j] != exp_offset) continue;
+        if (strides[j] != exp_offset) { 
+          // Mask off any dimensions with stride 0
+          if (strides[j] == 0) {
+            if (bounds.lo[j] != bounds.hi[j])
+              return false;
+            used_mask |= (1 << j);
+            if (++i == N) {
+              found = true;
+              break;
+            }
+          }
+          continue;
+        }
         found = true;
         // It's possible other dimensions can have the same strides if
         // there are multiple dimensions with extents of size 1. At most
-        // one dimension can have an extent >1 though
+        // one dimension must have an extent >1 though
         int nontrivial = (bounds.lo[j] < bounds.hi[j]) ? j : -1;
         for (int k = j+1; k < N; k++) {
           if ((used_mask >> k) & 1) continue;
@@ -1369,7 +1373,12 @@ namespace Realm {
   {
     size_t exp_offset = sizeof(FT);
     for (int i = 0; i < N; i++) {
-      if (strides[i] != exp_offset) return false;
+      if (strides[i] != exp_offset) {
+        // Special case for stride of zero for unit dimension
+        if ((strides[i] == 0) && (bounds.lo[i] == bounds.hi[i]))
+          continue;
+        return false;
+      }
       exp_offset *= (bounds.hi[i] - bounds.lo[i] + 1);
     }
     return true;
@@ -1381,7 +1390,12 @@ namespace Realm {
   {
     size_t exp_offset = sizeof(FT);
     for (int i = N-1; i >= 0; i--) {
-      if (strides[i] != exp_offset) return false;
+      if (strides[i] != exp_offset) { 
+        // Special case for stride of zero for unit dimension
+        if ((strides[i] == 0) && (bounds.lo[i] == bounds.hi[i]))
+          continue;
+        return false;
+      }
       exp_offset *= (bounds.hi[i] - bounds.lo[i] + 1);
     }
     return true;
@@ -1775,7 +1789,9 @@ namespace Realm {
       const PieceLookup::Instruction *i = start_inst;
       while(true) {
 #ifdef DEBUG_REALM
+#ifndef __HIP_DEVICE_COMPILE__
 	assert(i != 0);
+#endif
 #endif
 	if(i->opcode() == PieceLookup::Opcodes::OP_AFFINE_PIECE) {
 	  const PieceLookup::AffinePiece<N,T> *ap =
@@ -1790,7 +1806,9 @@ namespace Realm {
 	  } else
 	    i = ap->next();
 	} else {
+#ifndef __HIP_DEVICE_COMPILE__
 	  assert(i->opcode() == PieceLookup::Opcodes::OP_SPLIT1);
+#endif
 	  i = static_cast<const PieceLookup::SplitPlane<N,T> *>(i)->next(p);
 	}
       }

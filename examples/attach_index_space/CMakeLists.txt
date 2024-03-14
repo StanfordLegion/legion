@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------#
-# Copyright 2022 Los Alamos National Laboratory
+# Copyright 2024 Los Alamos National Laboratory
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
 # limitations under the License.
 #------------------------------------------------------------------------------#
 
-cmake_minimum_required(VERSION 3.1)
+cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
 project(LegionExample_attach_index_space)
 
 # Only search if were building stand-alone and not as part of Legion
@@ -24,6 +24,7 @@ endif()
 
 add_executable(index_space_attach index_space_attach.cc)
 target_link_libraries(index_space_attach Legion::Legion)
+target_compile_options(index_space_attach PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
 if(Legion_ENABLE_TESTING)
-  add_test(NAME index_space_attach COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:index_space_attach> ${Legion_TEST_ARGS}) 
+  add_test(NAME index_space_attach COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:index_space_attach> ${Legion_TEST_ARGS})
 endif()

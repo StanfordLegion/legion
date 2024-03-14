@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -45,7 +45,7 @@ namespace Realm {
   // if set_zero_time() is not called, relative time will equal absolute time
   /*static*/ uint64_t Clock::zero_time = 0;
 
-#ifdef REALM_TIMERS_USE_RDTSC
+#if REALM_TIMERS_USE_RDTSC
   /*static*/ bool Clock::cpu_tsc_enabled = false;
 #endif
 
@@ -89,15 +89,25 @@ namespace Realm {
 
   /*static*/ void Clock::set_zero_time(void)
   {
-    uint64_t native = native_time();
-    zero_time = native_to_nanoseconds.convert_forward_absolute(native);
+    zero_time = native_time_slower();
+#if REALM_TIMERS_USE_RDTSC
+    if(cpu_tsc_enabled) {
+      // shift our tsc->system time calibration to zero out here now
+      uint64_t tsc = raw_cpu_tsc();
+      native_to_nanoseconds.adjust(tsc, zero_time);
+    }
+#endif
   }
 
   /*static*/ void Clock::calibrate(int use_cpu_tsc /*1=yes, 0=no, -1=dont care*/,
                                    uint64_t force_cpu_tsc_freq)
   {
-#ifdef REALM_TIMERS_USE_RDTSC
+#if REALM_TIMERS_USE_RDTSC
     if(use_cpu_tsc != 0) {  // "yes" or "dont care"
+      if (force_cpu_tsc_freq == 0) {
+        force_cpu_tsc_freq = raw_cpu_tsc_freq();
+      }
+
       // we want to get two time samples spread by an interesting amount of
       //  real time (TARGET_NANOSECONDS), but we don't know the overhead of
       //  the OS time call so we do iterations with progressively more and
@@ -236,7 +246,7 @@ namespace Realm {
     uint64_t abstime = mach_absolute_time();
     mach_port_deallocate(mach_task_self(), cclock);
     uint64_t caltime = ts.tv_sec;
-    caltime = (caltime * 100000000) + ts.tv_nsec;
+    caltime = (caltime * 1000000000) + ts.tv_nsec;
     // now ask mach for the clock ratio and we'll fake the second sample
     mach_timebase_info_data_t info;
     kern_return_t ret = mach_timebase_info(&info);
@@ -247,8 +257,8 @@ namespace Realm {
     // ns = numer/denom * ticks -> `denom` ns == `numer` ticks
     bool ok = native_to_nanoseconds.set(abstime,
                                         caltime,
-                                        abstime + info.numer,
-                                        caltime + info.denom);
+                                        abstime + info.denom,
+                                        caltime + info.numer);
     if(!ok) {
       log_timer.fatal() << "mach calibration failed: abstime=" << abstime
                         << " caltime=" << caltime
@@ -262,6 +272,23 @@ namespace Realm {
 #endif
   }
 
+  /*static*/ long long Clock::get_calibration_error()
+  {
+#if REALM_TIMERS_USE_RDTSC
+    if(cpu_tsc_enabled) {
+      // how far ahead is realm's native->nanoseconds conversion than the
+      //  system time (which is always what native_time_slower returns)?
+      uint64_t native = native_time();
+      uint64_t systime = native_time_slower();
+      uint64_t now = native_to_nanoseconds.convert_forward_absolute(native);
+      return (now - systime);
+    } else
+#endif
+    {
+      // we're reporting system time directly, so there is no error
+      return 0;
+    }
+  }
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -327,5 +354,11 @@ namespace Realm {
     return true;
   }
 
+  void Clock::TimescaleConverter::adjust(uint64_t ta, uint64_t tb)
+  {
+    // 'ta' and 'tb' are just our new "zeros"
+    a_zero = ta;
+    b_zero = tb;
+  }
 
 }; // namespace Realm

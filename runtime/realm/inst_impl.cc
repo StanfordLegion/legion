@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -114,28 +114,22 @@ namespace Realm {
 
   void *CompiledInstanceLayout::allocate_memory(size_t bytes)
   {
-    // TODO: allocate where GPUs can see it
-    assert(program_base == 0);
-#ifdef REALM_ON_WINDOWS
-    program_base = _aligned_malloc(bytes, 16);
-    assert(program_base != 0);
-#else
-    int ret = posix_memalign(&program_base, 16, bytes);
-    assert(ret == 0);
-#endif
     program_size = bytes;
+    program_base = runtime_singleton->repl_heap.alloc_obj(bytes, 16);
+    assert(program_base != 0);
     return program_base;
+  }
+
+  void CompiledInstanceLayout::commit_updates()
+  {
+    runtime_singleton->repl_heap.commit_writes(program_base, program_size);
   }
 
   void CompiledInstanceLayout::reset()
   {
-    if(program_base) {
-#ifdef REALM_ON_WINDOWS
-      _aligned_free(program_base);
-#else
-      free(program_base);
-#endif
-    }
+    if(program_base)
+      runtime_singleton->repl_heap.free_obj(program_base);
+
     program_base = 0;
     program_size = 0;
     fields.clear();
@@ -412,6 +406,8 @@ namespace Realm {
       pf.inst_usage_mask = piece_list_masks[it->second.list_idx];
       pf.field_offset = it->second.rel_offset;
     }
+
+    p.commit_updates();
   }
 
 
@@ -476,7 +472,33 @@ namespace Realm {
       destroy(wait_on);
     }
 
-    /*static*/ const RegionInstance RegionInstance::NO_INST = { 0 };
+    // it is sometimes useful to re-register an existing instance (in whole or
+    //  in part) as an "external" instance (e.g. to provide a different view
+    //  on the same bits) - this hopefully gives an ExternalInstanceResource *
+    //  (which must be deleted by the caller) that corresponds to this instance
+    //  but may return a null pointer for instances that do not support
+    //  re-registration
+    ExternalInstanceResource *RegionInstance::generate_resource_info(bool read_only) const
+    {
+      MemoryImpl *mem_impl = get_runtime()->get_memory_impl(*this);
+      RegionInstanceImpl *inst_impl = mem_impl->get_instance(*this);
+      return mem_impl->generate_resource_info(inst_impl,
+					      0, span<const FieldID>(),
+					      read_only);
+    }
+
+    ExternalInstanceResource *RegionInstance::generate_resource_info(const IndexSpaceGeneric& space,
+								     span<const FieldID> fields,
+								     bool read_only) const
+    {
+      MemoryImpl *mem_impl = get_runtime()->get_memory_impl(*this);
+      RegionInstanceImpl *inst_impl = mem_impl->get_instance(*this);
+      return mem_impl->generate_resource_info(inst_impl,
+					      &space, fields,
+					      read_only);
+    }
+
+    /*static*/ const RegionInstance RegionInstance::NO_INST = {/* zero-initialization */};
 
     // before you can get an instance's index space or construct an accessor for
     //  a given processor, the necessary metadata for the instance must be
@@ -743,10 +765,9 @@ namespace Realm {
 
     RegionInstanceImpl::~RegionInstanceImpl(void)
     {
-      if(metadata.is_valid()) {
-	delete metadata.layout;
-	metadata.lookup_program.reset();
-      }
+      // clean up metadata if needed, but it's too late to send messages
+      if(metadata.is_valid())
+        metadata.initiate_cleanup(me.id, true /*local only*/);
     }
 
     /*static*/ Event RegionInstanceImpl::create_instance(RegionInstance& inst,
@@ -912,6 +933,33 @@ namespace Realm {
       return ready_event;
     }
 
+    void RegionInstanceImpl::send_metadata(const NodeSet& early_reqs)
+    {
+      log_inst.debug() << "sending instance metadata to early requestors: isnt=" << me;
+      Serialization::DynamicBufferSerializer dbs(4096);
+      metadata.serialize_msg(dbs);
+
+      // fragment serialized metadata if needed
+      size_t offset = 0;
+      size_t total_bytes = dbs.bytes_used();
+
+      while(offset < total_bytes) {
+        size_t to_send = std::min(total_bytes - offset,
+                                  ActiveMessage<MetadataResponseMessage>::recommended_max_payload(early_reqs,
+                                                                                                  false /*without congestion*/));
+
+        ActiveMessage<MetadataResponseMessage> amsg(early_reqs, to_send);
+        amsg->id = ID(me).id;
+        amsg->offset = offset;
+        amsg->total_bytes = total_bytes;
+        amsg.add_payload(static_cast<const char *>(dbs.get_buffer()) + offset,
+                         to_send);
+        amsg.commit();
+
+        offset += to_send;
+      }
+    }
+
     void RegionInstanceImpl::notify_allocation(MemoryImpl::AllocationResult result,
 					       size_t offset, TimeLimit work_until)
     {
@@ -983,16 +1031,22 @@ namespace Realm {
 	
 	log_inst.info() << "allocation failed: inst=" << me;
 
+        // mark metadata valid before we return any profiling responses
+        NodeSet early_reqs;
+        metadata.inst_offset = (size_t)-2;
+        metadata.mark_valid(early_reqs);
+        if(!early_reqs.empty())
+          send_metadata(early_reqs);
+
 	// poison the completion event, if it exists
 	Event ready_event = Event::NO_EVENT;
 	{
 	  AutoLock<> al(mutex);
 	  ready_event = metadata.ready_event;
 	  metadata.ready_event = Event::NO_EVENT;
-	  metadata.inst_offset = (size_t)-2;
 
-	  // adding measurements is not thread safe w.r.t. a deferral
-	  //  message, so do it with lock held
+          // adding measurements is not thread safe w.r.t. a deferral
+          //  message, so do it with lock held
 	  if(measurements.wants_measurement<InstanceStatus>()) {
 	    InstanceStatus stat;
 	    stat.result = ((result == MemoryImpl::ALLOC_INSTANT_FAILURE) ?
@@ -1120,31 +1174,8 @@ namespace Realm {
       // metadata is now valid and can be shared
       NodeSet early_reqs;
       metadata.mark_valid(early_reqs);
-      if(!early_reqs.empty()) {
-	log_inst.debug() << "sending instance metadata to early requestors: isnt=" << me;
-	Serialization::DynamicBufferSerializer dbs(4096);
-	metadata.serialize_msg(dbs);
-
-        // fragment serialized metadata if needed
-        size_t offset = 0;
-        size_t total_bytes = dbs.bytes_used();
-
-        while(offset < total_bytes) {
-          size_t to_send = std::min(total_bytes - offset,
-                                    ActiveMessage<MetadataResponseMessage>::recommended_max_payload(early_reqs,
-                                                                                                    false /*without congestion*/));
-
-          ActiveMessage<MetadataResponseMessage> amsg(early_reqs, to_send);
-          amsg->id = ID(me).id;
-          amsg->offset = offset;
-          amsg->total_bytes = total_bytes;
-          amsg.add_payload(static_cast<const char *>(dbs.get_buffer()) + offset,
-                           to_send);
-          amsg.commit();
-
-          offset += to_send;
-        }
-      }
+      if(!early_reqs.empty())
+        send_metadata(early_reqs);
 
       if(measurements.wants_measurement<ProfilingMeasurements::InstanceTimeline>()) {
 	timeline.record_ready_time();
@@ -1199,41 +1230,22 @@ namespace Realm {
 
 	// send any remaining incomplete profiling responses
 	measurements.send_responses(requests);
-
-	// flush the remote prefetch cache
-	{
-	  AutoLock<> al(mutex);
-	  prefetch_events.clear();
-	}
-
-	// send any required invalidation messages for metadata
-	bool recycle_now = metadata.initiate_cleanup(me.id);
-	if(recycle_now)
-	  recycle_instance();
-      } else {
-	// failed allocations never had valid metadata - recycle immediately
-	recycle_instance();
       }
+
+      // flush the remote prefetch cache
+      {
+        AutoLock<> al(mutex);
+        prefetch_events.clear();
+      }
+
+      // send any required invalidation messages for metadata
+      bool recycle_now = metadata.initiate_cleanup(me.id);
+      if(recycle_now)
+        recycle_instance();
     }
 
     void RegionInstanceImpl::recycle_instance(void)
     {
-      // delete an existing layout, if present
-      if(metadata.layout) {
-	delete metadata.layout;
-	metadata.layout = 0;
-	metadata.lookup_program.reset();
-      }
-      if(metadata.ext_resource) {
-	delete metadata.ext_resource;
-	metadata.ext_resource = 0;
-      }
-      // memory should not have left anything behind
-      assert(metadata.mem_specific == 0);
-
-      // set the offset back to the "unallocated" value
-      metadata.inst_offset = INSTOFFSET_UNALLOCATED;
-
       measurements.clear();
 
       MemoryImpl *m_impl = get_runtime()->get_memory_impl(memory);
@@ -1349,6 +1361,14 @@ namespace Realm {
       return true;
     }
 
+    RegionInstanceImpl::Metadata::Metadata()
+      : inst_offset(INSTOFFSET_UNALLOCATED)
+      , ready_event(Event::NO_EVENT)
+      , layout(0)
+      , ext_resource(0)
+      , mem_specific(0)
+    {}
+
     void *RegionInstanceImpl::Metadata::serialize(size_t& out_size) const
     {
       Serialization::DynamicBufferSerializer dbs(128);
@@ -1382,9 +1402,28 @@ namespace Realm {
 	lookup_program.reset();
       }
 
+      if(ext_resource) {
+	delete ext_resource;
+	ext_resource = 0;
+      }
+
+      // clean up chain of mem-specific info
+      while(mem_specific) {
+        MemSpecificInfo *next = mem_specific->next;
+        delete mem_specific;
+        mem_specific = next;
+      }
+
       // set the offset back to the "unallocated" value
       inst_offset = INSTOFFSET_UNALLOCATED;
     }
+
+    void RegionInstanceImpl::Metadata::add_mem_specific(MemSpecificInfo *info)
+    {
+      info->next = mem_specific;
+      mem_specific = info;
+    }
+
 
   ////////////////////////////////////////////////////////////////////////
   //

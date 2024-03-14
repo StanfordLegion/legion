@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -510,6 +510,9 @@ void top_level_task(const void *args, size_t arglen,
     Memory m = *it;
     if(m.capacity() == 0) continue;
 
+    // GPU_DYNAMIC_MEM does not support deferred allocation
+    if(m.kind() == Memory::GPU_DYNAMIC_MEM) continue;
+
     // directed tests
     if(config.directed_tests) {
       directed_test_memory(config, m, p, "simple capacity limit",
@@ -551,6 +554,18 @@ void top_level_task(const void *args, size_t arglen,
 
       directed_test_memory(config, m, p, "avoid fragmentation failures",
 			   "3 a1 s0 a1 s1 a1 s2 d0 a1 d1 d2 a2 t1 n3 t0 s3 t2 s4");
+
+      directed_test_memory(config, m, p, "nasty partial rollback case",
+			   "5 a2 s0 a1 s1 a1 s2 a1 s3" // 00123
+			   " d0 a2 n4"                 // 00123   44123
+			   " d3 a1 n5"                 // 00123   44125
+			   " d1 d2 a2 n6"              // 00123   44665
+			   " t2 n4 n5 n6"              // 001.3   44665
+			   // 4 needs to succeed, but not 5 due to fragmentation
+			   " t0 s4 n5 n6"              // 441.3   44665
+			   " t1 s5 n6"                 // 445.3   44566
+			   " t3 s6"                    // 44566
+			   );
 
       directed_test_memory(config, m, p, "reordered instant destroy",
 			   "2 a1 s0 a1 s1 d0 a1 i1 s2");

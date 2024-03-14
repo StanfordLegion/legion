@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -77,15 +77,11 @@ namespace Realm {
     static const int DIM2 = N2;
     typedef T2 IDXTYPE2;
 
-    PreimageOperation(const IndexSpace<N,T>& _parent,
-		      const std::vector<FieldDataDescriptor<IndexSpace<N,T>,Point<N2,T2> > >& _field_data,
-		      const ProfilingRequestSet &reqs,
-		      GenEventImpl *_finish_event, EventImpl::gen_t _finish_gen);
-
-    PreimageOperation(const IndexSpace<N,T>& _parent,
-		      const std::vector<FieldDataDescriptor<IndexSpace<N,T>,Rect<N2,T2> > >& _field_data,
-		      const ProfilingRequestSet &reqs,
-		      GenEventImpl *_finish_event, EventImpl::gen_t _finish_gen);
+    PreimageOperation(const IndexSpace<N, T> &_parent,
+                      const DomainTransform<N2, T2, N, T> &_domain_transform,
+                      const ProfilingRequestSet &reqs,
+                      GenEventImpl *_finish_event,
+                      EventImpl::gen_t _finish_gen);
 
     virtual ~PreimageOperation(void);
 
@@ -101,12 +97,11 @@ namespace Realm {
 
   protected:
     static ActiveMessageHandlerReg<ApproxImageResponseMessage<PreimageOperation<N,T,N2,T2> > > areg;
-    
-    IndexSpace<N,T> parent;
-    std::vector<FieldDataDescriptor<IndexSpace<N,T>,Point<N2,T2> > > ptr_data;
-    std::vector<FieldDataDescriptor<IndexSpace<N,T>,Rect<N2,T2> > > range_data;
-    std::vector<IndexSpace<N2,T2> > targets;
-    std::vector<SparsityMap<N,T> > preimages;
+
+    IndexSpace<N, T> parent;
+    DomainTransform<N2, T2, N, T> domain_transform;
+    std::vector<IndexSpace<N2, T2> > targets;
+    std::vector<SparsityMap<N, T> > preimages;
     Mutex mutex;
     OverlapTester<N2,T2> *overlap_tester;
     std::map<int, std::vector<Rect<N2,T2> > > pending_sparse_images;
@@ -125,6 +120,36 @@ namespace Realm {
 			       const void *data, size_t datalen);
   };
 
-};
+  template <int N, typename T, int N2, typename T2>
+  class StructuredPreimageMicroOp : public PartitioningMicroOp {
+  public:
+    static const int DIM = N;
+    typedef T IDXTYPE;
+    static const int DIM2 = N2;
+    typedef T2 IDXTYPE2;
+
+    StructuredPreimageMicroOp(const StructuredTransform<N2, T2, N, T> &_transform,
+                              IndexSpace<N, T> _parent_space);
+
+    virtual ~StructuredPreimageMicroOp(void);
+
+    void add_sparsity_output(IndexSpace<N2,T2> _target, SparsityMap<N,T> _sparsity);
+
+    virtual void execute(void);
+
+    void dispatch(PartitioningOperation *op, bool inline_ok);
+
+  protected:
+
+   template <typename BM>
+   void populate_bitmasks(std::map<int, BM *> &bitmasks);
+
+   StructuredTransform<N2, T2, N, T> transform;
+   IndexSpace<N, T> parent_space;
+   std::vector<IndexSpace<N2, T2> > targets;
+   std::vector<SparsityMap<N, T> > sparsity_outputs;
+  };
+
+  };  // namespace Realm
 
 #endif // REALM_DEPPART_PREIMAGE_H

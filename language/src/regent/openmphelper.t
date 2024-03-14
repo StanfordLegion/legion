@@ -1,4 +1,4 @@
--- Copyright 2022 Stanford University
+-- Copyright 2024 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -163,7 +163,7 @@ function omp.generate_argument_type(symbols, reductions)
   local arg_type = terralib.types.newstruct("omp_worker_arg")
   arg_type.entries = terralib.newlist()
   local mapping = {}
-  for i, symbol in pairs(symbols) do
+  for i, symbol in ipairs(symbols) do
     local field_name
     if reductions[symbol] == nil then
       field_name = "_arg" .. tostring(i)

@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -193,9 +193,14 @@ namespace Realm {
         };
 
       struct InstInfo {
-        RegionInstance src_inst_id;   // src instance
-        RegionInstance dst_inst_id;   // dst instance
-        unsigned num_fields; // num fields
+        std::vector<RegionInstance> src_insts;   // src instances
+        std::vector<RegionInstance> dst_insts;   // dst instances
+        RegionInstance src_indirection_inst; // src indirection instance (gather)
+        RegionInstance dst_indirection_inst; // dst indirection instance (scatter)
+        std::vector<FieldID> src_fields;  // src fields
+        std::vector<FieldID> dst_fields;  // dst fields
+        FieldID src_indirection_field;  // field of indirection points
+        FieldID dst_indirection_field;  // field of indirection points
         RequestType request_type; // fill, reduce, copy
         unsigned int num_hops; // num_hops for each request
       };

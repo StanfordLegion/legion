@@ -1,4 +1,4 @@
--- Copyright 2022 Stanford University
+-- Copyright 2024 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -95,7 +95,7 @@ terra top_level_task(task : c.legion_task_t,
 
   var isp = c.legion_index_partition_create_coloring(
     runtime, ctx, is, coloring, false, -1)
-  var lp = c.legion_logical_partition_create(runtime, ctx, r, isp)
+  var lp = c.legion_logical_partition_create(runtime, r, isp)
   c.legion_coloring_destroy(coloring)
 
   var r1 = c.legion_logical_partition_get_logical_subregion_by_color(

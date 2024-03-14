@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -73,18 +73,34 @@ namespace Realm {
 
       size_t get_address_space_count(void) const;
 
+      // get information about the OS process in which tasks for a given
+      //  processor run - note that the uniqueness of any/all of the provided
+      //  information depends on the underlying OS and any container runtimes
+      struct ProcessInfo {
+        static const size_t MAX_HOSTNAME_LENGTH = 256;
+        char hostname[MAX_HOSTNAME_LENGTH]; // always null-terminated
+        uint64_t hostid; // gethostid on posix, hash of hostname on windows
+        uint32_t processid;
+      };
+
+      // populates the `info` struct with information about the processor `p`'s
+      //  containing process, returning true if successful, false if the
+      //  processor is unknown or the information is unavailable
+      bool get_process_info(Processor p, ProcessInfo *info) const;
+
     public:
       struct ProcessorMemoryAffinity {
-	Processor p;
-	Memory m;
-	unsigned bandwidth; // TODO: consider splitting read vs. write?
-	unsigned latency;
+        Processor p;        // accessing processor
+        Memory m;           // target memory
+        unsigned bandwidth; // in MB/s
+        unsigned latency;   // in nanoseconds
       };
 
       struct MemoryMemoryAffinity {
-	Memory m1, m2;
-	unsigned bandwidth;
-	unsigned latency;
+        Memory m1;          // source memory
+        Memory m2;          // destination memory
+        unsigned bandwidth; // in MB/s
+        unsigned latency;   // in nanoseconds
       };
 
       int get_proc_mem_affinity(std::vector<ProcessorMemoryAffinity>& result,
@@ -249,7 +265,15 @@ namespace Realm {
     };
 
     template <typename QT, typename RT>
-    class REALM_PUBLIC_API MachineQueryIterator : public std::iterator<std::input_iterator_tag, RT> {
+    class REALM_PUBLIC_API MachineQueryIterator {
+    public:
+      // explicitly set iterator traits
+      typedef std::input_iterator_tag iterator_category;
+      typedef RT value_type;
+      typedef std::ptrdiff_t difference_type;
+      typedef RT *pointer;
+      typedef RT& reference;
+
       // would like this constructor to be protected and have QT be a friend, but that requires
       //  C++11 (or a compiler like g++ that supports it even without -std=c++11)
       //  The CUDA compiler also seems to be a little dense here as well

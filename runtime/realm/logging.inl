@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -604,6 +604,11 @@ namespace Realm {
   inline bool LoggerMessage::is_active(void) const
   {
     return active;
+  }
+
+  inline void LoggerMessage::deactivate(void)
+  {
+    active = false;
   }
   
   inline std::ostream& LoggerMessage::get_stream(void)

@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -45,6 +45,16 @@ extern "C" {
   }
 
   REALM_PUBLIC_API
+  int omp_get_num_places(void)
+  {
+    // Some newer versions of the OpenMP runtime enable control over OpenMP
+    // threads ploacement onto different sockets or cores. This sort of thing
+    // is controlled by Realm in our implementation, so just return the number
+    // of threads allocated to this worker pool.
+    return omp_get_num_threads();
+  }
+
+  REALM_PUBLIC_API
   int omp_get_max_threads(void)
   {
     Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(false);
@@ -52,6 +62,12 @@ extern "C" {
       return wi->pool->get_num_workers() + 1;
     else
       return 1;
+  }
+
+  REALM_PUBLIC_API
+  int omp_get_num_procs(void)
+  {
+    return omp_get_max_threads();
   }
 
   REALM_PUBLIC_API
@@ -288,7 +304,7 @@ extern "C" {
 
     wi->work_item->schedule.start_dynamic(start, end, incr, chunk);
     int64_t span_start, span_end;
-    long stride = 0; // not used
+    int64_t stride = 0; // not used
     bool more = wi->work_item->schedule.next_dynamic(span_start, span_end, stride);
     if(more) {
       *istart = span_start;
@@ -324,7 +340,7 @@ extern "C" {
 
     wi->work_item->schedule.start_dynamic(start_shifted, end_shifted, incr, chunk);
     int64_t span_start, span_end;
-    long stride = 0; // not used
+    int64_t stride = 0; // not used
     bool more = wi->work_item->schedule.next_dynamic(span_start, span_end, stride);
     if(more) {
       // shift from int64_t back to uint64_t range
@@ -1254,6 +1270,7 @@ namespace Realm {
        (wi->num_threads == 1) ||
        ((incr > 0) && (*plower > *pupper)) ||
        ((incr < 0) && (*plower < *pupper))) {
+      *pstride = *pupper - *plower + ((incr > 0) ? 1 : -1);
       return;
     }
 
@@ -1265,8 +1282,10 @@ namespace Realm {
 	T iters;
 	if(incr > 0) {
 	  iters = 1 + (*pupper - *plower) / incr;
+          *pstride = *pupper - *plower + 1;
 	} else {
 	  iters = 1 + (*plower - *pupper) / -incr;
+          *pstride = *pupper - *plower - 1;
 	}
 	T whole = iters / wi->num_threads;
 	T leftover = iters - (whole * wi->num_threads);
@@ -1493,6 +1512,20 @@ extern "C" {
     *p_lb = lb_signed ^ (uint64_t(1) << 63);
     *p_ub = ub_signed ^ (uint64_t(1) << 63);
     return ret;
+  }
+
+  // clang/llvm's OpenMP will invoke this function instead of the nowait
+  // variants below.
+  REALM_PUBLIC_API
+  kmp_int32 __kmpc_reduce(ident_t *loc, kmp_int32 global_tid, kmp_int32 num_vars,
+                        size_t reduce_size, void *reduce_data,
+                        kmpc_reduce reduce_func,
+                        kmp_critical_name *lck) {
+    // Tell caller to just do it themselves in all cases. In particular,
+    // this tells the caller to perform an atomic reduction of the 
+    // thread-local results. Returning 1 indicates to the caller that
+    // atomics are not needed.
+    return 2;
   }
 
   REALM_PUBLIC_API

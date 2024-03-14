@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -74,7 +74,8 @@ typedef enum realm_processor_kind_t {
   __op__(LEVEL3_CACHE, "CPU L3 Visible to all processors on the node, better performance to processors on same socket") \
   __op__(LEVEL2_CACHE, "CPU L2 Visible to all processors on the node, better performance to one processor") \
   __op__(LEVEL1_CACHE, "CPU L1 Visible to all processors on the node, better performance to one processor") \
-  __op__(GPU_MANAGED_MEM, "Managed memory that can be cached by either host or GPU")
+  __op__(GPU_MANAGED_MEM, "Managed memory that can be cached by either host or GPU") \
+  __op__(GPU_DYNAMIC_MEM, "Dynamically-allocated framebuffer memory for one GPU and all its SMs")
 
 typedef enum realm_memory_kind_t {
 #define C_ENUMS(name, desc) name,
@@ -97,6 +98,14 @@ typedef
     const void * /*userdata*/,
     size_t /*userlen*/,
     realm_id_t /*proc_id*/);
+
+// error code
+typedef enum RealmStatus_t
+{
+  // To comply with other C libraries, we use 0 for success, negative numbers for errors
+  REALM_SUCCESS = 0,
+  REALM_ERROR = -1,
+} RealmStatus;
 
 #ifdef __cplusplus
 }

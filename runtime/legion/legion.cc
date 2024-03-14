@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -30,7 +30,7 @@ namespace Legion {
 
     // Note: GCC 4.9 breaks even with C++11, so for now peg this on
     // C++14 until we deprecate GCC 4.9 support.
-#if __cplusplus >= 201402L
+#if !defined(__GNUC__) || (__GNUC__ >= 5)
     static_assert(std::is_trivially_copyable<IndexSpace>::value,
                   "IndexSpace is not trivially copyable");
     static_assert(std::is_trivially_copyable<IndexPartition>::value,
@@ -63,7 +63,7 @@ namespace Legion {
     static const TypeTag TYPE_TAG_##DIM##D = \
       Internal::NT_TemplateHelper::encode_tag<DIM,coord_t>();
     LEGION_FOREACH_N(DIMFUNC)
-#undef DIMFUNC
+#undef DIMFUNC 
 
     /////////////////////////////////////////////////////////////
     // Mappable 
@@ -162,6 +162,17 @@ namespace Legion {
     //--------------------------------------------------------------------------
     Partition::Partition(void)
       : Mappable(), is_index_space(false)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    /////////////////////////////////////////////////////////////
+    // MustEpoch 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    MustEpoch::MustEpoch(void)
+      : Mappable()
     //--------------------------------------------------------------------------
     {
     }
@@ -303,7 +314,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ArgumentMap::ArgumentMap(ArgumentMap &&rhs)
+    ArgumentMap::ArgumentMap(ArgumentMap &&rhs) noexcept
       : impl(rhs.impl)
     //--------------------------------------------------------------------------
     {
@@ -376,7 +387,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ArgumentMap& ArgumentMap::operator=(ArgumentMap &&rhs)
+    ArgumentMap& ArgumentMap::operator=(ArgumentMap &&rhs) noexcept
     //--------------------------------------------------------------------------
     {
       if ((impl != NULL) && impl->remove_reference())
@@ -459,11 +470,11 @@ namespace Legion {
       const_value = p.const_value;
       impl = p.impl;
       if (impl != NULL)
-        impl->add_predicate_reference();
+        impl->add_reference();
     }
 
     //--------------------------------------------------------------------------
-    Predicate::Predicate(Predicate &&p)
+    Predicate::Predicate(Predicate &&p) noexcept
     //--------------------------------------------------------------------------
     {
       const_value = p.const_value;
@@ -484,39 +495,36 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (impl != NULL)
-        impl->add_predicate_reference();
+        impl->add_reference();
     }
 
     //--------------------------------------------------------------------------
     Predicate::~Predicate(void)
     //--------------------------------------------------------------------------
     {
-      if (impl != NULL)
-      {
-        impl->remove_predicate_reference();
-        impl = NULL;
-      }
+      if ((impl != NULL) && impl->remove_reference())
+        delete impl;
     }
 
     //--------------------------------------------------------------------------
     Predicate& Predicate::operator=(const Predicate &rhs)
     //--------------------------------------------------------------------------
     {
-      if (impl != NULL)
-        impl->remove_predicate_reference();
+      if ((impl != NULL) && impl->remove_reference())
+        delete impl;
       const_value = rhs.const_value;
       impl = rhs.impl;
       if (impl != NULL)
-        impl->add_predicate_reference();
+        impl->add_reference();
       return *this;
     }
 
     //--------------------------------------------------------------------------
-    Predicate& Predicate::operator=(Predicate &&rhs)
+    Predicate& Predicate::operator=(Predicate &&rhs) noexcept
     //--------------------------------------------------------------------------
     {
-      if (impl != NULL)
-        impl->remove_predicate_reference();
+      if ((impl != NULL) && impl->remove_reference())
+        delete impl;
       const_value = rhs.const_value;
       impl = rhs.impl;
       rhs.impl = NULL;
@@ -1243,29 +1251,6 @@ namespace Legion {
       }
     }
 
-#ifdef LEGION_PRIVILEGE_CHECKS
-    //--------------------------------------------------------------------------
-    unsigned RegionRequirement::get_accessor_privilege(void) const
-    //--------------------------------------------------------------------------
-    {
-      switch (privilege)
-      {
-        case LEGION_NO_ACCESS:
-          return LegionRuntime::ACCESSOR_NONE;
-        case LEGION_READ_ONLY:
-          return LegionRuntime::ACCESSOR_READ;
-        case LEGION_READ_WRITE:
-        case LEGION_WRITE_DISCARD:
-          return LegionRuntime::ACCESSOR_ALL;
-        case LEGION_REDUCE:
-          return LegionRuntime::ACCESSOR_REDUCE;
-        default:
-          assert(false);
-      }
-      return LegionRuntime::ACCESSOR_NONE;
-    }
-#endif
-
     //--------------------------------------------------------------------------
     bool RegionRequirement::has_field_privilege(FieldID fid) const
     //--------------------------------------------------------------------------
@@ -1303,6 +1288,149 @@ namespace Legion {
         else
           projection_args = const_cast<void*>(args);
       }
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Output Requirement
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    OutputRequirement::OutputRequirement(bool valid)
+      : RegionRequirement(), type_tag(TYPE_TAG_1D),
+        field_space(FieldSpace::NO_SPACE),
+        global_indexing(false), valid_requirement(valid),
+        color_space(IndexSpace::NO_SPACE)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    OutputRequirement::OutputRequirement(const RegionRequirement &req)
+      : RegionRequirement(req), type_tag(req.parent.get_type_tag()),
+        global_indexing(false), valid_requirement(true),
+        color_space(IndexSpace::NO_SPACE)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    OutputRequirement::OutputRequirement(FieldSpace _field_space,
+                                        const std::set<FieldID> &fields,
+                                        int dim /*=1*/,
+                                        bool _global_indexing /*=false*/)
+      : RegionRequirement(), field_space(_field_space),
+        global_indexing(_global_indexing), valid_requirement(false),
+        color_space(IndexSpace::NO_SPACE)
+    //--------------------------------------------------------------------------
+    {
+      switch (dim)
+      {
+#define DIMFUNC(DIM)                      \
+        case DIM:                         \
+          {                               \
+            type_tag = TYPE_TAG_##DIM##D; \
+            break;                        \
+          }
+        LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
+        default:
+          assert(false);
+      }
+      for (std::set<FieldID>::const_iterator it = fields.begin();
+           it != fields.end(); ++it)
+        RegionRequirement::add_field(*it);
+    }
+
+    //--------------------------------------------------------------------------
+    OutputRequirement::OutputRequirement(const OutputRequirement &other)
+      : RegionRequirement(static_cast<const RegionRequirement&>(other)),
+        type_tag(other.type_tag), field_space(other.field_space),
+        global_indexing(other.global_indexing),
+        valid_requirement(other.valid_requirement),
+        color_space(other.color_space)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    OutputRequirement::~OutputRequirement(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    OutputRequirement& OutputRequirement::operator=(
+                                                   const OutputRequirement &rhs)
+    //--------------------------------------------------------------------------
+    {
+      static_cast<RegionRequirement&>(*this) =
+        static_cast<const RegionRequirement&>(rhs);
+      field_space = rhs.field_space;
+      global_indexing = rhs.global_indexing;
+      valid_requirement = rhs.valid_requirement;
+      type_tag = rhs.type_tag;
+      color_space = rhs.color_space;
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    OutputRequirement& OutputRequirement::operator=(
+                                                   const RegionRequirement &rhs)
+    //--------------------------------------------------------------------------
+    {
+      static_cast<RegionRequirement&>(*this) =
+        static_cast<const RegionRequirement&>(rhs);
+      field_space = FieldSpace::NO_SPACE;
+      global_indexing = false;
+      valid_requirement = true;
+      type_tag = rhs.region.get_type_tag();
+      color_space = IndexSpace::NO_SPACE;
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    bool OutputRequirement::operator==(const OutputRequirement &rhs) const
+    //--------------------------------------------------------------------------
+    {
+      if ((field_space != rhs.field_space) ||
+          (global_indexing != rhs.global_indexing) ||
+          (valid_requirement != rhs.valid_requirement) ||
+          (color_space != rhs.color_space))
+        return false;
+      return static_cast<const RegionRequirement&>(*this) ==
+             static_cast<const RegionRequirement&>(rhs);
+    }
+
+    //--------------------------------------------------------------------------
+    bool OutputRequirement::operator<(const OutputRequirement &rhs) const
+    //--------------------------------------------------------------------------
+    {
+      if (field_space < rhs.field_space)
+        return true;
+      if(field_space > rhs.field_space)
+        return false;
+      if (global_indexing < rhs.global_indexing)
+        return true;
+      if (global_indexing > rhs.global_indexing)
+        return false;
+      if (valid_requirement < rhs.valid_requirement)
+        return true;
+      if (valid_requirement > rhs.valid_requirement)
+        return false;
+      if (color_space < rhs.color_space)
+        return true;
+      if (color_space > rhs.color_space)
+        return false;
+      return static_cast<const RegionRequirement&>(*this) <
+             static_cast<const RegionRequirement&>(rhs);
+    }
+
+    //--------------------------------------------------------------------------
+    void OutputRequirement::set_projection(ProjectionID proj, IndexSpace cspace)
+    //--------------------------------------------------------------------------
+    {
+      projection = proj;
+      color_space = cspace;
     }
 
     /////////////////////////////////////////////////////////////
@@ -1426,7 +1554,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     StaticDependence::StaticDependence(unsigned prev, unsigned prev_req,
-               unsigned current_req, DependenceType dtype, bool val, bool shard)
+                           unsigned current_req, DependenceType dtype, 
+                           bool val, bool shard)
       : previous_offset(prev), previous_req_index(prev_req),
         current_req_index(current_req), dependence_type(dtype), 
         validates(val), shard_only(shard)
@@ -1441,7 +1570,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     TaskLauncher::TaskLauncher(void)
       : task_id(0), argument(UntypedBuffer()), predicate(Predicate::TRUE_PRED),
-        map_id(0), tag(0), point(DomainPoint()), static_dependences(NULL),
+        map_id(0), tag(0), point(DomainPoint(0)), 
+        sharding_space(IndexSpace::NO_SPACE), static_dependences(NULL),
         enable_inlining(false), local_function_task(false),
         independent_requirements(false), elide_future_return(false),
         silence_warnings(false)
@@ -1453,12 +1583,14 @@ namespace Legion {
     TaskLauncher::TaskLauncher(TaskID tid, UntypedBuffer arg,
                                Predicate pred /*= Predicate::TRUE_PRED*/,
                                MapperID mid /*=0*/, MappingTagID t /*=0*/,
-                               UntypedBuffer marg /*=UntypedBuffer*/)
+                               UntypedBuffer marg /*=UntypedBuffer*/,
+                               const char *prov /*=UntypedBuffer*/)
       : task_id(tid), argument(arg), predicate(pred), map_id(mid), tag(t), 
-        map_arg(marg), point(DomainPoint()), static_dependences(NULL), 
-        enable_inlining(false), local_function_task(false),
-        independent_requirements(false), elide_future_return(false),
-        silence_warnings(false)
+        map_arg(marg), point(DomainPoint(0)),
+        sharding_space(IndexSpace::NO_SPACE), provenance(prov),
+        static_dependences(NULL), enable_inlining(false),
+        local_function_task(false), independent_requirements(false), 
+        elide_future_return(false), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1470,11 +1602,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IndexTaskLauncher::IndexTaskLauncher(void)
       : task_id(0), launch_domain(Domain::NO_DOMAIN), 
-        launch_space(IndexSpace::NO_SPACE), global_arg(UntypedBuffer()), 
+        launch_space(IndexSpace::NO_SPACE), 
+        sharding_space(IndexSpace::NO_SPACE), global_arg(UntypedBuffer()), 
         argument_map(ArgumentMap()), predicate(Predicate::TRUE_PRED), 
-        must_parallelism(false), map_id(0), tag(0), static_dependences(NULL), 
-        enable_inlining(false), independent_requirements(false), 
-        elide_future_return(false), silence_warnings(false)
+        concurrent(false), must_parallelism(false), map_id(0), tag(0),
+        static_dependences(NULL), enable_inlining(false),
+        independent_requirements(false), elide_future_return(false), 
+        silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1485,11 +1619,13 @@ namespace Legion {
                                      ArgumentMap map,
                                      Predicate pred /*= Predicate::TRUE_PRED*/,
                                      bool must /*=false*/, MapperID mid /*=0*/,
-                                     MappingTagID t /*=0*/, UntypedBuffer marg)
+                                     MappingTagID t /*=0*/, UntypedBuffer marg,
+                                     const char *prov)
       : task_id(tid), launch_domain(dom), launch_space(IndexSpace::NO_SPACE),
-        global_arg(global), argument_map(map), predicate(pred), 
+        sharding_space(IndexSpace::NO_SPACE), global_arg(global), 
+        argument_map(map), predicate(pred), concurrent(false), 
         must_parallelism(must), map_id(mid), tag(t), map_arg(marg),
-        static_dependences(NULL), enable_inlining(false),
+        provenance(prov), static_dependences(NULL), enable_inlining(false),
         independent_requirements(false), elide_future_return(false),
         silence_warnings(false)
     //--------------------------------------------------------------------------
@@ -1503,11 +1639,13 @@ namespace Legion {
                                      ArgumentMap map,
                                      Predicate pred /*= Predicate::TRUE_PRED*/,
                                      bool must /*=false*/, MapperID mid /*=0*/,
-                                     MappingTagID t /*=0*/, UntypedBuffer marg)
+                                     MappingTagID t /*=0*/, UntypedBuffer marg,
+                                     const char *prov)
       : task_id(tid), launch_domain(Domain::NO_DOMAIN), launch_space(space),
-        global_arg(global), argument_map(map), predicate(pred), 
+        sharding_space(IndexSpace::NO_SPACE), global_arg(global), 
+        argument_map(map), predicate(pred), concurrent(false),
         must_parallelism(must), map_id(mid), tag(t), map_arg(marg),
-        static_dependences(NULL), enable_inlining(false),
+        provenance(prov), static_dependences(NULL), enable_inlining(false),
         independent_requirements(false), elide_future_return(false),
         silence_warnings(false)
     //--------------------------------------------------------------------------
@@ -1529,9 +1667,10 @@ namespace Legion {
     InlineLauncher::InlineLauncher(const RegionRequirement &req,
                                    MapperID mid /*=0*/, MappingTagID t /*=0*/,
                                    LayoutConstraintID lay_id /*=0*/,
-                                   UntypedBuffer marg /*= UntypedBuffer()*/)
+                                   UntypedBuffer marg /*= UntypedBuffer()*/,
+                                   const char *prov /*= UntypedBuffer()*/)
       : requirement(req), map_id(mid), tag(t), map_arg(marg),
-        layout_constraint_id(lay_id), static_dependences(NULL)
+        layout_constraint_id(lay_id), provenance(prov), static_dependences(NULL)
     //--------------------------------------------------------------------------
     {
     }
@@ -1543,9 +1682,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     CopyLauncher::CopyLauncher(Predicate pred /*= Predicate::TRUE_PRED*/,
                                MapperID mid /*=0*/, MappingTagID t /*=0*/,
-                               UntypedBuffer marg /*=UntypedBuffer()*/)
-      : predicate(pred), map_id(mid), tag(t), map_arg(marg), 
-        static_dependences(NULL), possible_src_indirect_out_of_range(true),
+                               UntypedBuffer marg /*=UntypedBuffer()*/,
+                               const char *prov /*=NULL*/)
+      : predicate(pred), map_id(mid), tag(t), map_arg(marg),
+        point(DomainPoint(0)), sharding_space(IndexSpace::NO_SPACE),
+        provenance(prov), static_dependences(NULL),
+        possible_src_indirect_out_of_range(true),
         possible_dst_indirect_out_of_range(true),
         possible_dst_indirect_aliasing(true), silence_warnings(false)
     //--------------------------------------------------------------------------
@@ -1559,8 +1701,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IndexCopyLauncher::IndexCopyLauncher(void) 
       : launch_domain(Domain::NO_DOMAIN), launch_space(IndexSpace::NO_SPACE),
-        predicate(Predicate::TRUE_PRED), map_id(0), tag(0),
-        static_dependences(NULL), possible_src_indirect_out_of_range(true),
+        sharding_space(IndexSpace::NO_SPACE), predicate(Predicate::TRUE_PRED), 
+        map_id(0), tag(0), static_dependences(NULL),
+        possible_src_indirect_out_of_range(true),
         possible_dst_indirect_out_of_range(true),
         possible_dst_indirect_aliasing(true), 
         collective_src_indirect_points(true),
@@ -1573,9 +1716,11 @@ namespace Legion {
     IndexCopyLauncher::IndexCopyLauncher(Domain dom, 
                                     Predicate pred /*= Predicate::TRUE_PRED*/,
                                     MapperID mid /*=0*/, MappingTagID t /*=0*/,
-                                    UntypedBuffer marg /*=UntypedBuffer()*/) 
-      : launch_domain(dom), launch_space(IndexSpace::NO_SPACE), predicate(pred),
-        map_id(mid), tag(t), map_arg(marg), static_dependences(NULL),
+                                    UntypedBuffer marg /*=UntypedBuffer()*/,
+                                    const char *prov /*=NULL*/)
+      : launch_domain(dom), launch_space(IndexSpace::NO_SPACE), 
+        sharding_space(IndexSpace::NO_SPACE), predicate(pred), map_id(mid),
+        tag(t), map_arg(marg), provenance(prov), static_dependences(NULL),
         possible_src_indirect_out_of_range(true),
         possible_dst_indirect_out_of_range(true),
         possible_dst_indirect_aliasing(true), 
@@ -1589,9 +1734,11 @@ namespace Legion {
     IndexCopyLauncher::IndexCopyLauncher(IndexSpace space, 
                                     Predicate pred /*= Predicate::TRUE_PRED*/,
                                     MapperID mid /*=0*/, MappingTagID t /*=0*/,
-                                    UntypedBuffer marg /*=UntypedBuffer()*/) 
-      : launch_domain(Domain::NO_DOMAIN), launch_space(space), predicate(pred),
-        map_id(mid), tag(t), map_arg(marg), static_dependences(NULL), 
+                                    UntypedBuffer marg /*=UntypedBuffer()*/,
+                                    const char *prov /*=NULL*/) 
+      : launch_domain(Domain::NO_DOMAIN), launch_space(space), 
+        sharding_space(IndexSpace::NO_SPACE), predicate(pred), map_id(mid), 
+        tag(t), map_arg(marg), provenance(prov), static_dependences(NULL),
         possible_src_indirect_out_of_range(true),
         possible_dst_indirect_out_of_range(true),
         possible_dst_indirect_aliasing(true), 
@@ -1610,9 +1757,10 @@ namespace Legion {
                                      PhysicalRegion phy,
                                      Predicate pred /*= Predicate::TRUE_PRED*/,
                                      MapperID id /*=0*/, MappingTagID t /*=0*/,
-                                     UntypedBuffer marg /*=UntypedBuffer()*/)
+                                     UntypedBuffer marg /*=UntypedBuffer()*/,
+                                     const char *prov /*=UntypedBuffer()*/)
       : logical_region(reg), parent_region(par), physical_region(phy), 
-        predicate(pred), map_id(id), tag(t), map_arg(marg),
+        predicate(pred), map_id(id), tag(t), map_arg(marg), provenance(prov),
         static_dependences(NULL), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
@@ -1627,9 +1775,10 @@ namespace Legion {
                                      PhysicalRegion phy,
                                      Predicate pred /*= Predicate::TRUE_PRED*/,
                                      MapperID id /*=0*/, MappingTagID t /*=0*/,
-                                     UntypedBuffer marg /*=UntypedBuffer()*/)
+                                     UntypedBuffer marg /*=UntypedBuffer()*/,
+                                     const char *prov /*=UntypedBuffer()*/)
       : logical_region(reg), parent_region(par), physical_region(phy), 
-        predicate(pred), map_id(id), tag(t), map_arg(marg),
+        predicate(pred), map_id(id), tag(t), map_arg(marg), provenance(prov),
         static_dependences(NULL), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
@@ -1642,7 +1791,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FillLauncher::FillLauncher(void)
       : handle(LogicalRegion::NO_REGION), parent(LogicalRegion::NO_REGION),
-        map_id(0), tag(0), static_dependences(NULL), silence_warnings(false)
+        map_id(0), tag(0), point(DomainPoint(0)), static_dependences(NULL), 
+        silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1652,9 +1802,11 @@ namespace Legion {
                                UntypedBuffer arg, 
                                Predicate pred /*= Predicate::TRUE_PRED*/,
                                MapperID id /*=0*/, MappingTagID t /*=0*/,
-                               UntypedBuffer marg /*=UntypedBuffer()*/)
+                               UntypedBuffer marg /*=UntypedBuffer()*/,
+                               const char *prov /*=UntypedBuffer()*/)
       : handle(h), parent(p), argument(arg), predicate(pred), map_id(id), 
-        tag(t), map_arg(marg), static_dependences(NULL), silence_warnings(false)
+        tag(t), map_arg(marg), point(DomainPoint(0)), provenance(prov),
+        static_dependences(NULL), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1663,9 +1815,11 @@ namespace Legion {
     FillLauncher::FillLauncher(LogicalRegion h, LogicalRegion p, Future f,
                                Predicate pred /*= Predicate::TRUE_PRED*/,
                                MapperID id /*=0*/, MappingTagID t /*=0*/,
-                               UntypedBuffer marg /*=UntypedBuffer()*/)
+                               UntypedBuffer marg /*=UntypedBuffer()*/,
+                               const char *prov /*=UntypedBuffer()*/)
       : handle(h), parent(p), future(f), predicate(pred), map_id(id), tag(t), 
-        map_arg(marg), static_dependences(NULL), silence_warnings(false) 
+        map_arg(marg), point(DomainPoint(0)), provenance(prov), 
+        static_dependences(NULL), silence_warnings(false) 
     //--------------------------------------------------------------------------
     {
     }
@@ -1677,9 +1831,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IndexFillLauncher::IndexFillLauncher(void)
       : launch_domain(Domain::NO_DOMAIN), launch_space(IndexSpace::NO_SPACE),
-        region(LogicalRegion::NO_REGION), partition(LogicalPartition::NO_PART), 
-        projection(0), map_id(0), tag(0), static_dependences(NULL), 
-        silence_warnings(false) 
+        sharding_space(IndexSpace::NO_SPACE), region(LogicalRegion::NO_REGION),
+        partition(LogicalPartition::NO_PART), projection(0), map_id(0), tag(0),
+        static_dependences(NULL), silence_warnings(false) 
     //--------------------------------------------------------------------------
     {
     }
@@ -1689,11 +1843,12 @@ namespace Legion {
                                LogicalRegion p, UntypedBuffer arg, 
                                ProjectionID proj, Predicate pred,
                                MapperID id /*=0*/, MappingTagID t /*=0*/,
-                               UntypedBuffer marg /*=UntypedBuffer()*/)
-      : launch_domain(dom), launch_space(IndexSpace::NO_SPACE), region(h), 
+                               UntypedBuffer marg /*=UntypedBuffer()*/,
+                               const char *prov /*=NULL*/)
+      : launch_domain(dom), launch_space(IndexSpace::NO_SPACE), 
         partition(LogicalPartition::NO_PART), parent(p), projection(proj), 
         argument(arg), predicate(pred), map_id(id), tag(t), map_arg(marg),
-        static_dependences(NULL), silence_warnings(false)
+        provenance(prov), static_dependences(NULL), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1703,11 +1858,13 @@ namespace Legion {
                                 LogicalRegion p, Future f,
                                 ProjectionID proj, Predicate pred,
                                 MapperID id /*=0*/, MappingTagID t /*=0*/,
-                                UntypedBuffer marg /*=UntypedBuffer()*/)
-      : launch_domain(dom), launch_space(IndexSpace::NO_SPACE), region(h), 
+                                UntypedBuffer marg /*=UntypedBuffer()*/,
+                                const char *prov /*=NULL*/)
+      : launch_domain(dom), launch_space(IndexSpace::NO_SPACE), 
+        sharding_space(IndexSpace::NO_SPACE), region(h), 
         partition(LogicalPartition::NO_PART), parent(p), projection(proj), 
         future(f), predicate(pred), map_id(id), tag(t), map_arg(marg),
-        static_dependences(NULL), silence_warnings(false)
+        provenance(prov), static_dependences(NULL), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1717,11 +1874,13 @@ namespace Legion {
                                LogicalRegion p, UntypedBuffer arg, 
                                ProjectionID proj, Predicate pred,
                                MapperID id /*=0*/, MappingTagID t /*=0*/,
-                               UntypedBuffer marg /*=UntypedBuffer()*/)
-      : launch_domain(Domain::NO_DOMAIN), launch_space(space), region(h), 
+                               UntypedBuffer marg /*=UntypedBuffer()*/,
+                               const char *prov /*=NULL*/)
+      : launch_domain(Domain::NO_DOMAIN), launch_space(space), 
+        sharding_space(IndexSpace::NO_SPACE), region(h), 
         partition(LogicalPartition::NO_PART), parent(p), projection(proj), 
         argument(arg), predicate(pred), map_id(id), tag(t), map_arg(marg),
-        static_dependences(NULL), silence_warnings(false)
+        provenance(prov), static_dependences(NULL), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1731,10 +1890,29 @@ namespace Legion {
                                 LogicalRegion p, Future f,
                                 ProjectionID proj, Predicate pred,
                                 MapperID id /*=0*/, MappingTagID t /*=0*/,
-                                UntypedBuffer marg /*=UntypedBuffer()*/)
-      : launch_domain(Domain::NO_DOMAIN), launch_space(space), region(h), 
+                                UntypedBuffer marg /*=UntypedBuffer()*/,
+                                const char *prov /*=NULL*/)
+      : launch_domain(Domain::NO_DOMAIN), launch_space(space), 
+        sharding_space(IndexSpace::NO_SPACE), region(h), 
         partition(LogicalPartition::NO_PART), parent(p), projection(proj), 
         future(f), predicate(pred), map_id(id), tag(t), map_arg(marg),
+        provenance(prov), static_dependences(NULL), silence_warnings(false)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    IndexFillLauncher::IndexFillLauncher(Domain dom, LogicalPartition h,
+                                         LogicalRegion p, UntypedBuffer arg,
+                                         ProjectionID proj, Predicate pred,
+                                         MapperID id /*=0*/, 
+                                         MappingTagID t /*=0*/,
+                                         UntypedBuffer marg/*=UntypedBuffer()*/,
+                                         const char *prov /*=NULL*/)
+      : launch_domain(dom), launch_space(IndexSpace::NO_SPACE), 
+        sharding_space(IndexSpace::NO_SPACE), region(LogicalRegion::NO_REGION), 
+        partition(h), parent(p), projection(proj),argument(arg),predicate(pred),
+        map_id(id), tag(t), map_arg(marg), provenance(prov),
         static_dependences(NULL), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
@@ -1742,30 +1920,17 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexFillLauncher::IndexFillLauncher(Domain dom, LogicalPartition h,
-                                         LogicalRegion p, UntypedBuffer arg,
-                                         ProjectionID proj, Predicate pred,
-                                         MapperID id /*=0*/, 
-                                         MappingTagID t /*=0*/,
-                                         UntypedBuffer marg/*=UntypedBuffer()*/)
-      : launch_domain(dom), launch_space(IndexSpace::NO_SPACE), 
-        region(LogicalRegion::NO_REGION), partition(h), parent(p),
-        projection(proj), argument(arg), predicate(pred), map_id(id), tag(t),
-        map_arg(marg), static_dependences(NULL), silence_warnings(false)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    IndexFillLauncher::IndexFillLauncher(Domain dom, LogicalPartition h,
                                          LogicalRegion p, Future f,
                                          ProjectionID proj, Predicate pred,
                                          MapperID id /*=0*/, 
                                          MappingTagID t /*=0*/,
-                                         UntypedBuffer marg/*=UntypedBuffer()*/)
+                                         UntypedBuffer marg/*=UntypedBuffer()*/,
+                                         const char *prov/*=UntypedBuffer()*/)
       : launch_domain(dom), launch_space(IndexSpace::NO_SPACE), 
-        region(LogicalRegion::NO_REGION), partition(h), parent(p),
-        projection(proj), future(f), predicate(pred), map_id(id), tag(t),
-        map_arg(marg), static_dependences(NULL), silence_warnings(false)
+        sharding_space(IndexSpace::NO_SPACE), region(LogicalRegion::NO_REGION), 
+        partition(h), parent(p), projection(proj), future(f), predicate(pred),
+        map_id(id), tag(t), map_arg(marg), provenance(prov),
+        static_dependences(NULL), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1776,11 +1941,13 @@ namespace Legion {
                                          ProjectionID proj, Predicate pred,
                                          MapperID id /*=0*/, 
                                          MappingTagID t /*=0*/,
-                                         UntypedBuffer marg/*=UntypedBuffer()*/)
+                                         UntypedBuffer marg/*=UntypedBuffer()*/,
+                                         const char *prov /*=NULL*/)
       : launch_domain(Domain::NO_DOMAIN), launch_space(space), 
-        region(LogicalRegion::NO_REGION), partition(h), parent(p),
-        projection(proj), argument(arg), predicate(pred), map_id(id), tag(t),
-        map_arg(marg), static_dependences(NULL), silence_warnings(false)
+        sharding_space(IndexSpace::NO_SPACE), region(LogicalRegion::NO_REGION), 
+        partition(h), parent(p), projection(proj),argument(arg),predicate(pred),
+        map_id(id), tag(t), map_arg(marg), provenance(prov),
+        static_dependences(NULL), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1791,14 +1958,29 @@ namespace Legion {
                                          ProjectionID proj, Predicate pred,
                                          MapperID id /*=0*/, 
                                          MappingTagID t /*=0*/,
-                                         UntypedBuffer marg/*=UntypedBuffer()*/)
+                                         UntypedBuffer marg/*=UntypedBuffer()*/,
+                                         const char *prov /*=NULL*/)
       : launch_domain(Domain::NO_DOMAIN), launch_space(space), 
-        region(LogicalRegion::NO_REGION), partition(h), parent(p),
-        projection(proj), future(f), predicate(pred), map_id(id), tag(t),
-        map_arg(marg), static_dependences(NULL), silence_warnings(false)
+        sharding_space(IndexSpace::NO_SPACE), region(LogicalRegion::NO_REGION),
+        partition(h), parent(p), projection(proj), future(f), predicate(pred),
+        map_id(id), tag(t), map_arg(marg), provenance(prov),
+        static_dependences(NULL), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
+
+    /////////////////////////////////////////////////////////////
+    // DiscardLauncher 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    DiscardLauncher::DiscardLauncher(LogicalRegion h, LogicalRegion p)
+      : handle(h), parent(p), static_dependences(NULL), silence_warnings(false)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    LEGION_DISABLE_DEPRECATED_WARNINGS
 
     /////////////////////////////////////////////////////////////
     // AttachLauncher
@@ -1809,9 +1991,17 @@ namespace Legion {
                                    LogicalRegion h, LogicalRegion p,
                                    const bool restr/*= true*/,
                                    const bool map/*= true*/)
-      : resource(r), handle(h), parent(p), restricted(restr), mapped(map),
-        file_name(NULL), mode(LEGION_FILE_READ_ONLY), footprint(0),
-        static_dependences(NULL)
+      : resource(r), parent(p), handle(h), external_resource(NULL),
+        restricted(restr), mapped(map),
+        collective((r == LEGION_EXTERNAL_INSTANCE) ? true : false),
+        deduplicate_across_shards(false), file_name(NULL),
+        mode(LEGION_FILE_READ_ONLY), footprint(0), static_dependences(NULL)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    AttachLauncher::~AttachLauncher(void)
     //--------------------------------------------------------------------------
     {
     }
@@ -1823,12 +2013,20 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IndexAttachLauncher::IndexAttachLauncher(ExternalResource r,
                                              LogicalRegion p, const bool restr)
-      : resource(r), parent(p), restricted(restr), 
+      : resource(r), parent(p), restricted(restr),
         deduplicate_across_shards(false), mode(LEGION_FILE_READ_ONLY),
         static_dependences(NULL)
     //--------------------------------------------------------------------------
     {
     }
+
+    //--------------------------------------------------------------------------
+    IndexAttachLauncher::~IndexAttachLauncher(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    LEGION_REENABLE_DEPRECATED_WARNINGS
 
     /////////////////////////////////////////////////////////////
     // PredicateLauncher
@@ -1858,8 +2056,9 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    TunableLauncher::TunableLauncher(TunableID tid, MapperID m, MappingTagID t)
-      : tunable(tid), mapper(m), tag(t)
+    TunableLauncher::TunableLauncher(TunableID tid, MapperID m, MappingTagID t,
+                                     size_t return_size)
+      : tunable(tid), mapper(m), tag(t), return_type_size(return_size)
     //--------------------------------------------------------------------------
     {
     }
@@ -1870,8 +2069,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     MustEpochLauncher::MustEpochLauncher(MapperID id /*= 0*/,   
-                                         MappingTagID tag /*= 0*/)
-      : map_id(id), mapping_tag(tag), silence_warnings(false)
+                                         MappingTagID tag/*= 0*/)
+      : map_id(id), mapping_tag(tag), launch_domain(Domain::NO_DOMAIN),
+        launch_space(IndexSpace::NO_SPACE), 
+        sharding_space(IndexSpace::NO_SPACE), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1904,7 +2105,8 @@ namespace Legion {
       : task_id(0), global_registration(true), 
         task_variant_name(NULL), leaf_variant(false), 
         inner_variant(false), idempotent_variant(false),
-        replicable_variant(false)
+        replicable_variant(false), concurrent_variant(false),
+        concurrent_barrier(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1915,7 +2117,8 @@ namespace Legion {
       : task_id(task_id), global_registration(global), 
         task_variant_name(variant_name), leaf_variant(false), 
         inner_variant(false), idempotent_variant(false),
-        replicable_variant(false)
+        replicable_variant(false), concurrent_variant(false),
+        concurrent_barrier(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1927,7 +2130,8 @@ namespace Legion {
       : task_id(task_id), global_registration(global), 
         task_variant_name(variant_name), leaf_variant(false), 
         inner_variant(false), idempotent_variant(false),
-        replicable_variant(false)
+        replicable_variant(false), concurrent_variant(false),
+        concurrent_barrier(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -2122,11 +2326,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (impl != NULL)
-        impl->add_base_gc_ref(Internal::FUTURE_HANDLE_REF);
+        impl->add_base_gc_ref(Internal::APPLICATION_REF);
     }
 
     //--------------------------------------------------------------------------
-    Future::Future(Future &&rhs)
+    Future::Future(Future &&rhs) noexcept
       : impl(rhs.impl)
     //--------------------------------------------------------------------------
     {
@@ -2137,44 +2341,36 @@ namespace Legion {
     Future::~Future(void)
     //--------------------------------------------------------------------------
     {
-      if (impl != NULL)
-      {
-        if (impl->remove_base_gc_ref(Internal::FUTURE_HANDLE_REF))
-          delete impl;
-        impl = NULL;
-      }
+      if ((impl != NULL) && impl->remove_base_gc_ref(Internal::APPLICATION_REF))
+        delete impl;
     }
 
     //--------------------------------------------------------------------------
-    Future::Future(Internal::FutureImpl *i, bool need_reference)
+    Future::Future(Internal::FutureImpl *i)
       : impl(i)
     //--------------------------------------------------------------------------
     {
-      if ((impl != NULL) && need_reference)
-        impl->add_base_gc_ref(Internal::FUTURE_HANDLE_REF);
+      if (impl != NULL)
+        impl->add_base_gc_ref(Internal::APPLICATION_REF);
     }
 
     //--------------------------------------------------------------------------
     Future& Future::operator=(const Future &rhs)
     //--------------------------------------------------------------------------
     {
-      if (impl != NULL)
-      {
-        if (impl->remove_base_gc_ref(Internal::FUTURE_HANDLE_REF))
-          delete impl;
-      }
+      if ((impl != NULL) && impl->remove_base_gc_ref(Internal::APPLICATION_REF))
+        delete impl;
       impl = rhs.impl;
       if (impl != NULL)
-        impl->add_base_gc_ref(Internal::FUTURE_HANDLE_REF);
+        impl->add_base_gc_ref(Internal::APPLICATION_REF);
       return *this;
     }
 
     //--------------------------------------------------------------------------
-    Future& Future::operator=(Future &&rhs)
+    Future& Future::operator=(Future &&rhs) noexcept
     //--------------------------------------------------------------------------
     {
-      if ((impl != NULL) && 
-          impl->remove_base_gc_ref(Internal::FUTURE_HANDLE_REF))
+      if ((impl != NULL) && impl->remove_base_gc_ref(Internal::APPLICATION_REF))
         delete impl;
       impl = rhs.impl;
       rhs.impl = NULL;
@@ -2207,33 +2403,36 @@ namespace Legion {
     {
       if (impl != NULL)
       {
-        const Internal::ApEvent ready = subscribe ? 
-          impl->subscribe() : impl->get_ready_event();
+        if (subscribe)
+          impl->subscribe();
+        const Internal::ApEvent ready = impl->get_ready_event();
         // Always subscribe to the Realm event to know when it triggers
         ready.subscribe();
         bool poisoned = false;
         if (ready.has_triggered_faultaware(poisoned))
-        {
-          if (poisoned)
-            Internal::implicit_context->raise_poison_exception();
           return true;
-        }
+        if (poisoned && (Internal::implicit_context != NULL))
+          Internal::implicit_context->raise_poison_exception();
         return false;
       }
       return true; // Empty futures are always ready
     }
 
     //--------------------------------------------------------------------------
-    void* Future::get_untyped_result(bool silence_warnings,
-                                     const char *warning_string,
-                                     bool check_size, size_t future_size) const
+    const void* Future::get_buffer(Memory::Kind memory, size_t *extent_in_bytes,
+       bool check_size, bool silence_warnings, const char *warning_string) const
     //--------------------------------------------------------------------------
     {
       if (impl == NULL)
         REPORT_LEGION_ERROR(ERROR_REQUEST_FOR_EMPTY_FUTURE, 
                           "Illegal request for future value from empty future")
-      return impl->get_untyped_result(silence_warnings, warning_string,
-                                    false/*internal*/, check_size, future_size);
+      if (Internal::implicit_context == NULL)
+        return impl->get_buffer(Processor::NO_PROC, memory, extent_in_bytes, 
+                                check_size, silence_warnings, warning_string);
+      else
+        return impl->get_buffer(
+            Internal::implicit_context->get_executing_processor(), memory,
+            extent_in_bytes, check_size, silence_warnings, warning_string);
     }
 
     //--------------------------------------------------------------------------
@@ -2244,6 +2443,84 @@ namespace Legion {
         REPORT_LEGION_ERROR(ERROR_REQUEST_FOR_EMPTY_FUTURE, 
                           "Illegal request for future size from empty future");
       return impl->get_untyped_size();
+    }
+
+    //--------------------------------------------------------------------------
+    const void* Future::get_metadata(size_t *size) const
+    //--------------------------------------------------------------------------
+    {
+      if (impl == NULL)
+        REPORT_LEGION_ERROR(ERROR_REQUEST_FOR_EMPTY_FUTURE, 
+                          "Illegal request for metadata from empty future");
+      return impl->get_metadata(size);
+    }
+
+    //--------------------------------------------------------------------------
+    Realm::RegionInstance Future::get_instance(Memory::Kind memkind,
+                        size_t field_size, bool check_field_size,
+                        const char *warning_string, bool silence_warnings) const
+    //--------------------------------------------------------------------------
+    {
+      if (impl == NULL)
+        REPORT_LEGION_ERROR(ERROR_REQUEST_FOR_EMPTY_FUTURE, 
+                          "Illegal request for accessor on an empty future");
+      return impl->get_instance(memkind, field_size, check_field_size,
+                                silence_warnings, warning_string);
+    }
+
+    //--------------------------------------------------------------------------
+    void Future::report_incompatible_accessor(const char *accessor_kind,
+                                           Realm::RegionInstance instance) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(impl != NULL);
+#endif
+      impl->report_incompatible_accessor(accessor_kind, instance);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ Future Future::from_untyped_pointer(Runtime *rt,
+                               const void *value, size_t value_size, bool owned)
+    //--------------------------------------------------------------------------
+    {
+      if (Internal::implicit_context == NULL)
+        REPORT_LEGION_ERROR(ERROR_CONFUSED_USER,
+            "Creating Legion Future objects from a buffer is only permitted "
+            "to be performed inside of Legion tasks.")
+      return Internal::implicit_context->from_value(value, value_size,
+          owned, NULL/*provenance*/, false/*shard local*/);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ Future Future::from_untyped_pointer(
+             const void *value, size_t value_size, bool owned, 
+             const char *prov, bool shard_local)
+    //--------------------------------------------------------------------------
+    {
+      if (Internal::implicit_context == NULL)
+        REPORT_LEGION_ERROR(ERROR_CONFUSED_USER,
+            "Creating Legion Future objects from a buffer is only permitted "
+            "to be performed inside of Legion tasks.")
+      Internal::AutoProvenance provenance(prov);
+      return Internal::implicit_context->from_value(value, value_size,
+                                        owned, provenance, shard_local);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ Future Future::from_value(const void *buffer, size_t size,
+        bool owned, const Realm::ExternalInstanceResource &resource,
+        void (*freefunc)(const Realm::ExternalInstanceResource&),
+        const char *prov, bool shard_local)
+    //--------------------------------------------------------------------------
+    {
+      if (Internal::implicit_context == NULL)
+        REPORT_LEGION_ERROR(ERROR_CONFUSED_USER,
+            "Creating Legion Future objects from a buffer is only permitted "
+            "to be performed inside of Legion tasks.")
+      Internal::AutoProvenance provenance(prov);
+      return Internal::implicit_context->from_value(buffer, size, owned,
+                            resource, freefunc, provenance, shard_local);
     }
 
     /////////////////////////////////////////////////////////////
@@ -2263,11 +2540,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (impl != NULL)
-        impl->add_base_gc_ref(Internal::FUTURE_HANDLE_REF);
+        impl->add_base_gc_ref(Internal::APPLICATION_REF);
     }
 
     //--------------------------------------------------------------------------
-    FutureMap::FutureMap(FutureMap &&map)
+    FutureMap::FutureMap(FutureMap &&map) noexcept
       : impl(map.impl)
     //--------------------------------------------------------------------------
     {
@@ -2275,47 +2552,39 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FutureMap::FutureMap(Internal::FutureMapImpl *i, bool need_reference)
+    FutureMap::FutureMap(Internal::FutureMapImpl *i)
       : impl(i)
     //--------------------------------------------------------------------------
     {
-      if ((impl != NULL) && need_reference)
-        impl->add_base_gc_ref(Internal::FUTURE_HANDLE_REF);
+      if (impl != NULL)
+        impl->add_base_gc_ref(Internal::APPLICATION_REF);
     }
 
     //--------------------------------------------------------------------------
     FutureMap::~FutureMap(void)
     //--------------------------------------------------------------------------
     {
-      if (impl != NULL)
-      {
-        if (impl->remove_base_gc_ref(Internal::FUTURE_HANDLE_REF))
-          delete impl;
-        impl = NULL;
-      }
+      if ((impl != NULL) && impl->remove_base_gc_ref(Internal::APPLICATION_REF))
+        delete impl;
     }
 
     //--------------------------------------------------------------------------
     FutureMap& FutureMap::operator=(const FutureMap &rhs)
     //--------------------------------------------------------------------------
     {
-      if (impl != NULL)
-      {
-        if (impl->remove_base_gc_ref(Internal::FUTURE_HANDLE_REF))
-          delete impl;
-      }
+      if ((impl != NULL) && impl->remove_base_gc_ref(Internal::APPLICATION_REF))
+        delete impl;
       impl = rhs.impl;
       if (impl != NULL)
-        impl->add_base_gc_ref(Internal::FUTURE_HANDLE_REF);
+        impl->add_base_gc_ref(Internal::APPLICATION_REF);
       return *this;
     }
 
     //--------------------------------------------------------------------------
-    FutureMap& FutureMap::operator=(FutureMap &&rhs)
+    FutureMap& FutureMap::operator=(FutureMap &&rhs) noexcept
     //--------------------------------------------------------------------------
     {
-      if ((impl != NULL) && 
-          impl->remove_base_gc_ref(Internal::FUTURE_HANDLE_REF))
+      if ((impl != NULL) && impl->remove_base_gc_ref(Internal::APPLICATION_REF))
         delete impl;
       impl = rhs.impl;
       rhs.impl = NULL;
@@ -2329,7 +2598,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(impl != NULL);
 #endif
-      return impl->get_future(point);
+      return impl->get_future(point, false/*internal*/);
     }
 
     //--------------------------------------------------------------------------
@@ -2349,6 +2618,16 @@ namespace Legion {
     {
       if (impl != NULL)
         impl->wait_all_results(silence_warnings, warning_string);
+    }
+
+    //--------------------------------------------------------------------------
+    Domain FutureMap::get_future_map_domain(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (impl == NULL)
+        return Domain::NO_DOMAIN;
+      else
+        return impl->get_domain();
     }
 
     /////////////////////////////////////////////////////////////
@@ -2372,7 +2651,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalRegion::PhysicalRegion(PhysicalRegion &&rhs)
+    PhysicalRegion::PhysicalRegion(PhysicalRegion &&rhs) noexcept
       : impl(rhs.impl)
     //--------------------------------------------------------------------------
     {
@@ -2416,7 +2695,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalRegion& PhysicalRegion::operator=(PhysicalRegion &&rhs)
+    PhysicalRegion& PhysicalRegion::operator=(PhysicalRegion &&rhs) noexcept
     //--------------------------------------------------------------------------
     {
       if ((impl != NULL) && impl->remove_reference())
@@ -2477,31 +2756,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    LegionRuntime::Accessor::RegionAccessor<
-      LegionRuntime::Accessor::AccessorType::Generic>
-        PhysicalRegion::get_accessor(bool silence_warnings) const
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(impl != NULL);
-#endif
-      return impl->get_accessor(silence_warnings);
-    }
-
-    //--------------------------------------------------------------------------
-    LegionRuntime::Accessor::RegionAccessor<
-      LegionRuntime::Accessor::AccessorType::Generic>
-        PhysicalRegion::get_field_accessor(FieldID fid, 
-                                           bool silence_warnings) const
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(impl != NULL);
-#endif
-      return impl->get_field_accessor(fid, silence_warnings);
-    }
-
-    //--------------------------------------------------------------------------
     void PhysicalRegion::get_memories(std::set<Memory>& memories,
                         bool silence_warnings, const char *warning_string) const
     //--------------------------------------------------------------------------
@@ -2543,6 +2797,23 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    Realm::RegionInstance PhysicalRegion::get_padding_info(FieldID fid,
+                            size_t field_size, Domain *inner, Domain &outer, 
+                            const char *warning_string, bool silence_warnings,
+                            bool generic_accessor, bool check_field_size) const
+    //--------------------------------------------------------------------------
+    {
+      if (impl == NULL)
+        REPORT_LEGION_ERROR(ERROR_PHYSICAL_REGION_UNMAPPED,
+            "Illegal request to create a padding accessor for uninitialized "
+            "physical region in task %s (UID %lld)",
+            Internal::implicit_context->get_task_name(),
+            Internal::implicit_context->get_unique_id())
+      return impl->get_padding_info(fid, field_size, inner, outer,
+          warning_string, silence_warnings, generic_accessor, check_field_size);
+    }
+
+    //--------------------------------------------------------------------------
     void PhysicalRegion::report_incompatible_accessor(const char *accessor_kind,
                               Realm::RegionInstance instance, FieldID fid) const
     //--------------------------------------------------------------------------
@@ -2556,6 +2827,26 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       impl->report_incompatible_multi_accessor(index, fid, inst1, inst2);
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalRegion::report_colocation_violation(const char *accessor_kind,
+                 FieldID fid, Realm::RegionInstance inst1, 
+                 Realm::RegionInstance inst2, 
+                 const PhysicalRegion &other, bool reduction) const
+    //--------------------------------------------------------------------------
+    {
+      impl->report_colocation_violation(accessor_kind, fid, inst1, inst2,
+                                        other, reduction);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void PhysicalRegion::empty_colocation_regions(
+                         const char *accessor_kind, FieldID fid, bool reduction)
+    //--------------------------------------------------------------------------
+    {
+      Internal::PhysicalRegionImpl::empty_colocation_regions(accessor_kind,
+                                                             fid, reduction);
     }
 
     //--------------------------------------------------------------------------
@@ -2588,6 +2879,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       Internal::PhysicalRegionImpl::fail_privilege_check(d, fid, mode);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void PhysicalRegion::fail_padding_check(DomainPoint p, 
+                                                       FieldID fid)
+    //--------------------------------------------------------------------------
+    {
+      Internal::PhysicalRegionImpl::fail_padding_check(p, fid);
     }
 
     /////////////////////////////////////////////////////////////
@@ -2640,8 +2939,14 @@ namespace Legion {
       Machine machine = Realm::Machine::get_machine();
       Machine::MemoryQuery finder(machine);
       const Processor exec_proc = Processor::get_executing_processor();
-      finder.has_affinity_to(exec_proc);
+      finder.best_affinity_to(exec_proc);
       finder.only_kind(memkind);
+      if (finder.count() == 0)
+      {
+        finder = Machine::MemoryQuery(machine);
+        finder.has_affinity_to(exec_proc);
+        finder.only_kind(memkind);
+      }
       if (finder.count() == 0)
       {
         const char *mem_names[] = {
@@ -2687,18 +2992,149 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void UntypedDeferredValue::finalize(Runtime *runtime, Context ctx) const
+    void UntypedDeferredValue::finalize(Context ctx) const
     //--------------------------------------------------------------------------
     {
-#if 0
-      Runtime::legion_task_postamble(runtime, ctx, 
-                    instance.pointer_untyped(0, field_size), field_size,
-                    true/*owner*/, instance, instance.get_location().kind());
-#else
-      Runtime::legion_task_postamble(runtime, ctx, 
-                    instance.pointer_untyped(0, field_size), field_size,
-                    true/*owner*/, instance);
+      Runtime::legion_task_postamble(ctx,instance.pointer_untyped(0,field_size),
+                                     field_size, true/*owner*/, instance);
+    }
+
+    //--------------------------------------------------------------------------
+    Realm::RegionInstance UntypedDeferredValue::get_instance() const
+    //--------------------------------------------------------------------------
+    {
+      return instance;
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Output Region
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    OutputRegion::OutputRegion(void)
+      : impl(NULL)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    OutputRegion::OutputRegion(const OutputRegion &rhs)
+      : impl(rhs.impl)
+    //--------------------------------------------------------------------------
+    {
+      if (impl != NULL)
+        impl->add_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    OutputRegion::OutputRegion(Internal::OutputRegionImpl *i)
+      : impl(i)
+    //--------------------------------------------------------------------------
+    {
+      if (impl != NULL)
+        impl->add_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    OutputRegion::~OutputRegion(void)
+    //--------------------------------------------------------------------------
+    {
+      if (impl != NULL)
+      {
+        if (impl->remove_reference())
+          delete impl;
+        impl = NULL;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    OutputRegion& OutputRegion::operator=(const OutputRegion &rhs)
+    //--------------------------------------------------------------------------
+    {
+      if (impl != NULL)
+      {
+        if (impl->remove_reference())
+          delete impl;
+      }
+      impl = rhs.impl;
+      if (impl != NULL)
+        impl->add_reference();
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    Memory OutputRegion::target_memory(void) const
+    //--------------------------------------------------------------------------
+    {
+      return impl->target_memory();
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalRegion OutputRegion::get_logical_region(void) const
+    //--------------------------------------------------------------------------
+    {
+      return impl->get_logical_region();
+    }
+
+    //--------------------------------------------------------------------------
+    bool OutputRegion::is_valid_output_region(void) const
+    //--------------------------------------------------------------------------
+    {
+      return impl->is_valid_output_region();
+    }
+
+    //--------------------------------------------------------------------------
+    void OutputRegion::check_type_tag(TypeTag type_tag) const
+    //--------------------------------------------------------------------------
+    {
+      assert(impl != NULL);
+      impl->check_type_tag(type_tag);
+    }
+
+    //--------------------------------------------------------------------------
+    void OutputRegion::check_field_size(
+                                      FieldID field_id, size_t field_size) const
+    //--------------------------------------------------------------------------
+    {
+      assert(impl != NULL);
+      impl->check_field_size(field_id, field_size);
+    }
+
+    //--------------------------------------------------------------------------
+    void OutputRegion::get_layout(FieldID field_id,
+                                  std::vector<DimensionKind> &ordering,
+                                  size_t &alignment) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(impl != NULL);
 #endif
+      impl->get_layout(field_id, ordering, alignment);
+    }
+
+    //--------------------------------------------------------------------------
+    void OutputRegion::return_data(const DomainPoint &extents,
+                                   FieldID field_id,
+                                   Realm::RegionInstance instance,
+                                   bool check_constraints /*= true */)
+    //--------------------------------------------------------------------------
+    {
+      return_data(extents, field_id, instance, NULL, check_constraints);
+    }
+
+    //--------------------------------------------------------------------------
+    void OutputRegion::return_data(const DomainPoint &extents,
+                                   FieldID field_id,
+                                   Realm::RegionInstance instance,
+                                   const LayoutConstraintSet *constraints,
+                                   bool check_constraints)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(impl != NULL);
+#endif
+      impl->return_data(
+          extents, field_id, instance, constraints, check_constraints);
     }
 
     /////////////////////////////////////////////////////////////
@@ -2712,6 +3148,14 @@ namespace Legion {
     {
     }
 
+    ExternalResources::ExternalResources(const ExternalResources &rhs)
+      : impl(rhs.impl)
+    //--------------------------------------------------------------------------
+    {
+      if (impl != NULL)
+        impl->add_reference();
+    }
+
     //--------------------------------------------------------------------------
     ExternalResources::ExternalResources(Internal::ExternalResourcesImpl *i)
       : impl(i)
@@ -2722,16 +3166,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ExternalResources::ExternalResources(const ExternalResources &rhs)
-      : impl(rhs.impl)
-    //--------------------------------------------------------------------------
-    {
-      if (impl != NULL)
-        impl->add_reference();
-    }
-
-    //--------------------------------------------------------------------------
-    ExternalResources::ExternalResources(ExternalResources &&rhs)
+    ExternalResources::ExternalResources(ExternalResources &&rhs) noexcept
       : impl(rhs.impl)
     //--------------------------------------------------------------------------
     {
@@ -2760,7 +3195,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ExternalResources& ExternalResources::operator=(ExternalResources &&rhs)
+    ExternalResources& ExternalResources::operator=(
+                                               ExternalResources &&rhs) noexcept
     //--------------------------------------------------------------------------
     {
       if ((impl != NULL) && impl->remove_reference())
@@ -2826,7 +3262,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PieceIterator::PieceIterator(PieceIterator &&rhs)
+    PieceIterator::PieceIterator(PieceIterator &&rhs) noexcept
       : impl(rhs.impl), index(rhs.index), current_piece(rhs.current_piece)
     //--------------------------------------------------------------------------
     {
@@ -2856,7 +3292,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PieceIterator& PieceIterator::operator=(PieceIterator &&rhs)
+    PieceIterator& PieceIterator::operator=(PieceIterator &&rhs) noexcept
     //--------------------------------------------------------------------------
     {
       if ((impl != NULL) && impl->remove_reference())
@@ -2876,169 +3312,6 @@ namespace Legion {
         index = impl->get_next(index, current_piece);
       return valid();
     }
-
-#ifdef __GNUC__
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-#endif
-#ifdef __clang__
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-#endif
-#ifdef __PGIC__
-#pragma warning (push)
-#pragma diag_suppress 1445
-#endif
-    /////////////////////////////////////////////////////////////
-    // Index Iterator  
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    IndexIterator::IndexIterator(void)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    IndexIterator::IndexIterator(const Domain &dom, ptr_t start)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(dom.get_dim() == 1);
-#endif
-      const DomainT<1,coord_t> is = dom;
-      is_iterator = Realm::IndexSpaceIterator<1,coord_t>(is);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexIterator::IndexIterator(Runtime *rt, Context ctx,
-                                 IndexSpace space, ptr_t start)
-    //--------------------------------------------------------------------------
-    {
-      Domain dom = rt->get_index_space_domain(ctx, space);
-#ifdef DEBUG_LEGION
-      assert(dom.get_dim() == 1);
-#endif
-      const DomainT<1,coord_t> is = dom;
-      is_iterator = Realm::IndexSpaceIterator<1,coord_t>(is);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexIterator::IndexIterator(Runtime *rt, Context ctx,
-                                 LogicalRegion handle, ptr_t start)
-    //--------------------------------------------------------------------------
-    {
-      Domain dom = rt->get_index_space_domain(ctx, handle.get_index_space());
-#ifdef DEBUG_LEGION
-      assert(dom.get_dim() == 1);
-#endif
-      const DomainT<1,coord_t> is = dom;
-      is_iterator = Realm::IndexSpaceIterator<1,coord_t>(is);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexIterator::IndexIterator(Runtime *rt, IndexSpace space, ptr_t start)
-    //--------------------------------------------------------------------------
-    {
-      Domain dom = rt->get_index_space_domain(space);
-#ifdef DEBUG_LEGION
-      assert(dom.get_dim() == 1);
-#endif
-      const DomainT<1,coord_t> is = dom;
-      is_iterator = Realm::IndexSpaceIterator<1,coord_t>(is);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexIterator::IndexIterator(const IndexIterator &rhs)
-      : is_iterator(rhs.is_iterator), rect_iterator(rhs.rect_iterator)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    IndexIterator::~IndexIterator(void)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    IndexIterator& IndexIterator::operator=(const IndexIterator &rhs)
-    //--------------------------------------------------------------------------
-    {
-      is_iterator = rhs.is_iterator;
-      rect_iterator = rhs.rect_iterator;
-      return *this;
-    }
-
-    /////////////////////////////////////////////////////////////
-    // IndexAllocator 
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    IndexAllocator::IndexAllocator(void)
-      : index_space(IndexSpace::NO_SPACE)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    IndexAllocator::IndexAllocator(const IndexAllocator &rhs)
-      : index_space(rhs.index_space), iterator(rhs.iterator)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    IndexAllocator::IndexAllocator(IndexSpace is, IndexIterator itr)
-      : index_space(is), iterator(itr)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    IndexAllocator::~IndexAllocator(void)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    IndexAllocator& IndexAllocator::operator=(const IndexAllocator &rhs)
-    //--------------------------------------------------------------------------
-    {
-      index_space = rhs.index_space;
-      iterator = rhs.iterator;
-      return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    ptr_t IndexAllocator::alloc(unsigned num_elements)
-    //--------------------------------------------------------------------------
-    {
-      size_t allocated = 0;
-      ptr_t result = iterator.next_span(allocated, num_elements);
-      if (allocated == num_elements)
-        return result;
-      else
-        return ptr_t::nil();
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexAllocator::free(ptr_t ptr, unsigned num_elements)
-    //--------------------------------------------------------------------------
-    {
-      Internal::log_run.error("Dynamic free of index space points is "
-                              "no longer supported");
-      assert(false);
-    }
-#ifdef __GNUC__
-#pragma GCC diagnostic pop
-#endif
-#ifdef __clang__
-#pragma clang diagnostic pop
-#endif
-#ifdef __PGIC__
-#pragma warning (pop)
-#endif
 
     /////////////////////////////////////////////////////////////
     // Field Allocator
@@ -3061,7 +3334,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FieldAllocator::FieldAllocator(FieldAllocator &&rhs)
+    FieldAllocator::FieldAllocator(FieldAllocator &&rhs) noexcept
       : impl(rhs.impl)
     //--------------------------------------------------------------------------
     {
@@ -3102,7 +3375,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FieldAllocator& FieldAllocator::operator=(FieldAllocator &&rhs)
+    FieldAllocator& FieldAllocator::operator=(FieldAllocator &&rhs) noexcept
     //--------------------------------------------------------------------------
     {
       if ((impl != NULL) && impl->remove_reference())
@@ -3115,97 +3388,116 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FieldID FieldAllocator::allocate_field(size_t field_size,
                                            FieldID desired_fieldid,
-                                           CustomSerdezID serdez_id, bool local)
+                                           CustomSerdezID serdez_id, bool local,
+                                           const char *prov)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(impl != NULL);
 #endif
-      return impl->allocate_field(field_size, desired_fieldid, serdez_id,local);
+      Internal::AutoProvenance provenance(prov);
+      return impl->allocate_field(field_size, desired_fieldid, serdez_id,
+                                  local, provenance);
     }
 
     //--------------------------------------------------------------------------
     FieldID FieldAllocator::allocate_field(const Future &field_size,
                                            FieldID desired_fieldid,
-                                           CustomSerdezID serdez_id, bool local)
+                                           CustomSerdezID serdez_id, bool local,
+                                           const char *prov)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(impl != NULL);
 #endif
-      return impl->allocate_field(field_size, desired_fieldid, serdez_id,local);
+      Internal::AutoProvenance provenance(prov);
+      return impl->allocate_field(field_size, desired_fieldid, serdez_id,
+                                  local, provenance);
     }
 
     //--------------------------------------------------------------------------
-    void FieldAllocator::free_field(FieldID fid, const bool unordered)
+    void FieldAllocator::free_field(FieldID fid, const bool unordered,
+                                    const char *prov)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(impl != NULL);
 #endif     
-      impl->free_field(fid, unordered);
+      Internal::AutoProvenance provenance(prov);
+      impl->free_field(fid, unordered, provenance);
     }
 
     //--------------------------------------------------------------------------
     FieldID FieldAllocator::allocate_local_field(size_t field_size,
                                                  FieldID desired_fieldid,
-                                                 CustomSerdezID serdez_id)
+                                                 CustomSerdezID serdez_id,
+                                                 const char *prov)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(impl != NULL);
 #endif
+      Internal::AutoProvenance provenance(prov);
       return impl->allocate_field(field_size, desired_fieldid, 
-                                  serdez_id, true/*local*/);
+                                  serdez_id, true/*local*/, provenance);
     }
 
     //--------------------------------------------------------------------------
     void FieldAllocator::allocate_fields(const std::vector<size_t> &field_sizes,
                                          std::vector<FieldID> &resulting_fields,
-                                         CustomSerdezID serdez_id, bool local)
+                                         CustomSerdezID serdez_id, bool local,
+                                         const char *prov)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(impl != NULL);
 #endif
-      impl->allocate_fields(field_sizes, resulting_fields, serdez_id, local);
+      Internal::AutoProvenance provenance(prov);
+      impl->allocate_fields(field_sizes, resulting_fields, serdez_id,
+                            local, provenance);
     }
 
     //--------------------------------------------------------------------------
     void FieldAllocator::allocate_fields(const std::vector<Future> &field_sizes,
                                          std::vector<FieldID> &resulting_fields,
-                                         CustomSerdezID serdez_id, bool local)
+                                         CustomSerdezID serdez_id, bool local,
+                                         const char *prov)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(impl != NULL);
 #endif
-      impl->allocate_fields(field_sizes, resulting_fields, serdez_id, local);
+      Internal::AutoProvenance provenance(prov);
+      impl->allocate_fields(field_sizes, resulting_fields,
+                            serdez_id, local, provenance);
     }
 
     //--------------------------------------------------------------------------
     void FieldAllocator::free_fields(const std::set<FieldID> &to_free,
-                                     const bool unordered)
+                                     const bool unordered, const char *prov)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(impl != NULL);
 #endif
-      impl->free_fields(to_free, unordered);
+      Internal::AutoProvenance provenance(prov);
+      impl->free_fields(to_free, unordered, provenance);
     }
 
     //--------------------------------------------------------------------------
     void FieldAllocator::allocate_local_fields(
                                         const std::vector<size_t> &field_sizes,
                                         std::vector<FieldID> &resulting_fields,
-                                        CustomSerdezID serdez_id)
+                                        CustomSerdezID serdez_id,
+                                        const char *prov)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(impl != NULL);
 #endif
+      Internal::AutoProvenance provenance(prov);
       impl->allocate_fields(field_sizes, resulting_fields, 
-                            serdez_id, true/*local*/); 
+                            serdez_id, true/*local*/, provenance);
     }
 
     //--------------------------------------------------------------------------
@@ -3255,16 +3547,10 @@ namespace Legion {
     {
     }
 
-// FIXME: This exists for backwards compatibility but it is tripping
-// over our own deprecation warnings. Turn those off inside this method.
-#ifdef __GNUC__
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-#endif
-#ifdef __clang__
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-#endif
+    // FIXME: This exists for backwards compatibility but it is tripping
+    // over our own deprecation warnings. Turn those off inside this method.
+    LEGION_DISABLE_DEPRECATED_WARNINGS
+
     //--------------------------------------------------------------------------
     LogicalRegion ProjectionFunctor::project(const Mappable *mappable, 
             unsigned index, LogicalRegion upper_bound, const DomainPoint &point)
@@ -3415,35 +3701,45 @@ namespace Legion {
       }
       return LogicalRegion::NO_REGION;
     }
-#ifdef __GNUC__
-#pragma GCC diagnostic pop
-#endif
-#ifdef __clang__
-#pragma clang diagnostic pop
-#endif
+
+    LEGION_REENABLE_DEPRECATED_WARNINGS
 
     //--------------------------------------------------------------------------
     LogicalRegion ProjectionFunctor::project(LogicalRegion upper_bound,
-                                             const DomainPoint &point,
-                                             const Domain &launch_domain)
+                          const DomainPoint &point, const Domain &launch_domain)
     //--------------------------------------------------------------------------
     {
-      REPORT_LEGION_ERROR(ERROR_DEPRECATED_PROJECTION, 
-                          "INVOCATION OF DEPRECATED PROJECTION "
-                          "FUNCTOR METHOD WITHOUT AN OVERRIDE!");
+      // Must be override by derived classes
+      assert(false);
       return LogicalRegion::NO_REGION;
     }
 
     //--------------------------------------------------------------------------
     LogicalRegion ProjectionFunctor::project(LogicalPartition upper_bound,
-                                             const DomainPoint &point,
-                                             const Domain &launch_domain)
+                          const DomainPoint &point, const Domain &launch_domain)
     //--------------------------------------------------------------------------
     {
-      REPORT_LEGION_ERROR(ERROR_DEPRECATED_PROJECTION, 
-                          "INVOCATION OF DEPRECATED PROJECTION "
-                          "FUNCTOR METHOD WITHOUT AN OVERRIDE!");
+      // Must be override by derived classes
+      assert(false);
       return LogicalRegion::NO_REGION;
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalRegion ProjectionFunctor::project(LogicalRegion upper_bound,
+                          const DomainPoint &point, const Domain &launch_domain, 
+                          const void *args, size_t size)
+    //--------------------------------------------------------------------------
+    {
+      return project(upper_bound, point, launch_domain);
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalRegion ProjectionFunctor::project(LogicalPartition upper_bound,
+                          const DomainPoint &point, const Domain &launch_domain, 
+                          const void *args, size_t size)
+    //--------------------------------------------------------------------------
+    {
+      return project(upper_bound, point, launch_domain);
     }
 
     //--------------------------------------------------------------------------
@@ -3485,161 +3781,107 @@ namespace Legion {
       // Must be override by derived classes
       assert(false);
     }
+
+    //--------------------------------------------------------------------------
+    bool ProjectionFunctor::is_complete(LogicalRegion upper_bound,
+                                        const Domain &launch_domain)
+    //--------------------------------------------------------------------------
+    {
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    bool ProjectionFunctor::is_complete(LogicalPartition upper_bound,
+                                        const Domain &launch_domain)
+    //--------------------------------------------------------------------------
+    {
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    bool ProjectionFunctor::is_complete(Mappable *mappable, unsigned index,
+                         LogicalRegion upper_bound, const Domain &launch_domain)
+    //--------------------------------------------------------------------------
+    {
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    bool ProjectionFunctor::is_complete(Mappable *mappable, unsigned index,
+                      LogicalPartition upper_bound, const Domain &launch_domain)
+    //--------------------------------------------------------------------------
+    {
+      return false;
+    }
+
+    /////////////////////////////////////////////////////////////
+    // ShardingFunctor 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ShardingFunctor::ShardingFunctor(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ShardingFunctor::~ShardingFunctor(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ShardID ShardingFunctor::shard(const DomainPoint &index_point,
+                                   const Domain &index_domain,
+                                   const size_t total_shards)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_DEPRECATED_SHARDING,
+          "Invocation of 'ShardingFunctor::shard' method "
+          "without a user-provided override");
+      return 0;
+    }
+
+    //--------------------------------------------------------------------------
+    DomainPoint ShardingFunctor::shard_points(const DomainPoint &index_point,
+                                   const Domain &index_domain,
+                                   const std::vector<DomainPoint> &shard_points,
+                                   const Domain &shard_domain)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_DEPRECATED_SHARDING,
+          "Invocation of 'ShardingFunctor::shard_points' method "
+          "without a user-provided override");
+      return DomainPoint();
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardingFunctor::invert(ShardID shard,
+                                 const Domain &sharding_domain,
+                                 const Domain &index_domain,
+                                 const size_t total_shards,
+                                 std::vector<DomainPoint> &points)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_DEPRECATED_SHARDING,
+          "Invocation of 'ShardingFunctor::invert' method "
+          "without a user-provided override");
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardingFunctor::invert_points(const DomainPoint &shard_point,
+                                 const std::vector<DomainPoint> &shard_points,
+                                 const Domain &shard_domain,
+                                 const Domain &index_domain,
+                                 const Domain &sharding_domain,
+                                 std::vector<DomainPoint> &index_points)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_DEPRECATED_SHARDING,
+          "Invocation of 'ShardingFunctor::invert_points' method "
+          "without a user-provided override");
+    }
     
-    /////////////////////////////////////////////////////////////
-    // Coloring Serializer 
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    ColoringSerializer::ColoringSerializer(const Coloring &c)
-      : coloring(c)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    size_t ColoringSerializer::legion_buffer_size(void) const
-    //--------------------------------------------------------------------------
-    {
-      size_t result = sizeof(size_t); // number of elements
-      for (Coloring::const_iterator it = coloring.begin();
-            it != coloring.end(); it++)
-      {
-        result += sizeof(Color);
-        result += 2*sizeof(size_t); // number of each kind of pointer
-        result += (it->second.points.size() * sizeof(ptr_t));
-        result += (it->second.ranges.size() * 2 * sizeof(ptr_t));
-      }
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    size_t ColoringSerializer::legion_serialize(void *buffer) const
-    //--------------------------------------------------------------------------
-    {
-      char *target = (char*)buffer; 
-      *((size_t*)target) = coloring.size();
-      target += sizeof(size_t);
-      for (Coloring::const_iterator it = coloring.begin();
-            it != coloring.end(); it++)
-      {
-        *((Color*)target) = it->first;
-        target += sizeof(it->first);
-        *((size_t*)target) = it->second.points.size();
-        target += sizeof(size_t);
-        for (std::set<ptr_t>::const_iterator ptr_it = it->second.points.begin();
-              ptr_it != it->second.points.end(); ptr_it++)
-        {
-          *((ptr_t*)target) = *ptr_it;
-          target += sizeof(ptr_t);
-        }
-        *((size_t*)target) = it->second.ranges.size();
-        target += sizeof(size_t);
-        for (std::set<std::pair<ptr_t,ptr_t> >::const_iterator range_it = 
-              it->second.ranges.begin(); range_it != it->second.ranges.end();
-              range_it++)
-        {
-          *((ptr_t*)target) = range_it->first;
-          target += sizeof(range_it->first);
-          *((ptr_t*)target) = range_it->second;
-          target += sizeof(range_it->second);
-        }
-      }
-      return (size_t(target) - size_t(buffer));
-    }
-
-    //--------------------------------------------------------------------------
-    size_t ColoringSerializer::legion_deserialize(const void *buffer)
-    //--------------------------------------------------------------------------
-    {
-      const char *source = (const char*)buffer;
-      size_t num_colors = *((const size_t*)source);
-      source += sizeof(num_colors);
-      for (unsigned idx = 0; idx < num_colors; idx++)
-      {
-        Color c = *((const Color*)source);
-        source += sizeof(c);
-        coloring[c]; // Force coloring to exist even if empty.
-        size_t num_points = *((const size_t*)source);
-        source += sizeof(num_points);
-        for (unsigned p = 0; p < num_points; p++)
-        {
-          ptr_t ptr = *((const ptr_t*)source);
-          source += sizeof(ptr);
-          coloring[c].points.insert(ptr);
-        }
-        size_t num_ranges = *((const size_t*)source);
-        source += sizeof(num_ranges);
-        for (unsigned r = 0; r < num_ranges; r++)
-        {
-          ptr_t start = *((const ptr_t*)source);
-          source += sizeof(start);
-          ptr_t stop = *((const ptr_t*)source);
-          source += sizeof(stop);
-          coloring[c].ranges.insert(std::pair<ptr_t,ptr_t>(start,stop));
-        }
-      }
-      // Return the number of bytes consumed
-      return (size_t(source) - size_t(buffer));
-    }
-
-    /////////////////////////////////////////////////////////////
-    // Domain Coloring Serializer 
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    DomainColoringSerializer::DomainColoringSerializer(const DomainColoring &d)
-      : coloring(d)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    size_t DomainColoringSerializer::legion_buffer_size(void) const
-    //--------------------------------------------------------------------------
-    {
-      size_t result = sizeof(size_t); // number of elements
-      result += (coloring.size() * (sizeof(Color) + sizeof(Domain)));
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    size_t DomainColoringSerializer::legion_serialize(void *buffer) const
-    //--------------------------------------------------------------------------
-    {
-      char *target = (char*)buffer;
-      *((size_t*)target) = coloring.size();
-      target += sizeof(size_t);
-      for (DomainColoring::const_iterator it = coloring.begin();
-            it != coloring.end(); it++)
-      {
-        *((Color*)target) = it->first; 
-        target += sizeof(it->first);
-        *((Domain*)target) = it->second;
-        target += sizeof(it->second);
-      }
-      return (size_t(target) - size_t(buffer));
-    }
-
-    //--------------------------------------------------------------------------
-    size_t DomainColoringSerializer::legion_deserialize(const void *buffer)
-    //--------------------------------------------------------------------------
-    {
-      const char *source = (const char*)buffer;
-      size_t num_elements = *((const size_t*)source);
-      source += sizeof(size_t);
-      for (unsigned idx = 0; idx < num_elements; idx++)
-      {
-        Color c = *((const Color*)source);
-        source += sizeof(c);
-        Domain d = *((const Domain*)source);
-        source += sizeof(d);
-        coloring[c] = d;
-      }
-      // Return the number of bytes consumed
-      return (size_t(source) - size_t(buffer));
-    }
-
     /////////////////////////////////////////////////////////////
     // Legion Runtime 
     /////////////////////////////////////////////////////////////
@@ -3658,14 +3900,15 @@ namespace Legion {
       const Rect<1,coord_t> bounds((Point<1,coord_t>(0)),
                                    (Point<1,coord_t>(max_num_elmts-1)));
       const Domain domain(bounds);
-      return create_index_space(ctx, domain, TYPE_TAG_1D);
+      return create_index_space(ctx, domain, TYPE_TAG_1D, NULL/*provenance*/);
     }
 
     //--------------------------------------------------------------------------
     IndexSpace Runtime::create_index_space(Context ctx, const Domain &domain,
-                                           TypeTag type_tag)
+                                           TypeTag type_tag, const char *prov)
     //--------------------------------------------------------------------------
     {
+      Internal::AutoProvenance provenance(prov);
       switch (domain.get_dim())
       {
 #define DIMFUNC(DIM) \
@@ -3673,7 +3916,7 @@ namespace Legion {
           {                             \
             if (type_tag == 0) \
               type_tag = TYPE_TAG_##DIM##D; \
-            return ctx->create_index_space(domain, type_tag); \
+            return ctx->create_index_space(domain, type_tag, provenance); \
           }
         LEGION_FOREACH_N(DIMFUNC)
 #undef DIMFUNC
@@ -3685,9 +3928,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexSpace Runtime::create_index_space(Context ctx, size_t dimensions,
-                                         const Future &future, TypeTag type_tag)
+                       const Future &future, TypeTag type_tag, const char *prov)
     //--------------------------------------------------------------------------
     {
+      Internal::AutoProvenance provenance(prov);
       if (type_tag == 0)
       {
         switch (dimensions)
@@ -3704,7 +3948,7 @@ namespace Legion {
           assert(false);
         }
       }
-      return ctx->create_index_space(future, type_tag); 
+      return ctx->create_index_space(future, type_tag, provenance);
     }
 
     //--------------------------------------------------------------------------
@@ -3713,47 +3957,52 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       std::vector<Domain> rects(domains.begin(), domains.end());
-      return create_index_space(ctx, rects); 
+      return create_index_space(ctx, rects, NULL/*provenance*/); 
     }
 
     //--------------------------------------------------------------------------
     IndexSpace Runtime::create_index_space(Context ctx,
-                                         const std::vector<DomainPoint> &points)
+                       const std::vector<DomainPoint> &points, const char *prov)
     //--------------------------------------------------------------------------
     {
-      return ctx->create_index_space(points); 
+      Internal::AutoProvenance provenance(prov);
+      return ctx->create_index_space(points, provenance); 
     }
 
     //--------------------------------------------------------------------------
     IndexSpace Runtime::create_index_space(Context ctx,
-                                           const std::vector<Domain> &rects)
+                              const std::vector<Domain> &rects, const char *prov)
     //--------------------------------------------------------------------------
     {
-      return ctx->create_index_space(rects); 
+      Internal::AutoProvenance provenance(prov);
+      return ctx->create_index_space(rects, provenance); 
     }
 
     //--------------------------------------------------------------------------
     IndexSpace Runtime::union_index_spaces(Context ctx,
-                                          const std::vector<IndexSpace> &spaces)
+                        const std::vector<IndexSpace> &spaces, const char *prov)
     //--------------------------------------------------------------------------
     {
-      return ctx->union_index_spaces(spaces);
+      Internal::AutoProvenance provenance(prov);
+      return ctx->union_index_spaces(spaces, provenance);
     }
 
     //--------------------------------------------------------------------------
     IndexSpace Runtime::intersect_index_spaces(Context ctx,
-                                          const std::vector<IndexSpace> &spaces)
+                        const std::vector<IndexSpace> &spaces, const char *prov)
     //--------------------------------------------------------------------------
     {
-      return ctx->intersect_index_spaces(spaces);
+      Internal::AutoProvenance provenance(prov);
+      return ctx->intersect_index_spaces(spaces, provenance);
     }
 
     //--------------------------------------------------------------------------
     IndexSpace Runtime::subtract_index_spaces(Context ctx,
-                                              IndexSpace left, IndexSpace right)
+                            IndexSpace left, IndexSpace right, const char *prov)
     //--------------------------------------------------------------------------
     {
-      return ctx->subtract_index_spaces(left, right);
+      Internal::AutoProvenance provenance(prov);
+      return ctx->subtract_index_spaces(left, right, provenance);
     }
 
     //--------------------------------------------------------------------------
@@ -3765,298 +4014,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void Runtime::destroy_index_space(Context ctx, IndexSpace handle,
-                                      const bool unordered, const bool recurse)
+                     const bool unordered, const bool recurse, const char *prov)
     //--------------------------------------------------------------------------
     {
-      ctx->destroy_index_space(handle, unordered, recurse);
+      Internal::AutoProvenance provenance(prov);
+      ctx->destroy_index_space(handle, unordered, recurse, provenance);
     } 
-
-    //--------------------------------------------------------------------------
-    IndexPartition Runtime::create_index_partition(Context ctx,
-                                          IndexSpace parent,
-                                          const Domain &color_space,
-                                          const PointColoring &coloring,
-                                          PartitionKind part_kind,
-                                          Color color, bool allocable)
-    //--------------------------------------------------------------------------
-    {
-      if (allocable)
-        Internal::log_run.warning("WARNING: allocable index partitions are "
-                                  "no longer supported");
-      std::map<DomainPoint,Domain> domains;
-      for (PointColoring::const_iterator cit = 
-            coloring.begin(); cit != coloring.end(); cit++)
-      {
-        if (cit->second.ranges.empty())
-        {
-          std::vector<Realm::Point<1,coord_t> > 
-            points(cit->second.points.size());
-          unsigned index = 0;
-          for (std::set<ptr_t>::const_iterator it = 
-                cit->second.points.begin(); it != 
-                cit->second.points.end(); it++)
-            points[index++] = Realm::Point<1,coord_t>(*it);
-          const Realm::IndexSpace<1,coord_t> space(points);
-          domains[cit->first] = DomainT<1,coord_t>(space);
-        }
-        else
-        {
-          std::vector<Realm::Rect<1,coord_t> >
-            ranges(cit->second.points.size() + cit->second.ranges.size());
-          unsigned index = 0;
-          for (std::set<ptr_t>::const_iterator it = 
-                cit->second.points.begin(); it != 
-                cit->second.points.end(); it++)
-          {
-            Realm::Point<1,coord_t> point(*it);
-            ranges[index++] = Realm::Rect<1,coord_t>(point, point);
-          }
-          for (std::set<std::pair<ptr_t,ptr_t> >::iterator it = 
-                cit->second.ranges.begin(); it !=
-                cit->second.ranges.end(); it++)
-          {
-            Realm::Point<1,coord_t> lo(it->first);
-            Realm::Point<1,coord_t> hi(it->second);
-            ranges[index++] = Realm::Rect<1,coord_t>(lo, hi);
-          }
-          const Realm::IndexSpace<1,coord_t> space(ranges);
-          domains[cit->first] = DomainT<1,coord_t>(space);
-        }
-      }
-      // Make an index space for the color space
-      IndexSpace index_color_space = create_index_space(ctx, color_space);
-      IndexPartition result = create_partition_by_domain(ctx, parent, domains,
-          index_color_space, true/*perform intersections*/, part_kind, color);
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition Runtime::create_index_partition(
-                                          Context ctx, IndexSpace parent,
-                                          const Coloring &coloring,
-                                          bool disjoint,
-                                          Color part_color)
-    //--------------------------------------------------------------------------
-    {
-      std::map<DomainPoint,Domain> domains;
-      Color lower_bound = UINT_MAX, upper_bound = 0;
-      for (Coloring::const_iterator cit = 
-            coloring.begin(); cit != coloring.end(); cit++)
-      {
-        if (cit->first < lower_bound)
-          lower_bound = cit->first;
-        if (cit->first > upper_bound)
-          upper_bound = cit->first;
-        const DomainPoint color = Point<1,coord_t>(cit->first);
-        if (cit->second.ranges.empty())
-        {
-          std::vector<Realm::Point<1,coord_t> > 
-            points(cit->second.points.size());
-          unsigned index = 0;
-          for (std::set<ptr_t>::const_iterator it = 
-                cit->second.points.begin(); it != 
-                cit->second.points.end(); it++)
-            points[index++] = Realm::Point<1,coord_t>(*it);
-          const Realm::IndexSpace<1,coord_t> space(points);
-          domains[color] = DomainT<1,coord_t>(space);
-        }
-        else
-        {
-          std::vector<Realm::Rect<1,coord_t> >
-            ranges(cit->second.points.size() + cit->second.ranges.size());
-          unsigned index = 0;
-          for (std::set<ptr_t>::const_iterator it = 
-                cit->second.points.begin(); it != 
-                cit->second.points.end(); it++)
-          {
-            Realm::Point<1,coord_t> point(*it);
-            ranges[index++] = Realm::Rect<1,coord_t>(point, point);
-          }
-          for (std::set<std::pair<ptr_t,ptr_t> >::iterator it = 
-                cit->second.ranges.begin(); it !=
-                cit->second.ranges.end(); it++)
-          {
-            Realm::Point<1,coord_t> lo(it->first);
-            Realm::Point<1,coord_t> hi(it->second);
-            ranges[index++] = Realm::Rect<1,coord_t>(lo, hi);
-          }
-          const Realm::IndexSpace<1,coord_t> space(ranges);
-          domains[color] = DomainT<1,coord_t>(space);
-        }
-      }
-#ifdef DEBUG_LEGION
-      assert(lower_bound <= upper_bound);
-#endif
-      // Make the color space
-      Rect<1,coord_t> 
-        color_space((Point<1,coord_t>(lower_bound)),
-                    (Point<1,coord_t>(upper_bound)));
-      // Make an index space for the color space
-      IndexSpaceT<1,coord_t> index_color_space = 
-                                  create_index_space(ctx, color_space);
-      IndexPartition result = create_partition_by_domain(ctx, parent, domains,
-          index_color_space, true/*perform intersections*/,
-          (disjoint ? LEGION_DISJOINT_KIND : LEGION_ALIASED_KIND), part_color);
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition Runtime::create_index_partition(Context ctx,
-                                          IndexSpace parent, 
-                                          const Domain &color_space,
-                                          const DomainPointColoring &coloring,
-                                          PartitionKind part_kind, Color color)
-    //--------------------------------------------------------------------------
-    {
-      // Make an index space for the color space
-      IndexSpace index_color_space = create_index_space(ctx, color_space);
-      IndexPartition result = create_partition_by_domain(ctx, parent, coloring,
-          index_color_space, true/*perform intersections*/, part_kind, color);
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition Runtime::create_index_partition(
-                                          Context ctx, IndexSpace parent,
-                                          Domain color_space,
-                                          const DomainColoring &coloring,
-                                          bool disjoint, Color part_color)
-    //--------------------------------------------------------------------------
-    {
-      std::map<DomainPoint,Domain> domains;
-      for (DomainColoring::const_iterator it = 
-            coloring.begin(); it != coloring.end(); it++)
-      {
-        Point<1,coord_t> color(it->first);
-        domains[color] = it->second;
-      }
-      // Make an index space for the color space
-      IndexSpace index_color_space = create_index_space(ctx, color_space);
-      IndexPartition result = create_partition_by_domain(ctx, parent, domains,
-          index_color_space, true/*perform intersections*/,
-          (disjoint ? LEGION_DISJOINT_KIND : LEGION_ALIASED_KIND), part_color);
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition Runtime::create_index_partition(Context ctx,
-                                       IndexSpace parent,
-                                       const Domain &color_space,
-                                       const MultiDomainPointColoring &coloring,
-                                       PartitionKind part_kind, Color color)
-    //--------------------------------------------------------------------------
-    {
-      const int dim = parent.get_dim();
-      std::map<DomainPoint,Domain> domains;
-      Realm::ProfilingRequestSet no_reqs;
-      switch (dim)
-      {
-#define DIMFUNC(DIM) \
-        case DIM:                                                       \
-          {                                                             \
-            for (MultiDomainPointColoring::const_iterator cit =         \
-                  coloring.begin(); cit != coloring.end(); cit++)       \
-            {                                                           \
-              std::vector<Realm::IndexSpace<DIM,coord_t> >              \
-                  subspaces(cit->second.size());                        \
-              unsigned index = 0;                                       \
-              for (std::set<Domain>::const_iterator it =                \
-                    cit->second.begin(); it != cit->second.end(); it++) \
-              {                                                         \
-                const DomainT<DIM,coord_t> domaint = *it;               \
-                subspaces[index++] = domaint;                           \
-              }                                                         \
-              Realm::IndexSpace<DIM,coord_t> summary;                   \
-              Internal::LgEvent wait_on(                                \
-                  Realm::IndexSpace<DIM,coord_t>::compute_union(        \
-                    subspaces, summary, no_reqs));                      \
-              if (wait_on.exists())                                     \
-                wait_on.wait();                                         \
-              summary = summary.tighten();                              \
-              domains[cit->first] = DomainT<DIM,coord_t>(summary);      \
-            }                                                           \
-            break;                                                      \
-          }
-        LEGION_FOREACH_N(DIMFUNC)
-#undef DIMFUNC
-        default:
-          assert(false);
-      }
-      // Make an index space for the color space
-      IndexSpace index_color_space = create_index_space(ctx, color_space);
-      IndexPartition result = create_partition_by_domain(ctx, parent, domains,
-        index_color_space, true/*perform intersections*/, part_kind, color);
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition Runtime::create_index_partition(
-                                          Context ctx, IndexSpace parent,
-                                          Domain color_space,
-                                          const MultiDomainColoring &coloring,
-                                          bool disjoint, Color part_color)
-    //--------------------------------------------------------------------------
-    {
-      const int dim = parent.get_dim();
-      std::map<DomainPoint,Domain> domains;
-      Realm::ProfilingRequestSet no_reqs;
-      switch (dim)
-      {
-#define DIMFUNC(DIM) \
-        case DIM:                                                       \
-          {                                                             \
-            for (MultiDomainColoring::const_iterator cit =              \
-                  coloring.begin(); cit != coloring.end(); cit++)       \
-            {                                                           \
-              std::vector<Realm::IndexSpace<DIM,coord_t> >              \
-                  subspaces(cit->second.size());                        \
-              unsigned index = 0;                                       \
-              for (std::set<Domain>::const_iterator it =                \
-                    cit->second.begin(); it != cit->second.end(); it++) \
-              {                                                         \
-                const DomainT<DIM,coord_t> domaint = *it;               \
-                subspaces[index++] = domaint;                           \
-              }                                                         \
-              Realm::IndexSpace<DIM,coord_t> summary;                   \
-              Internal::LgEvent wait_on(                                \
-                  Realm::IndexSpace<DIM,coord_t>::compute_union(        \
-                    subspaces, summary, no_reqs));                      \
-              const Point<1,coord_t> color(cit->first);                 \
-              if (wait_on.exists())                                     \
-                wait_on.wait();                                         \
-              summary = summary.tighten();                              \
-              domains[color] = DomainT<DIM,coord_t>(summary);           \
-            }                                                           \
-            break;                                                      \
-          }
-        LEGION_FOREACH_N(DIMFUNC)
-#undef DIMFUNC
-        default:
-          assert(false);
-      }
-      // Make an index space for the color space
-      IndexSpace index_color_space = create_index_space(ctx, color_space);
-      IndexPartition result = create_partition_by_domain(ctx, parent, domains,
-        index_color_space, true/*perform intersections*/, 
-        (disjoint ? LEGION_DISJOINT_KIND : LEGION_ALIASED_KIND), part_color);
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition Runtime::create_index_partition(
-                                          Context ctx, IndexSpace parent,
-    LegionRuntime::Accessor::RegionAccessor<
-      LegionRuntime::Accessor::AccessorType::Generic> field_accessor,
-                                                      Color part_color)
-    //--------------------------------------------------------------------------
-    {
-      Internal::log_run.error("Call to deprecated 'create_index_partition' "
-                    "method with an accessor in task %s (UID %lld) should be "
-                    "replaced with a call to create_partition_by_field.",
-                    ctx->get_task_name(), ctx->get_unique_id());
-      assert(false);
-      return IndexPartition::NO_PART;
-    }
 
     //--------------------------------------------------------------------------
     void Runtime::create_shared_ownership(Context ctx, IndexPartition handle)
@@ -4067,10 +4030,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void Runtime::destroy_index_partition(Context ctx, IndexPartition handle,
-                                       const bool unordered, const bool recurse)
+                     const bool unordered, const bool recurse, const char *prov)
     //--------------------------------------------------------------------------
     {
-      ctx->destroy_index_partition(handle, unordered, recurse);
+      Internal::AutoProvenance provenance(prov);
+      ctx->destroy_index_partition(handle, unordered, recurse, provenance);
     }
 
     //--------------------------------------------------------------------------
@@ -4078,10 +4042,13 @@ namespace Legion {
                                                    IndexSpace parent,
                                                    IndexSpace color_space,
                                                    size_t granularity,
-                                                   Color color)
+                                                   Color color,
+                                                   const char *prov)
     //--------------------------------------------------------------------------
     {
-      return ctx->create_equal_partition(parent, color_space,granularity,color);
+      Internal::AutoProvenance provenance(prov);
+      return ctx->create_equal_partition(parent, color_space, granularity,
+                                         color, provenance);
     }
 
     //--------------------------------------------------------------------------
@@ -4089,17 +4056,20 @@ namespace Legion {
                                        IndexSpace parent,
                                        const std::map<DomainPoint,int> &weights,
                                        IndexSpace color_space,
-                                       size_t granularity, Color color)
+                                       size_t granularity, Color color,
+                                       const char *prov)
     //--------------------------------------------------------------------------
     {
-      ArgumentMap argmap;
+      std::map<DomainPoint,UntypedBuffer> data;
       for (std::map<DomainPoint,int>::const_iterator it = 
             weights.begin(); it != weights.end(); it++)
-        argmap.set_point(it->first,
-            UntypedBuffer(&it->second, sizeof(it->second)));
-      FutureMap future_map(argmap.impl->freeze(ctx));
+        data.emplace(std::make_pair(it->first, 
+              UntypedBuffer(&it->second, sizeof(it->second))));
+      FutureMap future_map = construct_future_map(ctx, color_space, data,
+          false/*collective*/, 0/*sid*/, false/*implicit*/, prov);
+      Internal::AutoProvenance provenance(prov);
       return ctx->create_partition_by_weights(parent, future_map, color_space,
-                                              granularity, color);
+                                              granularity, color, provenance);
     }
 
     //--------------------------------------------------------------------------
@@ -4107,17 +4077,20 @@ namespace Legion {
                                     IndexSpace parent,
                                     const std::map<DomainPoint,size_t> &weights,
                                     IndexSpace color_space,
-                                    size_t granularity, Color color)
+                                    size_t granularity, Color color,
+                                    const char *prov)
     //--------------------------------------------------------------------------
     {
-      ArgumentMap argmap;
+      std::map<DomainPoint,UntypedBuffer> data;
       for (std::map<DomainPoint,size_t>::const_iterator it = 
             weights.begin(); it != weights.end(); it++)
-        argmap.set_point(it->first,
-            UntypedBuffer(&it->second, sizeof(it->second)));
-      FutureMap future_map(argmap.impl->freeze(ctx));
+        data.emplace(std::make_pair(it->first, 
+              UntypedBuffer(&it->second, sizeof(it->second))));
+      FutureMap future_map = construct_future_map(ctx, color_space, data,
+          false/*collective*/, 0/*sid*/, false/*implicit*/, prov);
+      Internal::AutoProvenance provenance(prov);
       return ctx->create_partition_by_weights(parent, future_map, color_space,
-                                              granularity, color);
+                                              granularity, color, provenance);
     }
 
     //--------------------------------------------------------------------------
@@ -4125,11 +4098,13 @@ namespace Legion {
                                                 IndexSpace parent,
                                                 const FutureMap &weights,
                                                 IndexSpace color_space,
-                                                size_t granularity, Color color)
+                                                size_t granularity, Color color,
+                                                const char *prov)
     //--------------------------------------------------------------------------
     {
+      Internal::AutoProvenance provenance(prov);
       return ctx->create_partition_by_weights(parent, weights, color_space, 
-                                              granularity, color);
+                                              granularity, color, provenance);
     }
 
     //--------------------------------------------------------------------------
@@ -4137,11 +4112,12 @@ namespace Legion {
                                     IndexSpace parent, IndexPartition handle1,
                                     IndexPartition handle2, 
                                     IndexSpace color_space, PartitionKind kind,
-                                    Color color)
+                                    Color color, const char *prov)
     //--------------------------------------------------------------------------
     {
+      Internal::AutoProvenance provenance(prov);
       return ctx->create_partition_by_union(parent, handle1, handle2, 
-                                            color_space, kind, color);
+                                color_space, kind, color, provenance);
     }
 
     //--------------------------------------------------------------------------
@@ -4150,21 +4126,25 @@ namespace Legion {
                                                 IndexPartition handle1, 
                                                 IndexPartition handle2,
                                                 IndexSpace color_space,
-                                                PartitionKind kind, Color color) 
+                                                PartitionKind kind, Color color,
+                                                const char *prov) 
     //--------------------------------------------------------------------------
     {
+      Internal::AutoProvenance provenance(prov);
       return ctx->create_partition_by_intersection(parent, handle1, handle2, 
-                                                   color_space, kind, color);
+                                       color_space, kind, color, provenance);
     }
 
     //--------------------------------------------------------------------------
     IndexPartition Runtime::create_partition_by_intersection(Context ctx,
                            IndexSpace parent, IndexPartition partition,
-                           PartitionKind part_kind, Color color, bool dominates)
+                           PartitionKind part_kind, Color color, 
+                           bool dominates, const char *prov)
     //--------------------------------------------------------------------------
     {
+      Internal::AutoProvenance provenance(prov);
       return ctx->create_partition_by_intersection(parent, partition, part_kind,
-                                                   color, dominates);
+                                                   color, dominates,provenance);
     }
 
     //--------------------------------------------------------------------------
@@ -4173,22 +4153,25 @@ namespace Legion {
                                                 IndexPartition handle1,
                                                 IndexPartition handle2,
                                                 IndexSpace color_space,
-                                                PartitionKind kind, Color color)
+                                                PartitionKind kind, Color color,
+                                                const char *prov)
     //--------------------------------------------------------------------------
     {
+      Internal::AutoProvenance provenance(prov);
       return ctx->create_partition_by_difference(parent, handle1, handle2, 
-                                                 color_space, kind, color);
+                                     color_space, kind, color, provenance);
     }
 
     //--------------------------------------------------------------------------
     Color Runtime::create_cross_product_partitions(Context ctx,
-                                IndexPartition handle1, IndexPartition handle2,
-                                std::map<IndexSpace,IndexPartition> &handles,
-                                PartitionKind kind, Color color)
+                              IndexPartition handle1, IndexPartition handle2,
+                              std::map<IndexSpace,IndexPartition> &handles,
+                              PartitionKind kind, Color color, const char *prov)
     //--------------------------------------------------------------------------
     {
+      Internal::AutoProvenance provenance(prov);
       return ctx->create_cross_product_partitions(handle1, handle2, handles, 
-                                                  kind, color);
+                                                  kind, color, provenance);
     }
 
     //--------------------------------------------------------------------------
@@ -4198,11 +4181,12 @@ namespace Legion {
                                      FieldID domain_fid,
                                      IndexSpace range,
                                      MapperID id, MappingTagID tag,
-                                     UntypedBuffer marg)
+                                     UntypedBuffer marg, const char *prov)
     //--------------------------------------------------------------------------
     {
+      Internal::AutoProvenance provenance(prov);
       ctx->create_association(domain, domain_parent, domain_fid, range,
-                              id, tag, marg);
+                              id, tag, marg, provenance);
     }
 
     //--------------------------------------------------------------------------
@@ -4214,15 +4198,15 @@ namespace Legion {
                                       LogicalRegion range_parent,
                                       FieldID range_fid,
                                       MapperID id, MappingTagID tag,
-                                      UntypedBuffer marg)
+                                      UntypedBuffer marg,const char *provenance)
     //--------------------------------------------------------------------------
     {
       // Realm guarantees that creating association in either direction
       // will produce the same result, so we can do these separately
       create_association(ctx, domain, domain_parent, domain_fid, 
-                         range.get_index_space(), id, tag, marg);
+                         range.get_index_space(), id, tag, marg, provenance);
       create_association(ctx, range, range_parent, range_fid, 
-                         domain.get_index_space(), id, tag, marg);
+                         domain.get_index_space(), id, tag, marg, provenance);
     }
 
     //--------------------------------------------------------------------------
@@ -4232,7 +4216,8 @@ namespace Legion {
                                                         DomainTransform tran,
                                                         Domain ext,
                                                         PartitionKind part_kind,
-                                                        Color color)
+                                                        Color color,
+                                                        const char *provenance)
     //--------------------------------------------------------------------------
     {
       switch ((ext.get_dim()-1) * LEGION_MAX_DIM + (tran.n-1))
@@ -4244,8 +4229,8 @@ namespace Legion {
             const Rect<D1,coord_t> extent(ext); \
             const Transform<D1,D2> transform(tran); \
             const IndexSpaceT<D2,coord_t> color_space(cs); \
-            return create_partition_by_restriction<D1,D2,coord_t>(ctx, \
-                parent, color_space, transform, extent, part_kind, color); \
+            return create_partition_by_restriction<D1,D2,coord_t>(ctx, parent, \
+              color_space, transform, extent, part_kind, color, provenance); \
           }
         LEGION_FOREACH_NN(DIMFUNC)
 #undef DIMFUNC
@@ -4257,7 +4242,8 @@ namespace Legion {
     IndexPartition Runtime::create_partition_by_blockify(Context ctx,
                                                          IndexSpace par,
                                                          DomainPoint bf,
-                                                         Color color)
+                                                         Color color,
+                                                         const char *provenance)
     //--------------------------------------------------------------------------
     {
       switch (bf.get_dim())
@@ -4268,7 +4254,7 @@ namespace Legion {
             const IndexSpaceT<DIM,coord_t> parent(par); \
             const Point<DIM,coord_t> blocking_factor(bf); \
             return create_partition_by_blockify<DIM,coord_t>(ctx, parent, \
-                                                blocking_factor, color); \
+                                      blocking_factor, color, provenance); \
           }
         LEGION_FOREACH_N(DIMFUNC)
 #undef DIMFUNC
@@ -4283,7 +4269,8 @@ namespace Legion {
                                                          IndexSpace par,
                                                          DomainPoint bf,
                                                          DomainPoint orig,
-                                                         Color color)
+                                                         Color color,
+                                                         const char *provenance)
     //--------------------------------------------------------------------------
     {
       switch (bf.get_dim())
@@ -4295,7 +4282,7 @@ namespace Legion {
             const Point<DIM,coord_t> blocking_factor(bf); \
             const Point<DIM,coord_t> origin(orig); \
             return create_partition_by_blockify<DIM,coord_t>(ctx, parent, \
-                                        blocking_factor, origin, color); \
+                              blocking_factor, origin, color, provenance); \
           }
         LEGION_FOREACH_N(DIMFUNC)
 #undef DIMFUNC
@@ -4314,123 +4301,131 @@ namespace Legion {
                                                         const void *extent, 
                                                         size_t extent_size,
                                                         PartitionKind part_kind,
-                                                        Color color)
+                                                        Color color,
+                                                        const char *prov)
     //--------------------------------------------------------------------------
     {
+      Internal::AutoProvenance provenance(prov);
       return ctx->create_restricted_partition(parent, color_space, transform, 
-                      transform_size, extent, extent_size, part_kind, color);
+            transform_size, extent, extent_size, part_kind, color, provenance);
     }
 
     //--------------------------------------------------------------------------
     IndexPartition Runtime::create_partition_by_domain(Context ctx,
                  IndexSpace parent, const std::map<DomainPoint,Domain> &domains,
                  IndexSpace color_space, bool perform_intersections,
-                 PartitionKind part_kind, Color color)
+                 PartitionKind part_kind, Color color, const char *prov)
     //--------------------------------------------------------------------------
     {
-      ArgumentMap argmap;
-      for (std::map<DomainPoint,Domain>::const_iterator it = 
-            domains.begin(); it != domains.end(); it++)
-        argmap.set_point(it->first,
-            UntypedBuffer(&it->second, sizeof(it->second)));
-      FutureMap future_map(argmap.impl->freeze(ctx));
-      return ctx->create_partition_by_domain(parent, future_map, color_space, 
-                                    perform_intersections, part_kind, color);
+      Internal::AutoProvenance provenance(prov);
+      return ctx->create_partition_by_domain(parent, domains, color_space,
+                      perform_intersections, part_kind, color, provenance);
     }
 
     //--------------------------------------------------------------------------
     IndexPartition Runtime::create_partition_by_domain(Context ctx,
-                             IndexSpace parent, const FutureMap &domains,
-                             IndexSpace color_space, bool perform_intersections,
-                             PartitionKind part_kind, Color color)
+                         IndexSpace parent, const FutureMap &domains,
+                         IndexSpace color_space, bool perform_intersections,
+                         PartitionKind part_kind, Color color, const char *prov)
     //--------------------------------------------------------------------------
     {
+      Internal::AutoProvenance provenance(prov);
       return ctx->create_partition_by_domain(parent, domains, color_space, 
-                                      perform_intersections, part_kind, color);
+                           perform_intersections, part_kind, color, provenance);
     }
 
     //--------------------------------------------------------------------------
     IndexPartition Runtime::create_partition_by_field(Context ctx,
                   LogicalRegion handle, LogicalRegion parent, FieldID fid, 
                   IndexSpace color_space, Color color, MapperID id,
-                  MappingTagID tag, PartitionKind part_kind, UntypedBuffer marg)
+                  MappingTagID tag, PartitionKind part_kind, 
+                  UntypedBuffer marg, const char *prov)
     //--------------------------------------------------------------------------
     {
+      Internal::AutoProvenance provenance(prov);
       return ctx->create_partition_by_field(handle, parent, fid, color_space, 
-                                            color, id, tag, part_kind, marg);
+                                color, id, tag, part_kind, marg, provenance);
     }
 
     //--------------------------------------------------------------------------
     IndexPartition Runtime::create_partition_by_image(Context ctx,
                   IndexSpace handle, LogicalPartition projection,
                   LogicalRegion parent, FieldID fid, IndexSpace color_space,
-                  PartitionKind part_kind, Color color,
-                  MapperID id, MappingTagID tag, UntypedBuffer marg)
+                  PartitionKind part_kind, Color color, MapperID id,
+                  MappingTagID tag, UntypedBuffer marg, const char *prov)
     //--------------------------------------------------------------------------
     {
+      Internal::AutoProvenance provenance(prov);
       return ctx->create_partition_by_image(handle, projection, parent, fid, 
-                                color_space, part_kind, color, id, tag, marg);
+                  color_space, part_kind, color, id, tag, marg, provenance);
     }
 
     //--------------------------------------------------------------------------
     IndexPartition Runtime::create_partition_by_image_range(Context ctx,
                   IndexSpace handle, LogicalPartition projection,
                   LogicalRegion parent, FieldID fid, IndexSpace color_space,
-                  PartitionKind part_kind, Color color, 
-                  MapperID id, MappingTagID tag, UntypedBuffer marg)
+                  PartitionKind part_kind, Color color, MapperID id,
+                  MappingTagID tag, UntypedBuffer marg, const char *prov)
     //--------------------------------------------------------------------------
     {
+      Internal::AutoProvenance provenance(prov);
       return ctx->create_partition_by_image_range(handle, projection, parent, 
-                          fid, color_space, part_kind, color, id, tag, marg);
+              fid, color_space, part_kind, color, id, tag, marg, provenance);
     }
 
     //--------------------------------------------------------------------------
     IndexPartition Runtime::create_partition_by_preimage(Context ctx,
                   IndexPartition projection, LogicalRegion handle,
                   LogicalRegion parent, FieldID fid, IndexSpace color_space,
-                  PartitionKind part_kind, Color color,
-                  MapperID id, MappingTagID tag, UntypedBuffer marg)
+                  PartitionKind part_kind, Color color, MapperID id, 
+                  MappingTagID tag, UntypedBuffer marg, const char *prov)
     //--------------------------------------------------------------------------
     {
+      Internal::AutoProvenance provenance(prov);
       return ctx->create_partition_by_preimage(projection, handle, parent,
-                        fid, color_space, part_kind, color, id, tag, marg);
+            fid, color_space, part_kind, color, id, tag, marg, provenance);
     }
 
     //--------------------------------------------------------------------------
     IndexPartition Runtime::create_partition_by_preimage_range(Context ctx,
                   IndexPartition projection, LogicalRegion handle,
                   LogicalRegion parent, FieldID fid, IndexSpace color_space,
-                  PartitionKind part_kind, Color color,
-                  MapperID id, MappingTagID tag, UntypedBuffer marg)
+                  PartitionKind part_kind, Color color, MapperID id,
+                  MappingTagID tag, UntypedBuffer marg, const char *prov)
     //--------------------------------------------------------------------------
     {
+      Internal::AutoProvenance provenance(prov);
       return ctx->create_partition_by_preimage_range(projection, handle, parent,
-                             fid, color_space, part_kind, color, id, tag, marg);
+                 fid, color_space, part_kind, color, id, tag, marg, provenance);
     } 
 
     //--------------------------------------------------------------------------
     IndexPartition Runtime::create_pending_partition(Context ctx,
                              IndexSpace parent, IndexSpace color_space, 
-                             PartitionKind part_kind, Color color)
+                             PartitionKind part_kind, Color color,
+                             const char *prov)
     //--------------------------------------------------------------------------
     {
-      return ctx->create_pending_partition(parent, color_space,part_kind,color);
+      Internal::AutoProvenance provenance(prov);
+      return ctx->create_pending_partition(parent, color_space,
+                                           part_kind, color, provenance);
     }
 
     //--------------------------------------------------------------------------
     IndexSpace Runtime::create_index_space_union(Context ctx,
                       IndexPartition parent, const DomainPoint &color,
-                      const std::vector<IndexSpace> &handles) 
+                      const std::vector<IndexSpace> &handles, const char *prov) 
     //--------------------------------------------------------------------------
     {
+      Internal::AutoProvenance provenance(prov);
       switch (color.get_dim())
       {
 #define DIMFUNC(DIM) \
         case DIM: \
           { \
             Point<DIM,coord_t> point = color; \
-            return ctx->create_index_space_union(parent, &point, \
-                                     TYPE_TAG_##DIM##D, handles); \
+            return ctx->create_index_space_union(parent, &point, sizeof(point),\
+                                      TYPE_TAG_##DIM##D, handles, provenance); \
           }
         LEGION_FOREACH_N(DIMFUNC)
 #undef DIMFUNC
@@ -4442,27 +4437,31 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexSpace Runtime::create_index_space_union_internal(Context ctx,
-                    IndexPartition parent, const void *color, TypeTag type_tag,
+                    IndexPartition parent, const void *color, size_t color_size,
+                    TypeTag type_tag, const char *prov,
                     const std::vector<IndexSpace> &handles)
     //--------------------------------------------------------------------------
     {
-      return ctx->create_index_space_union(parent, color, type_tag, handles);
+      Internal::AutoProvenance provenance(prov);
+      return ctx->create_index_space_union(parent, color, color_size, 
+                                           type_tag, handles, provenance);
     }
 
     //--------------------------------------------------------------------------
     IndexSpace Runtime::create_index_space_union(Context ctx,
-                      IndexPartition parent, const DomainPoint &color,
-                      IndexPartition handle)
+                                IndexPartition parent, const DomainPoint &color,
+                                IndexPartition handle, const char *prov)
     //--------------------------------------------------------------------------
     {
+      Internal::AutoProvenance provenance(prov);
       switch (color.get_dim())
       {
 #define DIMFUNC(DIM) \
         case DIM: \
           { \
             Point<DIM,coord_t> point = color; \
-            return ctx->create_index_space_union(parent, &point, \
-                                     TYPE_TAG_##DIM##D, handle); \
+            return ctx->create_index_space_union(parent, &point, sizeof(point),\
+                                       TYPE_TAG_##DIM##D, handle, provenance); \
           }
         LEGION_FOREACH_N(DIMFUNC)
 #undef DIMFUNC
@@ -4475,18 +4474,23 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IndexSpace Runtime::create_index_space_union_internal(Context ctx,
                         IndexPartition parent, const void *realm_color, 
-                        TypeTag type_tag, IndexPartition handle)
+                        size_t size, TypeTag type_tag,
+                        const char *prov, IndexPartition handle)
     //--------------------------------------------------------------------------
     {
-      return ctx->create_index_space_union(parent, realm_color,type_tag,handle);
+      Internal::AutoProvenance provenance(prov);
+      return ctx->create_index_space_union(parent, realm_color, size,
+                                           type_tag, handle, provenance);
     }
 
     //--------------------------------------------------------------------------
     IndexSpace Runtime::create_index_space_intersection(Context ctx,
                       IndexPartition parent, const DomainPoint &color,
-                      const std::vector<IndexSpace> &handles) 
+                      const std::vector<IndexSpace> &handles,
+                      const char *prov) 
     //--------------------------------------------------------------------------
     {
+      Internal::AutoProvenance provenance(prov);
       switch (color.get_dim())
       {
 #define DIMFUNC(DIM) \
@@ -4494,7 +4498,7 @@ namespace Legion {
         { \
           Point<DIM,coord_t> point = color; \
           return ctx->create_index_space_intersection(parent, &point, \
-                                          TYPE_TAG_##DIM##D, handles); \
+              sizeof(point), TYPE_TAG_##DIM##D, handles, provenance); \
         }
         LEGION_FOREACH_N(DIMFUNC)
 #undef DIMFUNC
@@ -4506,20 +4510,23 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexSpace Runtime::create_index_space_intersection_internal(Context ctx,
-                    IndexPartition parent, const void *color, TypeTag type_tag,
+                    IndexPartition parent, const void *color, size_t color_size,
+                    TypeTag type_tag, const char *prov,
                     const std::vector<IndexSpace> &handles)
     //--------------------------------------------------------------------------
     {
-      return ctx->create_index_space_intersection(parent, color, 
-                                                  type_tag, handles);
+      Internal::AutoProvenance provenance(prov);
+      return ctx->create_index_space_intersection(parent, color, color_size, 
+                                              type_tag, handles, provenance);
     }
 
     //--------------------------------------------------------------------------
     IndexSpace Runtime::create_index_space_intersection(Context ctx,
                       IndexPartition parent, const DomainPoint &color,
-                      IndexPartition handle)
+                      IndexPartition handle, const char *prov)
     //--------------------------------------------------------------------------
     {
+      Internal::AutoProvenance provenance(prov);
       switch (color.get_dim())
       {
 #define DIMFUNC(DIM) \
@@ -4527,7 +4534,7 @@ namespace Legion {
         { \
           Point<DIM,coord_t> point = color; \
           return ctx->create_index_space_intersection(parent, &point, \
-                                           TYPE_TAG_##DIM##D, handle); \
+                sizeof(point), TYPE_TAG_##DIM##D, handle, provenance); \
         }
         LEGION_FOREACH_N(DIMFUNC)
 #undef DIMFUNC
@@ -4539,20 +4546,23 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexSpace Runtime::create_index_space_intersection_internal(Context ctx,
-                        IndexPartition parent, const void *realm_color, 
-                        TypeTag type_tag, IndexPartition handle)
+                     IndexPartition parent, const void *realm_color, 
+                     size_t color_size, TypeTag type_tag,
+                     const char *prov, IndexPartition handle)
     //--------------------------------------------------------------------------
     {
-      return ctx->create_index_space_intersection(parent, realm_color,
-                                                  type_tag, handle);
+      Internal::AutoProvenance provenance(prov);
+      return ctx->create_index_space_intersection(parent, realm_color, 
+                            color_size, type_tag, handle, provenance);
     }
 
     //--------------------------------------------------------------------------
     IndexSpace Runtime::create_index_space_difference(Context ctx,
           IndexPartition parent, const DomainPoint &color, IndexSpace initial, 
-          const std::vector<IndexSpace> &handles)
+          const std::vector<IndexSpace> &handles, const char *prov)
     //--------------------------------------------------------------------------
     {
+      Internal::AutoProvenance provenance(prov);
       switch (color.get_dim())
       {
 #define DIMFUNC(DIM) \
@@ -4560,7 +4570,7 @@ namespace Legion {
         { \
           Point<DIM,coord_t> point = color; \
           return ctx->create_index_space_difference(parent, &point, \
-                              TYPE_TAG_##DIM##D, initial, handles); \
+            sizeof(point), TYPE_TAG_##DIM##D, initial, handles, provenance); \
         }
         LEGION_FOREACH_N(DIMFUNC)
 #undef DIMFUNC
@@ -4572,12 +4582,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexSpace Runtime::create_index_space_difference_internal(Context ctx,
-        IndexPartition parent, const void *realm_color, TypeTag type_tag,
-        IndexSpace initial, const std::vector<IndexSpace> &handles)
+        IndexPartition parent, const void *realm_color, size_t color_size,
+        TypeTag type_tag, const char *prov, IndexSpace initial, 
+        const std::vector<IndexSpace> &handles)
     //--------------------------------------------------------------------------
     {
-      return ctx->create_index_space_difference(parent, realm_color, type_tag, 
-                                                initial, handles);
+      Internal::AutoProvenance provenance(prov);
+      return ctx->create_index_space_difference(parent, realm_color, color_size,
+                                        type_tag, initial, handles, provenance);
     }
 
     //--------------------------------------------------------------------------
@@ -4784,7 +4796,8 @@ namespace Legion {
         case DIM: \
           { \
             DomainT<DIM,coord_t> realm_is; \
-            runtime->get_index_space_domain(ctx, handle, &realm_is, type_tag); \
+            runtime->get_index_space_domain(ctx, handle, &realm_is, \
+                Internal::NT_TemplateHelper::encode_tag<DIM,coord_t>()); \
             return Domain(realm_is); \
           }
         LEGION_FOREACH_N(DIMFUNC)
@@ -4806,7 +4819,8 @@ namespace Legion {
         case DIM: \
           { \
             DomainT<DIM,coord_t> realm_is; \
-            runtime->get_index_space_domain(handle, &realm_is, type_tag); \
+            runtime->get_index_space_domain(handle, &realm_is, \
+                Internal::NT_TemplateHelper::encode_tag<DIM,coord_t>()); \
             return Domain(realm_is); \
           }
         LEGION_FOREACH_N(DIMFUNC)
@@ -5094,19 +5108,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ptr_t Runtime::safe_cast(Context ctx, ptr_t pointer, 
-                                      LogicalRegion region)
-    //--------------------------------------------------------------------------
-    {
-      if (pointer.is_null())
-        return pointer;
-      Point<1,coord_t> p(pointer.value);
-      if (runtime->safe_cast(ctx, region, &p, TYPE_TAG_1D))
-        return pointer;
-      return ptr_t::nil();
-    }
-
-    //--------------------------------------------------------------------------
     DomainPoint Runtime::safe_cast(Context ctx, DomainPoint point, 
                                             LogicalRegion region)
     //--------------------------------------------------------------------------
@@ -5138,30 +5139,37 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FieldSpace Runtime::create_field_space(Context ctx)
+    FieldSpace Runtime::create_field_space(Context ctx, const char *prov)
     //--------------------------------------------------------------------------
     {
-      return ctx->create_field_space();
+      Internal::AutoProvenance provenance(prov);
+      return ctx->create_field_space(provenance);
     }
 
     //--------------------------------------------------------------------------
     FieldSpace Runtime::create_field_space(Context ctx,
                                          const std::vector<size_t> &field_sizes,
                                          std::vector<FieldID> &resulting_fields,
-                                         CustomSerdezID serdez_id)
+                                         CustomSerdezID serdez_id, 
+                                         const char *prov)
     //--------------------------------------------------------------------------
     {
-      return ctx->create_field_space(field_sizes, resulting_fields, serdez_id);
+      Internal::AutoProvenance provenance(prov);
+      return ctx->create_field_space(field_sizes, resulting_fields,
+                                     serdez_id, provenance);
     }
 
     //--------------------------------------------------------------------------
     FieldSpace Runtime::create_field_space(Context ctx,
                                          const std::vector<Future> &field_sizes,
                                          std::vector<FieldID> &resulting_fields,
-                                         CustomSerdezID serdez_id)
+                                         CustomSerdezID serdez_id,
+                                         const char *prov)
     //--------------------------------------------------------------------------
     {
-      return ctx->create_field_space(field_sizes, resulting_fields, serdez_id);
+      Internal::AutoProvenance provenance(prov);
+      return ctx->create_field_space(field_sizes, resulting_fields,
+                                     serdez_id, provenance);
     }
 
     //--------------------------------------------------------------------------
@@ -5173,10 +5181,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void Runtime::destroy_field_space(Context ctx, FieldSpace handle,
-                                      const bool unordered)
+                                      const bool unordered, const char *prov)
     //--------------------------------------------------------------------------
     {
-      ctx->destroy_field_space(handle, unordered);
+      Internal::AutoProvenance provenance(prov);
+      ctx->destroy_field_space(handle, unordered, provenance);
     }
 
     //--------------------------------------------------------------------------
@@ -5232,10 +5241,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     LogicalRegion Runtime::create_logical_region(Context ctx, 
-                           IndexSpace index, FieldSpace fields, bool task_local)
+                           IndexSpace index, FieldSpace fields,
+                           bool task_local, const char *prov)
     //--------------------------------------------------------------------------
     {
-      return runtime->create_logical_region(ctx, index, fields, task_local);
+      Internal::AutoProvenance provenance(prov);
+      return ctx->create_logical_region(index, fields, task_local, provenance);
     }
 
     //--------------------------------------------------------------------------
@@ -5247,10 +5258,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void Runtime::destroy_logical_region(Context ctx, LogicalRegion handle,
-                                         const bool unordered)
+                                         const bool unordered, const char *prov)
     //--------------------------------------------------------------------------
     {
-      ctx->destroy_logical_region(handle, unordered);
+      Internal::AutoProvenance provenance(prov);
+      ctx->destroy_logical_region(handle, unordered, provenance);
     }
 
     //--------------------------------------------------------------------------
@@ -5259,6 +5271,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // This is a no-op now
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::reset_equivalence_sets(Context ctx, LogicalRegion parent,
+                                         LogicalRegion region,
+                                         const std::set<FieldID> &fields)
+    //--------------------------------------------------------------------------
+    {
+      ctx->reset_equivalence_sets(parent, region, fields);
     }
 
     //--------------------------------------------------------------------------
@@ -5609,36 +5630,12 @@ namespace Legion {
       return runtime->get_parent_logical_partition(handle);
     }
 
-#ifdef __GNUC__
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-#endif
-#ifdef __clang__
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-#endif
-    //--------------------------------------------------------------------------
-    IndexAllocator Runtime::create_index_allocator(Context ctx, IndexSpace is)
-    //--------------------------------------------------------------------------
-    {
-      Internal::log_run.warning("Dynamic index space allocation is no longer "
-                                "supported. You can only make one allocator "
-                                "per index space and it must always be in the "
-                                "same task that created the index space.");
-      return IndexAllocator(is, IndexIterator(this, ctx, is));
-    }
-#ifdef __GNUC__
-#pragma GCC diagnostic pop
-#endif
-#ifdef __clang__
-#pragma clang diagnostic pop
-#endif
-
     //--------------------------------------------------------------------------
     FieldAllocator Runtime::create_field_allocator(Context ctx,FieldSpace space)
     //--------------------------------------------------------------------------
     {
-      return FieldAllocator(ctx->create_field_allocator(space));
+      return FieldAllocator(
+          ctx->create_field_allocator(space, false/*unordered*/));
     }
 
     //--------------------------------------------------------------------------
@@ -5649,44 +5646,56 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future Runtime::execute_task(Context ctx, 
-                                          const TaskLauncher &launcher)
+    Future Runtime::execute_task(Context ctx, const TaskLauncher &launcher,
+                             std::vector<OutputRequirement> *outputs /*= NULL*/)
     //--------------------------------------------------------------------------
     {
-      return runtime->execute_task(ctx, launcher);
+      return runtime->execute_task(ctx, launcher, outputs);
     }
 
     //--------------------------------------------------------------------------
-    FutureMap Runtime::execute_index_space(Context ctx, 
-                                              const IndexTaskLauncher &launcher)
+    FutureMap Runtime::execute_index_space(
+                             Context ctx, const IndexTaskLauncher &launcher,
+                             std::vector<OutputRequirement> *outputs /*= NULL*/)
     //--------------------------------------------------------------------------
     {
-      return runtime->execute_index_space(ctx, launcher);
+      return runtime->execute_index_space(ctx, launcher, outputs);
     }
 
     //--------------------------------------------------------------------------
-    Future Runtime::execute_index_space(Context ctx, 
-     const IndexTaskLauncher &launcher, ReductionOpID redop, bool deterministic)
+    Future Runtime::execute_index_space(
+                             Context ctx, const IndexTaskLauncher &launcher,
+                             ReductionOpID redop, bool deterministic,
+                             std::vector<OutputRequirement> *outputs /*= NULL*/)
     //--------------------------------------------------------------------------
     {
-      return runtime->execute_index_space(ctx, launcher, redop, deterministic);
+      return runtime->execute_index_space(
+                                  ctx, launcher, redop, deterministic, outputs);
     }
 
     //--------------------------------------------------------------------------
     Future Runtime::reduce_future_map(Context ctx, const FutureMap &future_map,
-                                      ReductionOpID redop, bool deterministic)
+                                      ReductionOpID redop, bool deterministic,
+                                      MapperID map, MappingTagID tag,
+                                      const char *prov,
+                                      Future initial_value)
     //--------------------------------------------------------------------------
     {
-      return ctx->reduce_future_map(future_map, redop, deterministic);
+      Internal::AutoProvenance provenance(prov);
+      return ctx->reduce_future_map(future_map, redop, deterministic,
+                                    map, tag, provenance, initial_value);
     }
 
     //--------------------------------------------------------------------------
     FutureMap Runtime::construct_future_map(Context ctx, IndexSpace domain,
                                 const std::map<DomainPoint,UntypedBuffer> &data,
-                                bool collective, ShardingID sid, bool implicit)
+                                bool collective, ShardingID sid, bool implicit,
+                                const char *prov)
     //--------------------------------------------------------------------------
     {
-      return ctx->construct_future_map(domain, data, collective, sid, implicit);
+      Internal::AutoProvenance provenance(prov);
+      return ctx->construct_future_map(domain, data, provenance,
+                                       collective, sid, implicit);
     }
 
     //--------------------------------------------------------------------------
@@ -5701,10 +5710,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FutureMap Runtime::construct_future_map(Context ctx, IndexSpace domain,
                                  const std::map<DomainPoint,Future> &futures,
-                                 bool collective, ShardingID sid, bool implicit)
+                                 bool collective, ShardingID sid, bool implicit,
+                                 const char *prov)
     //--------------------------------------------------------------------------
     {
-      return ctx->construct_future_map(domain, futures, false,
+      Internal::AutoProvenance provenance(prov);
+      return ctx->construct_future_map(domain, futures, provenance, false,
                                        collective, sid, implicit);
     }
 
@@ -5714,8 +5725,27 @@ namespace Legion {
                                  bool collective, ShardingID sid, bool implicit)
     //--------------------------------------------------------------------------
     {
-      return ctx->construct_future_map(domain, futures, false,
+      return ctx->construct_future_map(domain, futures, false/*internal*/,
                                        collective, sid, implicit);
+    }
+
+    //--------------------------------------------------------------------------
+    FutureMap Runtime::transform_future_map(Context ctx, const FutureMap &fm,
+             IndexSpace new_domain, PointTransformFnptr fnptr, const char *prov)
+    //--------------------------------------------------------------------------
+    {
+      Internal::AutoProvenance provenance(prov);
+      return ctx->transform_future_map(fm, new_domain, fnptr, provenance);
+    }
+
+    //--------------------------------------------------------------------------
+    FutureMap Runtime::transform_future_map(Context ctx, const FutureMap &fm,
+                          IndexSpace new_domain, PointTransformFunctor *functor,
+                          bool own, const char *prov)
+    //--------------------------------------------------------------------------
+    {
+      Internal::AutoProvenance provenance(prov);
+      return ctx->transform_future_map(fm, new_domain, functor, own,provenance);
     }
 
     //--------------------------------------------------------------------------
@@ -5733,7 +5763,7 @@ namespace Legion {
       TaskLauncher launcher(task_id, arg, predicate, id, tag);
       launcher.index_requirements = indexes;
       launcher.region_requirements = regions;
-      return runtime->execute_task(ctx, launcher);
+      return runtime->execute_task(ctx, launcher, NULL);
     }
 
     //--------------------------------------------------------------------------
@@ -5755,7 +5785,7 @@ namespace Legion {
                                  predicate, must_parallelism, id, tag);
       launcher.index_requirements = indexes;
       launcher.region_requirements = regions;
-      return runtime->execute_index_space(ctx, launcher);
+      return runtime->execute_index_space(ctx, launcher, NULL);
     }
 
 
@@ -5780,7 +5810,7 @@ namespace Legion {
                                  predicate, must_parallelism, id, tag);
       launcher.index_requirements = indexes;
       launcher.region_requirements = regions;
-      return runtime->execute_index_space(ctx, launcher, reduction, false);
+      return runtime->execute_index_space(ctx, launcher, reduction, false,NULL);
     }
 
     //--------------------------------------------------------------------------
@@ -5793,26 +5823,32 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhysicalRegion Runtime::map_region(Context ctx, 
-                    const RegionRequirement &req, MapperID id, MappingTagID tag)
+                                    const RegionRequirement &req, MapperID id,
+                                    MappingTagID tag, const char *provenance)
     //--------------------------------------------------------------------------
     {
       InlineLauncher launcher(req, id, tag);
+      if (provenance != NULL)
+        launcher.provenance = provenance;
       return runtime->map_region(ctx, launcher);
     }
 
     //--------------------------------------------------------------------------
     PhysicalRegion Runtime::map_region(Context ctx, unsigned idx, 
-                                                  MapperID id, MappingTagID tag)
+                        MapperID id, MappingTagID tag, const char *prov)
     //--------------------------------------------------------------------------
     {
-      return runtime->map_region(ctx, idx, id, tag);
+      Internal::AutoProvenance provenance(prov);
+      return runtime->map_region(ctx, idx, id, tag, provenance);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::remap_region(Context ctx, PhysicalRegion region)
+    void Runtime::remap_region(Context ctx, PhysicalRegion region,
+                               const char *prov)
     //--------------------------------------------------------------------------
     {
-      runtime->remap_region(ctx, region);
+      Internal::AutoProvenance provenance(prov);
+      runtime->remap_region(ctx, region, provenance);
     }
 
     //--------------------------------------------------------------------------
@@ -5827,6 +5863,21 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       ctx->unmap_all_regions(true/*external*/);
+    }
+
+    //--------------------------------------------------------------------------
+    OutputRegion Runtime::get_output_region(Context ctx, unsigned index)
+    //--------------------------------------------------------------------------
+    {
+      return ctx->get_output_region(index);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::get_output_regions(
+                                Context ctx, std::vector<OutputRegion> &regions)
+    //--------------------------------------------------------------------------
+    {
+      regions = ctx->get_output_regions();
     }
 
     //--------------------------------------------------------------------------
@@ -5894,11 +5945,26 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::discard_fields(Context ctx, const DiscardLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      ctx->discard_fields(launcher);
+    }
+
+    //--------------------------------------------------------------------------
     PhysicalRegion Runtime::attach_external_resource(Context ctx, 
                                                  const AttachLauncher &launcher)
     //--------------------------------------------------------------------------
     {
-      return ctx->attach_resource(launcher);
+      if (launcher.mapped)
+      {
+        PhysicalRegion region = ctx->attach_resource(launcher);
+        Internal::AutoProvenance provenance(launcher.provenance);
+        ctx->remap_region(region, provenance);
+        return region;
+      }
+      else
+        return ctx->attach_resource(launcher);
     }
 
     //--------------------------------------------------------------------------
@@ -5912,20 +5978,24 @@ namespace Legion {
     //--------------------------------------------------------------------------
     Future Runtime::detach_external_resource(Context ctx, PhysicalRegion region,
                                              const bool flush /*= true*/,
-                                             const bool unordered/*= false*/)
+                                             const bool unordered/*= false*/,
+                                             const char *prov)
     //--------------------------------------------------------------------------
     {
-      return ctx->detach_resource(region, flush, unordered);
+      Internal::AutoProvenance provenance(prov);
+      return ctx->detach_resource(region, flush, unordered, provenance);
     }
 
     //--------------------------------------------------------------------------
     Future Runtime::detach_external_resources(Context ctx,
                                               ExternalResources resources,
                                               const bool flush /*= true*/,
-                                              const bool unordered /*= false*/)
+                                              const bool unordered /*= false*/,
+                                              const char *prov)
     //--------------------------------------------------------------------------
     {
-      return ctx->detach_resources(resources, flush, unordered);
+      Internal::AutoProvenance provenance(prov);
+      return ctx->detach_resources(resources, flush, unordered, provenance);
     }
 
     //--------------------------------------------------------------------------
@@ -5934,6 +6004,8 @@ namespace Legion {
     {
       ctx->progress_unordered_operations();
     }
+
+    LEGION_DISABLE_DEPRECATED_WARNINGS
 
     //--------------------------------------------------------------------------
     PhysicalRegion Runtime::attach_hdf5(Context ctx, 
@@ -5946,7 +6018,10 @@ namespace Legion {
     {
       AttachLauncher launcher(LEGION_EXTERNAL_HDF5_FILE, handle, parent);
       launcher.attach_hdf5(file_name, field_map, mode);
-      return ctx->attach_resource(launcher);
+      PhysicalRegion region = ctx->attach_resource(launcher);
+      if (launcher.mapped)
+        ctx->remap_region(region, NULL/*no provenance because deprecated*/);
+      return region;
     }
 
     //--------------------------------------------------------------------------
@@ -5967,8 +6042,13 @@ namespace Legion {
     {
       AttachLauncher launcher(LEGION_EXTERNAL_POSIX_FILE, handle, parent);
       launcher.attach_file(file_name, field_vec, mode);
-      return ctx->attach_resource(launcher);
+      PhysicalRegion region = ctx->attach_resource(launcher);
+      if (launcher.mapped)
+        ctx->remap_region(region, NULL/*no provenance because deprecated*/);
+      return region;
     }
+
+    LEGION_REENABLE_DEPRECATED_WARNINGS
 
     //--------------------------------------------------------------------------
     void Runtime::detach_file(Context ctx, PhysicalRegion region)
@@ -5993,39 +6073,49 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Predicate Runtime::create_predicate(Context ctx, const Future &f)
+    Predicate Runtime::create_predicate(Context ctx, const Future &f,
+                                        const char *prov)
     //--------------------------------------------------------------------------
     {
-      return runtime->create_predicate(ctx, f);
+      Internal::AutoProvenance provenance(prov);
+      return ctx->create_predicate(f, provenance);
     }
 
     //--------------------------------------------------------------------------
-    Predicate Runtime::predicate_not(Context ctx, const Predicate &p) 
+    Predicate Runtime::predicate_not(Context ctx, const Predicate &p,
+                                     const char *prov) 
     //--------------------------------------------------------------------------
     {
-      return runtime->predicate_not(ctx, p);
+      Internal::AutoProvenance provenance(prov);
+      return ctx->predicate_not(p, provenance);
     }
 
     //--------------------------------------------------------------------------
     Predicate Runtime::predicate_and(Context ctx, 
-                                       const Predicate &p1, const Predicate &p2)
+                                     const Predicate &p1, const Predicate &p2,
+                                     const char *provenance)
     //--------------------------------------------------------------------------
     {
       PredicateLauncher launcher(true/*and*/);
       launcher.add_predicate(p1);
       launcher.add_predicate(p2);
-      return runtime->create_predicate(ctx, launcher);
+      if (provenance != NULL)
+        launcher.provenance.assign(provenance);
+      return ctx->create_predicate(launcher);
     }
 
     //--------------------------------------------------------------------------
     Predicate Runtime::predicate_or(Context ctx,
-                                       const Predicate &p1, const Predicate &p2)  
+                                    const Predicate &p1, const Predicate &p2,
+                                    const char *provenance)  
     //--------------------------------------------------------------------------
     {
       PredicateLauncher launcher(false/*and*/);
       launcher.add_predicate(p1);
       launcher.add_predicate(p2);
-      return runtime->create_predicate(ctx, launcher);
+      if (provenance != NULL)
+        launcher.provenance.assign(provenance);
+      return ctx->create_predicate(launcher);
     }
 
     //--------------------------------------------------------------------------
@@ -6033,14 +6123,16 @@ namespace Legion {
                                         const PredicateLauncher &launcher)
     //--------------------------------------------------------------------------
     {
-      return runtime->create_predicate(ctx, launcher);
+      return ctx->create_predicate(launcher);
     }
 
     //--------------------------------------------------------------------------
-    Future Runtime::get_predicate_future(Context ctx, const Predicate &p)
+    Future Runtime::get_predicate_future(Context ctx, const Predicate &p,
+                                         const char *prov)
     //--------------------------------------------------------------------------
     {
-      return runtime->get_predicate_future(ctx, p);
+      Internal::AutoProvenance provenance(prov);
+      return ctx->get_predicate_future(p, provenance);
     }
 
     //--------------------------------------------------------------------------
@@ -6138,10 +6230,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Future Runtime::get_dynamic_collective_result(Context ctx,
-                                                           DynamicCollective dc)
+                                         DynamicCollective dc, const char *prov)
     //--------------------------------------------------------------------------
     {
-      return ctx->get_dynamic_collective_result(dc);
+      Internal::AutoProvenance provenance(prov);
+      return ctx->get_dynamic_collective_result(dc, provenance);
     }
 
     //--------------------------------------------------------------------------
@@ -6169,33 +6262,38 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future Runtime::issue_mapping_fence(Context ctx)
+    Future Runtime::issue_mapping_fence(Context ctx, const char *prov)
     //--------------------------------------------------------------------------
     {
-      return runtime->issue_mapping_fence(ctx);
+      Internal::AutoProvenance provenance(prov);
+      return ctx->issue_mapping_fence(provenance);
     }
 
     //--------------------------------------------------------------------------
-    Future Runtime::issue_execution_fence(Context ctx)
+    Future Runtime::issue_execution_fence(Context ctx, const char *prov)
     //--------------------------------------------------------------------------
     {
-      return runtime->issue_execution_fence(ctx);
+      Internal::AutoProvenance provenance(prov);
+      return ctx->issue_execution_fence(provenance);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::begin_trace(
-                        Context ctx, TraceID tid, bool logical_only /*= false*/,
-                        bool static_trace, const std::set<RegionTreeID> *trees)
+       Context ctx, TraceID tid, bool logical_only /*= false*/,
+       bool static_trace, const std::set<RegionTreeID> *trees, const char *prov)
     //--------------------------------------------------------------------------
     {
-      ctx->begin_trace(tid, logical_only, static_trace, trees, false/*dep*/);
+      Internal::AutoProvenance provenance(prov);
+      ctx->begin_trace(tid, logical_only, static_trace, trees, 
+                       false/*dep*/, provenance);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::end_trace(Context ctx, TraceID tid)
+    void Runtime::end_trace(Context ctx, TraceID tid, const char *prov)
     //--------------------------------------------------------------------------
     {
-      ctx->end_trace(tid, false/*deprecated*/);
+      Internal::AutoProvenance provenance(prov);
+      ctx->end_trace(tid, false/*deprecated*/, provenance);
     }
 
     //--------------------------------------------------------------------------
@@ -6203,14 +6301,15 @@ namespace Legion {
                                      const std::set<RegionTreeID> *managed)
     //--------------------------------------------------------------------------
     {
-      ctx->begin_trace(0, true/*logical only*/, true/*static*/, managed, true);
+      ctx->begin_trace(0, true/*logical only*/, true/*static*/, managed,
+                       true/*deprecated*/, NULL/*provenance*/);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::end_static_trace(Context ctx)
     //--------------------------------------------------------------------------
     {
-      ctx->end_trace(0, true/*deprecated*/);
+      ctx->end_trace(0, true/*deprecated*/, NULL/*provenance*/);
     }
 
     //--------------------------------------------------------------------------
@@ -6235,10 +6334,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::complete_frame(Context ctx)
+    void Runtime::complete_frame(Context ctx, const char *prov)
     //--------------------------------------------------------------------------
     {
-      runtime->complete_frame(ctx);
+      Internal::AutoProvenance provenance(prov);
+      ctx->complete_frame(provenance);
     }
 
     //--------------------------------------------------------------------------
@@ -6383,6 +6483,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    size_t Runtime::query_available_memory(Context ctx, Memory target)
+    //--------------------------------------------------------------------------
+    {
+      if (ctx == DUMMY_CONTEXT)
+        return 0;
+      return ctx->query_available_memory(target);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::raise_region_exception(Context ctx, 
                                          PhysicalRegion region, bool nuclear)
     //--------------------------------------------------------------------------
@@ -6398,17 +6507,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ShardID Runtime::local_shard(Context ctx)
+    void Runtime::concurrent_task_barrier(Context ctx)
     //--------------------------------------------------------------------------
     {
-      return 0;
+      ctx->concurrent_task_barrier();
     }
 
     //--------------------------------------------------------------------------
-    size_t Runtime::total_shards(Context ctx)
+    bool Runtime::is_MPI_interop_configured(void)
     //--------------------------------------------------------------------------
     {
-      return 1;
+      return runtime->is_MPI_interop_configured();
     }
 
     //--------------------------------------------------------------------------
@@ -6432,13 +6541,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return runtime->find_local_MPI_rank();
-    }
-
-    //--------------------------------------------------------------------------
-    bool Runtime::is_MPI_interop_configured(void)
-    //--------------------------------------------------------------------------
-    {
-      return runtime->is_MPI_interop_configured();
     }
 
     //--------------------------------------------------------------------------
@@ -6537,25 +6639,22 @@ namespace Legion {
     ShardingID Runtime::generate_dynamic_sharding_id(void)
     //--------------------------------------------------------------------------
     {
-      // Not implemented until control replication
-      return 0;  
+      return runtime->generate_dynamic_sharding_id();
     }
 
     //--------------------------------------------------------------------------
-    ShardingID Runtime::generate_library_sharding_ids(
-                                                 const char *name, size_t count)
+    ShardingID Runtime::generate_library_sharding_ids(const char *name,
+                                                      size_t count)
     //--------------------------------------------------------------------------
     {
-      // Not implemented until control replication
-      return 0;
+      return runtime->generate_library_sharding_ids(name, count);
     }
 
     //--------------------------------------------------------------------------
-    ShardingID Runtime::generate_static_sharding_id(void)
+    /*static*/ ShardingID Runtime::generate_static_sharding_id(void)
     //--------------------------------------------------------------------------
     {
-      // Not implemented until control replication
-      return 0;
+      return Internal::Runtime::generate_static_sharding_id();
     }
 
     //--------------------------------------------------------------------------
@@ -6565,15 +6664,23 @@ namespace Legion {
                                             const char *warning_string)
     //--------------------------------------------------------------------------
     {
-      // Not implemented until control replication
+      runtime->register_sharding_functor(sid, functor, true/*need zero check*/,
+                                         silence_warnings, warning_string);
     }
 
     //--------------------------------------------------------------------------
     /*static*/ void Runtime::preregister_sharding_functor(ShardingID sid,
-                                                       ShardingFunctor *functor)
+                                                          ShardingFunctor *func)
     //--------------------------------------------------------------------------
     {
-      // Not implemented until control replication
+      Internal::Runtime::preregister_sharding_functor(sid, func);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ ShardingFunctor* Runtime::get_sharding_functor(ShardingID sid)
+    //--------------------------------------------------------------------------
+    {
+      return Internal::Runtime::get_sharding_functor(sid);
     }
 
     //--------------------------------------------------------------------------
@@ -6880,26 +6987,14 @@ namespace Legion {
     void Runtime::print_once(Context ctx, FILE *f, const char *message)
     //--------------------------------------------------------------------------
     {
-      fprintf(f, "%s", message);
+      runtime->print_once(ctx, f, message);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::log_once(Context ctx, Realm::LoggerMessage &message)
     //--------------------------------------------------------------------------
     {
-      // Do nothing, just don't deactivate it
-    }
-
-    //--------------------------------------------------------------------------
-    Future Runtime::from_value(const void *value, 
-                                        size_t value_size, bool owned)
-    //--------------------------------------------------------------------------
-    {
-      Future result = runtime->help_create_future(Internal::implicit_context,
-                                              Internal::ApEvent::NO_AP_EVENT);
-      // Set the future result
-      result.impl->set_result(value, value_size, owned);
-      return result;
+      runtime->log_once(ctx, message);
     }
 
     //--------------------------------------------------------------------------
@@ -6916,6 +7011,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::destroy_task_local_instance(Realm::RegionInstance instance)
+    //--------------------------------------------------------------------------
+    {
+      if (Internal::implicit_context == NULL)
+        REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
+            "It is illegal to request the destruction of DeferredBuffer, "
+            "Deferred Value, or DeferredReduction objects outside of "
+            "Legion tasks.")
+      return
+         Internal::implicit_context->destroy_task_local_instance(instance);
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ const char* Runtime::get_legion_version(void)
     //--------------------------------------------------------------------------
     {
@@ -6925,17 +7033,19 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ int Runtime::start(int argc, char **argv, bool background,
-                                  bool default_mapper)
+                                  bool default_mapper, bool filter)
     //--------------------------------------------------------------------------
     {
-      return Internal::Runtime::start(argc, argv, background, default_mapper);
+      return Internal::Runtime::start(argc, argv, background, 
+                                      default_mapper, filter);
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void Runtime::initialize(int *argc, char ***argv, bool filter)
+    /*static*/ void Runtime::initialize(int *argc, char ***argv, 
+                                        bool filter, bool parse)
     //--------------------------------------------------------------------------
     {
-      Internal::Runtime::initialize(argc, argv, filter);
+      Internal::Runtime::initialize(argc, argv, parse, filter);
     }
 
     //--------------------------------------------------------------------------
@@ -6966,11 +7076,11 @@ namespace Legion {
                                          const char *task_name,
                                          bool control_replicable,
                                          unsigned shard_per_address_space,
-                                         int shard_id)
+                                         int shard_id, DomainPoint point)
     //--------------------------------------------------------------------------
     {
       return runtime->begin_implicit_task(top_task_id, top_mapper_id, proc_kind,
-              task_name, control_replicable, shard_per_address_space, shard_id);
+       task_name, control_replicable, shard_per_address_space, shard_id, point);
     }
 
     //--------------------------------------------------------------------------
@@ -6988,10 +7098,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::finish_implicit_task(Context ctx)
+    void Runtime::finish_implicit_task(Context ctx, Realm::Event effects)
     //--------------------------------------------------------------------------
     {
-      runtime->finish_implicit_task(ctx);
+      runtime->finish_implicit_task(ctx, Internal::ApEvent(effects));
     } 
 
     //--------------------------------------------------------------------------
@@ -7075,16 +7185,6 @@ namespace Legion {
       return Internal::Runtime::get_reduction_op(redop_id);
     }
 
-#ifdef LEGION_GPU_REDUCTIONS
-    //--------------------------------------------------------------------------
-    /*static*/ void Runtime::preregister_gpu_reduction_op(ReductionOpID redop,
-                                                     const CodeDescriptor &desc)
-    //--------------------------------------------------------------------------
-    {
-      Internal::Runtime::preregister_gpu_reduction_op(redop, desc);
-    }
-#endif
-
     //--------------------------------------------------------------------------
     /*static*/ void Runtime::register_custom_serdez_op(CustomSerdezID serdez_id,
                                                        SerdezOp *serdez_op,
@@ -7104,46 +7204,50 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void Runtime::add_registration_callback(
-                                             RegistrationCallbackFnptr callback)
+                                             RegistrationCallbackFnptr callback,
+                                             bool dedup, size_t dedup_tag)
     //--------------------------------------------------------------------------
     {
-      Internal::Runtime::add_registration_callback(callback);
+      Internal::Runtime::add_registration_callback(callback, dedup, dedup_tag);
     }
 
     //--------------------------------------------------------------------------
     /*static*/ void Runtime::add_registration_callback(
-        RegistrationWithArgsCallbackFnptr callback, const UntypedBuffer &buffer)
+                       RegistrationWithArgsCallbackFnptr callback, 
+                       const UntypedBuffer &buffer, bool dedup, size_t dedup_tag)
     //--------------------------------------------------------------------------
     {
-      Internal::Runtime::add_registration_callback(callback, buffer);
+      Internal::Runtime::add_registration_callback(callback, buffer, 
+                                                   dedup, dedup_tag);
     }
 
-#ifdef LEGION_USE_LIBDL
     //--------------------------------------------------------------------------
     void Runtime::perform_registration_callback(
-                                RegistrationCallbackFnptr callback, bool global)
+                                RegistrationCallbackFnptr callback, bool global,
+                                bool deduplicate, size_t dedup_tag)
     //--------------------------------------------------------------------------
     {
-      Internal::Runtime::perform_dynamic_registration_callback(callback,global);
+      Internal::Runtime::perform_dynamic_registration_callback(callback,
+                                        global, deduplicate, dedup_tag);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::perform_registration_callback(
                                      RegistrationWithArgsCallbackFnptr callback,
-                                     const UntypedBuffer &buffer, bool global)
+                                     const UntypedBuffer &buffer, bool global,
+                                     bool deduplicate, size_t dedup_tag)
     //--------------------------------------------------------------------------
     {
-      Internal::Runtime::perform_dynamic_registration_callback(callback,
-                                                               buffer, global);
+      Internal::Runtime::perform_dynamic_registration_callback(callback, buffer,
+                                                global, deduplicate, dedup_tag);
     }
-#endif
 
     //--------------------------------------------------------------------------
     /*static*/ void Runtime::set_registration_callback(
                                             RegistrationCallbackFnptr callback)
     //--------------------------------------------------------------------------
     {
-      Internal::Runtime::add_registration_callback(callback);
+      Internal::Runtime::add_registration_callback(callback, true/*dedup*/, 0);
     }
 
     //--------------------------------------------------------------------------
@@ -7273,11 +7377,12 @@ namespace Legion {
                                     const void *user_data /*= NULL*/,
                                     size_t user_len /*= 0*/,
                                     size_t return_type_size/*=MAX_RETURN_SIZE*/,
-                                    VariantID vid /*= AUTO_GENERATE_ID*/)
+                                    VariantID vid /*= AUTO_GENERATE_ID*/,
+                                    bool has_return_type_size /*= true*/)
     //--------------------------------------------------------------------------
     {
       return runtime->register_variant(registrar, user_data, user_len, 
-                                       realm_desc, return_type_size, vid);
+             realm_desc, return_type_size, has_return_type_size, vid);
     }
 
     //--------------------------------------------------------------------------
@@ -7289,12 +7394,14 @@ namespace Legion {
 	      const char *task_name /*= NULL*/,
               VariantID vid /*=AUTO_GENERATE_ID*/,
               size_t return_type_size /*=MAX_RETURN_SIZE*/,
+              bool has_return_type_size /*=true*/,
               bool check_task_id/*=true*/)
     //--------------------------------------------------------------------------
     {
       // Make a copy of the descriptor here
       return Internal::Runtime::preregister_variant(registrar, user_data, 
-         user_len, realm_desc, return_type_size, task_name, vid, check_task_id);
+             user_len, realm_desc, return_type_size, has_return_type_size,
+             task_name, vid, check_task_id);
     }
 
     //--------------------------------------------------------------------------
@@ -7311,28 +7418,49 @@ namespace Legion {
 #endif
       ctx = *((const Context*)data);
       task = ctx->get_task();
-
-      reg = &ctx->begin_task(runtime);
+      const Processor exec_proc = Processor::get_executing_processor();
+#ifdef DEBUG_LEGION
+      assert(exec_proc.exists());
+#endif
+      reg = &ctx->begin_task(exec_proc);
+      runtime = Internal::implicit_runtime->external;
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void Runtime::legion_task_postamble(Runtime *runtime,Context ctx,
-                                                   const void *retvalptr,
-                                                   size_t retvalsize,
-                                                   bool owned,
-                                                   Realm::RegionInstance inst)
+    /*static*/ void Runtime::legion_task_postamble(Context ctx,
+                                                 const void *retvalptr,
+                                                 size_t retvalsize, bool owned,
+                                                 Realm::RegionInstance inst,
+                                                 const void *metadataptr,
+                                                 size_t metadatasize)
     //--------------------------------------------------------------------------
     {
-      ctx->end_task(retvalptr, retvalsize, owned, inst, NULL/*functor*/);
+      ctx->end_task(retvalptr, retvalsize, owned, inst, NULL/*functor*/,
+          NULL/*resource*/, NULL/*freefunc*/, metadataptr, metadatasize,
+          Internal::ApEvent::NO_AP_EVENT);
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void Runtime::legion_task_postamble(Runtime *runtime,Context ctx,
+    /*static*/ void Runtime::legion_task_postamble(Context ctx,
                                     FutureFunctor *callback_functor, bool owned)
     //--------------------------------------------------------------------------
     {
-      ctx->end_task(NULL, 0, owned, Realm::RegionInstance::NO_INST, 
-                    callback_functor);
+      ctx->end_task(NULL, 0, owned, Realm::RegionInstance::NO_INST,
+          callback_functor, NULL/*resource*/, NULL/*freefunc*/, NULL, 0,
+          Internal::ApEvent::NO_AP_EVENT);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void Runtime::legion_task_postamble(Context ctx,
+        const void *ptr, size_t size, bool owned,
+        const Realm::ExternalInstanceResource &resource,
+        void (*freefunc)(const Realm::ExternalInstanceResource&),
+        const void *metadataptr, size_t metadatasize)
+    //--------------------------------------------------------------------------
+    {
+      ctx->end_task(ptr, size, owned, Realm::RegionInstance::NO_INST,
+          NULL/*functor*/, &resource, freefunc, metadataptr, metadatasize,
+          Internal::ApEvent::NO_AP_EVENT);
     }
 
     //--------------------------------------------------------------------------
@@ -7343,7 +7471,8 @@ namespace Legion {
         REPORT_LEGION_ERROR(ERROR_CONFUSED_USER, "User does not know what "
             "they are doing asking for the shard ID in task %s (UID %lld)",
             ctx->get_task_name(), ctx->get_unique_id())
-      return 0;
+      const Task *task = get_local_task(ctx);
+      return task->get_shard_id();
     }
 
     //--------------------------------------------------------------------------
@@ -7354,7 +7483,18 @@ namespace Legion {
         REPORT_LEGION_ERROR(ERROR_CONFUSED_USER, "User does not know what they"
             " are doing asking for the number of shards in task %s (UID %lld)",
             ctx->get_task_name(), ctx->get_unique_id())
-      return 1;
+      const Task *task = get_local_task(ctx);
+      return task->get_total_shards();
+    }
+
+    //--------------------------------------------------------------------------
+    Future Runtime::consensus_match(Context ctx, const void *input,void *output,
+                     size_t num_elements, size_t element_size, const char *prov)
+    //--------------------------------------------------------------------------
+    {
+      Internal::AutoProvenance provenance(prov);
+      return ctx->consensus_match(input, output, num_elements, 
+                                  element_size, provenance);
     }
 
     //--------------------------------------------------------------------------
@@ -7425,4 +7565,3 @@ namespace Legion {
 }; // namespace Legion
 
 // EOF
-

@@ -1,4 +1,4 @@
-// Copyright 2022 Stanford University
+// Copyright 2024 Stanford University
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
 
 // test for Realm's IDs
 
+#include "realm.h"
 #include "realm/nodeset.h"
 
 #include <stdio.h>
@@ -222,8 +223,8 @@ int main(int argc, const char *argv[])
 	NodeSetWrapper *s1 = random_nodeset();
 	NodeID id1 = random_nodeid();
 	if(verbose)
-	  printf("ADD(%p, %d)\n", s1, id1);
-	s1->add(id1);
+          printf("ADD(%p, %d)\n", static_cast<void *>(s1), id1);
+        s1->add(id1);
 	s1->validate();
 	break;
       }
@@ -234,8 +235,8 @@ int main(int argc, const char *argv[])
 	NodeID id1 = s1->random_nodeid_in_set();
 	if(id1 == -1) break;
 	if(verbose)
-	  printf("ADD_EXIST(%p, %d)\n", s1, id1);
-	s1->add(id1);
+          printf("ADD_EXIST(%p, %d)\n", static_cast<void *>(s1), id1);
+        s1->add(id1);
 	s1->validate();
 	break;
       }
@@ -245,8 +246,8 @@ int main(int argc, const char *argv[])
 	NodeSetWrapper *s1 = random_nodeset();
 	NodeID id1 = random_nodeid();
 	if(verbose)
-	  printf("REMOVE(%p, %d)\n", s1, id1);
-	s1->remove(id1);
+          printf("REMOVE(%p, %d)\n", static_cast<void *>(s1), id1);
+        s1->remove(id1);
 	s1->validate();
 	break;
       }
@@ -257,8 +258,8 @@ int main(int argc, const char *argv[])
 	NodeID id1 = s1->random_nodeid_in_set();
 	if(id1 == -1) break;
 	if(verbose)
-	  printf("REMOVE_EXIST(%p, %d)\n", s1, id1);
-	s1->remove(id1);
+          printf("REMOVE_EXIST(%p, %d)\n", static_cast<void *>(s1), id1);
+        s1->remove(id1);
 	s1->validate();
 	break;
       }
@@ -269,8 +270,8 @@ int main(int argc, const char *argv[])
 	NodeID id1 = random_nodeid();
 	NodeID id2 = random_nodeid();
 	if(verbose)
-	  printf("ADD_RANGE(%p, %d, %d)\n", s1, id1, id2);
-	s1->add_range(id1, id2);
+          printf("ADD_RANGE(%p, %d, %d)\n", static_cast<void *>(s1), id1, id2);
+        s1->add_range(id1, id2);
 	s1->validate();
 	break;
       }
@@ -282,8 +283,8 @@ int main(int argc, const char *argv[])
 	NodeID id2 = id1 + (lrand48() % 32);
 	if(id2 >= num_nodes) break;
 	if(verbose)
-	  printf("ADD_RANGE_SMALL(%p, %d, %d)\n", s1, id1, id2);
-	s1->add_range(id1, id2);
+          printf("ADD_RANGE_SMALL(%p, %d, %d)\n", static_cast<void *>(s1), id1, id2);
+        s1->add_range(id1, id2);
 	s1->validate();
 	break;
       }
@@ -294,8 +295,8 @@ int main(int argc, const char *argv[])
 	NodeID id1 = random_nodeid();
 	NodeID id2 = random_nodeid();
 	if(verbose)
-	  printf("REMOVE_RANGE(%p, %d, %d)\n", s1, id1, id2);
-	s1->remove_range(id1, id2);
+          printf("REMOVE_RANGE(%p, %d, %d)\n", static_cast<void *>(s1), id1, id2);
+        s1->remove_range(id1, id2);
 	s1->validate();
 	break;
       }
@@ -307,8 +308,8 @@ int main(int argc, const char *argv[])
 	NodeID id2 = id1 + (lrand48() % 32);
 	if(id2 >= num_nodes) break;
 	if(verbose)
-	  printf("REMOVE_RANGE_SMALL(%p, %d, %d)\n", s1, id1, id2);
-	s1->remove_range(id1, id2);
+          printf("REMOVE_RANGE_SMALL(%p, %d, %d)\n", static_cast<void *>(s1), id1, id2);
+        s1->remove_range(id1, id2);
 	s1->validate();
 	break;
       }
@@ -318,8 +319,8 @@ int main(int argc, const char *argv[])
 	NodeSetWrapper *s1 = random_nodeset();
 	NodeID id1 = random_nodeid();
 	if(verbose) {
-	  printf("CONTAINS(%p, %d) = ", s1, id1);
-	  fflush(stdout);
+          printf("CONTAINS(%p, %d) = ", static_cast<void *>(s1), id1);
+          fflush(stdout);
 	}
 	bool present = s1->contains(id1);
 	if(verbose)
@@ -332,8 +333,8 @@ int main(int argc, const char *argv[])
       {
 	NodeSetWrapper *s1 = random_nodeset();
 	if(verbose)
-	  printf("CLEAR(%p)\n", s1);
-	s1->clear();
+          printf("CLEAR(%p)\n", static_cast<void *>(s1));
+        s1->clear();
 	s1->validate();
 	break;
       }
@@ -343,8 +344,8 @@ int main(int argc, const char *argv[])
 	NodeSetWrapper *s1 = random_nodeset();
 	NodeSetWrapper *s2 = random_nodeset();
 	if(verbose)
-	  printf("SWAP(%p, %p)\n", s1, s2);
-	s1->swap(s2);
+          printf("SWAP(%p, %p)\n", static_cast<void *>(s1), static_cast<void *>(s2));
+        s1->swap(s2);
 	s1->validate();
 	s2->validate();
 	break;
@@ -355,8 +356,8 @@ int main(int argc, const char *argv[])
 	NodeSetWrapper *s1 = random_nodeset();
 	NodeSetWrapper *s2 = random_nodeset();
 	if(verbose)
-	  printf("COPY(%p, %p)\n", s1, s2);
-	s1->copy(s2, false /*!reconstruct*/);
+          printf("COPY(%p, %p)\n", static_cast<void *>(s1), static_cast<void *>(s2));
+        s1->copy(s2, false /*!reconstruct*/);
 	s1->validate();
 	s2->validate();
 	break;
@@ -368,8 +369,9 @@ int main(int argc, const char *argv[])
 	NodeSetWrapper *s2 = random_nodeset();
 	if(s1 == s2) break;
 	if(verbose)
-	  printf("COPY_RECON(%p, %p)\n", s1, s2);
-	s1->copy(s2, true /*reconstruct*/);
+          printf("COPY_RECON(%p, %p)\n", static_cast<void *>(s1),
+                 static_cast<void *>(s2));
+        s1->copy(s2, true /*reconstruct*/);
 	s1->validate();
 	s2->validate();
 	break;
@@ -379,8 +381,8 @@ int main(int argc, const char *argv[])
       {
 	NodeSetWrapper *s1 = random_nodeset();
 	if(verbose)
-	  printf("RECON(%p)\n", s1);
-	s1->reconstruct();
+          printf("RECON(%p)\n", static_cast<void *>(s1));
+        s1->reconstruct();
 	s1->validate();
 	break;
       }

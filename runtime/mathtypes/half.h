@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -135,13 +135,22 @@ inline float __convert_halfint_to_float(uint16_t __x)
 // The CUDA Toolkit only provides device versions for half precision operators,
 // so we have to provide custom implementations below.
 #if defined(LEGION_USE_CUDA)
+#if defined(__CUDA_FP16_H__)
+#error "This header must be included before cuda_fp16.h"
+#endif
 #define __CUDA_NO_HALF_OPERATORS__
 #include <cuda_fp16.h>
 #elif defined(LEGION_USE_HIP)
 #ifdef __HIP_PLATFORM_NVCC__
+#if defined(__CUDA_FP16_H__)
+#error "This header must be included before cuda_fp16.h"
+#endif
 #define __CUDA_NO_HALF_OPERATORS__
 #include <cuda_fp16.h>
 #else
+#if defined(HIP_INCLUDE_HIP_HIP_FP16_H)
+#error "This header must be included before hip_fp16.h"
+#endif
 #define __HIP_NO_HALF_OPERATORS__
 #include <hip/hip_fp16.h>
 #endif

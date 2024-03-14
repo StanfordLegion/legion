@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -36,8 +36,8 @@
 #define CONCAT(a, b) CONCAT2(a, b)
 #define REGISTER_REALM_MODULE_STATIC(classname) \
   static Realm::ModuleRegistrar::StaticRegistration<classname> CONCAT(registration_, __LINE__)
-#define REGISTER_REALM_NETWORK_MODULE_STATIC(classname) \
-  static Realm::ModuleRegistrar::NetworkRegistration<classname> CONCAT(registration_, __LINE__)
+#define REGISTER_REALM_NETWORK_MODULE_STATIC(classname, name, order) \
+  static Realm::ModuleRegistrar::NetworkRegistration<classname> CONCAT(registration_, __LINE__)(name, order)
 
 #include "realm/runtime_impl.h"
 REGISTER_REALM_MODULE_STATIC(Realm::CoreModule);
@@ -78,19 +78,24 @@ REGISTER_REALM_MODULE_STATIC(Realm::LLVMJit::LLVMJitModule);
 REGISTER_REALM_MODULE_STATIC(Realm::HDF5::HDF5Module);
 #endif
 
+#if defined REALM_USE_UCX
+#include "realm/ucx/ucp_module.h"
+REGISTER_REALM_NETWORK_MODULE_STATIC(Realm::UCPModule, "ucx", 1);
+#endif
+
 #ifdef REALM_USE_GASNET1
 #include "realm/gasnet1/gasnet1_module.h"
-REGISTER_REALM_NETWORK_MODULE_STATIC(Realm::GASNet1Module);
+REGISTER_REALM_NETWORK_MODULE_STATIC(Realm::GASNet1Module, "gasnet1", 2);
 #endif
 
 #ifdef REALM_USE_GASNETEX
 #include "realm/gasnetex/gasnetex_module.h"
-REGISTER_REALM_NETWORK_MODULE_STATIC(Realm::GASNetEXModule);
+REGISTER_REALM_NETWORK_MODULE_STATIC(Realm::GASNetEXModule, "gasnetex", 3);
 #endif
 
 #if defined REALM_USE_MPI
 #include "realm/mpi/mpi_module.h"
-REGISTER_REALM_NETWORK_MODULE_STATIC(Realm::MPIModule);
+REGISTER_REALM_NETWORK_MODULE_STATIC(Realm::MPIModule, "mpi", 100);
 #endif
 
 namespace Realm {
@@ -157,6 +162,19 @@ namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
   //
+  // class ModuleSpecificInfo
+  //
+
+  ModuleSpecificInfo::ModuleSpecificInfo()
+    : next(0)
+  {}
+
+  ModuleSpecificInfo::~ModuleSpecificInfo()
+  {}
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
   // class ModuleRegistrar
   //
 
@@ -167,22 +185,34 @@ namespace Realm {
 
   ModuleRegistrar::ModuleRegistrar(RuntimeImpl *_runtime)
     : runtime(_runtime)
+    , sofile_loaded(false)
   {}
 
   // called by the runtime during init
-  void ModuleRegistrar::create_static_modules(std::vector<std::string>& cmdline,
-					      std::vector<Module *>& modules)
+  void ModuleRegistrar::create_static_modules(std::vector<Module *>& modules)
   {
     // just iterate over the static module list, trying to create each module
     for(const StaticRegistrationBase *sreg = static_modules_head;
 	sreg;
 	sreg = sreg->next) {
-      Module *m = sreg->create_module(runtime, cmdline);
+      Module *m = sreg->create_module(runtime);
       if(m)
 	modules.push_back(m);
     }
   }
 
+  // called by the runtime::create_configs
+  void ModuleRegistrar::create_static_module_configs(std::map<std::string, ModuleConfig *>& module_configs)
+  {
+    // just iterate over the static module list, trying to create each module
+    for(const StaticRegistrationBase *sreg = static_modules_head;
+	sreg;
+	sreg = sreg->next) {
+      ModuleConfig *config = sreg->create_module_config(runtime);
+      if(config)
+	module_configs.insert({config->get_name(), config});
+    }
+  }
 
 #ifdef REALM_USE_DLFCN
   extern "C" {
@@ -210,8 +240,7 @@ namespace Realm {
   static void load_module_list(const char *sonames,
 			       RuntimeImpl *runtime,
 			       std::vector<std::string>& cmdline,
-			       std::vector<void *>& handles,
-			       std::vector<Module *>& modules)
+			       std::vector<void *>& handles)
   {
     // null/empty strings are nops
     if(!sonames || !*sonames) return;
@@ -269,35 +298,14 @@ namespace Realm {
         }
       }
 
-      // this file should also have a "create_realm_module" symbol
-      void *sym = dlsym(handle, "create_realm_module");
-      if(!sym) {
-        log_module.error() << "symbol 'create_realm_module' not found in " << filename;
-        dlclose(handle);
-        continue;
-      }
-
       // TODO: hold onto the handle even if it doesn't create a module?
       handles.push_back(handle);
-
-      Module *m = ((Module *(*)(RuntimeImpl *, std::vector<std::string>&))sym)(runtime, cmdline);
-      if(m)
-        modules.push_back(m);
     }
   }
 #endif
 
-  // called by the runtime during init
-  void ModuleRegistrar::create_dynamic_modules(std::vector<std::string>& cmdline,
-					       std::vector<Module *>& modules)
+  void ModuleRegistrar::load_module_sofiles(std::vector<std::string>& cmdline)
   {
-    // dynamic modules are requested in one of two ways:
-    // 1) REALM_DYNAMIC_MODULES=sonames environment variable
-    // 2) "-ll:module sonames" on command line
-    // in both cases, 'sonames' is a colon-separate listed of .so files that should be
-
-    // loading modules can also monkey with the cmdline, so do a pass first where we pull
-    //  out all the name we want to load
     std::vector<std::string> sonames_list;
 
     {
@@ -333,7 +341,8 @@ namespace Realm {
           it != sonames_list.end();
           it++)
         load_module_list(it->c_str(),
-                         runtime, cmdline, sofile_handles, modules);
+                         runtime, cmdline, module_sofile_handles);
+      sofile_loaded = true;
 #else
       log_module.fatal() << "loading of dynamic Realm modules requested, but REALM_USE_DLFCN=0!";
       abort();
@@ -341,8 +350,57 @@ namespace Realm {
     }
   }
 
-  // called by runtime after all modules have been cleaned up
-  void ModuleRegistrar::unload_module_sofiles(void)
+  // called by the runtime during init
+  void ModuleRegistrar::create_dynamic_modules(std::vector<Module *>& modules)
+  {
+    // dynamic modules are requested in one of two ways:
+    // 1) REALM_DYNAMIC_MODULES=sonames environment variable
+    // 2) "-ll:module sonames" on command line
+    // in both cases, 'sonames' is a colon-separate listed of .so files that should be
+
+    // loading modules can also monkey with the cmdline, so do a pass first where we pull
+    //  out all the name we want to load
+#ifdef REALM_USE_DLFCN
+    if (module_sofile_handles.size() > 0) {
+      assert(sofile_loaded);
+    }
+    for (std::vector<void *>::iterator it = module_sofile_handles.begin();
+         it != module_sofile_handles.end(); it++) {
+      void *handle = *it;
+      void *sym = dlsym(handle, "create_realm_module");
+      if(!sym) {
+        log_module.error() << "symbol 'create_realm_module' not found";
+        continue;
+      }
+      Module *m = ((Module *(*)(RuntimeImpl *))sym)(runtime);
+      if(m)
+        modules.push_back(m);
+    }
+#endif
+  }
+
+  // called by the runtime::create_configs
+  void ModuleRegistrar::create_dynamic_module_configs(std::vector<std::string>& cmdline,
+					              std::map<std::string, ModuleConfig *>& module_configs)
+  {
+    load_module_sofiles(cmdline);
+#ifdef REALM_USE_DLFCN
+    for (std::vector<void *>::iterator it = module_sofile_handles.begin();
+         it != module_sofile_handles.end(); it++) {
+      void *handle = *it;
+      void *sym = dlsym(handle, "create_realm_module_config");
+      if(!sym) {
+        log_module.error() << "symbol 'create_realm_module_config' not found";
+        continue;
+      }
+      ModuleConfig *config = ((ModuleConfig *(*)(RuntimeImpl *))sym)(runtime);
+      if(config)
+        module_configs.insert({config->get_name(), config});
+    }
+#endif
+  }
+
+  static void unload_sofiles(std::vector<void *> &sofile_handles)
   {
 #ifdef REALM_USE_DLFCN
     while(!sofile_handles.empty()) {
@@ -356,6 +414,14 @@ namespace Realm {
       assert(ret == 0);
     }
 #endif
+  }
+
+  // called by runtime after all modules have been cleaned up
+  void ModuleRegistrar::unload_module_sofiles(void)
+  {
+    unload_sofiles(module_sofile_handles);
+    unload_sofiles(network_sofile_handles);
+    sofile_loaded = false;
   }
 
   // called by the module registration helpers

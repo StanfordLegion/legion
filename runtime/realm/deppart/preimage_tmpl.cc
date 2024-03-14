@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -43,19 +43,15 @@ namespace Realm {
 
 #define DOIT(T1,T2)			    \
   template class PreimageMicroOp<N1,T1,N2,T2>; \
+  template class StructuredPreimageMicroOp<N1,T1,N2,T2>; \
   template class PreimageOperation<N1,T1,N2,T2>; \
   template PreimageMicroOp<N1,T1,N2,T2>::PreimageMicroOp(NodeID, AsyncMicroOp *, Serialization::FixedBufferDeserializer&); \
-  template Event IndexSpace<N1,T1>::create_subspaces_by_preimage(const std::vector<FieldDataDescriptor<IndexSpace<N1,T1>,Point<N2,T2> > >&, \
-								  const std::vector<IndexSpace<N2,T2> >&, \
-								  std::vector<IndexSpace<N1,T1> >&, \
-								  const ProfilingRequestSet &, \
-								  Event) const; \
-  template Event IndexSpace<N1,T1>::create_subspaces_by_preimage(const std::vector<FieldDataDescriptor<IndexSpace<N1,T1>,Rect<N2,T2> > >&, \
-								  const std::vector<IndexSpace<N2,T2> >&, \
-								  std::vector<IndexSpace<N1,T1> >&, \
-								  const ProfilingRequestSet &, \
-								  Event) const;
+  template Event IndexSpace<N1, T1>::create_subspaces_by_preimage(            \
+      const DomainTransform<N2, T2, N1, T1> &, const std::vector<IndexSpace<N2, T2> > &,            \
+      std::vector<IndexSpace<N1, T1> > &, const ProfilingRequestSet &, Event) \
+      const;
 
   FOREACH_TT(DOIT)
+
 
 };

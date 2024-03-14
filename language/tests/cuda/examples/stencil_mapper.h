@@ -1,0 +1,1 @@
+../../../examples/stencil_mapper.h

@@ -1,4 +1,4 @@
--- Copyright 2022 Stanford University, NVIDIA Corporation
+-- Copyright 2024 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -70,7 +70,7 @@ local default = ast.default_annotations()
 
 local function check(node, allowed_set)
   -- Sanity check the allowed set.
-  for option, _ in pairs(allowed_set) do
+  for _, option in allowed_set:keys() do
     assert(node.annotations[option]:is(ast.annotation))
   end
 

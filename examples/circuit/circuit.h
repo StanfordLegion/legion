@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University
+/* Copyright 2024 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -80,6 +80,11 @@ enum WireFields {
 
 enum LocatorFields {
   FID_LOCATOR,
+};
+
+enum {
+  COLOCATION_NEXT_TAG = 1,
+  COLOCATION_PREV_TAG = 2,
 };
 
 typedef FieldAccessor<READ_ONLY,float,1,coord_t,Realm::AffineAccessor<float,1,coord_t> > AccessorROfloat;
@@ -351,7 +356,8 @@ namespace TaskHelper {
 #endif
 
   template<typename T>
-  void register_hybrid_variants(LayoutConstraintID id)
+  void register_hybrid_variants(LayoutConstraintID id,
+                                const std::vector<ColocationConstraint> &colocations)
   {
     {
       TaskVariantRegistrar registrar(T::TASK_ID, T::TASK_NAME);
@@ -363,6 +369,9 @@ namespace TaskHelper {
         for (int i = 0; i < T::REGIONS; i++)
           registrar.add_layout_constraint_set(i, id);
       }
+      for (std::vector<ColocationConstraint>::const_iterator it =
+            colocations.begin(); it != colocations.end(); it++)
+        registrar.add_constraint(*it);
       Runtime::preregister_task_variant<base_cpu_wrapper<T> >(registrar, T::TASK_NAME);
     }
 

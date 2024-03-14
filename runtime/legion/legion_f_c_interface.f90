@@ -1,4 +1,4 @@
-! Copyright 2022 Stanford University, NVIDIA Corporation,
+! Copyright 2024 Stanford University, NVIDIA Corporation,
 !                Los Alamos National Laboratory
 !
 ! Licensed under the Apache License, Version 2.0 (the "License");
@@ -1153,19 +1153,17 @@ module legion_fortran_c_interface
     ! Logical Region Tree Traversal Operations
     ! -----------------------------------------------------------------------
     ! @see Legion::Runtime::get_logical_partition()
-    function legion_logical_partition_create_f(runtime, ctx, parent, handle) &
+    function legion_logical_partition_create_f(runtime, parent, handle) &
         bind (C, name="legion_logical_partition_create")
       use iso_c_binding
       import legion_logical_partition_f_t
       import legion_runtime_f_t
-      import legion_context_f_t
       import legion_logical_region_f_t
       import legion_index_partition_f_t
       implicit none
 
       type(legion_logical_partition_f_t)                  :: legion_logical_partition_create_f
       type(legion_runtime_f_t), value, intent(in)         :: runtime
-      type(legion_context_f_t), value, intent(in)         :: ctx
       type(legion_logical_region_f_t), value, intent(in)  :: parent
       type(legion_index_partition_f_t), value, intent(in) :: handle
     end function legion_logical_partition_create_f

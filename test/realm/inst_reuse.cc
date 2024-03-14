@@ -97,8 +97,8 @@ void top_level_task(const void *args, size_t arglen,
       Event e = finish_events.front();
       instances.pop_front();
       finish_events.pop_front();
-      inst.destroy(e);
       e.wait();
+      inst.destroy();
     }
   }
 
@@ -107,12 +107,9 @@ void top_level_task(const void *args, size_t arglen,
     Event e = finish_events.front();
     instances.pop_front();
     finish_events.pop_front();
-    inst.destroy(e);
     e.wait();
+    inst.destroy();
   }
-
-  // HACK: there's a shutdown race condition related to instance destruction
-  usleep(100000);
 }
 
 void worker_task(const void *args, size_t arglen,

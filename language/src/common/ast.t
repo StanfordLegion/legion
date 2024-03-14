@@ -1,4 +1,4 @@
--- Copyright 2022 Stanford University, NVIDIA Corporation
+-- Copyright 2024 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -43,18 +43,13 @@ function ast_node:__index(field)
   if value ~= nil then
     return value
   end
-  local node_type = tostring(rawget(self, "node_type")) or "(unknown)"
+  local node_type = tostring(self["node_type"]) or "(unknown)"
   error(node_type .. " has no field '" .. field .. "' (in lookup)", 2)
 end
 
 function ast_node:__newindex(field, value)
   local node_type = tostring(rawget(self, "node_type")) or "(unknown)"
   error(node_type .. " has no field '" .. field .. "' (in assignment)", 2)
-end
-
-function ast_node:hash()
-  local hash_value = "__ast_node_#" .. tostring(self.node_id)
-  return hash_value
 end
 
 function ast.is_node(node)
@@ -139,11 +134,10 @@ function ast_node:type()
 end
 
 function ast_node:get_fields()
-  local result = {}
-  for k, v in pairs(self) do
-    if k ~= "node_type" and k ~= "node_id" then
-      result[k] = v
-    end
+  local result = data.newmap()
+  for _, k in ipairs(rawget(self, "node_type").expected_fields) do
+    local v = self[k]
+    result[k] = v
   end
   return result
 end
@@ -234,7 +228,7 @@ function ast_ctor:__call(node)
     end
   end
   for f, _ in pairs(result) do
-    if rawget(self.expected_field_set, f) == nil then
+    if self.expected_field_set[f] == nil then
       error(tostring(self) .. " does not require argument '" .. f .. "'", 2)
     end
   end
@@ -283,7 +277,7 @@ end
 
 local function merge_fields(...)
   local keys = {}
-  local result = terralib.newlist({})
+  local result = terralib.newlist()
   for _, fields in ipairs({...}) do
     if fields then
       for _, field in ipairs(fields) do

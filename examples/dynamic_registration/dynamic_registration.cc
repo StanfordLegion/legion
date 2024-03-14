@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University
+/* Copyright 2024 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -84,7 +84,7 @@ void wrapped_cpp_task(const void *data, size_t datalen,
 					  runtime);
   printf("hello from wrapped_cpp_task (msg='%.*s')\n",
 	 (int)userlen, (const char *)userdata);
-  LegionTaskWrapper::legion_task_postamble(runtime, ctx);
+  LegionTaskWrapper::legion_task_postamble(ctx);
 }
 
 void wrapped_c_task(const void *data, size_t datalen,

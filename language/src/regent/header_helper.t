@@ -1,4 +1,4 @@
--- Copyright 2022 Stanford University
+-- Copyright 2024 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -484,7 +484,7 @@ local function make_add_argument(launcher_name, wrapper_type, state_type,
         [launcher_state].task_args.[param_field_id_array] = @[&c.legion_field_id_t[#field_paths]]([field_ids])
       end)
     local field_id_by_path = data.newmap()
-    for j, field_path in pairs(field_paths) do
+    for j, field_path in ipairs(field_paths) do
       local arg_field_id = `([field_ids][ [j-1] ])
       field_id_by_path[field_path] = arg_field_id
     end
@@ -701,7 +701,7 @@ local function OLD_generate_task_implementation(task)
             end
         end)
       local field_id_by_path = data.newmap()
-      for j, field_path in pairs(field_paths) do
+      for j, field_path in ipairs(field_paths) do
         local arg_field_id = `([field_ids][ [j-1] ])
         local param_field_id = param_field_ids[i][j]
         field_id_by_path[field_path] = arg_field_id

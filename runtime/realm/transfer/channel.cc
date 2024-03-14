@@ -1,5 +1,5 @@
-/* Copyright 2022 Stanford University
- * Copyright 2022 Los Alamos National Laboratory
+/* Copyright 2024 Stanford University
+ * Copyright 2024 Los Alamos National Laboratory
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -656,245 +656,6 @@ namespace Realm {
       }
     }
 
-
-  ////////////////////////////////////////////////////////////////////////
-  //
-  // class AddressList
-  //
-
-  AddressList::AddressList()
-    : total_bytes(0)
-    , write_pointer(0)
-    , read_pointer(0)
-  {}
-
-  size_t *AddressList::begin_nd_entry(int max_dim)
-  {
-    size_t entries_needed = max_dim * 2;
-
-    size_t new_wp = write_pointer + entries_needed;
-    if(new_wp > MAX_ENTRIES) {
-      // have to wrap around
-      if(read_pointer <= entries_needed)
-	return 0;
-
-      // fill remaining entries with 0's so reader skips over them
-      while(write_pointer < MAX_ENTRIES)
-	data[write_pointer++] = 0;
-
-      write_pointer = 0;
-    } else {
-      // if the write pointer would cross over the read pointer, we have to wait
-      if((write_pointer < read_pointer) && (new_wp >= read_pointer))
-	return 0;
-
-      // special case: if the write pointer would wrap and read is at 0, that'd
-      //  be a collision too
-      if((new_wp == MAX_ENTRIES) && (read_pointer == 0))
-	return 0;
-    }
-
-    // all good - return a pointer to the first available entry
-    return (data + write_pointer);
-  }
-
-  void AddressList::commit_nd_entry(int act_dim, size_t bytes)
-  {
-    size_t entries_used = act_dim * 2;
-
-    write_pointer += entries_used;
-    if(write_pointer >= MAX_ENTRIES) {
-      assert(write_pointer == MAX_ENTRIES);
-      write_pointer = 0;
-    }
-
-    total_bytes += bytes;
-  }
-
-  size_t AddressList::bytes_pending() const
-  {
-    return total_bytes;
-  }
-
-  const size_t *AddressList::read_entry()
-  {
-    assert(total_bytes > 0);
-    if(read_pointer >= MAX_ENTRIES) {
-      assert(read_pointer == MAX_ENTRIES);
-      read_pointer = 0;
-    }
-    // skip trailing 0's
-    if(data[read_pointer] == 0)
-      read_pointer = 0;
-    return (data + read_pointer);
-  }
-	 
-
-  ////////////////////////////////////////////////////////////////////////
-  //
-  // class AddressListCursor
-  //
-
-  AddressListCursor::AddressListCursor()
-    : addrlist(0)
-    , partial(false)
-  {
-    for(int i = 0; i < MAX_DIM; i++)
-      pos[i] = 0;
-  }
-
-  void AddressListCursor::set_addrlist(AddressList *_addrlist)
-  {
-    addrlist = _addrlist;
-  }
-
-  int AddressListCursor::get_dim()
-  {
-    assert(addrlist);
-    // with partial progress, we restrict ourselves to just the rest of that dim
-    if(partial) {
-      return (partial_dim + 1);
-    } else {
-      const size_t *entry = addrlist->read_entry();
-      int act_dim = (entry[0] & 15);
-      return act_dim;
-    }
-  }
-
-  uintptr_t AddressListCursor::get_offset()
-  {
-    const size_t *entry = addrlist->read_entry();
-    int act_dim = (entry[0] & 15);
-    uintptr_t ofs = entry[1];
-    if(partial) {
-      for(int i = partial_dim; i < act_dim; i++)
-	if(i == 0) {
-	  // dim 0 is counted in bytes
-	  ofs += pos[0];
-	} else {
-	  // rest use the strides from the address list
-	  ofs += pos[i] * entry[1 + (2 * i)];
-	}
-    }
-    return ofs;
-  }
-
-  uintptr_t AddressListCursor::get_stride(int dim)
-  {
-    const size_t *entry = addrlist->read_entry();
-    int act_dim = (entry[0] & 15);
-    assert((dim > 0) && (dim < act_dim));
-    return entry[2 * dim + 1];
-  }
-
-  size_t AddressListCursor::remaining(int dim)
-  {
-    const size_t *entry = addrlist->read_entry();
-    int act_dim = (entry[0] & 15);
-    assert(dim < act_dim);
-    size_t r = entry[2 * dim];
-    if(dim == 0) r >>= 4;
-    if(partial) {
-      if(dim > partial_dim) r = 1;
-      if(dim == partial_dim) {
-	assert(r > pos[dim]);
-	r -= pos[dim];
-      }
-    }
-    return r;
-  }
-
-  void AddressListCursor::advance(int dim, size_t amount)
-  {
-    const size_t *entry = addrlist->read_entry();
-    int act_dim = (entry[0] & 15);
-    assert(dim < act_dim);
-    size_t r = entry[2 * dim];
-    if(dim == 0) r >>= 4;
-
-    size_t bytes = amount;
-    if(dim > 0) {
-#ifdef DEBUG_REALM
-      for(int i = 0; i < dim; i++)
-	assert(pos[i] == 0);
-#endif
-      bytes *= (entry[0] >> 4);
-      for(int i = 1; i < dim; i++)
-	bytes *= entry[2 * i];
-    }
-#ifdef DEBUG_REALM
-    assert(addrlist->total_bytes >= bytes);
-#endif
-    addrlist->total_bytes -= bytes;
-    
-    if(!partial) {
-      if((dim == (act_dim - 1)) && (amount == r)) {
-	// simple case - we consumed the whole thing
-	addrlist->read_pointer += 2 * act_dim;
-	return;
-      } else {
-	// record partial consumption
-	partial = true;
-	partial_dim = dim;
-	pos[partial_dim] = amount;
-      }
-    } else {
-      // update a partial consumption in progress
-      assert(dim <= partial_dim);
-      partial_dim = dim;
-      pos[partial_dim] += amount;
-    }
-
-    while(pos[partial_dim] == r) {
-      pos[partial_dim++] = 0;
-      if(partial_dim == act_dim) {
-	// all done
-	partial = false;
-	addrlist->read_pointer += 2 * act_dim;
-	break;
-      } else {
-	pos[partial_dim]++;  // carry into next dimension
-	r = entry[2 * partial_dim]; // no shift because partial_dim > 0
-      }
-    }
-  }
-
-  void AddressListCursor::skip_bytes(size_t bytes)
-  {
-    while(bytes > 0) {
-      int act_dim = get_dim();
-
-      if(act_dim == 0) {
-	assert(0);
-      } else {
-	size_t chunk = remaining(0);
-	if(chunk <= bytes) {
-	  int dim = 0;
-	  size_t count = chunk;
-	  while((dim + 1) < act_dim) {
-	    dim++;
-	    count = bytes / chunk;
-	    assert(count > 0);
-	    size_t r = remaining(dim + 1);
-	    if(count < r) {
-	      chunk *= count;
-	      break;
-	    } else {
-	      count = r;
-	      chunk *= count;
-	    }
-	  }
-	  advance(dim, count);
-	  bytes -= chunk;
-	} else {
-	  advance(0, bytes);
-	  return;
-	}
-      }
-    }
-  }
-
-
   ////////////////////////////////////////////////////////////////////////
   //
   // class ControlPort::Encoder
@@ -1077,6 +838,7 @@ namespace Realm {
 	  xferDes_queue(XferDesQueue::get_singleton()),
 	  launch_node(_launch_node),
 	  iteration_completed(false),
+          bytes_write_pending(0),
 	  transfer_completed(false),
           max_req_size(16 << 20 /*TO REMOVE*/), priority(_priority),
           guid(_guid),
@@ -1296,108 +1058,112 @@ namespace Realm {
 
   size_t XferDes::update_control_info(ReadSequenceCache *rseqcache)
   {
+    if(iteration_completed.load_acquire())
+      return 0;
+
     // pull control information if we need it
     if(input_control.remaining_count == 0) {
-      XferPort& icp = input_ports[input_control.control_port_idx];
-      size_t avail = icp.seq_remote.span_exists(icp.local_bytes_total,
-						4 * sizeof(unsigned));
-      size_t old_lbt = icp.local_bytes_total;
+      if(input_control.control_port_idx >= 0) {
+        XferPort& icp = input_ports[input_control.control_port_idx];
+        size_t avail = icp.seq_remote.span_exists(icp.local_bytes_total,
+                                                  4 * sizeof(unsigned));
+        size_t old_lbt = icp.local_bytes_total;
 
-      // may take a few chunks of data to get a control packet
-      while(true) {
-        if(avail < sizeof(unsigned))
-          return 0;  // no data right now
+        // may take a few chunks of data to get a control packet
+        while(true) {
+          if(avail < sizeof(unsigned))
+            return 0;  // no data right now
 
-        TransferIterator::AddressInfo c_info;
-        size_t amt = icp.iter->step(sizeof(unsigned), c_info, 0,
-                                    false /*!tentative*/);
-        assert(amt == sizeof(unsigned));
-        const void *srcptr = icp.mem->get_direct_ptr(c_info.base_offset, amt);
-        assert(srcptr != 0);
-        unsigned cword;
-        memcpy(&cword, srcptr, sizeof(unsigned));
+          TransferIterator::AddressInfo c_info;
+          size_t amt = icp.iter->step(sizeof(unsigned), c_info, 0,
+                                      false /*!tentative*/);
+          assert(amt == sizeof(unsigned));
+          const void *srcptr = icp.mem->get_direct_ptr(c_info.base_offset, amt);
+          assert(srcptr != 0);
+          unsigned cword;
+          memcpy(&cword, srcptr, sizeof(unsigned));
 
-        icp.local_bytes_total += sizeof(unsigned);
-        avail -= sizeof(unsigned);
+          icp.local_bytes_total += sizeof(unsigned);
+          avail -= sizeof(unsigned);
 
-        if(input_control.decoder.decode(cword,
-                                        input_control.remaining_count,
-                                        input_control.current_io_port,
-                                        input_control.eos_received))
-          break;
-      }
+          if(input_control.decoder.decode(cword,
+                                          input_control.remaining_count,
+                                          input_control.current_io_port,
+                                          input_control.eos_received))
+            break;
+        }
 
-      // can't get here unless we read something, so ack it
-      if(rseqcache != 0)
-	rseqcache->add_span(input_control.control_port_idx,
+        // can't get here unless we read something, so ack it
+        if(rseqcache != 0)
+          rseqcache->add_span(input_control.control_port_idx,
+                              old_lbt, icp.local_bytes_total - old_lbt);
+        else
+          update_bytes_read(input_control.control_port_idx,
                             old_lbt, icp.local_bytes_total - old_lbt);
-      else
-	update_bytes_read(input_control.control_port_idx,
-                          old_lbt, icp.local_bytes_total - old_lbt);
 
-      log_xd.info() << "input control: xd=" << std::hex << guid << std::dec
-		    << " port=" << input_control.current_io_port
-		    << " count=" << input_control.remaining_count
-		    << " done=" << input_control.eos_received;
+        log_xd.info() << "input control: xd=" << std::hex << guid << std::dec
+                      << " port=" << input_control.current_io_port
+                      << " count=" << input_control.remaining_count
+                      << " done=" << input_control.eos_received;
+      }
       // if count is still zero, we're done
       if(input_control.remaining_count == 0) {
 	assert(input_control.eos_received);
-	iteration_completed.store_release(true);
+	begin_completion();
 	return 0;
       }
     }
 
     if(output_control.remaining_count == 0) {
-      // this looks wrong, but the port that controls the output is
-      //  an input port! vvv
-      XferPort& ocp = input_ports[output_control.control_port_idx];
-      size_t avail = ocp.seq_remote.span_exists(ocp.local_bytes_total,
-						4 * sizeof(unsigned));
-      size_t old_lbt = ocp.local_bytes_total;
+      if(output_control.control_port_idx >= 0) {
+        // this looks wrong, but the port that controls the output is
+        //  an input port! vvv
+        XferPort& ocp = input_ports[output_control.control_port_idx];
+        size_t avail = ocp.seq_remote.span_exists(ocp.local_bytes_total,
+                                                  4 * sizeof(unsigned));
+        size_t old_lbt = ocp.local_bytes_total;
 
-      // may take a few chunks of data to get a control packet
-      while(true) {
-        if(avail < sizeof(unsigned))
-          return 0;  // no data right now
+        // may take a few chunks of data to get a control packet
+        while(true) {
+          if(avail < sizeof(unsigned))
+            return 0;  // no data right now
 
-        TransferIterator::AddressInfo c_info;
-        size_t amt = ocp.iter->step(sizeof(unsigned), c_info, 0,
-                                    false /*!tentative*/);
-        assert(amt == sizeof(unsigned));
-        const void *srcptr = ocp.mem->get_direct_ptr(c_info.base_offset, amt);
-        assert(srcptr != 0);
-        unsigned cword;
-        memcpy(&cword, srcptr, sizeof(unsigned));
+          TransferIterator::AddressInfo c_info;
+          size_t amt = ocp.iter->step(sizeof(unsigned), c_info, 0,
+                                      false /*!tentative*/);
+          assert(amt == sizeof(unsigned));
+          const void *srcptr = ocp.mem->get_direct_ptr(c_info.base_offset, amt);
+          assert(srcptr != 0);
+          unsigned cword;
+          memcpy(&cword, srcptr, sizeof(unsigned));
 
-        ocp.local_bytes_total += sizeof(unsigned);
-        avail -= sizeof(unsigned);
+          ocp.local_bytes_total += sizeof(unsigned);
+          avail -= sizeof(unsigned);
 
-        if(output_control.decoder.decode(cword,
-                                         output_control.remaining_count,
-                                         output_control.current_io_port,
-                                         output_control.eos_received))
-          break;
-      }
+          if(output_control.decoder.decode(cword,
+                                           output_control.remaining_count,
+                                           output_control.current_io_port,
+                                           output_control.eos_received))
+            break;
+        }
 
-      // can't get here unless we read something, so ack it
-      if(rseqcache != 0)
-	rseqcache->add_span(output_control.control_port_idx,
+        // can't get here unless we read something, so ack it
+        if(rseqcache != 0)
+          rseqcache->add_span(output_control.control_port_idx,
+                              old_lbt, ocp.local_bytes_total - old_lbt);
+        else
+          update_bytes_read(output_control.control_port_idx,
                             old_lbt, ocp.local_bytes_total - old_lbt);
-      else
-	update_bytes_read(output_control.control_port_idx,
-                          old_lbt, ocp.local_bytes_total - old_lbt);
 
-      log_xd.info() << "output control: xd=" << std::hex << guid << std::dec
-		    << " port=" << output_control.current_io_port
-		    << " count=" << output_control.remaining_count
-		    << " done=" << output_control.eos_received;
+        log_xd.info() << "output control: xd=" << std::hex << guid << std::dec
+                      << " port=" << output_control.current_io_port
+                      << " count=" << output_control.remaining_count
+                      << " done=" << output_control.eos_received;
+      }
       // if count is still zero, we're done
       if(output_control.remaining_count == 0) {
 	assert(output_control.eos_received);
-	iteration_completed.store_release(true);
-	// give all output channels a chance to indicate completion
-	for(size_t i = 0; i < output_ports.size(); i++)
-	  update_bytes_write(i, output_ports[i].local_bytes_total, 0);
+	begin_completion();
 	return 0;
       }
     }
@@ -1409,9 +1175,25 @@ namespace Realm {
   size_t XferDes::get_addresses(size_t min_xfer_size,
 				ReadSequenceCache *rseqcache)
   {
+    const InstanceLayoutPieceBase *in_nonaffine;
+    const InstanceLayoutPieceBase *out_nonaffine;
+    size_t ret = get_addresses(min_xfer_size, rseqcache,
+                               in_nonaffine, out_nonaffine);
+    assert(!in_nonaffine && !out_nonaffine);
+    return ret;
+  }
+
+  size_t XferDes::get_addresses(size_t min_xfer_size,
+				ReadSequenceCache *rseqcache,
+                                const InstanceLayoutPieceBase *&in_nonaffine,
+                                const InstanceLayoutPieceBase *&out_nonaffine)
+  {
     size_t control_count = update_control_info(rseqcache);
-    if(control_count == 0)
+    if(control_count == 0) {
+      in_nonaffine = 0;
+      out_nonaffine = 0;
       return 0;
+    }
     if(control_count < min_xfer_size)
       min_xfer_size = control_count;
     size_t max_bytes = control_count;
@@ -1423,13 +1205,21 @@ namespace Realm {
       // do we need more addresses?
       size_t read_bytes_avail = in_port->addrlist.bytes_pending();
       if(read_bytes_avail < min_xfer_size) {
-	if(in_port->iter->get_addresses(in_port->addrlist)) {
-	  // adjust min size to flush as requested
-	  min_xfer_size = std::min(min_xfer_size,
-				   in_port->addrlist.bytes_pending());
-	}
+        bool flush = in_port->iter->get_addresses(in_port->addrlist,
+                                                  in_nonaffine);
 	read_bytes_avail = in_port->addrlist.bytes_pending();
-      }
+        if(flush) {
+          if(read_bytes_avail > 0) {
+            // ignore a nonaffine piece as we still have some affine bytes
+            in_nonaffine = 0;
+          }
+
+	  // adjust min size to flush as requested (unless we're non-affine)
+          if(!in_nonaffine)
+            min_xfer_size = std::min(min_xfer_size, read_bytes_avail);
+	}
+      } else
+        in_nonaffine = 0;
 
       // if we're not the first in the chain, respect flow control too
       if(in_port->peer_guid != XFERDES_NO_GUID) {
@@ -1438,6 +1228,11 @@ namespace Realm {
 	size_t pbt_limit = (in_port->remote_bytes_total.load_acquire() -
 			    in_port->local_bytes_total);
 	min_xfer_size = std::min(min_xfer_size, pbt_limit);
+
+        // don't ever expect to be able to read more than half the size of the
+        //  incoming intermediate buffer
+        if(min_xfer_size > (in_port->ib_size >> 1))
+          min_xfer_size = std::max<size_t>(1, (in_port->ib_size >> 1));
       }
 
       // we'd like to wait until there's `min_xfer_size` bytes available on the
@@ -1448,7 +1243,10 @@ namespace Realm {
       if((read_bytes_avail > 0) && (read_bytes_avail < min_xfer_size))
 	min_xfer_size = read_bytes_avail;
 
-      max_bytes = std::min(max_bytes, read_bytes_avail);
+      if(!in_nonaffine)
+        max_bytes = std::min(max_bytes, read_bytes_avail);
+    } else {
+      in_nonaffine = 0;
     }
 
     // get addresses for the output, if it exists
@@ -1458,33 +1256,56 @@ namespace Realm {
       // do we need more addresses?
       size_t write_bytes_avail = out_port->addrlist.bytes_pending();
       if(write_bytes_avail < min_xfer_size) {
-	if(out_port->iter->get_addresses(out_port->addrlist)) {
-	  // adjust min size to flush as requested
-	  min_xfer_size = std::min(min_xfer_size,
-				   out_port->addrlist.bytes_pending());
-	}
+	bool flush = out_port->iter->get_addresses(out_port->addrlist,
+                                                   out_nonaffine);
 	write_bytes_avail = out_port->addrlist.bytes_pending();
-      }
+        // TODO(apryakhin@): We add this to handle scatter when both
+        // indirection and source are coming from IB and this needs
+        // good testing.
+        if(out_port->indirect_port_idx >= 0 && write_bytes_avail) {
+          min_xfer_size = std::min(write_bytes_avail, min_xfer_size);
+        }
+        if(flush) {
+          if(write_bytes_avail > 0) {
+            // ignore a nonaffine piece as we still have some affine bytes
+            out_nonaffine = 0;
+          }
+
+	  // adjust min size to flush as requested (unless we're non-affine)
+          if(!out_nonaffine)
+            min_xfer_size = std::min(min_xfer_size, write_bytes_avail);
+	}
+      } else
+        out_nonaffine = 0;
 
       // if we're not the last in the chain, respect flow control too
       if(out_port->peer_guid != XFERDES_NO_GUID) {
 	write_bytes_avail = out_port->seq_remote.span_exists(out_port->local_bytes_total,
 							     write_bytes_avail);
+
+        // we'd like to wait until there's `min_xfer_size` bytes available on
+        //  the output, but if we're landing in an intermediate buffer and need
+        //  to wrap around, waiting won't do any good
+        if(min_xfer_size > (out_port->ib_size >> 1))
+          min_xfer_size = std::max<size_t>(1, (out_port->ib_size >> 1));
       }
 
-      max_bytes = std::min(max_bytes, write_bytes_avail);
+      if(!out_nonaffine)
+        max_bytes = std::min(max_bytes, write_bytes_avail);
+    } else {
+      out_nonaffine = 0;
     }
 
     if(min_xfer_size == 0) {
       // should only happen in the absence of control ports
       assert((input_control.control_port_idx == -1) &&
 	     (output_control.control_port_idx == -1));
-      iteration_completed.store_release(true);
+      begin_completion();
       return 0;
     }
 
     // if we don't have a big enough chunk, wait for more to show up
-    if(max_bytes < min_xfer_size)
+    if((max_bytes < min_xfer_size) && !in_nonaffine && !out_nonaffine)
       return 0;
 
     return max_bytes;
@@ -1533,7 +1354,7 @@ namespace Realm {
 		  output_control.eos_received);
 	  
     if(in_done || out_done) {
-      iteration_completed.store_release(true);
+      begin_completion();
       return true;
     } else
       return false;
@@ -1624,7 +1445,7 @@ namespace Realm {
 	    // if count is still zero, we're done
 	    if(input_control.remaining_count == 0) {
 	      assert(input_control.eos_received);
-	      iteration_completed.store_release(true);
+	      begin_completion();
 	      break;
 	    }
 	  }
@@ -1673,10 +1494,7 @@ namespace Realm {
 	    // if count is still zero, we're done
 	    if(output_control.remaining_count == 0) {
 	      assert(output_control.eos_received);
-	      iteration_completed.store_release(true);
-	      // give all output channels a chance to indicate completion
-	      for(size_t i = 0; i < output_ports.size(); i++)
-		update_bytes_write(i, output_ports[i].local_bytes_total, 0);
+	      begin_completion();
 	      break;
 	    }
 	  }
@@ -1713,10 +1531,7 @@ namespace Realm {
 	      if(((input_control.remaining_count == 0) && input_control.eos_received) ||
 		 ((output_control.remaining_count == 0) && output_control.eos_received)) {
 		log_xd.info() << "iteration completed via control port: xd=" << std::hex << guid << std::dec;
-		iteration_completed.store_release(true);
-		// give all output channels a chance to indicate completion
-		for(size_t i = 0; i < output_ports.size(); i++)
-		  update_bytes_write(i, output_ports[i].local_bytes_total, 0);
+		begin_completion();
 		break;
 	      }
 	      continue;  // try again
@@ -1751,10 +1566,7 @@ namespace Realm {
 	    if(((input_control.remaining_count == 0) && input_control.eos_received) ||
 	       ((output_control.remaining_count == 0) && output_control.eos_received)) {
 	      log_xd.info() << "iteration completed via control port: xd=" << std::hex << guid << std::dec;
-	      iteration_completed.store_release(true);
-	      // give all output channels a chance to indicate completion
-	      for(size_t i = 0; i < output_ports.size(); i++)
-		update_bytes_write(i, output_ports[i].local_bytes_total, 0);
+	      begin_completion();
 	      break;
 	    }
 	    continue;  // try again
@@ -1789,11 +1601,7 @@ namespace Realm {
 		   out_port->iter->done());
 #endif
 
-	    iteration_completed.store_release(true);
-
-	    // give all output channels a chance to indicate completion
-	    for(size_t i = 0; i < output_ports.size(); i++)
-	      update_bytes_write(i, output_ports[i].local_bytes_total, 0);
+	    begin_completion();
 	    break;
 	  }
 	  
@@ -2029,7 +1837,7 @@ namespace Realm {
 		// otherwise, this shouldn't happen - we should detect this case
 		//  on the the transfer of those last bytes
 		assert(0);
-		iteration_completed.store_release(true);
+		begin_completion();
 		break;
 	      }
 	      if(pre_max < max_bytes) {
@@ -2331,12 +2139,8 @@ namespace Realm {
 	    if(((input_control.remaining_count == 0) && input_control.eos_received) ||
 	       ((output_control.remaining_count == 0) && output_control.eos_received)) {
 	      log_xd.info() << "iteration completed via control port: xd=" << std::hex << guid << std::dec;
-	      iteration_completed.store_release(true);
+	      begin_completion();
 
-	      // give all output channels a chance to indicate completion
-	      for(size_t i = 0; i < output_ports.size(); i++)
-		if(int(i) != output_control.current_io_port)
-		  update_bytes_write(i, output_ports[i].local_bytes_total, 0);
 #if 0
 	      // non-ib iterators should end at the same time?
 	      for(size_t i = 0; i < input_ports.size(); i++)
@@ -2352,13 +2156,8 @@ namespace Realm {
 	    if(in_port->iter->done() || out_port->iter->done() ||
 	       (in_port->local_bytes_total == pbt_snapshot)) {
 	      assert(!iteration_completed.load());
-	      iteration_completed.store_release(true);
+	      begin_completion();
 	    
-	      // give all output channels a chance to indicate completion
-	      for(size_t i = 0; i < output_ports.size(); i++)
-		if(int(i) != output_control.current_io_port)
-		  update_bytes_write(i, output_ports[i].local_bytes_total, 0);
-
 	      // TODO: figure out how to eliminate false positives from these
 	      //  checks with indirection and/or multiple remote inputs
 #if 0
@@ -2557,37 +2356,44 @@ namespace Realm {
         return idx;
       }
 
-
-    bool XferDes::is_completed(void)
+    void XferDes::begin_completion()
     {
-      // check below is a bit expensive, do don't do it more than once
-      if(transfer_completed.load()) return true;
-      // to be complete, we need to have finished iterating (which may have been
-      //  achieved by getting a pre_bytes_total update) and finished all of our
-      //  writes
-      // use the conservative byte write count here to make sure we don't
-      //  trigger early when serializing
-      if(!iteration_completed.load_acquire()) return false;
-      for(std::vector<XferPort>::iterator it = output_ports.begin();
-	  it != output_ports.end();
-	  ++it) {
-	// see if we still need to send the total bytes
-	if(it->needs_pbt_update.load()) {
 #ifdef DEBUG_REALM
-	  assert(it->peer_guid != XFERDES_NO_GUID);
+      // shouldn't be called more than once
+      assert(!iteration_completed.load());
 #endif
-	  // exchange sets the flag to false and tells us previous value
-	  if(it->needs_pbt_update.exchange(false))
-	    xferDes_queue->update_pre_bytes_total(it->peer_guid,
-						  it->peer_port_idx,
-						  it->local_bytes_total);
-	}
-	size_t lbc_snapshot = it->local_bytes_cons.load();
-	if(it->seq_local.span_exists(0, lbc_snapshot) != lbc_snapshot)
-	  return false;
+      iteration_completed.store_release(true);
+
+      // give all output channels a chance to indicate completion and determine
+      //  the total number of bytes we've written
+      size_t total_bytes_written = 0;
+      for(size_t i = 0; i < output_ports.size(); i++) {
+        total_bytes_written += output_ports[i].local_bytes_cons.load();
+        update_bytes_write(i, output_ports[i].local_bytes_total, 0);
+
+        // see if we still need to send the total bytes
+        if(output_ports[i].needs_pbt_update.load() &&
+           (output_ports[i].local_bytes_total == output_ports[i].local_bytes_cons.load())) {
+ #ifdef DEBUG_REALM
+          assert(output_ports[i].peer_guid != XFERDES_NO_GUID);
+#endif
+          // exchange sets the flag to false and tells us previous value
+          if(output_ports[i].needs_pbt_update.exchange(false))
+            xferDes_queue->update_pre_bytes_total(output_ports[i].peer_guid,
+                                                  output_ports[i].peer_port_idx,
+                                                  output_ports[i].local_bytes_total);
+        }
       }
-      transfer_completed.store(true);
-      return true;
+
+      // bytes pending is total minus however many writes have already
+      //  finished - if that's all of them, we can mark full transfer completion
+      int64_t prev = bytes_write_pending.fetch_add(total_bytes_written);
+      int64_t pending = prev + total_bytes_written;
+      log_xd.info() << "completion: xd=" << std::hex << guid << std::dec
+                    << " total_bytes=" << total_bytes_written << " pending=" << pending;
+      assert(pending >= 0);
+      if(pending == 0)
+        transfer_completed.store_release(true);
     }
 
       void XferDes::update_bytes_read(int port_idx, size_t offset, size_t size)
@@ -2649,17 +2455,12 @@ namespace Realm {
 	size_t inc_amt = out_port->seq_local.add_span(offset, size);
 	log_xd.info() << "bytes_write: " << std::hex << guid << std::dec
 		      << "(" << port_idx << ") " << offset << "+" << size << " -> " << inc_amt;
-	// if our _last_ write was ack'd, update progress in case the xd
-	//  is just waiting for all writes to complete
-	if(inc_amt > 0) {
-          if(iteration_completed.load_acquire() &&
-             ((offset + inc_amt) == out_port->local_bytes_total))
-            update_progress();
-        }
+
 	if(out_port->peer_guid != XFERDES_NO_GUID) {
 	  // update bytes total if needed (and available)
 	  if(out_port->needs_pbt_update.load() &&
-	     iteration_completed.load_acquire()) {
+	     iteration_completed.load_acquire() &&
+             (out_port->local_bytes_total == out_port->local_bytes_cons.load())) {
 	    // exchange sets the flag to false and tells us previous value
 	    if(out_port->needs_pbt_update.exchange(false))
 	      xferDes_queue->update_pre_bytes_total(out_port->peer_guid,
@@ -2676,6 +2477,25 @@ namespace Realm {
 	    // TODO: mode to send non-contiguous updates?
 	  }
 	}
+
+        // subtract bytes written from the pending count - if that causes it to
+        //  go to zero, we can mark the transfer completed and update progress
+        //  in case the xd is just waiting for that
+        // NOTE: as soon as we set `transfer_completed`, the other references
+        //  to this xd may be removed, so do this last, and hold a reference of
+        //  our own long enough to call update_progress
+        if(inc_amt > 0) {
+          int64_t prev = bytes_write_pending.fetch_sub(inc_amt);
+          if(prev > 0)
+            log_xd.info() << "completion: xd=" << std::hex << guid << std::dec
+                          << " remaining=" << (prev - inc_amt);
+          if(inc_amt == static_cast<size_t>(prev)) {
+            add_reference();
+            transfer_completed.store_release(true);
+            update_progress();
+            remove_reference();
+          }
+        }
       }
 
 #if 0
@@ -3203,16 +3023,20 @@ namespace Realm {
 				 const std::vector<XferDesPortInfo>& inputs_info,
 				 const std::vector<XferDesPortInfo>& outputs_info,
 				 int _priority,
-				 const void *_fill_data, size_t _fill_size)
+				 const void *_fill_data, size_t _fill_size,
+                                 size_t _fill_total)
 	: XferDes(_dma_op, _channel, _launch_node, _guid,
 		  inputs_info, outputs_info,
 		  _priority, _fill_data, _fill_size)
       {
 	kind = XFER_MEM_FILL;
 
-	// no direct input data for us
+	// no direct input data for us, but we know how much data to produce
+        //  (in case the output is an intermediate buffer)
 	assert(input_control.control_port_idx == -1);
 	input_control.current_io_port = -1;
+        input_control.remaining_count = _fill_total;
+        input_control.eos_received = true;
       }
 
       long MemfillXferDes::get_requests(Request** requests, long nr)
@@ -3832,19 +3656,19 @@ namespace Realm {
 		  assert(ok);
 
 		  // now look at the input
-		  const void *src_buf = in_port->mem->get_direct_ptr(in_alc.get_offset(), icount);
-		  size_t src_1d_maxbytes = 0;
-		  if(in_dim > 0) {
-		    size_t rec_bytes = ActiveMessage<Write1DMessage>::recommended_max_payload(dst_node,
-											      src_buf, icount, 1, 0,
-											      dst_buf,
-											      true /*w/ congestion*/);
-		    src_1d_maxbytes = std::min({ dst_1d_maxbytes,
-					         icount,
-					         rec_bytes });
-		  }
+                  LocalAddress src_buf;
+                  ok = in_port->mem->get_local_addr(in_alc.get_offset(), src_buf);
+                  assert(ok);
+                  size_t src_1d_maxbytes = 0;
+                  if(in_dim > 0) {
+                    size_t rec_bytes =
+                        ActiveMessage<Write1DMessage>::recommended_max_payload(
+                            dst_node, src_buf, icount, 1, 0, dst_buf,
+                            true /*w/ congestion*/);
+                    src_1d_maxbytes = std::min({dst_1d_maxbytes, icount, rec_bytes});
+                  }
 
-		  size_t src_2d_maxbytes = 0;
+                  size_t src_2d_maxbytes = 0;
                   // TODO: permit if source memory is cpu-accessible?
 #ifdef ALLOW_RDMA_SOURCE_2D
 		  if(in_dim > 1) {
@@ -4124,14 +3948,39 @@ namespace Realm {
 	size_t inc_amt = out_port->seq_local.add_span(offset, size);
 	log_xd.info() << "bytes_write: " << std::hex << guid << std::dec
 		      << "(" << port_idx << ") " << offset << "+" << size << " -> " << inc_amt;
-	// if our _last_ write was ack'd, update progress in case the xd
-	//  is just waiting for all writes to complete
-	if(inc_amt > 0) {
-          if(iteration_completed.load_acquire() &&
-             ((offset + inc_amt) == out_port->local_bytes_total))
-            update_progress();
-        }
+
 	// pre_bytes_write update was handled in the remote AM handler
+	if(out_port->peer_guid != XFERDES_NO_GUID) {
+	  // update bytes total if needed (and available)
+	  if(out_port->needs_pbt_update.load() &&
+	     iteration_completed.load_acquire() &&
+             (out_port->local_bytes_total == out_port->local_bytes_cons.load())) {
+	    // exchange sets the flag to false and tells us previous value
+	    if(out_port->needs_pbt_update.exchange(false))
+	      xferDes_queue->update_pre_bytes_total(out_port->peer_guid,
+						    out_port->peer_port_idx,
+						    out_port->local_bytes_total);
+	  }
+        }
+
+        // subtract bytes written from the pending count - if that causes it to
+        //  go to zero, we can mark the transfer completed and update progress
+        //  in case the xd is just waiting for that
+        // NOTE: as soon as we set `transfer_completed`, the other references
+        //  to this xd may be removed, so do this last, and hold a reference of
+        //  our own long enough to call update_progress
+        if(inc_amt > 0) {
+          int64_t prev = bytes_write_pending.fetch_sub(inc_amt);
+          if(prev > 0)
+            log_xd.info() << "completion: xd=" << std::hex << guid << std::dec
+                          << " remaining=" << (prev - inc_amt);
+          if(inc_amt == static_cast<size_t>(prev)) {
+            add_reference();
+            transfer_completed.store_release(true);
+            update_progress();
+            remove_reference();
+          }
+        }
       }
 
       /*static*/
@@ -4335,7 +4184,7 @@ namespace Realm {
 	return paths;
       }
 	  
-      uint64_t Channel::supports_path(Memory src_mem, Memory dst_mem,
+      uint64_t Channel::supports_path(ChannelCopyInfo channel_copy_info,
                                       CustomSerdezID src_serdez_id,
                                       CustomSerdezID dst_serdez_id,
                                       ReductionOpID redop_id,
@@ -4346,7 +4195,9 @@ namespace Realm {
                                       unsigned *bw_ret /*= 0*/,
                                       unsigned *lat_ret /*= 0*/)
       {
-	for(std::vector<SupportedPath>::const_iterator it = paths.begin();
+        Memory src_mem = channel_copy_info.src_mem;
+        Memory dst_mem = channel_copy_info.dst_mem;
+        for(std::vector<SupportedPath>::const_iterator it = paths.begin();
 	    it != paths.end();
 	    ++it) {
 	  if(!it->serdez_allowed && ((src_serdez_id != 0) ||
@@ -4504,6 +4355,26 @@ namespace Realm {
 	}
 
 	return 0;
+      }
+
+      Memory Channel::suggest_ib_memories(Memory memory) const
+      {
+        Node &n = get_runtime()->nodes[node];
+        for(std::vector<IBMemory *>::const_iterator it = n.ib_memories.begin();
+            it != n.ib_memories.end(); ++it) {
+          switch((*it)->lowlevel_kind) {
+          case Memory::SYSTEM_MEM:
+          case Memory::REGDMA_MEM:
+          case Memory::SOCKET_MEM:
+          case Memory::Z_COPY_MEM:
+            return (*it)->me;
+          default:
+            break;
+          }
+        }
+        log_new_dma.fatal() << "no sysmem ib memory on node:" << node;
+        abort();
+        return Memory::NO_MEMORY;
       }
 
       // sometimes we need to return a reference to a SupportedPath that won't
@@ -4805,7 +4676,8 @@ namespace Realm {
 					     int priority,
 					     XferDesRedopInfo redop_info,
 					     const void *fill_data,
-					     size_t fill_size)
+					     size_t fill_size,
+                                             size_t fill_total)
   {
     if(target_node == Network::my_node_id) {
       // local creation
@@ -4814,7 +4686,7 @@ namespace Realm {
       XferDes *xd = c->create_xfer_des(dma_op, launch_node, guid,
 				       inputs_info, outputs_info,
 				       priority, redop_info,
-				       fill_data, fill_size);
+				       fill_data, fill_size, fill_total);
 
       c->enqueue_ready_xd(xd);
     } else {
@@ -4824,7 +4696,8 @@ namespace Realm {
 	bool ok = ((bcs << inputs_info) &&
 		   (bcs << outputs_info) &&
 		   (bcs << priority) &&
-		   (bcs << redop_info));
+		   (bcs << redop_info) &&
+                   (bcs << fill_total));
 	if(ok && (fill_size > 0))
 	  ok = bcs.append_bytes(fill_data, fill_size);
 	assert(ok);
@@ -4840,7 +4713,8 @@ namespace Realm {
 	bool ok = ((amsg << inputs_info) &&
 		   (amsg << outputs_info) &&
 		   (amsg << priority) &&
-		   (amsg << redop_info));
+		   (amsg << redop_info) &&
+                   (amsg << fill_total));
 	if(ok && (fill_size > 0))
 	  amsg.add_payload(fill_data, fill_size);
 	assert(ok);
@@ -4876,13 +4750,15 @@ namespace Realm {
     std::vector<XferDesPortInfo> inputs_info, outputs_info;
     int priority = 0;
     XferDesRedopInfo redop_info;
+    size_t fill_total = 0;
 
     Realm::Serialization::FixedBufferDeserializer fbd(msgdata, msglen);
 
     bool ok = ((fbd >> inputs_info) &&
 	       (fbd >> outputs_info) &&
 	       (fbd >> priority) &&
-	       (fbd >> redop_info));
+	       (fbd >> redop_info) &&
+               (fbd >> fill_total));
     assert(ok);
     const void *fill_data;
     size_t fill_size;
@@ -4902,7 +4778,7 @@ namespace Realm {
 				     outputs_info,
 				     priority,
 				     redop_info,
-				     fill_data, fill_size);
+				     fill_data, fill_size, fill_total);
 
     c->enqueue_ready_xd(xd);
   }
@@ -5012,7 +4888,7 @@ namespace Realm {
 	return 0;
       }
 
-      uint64_t RemoteChannel::supports_path(Memory src_mem, Memory dst_mem,
+      uint64_t RemoteChannel::supports_path(ChannelCopyInfo channel_copy_info,
                                             CustomSerdezID src_serdez_id,
                                             CustomSerdezID dst_serdez_id,
                                             ReductionOpID redop_id,
@@ -5029,12 +4905,27 @@ namespace Realm {
 	  return 0;
 
 	// fall through to normal checks
-	return Channel::supports_path(src_mem, dst_mem,
+	return Channel::supports_path(channel_copy_info,
 				      src_serdez_id, dst_serdez_id, redop_id,
                                       total_bytes, src_frags, dst_frags,
 				      kind_ret, bw_ret, lat_ret);
       }
 
+
+
+  static void enumerate_remote_shared_mems(std::vector<Memory> &mems)
+  {
+    RuntimeImpl *runtime = get_runtime();
+    size_t idx = 0;
+    mems.resize(runtime->remote_shared_memory_mappings.size(), Memory::NO_MEMORY);
+    for(std::unordered_map<realm_id_t, SharedMemoryInfo>::iterator it =
+            runtime->remote_shared_memory_mappings.begin();
+        it != runtime->remote_shared_memory_mappings.end(); ++it) {
+      Memory m;
+      m.id = it->first;
+      mems[idx++] = m;
+    }
+  }
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -5047,20 +4938,28 @@ namespace Realm {
 							"memcpy channel")
       {
         //cbs = (MemcpyRequest**) calloc(max_nr, sizeof(MemcpyRequest*));
-	unsigned bw = 5000; // HACK - estimate at 5 GB/s
-	unsigned latency = 100; // HACK - estimate at 100ns
+        unsigned bw = 128000;         // HACK - estimate at 128 GB/s
+        unsigned latency = 100;       // HACK - estimate at 100ns
         unsigned frag_overhead = 100; // HACK - estimate at 100ns
 
         // all local cpu memories are valid sources and dests
         std::vector<Memory> local_cpu_mems;
         enumerate_local_cpu_memories(local_cpu_mems);
+        std::vector<Memory> remote_shared_mems;
+        enumerate_remote_shared_mems(remote_shared_mems);
 
         add_path(local_cpu_mems, local_cpu_mems,
                  bw, latency, frag_overhead, XFER_MEM_CPY)
           .set_max_dim(3)
           .allow_serdez();
 
-	xdq.add_to_manager(bgwork);
+        if (remote_shared_mems.size() > 0) {
+          add_path(local_cpu_mems, remote_shared_mems, bw, latency, frag_overhead,
+                   XFER_MEM_CPY)
+              .set_max_dim(3);
+        }
+
+        xdq.add_to_manager(bgwork);
       }
 
       MemcpyChannel::~MemcpyChannel()
@@ -5094,7 +4993,7 @@ namespace Realm {
       }
 
 
-      uint64_t MemcpyChannel::supports_path(Memory src_mem, Memory dst_mem,
+      uint64_t MemcpyChannel::supports_path(ChannelCopyInfo channel_copy_info,
                                             CustomSerdezID src_serdez_id,
                                             CustomSerdezID dst_serdez_id,
                                             ReductionOpID redop_id,
@@ -5111,7 +5010,7 @@ namespace Realm {
 	  return 0;
 
 	// fall through to normal checks
-	return Channel::supports_path(src_mem, dst_mem,
+	return Channel::supports_path(channel_copy_info,
 				      src_serdez_id, dst_serdez_id, redop_id,
                                       total_bytes, src_frags, dst_frags,
 				      kind_ret, bw_ret, lat_ret);
@@ -5124,7 +5023,9 @@ namespace Realm {
 					      const std::vector<XferDesPortInfo>& outputs_info,
 					      int priority,
 					      XferDesRedopInfo redop_info,
-					      const void *fill_data, size_t fill_size)
+					      const void *fill_data,
+                                              size_t fill_size,
+                                              size_t fill_total)
       {
         assert(redop_info.id == 0);
 	assert(fill_size == 0);
@@ -5549,7 +5450,14 @@ namespace Realm {
 	    req->write_seq_count = out_port->local_bytes_total - req->write_seq_pos;
 	    if(rewind_dst > 0) {
 	      //log_request.print() << "rewind dst: " << rewind_dst;
-	      out_port->local_bytes_cons.fetch_sub(rewind_dst);
+              // if we've finished iteration, it's too late to rewind the
+              //  conservative count, so decrement the number of write bytes
+              //  pending (we know we can't drive it to zero) as well
+              if(req->xd->iteration_completed.load()) {
+                int64_t prev = req->xd->bytes_write_pending.fetch_sub(rewind_dst);
+                assert((prev > 0) && (static_cast<size_t>(prev) > rewind_dst));
+              }
+              out_port->local_bytes_cons.fetch_sub(rewind_dst);
 	    }
 	  } else
 	    assert(rewind_dst == 0);
@@ -5609,10 +5517,18 @@ namespace Realm {
     // all local cpu memories are valid dests
     std::vector<Memory> local_cpu_mems;
     MemcpyChannel::enumerate_local_cpu_memories(local_cpu_mems);
+    std::vector<Memory> remote_shared_mems;
+    enumerate_remote_shared_mems(remote_shared_mems);
 
     add_path(Memory::NO_MEMORY, local_cpu_mems,
              bw, latency, frag_overhead, XFER_MEM_FILL)
       .set_max_dim(3);
+
+    if (remote_shared_mems.size() > 0) {
+      add_path(Memory::NO_MEMORY, remote_shared_mems,
+             bw, latency, frag_overhead, XFER_MEM_FILL)
+      .set_max_dim(3);
+    }
 
     xdq.add_to_manager(bgwork);
   }
@@ -5627,14 +5543,16 @@ namespace Realm {
 					   const std::vector<XferDesPortInfo>& outputs_info,
 					   int priority,
 					   XferDesRedopInfo redop_info,
-					   const void *fill_data, size_t fill_size)
+					   const void *fill_data,
+                                           size_t fill_size,
+                                           size_t fill_total)
   {
     assert(redop_info.id == 0); // TODO: add support
     assert(fill_size > 0);
     return new MemfillXferDes(dma_op, this, launch_node, guid,
 			      inputs_info, outputs_info,
 			      priority,
-			      fill_data, fill_size);
+			      fill_data, fill_size, fill_total);
   }
 
   long MemfillChannel::submit(Request** requests, long nr)
@@ -5662,16 +5580,25 @@ namespace Realm {
     // all local cpu memories are valid sources and dests
     std::vector<Memory> local_cpu_mems;
     MemcpyChannel::enumerate_local_cpu_memories(local_cpu_mems);
+    std::vector<Memory> remote_shared_mems;
+    enumerate_remote_shared_mems(remote_shared_mems);
 
     add_path(local_cpu_mems, local_cpu_mems,
              bw, latency, frag_overhead, XFER_MEM_CPY)
       .set_max_dim(3)
       .allow_redops();
 
+    if (remote_shared_mems.size() > 0) {
+      add_path(local_cpu_mems, remote_shared_mems,
+              bw, latency, frag_overhead, XFER_MEM_CPY)
+        .set_max_dim(3)
+        .allow_redops();
+    }
+
     xdq.add_to_manager(bgwork);
   }
 
-  uint64_t MemreduceChannel::supports_path(Memory src_mem, Memory dst_mem,
+  uint64_t MemreduceChannel::supports_path(ChannelCopyInfo channel_copy_info,
                                            CustomSerdezID src_serdez_id,
                                            CustomSerdezID dst_serdez_id,
                                            ReductionOpID redop_id,
@@ -5687,7 +5614,7 @@ namespace Realm {
       return 0;
 
     // otherwise consult the normal supports_path logic
-    return Channel::supports_path(src_mem, dst_mem,
+    return Channel::supports_path(channel_copy_info,
                                   src_serdez_id, dst_serdez_id, redop_id,
                                   total_bytes, src_frags, dst_frags,
                                   kind_ret, bw_ret, lat_ret);
@@ -5700,7 +5627,9 @@ namespace Realm {
                                              const std::vector<XferDesPortInfo>& outputs_info,
                                              int priority,
                                              XferDesRedopInfo redop_info,
-                                             const void *fill_data, size_t fill_size)
+                                             const void *fill_data,
+                                             size_t fill_size,
+                                             size_t fill_total)
   {
     assert(redop_info.id != 0); // redop is required
     assert(fill_size == 0);
@@ -5758,7 +5687,9 @@ namespace Realm {
 					      const std::vector<XferDesPortInfo>& outputs_info,
 					      int priority,
 					      XferDesRedopInfo redop_info,
-					      const void *fill_data, size_t fill_size)
+					      const void *fill_data,
+                                              size_t fill_size,
+                                              size_t fill_total)
       {
 	assert(redop_info.id == 0);
 	assert(fill_size == 0);
@@ -5826,7 +5757,9 @@ namespace Realm {
 						   const std::vector<XferDesPortInfo>& outputs_info,
 						   int priority,
 						   XferDesRedopInfo redop_info,
-						   const void *fill_data, size_t fill_size)
+						   const void *fill_data,
+                                                   size_t fill_size,
+                                                   size_t fill_total)
       {
 	assert(redop_info.id == 0);
 	assert(fill_size == 0);
@@ -5837,6 +5770,9 @@ namespace Realm {
 
       long RemoteWriteChannel::submit(Request** requests, long nr)
       {
+        // should not be reached
+        assert(0);
+#if 0 // TODO: DELETE
         for (long i = 0; i < nr; i ++) {
           RemoteWriteRequest* req = (RemoteWriteRequest*) requests[i];
 	  XferDes::XferPort *in_port = &req->xd->input_ports[req->src_port_idx];
@@ -5896,9 +5832,11 @@ namespace Realm {
                                                       PAYLOAD_KEEPREG,
                                                       req->dst_buf);*/
         }
+#endif
         return nr;
       }
 
+#if 0 // TODO: DELETE
       /*static*/
       void XferDesRemoteWriteMessage::handle_message(NodeID sender,
 						     const XferDesRemoteWriteMessage &args,
@@ -5942,6 +5880,7 @@ namespace Realm {
         req->xd->notify_request_read_done(req);
         req->xd->notify_request_write_done(req);
       }
+#endif
 
       /*static*/ void XferDesDestroyMessage::handle_message(NodeID sender,
 							    const XferDesDestroyMessage &args,
@@ -6381,8 +6320,10 @@ namespace Realm {
 
 ActiveMessageHandlerReg<SimpleXferDesCreateMessage> simple_xfer_des_create_message_handler;
 ActiveMessageHandlerReg<NotifyXferDesCompleteMessage> notify_xfer_des_complete_handler;
+#if 0 // TODO: DELETE
 ActiveMessageHandlerReg<XferDesRemoteWriteMessage> xfer_des_remote_write_handler;
 ActiveMessageHandlerReg<XferDesRemoteWriteAckMessage> xfer_des_remote_write_ack_handler;
+#endif
 ActiveMessageHandlerReg<XferDesDestroyMessage> xfer_des_destroy_message_handler;
 ActiveMessageHandlerReg<UpdateBytesTotalMessage> update_bytes_total_message_handler;
 ActiveMessageHandlerReg<UpdateBytesWriteMessage> update_bytes_write_message_handler;

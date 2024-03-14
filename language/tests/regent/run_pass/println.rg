@@ -1,4 +1,4 @@
--- Copyright 2022 Stanford University
+-- Copyright 2024 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -21,7 +21,8 @@ task main()
   var b : uint16 = 65535
   var c : int32 = -12345678
   var d : uint64 = 1234
-  format.println("Hello {} {} {} {} world!", a, b, c, d)
+  var e : bool = true
+  format.println("Hello {} {} {} {} {} world!", a, b, c, d, e)
 
   var z : float = 1.23
   var w : double = 3.45

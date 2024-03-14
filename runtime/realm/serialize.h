@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -89,6 +89,9 @@ char operator,(const is_copy_serializable::inner&, const T&);
   template <P> void *operator,(const is_copy_serializable::inner&, const T&);
 #define TEMPLATE_TYPE_IS_SERIALIZABLE2(P1,P2,T1,T2)			\
   template <P1,P2> void *operator,(const is_copy_serializable::inner&, const T1,T2&);
+#define TEMPLATE_TYPE_IS_SERIALIZABLE3(P1, P2, P3, T1, T2, T3)                           \
+  template <P1, P2, P3>                                                                  \
+  void *operator,(const is_copy_serializable::inner &, const T1, T2, T3 &);
 
 namespace Realm {
   namespace Serialization {
@@ -110,7 +113,6 @@ namespace Realm {
 
       ptrdiff_t bytes_left(void) const;
 
-      bool enforce_alignment(size_t granularity);
       bool append_bytes(const void *data, size_t datalen);
       template <typename T> bool append_serializable(const T& data);
 
@@ -134,7 +136,6 @@ namespace Realm {
       void *detach_buffer(ptrdiff_t max_wasted_bytes = 0);
       ByteArray detach_bytearray(ptrdiff_t max_wasted_bytes = 0);
 
-      bool enforce_alignment(size_t granularity);
       bool append_bytes(const void *data, size_t datalen);
       template <typename T> bool append_serializable(const T& data);
 
@@ -154,7 +155,6 @@ namespace Realm {
 
       size_t bytes_used(void) const;
 
-      bool enforce_alignment(size_t granularity);
       bool append_bytes(const void *data, size_t datalen);
       template <typename T> bool append_serializable(const T& data);
 
@@ -173,7 +173,6 @@ namespace Realm {
 
       ptrdiff_t bytes_left(void) const;
 
-      bool enforce_alignment(size_t granularity);
       bool extract_bytes(void *data, size_t datalen);
       const void *peek_bytes(size_t datalen);
       template <typename T> bool extract_serializable(T& data);

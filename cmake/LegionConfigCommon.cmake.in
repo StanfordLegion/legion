@@ -3,12 +3,14 @@
 set(Legion_NETWORKS @Legion_NETWORKS@)
 set(Legion_EMBED_GASNet @Legion_EMBED_GASNet@)
 if("${Legion_NETWORKS}" MATCHES ".*gasnet(1|ex).*")
-  # define a GASNet::GASNet package that just points at:
-  #  gasnet libs (embedded or external) for static builds
-  #  external libs (e.g. mpi) needed in all cases
-  cmake_minimum_required(VERSION 3.11)  # required for adding libs to imported target
-  add_library(GASNet::GASNet INTERFACE IMPORTED)
-  target_link_libraries(GASNet::GASNet INTERFACE @GASNET_LINK_LIBRARIES_FOR_INSTALL@)
+  if(NOT TARGET GASNet::GASNet)
+    # define a GASNet::GASNet package that just points at:
+    #  gasnet libs (embedded or external) for static builds
+    #  external libs (e.g. mpi) needed in all cases
+    cmake_minimum_required(VERSION 3.11)  # required for adding libs to imported target
+    add_library(GASNet::GASNet INTERFACE IMPORTED)
+    target_link_libraries(GASNet::GASNet INTERFACE @GASNET_LINK_LIBRARIES_FOR_INSTALL@)
+  endif()
 endif()
 
 # LLVM is a private dependency and only needs to be pulled in for static
@@ -20,37 +22,20 @@ if((NOT @BUILD_SHARED_LIBS@) AND Legion_USE_LLVM)
   find_package(LLVM REQUIRED COMPONENTS ${Legion_LLVM_COMPONENTS})
 endif()
 
-# CUDA is only a private dependency of Legion but has a few usage requirements
-# so we add it in here
+# Find the CUDA Toolkit here
 set(Legion_USE_CUDA @Legion_USE_CUDA@)
 if(Legion_USE_CUDA)
-  set(CUDA_USE_STATIC_CUDA_RUNTIME @CUDA_USE_STATIC_CUDA_RUNTIME@)
-  find_package(CUDA REQUIRED)
-  if(@REALM_USE_CUDART_HIJACK@)
-    # Realm is providing entry points for the CUDA runtime API, so
-    # filter anything referring to *cudart* out of the CUDA_LIBRARIES
-    #  making sure our changes are visible to the scope above
-    list(FILTER CUDA_LIBRARIES EXCLUDE REGEX cudart)
-    set(CUDA_LIBRARIES ${CUDA_LIBRARIES} PARENT_SCOPE)
+  set(Legion_CUDA_ARCH @Legion_CUDA_ARCH@)
+  set(CMAKE_CUDA_RUNTIME_LIBRARY "@CMAKE_CUDA_RUNTIME_LIBRARY@")
+  find_package(CUDAToolkit REQUIRED)
+  if("${CUDA_cuda_driver_LIBRARY}" MATCHES ".*stubs.*")
+    get_filename_component(_cuda_stubs_path "${CUDA_cuda_driver_LIBRARY}" DIRECTORY)
+    list(APPEND CMAKE_PLATFORM_IMPLICIT_LINK_DIRECTORIES "${_cuda_stubs_path}")
+    unset(_cuda_stubs_path)
   endif()
 endif()
 
 include(${CMAKE_CURRENT_LIST_DIR}/LegionTargets.cmake)
-
-if(Legion_USE_CUDA AND NOT Legion_CUDA_NVCC_FLAGS_SET)
-  # CUDA has some issues propogating target interface properties so we
-  # have to extract them from the target and manually add them to the nvcc
-  # flags
-  set(PROP $<TARGET_PROPERTY:Legion::Legion,INTERFACE_COMPILE_OPTIONS>)
-  set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} ${PROP}")
-  set(PROP $<TARGET_PROPERTY:Legion::Legion,INTERFACE_COMPILE_DEFINITIONS>)
-  set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} $<$<BOOL:${PROP}>:-D$<JOIN:${PROP}, -D>>")
-  set(PROP $<TARGET_PROPERTY:Legion::Legion,INTERFACE_INCLUDE_DIRECTORIES>)
-  set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} $<$<BOOL:${PROP}>:-I$<JOIN:${PROP}, -I>>")
-
-  # Make sure we don't get duplicates
-  set(Legion_CUDA_NVCC_FLAGS_SET ON)
-endif()
 
 # HIP is only a private dependency of Legion but has a few usage requirements
 # so we add it in here
@@ -58,22 +43,6 @@ set(Legion_USE_HIP @Legion_USE_HIP@)
 if(Legion_USE_HIP)
   set(Legion_HIP_TARGET @Legion_HIP_TARGET@)
   find_package(HIP REQUIRED)
-endif()
-
-if(Legion_USE_HIP AND Legion_HIP_TARGET STREQUAL "CUDA" AND NOT Legion_HIP_HIPCC_FLAGS_SET)
-  # CUDA has some issues propogating target interface properties so we
-  # have to extract them from the target and manually add them to the nvcc
-  # flags
-  set(PROP $<TARGET_PROPERTY:Legion::Legion,INTERFACE_COMPILE_OPTIONS>)
-  set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} ${PROP}")
-  set(PROP $<TARGET_PROPERTY:Legion::Legion,INTERFACE_COMPILE_DEFINITIONS>)
-  set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} $<$<BOOL:${PROP}>:-D$<JOIN:${PROP}, -D>>")
-  set(PROP $<TARGET_PROPERTY:Legion::Legion,INTERFACE_INCLUDE_DIRECTORIES>)
-  set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} $<$<BOOL:${PROP}>:-I$<JOIN:${PROP}, -I>>")
-  set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} @HIPCC_FLAGS@")
-
-  # Make sure we don't get duplicates
-  set(Legion_HIP_HIPCC_FLAGS_SET ON)
 endif()
 
 if(Legion_USE_HIP AND Legion_HIP_TARGET STREQUAL "ROCM" AND NOT Legion_HIP_HIPCC_FLAGS_SET)

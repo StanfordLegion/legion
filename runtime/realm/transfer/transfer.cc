@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@
 // data transfer (a.k.a. dma) engine for Realm
 
 #include "realm/transfer/transfer.h"
+#include "realm/transfer/transfer_utils.h"
 #include "realm/transfer/channel.h"
 
 #include "realm/transfer/lowlevel_dma.h"
@@ -33,6 +34,13 @@ namespace Realm {
   extern Logger log_ib_alloc;
   Logger log_xplan("xplan");
   Logger log_xpath("xpath");
+  Logger log_xpath_cache("xpath_cache");
+
+  namespace Config {
+    // the size of the cache
+    size_t path_cache_lru_size = 0;
+    size_t ib_size_bytes = 65536;
+  };
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -54,7 +62,20 @@ namespace Realm {
     // should not be called
     assert(0);
   }
-  
+
+  size_t TransferIterator::get_base_offset(void) const
+  {
+    // should not be called
+    assert(0);
+    return 0;
+  }
+
+  size_t TransferIterator::get_address_size(void) const
+  {
+    // should not be called
+    assert(0);
+    return 0;
+  }
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -82,12 +103,15 @@ namespace Realm {
     virtual void confirm_step(void);
     virtual void cancel_step(void);
 
-    virtual bool get_addresses(AddressList &addrlist);
+    virtual size_t get_base_offset(void) const;
+
+    virtual bool get_addresses(AddressList &addrlist,
+                               const InstanceLayoutPieceBase *&nonaffine);
 
   protected:
-    virtual bool get_next_rect(Rect<N,T>& r, FieldID& fid,
-			       size_t& offset, size_t& fsize) = 0;
-    
+    virtual bool get_next_rect(Rect<N, T> &r, FieldID &fid, size_t &offset,
+                               size_t &fsize) = 0;
+
     bool have_rect, is_done;
     Rect<N,T> cur_rect;
     FieldID cur_field_id;
@@ -172,74 +196,33 @@ namespace Realm {
     }
   }
 
-  // finds the largest subrectangle of 'domain' that starts with 'start',
-  //  lies entirely within 'restriction', and is consistent with an iteration
-  //  order (over the original 'domain') of 'dim_order'
-  // the subrectangle is returned in 'subrect', the start of the next subrect
-  //  is in 'next_start', and the return value indicates whether the 'domain'
-  //  has been fully covered
   template <int N, typename T>
-  static bool next_subrect(const Rect<N,T>& domain, const Point<N,T>& start,
-                           const Rect<N,T>& restriction, const int *dim_order,
-                           Rect<N,T>& subrect, Point<N,T>& next_start)
+  static size_t get_layout_piece(const InstanceLayout<N, T> *inst_layout,
+                                 const InstanceLayoutPiece<N, T> *&layout_piece,
+                                 size_t field_id, size_t field_size, size_t field_offset,
+                                 int piece_idx)
   {
-    // special case for when we can do the whole domain in one subrect
-    if((start == domain.lo) && restriction.contains(domain)) {
-      subrect = domain;
-      return true;
-    }
-
-#ifdef DEBUG_REALM
-    // starting point better be inside the restriction
-    assert(restriction.contains(start));
-#endif
-    subrect.lo = start;
-
-    for(int di = 0; di < N; di++) {
-      int d = dim_order[di];
-
-      // can we go to the end of the domain in this dimension?
-      if(domain.hi[d] <= restriction.hi[d]) {
-        // we can go to the end of the domain in this dimension ...
-        subrect.hi[d] = domain.hi[d];
-        next_start[d] = domain.lo[d];
-
-        if(start[d] == domain.lo[d]) {
-          // ... and since we started at the start, we can continue to next dim
-          continue;
-        } else {
-          // ... but we have to stop since this wasn't a full span
-          if(++di < N) {
-            d = dim_order[di];
-            subrect.hi[d] = start[d];
-            next_start[d] = start[d] + 1;
-
-            while(++di < N) {
-              d = dim_order[di];
-              subrect.hi[d] = start[d];
-              next_start[d] = start[d];
-            }
-
-            return false;  // still more to do
-          }
-        }
-      } else {
-        // we didn't get to the end, so we'll have to pick up where we left off
-        subrect.hi[d] = restriction.hi[d];
-        next_start[d] = restriction.hi[d] + 1;
-
-        while(++di < N) {
-          d = dim_order[di];
-          subrect.hi[d] = start[d];
-          next_start[d] = start[d];
-        }
-
-        return false;  // still more to do
+    size_t field_rel_offset;
+    {
+      std::map<FieldID, InstanceLayoutGeneric::FieldLayout>::const_iterator it =
+          inst_layout->fields.find(field_id);
+      assert(it != inst_layout->fields.end());
+      assert((field_offset + field_size) <= size_t(it->second.size_in_bytes));
+      const InstancePieceList<N, T> &piece_list =
+          inst_layout->piece_lists[it->second.list_idx];
+      assert(piece_idx >= 0);
+      assert(piece_list.pieces.size() > static_cast<size_t>(piece_idx));
+      layout_piece = piece_list.pieces[piece_idx];
+      // TODO(apryakhin@): Consider adding point lookup.
+      // layout_piece = piece_list.find_piece(cur_point) and testing
+      // for non-affine layouts.
+      if(REALM_UNLIKELY(layout_piece == 0)) {
+        abort();
       }
+      assert(layout_piece->layout_type == PieceLayoutTypes::AffineLayoutType);
+      field_rel_offset = it->second.rel_offset + field_offset;
     }
-
-    // if we got through all dimensions, we're done with this domain
-    return true;
+    return field_rel_offset;
   }
 
   template <int N, typename T>
@@ -449,8 +432,9 @@ namespace Realm {
     }
 
     // offer the rectangle - it can be reduced by pruning dimensions
-    int ndims = info.set_rect(inst_impl, layout_piece, N,
-                              target_lo, target_hi, dim_order);
+    int ndims = info.set_rect(inst_impl, layout_piece,
+                              cur_field_size, cur_field_offset,
+                              N, target_lo, target_hi, dim_order);
 
     // if pruning did occur, update target_subrect and cur_bytes to match
     if(ndims < N) {
@@ -512,11 +496,20 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  bool TransferIteratorBase<N,T>::get_addresses(AddressList &addrlist)
+  uintptr_t TransferIteratorBase<N, T>::get_base_offset(void) const
+  {
+    return inst_impl->metadata.inst_offset;
+  }
+
+  template <int N, typename T>
+  bool TransferIteratorBase<N,T>::get_addresses(AddressList &addrlist,
+                                                const InstanceLayoutPieceBase *&nonaffine)
   {
 #ifdef DEBUG_REALM
     assert(!tentative_valid);
 #endif
+
+    nonaffine = 0;
 
     while(!done()) {
       if(!have_rect)
@@ -537,9 +530,18 @@ namespace Realm {
 	assert((cur_field_offset + cur_field_size) <= size_t(it->second.size_in_bytes));
 	const InstancePieceList<N,T>& piece_list = inst_layout->piece_lists[it->second.list_idx];
 	layout_piece = piece_list.find_piece(cur_point);
-        if(REALM_UNLIKELY(layout_piece == 0)) {
-          log_dma.fatal() << "no piece found for " << cur_point << " in instance " << inst_impl->me << " (list: " << piece_list << ")";
+        log_dma.debug() << "Find piece found for " << cur_point
+                        << " in instance " << inst_impl->me
+                        << " (list: " << piece_list << ")";
+        if (REALM_UNLIKELY(layout_piece == 0)) {
+          log_dma.fatal() << "no piece found for " << cur_point;
           abort();
+        }
+        if(layout_piece->layout_type != PieceLayoutTypes::AffineLayoutType) {
+          // can't handle this piece here - let the caller know what the
+          //  non-affine piece is and maybe it can handle it
+          nonaffine = layout_piece;
+          return true;
         }
 	field_rel_offset = it->second.rel_offset + cur_field_offset;
       }
@@ -596,11 +598,16 @@ namespace Realm {
 	  break;
 	}
       }
-      //log_dma.print() << "step: cr=" << cur_rect << " bounds=" << layout_piece->bounds << " tgt=" << target_subrect << " next=" << cur_point << " (" << have_rect << ")";
+      log_dma.debug() << "step: cur_rect=" << cur_rect
+                      << " layout_bounds=" << layout_piece->bounds
+                      << " target_subrect=" << target_subrect
+                      << " next_point=" << cur_point
+                      << " (have_rect=" << have_rect << ")";
 #ifdef DEBUG_REALM
       assert(layout_piece->bounds.contains(target_subrect));
 #endif
 
+      // TODO: remove now-redundant condition here
       if(layout_piece->layout_type == PieceLayoutTypes::AffineLayoutType) {
 	const AffineLayoutPiece<N,T> *affine = static_cast<const AffineLayoutPiece<N,T> *>(layout_piece);
 
@@ -652,7 +659,10 @@ namespace Realm {
 
 	  addr_data[cur_dim * 2] = total_count;
 	  addr_data[cur_dim * 2 + 1] = stride;
-	  total_bytes *= total_count;
+          log_dma.debug() << "Add addr data dim=" << cur_dim
+                          << " total_count=" << total_count
+                          << " stride=" << stride;
+          total_bytes *= total_count;
 	  cur_dim++;
 	}
 
@@ -660,6 +670,8 @@ namespace Realm {
 	//  record
 	addr_data[0] = (bytes << 4) + cur_dim;
 	addrlist.commit_nd_entry(cur_dim, total_bytes);
+        log_dma.debug() << "Finalize addr data dim=" << cur_dim
+                        << " total_bytes" << total_bytes;
       } else {
 	assert(0 && "no support for non-affine pieces yet");
       }
@@ -864,6 +876,293 @@ namespace Realm {
     return true;
   }
 
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class WrappingTransferIteratorIndirect<N,T>
+  //
+
+  template <int N, typename T>
+  class WrappingTransferIteratorIndirect : public TransferIteratorBase<N, T> {
+  protected:
+    WrappingTransferIteratorIndirect(void); // used by deserializer
+  public:
+    WrappingTransferIteratorIndirect(RegionInstance inst,
+                                     const std::vector<FieldID> &_fields,
+                                     const std::vector<size_t> &_fld_offsets,
+                                     const std::vector<size_t> &_fld_sizes);
+
+    template <typename S>
+    static TransferIterator *deserialize_new(S &deserializer);
+
+    virtual ~WrappingTransferIteratorIndirect(void);
+
+    virtual Event request_metadata(void);
+
+    // specify the xd port used for indirect address flow control, if any
+    virtual void set_indirect_input_port(XferDes *xd, int port_idx,
+                                         TransferIterator *inner_iter);
+
+    virtual bool get_addresses(AddressList &addrlist,
+                               const InstanceLayoutPieceBase *&nonaffine);
+
+    virtual size_t get_base_offset(void) const;
+
+    virtual void reset(void);
+
+    virtual size_t get_address_size(void) const;
+    virtual size_t step(size_t max_bytes, TransferIterator::AddressInfo &info,
+                        unsigned flags, bool tentative = false);
+
+    static Serialization::PolymorphicSerdezSubclass<
+        TransferIterator, WrappingTransferIteratorIndirect<N, T>>
+        serdez_subclass;
+
+    template <typename S>
+    bool serialize(S &serializer) const;
+
+  protected:
+    virtual bool get_next_rect(Rect<N, T> &r, FieldID &fid, size_t &offset,
+                               size_t &fsize);
+
+    std::vector<FieldID> fields;
+    std::vector<size_t> fld_offsets, fld_sizes;
+    XferDes *indirect_xd;
+    size_t piece_idx;
+    int indirect_port_idx;
+    TransferIterator *addrs_in;
+    size_t addrs_in_offset = 0;
+    size_t point_pos = 0;
+    size_t num_points = 0;
+    static const size_t MAX_POINTS = 4194304;
+  };
+
+  template <int N, typename T>
+  WrappingTransferIteratorIndirect<N, T>::WrappingTransferIteratorIndirect(void)
+  {}
+
+  template <int N, typename T>
+  WrappingTransferIteratorIndirect<N, T>::WrappingTransferIteratorIndirect(
+      RegionInstance inst, const std::vector<FieldID> &_fields,
+      const std::vector<size_t> &_fld_offsets, const std::vector<size_t> &_fld_sizes)
+    : TransferIteratorBase<N, T>(inst, 0)
+    , fields(_fields)
+    , fld_offsets(_fld_offsets)
+    , fld_sizes(_fld_sizes)
+    , piece_idx(0)
+  {}
+
+  template <int N, typename T>
+  /*static*/ Serialization::PolymorphicSerdezSubclass<
+      TransferIterator, WrappingTransferIteratorIndirect<N, T>>
+      WrappingTransferIteratorIndirect<N, T>::serdez_subclass;
+
+  template <int N, typename T>
+  template <typename S>
+  bool WrappingTransferIteratorIndirect<N, T>::serialize(S &serializer) const
+  {
+    return ((serializer << this->inst_impl->me) && (serializer << fields) &&
+            (serializer << fld_offsets) && (serializer << fld_sizes));
+  }
+
+  template <int N, typename T>
+  template <typename S>
+  /*static*/ TransferIterator *
+  WrappingTransferIteratorIndirect<N, T>::deserialize_new(S &deserializer)
+  {
+    RegionInstance inst;
+    std::vector<FieldID> fields;
+    std::vector<size_t> fld_offsets, fld_sizes;
+
+    if(!((deserializer >> inst) && (deserializer >> fields) &&
+         (deserializer >> fld_offsets) && (deserializer >> fld_sizes)))
+      return 0;
+
+    return new WrappingTransferIteratorIndirect<N, T>(inst, fields, fld_offsets,
+                                                      fld_sizes);
+  }
+
+  template <int N, typename T>
+  WrappingTransferIteratorIndirect<N, T>::~WrappingTransferIteratorIndirect(void)
+  {}
+
+  template <int N, typename T>
+  Event WrappingTransferIteratorIndirect<N, T>::request_metadata(void)
+  {
+    return TransferIteratorBase<N, T>::request_metadata();
+  }
+
+  template <int N, typename T>
+  void WrappingTransferIteratorIndirect<N, T>::set_indirect_input_port(
+      XferDes *xd, int port_idx, TransferIterator *inner_iter)
+  {
+    indirect_xd = xd;
+    indirect_port_idx = port_idx;
+    addrs_in = inner_iter;
+  }
+
+  template <int N, typename T>
+  void WrappingTransferIteratorIndirect<N, T>::reset(void)
+  {
+    TransferIteratorBase<N, T>::reset();
+    piece_idx = 0;
+  }
+
+  template <int N, typename T>
+  size_t WrappingTransferIteratorIndirect<N, T>::get_address_size(void) const
+  {
+    return sizeof(Point<N, T>);
+  }
+
+  template <int N, typename T>
+  uintptr_t WrappingTransferIteratorIndirect<N, T>::get_base_offset(void) const
+  {
+    return addrs_in_offset;
+  }
+
+  template <int N, typename T>
+  size_t WrappingTransferIteratorIndirect<N, T>::step(size_t max_bytes,
+                                                      TransferIterator::AddressInfo &info,
+                                                      unsigned flags,
+                                                      bool tentative /*= false*/)
+  {
+    FieldID cur_field_id = fields[0];
+    size_t cur_field_offset = fld_offsets[0];
+    size_t cur_field_size = fld_sizes[0];
+
+    if(this->inst_layout == 0) {
+      assert(this->inst_impl->metadata.is_valid());
+      this->inst_layout =
+          checked_cast<const InstanceLayout<N, T> *>(this->inst_impl->metadata.layout);
+    }
+
+    assert(this->inst_layout);
+    std::map<FieldID, InstanceLayoutGeneric::FieldLayout>::const_iterator it =
+        this->inst_layout->fields.find(cur_field_id);
+    assert(it != this->inst_layout->fields.end());
+    size_t pieces = this->inst_layout->piece_lists[it->second.list_idx].pieces.size();
+
+    if(piece_idx < pieces) {
+      const InstanceLayoutPiece<N, T> *layout_piece;
+      size_t field_rel_offset =
+          get_layout_piece(this->inst_layout, layout_piece, cur_field_id, cur_field_size,
+                           cur_field_offset, piece_idx);
+
+      if(layout_piece->layout_type == PieceLayoutTypes::AffineLayoutType) {
+        const AffineLayoutPiece<N, T> *affine =
+            static_cast<const AffineLayoutPiece<N, T> *>(layout_piece);
+
+        info.base_offset = (this->inst_impl->metadata.inst_offset + affine->offset +
+                            affine->strides.dot(affine->bounds.lo) + field_rel_offset);
+
+        size_t cur_dim = 0;
+        info.bytes_per_chunk = affine->strides[cur_dim++];
+        if(N > cur_dim) {
+          info.num_lines = affine->bounds.hi[cur_dim] - affine->bounds.lo[cur_dim] + 1;
+          info.line_stride = affine->strides[cur_dim];
+        }
+        cur_dim++;
+        if(N > cur_dim) {
+          info.num_planes = affine->bounds.hi[cur_dim] - affine->bounds.lo[cur_dim] + 1;
+          info.plane_stride = affine->strides[cur_dim];
+        }
+        piece_idx++;
+      }
+    }
+    piece_idx %= pieces;
+    return 0;
+  }
+
+  template <int N, typename T>
+  bool WrappingTransferIteratorIndirect<N, T>::get_addresses(
+      AddressList &addrlist, const InstanceLayoutPieceBase *&nonaffine)
+  {
+    nonaffine = 0;
+
+    while(!this->done()) {
+      if(!this->have_rect) {
+        return false;
+      }
+
+      size_t *addr_data = addrlist.begin_nd_entry(1);
+      if(!addr_data) {
+        return true;
+      }
+
+      int cur_dim = 1;
+      size_t total_bytes = this->cur_rect.volume() * this->cur_field_size;
+      this->have_rect = false;
+      addr_data[0] = ((total_bytes) << 4) + cur_dim;
+      addrlist.commit_nd_entry(cur_dim, total_bytes);
+      log_dma.debug() << "Finalize gather/scatter addr data dim=" << cur_dim
+                      << " total_bytes=" << total_bytes;
+      break;
+    }
+    return true;
+  }
+
+  template <int N, typename T>
+  bool WrappingTransferIteratorIndirect<N, T>::get_next_rect(Rect<N, T> &r, FieldID &fid,
+                                                             size_t &offset,
+                                                             size_t &fsize)
+  {
+    assert(fields.size() == 1);
+    fid = fields[0];
+    offset = fld_offsets[0];
+    fsize = fld_sizes[0];
+
+    r.lo = Point<N, T>::ZEROES();
+    r.hi = Point<N, T>::ZEROES();
+
+    addrs_in->done();
+
+    XferDes::XferPort &iip = indirect_xd->input_ports[indirect_port_idx];
+
+    bool nonempty = false;
+    while(true) {
+
+      if(point_pos * sizeof(Point<N, T>) > iip.local_bytes_total) {
+        return nonempty;
+      }
+
+      if(point_pos >= num_points) {
+        if(addrs_in->done()) {
+          this->is_done = true;
+          return nonempty;
+        }
+
+        TransferIterator::AddressInfo a_info;
+        size_t addr_max_bytes = sizeof(Point<N, T>) * MAX_POINTS;
+        if(indirect_xd != 0) {
+          if(iip.peer_guid != XferDes::XFERDES_NO_GUID) {
+            addr_max_bytes =
+                iip.seq_remote.span_exists(iip.local_bytes_total, addr_max_bytes);
+            size_t rem = addr_max_bytes % sizeof(Point<N, T>);
+            if(rem > 0) {
+              addr_max_bytes -= rem;
+            }
+            if(addr_max_bytes == 0) {
+              if(iip.remote_bytes_total.load() == iip.local_bytes_total)
+                this->is_done = true;
+              return nonempty;
+            }
+          }
+        }
+
+        size_t amt = addrs_in->step(addr_max_bytes, a_info, 0, false);
+        if(amt == 0) {
+          return nonempty;
+        }
+
+        // TODO: handle partial point reads
+        addrs_in_offset = a_info.base_offset;
+        num_points = amt / sizeof(Point<N, T>);
+      }
+      r.lo[0] = point_pos;
+      r.hi[0] = point_pos + num_points - 1;
+      point_pos += num_points;
+      nonempty = true;
+    }
+  }
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -892,8 +1191,7 @@ namespace Realm {
 
     // specify the xd port used for indirect address flow control, if any
     virtual void set_indirect_input_port(XferDes *xd, int port_idx,
-					 TransferIterator *inner_iter);
-
+                                         TransferIterator *inner_iter);
     virtual void reset(void);
 
     static Serialization::PolymorphicSerdezSubclass<TransferIterator, TransferIteratorIndirect<N,T> > serdez_subclass;
@@ -904,7 +1202,7 @@ namespace Realm {
   protected:
     virtual bool get_next_rect(Rect<N,T>& r, FieldID& fid,
 			       size_t& offset, size_t& fsize);
-    
+
     TransferIterator *addrs_in;
     Memory addrs_mem;
     intptr_t addrs_mem_base;
@@ -990,12 +1288,10 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  Event TransferIteratorIndirect<N,T>::request_metadata(void)
+  Event TransferIteratorIndirect<N, T>::request_metadata(void)
   {
-    Event ev1 = addrs_in->request_metadata();
-    //Event ev2 = is.make_valid();
-    Event ev3 = TransferIteratorBase<N,T>::request_metadata();
-    return Event::merge_events(ev1, /*ev2,*/ ev3);
+    return Event::merge_events(
+        {addrs_in->request_metadata(), TransferIteratorBase<N, T>::request_metadata()});
   }
 
   template <int N, typename T>
@@ -1006,7 +1302,6 @@ namespace Realm {
     indirect_xd = xd;
     indirect_port_idx = port_idx;
     addrs_in = inner_iter;
-
     assert(indirect_xd != 0);
     assert(indirect_port_idx >= 0);
     void *mem_base = indirect_xd->input_ports[indirect_port_idx].mem->get_direct_ptr(0, 0);
@@ -1020,7 +1315,7 @@ namespace Realm {
     TransferIteratorBase<N,T>::reset();
     addrs_in->reset();
   }
-  
+
   template <int N, typename T>
   bool TransferIteratorIndirect<N,T>::get_next_rect(Rect<N,T>& r,
 						    FieldID& fid,
@@ -1031,6 +1326,8 @@ namespace Realm {
     fid = fields[0];
     offset = fld_offsets[0];
     fsize = fld_sizes[0];
+
+    addrs_in->done();
 
     bool nonempty = false;
     int merge_dim = -1;
@@ -1049,6 +1346,10 @@ namespace Realm {
 	  if(iip.peer_guid != XferDes::XFERDES_NO_GUID) {
 	    addr_max_bytes = iip.seq_remote.span_exists(iip.local_bytes_total,
 							addr_max_bytes);
+            // round down to multiple of sizeof(Point<N,T>)
+            size_t rem = addr_max_bytes % sizeof(Point<N,T>);
+            if(rem > 0)
+              addr_max_bytes -= rem;
 	    if(addr_max_bytes == 0) {
 	      // end of data?
 	      if(iip.remote_bytes_total.load() == iip.local_bytes_total)
@@ -1057,18 +1358,34 @@ namespace Realm {
 	    }
 	  }
 	}
+
 	size_t amt = addrs_in->step(addr_max_bytes, a_info, 0,
 				    false /*!tentative*/);
-	if(amt == 0)
-	  return nonempty;
+
+        if(amt == 0) {
+          return nonempty;
+        }
+        memcpy(points,
+               reinterpret_cast<const void *>(addrs_mem_base + a_info.base_offset), amt);
+        // handle reads of partial points
+        while((amt % sizeof(Point<N,T>)) != 0) {
+          // get some more - should never be empty
+          size_t todo = addrs_in->step(addr_max_bytes - amt, a_info, 0,
+                                       false /*!tentative*/);
+          assert(todo > 0);
+
+          memcpy(reinterpret_cast<char *>(points) + amt,
+                 reinterpret_cast<const void *>(addrs_mem_base +
+                                                a_info.base_offset),
+                 todo);
+          amt += todo;
+        }
+
 	point_pos = 0;
 	num_points = amt / sizeof(Point<N,T>);
+        log_dma.debug() << "indirect-iterator read num_points=" << num_points;
 	assert(amt == (num_points * sizeof(Point<N,T>)));
 
-	memcpy(points,
-	       reinterpret_cast<const void *>(addrs_mem_base +
-					      a_info.base_offset),
-	       amt);
 	//log_dma.print() << "got points: " << points[0] << "(+" << (num_points - 1) << ")";
 	if(indirect_xd != 0) {
 	  XferDes::XferPort& iip = indirect_xd->input_ports[indirect_port_idx];
@@ -1087,7 +1404,8 @@ namespace Realm {
 	    // we've already chosen which dimension we can merge along
 	    for(int i = 0; i < N; i++)
 	      if(p[i] != (r.hi[i] + ((i == merge_dim) ? 1 : 0))) {
-		// merge fails - return what we have
+                log_dma.debug() << "indirect-iterator merge fails next_rect=" << r;
+                // merge fails - return what we have
 		return true;
 	      }
 	    // if we fall through, merging is ok
@@ -1114,6 +1432,7 @@ namespace Realm {
 	      r.hi = p;
 	      point_pos++;
 	    } else {
+              log_dma.debug() << "indirect-iterator next_rect=" << r;
 	      return true;
 	    }
 	  }
@@ -1125,7 +1444,6 @@ namespace Realm {
       }
     }
   }
-  
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -1311,6 +1629,10 @@ namespace Realm {
 	  if(iip.peer_guid != XferDes::XFERDES_NO_GUID) {
 	    addr_max_bytes = iip.seq_remote.span_exists(iip.local_bytes_total,
 							addr_max_bytes);
+            // round down to multiple of sizeof(Rect<N,T>)
+            size_t rem = addr_max_bytes % sizeof(Rect<N,T>);
+            if(rem > 0)
+              addr_max_bytes -= rem;
 	    if(addr_max_bytes == 0) {
 	      // end of data?
 	      if(iip.remote_bytes_total.load() == iip.local_bytes_total)
@@ -1323,14 +1645,28 @@ namespace Realm {
 				    false /*!tentative*/);
 	if(amt == 0)
 	  return nonempty;
-	rect_pos = 0;
-	num_rects = amt / sizeof(Rect<N,T>);
-	assert(amt == (num_rects * sizeof(Rect<N,T>)));
-
 	memcpy(rects,
 	       reinterpret_cast<const void *>(addrs_mem_base +
 					      a_info.base_offset),
 	       amt);
+        // handle reads of partial rects
+        while((amt % sizeof(Rect<N,T>)) != 0) {
+          // get some more - should never be empty
+          size_t todo = addrs_in->step(addr_max_bytes - amt, a_info, 0,
+                                       false /*!tentative*/);
+          assert(todo > 0);
+
+          memcpy(reinterpret_cast<char *>(rects) + amt,
+                 reinterpret_cast<const void *>(addrs_mem_base +
+                                                a_info.base_offset),
+                 todo);
+          amt += todo;
+        }
+
+	rect_pos = 0;
+	num_rects = amt / sizeof(Rect<N,T>);
+	assert(amt == (num_rects * sizeof(Rect<N,T>)));
+
 	//log_dma.print() << "got rects: " << rects[0] << "(+" << (num_rects - 1) << ")";
 	if(indirect_xd != 0) {
 	  XferDes::XferPort& iip = indirect_xd->input_ports[indirect_port_idx];
@@ -1997,7 +2333,8 @@ namespace Realm {
 				 const std::vector<XferDesPortInfo>& outputs_info,
 				 int priority,
 				 XferDesRedopInfo redop_info,
-				 const void *fill_data, size_t fill_size);
+				 const void *fill_data, size_t fill_size,
+                                 size_t fill_total);
 
     static ActiveMessageHandlerReg<AddressSplitXferDesCreateMessage<N,T> > areg;
 
@@ -2069,7 +2406,9 @@ namespace Realm {
 							const std::vector<XferDesPortInfo>& outputs_info,
 							int priority,
 							XferDesRedopInfo redop_info,
-							const void *fill_data, size_t fill_size)
+							const void *fill_data,
+                                                        size_t fill_size,
+                                                        size_t fill_total)
   {
     assert(redop_info.id == 0);
     assert(fill_size == 0);
@@ -2235,6 +2574,10 @@ namespace Realm {
 	  size_t max_bytes = MAX_POINTS * sizeof(Point<N,T>);
 	  if(input_ports[0].peer_guid != XFERDES_NO_GUID) {
 	    max_bytes = input_ports[0].seq_remote.span_exists(input_ports[0].local_bytes_total, max_bytes);
+            // round down to multiple of sizeof(Point<N,T>)
+            size_t rem = max_bytes % sizeof(Point<N,T>);
+            if(rem > 0)
+              max_bytes -= rem;
 	    if(max_bytes < sizeof(Point<N,T>)) {
               // check to see if this is the end of the input
               if(input_ports[0].local_bytes_total ==
@@ -2246,12 +2589,25 @@ namespace Realm {
 	  size_t bytes = input_ports[0].iter->step(max_bytes, p_info,
 						   0, false /*!tentative*/);
 	  if(bytes == 0) break;
-	  point_count = bytes / sizeof(Point<N,T>);
-	  assert(bytes == (point_count * sizeof(Point<N,T>)));
 	  const void *srcptr = input_ports[0].mem->get_direct_ptr(p_info.base_offset,
 								  bytes);
 	  assert(srcptr != 0);
 	  memcpy(points, srcptr, bytes);
+          // handle reads of partial points
+          while((bytes % sizeof(Point<N,T>)) != 0) {
+            // get some more - should never be empty
+            size_t todo = input_ports[0].iter->step(max_bytes - bytes, p_info,
+                                                    0, false /*!tentative*/);
+            assert(todo > 0);
+            const void *srcptr = input_ports[0].mem->get_direct_ptr(p_info.base_offset,
+                                                                    todo);
+            assert(srcptr != 0);
+            memcpy(reinterpret_cast<char *>(points) + bytes, srcptr, todo);
+            bytes += todo;
+          }
+
+	  point_count = bytes / sizeof(Point<N,T>);
+	  assert(bytes == (point_count * sizeof(Point<N,T>)));
 	  point_index = 0;
 	  rseqcache.add_span(0, input_ports[0].local_bytes_total, bytes);
 	  input_ports[0].local_bytes_total += bytes;
@@ -2278,14 +2634,18 @@ namespace Realm {
 				       sizeof(Point<N,T>)) < sizeof(Point<N,T>))
 	    break;
 	  TransferIterator::AddressInfo o_info;
-	  size_t bytes = op.iter->step(sizeof(Point<N,T>), o_info,
-				       0, false /*!tentative*/);
-	  assert(bytes == sizeof(Point<N,T>));
-	  void *dstptr = op.mem->get_direct_ptr(o_info.base_offset,
-						sizeof(Point<N,T>));
-	  assert(dstptr != 0);
-	  memcpy(dstptr, &points[point_index], sizeof(Point<N,T>));
-	  output_bytes += sizeof(Point<N,T>);
+          size_t partial = 0;
+          while(partial < sizeof(Point<N,T>)) {
+            size_t bytes = op.iter->step(sizeof(Point<N,T>) - partial, o_info,
+                                         0, false /*!tentative*/);
+            void *dstptr = op.mem->get_direct_ptr(o_info.base_offset, bytes);
+            assert(dstptr != 0);
+            memcpy(dstptr,
+                   reinterpret_cast<const char *>(&points[point_index])+partial,
+                   bytes);
+            partial += bytes;
+          }
+          output_bytes += sizeof(Point<N,T>);
 	}
 	output_count++;
 	point_index++;
@@ -2298,6 +2658,7 @@ namespace Realm {
 			   output_ports[output_space_id].local_bytes_total,
 			   output_bytes);
 	output_ports[output_space_id].local_bytes_total += output_bytes;
+	output_ports[output_space_id].local_bytes_cons.fetch_add(output_bytes);
 	did_work = true;
       }
 
@@ -2329,10 +2690,12 @@ namespace Realm {
           memcpy(dstptr, &cword, sizeof(unsigned));
 
           cp.local_bytes_total += sizeof(unsigned);
+          cp.local_bytes_cons.fetch_add(sizeof(unsigned));
         } while(!ctrl_sent);
 
 	if(input_done && ctrl_sent) {
-	  iteration_completed.store_release(true);
+          begin_completion();
+
 	  // mark all address streams as done (dummy write update)
 	  for(size_t i = 0; i < spaces.size(); i++)
 	    wseqcache.add_span(i, output_ports[i].local_bytes_total, 0);
@@ -2371,7 +2734,7 @@ namespace Realm {
   // transfer path search logic
   //
 
-  static bool best_channel_for_mem_pair(Memory src_mem, Memory dst_mem,
+  static bool best_channel_for_mem_pair(ChannelCopyInfo channel_copy_info,
                                         CustomSerdezID src_serdez_id,
                                         CustomSerdezID dst_serdez_id,
                                         ReductionOpID redop_id,
@@ -2383,8 +2746,8 @@ namespace Realm {
                                         XferDesKind& best_kind)
   {
     // consider dma channels available on either source or dest node
-    NodeID src_node = ID(src_mem).memory_owner_node();
-    NodeID dst_node = ID(dst_mem).memory_owner_node();
+    NodeID src_node = ID(channel_copy_info.src_mem).memory_owner_node();
+    NodeID dst_node = ID(channel_copy_info.dst_mem).memory_owner_node();
 
     best_cost = 0;
     best_channel = 0;
@@ -2396,7 +2759,7 @@ namespace Realm {
 	  it != n.dma_channels.end();
 	  ++it) {
         XferDesKind kind = XFER_NONE;
-        uint64_t cost = (*it)->supports_path(src_mem, dst_mem,
+        uint64_t cost = (*it)->supports_path(channel_copy_info,
                                              src_serdez_id, dst_serdez_id,
                                              redop_id,
                                              total_bytes, src_frags, dst_frags,
@@ -2415,7 +2778,7 @@ namespace Realm {
 	  it != n.dma_channels.end();
 	  ++it) {
         XferDesKind kind = XFER_NONE;
-        uint64_t cost = (*it)->supports_path(src_mem, dst_mem,
+        uint64_t cost = (*it)->supports_path(channel_copy_info,
                                              src_serdez_id, dst_serdez_id,
                                              redop_id,
                                              total_bytes, src_frags, dst_frags,
@@ -2431,7 +2794,185 @@ namespace Realm {
     return (best_cost != 0);
   }
 
-  static bool find_fastest_path(Memory src_mem, Memory dst_mem,
+// #define PATH_CACHE_EARLY_INIT
+
+  // a map to cache the path from src memory to dst memory. 
+  //  the key is the pair of src and dst memory id. 
+  //  the value is a LRU. 
+  //  The LRU is indexed by LRUKey, the value is MemPathInfo
+  static std::map<std::pair<realm_id_t, realm_id_t>, PathLRU *> path_cache;
+
+  // a RWLock to control the access to the path_cache
+  static RWLock path_cache_rwlock;
+  static bool path_cache_inited = false;
+
+  // counters for calculating cache misses and hits
+  atomic<unsigned int> nb_cache_miss(0);
+  atomic<unsigned int> nb_cache_hit(0);
+
+  // The path cache initialization function, which is called by 
+  //   RuntimeImpl::configure_from_command_line
+  void init_path_cache(void)
+  {
+    assert(path_cache_inited == false);
+#ifdef PATH_CACHE_EARLY_INIT
+    std::vector<Memory> memories;
+    Machine machine = Machine::get_machine();
+    for(Machine::MemoryQuery::iterator it = Machine::MemoryQuery(machine).begin(); it; ++it) {
+      Memory m = *it;
+      memories.push_back(m);
+    }
+    for(std::vector<Memory>::const_iterator src_it = memories.begin(); src_it != memories.end(); ++src_it) {
+      for(std::vector<Memory>::const_iterator dst_it = memories.begin(); dst_it != memories.end(); ++dst_it) {
+        std::pair<realm_id_t, realm_id_t> key((*src_it).id, (*dst_it).id);
+        if (path_cache.find(key) != path_cache.end()) {
+          assert(0);
+        }
+        PathLRU *lru = new PathLRU(Config::path_cache_lru_size);
+        path_cache[key] = lru;
+      }
+    }
+#endif
+    path_cache_inited = true;
+    nb_cache_miss.store_release(0);
+    nb_cache_hit.store_release(0);
+  }
+
+  // The path cache finalize function, which is called by
+  //   RuntimeImpl::wait_for_shutdown
+  void finalize_path_cache(void)
+  {
+    assert(path_cache_inited == true);
+    log_xpath_cache.info() << "Cache Miss: " << nb_cache_miss.load_fenced() << " Cache Hit: " << nb_cache_hit.load_fenced();
+    std::map<std::pair<realm_id_t, realm_id_t>, PathLRU *>::iterator it;
+    for (it = path_cache.begin(); it != path_cache.end(); it++) {
+      delete it->second;
+    }
+    path_cache.clear();
+    path_cache_inited = false;
+  }
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class PathLRU::LRUKey
+
+  PathLRU::LRUKey::LRUKey(const CustomSerdezID serdez_id, const ReductionOpID redop_id, 
+                          const size_t total_bytes, 
+                          const std::vector<size_t> src_frags, 
+                          const std::vector<size_t> dst_frags)
+  : timestamp(0), serdez_id(serdez_id), redop_id(redop_id), total_bytes(total_bytes), 
+    src_frags(src_frags), dst_frags(dst_frags)
+  {
+  }
+
+  bool PathLRU::LRUKey::operator==(const LRUKey &rhs) const 
+  {
+    if ( (serdez_id == rhs.serdez_id) && (redop_id == rhs.redop_id) && 
+         (total_bytes == rhs.total_bytes) && 
+         (src_frags == rhs.src_frags) && (dst_frags == rhs.dst_frags)) {
+      return true;
+    } else {
+      return false;
+    }
+  }
+
+  std::ostream& operator<<(std::ostream& out, const PathLRU::LRUKey& lru_key)
+  {
+    out << "LRUKey:{";
+    out << " serdez_id: " << lru_key.serdez_id;
+    out << " redop_id: " << lru_key.redop_id;
+    out << " size: " << lru_key.total_bytes;
+    out << " src_frags:(";
+    for (size_t i = 0; i < lru_key.src_frags.size(); i++) {
+      out << lru_key.src_frags[i] << ",";
+    }
+    out << ")";
+    out << " dst_frags:(";
+    for (size_t i = 0; i < lru_key.dst_frags.size(); i++) {
+      out << lru_key.dst_frags[i] << ",";
+    }
+    out << ") }";
+    return out;
+  }
+
+  std::ostream& operator<<(std::ostream& out, const MemPathInfo& info)
+  {
+    out << "MemPathInfo:{ ";
+    for (size_t i = 0; i < info.path.size(); i++) {
+      out << "Mem:" << info.path[i] << " kind:" << info.path[i].kind() << " ";
+    }
+    for (size_t i = 0; i < info.xd_channels.size(); i++) {
+      out << "Channel:" << info.xd_channels[i]->kind << " ";
+    }
+    out << "}";
+    return out;
+  }
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class PathLRU
+
+  PathLRU::PathLRU(size_t size)
+  : max_size(size), timestamp(0)
+  {
+  }
+
+  void PathLRU::miss(LRUKey &key, const MemPathInfo &path)
+  {
+    unsigned long current_timestamp = timestamp.fetch_add_acqrel(1);
+    assert(current_timestamp <= ULONG_MAX);
+    // get the current timestamp and assign it to the lru key
+    key.timestamp.store_release(current_timestamp);
+    std::pair<LRUKey,MemPathInfo> item = std::make_pair(key, path);
+    if (item_list.size() < max_size) {
+      // if the LRU not full, we just insert the item
+      item_list.push_back(item);
+    } else {
+      // if the LRU is full, we need to iterate the LRU to find 
+      //   the item that has the earliest timestamp, and replace 
+      //   it with the new item
+      assert(item_list.size() == max_size);
+      size_t earliest_idx = 0;
+      unsigned long earliest_timestamp = item_list[earliest_idx].first.timestamp.load(); 
+      for (size_t i = 0; i < item_list.size(); i++) {
+        unsigned long t = item_list[i].first.timestamp.load();
+        if (t < earliest_timestamp) {
+        earliest_timestamp = t;
+        earliest_idx = i;
+        }
+      }
+      // log_xpath_cache.debug() << "Cache full, remove LRUKey: " << item_list[earliest_idx].first;
+      item_list[earliest_idx] = item;
+    }
+  }
+
+  void PathLRU::hit(PathLRU::PathLRUIterator it)
+  {
+    unsigned long current_timestamp = timestamp.fetch_add_acqrel(1);
+    assert(current_timestamp <= ULONG_MAX);
+    // update the timestamp of the lru key with the newest one.   
+    //   When 2 threads calls the hit, even though we can not guarantee that
+    //   it->first.timestamp gets the latest timestamp, but it is fine
+    //   because it->first.timestamp > timestamps of other items in the LRU,
+    //   which guarantees the correctness of LRU.
+    it->first.timestamp.store_release(current_timestamp);
+  }
+
+  PathLRU::PathLRUIterator PathLRU::find(const PathLRU::LRUKey &key)
+  {
+    PathLRUIterator it;
+    for (it = item_list.begin(); it != item_list.end(); it++) {
+      if (it->first == key) break;
+    }
+    return it;
+  }
+
+  PathLRU::PathLRUIterator PathLRU::end(void)
+  {
+    return item_list.end();
+  }
+
+  static bool find_fastest_path(ChannelCopyInfo channel_copy_info,
                                 CustomSerdezID serdez_id,
                                 ReductionOpID redop_id,
                                 size_t total_bytes,
@@ -2440,6 +2981,10 @@ namespace Realm {
                                 MemPathInfo& info,
                                 bool skip_final_memcpy = false)
   {
+    Memory src_mem = channel_copy_info.src_mem;
+    Memory dst_mem = channel_copy_info.dst_mem;
+    NodeID src_node = ID(src_mem).memory_owner_node();
+    NodeID dst_node = ID(dst_mem).memory_owner_node();
     std::vector<size_t> empty_vec;
     log_xpath.info() << "FFP: " << src_mem << "->" << dst_mem
                      << " serdez=" << serdez_id
@@ -2448,20 +2993,64 @@ namespace Realm {
                      << " frags=" << PrettyVector<size_t>(*(src_frags ? src_frags : &empty_vec))
                      << "/" << PrettyVector<size_t>(*(dst_frags ? dst_frags : &empty_vec));
 
+    if (path_cache_inited) {
+      std::pair<realm_id_t, realm_id_t> key(src_mem.id, dst_mem.id);
+      PathLRU *lru = nullptr;
+#ifdef PATH_CACHE_EARLY_INIT
+      std::map<std::pair<realm_id_t, realm_id_t>, PathLRU *>::iterator path_cache_it;
+      path_cache_it = path_cache.find(key);
+      assert(path_cache_it != path_cache.end());
+      lru = path_cache_it->second;
+#else
+      {
+        // first check if the key is existed, if not create a PathLRU for the given key
+        RWLock::AutoReaderLock arl(path_cache_rwlock);
+        if (path_cache.find(key) == path_cache.end()) {
+          // drop reader lock and take writer lock
+          arl.release();
+          RWLock::AutoWriterLock awl(path_cache_rwlock);
+          // double check if the key is existed because it could be created by 
+          //   another thread before we get the wrlock. 
+          if (path_cache.find(key) == path_cache.end()) {
+            path_cache[key] = new PathLRU(Config::path_cache_lru_size);
+          }
+        }
+        lru = path_cache.find(key)->second;
+      }
+#endif
+      assert(lru != nullptr);
+      // check if we can find the LRU key inside the LRU. If yes, we call the hit
+      {
+        PathLRU::LRUKey lru_key(serdez_id, redop_id, total_bytes, *src_frags, *dst_frags);
+        RWLock::AutoReaderLock arl(lru->rwlock);
+        PathLRU::PathLRUIterator lru_it = lru->find(lru_key);
+        if (lru_it != lru->end()) {
+          info = lru_it->second;
+          lru->hit(lru_it);
+          nb_cache_hit.fetch_add(1);
+          log_xpath_cache.debug() << "src:" << src_mem << ", dst:" << dst_mem << ", " << info << ", " << lru_key << ", Hit";
+          arl.release();
+          return true;
+        }
+      }
+    }
+
     // baseline - is a direct path possible?
     uint64_t best_cost = 0;
     {
       Channel *channel;
       XferDesKind kind;
-      if(best_channel_for_mem_pair(src_mem, dst_mem, serdez_id, serdez_id,
+      if(best_channel_for_mem_pair(channel_copy_info, serdez_id, serdez_id,
                                    redop_id, total_bytes, src_frags, dst_frags,
                                    best_cost, channel, kind)) {
-        log_xpath.info() << "direct: " << src_mem << "->" << dst_mem
-                         << " cost=" << best_cost;
-	info.path.assign(1, src_mem);
-	if(!skip_final_memcpy || (kind != XFER_MEM_CPY)) {
-	  info.path.push_back(dst_mem);
-	  info.xd_channels.assign(1, channel);
+        log_xpath.info() << "direct: " << src_mem << "(" << src_mem.kind()
+                         << ",n:" << src_node << ")->" << dst_mem << " ("
+                         << dst_mem.kind() << ",n:" << dst_node << ") cost=" << best_cost
+                         << " channel=" << channel->kind;
+        info.path.assign(1, src_mem);
+        if(!skip_final_memcpy || (kind != XFER_MEM_CPY)) {
+          info.path.push_back(dst_mem);
+          info.xd_channels.assign(1, channel);
         } else
           info.xd_channels.clear();
       }
@@ -2476,8 +3065,6 @@ namespace Realm {
       std::vector<Channel *> channels;
     };
     std::vector<PartialPath> partials;
-    NodeID src_node = ID(src_mem).memory_owner_node();
-    NodeID dst_node = ID(dst_mem).memory_owner_node();
     size_t num_src_ibs, total_ibs;
     {
       const Node& n = get_runtime()->nodes[src_node];
@@ -2502,16 +3089,22 @@ namespace Realm {
     // see which of the ib memories we can get to from the original srcmem
     std::set<size_t> active_ibs;
     for(size_t i = 0; i < total_ibs; i++) {
-      uint64_t cost;
+      uint64_t cost = 0;
       Channel *channel;
       XferDesKind kind;
-      if(best_channel_for_mem_pair(src_mem, partials[i].ib_mem,
+      ChannelCopyInfo copy_info = channel_copy_info;
+      copy_info.dst_mem = partials[i].ib_mem;
+      copy_info.is_direct = false;
+      if(best_channel_for_mem_pair(copy_info,
                                    serdez_id, 0 /*no dst serdez*/,
                                    0 /*no redop on not-last hops*/,
                                    total_bytes, src_frags, 0 /*no dst_frags*/,
                                    cost, channel, kind)) {
-        log_xpath.info() << "first: " << src_mem << "->" << partials[i].ib_mem
-                         << " cost=" << cost;
+        NodeID dst_node = ID(partials[i].ib_mem).memory_owner_node();
+        log_xpath.info() << "first: " << src_mem << "(" << src_mem.kind()
+                         << ",n:" << src_node << ")->" << partials[i].ib_mem << "("
+                         << partials[i].ib_mem.kind() << ",n:" << dst_node
+                         << ") cost=" << cost << " channel=" << channel->kind;
         // ignore anything that's already worse than the direct path
         if((best_cost == 0) || (cost < best_cost)) {
           active_ibs.insert(i);
@@ -2538,14 +3131,27 @@ namespace Realm {
         uint64_t cost;
         Channel *channel;
         XferDesKind kind;
-        if(best_channel_for_mem_pair(partials[src_idx].ib_mem,
-                                     partials[dst_idx].ib_mem,
+        ChannelCopyInfo copy_info = channel_copy_info;
+        copy_info.src_mem = partials[src_idx].ib_mem;
+        copy_info.dst_mem = partials[dst_idx].ib_mem;
+        copy_info.is_direct = false;
+        if(best_channel_for_mem_pair(copy_info,
                                      0, 0, 0, // no serdez or redop on interhops
                                      total_bytes, 0, 0, // no fragmentation also
                                      cost, channel, kind)) {
+
+          NodeID src_node = ID(partials[src_idx].ib_mem).memory_owner_node();
+          NodeID dst_node = ID(partials[dst_idx].ib_mem).memory_owner_node();
           size_t total_cost = partials[src_idx].cost + cost;
-          log_xpath.info() << "inter: " << partials[src_idx].ib_mem << "->" << partials[dst_idx].ib_mem
-                           << " cost=" << partials[src_idx].cost << "+" << cost << " = " << total_cost << " <? " << partials[dst_idx].cost;
+          log_xpath.info() << "inter: src_idx:" << src_idx << " "
+                           << partials[src_idx].ib_mem << "("
+                           << partials[src_idx].ib_mem.kind() << ",n:" << src_node
+                           << ")-> dst_idx:" << dst_idx << " " << partials[dst_idx].ib_mem
+                           << "(" << partials[dst_idx].ib_mem.kind() << ",n:" << dst_node
+                           << ")"
+                           << " channel=" << channel->kind
+                           << " cost=" << partials[src_idx].cost << "+" << cost << " = "
+                           << total_cost << " <? " << partials[dst_idx].cost;
           // also prune any path that already exceeds the cost of the direct path
           if(((partials[dst_idx].cost == 0) ||
               (total_cost < partials[dst_idx].cost)) &&
@@ -2570,13 +3176,20 @@ namespace Realm {
       uint64_t cost;
       Channel *channel;
       XferDesKind kind;
-      if(best_channel_for_mem_pair(partials[i].ib_mem, dst_mem,
+      ChannelCopyInfo copy_info = channel_copy_info;
+      copy_info.src_mem = partials[i].ib_mem;
+      copy_info.is_direct = false;
+      if(best_channel_for_mem_pair(copy_info,
                                    0 /*no src serdez*/, serdez_id, redop_id,
                                    total_bytes, 0 /*no src_frags*/, dst_frags,
                                    cost, channel, kind)) {
+        NodeID src_node = ID(partials[i].ib_mem).memory_owner_node();
         size_t total_cost = partials[i].cost + cost;
-        log_xpath.info() << "last: " << partials[i].ib_mem << "->" << dst_mem
-                         << " cost=" << partials[i].cost << "+" << cost << " = " << total_cost << " <? " << best_cost;
+        log_xpath.info() << "last: " << partials[i].ib_mem << "("
+                         << partials[i].ib_mem.kind() << ",n:" << src_node << ")->"
+                         << dst_mem << "(" << dst_mem.kind() << ",n:" << dst_node << ")"
+                         << " channel=" << channel->kind << " cost=" << partials[i].cost
+                         << "+" << cost << " = " << total_cost << " <? " << best_cost;
         if((best_cost == 0) || (total_cost < best_cost)) {
           best_cost = total_cost;
           info.path.swap(partials[i].path);
@@ -2587,6 +3200,26 @@ namespace Realm {
             info.xd_channels.push_back(channel);
           }
         }
+      }
+    }
+
+    if (path_cache_inited) {
+      std::pair<realm_id_t, realm_id_t> key(src_mem.id, dst_mem.id);
+      PathLRU *lru = path_cache.find(key)->second;
+      PathLRU::LRUKey lru_key(serdez_id, redop_id, total_bytes, *src_frags, *dst_frags);
+      // the LRU key is not in the LRU, now we cache it
+      {
+        RWLock::AutoWriterLock awl(lru->rwlock);
+        // double check if lru key is already put in the LRU by another thread
+        PathLRU::PathLRUIterator lru_it = lru->find(lru_key);
+        if (lru_it != lru->end()) {
+          lru->hit(lru_it);
+          log_xpath_cache.debug() << "src:" << src_mem << ", dst:" << dst_mem << ", " << info << ", " << lru_key << ", Miss-Hit";
+        } else {
+          lru->miss(lru_key, info);
+          log_xpath_cache.debug() << "src:" << src_mem << ", dst:" << dst_mem << ", " << info << ", " << lru_key << ", Miss";
+        }
+        nb_cache_miss.fetch_add(1);
       }
     }
 
@@ -2638,7 +3271,8 @@ namespace Realm {
 
     // ... but we need three helpers that will be defined in the typed versions
     virtual size_t num_spaces() const = 0;
-
+    virtual void populate_copy_info(ChannelCopyInfo &info) const = 0;
+    virtual size_t domain_size() const = 0;
     virtual size_t address_size() const = 0;
 
     virtual XferDesFactory *create_addrsplit_factory(size_t bytes_per_element) const = 0;
@@ -2671,10 +3305,11 @@ namespace Realm {
     , insts(_insts)
   {}
 
-  static TransferGraph::XDTemplate::IO add_copy_path(std::vector<TransferGraph::XDTemplate>& xd_nodes,
-						     std::vector<TransferGraph::IBInfo>& ib_edges,
-						     TransferGraph::XDTemplate::IO start_edge,
-						     const MemPathInfo& info)
+  static TransferGraph::XDTemplate::IO
+  add_copy_path(std::vector<TransferGraph::XDTemplate> &xd_nodes,
+                std::vector<TransferGraph::IBInfo> &ib_edges,
+                TransferGraph::XDTemplate::IO start_edge, const MemPathInfo &info,
+                size_t ib_size = Config::ib_size_bytes)
   {
     size_t hops = info.xd_channels.size();
 
@@ -2690,10 +3325,12 @@ namespace Realm {
     for(size_t i = 0; i < hops; i++) {
       TransferGraph::XDTemplate& xdn = xd_nodes[xd_base + i];
 
+      xdn.channel = info.xd_channels[i];
       xdn.factory = info.xd_channels[i]->get_factory();
       xdn.gather_control_input = -1;
       xdn.scatter_control_input = -1;
       xdn.target_node = info.xd_channels[i]->node;
+      xdn.channel = info.xd_channels[i];
       xdn.inputs.resize(1);
       xdn.inputs[0] = ((i == 0) ?
 		         start_edge :
@@ -2704,7 +3341,7 @@ namespace Realm {
 
       TransferGraph::IBInfo& ibe = ib_edges[ib_base + i];
       ibe.memory = info.path[i + 1];
-      ibe.size = 65536; // TODO: pick size?
+      ibe.size = ib_size;
     }
 
     // last edge we created is the output
@@ -2762,12 +3399,16 @@ namespace Realm {
       if(idx >= path_infos.size()) {
 	// new path to compute
 	path_infos.resize(idx + 1);
-	bool ok = find_shortest_path(insts[i].get_location(),
-				     dst_mem,
-				     serdez_id,
-                                     0 /*redop_id*/,
-				     path_infos[idx]);
-	assert(ok);
+        std::vector<size_t> src_frags{domain_size()}, dst_frags{1};
+        log_xpath.info() << "Find fastest path for gather op spaces:" << spaces_size;
+        ChannelCopyInfo copy_info{insts[i].get_location(), dst_mem, inst.get_location(),
+                                  spaces_size,
+                                  /*is_scatter=*/false};
+        populate_copy_info(copy_info);
+        bool ok =
+            find_fastest_path(copy_info, serdez_id, 0, domain_size() * bytes_per_element,
+                              &src_frags, &dst_frags, path_infos[idx]);
+        assert(ok);
       }
     }
 
@@ -2781,19 +3422,28 @@ namespace Realm {
     //  accesses
     if((spaces_size == 1) && !oor_possible) {
       size_t pathlen = path_infos[0].xd_channels.size();
-      // HACK!
-      Memory local_ib_mem = find_sysmem_ib_memory(path_infos[0].xd_channels[0]->node);
-      // do we have to do anything to get the addresses into a cpu-readable
-      //  memory on that node?
-      MemPathInfo addr_path;
-      bool ok = find_shortest_path(inst.get_location(),
-				   local_ib_mem,
-				   0 /*no serdez*/,
-                                   0 /*redop_id*/,
-				   addr_path,
-				   true /*skip_final_memcpy*/);
-      assert(ok);
-      addr_edge = add_copy_path(xd_nodes, ib_edges, addr_edge, addr_path);
+      auto channel = path_infos[0].xd_channels[0];
+      log_xpath.info() << "Gather channel kind=" << channel->kind
+                       << " node=" << channel->node << " path len=" << pathlen;
+
+      Memory ind_ib_mem = channel->suggest_ib_memories(inst.get_location());
+      if(ind_ib_mem != Memory::NO_MEMORY) {
+        log_xpath.info() << "Copy indirectiom from src_node="
+                         << NodeID(ID(inst.get_location()).memory_owner_node())
+                         << " to dst_node=" << NodeID(ID(ind_ib_mem).memory_owner_node())
+                         << " ind_mem=" << ind_ib_mem
+                         << " ind_mem_kind=" << ind_ib_mem.kind();
+        MemPathInfo addr_path;
+        bool ok =
+            find_shortest_path(inst.get_location(), ind_ib_mem, 0 /*no serdez*/,
+                               0 /*redop_id*/, addr_path, true /*skip_final_memcpy*/);
+        assert(ok);
+        size_t aligned_ib_size =
+            Config::ib_size_bytes +
+            (address_size() - (Config::ib_size_bytes % address_size())) % address_size();
+        addr_edge =
+            add_copy_path(xd_nodes, ib_edges, addr_edge, addr_path, aligned_ib_size);
+      }
 
       size_t xd_idx = xd_nodes.size();
       size_t ib_idx = ib_edges.size();
@@ -2801,36 +3451,34 @@ namespace Realm {
       ib_edges.resize(ib_idx + pathlen - 1);
 
       for(size_t i = 0; i < pathlen; i++) {
-	TransferGraph::XDTemplate& xdn = xd_nodes[xd_idx + i];
+        TransferGraph::XDTemplate &xdn = xd_nodes[xd_idx + i];
+        xdn.target_node = path_infos[0].xd_channels[i]->node;
+        xdn.channel = path_infos[0].xd_channels[i];
+        // xdn.kind = path_infos[0].xd_kinds[i];
 
-	xdn.target_node = path_infos[0].xd_channels[i]->node;
-	//xdn.kind = path_infos[0].xd_kinds[i];
-	xdn.factory = path_infos[0].xd_channels[i]->get_factory();
-	xdn.gather_control_input = -1;
-	xdn.scatter_control_input = -1;
-	if(i == 0) {
-	  xdn.inputs.resize(2);
-	  xdn.inputs[0] = TransferGraph::XDTemplate::mk_indirect(indirect_idx,
-								 1,
-								 insts[0],
-								 src_fld_start,
-								 src_fld_count);
-	  xdn.inputs[1] = addr_edge;
-	} else {
-	  xdn.inputs.resize(1);
-	  xdn.inputs[0] = TransferGraph::XDTemplate::mk_edge(ib_idx + i - 1);
-	}
-	if(i == (pathlen - 1)) {
-	  xdn.outputs.resize(1);
-	  xdn.outputs[0] = dst_edge;
-	} else {
-	  xdn.outputs.resize(1);
-	  xdn.outputs[0] = TransferGraph::XDTemplate::mk_edge(ib_idx + i);
+        xdn.factory = path_infos[0].xd_channels[i]->get_factory();
+        xdn.gather_control_input = -1;
+        xdn.scatter_control_input = -1;
+        if(i == 0) {
+          xdn.inputs.resize(2);
+          xdn.inputs[0] = TransferGraph::XDTemplate::mk_indirect(
+              indirect_idx, 1, insts[0], src_fld_start, src_fld_count);
+          xdn.inputs[1] = addr_edge;
+        } else {
+          xdn.inputs.resize(1);
+          xdn.inputs[0] = TransferGraph::XDTemplate::mk_edge(ib_idx + i - 1);
+        }
+        if(i == (pathlen - 1)) {
+          xdn.outputs.resize(1);
+          xdn.outputs[0] = dst_edge;
+        } else {
+          xdn.outputs.resize(1);
+          xdn.outputs[0] = TransferGraph::XDTemplate::mk_edge(ib_idx + i);
 
-	  TransferGraph::IBInfo& ibe = ib_edges[ib_idx + i];
-	  ibe.memory = path_infos[0].path[i + 1];
-	  ibe.size = 1 << 20; /*TODO*/
-	}
+          TransferGraph::IBInfo &ibe = ib_edges[ib_idx + i];
+          ibe.memory = path_infos[0].path[i + 1];
+          ibe.size = Config::ib_size_bytes; // 1 << 20; /*TODO*/
+        }
       }
     } else {
       // step 1: we need the address decoder, possibly with some hops to get
@@ -2966,36 +3614,33 @@ namespace Realm {
 	  for(size_t j = 0; j < hops; j++) {
 	    TransferGraph::XDTemplate& xdn = xd_nodes[xd_base + j];
 
-	    xdn.factory = mpi.xd_channels[j]->get_factory();
-	    xdn.gather_control_input = -1;
-	    xdn.scatter_control_input = -1;
-	    xdn.target_node = mpi.xd_channels[j]->node;
-	    if(j == 0) {
-	      xdn.inputs.resize(2);
-	      xdn.inputs[0] = TransferGraph::XDTemplate::mk_indirect(indirect_idx,
-								     1,
-								     insts[i],
-								     src_fld_start,
-								     src_fld_count);
-	      xdn.inputs[1] = decoded_addr_edges[i];
-	    } else {
-	      xdn.inputs.resize(1);
-	      xdn.inputs[0] = TransferGraph::XDTemplate::mk_edge(ib_base + j - 1);
-	    }
-	    xdn.outputs.resize(1);
-	    xdn.outputs[0] = TransferGraph::XDTemplate::mk_edge(ib_base + j);
-	    ib_edges[ib_base + j].memory = mpi.path[j + 1];
-	    ib_edges[ib_base + j].size = 65536; // TODO: pick size?
-	  }
-	  data_edges[i] = TransferGraph::XDTemplate::mk_edge(ib_base + hops - 1);
-	}
+            xdn.factory = mpi.xd_channels[j]->get_factory();
+            xdn.gather_control_input = -1;
+            xdn.scatter_control_input = -1;
+            xdn.target_node = mpi.xd_channels[j]->node;
+            xdn.channel = mpi.xd_channels[j];
+            if(j == 0) {
+              xdn.inputs.resize(2);
+              xdn.inputs[0] = TransferGraph::XDTemplate::mk_indirect(
+                  indirect_idx, 1, insts[i], src_fld_start, src_fld_count);
+              xdn.inputs[1] = decoded_addr_edges[i];
+            } else {
+              xdn.inputs.resize(1);
+              xdn.inputs[0] = TransferGraph::XDTemplate::mk_edge(ib_base + j - 1);
+            }
+            xdn.outputs.resize(1);
+            xdn.outputs[0] = TransferGraph::XDTemplate::mk_edge(ib_base + j);
+            ib_edges[ib_base + j].memory = mpi.path[j + 1];
+            ib_edges[ib_base + j].size = 65536; // TODO: pick size?
+          }
+          data_edges[i] = TransferGraph::XDTemplate::mk_edge(ib_base + hops - 1);
+        }
       }
 
       // and finally the last xd that merges the streams together
       size_t xd_idx = xd_nodes.size();
       xd_nodes.resize(xd_idx + 1);
-      TransferGraph::XDTemplate& xdn = xd_nodes[xd_idx];
-
+      TransferGraph::XDTemplate &xdn = xd_nodes[xd_idx];
       xdn.target_node = ID(dst_mem).memory_owner_node();
       //xdn.kind = last_kind;
       xdn.factory = last_channel->get_factory();
@@ -3041,7 +3686,6 @@ namespace Realm {
   {
     // TODO: see how much of this we can reuse for the structured case?
     assert(!structured);
-
     size_t spaces_size = num_spaces();
 
     // compute the paths from the src instance to each dst data instance
@@ -3060,12 +3704,23 @@ namespace Realm {
       if(idx >= path_infos.size()) {
 	// new path to compute
 	path_infos.resize(idx + 1);
-	bool ok = find_shortest_path(src_mem,
-				     insts[i].get_location(),
-				     serdez_id,
-                                     0 /*redop_id*/,
-				     path_infos[idx]);
-	assert(ok);
+        // TODO(apryakhin@): Technically this is not a correct number
+        // of destination fragements that we get during scatter.
+        // domain_size() returns just a maximum number of addresses
+        // that we need to scatter and hence this value would be the
+        // worst case. The actual number of consecutive rectangles (e.g
+        // fragments) to handle can be less. Consider finding a
+        // better way to handle this (same for gather op).
+        std::vector<size_t> src_frags{1}, dst_frags{domain_size()};
+        log_xpath.info() << "Find fastest path for scatter op.";
+        ChannelCopyInfo copy_info{src_mem, insts[i].get_location(), inst.get_location(),
+                                  spaces_size,
+                                  /*is_scatter=*/true};
+        populate_copy_info(copy_info);
+        bool ok =
+            find_fastest_path(copy_info, serdez_id, 0, domain_size() * bytes_per_element,
+                              &src_frags, &dst_frags, path_infos[idx]);
+        assert(ok);
       }
     }
 
@@ -3079,19 +3734,30 @@ namespace Realm {
     //  range accesses
     if((spaces_size == 1) && !oor_possible) {
       size_t pathlen = path_infos[0].xd_channels.size();
-      // HACK!
-      Memory local_ib_mem = find_sysmem_ib_memory(path_infos[0].xd_channels[pathlen - 1]->node);
-      // do we have to do anything to get the addresses into a cpu-readable
-      //  memory on that node?
-      MemPathInfo addr_path;
-      bool ok = find_shortest_path(inst.get_location(),
-				   local_ib_mem,
-				   0 /*no serdez*/,
-                                   0 /*redop_id*/,
-				   addr_path,
-				   true /*skip_final_memcpy*/);
-      assert(ok);
-      addr_edge = add_copy_path(xd_nodes, ib_edges, addr_edge, addr_path);
+      auto channel = path_infos[0].xd_channels[pathlen - 1];
+      log_xpath.info() << "Scatter channel kind=" << channel->kind
+                       << " node=" << channel->node << " path len=" << pathlen;
+      Memory ind_ib_mem = channel->suggest_ib_memories(inst.get_location());
+
+      if(ind_ib_mem != Memory::NO_MEMORY) {
+        log_xpath.info() << "Copy indirectiom from src_node="
+                         << NodeID(ID(inst.get_location()).memory_owner_node())
+                         << " to dst_node=" << NodeID(ID(ind_ib_mem).memory_owner_node())
+                         << " ind_mem=" << ind_ib_mem
+                         << " ind_mem_kind=" << ind_ib_mem.kind();
+        // do we have to do anything to get the addresses into a cpu-readable
+        //  memory on that node?
+        MemPathInfo addr_path;
+        bool ok =
+            find_shortest_path(inst.get_location(), ind_ib_mem, 0 /*no serdez*/,
+                               0 /*redop_id*/, addr_path, true /*skip_final_memcpy*/);
+        assert(ok);
+        size_t aligned_ib_size =
+            Config::ib_size_bytes +
+            (address_size() - (Config::ib_size_bytes % address_size())) % address_size();
+        addr_edge =
+            add_copy_path(xd_nodes, ib_edges, addr_edge, addr_path, aligned_ib_size);
+      }
 
       size_t xd_idx = xd_nodes.size();
       size_t ib_idx = ib_edges.size();
@@ -3099,38 +3765,34 @@ namespace Realm {
       ib_edges.resize(ib_idx + pathlen - 1);
 
       for(size_t i = 0; i < pathlen; i++) {
-	TransferGraph::XDTemplate& xdn = xd_nodes[xd_idx + i];
+        TransferGraph::XDTemplate &xdn = xd_nodes[xd_idx + i];
+        xdn.channel = path_infos[0].xd_channels[i];
+        xdn.target_node = path_infos[0].xd_channels[i]->node;
 
-	xdn.target_node = path_infos[0].xd_channels[i]->node;
-	//xdn.kind = path_infos[0].xd_kinds[i];
-	xdn.factory = path_infos[0].xd_channels[i]->get_factory();
-	xdn.gather_control_input = -1;
-	xdn.scatter_control_input = -1;
-	if(i == (pathlen - 1)) {
-	  xdn.inputs.resize(2);
-	  xdn.inputs[1] = addr_edge;
-	} else {
-	  xdn.inputs.resize(1);
-	}
-	xdn.inputs[0] = ((i == 0) ?
-			   src_edge :
-			   TransferGraph::XDTemplate::mk_edge(ib_idx + i - 1));
+        xdn.factory = path_infos[0].xd_channels[i]->get_factory();
+        xdn.gather_control_input = -1;
+        xdn.scatter_control_input = -1;
+        if(i == (pathlen - 1)) {
+          xdn.inputs.resize(2);
+          xdn.inputs[1] = addr_edge;
+        } else {
+          xdn.inputs.resize(1);
+        }
+        xdn.inputs[0] =
+            ((i == 0) ? src_edge : TransferGraph::XDTemplate::mk_edge(ib_idx + i - 1));
 
-	xdn.outputs.resize(1);
-	if(i == (pathlen - 1)) {
-	  xdn.outputs[0] = TransferGraph::XDTemplate::mk_indirect(indirect_idx,
-								  1,
-								  insts[0],
-								  dst_fld_start,
-								  dst_fld_count);
-	} else {
-	  xdn.outputs.resize(1);
-	  xdn.outputs[0] = TransferGraph::XDTemplate::mk_edge(ib_idx + i);
+        xdn.outputs.resize(1);
+        if(i == (pathlen - 1)) {
+          xdn.outputs[0] = TransferGraph::XDTemplate::mk_indirect(
+              indirect_idx, 1, insts[0], dst_fld_start, dst_fld_count);
+        } else {
+          xdn.outputs.resize(1);
+          xdn.outputs[0] = TransferGraph::XDTemplate::mk_edge(ib_idx + i);
 
-	  TransferGraph::IBInfo& ibe = ib_edges[ib_idx + i];
-	  ibe.memory = path_infos[0].path[i + 1];
-	  ibe.size = 1 << 20; /*TODO*/
-	}
+          TransferGraph::IBInfo &ibe = ib_edges[ib_idx + i];
+          ibe.memory = path_infos[0].path[i + 1];
+          ibe.size = Config::ib_size_bytes; // 1 << 20; /*TODO*/
+        }
       }
     } else {
       // step 1: we need the address decoder, possibly with some hops to get
@@ -3308,39 +3970,36 @@ namespace Realm {
 	  for(size_t j = 0; j < hops; j++) {
 	    TransferGraph::XDTemplate& xdn = xd_nodes[xd_base + j];
 
-	    xdn.factory = mpi.xd_channels[j + 1]->get_factory();
-	    xdn.gather_control_input = -1;
-	    xdn.scatter_control_input = -1;
-	    xdn.target_node = mpi.xd_channels[j + 1]->node;
-	    if(j < (hops - 1)) {
-	      xdn.inputs.resize(1);
-	      xdn.inputs[0] = ((j == 0) ?
-			         data_edges[i] :
-			         TransferGraph::XDTemplate::mk_edge(ib_base + j - 1));
-	      xdn.outputs.resize(1);
-	      xdn.outputs[0] = TransferGraph::XDTemplate::mk_edge(ib_base + j);
-	      ib_edges[ib_base + j].memory = mpi.path[j + 2];
-	      ib_edges[ib_base + j].size = 65536; // TODO: pick size?
-	    } else {
-	      // last hop uses the address stream
-	      xdn.inputs.resize(2);
-	      xdn.inputs[0] = ((j == 0) ?
-			         data_edges[i] :
-			         TransferGraph::XDTemplate::mk_edge(ib_base + j - 1));
-	      xdn.inputs[1] = decoded_addr_edges[i];
-	      xdn.outputs.resize(1);
-	      xdn.outputs[0] = TransferGraph::XDTemplate::mk_indirect(indirect_idx,
-								      1,
-								      insts[i],
-								      dst_fld_start,
-								      dst_fld_count);
-	    }
-	  }
-	}
+            xdn.factory = mpi.xd_channels[j + 1]->get_factory();
+            xdn.gather_control_input = -1;
+            xdn.scatter_control_input = -1;
+            xdn.target_node = mpi.xd_channels[j + 1]->node;
+            xdn.channel = mpi.xd_channels[j + 1];
+            if(j < (hops - 1)) {
+              xdn.inputs.resize(1);
+              xdn.inputs[0] =
+                  ((j == 0) ? data_edges[i]
+                            : TransferGraph::XDTemplate::mk_edge(ib_base + j - 1));
+              xdn.outputs.resize(1);
+              xdn.outputs[0] = TransferGraph::XDTemplate::mk_edge(ib_base + j);
+              ib_edges[ib_base + j].memory = mpi.path[j + 2];
+              ib_edges[ib_base + j].size = 65536; // TODO: pick size?
+            } else {
+              // last hop uses the address stream
+              xdn.inputs.resize(2);
+              xdn.inputs[0] =
+                  ((j == 0) ? data_edges[i]
+                            : TransferGraph::XDTemplate::mk_edge(ib_base + j - 1));
+              xdn.inputs[1] = decoded_addr_edges[i];
+              xdn.outputs.resize(1);
+              xdn.outputs[0] = TransferGraph::XDTemplate::mk_indirect(
+                  indirect_idx, 1, insts[i], dst_fld_start, dst_fld_count);
+            }
+          }
+        }
       }
     }
   }
-
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -3357,19 +4016,23 @@ namespace Realm {
 
     virtual RegionInstance get_pointer_instance(void) const;
 
+    virtual const std::vector<RegionInstance>* get_instances(void) const;
+
+    virtual FieldID get_field(void) const;
+
     virtual TransferIterator *create_address_iterator(RegionInstance peer) const;
 
-    virtual TransferIterator *create_indirect_iterator(Memory addrs_mem,
-						       RegionInstance inst,
-						       const std::vector<FieldID>& fields,
-						       const std::vector<size_t>& fld_offsets,
-						       const std::vector<size_t>& fld_sizes) const;
+    virtual TransferIterator *create_indirect_iterator(
+        Memory addrs_mem, RegionInstance inst, const std::vector<FieldID> &fields,
+        const std::vector<size_t> &fld_offsets, const std::vector<size_t> &fld_sizes,
+        Channel *channel = nullptr) const;
 
     virtual void print(std::ostream& os) const;
 
   protected:
     virtual size_t num_spaces() const;
-
+    virtual void populate_copy_info(ChannelCopyInfo &info) const;
+    virtual size_t domain_size() const;
     virtual size_t address_size() const;
 
     virtual XferDesFactory *create_addrsplit_factory(size_t bytes_per_element) const;
@@ -3392,12 +4055,12 @@ namespace Realm {
   template <int N, typename T, int N2, typename T2>
   Event IndirectionInfoTyped<N,T,N2,T2>::request_metadata(void)
   {
-    std::set<Event> evs;
+    std::vector<Event> evs;
 
     {
       RegionInstanceImpl *impl = get_runtime()->get_instance_impl(inst);
       Event e = impl->request_metadata();
-      if(!e.has_triggered()) evs.insert(e);
+      if(!e.has_triggered()) evs.push_back(e);
     }
 
     for(std::vector<RegionInstance>::const_iterator it = insts.begin();
@@ -3405,7 +4068,7 @@ namespace Realm {
 	++it) {
       RegionInstanceImpl *impl = get_runtime()->get_instance_impl(*it);
       Event e = impl->request_metadata();
-      if(!e.has_triggered()) evs.insert(e);
+      if(!e.has_triggered()) evs.push_back(e);
     }
 
     return Event::merge_events(evs);
@@ -3415,6 +4078,18 @@ namespace Realm {
   size_t IndirectionInfoTyped<N,T,N2,T2>::num_spaces() const
   {
     return spaces.size();
+  }
+
+  template <int N, typename T, int N2, typename T2>
+  void IndirectionInfoTyped<N, T, N2, T2>::populate_copy_info(ChannelCopyInfo &info) const
+  {
+    info.is_ranges = is_ranges;
+    info.addr_size = sizeof(T2);
+  }
+
+  template <int N, typename T, int N2, typename T2>
+  size_t IndirectionInfoTyped<N, T, N2, T2>::domain_size() const {
+    return domain.volume();
   }
 
   template <int N, typename T, int N2, typename T2>
@@ -3437,6 +4112,18 @@ namespace Realm {
   {
     return inst;
   }
+
+  template <int N, typename T, int N2, typename T2>
+  const std::vector<RegionInstance>* IndirectionInfoTyped<N,T,N2,T2>::get_instances(void) const
+  {
+    return &insts;
+  }
+
+  template <int N, typename T, int N2, typename T2>
+  FieldID IndirectionInfoTyped<N,T,N2,T2>::get_field(void) const
+  {
+    return field_id;
+  }
   
   template <int N, typename T, int N2, typename T2>
   TransferIterator *IndirectionInfoTyped<N,T,N2,T2>::create_address_iterator(RegionInstance peer) const
@@ -3450,26 +4137,24 @@ namespace Realm {
   }
 
   template <int N, typename T, int N2, typename T2>
-  TransferIterator *IndirectionInfoTyped<N,T,N2,T2>::create_indirect_iterator(Memory addrs_mem,
-									      RegionInstance inst,
-									      const std::vector<FieldID>& fields,
-									      const std::vector<size_t>& fld_offsets,
-									      const std::vector<size_t>& fld_sizes) const
+  TransferIterator *IndirectionInfoTyped<N, T, N2, T2>::create_indirect_iterator(
+      Memory addrs_mem, RegionInstance inst, const std::vector<FieldID> &fields,
+      const std::vector<size_t> &fld_offsets, const std::vector<size_t> &fld_sizes,
+      Channel *channel) const
   {
-    if(is_ranges)
-      return new TransferIteratorIndirectRange<N2,T2>(addrs_mem,
-						      inst,
-						      fields,
-						      fld_offsets,
-						      fld_sizes);
-    else
-      return new TransferIteratorIndirect<N2,T2>(addrs_mem,
-						 inst,
-						 fields,
-						 fld_offsets,
-						 fld_sizes);
+    if(channel && channel->needs_wrapping_iterator()) {
+      return new WrappingTransferIteratorIndirect<N2, T2>(inst, fields, fld_offsets,
+                                                          fld_sizes);
+    } else {
+      if(is_ranges)
+        return new TransferIteratorIndirectRange<N2, T2>(addrs_mem, inst, fields,
+                                                         fld_offsets, fld_sizes);
+      else
+        return new TransferIteratorIndirect<N2, T2>(addrs_mem, inst, fields, fld_offsets,
+                                                    fld_sizes);
+    }
   }
-  
+
   template <int N, typename T, int N2, typename T2>
   void IndirectionInfoTyped<N,T,N2,T2>::print(std::ostream& os) const
   {
@@ -3491,6 +4176,8 @@ namespace Realm {
   template <int N2, typename T2>
   IndirectionInfo *CopyIndirection<N,T>::Unstructured<N2,T2>::create_info(const IndexSpace<N,T>& is) const
   {
+    // The next indirection is not allowed to be specified yet.
+    assert(next_indirection == nullptr);
     return new IndirectionInfoTyped<N,T,N2,T2>(is, *this);
   }
 
@@ -3573,6 +4260,7 @@ namespace Realm {
     if(!preconditions.empty()) {
       Event merged = Event::merge_events(preconditions);
       if(merged.exists()) {
+	deferred_analysis.precondition = merged;
         EventImpl::add_waiter(merged, &deferred_analysis);
         return;
       }
@@ -3651,9 +4339,11 @@ namespace Realm {
       // well, we still have to poke pending ops
       std::vector<TransferOperation *> to_alloc;
       {
-	AutoLock<> al(mutex);
-	to_alloc.swap(pending_ops);
-	analysis_complete.store(true);  // release done by mutex
+        AutoLock<> al(mutex);
+        to_alloc.swap(pending_ops);
+        // release before the mutex is released so to_alloc is visible before the
+        // analysis_complete flag is set
+        analysis_complete.store_release(true);
       }
 
       for(size_t i = 0; i < to_alloc.size(); i++)
@@ -3689,7 +4379,14 @@ namespace Realm {
     // TODO: look at layouts and decide if fields should be grouped into
     //  a smaller number of copies
     assert(srcs.size() == dsts.size());
+    std::vector<bool> field_done(srcs.size(), false);
+    // fields will get reordered to be contiguous per xd subgraph
+    size_t fld_start = 0;
     for(size_t i = 0; i < srcs.size(); i++) {
+      // did this field already get grouped into a previous path?
+      if(field_done[i])
+        continue;
+
       assert(srcs[i].redop_id == 0);
       if(dsts[i].redop_id == 0) {
         // sizes of fills or copies should match
@@ -3717,8 +4414,12 @@ namespace Realm {
         assert((srcs[i].serdez_id == 0) &&
                (dsts[i].serdez_id == 0) && "help: serdez reduce!");
 
-	src_fields[i] = FieldInfo { srcs[i].field_id, srcs[i].subfield_offset, srcs[i].size, srcs[i].serdez_id };
-	dst_fields[i] = FieldInfo { dsts[i].field_id, dsts[i].subfield_offset, dsts[i].size, dsts[i].serdez_id };
+	src_fields[fld_start] = FieldInfo { srcs[i].field_id,
+                                            srcs[i].subfield_offset,
+                                            srcs[i].size, srcs[i].serdez_id };
+	dst_fields[fld_start] = FieldInfo { dsts[i].field_id,
+                                            dsts[i].subfield_offset,
+                                            dsts[i].size, dsts[i].serdez_id };
 
         Memory src_mem = srcs[i].inst.get_location();
         Memory dst_mem = dsts[i].inst.get_location();
@@ -3734,7 +4435,7 @@ namespace Realm {
                                 dst_frags);
 
         MemPathInfo path_info;
-        bool ok = find_fastest_path(src_mem, dst_mem, serdez_id,
+        bool ok = find_fastest_path(ChannelCopyInfo{src_mem, dst_mem}, serdez_id,
                                     dsts[i].redop_id,
                                     domain_size * combined_field_size,
                                     &src_frags, &dst_frags,
@@ -3762,6 +4463,7 @@ namespace Realm {
           xdn.gather_control_input = -1;
           xdn.scatter_control_input = -1;
           xdn.target_node = path_info.xd_channels[j]->node;
+          xdn.channel = path_info.xd_channels[j];
           if(j == (pathlen - 1))
             xdn.redop = XferDesRedopInfo(dsts[i].redop_id,
                                          dsts[i].red_fold,
@@ -3770,13 +4472,13 @@ namespace Realm {
           xdn.inputs.resize(1);
           xdn.inputs[0] = ((j == 0) ?
                              TransferGraph::XDTemplate::mk_inst(srcs[i].inst,
-                                                                i, 1) :
+                                                                fld_start, 1) :
                              TransferGraph::XDTemplate::mk_edge(ib_idx - 1));
           //xdn.inputs[0].indirect_inst = RegionInstance::NO_INST;
           xdn.outputs.resize(1);
           xdn.outputs[0] = ((j == (pathlen - 1)) ?
                               TransferGraph::XDTemplate::mk_inst(dsts[i].inst,
-                                                                 i, 1) :
+                                                                 fld_start, 1) :
                               TransferGraph::XDTemplate::mk_edge(ib_idx));
           //xdn.outputs[0].indirect_inst = RegionInstance::NO_INST;
           if(j < (pathlen - 1)) {
@@ -3789,19 +4491,32 @@ namespace Realm {
         prof_usage.source = src_mem;
         prof_usage.target = dst_mem;
         prof_usage.size += domain_size * combined_field_size;
+	std::vector<RegionInstance> instinfo_src_insts{srcs[i].inst};
+	std::vector<RegionInstance> instinfo_dst_insts{dsts[i].inst};
+	std::vector<FieldID> instinfo_src_field_ids{srcs[i].field_id};
+	std::vector<FieldID> instinfo_dst_field_ids{dsts[i].field_id};
         prof_cpinfo.inst_info.push_back(ProfilingMeasurements::OperationCopyInfo::InstInfo {
-          srcs[i].inst,
-          dsts[i].inst,
-          1 /*num_fields*/,
+	  instinfo_src_insts,
+	  instinfo_dst_insts,
+	  RegionInstance::NO_INST,
+	  RegionInstance::NO_INST,
+	  instinfo_src_field_ids,
+	  instinfo_dst_field_ids,
+	  0,
+	  0,
           ProfilingMeasurements::OperationCopyInfo::REDUCE,
           unsigned(pathlen) });
+        fld_start += 1;
       }
       else if(srcs[i].field_id == FieldID(-1)) {
 	// fill
 	assert((dsts[i].indirect_index == -1) && "help: scatter fill!");
 
-	src_fields[i] = FieldInfo { FieldID(-1), 0, 0, 0 };
-	dst_fields[i] = FieldInfo { dsts[i].field_id, dsts[i].subfield_offset, dsts[i].size, dsts[i].serdez_id };
+	src_fields[fld_start] = FieldInfo { FieldID(-1), 0, 0, 0 };
+	dst_fields[fld_start] = FieldInfo { dsts[i].field_id,
+                                            dsts[i].subfield_offset,
+                                            dsts[i].size,
+                                            dsts[i].serdez_id };
 
 	Memory dst_mem = dsts[i].inst.get_location();
 	MemPathInfo path_info;
@@ -3815,50 +4530,79 @@ namespace Realm {
 
 	size_t pathlen = path_info.xd_channels.size();
 	size_t xd_idx = graph.xd_nodes.size();
-	//size_t ib_idx = graph.ib_edges.size();
-
-	graph.xd_nodes.resize(xd_idx + pathlen);
-	if(pathlen > 1) {
-	  log_new_dma.fatal() << "FATAL: multi-hop fill path found for " << dst_mem << " (serdez=" << serdez_id << ")";
-	  assert(0);
-	}
-	// just one node for now
-	{
+        size_t ib_idx = graph.ib_edges.size();
+        size_t ib_alloc_size = 0;
+        graph.xd_nodes.resize(xd_idx + pathlen);
+        if(pathlen > 1) {
+          graph.ib_edges.resize(ib_idx + pathlen - 1);
+          ib_alloc_size = compute_ib_size(combined_field_size,
+                                          domain_size,
+                                          serdez_id);
+        }
+        for(size_t j = 0; j < pathlen; j++) {
 	  TransferGraph::XDTemplate& xdn = graph.xd_nodes[xd_idx++];
 	      
 	  //xdn.kind = path_info.xd_kinds[j];
-	  xdn.factory = path_info.xd_channels[0]->get_factory();
+	  xdn.factory = path_info.xd_channels[j]->get_factory();
 	  xdn.gather_control_input = -1;
 	  xdn.scatter_control_input = -1;
-	  xdn.target_node = path_info.xd_channels[0]->node;
-	  xdn.inputs.resize(1);
-	  xdn.inputs[0] = TransferGraph::XDTemplate::mk_fill(fill_ofs,
-							     combined_field_size);
-	  // FIXME: handle multiple fields
-	  memcpy(static_cast<char *>(fill_data)+fill_ofs,
-		 ((srcs[i].size <= CopySrcDstField::MAX_DIRECT_SIZE) ?
-		    srcs[i].fill_data.direct :
-		    srcs[i].fill_data.indirect),
-		 srcs[i].size);
-	  fill_ofs += srcs[i].size;
+          xdn.target_node = path_info.xd_channels[j]->node;
+          xdn.channel = path_info.xd_channels[j];
+          xdn.inputs.resize(1);
+          xdn.inputs[0] = ((j == 0) ?
+                             TransferGraph::XDTemplate::mk_fill(fill_ofs,
+                                                                combined_field_size,
+                                                                domain_size * combined_field_size) :
+                             TransferGraph::XDTemplate::mk_edge(ib_idx - 1));
 
 	  xdn.outputs.resize(1);
-	  xdn.outputs[0] = TransferGraph::XDTemplate::mk_inst(dsts[i].inst,
-							      i, 1);
+          xdn.outputs[0] = ((j == (pathlen - 1)) ?
+                              TransferGraph::XDTemplate::mk_inst(dsts[i].inst,
+                                                                 fld_start, 1) :
+                              TransferGraph::XDTemplate::mk_edge(ib_idx));
+          if(j < (pathlen - 1)) {
+            TransferGraph::IBInfo& ibe = graph.ib_edges[ib_idx++];
+            ibe.memory = path_info.path[j + 1];
+            ibe.size = ib_alloc_size;
+          }
 	}
+
+        // FIXME: handle multiple fields
+        memcpy(static_cast<char *>(fill_data)+fill_ofs,
+               ((srcs[i].size <= CopySrcDstField::MAX_DIRECT_SIZE) ?
+                  srcs[i].fill_data.direct :
+                  srcs[i].fill_data.indirect),
+               srcs[i].size);
+        fill_ofs += srcs[i].size;
 
         prof_usage.source = Memory::NO_MEMORY;
         prof_usage.target = dst_mem;
         prof_usage.size += domain_size * combined_field_size;
+	std::vector<RegionInstance> instinfo_src_insts;
+	std::vector<RegionInstance> instinfo_dst_insts{dsts[i].inst};
+	std::vector<FieldID> instinfo_src_field_ids;
+	std::vector<FieldID> instinfo_dst_field_ids{dsts[i].field_id};
         prof_cpinfo.inst_info.push_back(ProfilingMeasurements::OperationCopyInfo::InstInfo {
-              RegionInstance::NO_INST,
-              dsts[i].inst,
-              1 /*num_fields*/,
+	      instinfo_src_insts,
+	      instinfo_dst_insts,
+	      RegionInstance::NO_INST,
+	      RegionInstance::NO_INST,
+	      instinfo_src_field_ids,
+	      instinfo_dst_field_ids,
+	      0,
+	      0,
               ProfilingMeasurements::OperationCopyInfo::FILL,
               unsigned(pathlen) });
+        fld_start += 1;
       } else {
-	src_fields[i] = FieldInfo { srcs[i].field_id, srcs[i].subfield_offset, srcs[i].size, srcs[i].serdez_id };
-	dst_fields[i] = FieldInfo { dsts[i].field_id, dsts[i].subfield_offset, dsts[i].size, dsts[i].serdez_id };
+	src_fields[fld_start] = FieldInfo { srcs[i].field_id,
+                                            srcs[i].subfield_offset,
+                                            srcs[i].size,
+                                            srcs[i].serdez_id };
+	dst_fields[fld_start] = FieldInfo { dsts[i].field_id,
+                                            dsts[i].subfield_offset,
+                                            dsts[i].size,
+                                            dsts[i].serdez_id };
 	
 	if(srcs[i].indirect_index == -1) {
 	  Memory src_mem = srcs[i].inst.get_location();
@@ -3866,21 +4610,57 @@ namespace Realm {
 	  if(dsts[i].indirect_index == -1) {
 	    Memory dst_mem = dsts[i].inst.get_location();
 
+            unsigned num_fields = 1;
+            std::vector<FieldID> src_field_ids(1, srcs[i].field_id);
+            std::vector<size_t> src_field_sizes(1, srcs[i].size);
+            std::vector<FieldID> dst_field_ids(1, dsts[i].field_id);
+            std::vector<size_t> dst_field_sizes(1, dsts[i].size);
+
+            // group any other fields that have the same insts/size/redop/serdez
+            for(size_t j = i + 1; j < srcs.size(); j++) {
+              if(field_done[j]) continue;
+              if(srcs[j].inst != srcs[i].inst) continue;
+              if(srcs[j].size != srcs[i].size) continue;
+              if(srcs[j].redop_id != srcs[i].redop_id) continue;
+              if(srcs[j].serdez_id != srcs[i].serdez_id) continue;
+              if(dsts[j].inst != dsts[i].inst) continue;
+              if(dsts[j].size != dsts[i].size) continue;
+              if(dsts[j].redop_id != dsts[i].redop_id) continue;
+              if(dsts[j].serdez_id != dsts[i].serdez_id) continue;
+
+              src_field_ids.push_back(srcs[j].field_id);
+              src_field_sizes.push_back(srcs[j].size);
+              dst_field_ids.push_back(dsts[j].field_id);
+              dst_field_sizes.push_back(dsts[j].size);
+
+              src_fields[fld_start + num_fields] = FieldInfo {
+                                                       srcs[j].field_id,
+                                                       srcs[j].subfield_offset,
+                                                       srcs[j].size,
+                                                       srcs[j].serdez_id };
+              dst_fields[fld_start + num_fields] = FieldInfo {
+                                                       dsts[j].field_id,
+                                                       dsts[j].subfield_offset,
+                                                       dsts[j].size,
+                                                       dsts[j].serdez_id };
+              num_fields += 1;
+              combined_field_size += srcs[j].size;
+              field_done[j] = true;
+            }
+
             std::vector<size_t> src_frags, dst_frags;
             domain->count_fragments(srcs[i].inst, dim_order,
-                                    std::vector<FieldID>(1, srcs[i].field_id),
-                                    std::vector<size_t>(1, srcs[i].size),
+                                    src_field_ids, src_field_sizes,
                                     src_frags);
             domain->count_fragments(dsts[i].inst, dim_order,
-                                    std::vector<FieldID>(1, dsts[i].field_id),
-                                    std::vector<size_t>(1, dsts[i].size),
+                                    dst_field_ids, dst_field_sizes,
                                     dst_frags);
             //log_new_dma.print() << "fragments: domain=" << *domain
             //                    << " src_inst=" << srcs[i].inst << " frags=" << PrettyVector<size_t>(src_frags)
             //                    << " dst_inst=" << dsts[i].inst << " frags=" << PrettyVector<size_t>(dst_frags);
 
 	    MemPathInfo path_info;
-            bool ok = find_fastest_path(src_mem, dst_mem, serdez_id,
+            bool ok = find_fastest_path(ChannelCopyInfo{src_mem, dst_mem}, serdez_id,
                                         0 /*redop_id*/,
                                         domain_size * combined_field_size,
                                         &src_frags, &dst_frags,
@@ -3902,40 +4682,48 @@ namespace Realm {
 	    }
 	    for(size_t j = 0; j < pathlen; j++) {
 	      TransferGraph::XDTemplate& xdn = graph.xd_nodes[xd_idx++];
-	      
-	      //xdn.kind = path_info.xd_kinds[j];
-	      xdn.factory = path_info.xd_channels[j]->get_factory();
-	      xdn.gather_control_input = -1;
-	      xdn.scatter_control_input = -1;
-	      xdn.target_node = path_info.xd_channels[j]->node;
-	      xdn.inputs.resize(1);
-	      xdn.inputs[0] = ((j == 0) ?
-			         TransferGraph::XDTemplate::mk_inst(srcs[i].inst,
-								    i, 1) :
-			         TransferGraph::XDTemplate::mk_edge(ib_idx - 1));
-	      //xdn.inputs[0].indirect_inst = RegionInstance::NO_INST;
-	      xdn.outputs.resize(1);
-	      xdn.outputs[0] = ((j == (pathlen - 1)) ?
-				  TransferGraph::XDTemplate::mk_inst(dsts[i].inst,
-								     i, 1) :
-				  TransferGraph::XDTemplate::mk_edge(ib_idx));
-	      //xdn.outputs[0].indirect_inst = RegionInstance::NO_INST;
-	      if(j < (pathlen - 1)) {
-		TransferGraph::IBInfo& ibe = graph.ib_edges[ib_idx++];
-		ibe.memory = path_info.path[j + 1];
-		ibe.size = ib_alloc_size;
-	      }
-	    }
+
+              // xdn.kind = path_info.xd_kinds[j];
+              xdn.factory = path_info.xd_channels[j]->get_factory();
+              xdn.gather_control_input = -1;
+              xdn.scatter_control_input = -1;
+              xdn.target_node = path_info.xd_channels[j]->node;
+              xdn.channel = path_info.xd_channels[j];
+              xdn.inputs.resize(1);
+              xdn.inputs[0] = ((j == 0) ? TransferGraph::XDTemplate::mk_inst(
+                                              srcs[i].inst, fld_start, num_fields)
+                                        : TransferGraph::XDTemplate::mk_edge(ib_idx - 1));
+              // xdn.inputs[0].indirect_inst = RegionInstance::NO_INST;
+              xdn.outputs.resize(1);
+              xdn.outputs[0] =
+                  ((j == (pathlen - 1)) ? TransferGraph::XDTemplate::mk_inst(
+                                              dsts[i].inst, fld_start, num_fields)
+                                        : TransferGraph::XDTemplate::mk_edge(ib_idx));
+              // xdn.outputs[0].indirect_inst = RegionInstance::NO_INST;
+              if(j < (pathlen - 1)) {
+                TransferGraph::IBInfo &ibe = graph.ib_edges[ib_idx++];
+                ibe.memory = path_info.path[j + 1];
+                ibe.size = ib_alloc_size;
+              }
+            }
 
             prof_usage.source = src_mem;
             prof_usage.target = dst_mem;
             prof_usage.size += domain_size * combined_field_size;
+	    std::vector<RegionInstance> instinfo_src_insts{srcs[i].inst};
+	    std::vector<RegionInstance> instinfo_dst_insts{dsts[i].inst};
             prof_cpinfo.inst_info.push_back(ProfilingMeasurements::OperationCopyInfo::InstInfo {
-                 srcs[i].inst,
-                 dsts[i].inst,
-                 1 /*num_fields*/,
+		 instinfo_src_insts,
+		 instinfo_dst_insts,
+		 RegionInstance::NO_INST,
+		 RegionInstance::NO_INST,
+		 src_field_ids,
+		 dst_field_ids,
+		 0,
+		 0,
                  ProfilingMeasurements::OperationCopyInfo::COPY,
                  unsigned(pathlen) });
+            fld_start += num_fields;
 	  } else {
 	    // scatter
 	    IndirectionInfo *scatter_info = indirects[dsts[i].indirect_index];
@@ -3944,9 +4732,9 @@ namespace Realm {
 						    1);
             size_t prev_nodes = graph.xd_nodes.size();
 	    scatter_info->generate_scatter_paths(src_mem,
-						 TransferGraph::XDTemplate::mk_inst(srcs[i].inst, i, 1),
+						 TransferGraph::XDTemplate::mk_inst(srcs[i].inst, fld_start, 1),
 						 dsts[i].indirect_index,
-						 i, 1,
+						 fld_start, 1,
 						 addrsplit_bytes_per_element,
 						 serdez_id,
 						 graph.xd_nodes,
@@ -3956,12 +4744,25 @@ namespace Realm {
             prof_usage.source = src_mem;
             prof_usage.target = Memory::NO_MEMORY;
             prof_usage.size += domain_size * combined_field_size;
+	    std::vector<RegionInstance> instinfo_src_insts{srcs[i].inst};
+	    std::vector<RegionInstance> instinfo_dst_insts;
+	    if (scatter_info->get_instances()) {
+	      instinfo_dst_insts = *(scatter_info->get_instances());
+	    }
+	    std::vector<FieldID> instinfo_src_field_ids{srcs[i].field_id};
+	    std::vector<FieldID> instinfo_dst_field_ids{dsts[i].field_id};
             prof_cpinfo.inst_info.push_back(ProfilingMeasurements::OperationCopyInfo::InstInfo {
-                 srcs[i].inst,
-                 RegionInstance::NO_INST,
-                 1 /*num_fields*/,
+		 instinfo_src_insts,
+		 instinfo_dst_insts,
+		 RegionInstance::NO_INST,
+		 scatter_info->get_pointer_instance(),
+		 instinfo_src_field_ids,
+		 instinfo_dst_field_ids,
+		 0,
+		 scatter_info->get_field(),
                  ProfilingMeasurements::OperationCopyInfo::COPY,
                  unsigned(graph.xd_nodes.size() - prev_nodes) });
+            fld_start += 1;
 	  }
 	} else {
 	  size_t addrsplit_bytes_per_element = ((serdez_id == 0) ?
@@ -3972,9 +4773,9 @@ namespace Realm {
 	    IndirectionInfo *gather_info = indirects[srcs[i].indirect_index];
             size_t prev_nodes = graph.xd_nodes.size();
 	    gather_info->generate_gather_paths(dst_mem,
-					       TransferGraph::XDTemplate::mk_inst(dsts[i].inst, i, 1),
+					       TransferGraph::XDTemplate::mk_inst(dsts[i].inst, fld_start, 1),
 					       srcs[i].indirect_index,
-					       i, 1,
+					       fld_start, 1,
 					       addrsplit_bytes_per_element,
 					       serdez_id,
 					       graph.xd_nodes,
@@ -3984,12 +4785,25 @@ namespace Realm {
             prof_usage.source = Memory::NO_MEMORY;
             prof_usage.target = dst_mem;
             prof_usage.size += domain_size * combined_field_size;
+	    std::vector<RegionInstance> instinfo_src_insts;
+	    if (gather_info->get_instances()) {
+	      instinfo_src_insts = *(gather_info->get_instances());
+	    }
+	    std::vector<RegionInstance> instinfo_dst_insts{dsts[i].inst};
+	    std::vector<FieldID> instinfo_src_field_ids{srcs[i].field_id};
+	    std::vector<FieldID> instinfo_dst_field_ids{dsts[i].field_id};
             prof_cpinfo.inst_info.push_back(ProfilingMeasurements::OperationCopyInfo::InstInfo {
-                 RegionInstance::NO_INST,
-                 dsts[i].inst,
-                 1 /*num_fields*/,
+		 instinfo_src_insts,
+		 instinfo_dst_insts,
+		 gather_info->get_pointer_instance(),
+		 RegionInstance::NO_INST,
+		 instinfo_src_field_ids,
+		 instinfo_dst_field_ids,
+		 gather_info->get_field(),
+		 0,
                  ProfilingMeasurements::OperationCopyInfo::COPY,
                  unsigned(graph.xd_nodes.size() - prev_nodes) });
+            fld_start += 1;
 	  } else {
 	    // scatter+gather
 	    // TODO: optimize case of single source and single dest
@@ -4011,7 +4825,7 @@ namespace Realm {
 	    gather_info->generate_gather_paths(ib_mem,
 					       TransferGraph::XDTemplate::mk_edge(ib_idx),
 					       srcs[i].indirect_index,
-					       i, 1,
+					       fld_start, 1,
 					       addrsplit_bytes_per_element,
 					       serdez_id,
 					       graph.xd_nodes,
@@ -4022,7 +4836,7 @@ namespace Realm {
 	    scatter_info->generate_scatter_paths(ib_mem,
 						 TransferGraph::XDTemplate::mk_edge(ib_idx),
 						 dsts[i].indirect_index,
-						 i, 1,
+						 fld_start, 1,
 						 addrsplit_bytes_per_element,
 						 serdez_id,
 						 graph.xd_nodes,
@@ -4032,16 +4846,34 @@ namespace Realm {
             prof_usage.source = Memory::NO_MEMORY;
             prof_usage.target = Memory::NO_MEMORY;
             prof_usage.size += domain_size * combined_field_size;
+	    std::vector<RegionInstance> instinfo_src_insts;
+	    if (gather_info->get_instances()) {
+	      instinfo_src_insts = *(gather_info->get_instances());
+	    }
+	    std::vector<RegionInstance> instinfo_dst_insts;
+	    if (scatter_info->get_instances()) {
+	      instinfo_dst_insts = *(scatter_info->get_instances());
+	    }
+	    std::vector<FieldID> instinfo_src_field_ids{srcs[i].field_id};
+	    std::vector<FieldID> instinfo_dst_field_ids{dsts[i].field_id};
             prof_cpinfo.inst_info.push_back(ProfilingMeasurements::OperationCopyInfo::InstInfo {
-                 RegionInstance::NO_INST,
-                 RegionInstance::NO_INST,
-                 1 /*num_fields*/,
+		 instinfo_src_insts,
+		 instinfo_dst_insts,
+		 gather_info->get_pointer_instance(),
+		 scatter_info->get_pointer_instance(),
+		 instinfo_src_field_ids,
+		 instinfo_dst_field_ids,
+		 gather_info->get_field(),
+		 scatter_info->get_field(),
                  ProfilingMeasurements::OperationCopyInfo::COPY,
                  unsigned(graph.xd_nodes.size() - prev_nodes) });
+            fld_start += 1;
 	  }
 	}
       }
     }
+    // make sure the reordered field list includes them all
+    assert(fld_start == srcs.size());
 
     // once we've enumerated all the ibs we'll need, we need to pick an order in
     //  which to allocate them that will avoid deadlock when multiple transfer
@@ -4059,28 +4891,44 @@ namespace Realm {
 
     if(log_xplan.want_debug()) {
       log_xplan.debug() << "analysis: plan=" << (void *)this
-			<< " dim_order=" << PrettyVector<int>(dim_order)
-			<< " xds=" << graph.xd_nodes.size()
-			<< " ibs=" << graph.ib_edges.size();
-      for(size_t i = 0; i < graph.xd_nodes.size(); i++)
-        if(graph.xd_nodes[i].redop.id != 0)
-          log_xplan.debug() << "analysis: plan=" << (void *)this
-                            << " xds[" << i << "]: target=" << graph.xd_nodes[i].target_node
-                            << " inputs=" << PrettyVector<TransferGraph::XDTemplate::IO>(graph.xd_nodes[i].inputs)
-                            << " outputs=" << PrettyVector<TransferGraph::XDTemplate::IO>(graph.xd_nodes[i].outputs)
-                            << " redop=(" << graph.xd_nodes[i].redop.id << "," << graph.xd_nodes[i].redop.is_fold << "," << graph.xd_nodes[i].redop.in_place << ")";
-        else
-          log_xplan.debug() << "analysis: plan=" << (void *)this
-                            << " xds[" << i << "]: target=" << graph.xd_nodes[i].target_node
-                            << " inputs=" << PrettyVector<TransferGraph::XDTemplate::IO>(graph.xd_nodes[i].inputs)
-                            << " outputs=" << PrettyVector<TransferGraph::XDTemplate::IO>(graph.xd_nodes[i].outputs);
-      for(size_t i = 0; i < graph.ib_edges.size(); i++)
-	log_xplan.debug() << "analysis: plan=" << (void *)this
-			  << " ibs[" << i << "]: memory=" << graph.ib_edges[i].memory
-			  << " size=" << graph.ib_edges[i].size;
-      if(!graph.ib_edges.empty())
+                        << " dim_order=" << PrettyVector<int>(dim_order)
+                        << " xds=" << graph.xd_nodes.size()
+                        << " ibs=" << graph.ib_edges.size();
+
+      for(size_t i = 0; i < graph.xd_nodes.size(); i++) {
+        if(graph.xd_nodes[i].redop.id != 0) {
+          log_xplan.debug()
+              << "analysis: plan=" << (void *)this << " xds[" << i
+              << "]: target=" << graph.xd_nodes[i].target_node << " inputs="
+              << PrettyVector<TransferGraph::XDTemplate::IO>(graph.xd_nodes[i].inputs)
+              << " outputs="
+              << PrettyVector<TransferGraph::XDTemplate::IO>(graph.xd_nodes[i].outputs)
+              << " channel="
+              << ((graph.xd_nodes[i].channel) ? graph.xd_nodes[i].channel->kind : -1)
+              << " redop=(" << graph.xd_nodes[i].redop.id << ","
+              << graph.xd_nodes[i].redop.is_fold << ","
+              << graph.xd_nodes[i].redop.in_place << ")";
+        } else {
+          log_xplan.debug()
+              << "analysis: plan=" << (void *)this << " xds[" << i
+              << "]: target=" << graph.xd_nodes[i].target_node << " inputs="
+              << PrettyVector<TransferGraph::XDTemplate::IO>(graph.xd_nodes[i].inputs)
+              << " outputs="
+              << PrettyVector<TransferGraph::XDTemplate::IO>(graph.xd_nodes[i].outputs)
+              << " channel="
+              << ((graph.xd_nodes[i].channel) ? graph.xd_nodes[i].channel->kind : -1);
+        }
+      }
+
+      for(size_t i = 0; i < graph.ib_edges.size(); i++) {
+        log_xplan.debug() << "analysis: plan=" << (void *)this << " ibs[" << i
+                          << "]: memory=" << graph.ib_edges[i].memory
+                          << " size=" << graph.ib_edges[i].size;
+      }
+      if(!graph.ib_edges.empty()) {
         log_xplan.debug() << "analysis: plan=" << (void *)this
-			  << " ib_alloc=" << PrettyVector<unsigned>(graph.ib_alloc_order);
+                          << " ib_alloc=" << PrettyVector<unsigned>(graph.ib_alloc_order);
+      }
     }
 
     // mark that the analysis is complete and see if there are any pending
@@ -4089,11 +4937,32 @@ namespace Realm {
     {
       AutoLock<> al(mutex);
       to_alloc.swap(pending_ops);
-      analysis_complete.store(true);  // release done by mutex
+      analysis_successful = true;
+      // release before the mutex is released so to_alloc is visible before the
+      // analysis_complete flag is set
+      analysis_complete.store_release(true);
     }
 
     for(size_t i = 0; i < to_alloc.size(); i++)
       to_alloc[i]->allocate_ibs();
+  }
+
+  void TransferDesc::cancel_analysis(Event failed_precondition)
+  {
+    // mark that the analysis is failed and see if there are any pending
+    //  ops that need to also fail
+    std::vector<TransferOperation *> to_alloc;
+    {
+      AutoLock<> al(mutex);
+      to_alloc.swap(pending_ops);
+      analysis_successful = false;
+      // release before the mutex is released so to_alloc is visible before the
+      // analysis_complete flag is set
+      analysis_complete.store_release(true);
+    }
+
+    for(size_t i = 0; i < to_alloc.size(); i++)
+      to_alloc[i]->handle_poisoned_precondition(failed_precondition);
   }
 
 
@@ -4109,10 +4978,11 @@ namespace Realm {
   void TransferDesc::DeferredAnalysis::event_triggered(bool poisoned,
 						       TimeLimit work_until)
   {
-    assert(!poisoned);
     // TODO: respect time limit
-
-    desc->perform_analysis();
+    if(poisoned)
+      desc->cancel_analysis(precondition);
+    else
+      desc->perform_analysis();
   }
 
   void TransferDesc::DeferredAnalysis::print(std::ostream& os) const
@@ -4134,13 +5004,14 @@ namespace Realm {
   TransferOperation::TransferOperation(TransferDesc& _desc,
 				       Event _precondition,
 				       GenEventImpl *_finish_event,
-				       EventImpl::gen_t _finish_gen)
+				       EventImpl::gen_t _finish_gen,
+				       int _priority)
     : Operation(_finish_event, _finish_gen, _desc.prs)
     , deferred_start(this)
     , desc(_desc)
     , precondition(_precondition)
     , ib_responses_needed(0)
-    , priority(0) // FIXME
+    , priority(_priority)
   {
     desc.add_reference();
   }
@@ -4164,10 +5035,14 @@ namespace Realm {
 
     bool poisoned;
     if(!precondition.has_triggered_faultaware(poisoned)) {
+      deferred_start.precondition = precondition;
       EventImpl::add_waiter(precondition, &deferred_start);
       return;
     }
-    assert(!poisoned);
+    if(poisoned) {
+      handle_poisoned_precondition(precondition);
+      return;
+    }
 
     // see if we need to wait for the transfer description analysis
     if(desc.request_analysis(this)) {
@@ -4216,6 +5091,12 @@ namespace Realm {
     bool ok_to_run = mark_ready();
     if(!ok_to_run) {
       mark_finished(false /*!successful*/);
+      return;
+    }
+
+    // if the transfer analysis was not successful, we can't continue
+    if(!desc.analysis_successful) {
+      mark_terminated(0, ByteArray());
       return;
     }
 
@@ -4440,6 +5321,7 @@ namespace Realm {
 
       const void *fill_data = 0;
       size_t fill_size = 0;
+      size_t fill_total = 0;
 
       std::vector<XferDesPortInfo> inputs_info(xdn.inputs.size());
       for(size_t j = 0; j < xdn.inputs.size(); j++) {
@@ -4451,85 +5333,84 @@ namespace Realm {
 			  XferDesPortInfo::SCATTER_CONTROL_PORT :
 			  XferDesPortInfo::DATA_PORT);
 
-	switch(xdn.inputs[j].iotype) {
-	case TransferGraph::XDTemplate::IO_INST:
-	  {
-	    ii.peer_guid = XferDes::XFERDES_NO_GUID;
-	    ii.peer_port_idx = 0;
-	    ii.indirect_port_idx = -1;
-	    ii.mem = xdn.inputs[j].inst.inst.get_location();
-	    ii.inst = xdn.inputs[j].inst.inst;
-	    std::vector<FieldID> src_fields(xdn.inputs[j].inst.fld_count);
-	    std::vector<size_t> src_offsets(xdn.inputs[j].inst.fld_count);
-	    std::vector<size_t> src_sizes(xdn.inputs[j].inst.fld_count);
-	    for(size_t k = 0; k < xdn.inputs[j].inst.fld_count; k++) {
-	      src_fields[k] = desc.src_fields[xdn.inputs[j].inst.fld_start + k].id;
-	      src_offsets[k] = desc.src_fields[xdn.inputs[j].inst.fld_start + k].offset;
-	      src_sizes[k] = desc.src_fields[xdn.inputs[j].inst.fld_start + k].size;
-	    }
-	    ii.iter = desc.domain->create_iterator(xdn.inputs[j].inst.inst,
-						   desc.dim_order,
-						   src_fields,
-						   src_offsets,
-						   src_sizes);
-	    // use first field's serdez - they all have to be the same
-	    ii.serdez_id = desc.src_fields[xdn.inputs[j].inst.fld_start].serdez_id;
-	    ii.ib_offset = 0;
-	    ii.ib_size = 0;
-	    break;
-	  }
-	case TransferGraph::XDTemplate::IO_INDIRECT_INST:
-	  {
-	    ii.peer_guid = XferDes::XFERDES_NO_GUID;
-	    ii.peer_port_idx = 0;
-	    ii.indirect_port_idx = xdn.inputs[j].indirect.port;
-	    ii.mem = xdn.inputs[j].indirect.inst.get_location();
-	    ii.inst = xdn.inputs[j].indirect.inst;
-	    std::vector<FieldID> src_fields(xdn.inputs[j].indirect.fld_count);
-	    std::vector<size_t> src_offsets(xdn.inputs[j].indirect.fld_count);
-	    std::vector<size_t> src_sizes(xdn.inputs[j].indirect.fld_count);
-	    for(size_t k = 0; k < xdn.inputs[j].indirect.fld_count; k++) {
-	      src_fields[k] = desc.src_fields[xdn.inputs[j].indirect.fld_start + k].id;
-	      src_offsets[k] = desc.src_fields[xdn.inputs[j].indirect.fld_start + k].offset;
-	      src_sizes[k] = desc.src_fields[xdn.inputs[j].indirect.fld_start + k].size;
-	    }
-	    IndirectionInfo *gather_info = desc.indirects[xdn.inputs[j].indirect.ind_idx];
-	    ii.iter = gather_info->create_indirect_iterator(ii.mem,
-							    xdn.inputs[j].indirect.inst,
-							    src_fields,
-							    src_offsets,
-							    src_sizes);
-	    // use first field's serdez - they all have to be the same
-	    ii.serdez_id = desc.src_fields[xdn.inputs[j].indirect.fld_start].serdez_id;
-	    ii.ib_offset = 0;
-	    ii.ib_size = 0;
-	    break;
-	  }
-	case TransferGraph::XDTemplate::IO_EDGE:
-	  {
-	    ii.peer_guid = ib_pre_ids[xdn.inputs[j].edge].first;
-	    ii.peer_port_idx = ib_pre_ids[xdn.inputs[j].edge].second;
-	    ii.indirect_port_idx = -1;
-	    ii.mem = tg.ib_edges[xdn.inputs[j].edge].memory;
-	    ii.inst = RegionInstance::NO_INST;
-	    ii.ib_offset = ib_offsets[xdn.inputs[j].edge];
-	    ii.ib_size = tg.ib_edges[xdn.inputs[j].edge].size;
-	    ii.iter = new WrappingFIFOIterator(ii.ib_offset, ii.ib_size);
-	    ii.serdez_id = 0;
-	    break;
-	  }
-	case TransferGraph::XDTemplate::IO_FILL_DATA:
-	  {
-	    // don't actually want an input in this case
-	    assert((j == 0) && (xdn.inputs.size() == 1));
-	    inputs_info.clear();
-	    fill_data = static_cast<const char *>(desc.fill_data) + xdn.inputs[j].fill.fill_start;
-	    fill_size = xdn.inputs[j].fill.fill_size;
-	    break;
-	  }
-	default:
-	  assert(0);
-	}
+        switch(xdn.inputs[j].iotype) {
+        case TransferGraph::XDTemplate::IO_INST:
+        {
+          ii.peer_guid = XferDes::XFERDES_NO_GUID;
+          ii.peer_port_idx = 0;
+          ii.indirect_port_idx = -1;
+          ii.mem = xdn.inputs[j].inst.inst.get_location();
+          ii.inst = xdn.inputs[j].inst.inst;
+          std::vector<FieldID> src_fields(xdn.inputs[j].inst.fld_count);
+          std::vector<size_t> src_offsets(xdn.inputs[j].inst.fld_count);
+          std::vector<size_t> src_sizes(xdn.inputs[j].inst.fld_count);
+          for(size_t k = 0; k < xdn.inputs[j].inst.fld_count; k++) {
+            src_fields[k] = desc.src_fields[xdn.inputs[j].inst.fld_start + k].id;
+            src_offsets[k] = desc.src_fields[xdn.inputs[j].inst.fld_start + k].offset;
+            src_sizes[k] = desc.src_fields[xdn.inputs[j].inst.fld_start + k].size;
+          }
+          ii.iter = desc.domain->create_iterator(xdn.inputs[j].inst.inst, desc.dim_order,
+                                                 src_fields, src_offsets, src_sizes);
+          // use first field's serdez - they all have to be the same
+          ii.serdez_id = desc.src_fields[xdn.inputs[j].inst.fld_start].serdez_id;
+          ii.ib_offset = 0;
+          ii.ib_size = 0;
+          break;
+        }
+        case TransferGraph::XDTemplate::IO_INDIRECT_INST:
+        {
+          ii.peer_guid = XferDes::XFERDES_NO_GUID;
+          ii.peer_port_idx = 0;
+          ii.indirect_port_idx = xdn.inputs[j].indirect.port;
+          ii.mem = xdn.inputs[j].indirect.inst.get_location();
+          ii.inst = xdn.inputs[j].indirect.inst;
+          std::vector<FieldID> src_fields(xdn.inputs[j].indirect.fld_count);
+          std::vector<size_t> src_offsets(xdn.inputs[j].indirect.fld_count);
+          std::vector<size_t> src_sizes(xdn.inputs[j].indirect.fld_count);
+          for(size_t k = 0; k < xdn.inputs[j].indirect.fld_count; k++) {
+            src_fields[k] = desc.src_fields[xdn.inputs[j].indirect.fld_start + k].id;
+            src_offsets[k] = desc.src_fields[xdn.inputs[j].indirect.fld_start + k].offset;
+            src_sizes[k] = desc.src_fields[xdn.inputs[j].indirect.fld_start + k].size;
+          }
+          IndirectionInfo *gather_info = desc.indirects[xdn.inputs[j].indirect.ind_idx];
+          ii.iter = gather_info->create_indirect_iterator(
+              ii.mem, xdn.inputs[j].indirect.inst, src_fields, src_offsets, src_sizes,
+              xdn.channel);
+          // use first field's serdez - they all have to be the same
+          ii.serdez_id = desc.src_fields[xdn.inputs[j].indirect.fld_start].serdez_id;
+          ii.ib_offset = 0;
+          ii.ib_size = 0;
+          break;
+        }
+
+        case TransferGraph::XDTemplate::IO_EDGE:
+        {
+          ii.peer_guid = ib_pre_ids[xdn.inputs[j].edge].first;
+          ii.peer_port_idx = ib_pre_ids[xdn.inputs[j].edge].second;
+          ii.indirect_port_idx = -1;
+          ii.mem = tg.ib_edges[xdn.inputs[j].edge].memory;
+          ii.inst = RegionInstance::NO_INST;
+          ii.ib_offset = ib_offsets[xdn.inputs[j].edge];
+          ii.ib_size = tg.ib_edges[xdn.inputs[j].edge].size;
+          ii.iter = new WrappingFIFOIterator(ii.ib_offset, ii.ib_size);
+          ii.serdez_id = 0;
+          break;
+        }
+
+        case TransferGraph::XDTemplate::IO_FILL_DATA:
+        {
+          // don't actually want an input in this case
+          assert((j == 0) && (xdn.inputs.size() == 1));
+          inputs_info.clear();
+          fill_data =
+              static_cast<const char *>(desc.fill_data) + xdn.inputs[j].fill.fill_start;
+          fill_size = xdn.inputs[j].fill.fill_size;
+          fill_total = xdn.inputs[j].fill.fill_total;
+          break;
+        }
+        default:
+          assert(0);
+        }
 #if 0
 	if(0) {
 	    //mark_started = true;
@@ -4582,76 +5463,73 @@ namespace Realm {
 
 	oi.port_type = XferDesPortInfo::DATA_PORT;
 
-	switch(xdn.outputs[j].iotype) {
-	case TransferGraph::XDTemplate::IO_INST:
-	  {
-	    oi.peer_guid = XferDes::XFERDES_NO_GUID;
-	    oi.peer_port_idx = 0;
-	    oi.indirect_port_idx = -1;
-	    oi.mem = xdn.outputs[j].inst.inst.get_location();
-	    oi.inst = xdn.outputs[j].inst.inst;
-	    std::vector<FieldID> dst_fields(xdn.outputs[j].inst.fld_count);
-	    std::vector<size_t> dst_offsets(xdn.outputs[j].inst.fld_count);
-	    std::vector<size_t> dst_sizes(xdn.outputs[j].inst.fld_count);
-	    for(size_t k = 0; k < xdn.outputs[j].inst.fld_count; k++) {
-	      dst_fields[k] = desc.dst_fields[xdn.outputs[j].inst.fld_start + k].id;
-	      dst_offsets[k] = desc.dst_fields[xdn.outputs[j].inst.fld_start + k].offset;
-	      dst_sizes[k] = desc.dst_fields[xdn.outputs[j].inst.fld_start + k].size;
-	    }
-	    oi.iter = desc.domain->create_iterator(xdn.outputs[j].inst.inst,
-						   desc.dim_order,
-						   dst_fields,
-						   dst_offsets,
-						   dst_sizes);
-	    // use first field's serdez - they all have to be the same
-	    oi.serdez_id = desc.dst_fields[xdn.outputs[j].inst.fld_start].serdez_id;
-	    oi.ib_offset = 0;
-	    oi.ib_size = 0;
-	    break;
-	  }
-	case TransferGraph::XDTemplate::IO_INDIRECT_INST:
-	  {
-	    oi.peer_guid = XferDes::XFERDES_NO_GUID;
-	    oi.peer_port_idx = 0;
-	    oi.indirect_port_idx = xdn.outputs[j].indirect.port;
-	    oi.mem = xdn.outputs[j].indirect.inst.get_location();
-	    oi.inst = xdn.outputs[j].indirect.inst;
-	    std::vector<FieldID> dst_fields(xdn.outputs[j].indirect.fld_count);
-	    std::vector<size_t> dst_offsets(xdn.outputs[j].indirect.fld_count);
-	    std::vector<size_t> dst_sizes(xdn.outputs[j].indirect.fld_count);
-	    for(size_t k = 0; k < xdn.outputs[j].indirect.fld_count; k++) {
-	      dst_fields[k] = desc.dst_fields[xdn.outputs[j].indirect.fld_start + k].id;
-	      dst_offsets[k] = desc.dst_fields[xdn.outputs[j].indirect.fld_start + k].offset;
-	      dst_sizes[k] = desc.dst_fields[xdn.outputs[j].indirect.fld_start + k].size;
-	    }
-	    IndirectionInfo *scatter_info = desc.indirects[xdn.outputs[j].indirect.ind_idx];
-	    oi.iter = scatter_info->create_indirect_iterator(oi.mem,
-							     xdn.outputs[j].indirect.inst,
-							     dst_fields,
-							     dst_offsets,
-							     dst_sizes);
-	    // use first field's serdez - they all have to be the same
-	    oi.serdez_id = desc.dst_fields[xdn.outputs[j].indirect.fld_start].serdez_id;
-	    oi.ib_offset = 0;
-	    oi.ib_size = 0;
-	    break;
-	  }
-	case TransferGraph::XDTemplate::IO_EDGE:
-	  {
-	    oi.peer_guid = ib_next_ids[xdn.outputs[j].edge].first;
-	    oi.peer_port_idx = ib_next_ids[xdn.outputs[j].edge].second;
-	    oi.indirect_port_idx = -1;
-	    oi.mem = tg.ib_edges[xdn.outputs[j].edge].memory;
-	    oi.inst = RegionInstance::NO_INST;
-	    oi.ib_offset = ib_offsets[xdn.outputs[j].edge];
-	    oi.ib_size = tg.ib_edges[xdn.outputs[j].edge].size;
-	    oi.iter = new WrappingFIFOIterator(oi.ib_offset, oi.ib_size);
-	    oi.serdez_id = 0;
-	    break;
-	  }
-	default:
-	  assert(0);
-	}
+        switch(xdn.outputs[j].iotype) {
+        case TransferGraph::XDTemplate::IO_INST:
+        {
+          oi.peer_guid = XferDes::XFERDES_NO_GUID;
+          oi.peer_port_idx = 0;
+          oi.indirect_port_idx = -1;
+          oi.mem = xdn.outputs[j].inst.inst.get_location();
+          oi.inst = xdn.outputs[j].inst.inst;
+          std::vector<FieldID> dst_fields(xdn.outputs[j].inst.fld_count);
+          std::vector<size_t> dst_offsets(xdn.outputs[j].inst.fld_count);
+          std::vector<size_t> dst_sizes(xdn.outputs[j].inst.fld_count);
+          for(size_t k = 0; k < xdn.outputs[j].inst.fld_count; k++) {
+            dst_fields[k] = desc.dst_fields[xdn.outputs[j].inst.fld_start + k].id;
+            dst_offsets[k] = desc.dst_fields[xdn.outputs[j].inst.fld_start + k].offset;
+            dst_sizes[k] = desc.dst_fields[xdn.outputs[j].inst.fld_start + k].size;
+          }
+          oi.iter = desc.domain->create_iterator(xdn.outputs[j].inst.inst, desc.dim_order,
+                                                 dst_fields, dst_offsets, dst_sizes);
+          // use first field's serdez - they all have to be the same
+          oi.serdez_id = desc.dst_fields[xdn.outputs[j].inst.fld_start].serdez_id;
+          oi.ib_offset = 0;
+          oi.ib_size = 0;
+          break;
+        }
+        case TransferGraph::XDTemplate::IO_INDIRECT_INST:
+        {
+          oi.peer_guid = XferDes::XFERDES_NO_GUID;
+          oi.peer_port_idx = 0;
+          oi.indirect_port_idx = xdn.outputs[j].indirect.port;
+          oi.mem = xdn.outputs[j].indirect.inst.get_location();
+          oi.inst = xdn.outputs[j].indirect.inst;
+          std::vector<FieldID> dst_fields(xdn.outputs[j].indirect.fld_count);
+          std::vector<size_t> dst_offsets(xdn.outputs[j].indirect.fld_count);
+          std::vector<size_t> dst_sizes(xdn.outputs[j].indirect.fld_count);
+          for(size_t k = 0; k < xdn.outputs[j].indirect.fld_count; k++) {
+            dst_fields[k] = desc.dst_fields[xdn.outputs[j].indirect.fld_start + k].id;
+            dst_offsets[k] =
+                desc.dst_fields[xdn.outputs[j].indirect.fld_start + k].offset;
+            dst_sizes[k] = desc.dst_fields[xdn.outputs[j].indirect.fld_start + k].size;
+          }
+          IndirectionInfo *scatter_info = desc.indirects[xdn.outputs[j].indirect.ind_idx];
+          oi.iter = scatter_info->create_indirect_iterator(
+              oi.mem, xdn.outputs[j].indirect.inst, dst_fields, dst_offsets, dst_sizes,
+              xdn.channel);
+          // use first field's serdez - they all have to be the same
+          oi.serdez_id = desc.dst_fields[xdn.outputs[j].indirect.fld_start].serdez_id;
+          oi.ib_offset = 0;
+          oi.ib_size = 0;
+          break;
+        }
+
+        case TransferGraph::XDTemplate::IO_EDGE:
+        {
+          oi.peer_guid = ib_next_ids[xdn.outputs[j].edge].first;
+          oi.peer_port_idx = ib_next_ids[xdn.outputs[j].edge].second;
+          oi.indirect_port_idx = -1;
+          oi.mem = tg.ib_edges[xdn.outputs[j].edge].memory;
+          oi.inst = RegionInstance::NO_INST;
+          oi.ib_offset = ib_offsets[xdn.outputs[j].edge];
+          oi.ib_size = tg.ib_edges[xdn.outputs[j].edge].size;
+          oi.iter = new WrappingFIFOIterator(oi.ib_offset, oi.ib_size);
+          oi.serdez_id = 0;
+          break;
+        }
+        default:
+          assert(0);
+        }
 #if 0
 	  if(xdn.outputs[j].edge_id == XDNemplate::DST_INST) {
 	    oi.peer_guid = XferDes::XFERDES_NO_GUID;
@@ -4704,7 +5582,7 @@ namespace Realm {
 				  outputs_info,
 				  priority,
                                   xdn.redop,
-				  fill_data, fill_size);
+				  fill_data, fill_size, fill_total);
       xd_factory->release();
     }
 
@@ -4776,15 +5654,17 @@ namespace Realm {
   void TransferOperation::DeferredStart::event_triggered(bool poisoned,
 							 TimeLimit work_until)
   {
-    assert(!poisoned);
     // TODO: respect time limit
-
-    // see if we need to wait for the transfer description analysis
-    if(op->desc.request_analysis(op)) {
-      // it's ready - go ahead and do ib creation
-      op->allocate_ibs();
+    if(poisoned) {
+      op->handle_poisoned_precondition(precondition);
     } else {
-      // do nothing - the TransferDesc will call us when it's ready
+      // see if we need to wait for the transfer description analysis
+      if(op->desc.request_analysis(op)) {
+	// it's ready - go ahead and do ib creation
+	op->allocate_ibs();
+      } else {
+	// do nothing - the TransferDesc will call us when it's ready
+      }
     }
   }
 
@@ -4806,7 +5686,8 @@ namespace Realm {
 			      const std::vector<CopySrcDstField>& dsts,
 			      const std::vector<const typename CopyIndirection<N,T>::Base *> &indirects,
 			      const Realm::ProfilingRequestSet &requests,
-			      Event wait_on) const
+			      Event wait_on,
+			      int priority) const
   {
     // create a (one-use) transfer description
     TransferDesc *tdesc = new TransferDesc(*this,
@@ -4821,8 +5702,8 @@ namespace Realm {
     TransferOperation *op = new TransferOperation(*tdesc,
                                                   wait_on,
                                                   finish_event,
-                                                  ID(ev).event_generation());
-    get_runtime()->optable.add_local_operation(ev, op);
+                                                  ID(ev).event_generation(),
+                                                  priority);
     op->start_or_defer();
 
     // remove our reference to the description (op holds one)
@@ -4831,17 +5712,17 @@ namespace Realm {
     return ev;
   }
 
-#define DOIT(N,T) \
-  template Event IndexSpace<N,T>::copy(const std::vector<CopySrcDstField>&, \
-				       const std::vector<CopySrcDstField>&, \
-				       const std::vector<const CopyIndirection<N,T>::Base *>&, \
-				       const ProfilingRequestSet&,	\
-				       Event) const;			\
-  template class TransferIteratorIndexSpace<N,T>; \
-  template class TransferIteratorIndirect<N,T>; \
-  template class TransferIteratorIndirectRange<N,T>; \
-  template class TransferDomainIndexSpace<N,T>; \
-  template class AddressSplitXferDesFactory<N,T>;
+#define DOIT(N, T)                                                                       \
+  template Event IndexSpace<N, T>::copy(                                                 \
+      const std::vector<CopySrcDstField> &, const std::vector<CopySrcDstField> &,        \
+      const std::vector<const CopyIndirection<N, T>::Base *> &,                          \
+      const ProfilingRequestSet &, Event, int) const;                                    \
+  template class TransferIteratorIndexSpace<N, T>;                                       \
+  template class TransferIteratorIndirect<N, T>;                                         \
+  template class WrappingTransferIteratorIndirect<N, T>;                                 \
+  template class TransferIteratorIndirectRange<N, T>;                                    \
+  template class TransferDomainIndexSpace<N, T>;                                         \
+  template class AddressSplitXferDesFactory<N, T>;
   FOREACH_NT(DOIT)
 
 #define DOIT2(N,T,N2,T2) \

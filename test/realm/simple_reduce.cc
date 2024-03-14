@@ -223,7 +223,7 @@ void top_level_task(const void *data, size_t datalen,
 				  ok ? 0 : 1);
 }
 
-#ifdef REALM_USE_CUDA
+#if defined(REALM_USE_CUDA) || defined(REALM_USE_HIP)
 extern void register_gpu_reduction(Realm::Runtime& realm,
                                    Realm::ReductionOpID redop_id);
 #endif
@@ -240,7 +240,7 @@ int main(int argc, char **argv)
   bool ok = cp.parse_command_line(argc, const_cast<const char **>(argv));
   assert(ok);
 
-#ifdef REALM_USE_CUDA
+#if defined(REALM_USE_CUDA) || defined(REALM_USE_HIP)
   // register a reduction op capable of running on cpu or gpu
   register_gpu_reduction(rt, REDOP_MIXED_ADD);
 #else

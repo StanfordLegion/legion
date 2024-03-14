@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -97,32 +97,40 @@ namespace Realm {
       return 0; // cannot provide a pointer for it.
     }
 
+    // HDF5Memory supports ExternalHDF5Resource
+    bool HDF5Memory::attempt_register_external_resource(RegionInstanceImpl *inst,
+                                                        size_t& inst_offset)
+    {
+      {
+        ExternalHDF5Resource *res = dynamic_cast<ExternalHDF5Resource *>(inst->metadata.ext_resource);
+        if(res) {
+          // instant success - we won't try to open the file until it's accessed
+          inst_offset = 0;
+          return true;
+        }
+      }
+
+      // not a kind we recognize
+      return false;
+    }
+
+    void HDF5Memory::unregister_external_resource(RegionInstanceImpl *inst)
+    {
+      // nothing to do here
+    }
+
     MemoryImpl::AllocationResult HDF5Memory::allocate_storage_immediate(RegionInstanceImpl *inst,
 							    bool need_alloc_result,
 							    bool poisoned,
 							    TimeLimit work_until)
     {
-      // if the allocation request doesn't include an external HDF5 resource,
-      //  we fail it immediately
-      ExternalHDF5Resource *res = dynamic_cast<ExternalHDF5Resource *>(inst->metadata.ext_resource);
-      if(res == 0) {
-	if(inst->metadata.ext_resource)
-	  log_inst.warning() << "attempt to register non-hdf5 resource: mem=" << me << " resource=" << *(inst->metadata.ext_resource);
-	else
-	  log_inst.warning() << "attempt to allocate memory in hdf5 memory: layout=" << *(inst->metadata.layout);
-	inst->notify_allocation(ALLOC_INSTANT_FAILURE, 0, work_until);
-	return ALLOC_INSTANT_FAILURE;
-      }
+      // we can't actually allocate anything in an HDF5Memory
+      if(inst->metadata.ext_resource)
+        log_inst.warning() << "attempt to register non-hdf5 resource: mem=" << me << " resource=" << *(inst->metadata.ext_resource);
+      else
+        log_inst.warning() << "attempt to allocate memory in hdf5 memory: layout=" << *(inst->metadata.layout);
 
-      // poisoned preconditions cancel the allocation request
-      if(poisoned) {
-	inst->notify_allocation(ALLOC_CANCELLED, 0, work_until);
-	return ALLOC_CANCELLED;
-      }
-
-      // TODO: try to open the file once here to make sure it exists?
-
-      AllocationResult result = ALLOC_INSTANT_SUCCESS;
+      AllocationResult result = ALLOC_INSTANT_FAILURE;
       size_t inst_offset = 0;
       inst->notify_allocation(result, inst_offset, work_until);
 
@@ -137,8 +145,15 @@ namespace Realm {
       if(poisoned)
 	return;
 
-      // we didn't save anything on the instance, so just ack and return
-      inst->notify_deallocation();
+      // for external instances, all we have to do is ack the destruction
+      if(inst->metadata.ext_resource != 0) {
+        unregister_external_resource(inst);
+        inst->notify_deallocation();
+	return;
+      }
+
+      // shouldn't get here - no allocation
+      assert(0);
     }
 
 
@@ -148,6 +163,7 @@ namespace Realm {
 
     int AddressInfoHDF5::set_rect(const RegionInstanceImpl *inst,
                                   const InstanceLayoutPieceBase *piece,
+                                  size_t field_size, size_t field_offset,
                                   int ndims,
                                   const int64_t lo[/*ndims*/],
                                   const int64_t hi[/*ndims*/],
@@ -190,7 +206,7 @@ namespace Realm {
         } else {
           // which hdf5 dim are we doing next?
           int hd = info->dim_order[order[d]];
-          if((hd < 0) && (hd >= first_nontrivial_hdf5_dim)) {
+          if((hd < 0) || (hd >= first_nontrivial_hdf5_dim)) {
             // have to stop here
             break;
           }
@@ -263,6 +279,10 @@ namespace Realm {
         long idx = 0;
 	
 	while((idx < nr) && request_available()) {	  
+	  // TODO: we really shouldn't even be trying if the iteration
+	  //   is already done
+	  if(iteration_completed.load()) break;
+
 	  // TODO: use control stream to determine which input/output ports
 	  //  to use
 	  int in_port_idx = 0;
@@ -276,7 +296,7 @@ namespace Realm {
 	    // non-ib iterators should end at the same time
 	    assert((in_port->peer_guid != XFERDES_NO_GUID) || in_port->iter->done());
 	    assert((out_port->peer_guid != XFERDES_NO_GUID) || out_port->iter->done());
-	    iteration_completed.store_release(true);
+	    begin_completion();
 	    break;
 	  }
 
@@ -300,7 +320,7 @@ namespace Realm {
 	      // otherwise, this shouldn't happen - we should detect this case
 	      //  on the the transfer of those last bytes
 	      assert(0);
-	      iteration_completed.store_release(true);
+	      begin_completion();
 	      break;
 	    }
 	    if(pre_max < max_bytes) {
@@ -413,6 +433,7 @@ namespace Realm {
 	  new_req->write_seq_pos = out_port->local_bytes_total;
 	  new_req->write_seq_count = hdf5_bytes;
 	  out_port->local_bytes_total += hdf5_bytes;
+          out_port->local_bytes_cons.fetch_add(hdf5_bytes);
 
 	  requests[idx++] = new_req;
 
@@ -420,7 +441,7 @@ namespace Realm {
 	  //  process the request (so that multi-hop successors are notified
 	  //  properly)
 	  if(hdf5_iter->done())
-	    iteration_completed.store_release(true);
+	    begin_completion();
 	}
 
 	return idx;
@@ -524,7 +545,7 @@ namespace Realm {
                     output_control.eos_received);
 
           if(done)
-            iteration_completed.store_release(true);
+            begin_completion();
 
           if(done || work_until.is_expired())
             break;
@@ -613,7 +634,9 @@ namespace Realm {
 					    const std::vector<XferDesPortInfo>& outputs_info,
 					    int priority,
 					    XferDesRedopInfo redop_info,
-					    const void *fill_data, size_t fill_size)
+					    const void *fill_data,
+                                            size_t fill_size,
+                                            size_t fill_total)
       {
 	assert(redop_info.id == 0);
 	return new HDF5XferDes(dma_op, this, launch_node, guid,

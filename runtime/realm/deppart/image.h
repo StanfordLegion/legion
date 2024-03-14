@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@
 #define REALM_DEPPART_IMAGE_H
 
 #include "realm/deppart/partitions.h"
+#include "realm/deppart/rectlist.h"
 
 namespace Realm {
 
@@ -32,6 +33,7 @@ namespace Realm {
 
     ImageMicroOp(IndexSpace<N,T> _parent_space, IndexSpace<N2,T2> _inst_space,
 		 RegionInstance _inst, size_t _field_offset, bool _is_ranged);
+
     virtual ~ImageMicroOp(void);
 
     void add_sparsity_output(IndexSpace<N2,T2> _source, SparsityMap<N,T> _sparsity);
@@ -83,37 +85,54 @@ namespace Realm {
   template <int N, typename T, int N2, typename T2>
   class ImageOperation : public PartitioningOperation {
   public:
-    ImageOperation(const IndexSpace<N,T>& _parent,
-		   const std::vector<FieldDataDescriptor<IndexSpace<N2,T2>,Point<N,T> > >& _field_data,
-		   const ProfilingRequestSet &reqs,
-		   GenEventImpl *_finish_event, EventImpl::gen_t _finish_gen);
+   ImageOperation(const IndexSpace<N, T>& _parent,
+                  const DomainTransform<N, T, N2, T2>& _domain_transform,
+                  const ProfilingRequestSet& reqs, GenEventImpl* _finish_event,
+                  EventImpl::gen_t _finish_gen);
 
-    ImageOperation(const IndexSpace<N,T>& _parent,
-		   const std::vector<FieldDataDescriptor<IndexSpace<N2,T2>,Rect<N,T> > >& _field_data,
-		   const ProfilingRequestSet &reqs,
-		   GenEventImpl *_finish_event, EventImpl::gen_t _finish_gen);
+   virtual ~ImageOperation(void);
 
-    virtual ~ImageOperation(void);
+   IndexSpace<N, T> add_source(const IndexSpace<N2, T2>& source);
+   IndexSpace<N, T> add_source_with_difference(
+       const IndexSpace<N2, T2>& source, const IndexSpace<N, T>& diff_rhs);
 
-    IndexSpace<N,T> add_source(const IndexSpace<N2,T2>& source);
-    IndexSpace<N,T> add_source_with_difference(const IndexSpace<N2,T2>& source,
-                                                const IndexSpace<N,T>& diff_rhs);
+   virtual void execute(void);
 
-    virtual void execute(void);
+   virtual void print(std::ostream& os) const;
 
-    virtual void print(std::ostream& os) const;
-
-    virtual void set_overlap_tester(void *tester);
+   virtual void set_overlap_tester(void* tester);
 
   protected:
-    IndexSpace<N,T> parent;
-    std::vector<FieldDataDescriptor<IndexSpace<N2,T2>,Point<N,T> > > ptr_data;
-    std::vector<FieldDataDescriptor<IndexSpace<N2,T2>,Rect<N,T> > > range_data;
-    std::vector<IndexSpace<N2,T2> > sources;
-    std::vector<IndexSpace<N,T> > diff_rhss;
-    std::vector<SparsityMap<N,T> > images;
+   IndexSpace<N, T> parent;
+   DomainTransform<N, T, N2, T2> domain_transform;
+   std::vector<IndexSpace<N2, T2>> sources;
+   std::vector<IndexSpace<N, T>> diff_rhss;
+   std::vector<SparsityMap<N, T>> images;
   };
-    
-};
+
+  template <int N, typename T, int N2, typename T2>
+  class StructuredImageMicroOp : public PartitioningMicroOp {
+   public:
+    StructuredImageMicroOp(
+        const IndexSpace<N, T>& _parent,
+        const StructuredTransform<N, T, N2, T2>& _transform);
+
+    virtual ~StructuredImageMicroOp(void);
+    virtual void execute(void);
+
+    virtual void populate(std::map<int, HybridRectangleList<N, T>*>& bitmasks);
+
+    void dispatch(PartitioningOperation* op, bool inline_ok);
+    void add_sparsity_output(IndexSpace<N2, T2> _source,
+                             SparsityMap<N, T> _sparsity);
+
+   protected:
+    IndexSpace<N, T> parent_space;
+    StructuredTransform<N, T, N2, T2> transform;
+    std::vector<IndexSpace<N2, T2>> sources;
+    std::vector<SparsityMap<N, T>> sparsity_outputs;
+  };
+
+  };  // namespace Realm
 
 #endif // REALM_DEPPART_IMAGE_H

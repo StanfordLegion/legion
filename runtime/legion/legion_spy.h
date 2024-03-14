@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -84,9 +84,12 @@ namespace Legion {
       }
 
       // Logger calls for the shape of region trees
-      static inline void log_top_index_space(IDType unique_id)
+      static inline void log_top_index_space(IDType unique_id,
+                                             AddressSpaceID owner,
+                                             const char *provenance)
       {
-        log_spy.print("Index Space " IDFMT "", unique_id);
+        log_spy.print("Index Space " IDFMT " %u %s", unique_id,
+            owner, (provenance == NULL) ? "" : provenance);
       }
 
       static inline void log_index_space_name(IDType unique_id,
@@ -97,11 +100,13 @@ namespace Legion {
       }
 
       static inline void log_index_partition(IDType parent_id, 
-                IDType unique_id, int disjoint, int complete, LegionColor point)
+                IDType unique_id, int disjoint, int complete,
+                LegionColor point, AddressSpaceID owner, const char *provenance)
       {
         // Convert ints from -1,0,1 to 0,1,2
-        log_spy.print("Index Partition " IDFMT " " IDFMT " %d %d %lld",
-		      parent_id, unique_id, disjoint+1, complete+1, point); 
+        log_spy.print("Index Partition " IDFMT " " IDFMT " %d %d %lld %u %s",
+		      parent_id, unique_id, disjoint+1, complete+1, point,
+                      owner, (provenance == NULL) ? "" : provenance); 
       }
 
       static inline void log_index_partition_name(IDType unique_id,
@@ -111,91 +116,94 @@ namespace Legion {
 		      unique_id, name);
       }
 
-      static inline void log_index_subspace(IDType parent_id, 
-                              IDType unique_id, const DomainPoint &point)
+      static inline void log_index_subspace(IDType parent_id,
+          IDType unique_id, AddressSpaceID owner, const DomainPoint &point)
       {
 #if LEGION_MAX_DIM == 1
-        log_spy.print("Index Subspace " IDFMT " " IDFMT " %u %lld",
-		      parent_id, unique_id, point.dim,
+        log_spy.print("Index Subspace " IDFMT " " IDFMT " %u %u %lld",
+		      parent_id, unique_id, owner, point.dim,
                       (long long )point.point_data[0]);
 #elif LEGION_MAX_DIM == 2
-        log_spy.print("Index Subspace " IDFMT " " IDFMT " %u %lld %lld",
-		      parent_id, unique_id, point.dim,
+        log_spy.print("Index Subspace " IDFMT " " IDFMT " %u %u %lld %lld",
+		      parent_id, unique_id, owner, point.dim,
                       (long long)point.point_data[0],
-                      (long long)point.point_data[1]);
+                      (point.dim < 2) ? 0 : (long long)point.point_data[1]);
 #elif LEGION_MAX_DIM == 3
-        log_spy.print("Index Subspace " IDFMT " " IDFMT " %u %lld %lld %lld",
-		      parent_id, unique_id, point.dim,
+        log_spy.print("Index Subspace " IDFMT " " IDFMT " %u %u %lld %lld %lld",
+		      parent_id, unique_id, owner, point.dim,
                       (long long)point.point_data[0],
-                      (long long)point.point_data[1],
-                      (long long)point.point_data[2]);
+                      (point.dim < 2) ? 0 : (long long)point.point_data[1],
+                      (point.dim < 3) ? 0 : (long long)point.point_data[2]);
 #elif LEGION_MAX_DIM == 4
-        log_spy.print("Index Subspace " IDFMT " " IDFMT " %u %lld %lld %lld "
-                      "%lld", parent_id, unique_id, point.dim,
+        log_spy.print("Index Subspace " IDFMT " " IDFMT " %u %u %lld %lld %lld "
+                      "%lld", parent_id, unique_id, owner, point.dim,
                       (long long)point.point_data[0],
-                      (long long)point.point_data[1],
-                      (long long)point.point_data[2],
-                      (long long)point.point_data[3]);
+                      (point.dim < 2) ? 0 : (long long)point.point_data[1],
+                      (point.dim < 3) ? 0 : (long long)point.point_data[2],
+                      (point.dim < 4) ? 0 : (long long)point.point_data[3]);
 #elif LEGION_MAX_DIM == 5
-        log_spy.print("Index Subspace " IDFMT " " IDFMT " %u %lld %lld %lld "
-                      "%lld %lld", parent_id, unique_id, point.dim,
+        log_spy.print("Index Subspace " IDFMT " " IDFMT " %u %u %lld %lld %lld "
+                      "%lld %lld", parent_id, unique_id, owner, point.dim,
                       (long long)point.point_data[0],
-                      (long long)point.point_data[1],
-                      (long long)point.point_data[2],
-                      (long long)point.point_data[3],
-                      (long long)point.point_data[4]);
+                      (point.dim < 2) ? 0 : (long long)point.point_data[1],
+                      (point.dim < 3) ? 0 : (long long)point.point_data[2],
+                      (point.dim < 4) ? 0 : (long long)point.point_data[3],
+                      (point.dim < 5) ? 0 : (long long)point.point_data[4]);
 #elif LEGION_MAX_DIM == 6
-        log_spy.print("Index Subspace " IDFMT " " IDFMT " %u %lld %lld %lld "
-                      "%lld %lld %lld", parent_id, unique_id, point.dim,
+        log_spy.print("Index Subspace " IDFMT " " IDFMT " %u %u %lld %lld %lld "
+                      "%lld %lld %lld", parent_id, unique_id, owner, point.dim,
                       (long long)point.point_data[0],
-                      (long long)point.point_data[1],
-                      (long long)point.point_data[2],
-                      (long long)point.point_data[3],
-                      (long long)point.point_data[4],
-                      (long long)point.point_data[5]);
+                      (point.dim < 2) ? 0 : (long long)point.point_data[1],
+                      (point.dim < 3) ? 0 : (long long)point.point_data[2],
+                      (point.dim < 4) ? 0 : (long long)point.point_data[3],
+                      (point.dim < 5) ? 0 : (long long)point.point_data[4],
+                      (point.dim < 6) ? 0 : (long long)point.point_data[5]);
 #elif LEGION_MAX_DIM == 7
-        log_spy.print("Index Subspace " IDFMT " " IDFMT " %u %lld %lld %lld "
-                      "%lld %lld %lld %lld", parent_id, unique_id, point.dim,
+        log_spy.print("Index Subspace " IDFMT " " IDFMT " %u %u %lld %lld %lld "
+                      "%lld %lld %lld %lld", parent_id, unique_id, owner, point.dim,
                       (long long)point.point_data[0],
-                      (long long)point.point_data[1],
-                      (long long)point.point_data[2],
-                      (long long)point.point_data[3],
-                      (long long)point.point_data[4],
-                      (long long)point.point_data[5],
-                      (long long)point.point_data[6]);
+                      (point.dim < 2) ? 0 : (long long)point.point_data[1],
+                      (point.dim < 3) ? 0 : (long long)point.point_data[2],
+                      (point.dim < 4) ? 0 : (long long)point.point_data[3],
+                      (point.dim < 5) ? 0 : (long long)point.point_data[4],
+                      (point.dim < 6) ? 0 : (long long)point.point_data[5],
+                      (point.dim < 7) ? 0 : (long long)point.point_data[6]);
 #elif LEGION_MAX_DIM == 8
-        log_spy.print("Index Subspace " IDFMT " " IDFMT " %u %lld %lld %lld "
+        log_spy.print("Index Subspace " IDFMT " " IDFMT " %u %u %lld %lld %lld "
                       "%lld %lld %lld %lld %lld", 
-                      parent_id, unique_id, point.dim,
+                      parent_id, unique_id, owner, point.dim,
                       (long long)point.point_data[0],
-                      (long long)point.point_data[1],
-                      (long long)point.point_data[2],
-                      (long long)point.point_data[3],
-                      (long long)point.point_data[4],
-                      (long long)point.point_data[5],
-                      (long long)point.point_data[6],
-                      (long long)point.point_data[7]);
+                      (point.dim < 2) ? 0 : (long long)point.point_data[1],
+                      (point.dim < 3) ? 0 : (long long)point.point_data[2],
+                      (point.dim < 4) ? 0 : (long long)point.point_data[3],
+                      (point.dim < 5) ? 0 : (long long)point.point_data[4],
+                      (point.dim < 6) ? 0 : (long long)point.point_data[5],
+                      (point.dim < 7) ? 0 : (long long)point.point_data[6],
+                      (point.dim < 8) ? 0 : (long long)point.point_data[7]);
 #elif LEGION_MAX_DIM == 9
-        log_spy.print("Index Subspace " IDFMT " " IDFMT " %u %lld %lld %lld "
+        log_spy.print("Index Subspace " IDFMT " " IDFMT " %u %u %lld %lld %lld "
                       "%lld %lld %lld %lld %lld %lld", 
-                      parent_id, unique_id, point.dim,
+                      parent_id, unique_id, owner, point.dim,
                       (long long)point.point_data[0],
-                      (long long)point.point_data[1],
-                      (long long)point.point_data[2],
-                      (long long)point.point_data[3],
-                      (long long)point.point_data[4],
-                      (long long)point.point_data[5],
-                      (long long)point.point_data[6],
-                      (long long)point.point_data[7],
-                      (long long)point.point_data[8]);
+                      (point.dim < 2) ? 0 : (long long)point.point_data[1],
+                      (point.dim < 3) ? 0 : (long long)point.point_data[2],
+                      (point.dim < 4) ? 0 : (long long)point.point_data[3],
+                      (point.dim < 5) ? 0 : (long long)point.point_data[4],
+                      (point.dim < 6) ? 0 : (long long)point.point_data[5],
+                      (point.dim < 7) ? 0 : (long long)point.point_data[6],
+                      (point.dim < 8) ? 0 : (long long)point.point_data[7],
+                      (point.dim < 9) ? 0 : (long long)point.point_data[8]);
 #else
 #error "Illegal LEGION_MAX_DIM"
 #endif
       }
 
-      static inline void log_field_space(unsigned unique_id)
+      static inline void log_field_space(unsigned unique_id,
+                                         AddressSpaceID owner,
+                                         const char *provenance)
       {
-        log_spy.print("Field Space %u", unique_id);
+        log_spy.print("Field Space %u %u %s", unique_id, 
+            owner, (provenance == NULL) ? "" : provenance);
       }
 
       static inline void log_field_space_name(unsigned unique_id,
@@ -206,10 +214,12 @@ namespace Legion {
       }
 
       static inline void log_field_creation(unsigned unique_id, 
-                                unsigned field_id, size_t size)
+                                unsigned field_id, size_t size,
+                                const char *provenance)
       {
-        log_spy.print("Field Creation %u %u %ld", 
-		      unique_id, field_id, long(size));
+        log_spy.print("Field Creation %u %u %ld %s", 
+		      unique_id, field_id, long(size),
+                      (provenance == NULL) ? "" : provenance);
       }
 
       static inline void log_field_name(unsigned unique_id,
@@ -221,10 +231,12 @@ namespace Legion {
       }
 
       static inline void log_top_region(IDType index_space, 
-                      unsigned field_space, unsigned tree_id)
+                      unsigned field_space, unsigned tree_id,
+                      AddressSpaceID owner, const char *provenance)
       {
-        log_spy.print("Region " IDFMT " %u %u", 
-		      index_space, field_space, tree_id);
+        log_spy.print("Region " IDFMT " %u %u %u %s", 
+		      index_space, field_space, tree_id, owner,
+                      (provenance == NULL) ? "" : provenance);
       }
 
       static inline void log_logical_region_name(IDType index_space, 
@@ -248,7 +260,7 @@ namespace Legion {
       static inline void log_index_space_point(IDType handle,
                                     const Point<DIM,T> &point)
       {
-        LEGION_STATIC_ASSERT(DIM <= LEGION_MAX_DIM, 
+        static_assert(DIM <= LEGION_MAX_DIM, 
                       "DIM exceeds LEGION_MAX_DIM");
 #if LEGION_MAX_DIM == 1
         log_spy.print("Index Space Point " IDFMT " %d %lld", handle,
@@ -322,7 +334,7 @@ namespace Legion {
       static inline void log_index_space_rect(IDType handle, 
                                               const Rect<DIM,T> &rect)
       {
-        LEGION_STATIC_ASSERT(DIM <= LEGION_MAX_DIM,
+        static_assert(DIM <= LEGION_MAX_DIM,
                       "DIM exceeds LEGION_MAX_DIM");
 #if LEGION_MAX_DIM == 1
         log_spy.print("Index Space Rect " IDFMT " %d "
@@ -520,7 +532,8 @@ namespace Legion {
 
       static inline void log_top_level_task(Processor::TaskFuncID task_id,
                                             UniqueID parent_ctx_uid,
-                                            UniqueID unique_id,const char *name)
+                                            UniqueID unique_id,
+                                            const char *name)
       {
         log_spy.print("Top Task %u %llu %llu %s", 
 		      task_id, parent_ctx_uid, unique_id, name);
@@ -529,21 +542,19 @@ namespace Legion {
       static inline void log_individual_task(UniqueID context,
                                              UniqueID unique_id,
                                              Processor::TaskFuncID task_id,
-                                             size_t context_index,
                                              const char *name)
       {
-        log_spy.print("Individual Task %llu %u %llu %zd %s", 
-		      context, task_id, unique_id, context_index, name);
+        log_spy.print("Individual Task %llu %u %llu %s", 
+		      context, task_id, unique_id, name);
       }
 
       static inline void log_index_task(UniqueID context,
                                         UniqueID unique_id,
                                         Processor::TaskFuncID task_id,
-                                        size_t context_index,
                                         const char *name)
       {
-        log_spy.print("Index Task %llu %u %llu %zd %s",
-		      context, task_id, unique_id, context_index, name);
+        log_spy.print("Index Task %llu %u %llu %s",
+		      context, task_id, unique_id, name);
       }
 
       static inline void log_inline_task(UniqueID unique_id)
@@ -552,28 +563,41 @@ namespace Legion {
       }
 
       static inline void log_mapping_operation(UniqueID context,
-                                               UniqueID unique_id,
-                                               size_t context_index)
+                                               UniqueID unique_id)
       {
-        log_spy.print("Mapping Operation %llu %llu %zd",
-                      context, unique_id, context_index);
+        log_spy.print("Mapping Operation %llu %llu", context, unique_id);
       }
 
       static inline void log_fill_operation(UniqueID context,
-                                            UniqueID unique_id,
-                                            size_t context_index)
+                                            UniqueID unique_id)
       {
-        log_spy.print("Fill Operation %llu %llu %zd",
-                      context, unique_id, context_index);
+        log_spy.print("Fill Operation %llu %llu", context, unique_id);
+      }
+
+      static inline void log_discard_operation(UniqueID context,
+                                               UniqueID unique_id)
+      {
+        log_spy.print("Discard Operation %llu %llu", context, unique_id);
       }
 
       static inline void log_close_operation(UniqueID context,
                                              UniqueID unique_id,
-                                             size_t context_index,
                                              bool is_intermediate_close_op)
       {
-        log_spy.print("Close Operation %llu %llu %zd %u",
-          context, unique_id, context_index, is_intermediate_close_op ? 1 : 0);
+        log_spy.print("Close Operation %llu %llu %u",
+          context, unique_id, is_intermediate_close_op ? 1 : 0);
+      }
+
+      static inline void log_refinement_operation(UniqueID context,
+                                                  UniqueID unique_id)
+      {
+        log_spy.print("Refinement Operation %llu %llu", context, unique_id);
+      }
+
+      static inline void log_reset_operation(UniqueID context,
+                                             UniqueID unique_id)
+      {
+        log_spy.print("Reset Operation %llu %llu", context, unique_id);
       }
 
       static inline void log_internal_op_creator(UniqueID internal_op_id,
@@ -586,114 +610,88 @@ namespace Legion {
 
       static inline void log_fence_operation(UniqueID context,
                                              UniqueID unique_id,
-                                             size_t context_index)
+                                             bool execution)
       {
-        log_spy.print("Fence Operation %llu %llu %zd",
-		      context, unique_id, context_index);
+        log_spy.print("Fence Operation %llu %llu %d",
+		      context, unique_id, execution ? 1 : 0);
       }
 
       static inline void log_copy_operation(UniqueID context,
                                             UniqueID unique_id,
                                             unsigned copy_kind,
-                                            size_t context_index,
                                             bool couple_src_indirect,
                                             bool couple_dst_indirect)
       {
-        log_spy.print("Copy Operation %llu %llu %u %zd %d %d",
-		      context, unique_id, copy_kind, context_index,
+        log_spy.print("Copy Operation %llu %llu %u %d %d",
+		      context, unique_id, copy_kind,
                       couple_src_indirect ? 1 : 0,
                       couple_dst_indirect ? 1 : 0);
       }
 
       static inline void log_acquire_operation(UniqueID context,
-                                               UniqueID unique_id,
-                                               size_t context_index)
+                                               UniqueID unique_id)
       {
-        log_spy.print("Acquire Operation %llu %llu %zd",
-		      context, unique_id, context_index);
+        log_spy.print("Acquire Operation %llu %llu", context, unique_id);
       }
 
       static inline void log_release_operation(UniqueID context,
-                                               UniqueID unique_id,
-                                               size_t context_index)
+                                               UniqueID unique_id)
       {
-        log_spy.print("Release Operation %llu %llu %zd",
-		      context, unique_id, context_index);
+        log_spy.print("Release Operation %llu %llu", context, unique_id);
       }
 
       static inline void log_creation_operation(UniqueID context,
-                                                UniqueID creation,
-                                                size_t context_index)
+                                                UniqueID creation)
       {
-        log_spy.print("Creation Operation %llu %llu %zd",
-                      context, creation, context_index);
+        log_spy.print("Creation Operation %llu %llu", context, creation);
       }
 
       static inline void log_deletion_operation(UniqueID context,
                                                 UniqueID deletion,
-                                                size_t context_index,
                                                 bool unordered)
       {
-        log_spy.print("Deletion Operation %llu %llu %zd %u",
-		      context, deletion, context_index, unordered ? 1 : 0);
+        log_spy.print("Deletion Operation %llu %llu %u",
+		      context, deletion, unordered ? 1 : 0);
       }
 
       static inline void log_attach_operation(UniqueID context,
                                               UniqueID attach,
-                                              size_t context_index,
                                               bool restricted)
       {
-        log_spy.print("Attach Operation %llu %llu %zd %u", 
-                      context, attach, context_index, restricted ? 1 : 0);
+        log_spy.print("Attach Operation %llu %llu %u", 
+                      context, attach, restricted ? 1 : 0);
       }
 
       static inline void log_detach_operation(UniqueID context,
                                               UniqueID detach,
-                                              size_t context_index,
                                               bool unordered)
       {
-        log_spy.print("Detach Operation %llu %llu %zd %u",
-                      context, detach, context_index, unordered ? 1 : 0);
-      }
-
-      static inline void log_unordered_operation(UniqueID context,
-                                                 UniqueID opid,
-                                                 size_t context_index)
-      {
-        log_spy.print("Unordered Operation %llu %llu %zd",
-                      context, opid, context_index);
+        log_spy.print("Detach Operation %llu %llu %u",
+                      context, detach, unordered ? 1 : 0);
       }
 
       static inline void log_dynamic_collective(UniqueID context, 
-                                                UniqueID collective,
-                                                size_t context_index)
+                                                UniqueID collective)
       {
-        log_spy.print("Dynamic Collective %llu %llu %zd",
-                      context, collective, context_index);
+        log_spy.print("Dynamic Collective %llu %llu", context, collective);
       }
 
       static inline void log_timing_operation(UniqueID context,
-                                              UniqueID timing,
-                                              size_t context_index)
+                                              UniqueID timing)
       {
-        log_spy.print("Timing Operation %llu %llu %zd",
-                      context, timing, context_index);
+        log_spy.print("Timing Operation %llu %llu", context, timing);
       }
 
       static inline void log_tunable_operation(UniqueID context,
-                                               UniqueID timing,
-                                               size_t context_index)
+                                               UniqueID tunable)
       {
-        log_spy.print("Tunable Operation %llu %llu %zd",
-                      context, timing, context_index);
+        log_spy.print("Tunable Operation %llu %llu", context, tunable);
       }
 
       static inline void log_all_reduce_operation(UniqueID context, 
-                                                  UniqueID reduce,
-                                                  size_t context_index)
+                                                  UniqueID reduce)
       {
-        log_spy.print("All Reduce Operation %llu %llu %zd",
-                      context, reduce, context_index);
+        log_spy.print("All Reduce Operation %llu %llu", context, reduce);
       }
 
       static inline void log_predicate_operation(UniqueID context, 
@@ -718,19 +716,17 @@ namespace Legion {
       static inline void log_dependent_partition_operation(UniqueID context,
                                                            UniqueID unique_id,
                                                            IDType pid,
-                                                           int kind,
-                                                           size_t context_index)
+                                                           int kind)
       {
-        log_spy.print("Dependent Partition Operation %llu %llu " IDFMT
-                      " %d %zd", context, unique_id, pid, kind, context_index);
+        log_spy.print("Dependent Partition Operation %llu %llu " IDFMT " %d",
+                      context, unique_id, pid, kind);
       }
 
       static inline void log_pending_partition_operation(UniqueID context,
-                                                         UniqueID unique_id,
-                                                         size_t context_index)
+                                                         UniqueID unique_id)
       {
-        log_spy.print("Pending Partition Operation %llu %llu %zd",
-		      context, unique_id, context_index);
+        log_spy.print("Pending Partition Operation %llu %llu",
+		      context, unique_id);
       }
 
       static inline void log_target_pending_partition(UniqueID unique_id,
@@ -762,70 +758,70 @@ namespace Legion {
         log_spy.print("Slice Point %llu %llu %u %lld %lld", 
 		      slice_id, point_id, point.dim, 
                       (long long)point.point_data[0],
-		      (long long)point.point_data[1]);
+		      (point.dim < 2) ? 0 : (long long)point.point_data[1]);
 #elif LEGION_MAX_DIM == 3
         log_spy.print("Slice Point %llu %llu %u %lld %lld %lld", 
 		      slice_id, point_id, point.dim, 
                       (long long)point.point_data[0],
-		      (long long)point.point_data[1], 
-                      (long long)point.point_data[2]);
+		      (point.dim < 2) ? 0 : (long long)point.point_data[1],
+                      (point.dim < 3) ? 0 : (long long)point.point_data[2]);
 #elif LEGION_MAX_DIM == 4
         log_spy.print("Slice Point %llu %llu %u %lld %lld %lld %lld", 
 		      slice_id, point_id, point.dim, 
                       (long long)point.point_data[0],
-		      (long long)point.point_data[1], 
-                      (long long)point.point_data[2],
-                      (long long)point.point_data[3]);
+		      (point.dim < 2) ? 0 : (long long)point.point_data[1], 
+                      (point.dim < 3) ? 0 : (long long)point.point_data[2],
+                      (point.dim < 4) ? 0 : (long long)point.point_data[3]);
 #elif LEGION_MAX_DIM == 5
         log_spy.print("Slice Point %llu %llu %u %lld %lld %lld %lld %lld", 
 		      slice_id, point_id, point.dim, 
                       (long long)point.point_data[0],
-		      (long long)point.point_data[1], 
-                      (long long)point.point_data[2],
-                      (long long)point.point_data[3],
-                      (long long)point.point_data[4]);
+		      (point.dim < 2) ? 0 : (long long)point.point_data[1], 
+                      (point.dim < 3) ? 0 : (long long)point.point_data[2],
+                      (point.dim < 4) ? 0 : (long long)point.point_data[3],
+                      (point.dim < 5) ? 0 : (long long)point.point_data[4]);
 #elif LEGION_MAX_DIM == 6
         log_spy.print("Slice Point %llu %llu %u %lld %lld %lld %lld %lld %lld",
 		      slice_id, point_id, point.dim, 
                       (long long)point.point_data[0],
-		      (long long)point.point_data[1], 
-                      (long long)point.point_data[2],
-                      (long long)point.point_data[3],
-                      (long long)point.point_data[4],
-                      (long long)point.point_data[5]);
+		      (point.dim < 2) ? 0 : (long long)point.point_data[1], 
+                      (point.dim < 3) ? 0 : (long long)point.point_data[2],
+                      (point.dim < 4) ? 0 : (long long)point.point_data[3],
+                      (point.dim < 5) ? 0 : (long long)point.point_data[4],
+                      (point.dim < 6) ? 0 : (long long)point.point_data[5]);
 #elif LEGION_MAX_DIM == 7
         log_spy.print("Slice Point %llu %llu %u %lld %lld %lld %lld %lld %lld "
                       "%lld", slice_id, point_id, point.dim, 
                       (long long)point.point_data[0],
-		      (long long)point.point_data[1], 
-                      (long long)point.point_data[2],
-                      (long long)point.point_data[3],
-                      (long long)point.point_data[4],
-                      (long long)point.point_data[5],
-                      (long long)point.point_data[6]);
+		      (point.dim < 2) ? 0 : (long long)point.point_data[1], 
+                      (point.dim < 3) ? 0 : (long long)point.point_data[2],
+                      (point.dim < 4) ? 0 : (long long)point.point_data[3],
+                      (point.dim < 5) ? 0 : (long long)point.point_data[4],
+                      (point.dim < 6) ? 0 : (long long)point.point_data[5],
+                      (point.dim < 7) ? 0 : (long long)point.point_data[6]);
 #elif LEGION_MAX_DIM == 8
         log_spy.print("Slice Point %llu %llu %u %lld %lld %lld %lld %lld %lld "
                       "%lld %lld", slice_id, point_id, point.dim, 
                       (long long)point.point_data[0],
-		      (long long)point.point_data[1], 
-                      (long long)point.point_data[2],
-                      (long long)point.point_data[3],
-                      (long long)point.point_data[4],
-                      (long long)point.point_data[5],
-                      (long long)point.point_data[6],
-                      (long long)point.point_data[7]);
+		      (point.dim < 2) ? 0 : (long long)point.point_data[1], 
+                      (point.dim < 3) ? 0 : (long long)point.point_data[2],
+                      (point.dim < 4) ? 0 : (long long)point.point_data[3],
+                      (point.dim < 5) ? 0 : (long long)point.point_data[4],
+                      (point.dim < 6) ? 0 : (long long)point.point_data[5],
+                      (point.dim < 7) ? 0 : (long long)point.point_data[6],
+                      (point.dim < 8) ? 0 : (long long)point.point_data[7]);
 #elif LEGION_MAX_DIM == 9
         log_spy.print("Slice Point %llu %llu %u %lld %lld %lld %lld %lld %lld "
                       "%lld %lld %lld", slice_id, point_id, point.dim, 
                       (long long)point.point_data[0],
-		      (long long)point.point_data[1], 
-                      (long long)point.point_data[2],
-                      (long long)point.point_data[3],
-                      (long long)point.point_data[4],
-                      (long long)point.point_data[5],
-                      (long long)point.point_data[6],
-                      (long long)point.point_data[7],
-                      (long long)point.point_data[8]);
+		      (point.dim < 2) ? 0 : (long long)point.point_data[1], 
+                      (point.dim < 3) ? 0 : (long long)point.point_data[2],
+                      (point.dim < 4) ? 0 : (long long)point.point_data[3],
+                      (point.dim < 5) ? 0 : (long long)point.point_data[4],
+                      (point.dim < 6) ? 0 : (long long)point.point_data[5],
+                      (point.dim < 7) ? 0 : (long long)point.point_data[6],
+                      (point.dim < 8) ? 0 : (long long)point.point_data[7],
+                      (point.dim < 9) ? 0 : (long long)point.point_data[8]);
 #else
 #error "Illegal LEGION_MAX_DIM"
 #endif
@@ -847,73 +843,91 @@ namespace Legion {
         log_spy.print("Index Point %llu %llu %u %lld %lld", 
                       index_id, point_id, point.dim, 
                       (long long)point.point_data[0],
-                      (long long)point.point_data[1]);
+                      (point.dim < 2) ? 0 : (long long)point.point_data[1]);
 #elif LEGION_MAX_DIM == 3
         log_spy.print("Index Point %llu %llu %u %lld %lld %lld", 
                       index_id, point_id, point.dim, 
                       (long long)point.point_data[0],
-                      (long long)point.point_data[1], 
-                      (long long)point.point_data[2]);
+                      (point.dim < 2) ? 0 : (long long)point.point_data[1], 
+                      (point.dim < 3) ? 0 : (long long)point.point_data[2]);
 #elif LEGION_MAX_DIM == 4
         log_spy.print("Index Point %llu %llu %u %lld %lld %lld %lld",
                       index_id, point_id, point.dim, 
                       (long long)point.point_data[0],
-                      (long long)point.point_data[1], 
-                      (long long)point.point_data[2],
-                      (long long)point.point_data[3]);
+                      (point.dim < 2) ? 0 : (long long)point.point_data[1], 
+                      (point.dim < 3) ? 0 : (long long)point.point_data[2],
+                      (point.dim < 4) ? 0 : (long long)point.point_data[3]);
 #elif LEGION_MAX_DIM == 5
         log_spy.print("Index Point %llu %llu %u %lld %lld %lld %lld %lld",
                       index_id, point_id, point.dim, 
                       (long long)point.point_data[0],
-                      (long long)point.point_data[1], 
-                      (long long)point.point_data[2],
-                      (long long)point.point_data[3],
-                      (long long)point.point_data[4]);
+                      (point.dim < 2) ? 0 : (long long)point.point_data[1], 
+                      (point.dim < 3) ? 0 : (long long)point.point_data[2],
+                      (point.dim < 4) ? 0 : (long long)point.point_data[3],
+                      (point.dim < 5) ? 0 : (long long)point.point_data[4]);
 #elif LEGION_MAX_DIM == 6
         log_spy.print("Index Point %llu %llu %u %lld %lld %lld %lld %lld %lld",
                       index_id, point_id, point.dim, 
                       (long long)point.point_data[0],
-                      (long long)point.point_data[1], 
-                      (long long)point.point_data[2],
-                      (long long)point.point_data[3],
-                      (long long)point.point_data[4],
-                      (long long)point.point_data[5]);
+                      (point.dim < 2) ? 0 : (long long)point.point_data[1], 
+                      (point.dim < 3) ? 0 : (long long)point.point_data[2],
+                      (point.dim < 4) ? 0 : (long long)point.point_data[3],
+                      (point.dim < 5) ? 0 : (long long)point.point_data[4],
+                      (point.dim < 6) ? 0 : (long long)point.point_data[5]);
 #elif LEGION_MAX_DIM == 7
         log_spy.print("Index Point %llu %llu %u %lld %lld %lld %lld %lld %lld "
                       "%lld", index_id, point_id, point.dim, 
                       (long long)point.point_data[0],
-                      (long long)point.point_data[1], 
-                      (long long)point.point_data[2],
-                      (long long)point.point_data[3],
-                      (long long)point.point_data[4],
-                      (long long)point.point_data[5],
-                      (long long)point.point_data[6]);
+                      (point.dim < 2) ? 0 : (long long)point.point_data[1], 
+                      (point.dim < 3) ? 0 : (long long)point.point_data[2],
+                      (point.dim < 4) ? 0 : (long long)point.point_data[3],
+                      (point.dim < 5) ? 0 : (long long)point.point_data[4],
+                      (point.dim < 6) ? 0 : (long long)point.point_data[5],
+                      (point.dim < 7) ? 0 : (long long)point.point_data[6]);
 #elif LEGION_MAX_DIM == 8
         log_spy.print("Index Point %llu %llu %u %lld %lld %lld %lld %lld %lld "
                       "%lld %lld", index_id, point_id, point.dim, 
                       (long long)point.point_data[0],
-                      (long long)point.point_data[1], 
-                      (long long)point.point_data[2],
-                      (long long)point.point_data[3],
-                      (long long)point.point_data[4],
-                      (long long)point.point_data[5],
-                      (long long)point.point_data[6],
-                      (long long)point.point_data[7]);
+                      (point.dim < 2) ? 0 : (long long)point.point_data[1], 
+                      (point.dim < 3) ? 0 : (long long)point.point_data[2],
+                      (point.dim < 4) ? 0 : (long long)point.point_data[3],
+                      (point.dim < 5) ? 0 : (long long)point.point_data[4],
+                      (point.dim < 6) ? 0 : (long long)point.point_data[5],
+                      (point.dim < 7) ? 0 : (long long)point.point_data[6],
+                      (point.dim < 8) ? 0 : (long long)point.point_data[7]);
 #elif LEGION_MAX_DIM == 9
         log_spy.print("Index Point %llu %llu %u %lld %lld %lld %lld %lld %lld "
                       "%lld %lld %lld", index_id, point_id, point.dim, 
                       (long long)point.point_data[0],
-                      (long long)point.point_data[1], 
-                      (long long)point.point_data[2],
-                      (long long)point.point_data[3],
-                      (long long)point.point_data[4],
-                      (long long)point.point_data[5],
-                      (long long)point.point_data[6],
-                      (long long)point.point_data[7],
-                      (long long)point.point_data[8]);
+                      (point.dim < 2) ? 0 : (long long)point.point_data[1], 
+                      (point.dim < 3) ? 0 : (long long)point.point_data[2],
+                      (point.dim < 4) ? 0 : (long long)point.point_data[3],
+                      (point.dim < 5) ? 0 : (long long)point.point_data[4],
+                      (point.dim < 6) ? 0 : (long long)point.point_data[5],
+                      (point.dim < 7) ? 0 : (long long)point.point_data[6],
+                      (point.dim < 8) ? 0 : (long long)point.point_data[7],
+                      (point.dim < 9) ? 0 : (long long)point.point_data[8]);
 #else
 #error "Illegal LEGION_MAX_DIM"
 #endif
+      }
+
+      static inline void log_replication(UniqueID uid, DistributedID repl_id,
+                                         bool control_replicated)
+      {
+        log_spy.print("Replicate Task %llu %llu %d", uid, repl_id,
+                                    (control_replicated ? 1 : 0));
+      }
+
+      static inline void log_shard(DistributedID repl_id, 
+                                   ShardID sid, UniqueID uid)
+      {
+        log_spy.print("Replicate Shard %llu %d %llu", repl_id, sid, uid);
+      }
+
+      static inline void log_owner_shard(UniqueID uid, ShardID sid)
+      {
+        log_spy.print("Owner Shard %llu %d", uid, sid);
       }
 
       static inline void log_intra_space_dependence(UniqueID point_id,
@@ -927,85 +941,86 @@ namespace Legion {
         log_spy.print("Intra Space Dependence %llu %u %lld %lld", 
 		      point_id, point.dim, 
                       (long long)point.point_data[0],
-		      (long long)point.point_data[1]);
+		      (point.dim < 2) ? 0 : (long long)point.point_data[1]);
 #elif LEGION_MAX_DIM == 3
         log_spy.print("Intra Space Dependence %llu %u %lld %lld %lld", 
 		      point_id, point.dim, 
                       (long long)point.point_data[0],
-		      (long long)point.point_data[1], 
-                      (long long)point.point_data[2]);
+		      (point.dim < 2) ? 0 : (long long)point.point_data[1], 
+                      (point.dim < 3) ? 0 : (long long)point.point_data[2]);
 #elif LEGION_MAX_DIM == 4
         log_spy.print("Intra Space Dependence %llu %u %lld %lld %lld %lld", 
 		      point_id, point.dim, 
                       (long long)point.point_data[0],
-		      (long long)point.point_data[1], 
-                      (long long)point.point_data[2],
-                      (long long)point.point_data[3]);
+		      (point.dim < 2) ? 0 : (long long)point.point_data[1], 
+                      (point.dim < 3) ? 0 : (long long)point.point_data[2],
+                      (point.dim < 4) ? 0 : (long long)point.point_data[3]);
 #elif LEGION_MAX_DIM == 5
         log_spy.print("Intra Space Dependence %llu %u %lld %lld %lld %lld %lld", 
 		      point_id, point.dim, 
                       (long long)point.point_data[0],
-		      (long long)point.point_data[1], 
-                      (long long)point.point_data[2],
-                      (long long)point.point_data[3],
-                      (long long)point.point_data[4]);
+		      (point.dim < 2) ? 0 : (long long)point.point_data[1], 
+                      (point.dim < 3) ? 0 : (long long)point.point_data[2],
+                      (point.dim < 4) ? 0 : (long long)point.point_data[3],
+                      (point.dim < 5) ? 0 : (long long)point.point_data[4]);
 #elif LEGION_MAX_DIM == 6
         log_spy.print("Intra Space Dependence %llu %u %lld %lld %lld %lld %lld %lld",
 		      point_id, point.dim, 
                       (long long)point.point_data[0],
-		      (long long)point.point_data[1], 
-                      (long long)point.point_data[2],
-                      (long long)point.point_data[3],
-                      (long long)point.point_data[4],
-                      (long long)point.point_data[5]);
+		      (point.dim < 2) ? 0 : (long long)point.point_data[1], 
+                      (point.dim < 3) ? 0 : (long long)point.point_data[2],
+                      (point.dim < 4) ? 0 : (long long)point.point_data[3],
+                      (point.dim < 5) ? 0 : (long long)point.point_data[4],
+                      (point.dim < 6) ? 0 : (long long)point.point_data[5]);
 #elif LEGION_MAX_DIM == 7
         log_spy.print("Intra Space Dependence %llu %u %lld %lld %lld %lld %lld %lld "
                       "%lld", point_id, point.dim, 
                       (long long)point.point_data[0],
-		      (long long)point.point_data[1], 
-                      (long long)point.point_data[2],
-                      (long long)point.point_data[3],
-                      (long long)point.point_data[4],
-                      (long long)point.point_data[5],
-                      (long long)point.point_data[6]);
+		      (point.dim < 2) ? 0 : (long long)point.point_data[1], 
+                      (point.dim < 3) ? 0 : (long long)point.point_data[2],
+                      (point.dim < 4) ? 0 : (long long)point.point_data[3],
+                      (point.dim < 5) ? 0 : (long long)point.point_data[4],
+                      (point.dim < 6) ? 0 : (long long)point.point_data[5],
+                      (point.dim < 7) ? 0 : (long long)point.point_data[6]);
 #elif LEGION_MAX_DIM == 8
         log_spy.print("Intra Space Dependence %llu %u %lld %lld %lld %lld %lld %lld "
                       "%lld %lld", point_id, point.dim, 
                       (long long)point.point_data[0],
-		      (long long)point.point_data[1], 
-                      (long long)point.point_data[2],
-                      (long long)point.point_data[3],
-                      (long long)point.point_data[4],
-                      (long long)point.point_data[5],
-                      (long long)point.point_data[6],
-                      (long long)point.point_data[7]);
+		      (point.dim < 2) ? 0 : (long long)point.point_data[1], 
+                      (point.dim < 3) ? 0 : (long long)point.point_data[2],
+                      (point.dim < 4) ? 0 : (long long)point.point_data[3],
+                      (point.dim < 5) ? 0 : (long long)point.point_data[4],
+                      (point.dim < 6) ? 0 : (long long)point.point_data[5],
+                      (point.dim < 7) ? 0 : (long long)point.point_data[6],
+                      (point.dim < 8) ? 0 : (long long)point.point_data[7]);
 #elif LEGION_MAX_DIM == 9
         log_spy.print("Intra Space Dependence %llu %u %lld %lld %lld %lld %lld %lld "
                       "%lld %lld %lld", point_id, point.dim, 
                       (long long)point.point_data[0],
-		      (long long)point.point_data[1], 
-                      (long long)point.point_data[2],
-                      (long long)point.point_data[3],
-                      (long long)point.point_data[4],
-                      (long long)point.point_data[5],
-                      (long long)point.point_data[6],
-                      (long long)point.point_data[7],
-                      (long long)point.point_data[8]);
+		      (point.dim < 2) ? 0 : (long long)point.point_data[1], 
+                      (point.dim < 3) ? 0 : (long long)point.point_data[2],
+                      (point.dim < 4) ? 0 : (long long)point.point_data[3],
+                      (point.dim < 5) ? 0 : (long long)point.point_data[4],
+                      (point.dim < 6) ? 0 : (long long)point.point_data[5],
+                      (point.dim < 7) ? 0 : (long long)point.point_data[6],
+                      (point.dim < 8) ? 0 : (long long)point.point_data[7],
+                      (point.dim < 9) ? 0 : (long long)point.point_data[8]);
 #else
 #error "Illegal LEGION_MAX_DIM"
 #endif
       }
 
+      static inline void log_operation_provenance(UniqueID unique_id,
+                                                  const char *provenance)
+      {
+        log_spy.print("Operation Provenance %llu %s", unique_id, provenance);
+      }
+
       static inline void log_child_operation_index(UniqueID parent_id, 
                                        size_t index, UniqueID child_id)
       {
-        log_spy.print("Operation Index %llu %zd %llu",parent_id,index,child_id);
-      }
-
-      static inline void log_close_operation_index(UniqueID parent_id,
-                                        size_t index, UniqueID child_id)
-      {
-        log_spy.print("Close Index %llu %zd %llu", parent_id, index, child_id);
+        log_spy.print("Operation Index %llu %zd %llu",
+            parent_id, index, child_id);
       }
 
       static inline void log_predicated_false_op(UniqueID unique_id)
@@ -1048,9 +1063,10 @@ namespace Legion {
       }
 
       static inline void log_projection_function(ProjectionID pid,
-                                                 int depth, bool invertible)
+                                                 unsigned depth,
+                                                 bool invertible)
       {
-        log_spy.print("Projection Function %u %d %d", pid, depth, 
+        log_spy.print("Projection Function %u %u %d", pid, depth, 
                       invertible ? 1 : 0);
       }
 
@@ -1065,7 +1081,7 @@ namespace Legion {
       static inline void log_launch_index_space_rect(UniqueID unique_id, 
                                                      const Rect<DIM,T> &rect)
       {
-        LEGION_STATIC_ASSERT(DIM <= LEGION_MAX_DIM,
+        static_assert(DIM <= LEGION_MAX_DIM,
                       "DIM exceeds LEGION_MAX DIM");
 #if LEGION_MAX_DIM == 1
         log_spy.print() << "Index Launch Rect " << unique_id << " "
@@ -1173,42 +1189,42 @@ namespace Legion {
 
       // Logger calls for futures
       static inline void log_future_creation(UniqueID creator_id,
-                                             ApEvent future_event, 
+                                             DistributedID future_did,
                                              const DomainPoint &point)
       {
 #if LEGION_MAX_DIM == 1
-        log_spy.print("Future Creation %llu " IDFMT " %u %lld",
-                      creator_id, future_event.id, point.dim,
+        log_spy.print("Future Creation %llu %llu %u %lld",
+                      creator_id, future_did, point.dim,
                       (long long)point.point_data[0]); 
 #elif LEGION_MAX_DIM == 2
-        log_spy.print("Future Creation %llu " IDFMT " %u %lld %lld",
-                      creator_id, future_event.id, point.dim,
+        log_spy.print("Future Creation %llu %llu %u %lld %lld",
+                      creator_id, future_did, point.dim,
                                         (long long)point.point_data[0], 
                       (point.dim > 1) ? (long long)point.point_data[1] : 0);
 #elif LEGION_MAX_DIM == 3
-        log_spy.print("Future Creation %llu " IDFMT " %u %lld %lld %lld",
-                      creator_id, future_event.id, point.dim,
+        log_spy.print("Future Creation %llu %llu %u %lld %lld %lld",
+                      creator_id, future_did, point.dim,
                                         (long long)point.point_data[0], 
                       (point.dim > 1) ? (long long)point.point_data[1] : 0,
                       (point.dim > 2) ? (long long)point.point_data[2] : 0);
 #elif LEGION_MAX_DIM == 4
-        log_spy.print("Future Creation %llu " IDFMT " %u %lld %lld %lld %lld",
-                      creator_id, future_event.id, point.dim,
+        log_spy.print("Future Creation %llu %llu %u %lld %lld %lld %lld",
+                      creator_id, future_did, point.dim,
                                         (long long)point.point_data[0], 
                       (point.dim > 1) ? (long long)point.point_data[1] : 0,
                       (point.dim > 2) ? (long long)point.point_data[2] : 0,
                       (point.dim > 3) ? (long long)point.point_data[3] : 0);
 #elif LEGION_MAX_DIM == 5
-        log_spy.print("Future Creation %llu " IDFMT " %u %lld %lld %lld %lld "
-                      "%lld", creator_id, future_event.id, point.dim,
+        log_spy.print("Future Creation %llu %llu %u %lld %lld %lld %lld "
+                      "%lld", creator_id, future_did, point.dim,
                                         (long long)point.point_data[0], 
                       (point.dim > 1) ? (long long)point.point_data[1] : 0,
                       (point.dim > 2) ? (long long)point.point_data[2] : 0,
                       (point.dim > 3) ? (long long)point.point_data[3] : 0,
                       (point.dim > 4) ? (long long)point.point_data[4] : 0);
 #elif LEGION_MAX_DIM == 6
-        log_spy.print("Future Creation %llu " IDFMT " %u %lld %lld %lld %lld "
-                      "%lld %lld", creator_id, future_event.id, point.dim,
+        log_spy.print("Future Creation %llu %llu %u %lld %lld %lld %lld "
+                      "%lld %lld", creator_id, future_did, point.dim,
                                         (long long)point.point_data[0], 
                       (point.dim > 1) ? (long long)point.point_data[1] : 0,
                       (point.dim > 2) ? (long long)point.point_data[2] : 0,
@@ -1216,8 +1232,8 @@ namespace Legion {
                       (point.dim > 4) ? (long long)point.point_data[4] : 0,
                       (point.dim > 5) ? (long long)point.point_data[5] : 0);
 #elif LEGION_MAX_DIM == 7
-        log_spy.print("Future Creation %llu " IDFMT " %u %lld %lld %lld %lld "
-                      "%lld %lld %lld", creator_id, future_event.id, point.dim,
+        log_spy.print("Future Creation %llu %llu %u %lld %lld %lld %lld "
+                      "%lld %lld %lld", creator_id, future_did, point.dim,
                                         (long long)point.point_data[0], 
                       (point.dim > 1) ? (long long)point.point_data[1] : 0,
                       (point.dim > 2) ? (long long)point.point_data[2] : 0,
@@ -1226,8 +1242,8 @@ namespace Legion {
                       (point.dim > 5) ? (long long)point.point_data[5] : 0,
                       (point.dim > 6) ? (long long)point.point_data[6] : 0);
 #elif LEGION_MAX_DIM == 8
-        log_spy.print("Future Creation %llu " IDFMT " %u %lld %lld %lld %lld "
-                      "%lld %lld %lld %lld", creator_id, future_event.id, 
+        log_spy.print("Future Creation %llu %llu %u %lld %lld %lld %lld "
+                      "%lld %lld %lld %lld", creator_id, future_did,
                        point.dim,       (long long)point.point_data[0], 
                       (point.dim > 1) ? (long long)point.point_data[1] : 0,
                       (point.dim > 2) ? (long long)point.point_data[2] : 0,
@@ -1237,8 +1253,8 @@ namespace Legion {
                       (point.dim > 6) ? (long long)point.point_data[6] : 0,
                       (point.dim > 7) ? (long long)point.point_data[7] : 0);
 #elif LEGION_MAX_DIM == 9
-        log_spy.print("Future Creation %llu " IDFMT " %u %lld %lld %lld %lld "
-                      "%lld %lld %lld %lld %lld", creator_id, future_event.id, 
+        log_spy.print("Future Creation %llu %llu %u %lld %lld %lld %lld "
+                      "%lld %lld %lld %lld %lld", creator_id, future_did,
                        point.dim,       (long long)point.point_data[0], 
                       (point.dim > 1) ? (long long)point.point_data[1] : 0,
                       (point.dim > 2) ? (long long)point.point_data[2] : 0,
@@ -1253,10 +1269,10 @@ namespace Legion {
 #endif
       }
 
-      static inline void log_future_use(UniqueID user_id, 
-                                        ApEvent future_event)
+      static inline void log_future_use(UniqueID user_id,
+                                        DistributedID future_did)
       {
-        log_spy.print("Future Usage %llu " IDFMT "", user_id, future_event.id);
+        log_spy.print("Future Usage %llu %llu", user_id, future_did);
       }
 
       static inline void log_predicate_use(UniqueID pred_id,
@@ -1266,7 +1282,7 @@ namespace Legion {
       }
 
       // Logger call for physical instances
-      static inline void log_physical_instance(ApEvent inst_event,
+      static inline void log_physical_instance(LgEvent inst_event,
                                                IDType inst_id, IDType mem_id,
                                                IndexSpaceExprID expr_id,
                                                FieldSpace handle,
@@ -1278,14 +1294,14 @@ namespace Legion {
                       expr_id, handle.get_id(), tid);
       }
 
-      static inline void log_physical_instance_field(ApEvent inst_event,
+      static inline void log_physical_instance_field(LgEvent inst_event,
                                                      FieldID field_id)
       {
         log_spy.print("Physical Instance Field " IDFMT " %d", 
                       inst_event.id, field_id);
       }
 
-      static inline void log_physical_instance_creator(ApEvent inst_event, 
+      static inline void log_physical_instance_creator(LgEvent inst_event, 
                                            UniqueID creator_id, IDType proc_id)
       {
         log_spy.print("Physical Instance Creator " IDFMT " %lld " IDFMT "",
@@ -1293,42 +1309,42 @@ namespace Legion {
       }
 
       static inline void log_physical_instance_creation_region(
-                                      ApEvent inst_event, LogicalRegion handle)
+                                      LgEvent inst_event, LogicalRegion handle)
       {
         log_spy.print("Physical Instance Creation Region " IDFMT " %d %d %d",
                       inst_event.id, handle.get_index_space().get_id(), 
                       handle.get_field_space().get_id(), handle.get_tree_id());
       }
 
-      static inline void log_instance_specialized_constraint(ApEvent inst_event,
+      static inline void log_instance_specialized_constraint(LgEvent inst_event,
                                   SpecializedKind kind, ReductionOpID redop)
       {
         log_spy.print("Instance Specialized Constraint " IDFMT " %d %d",
                       inst_event.id, kind, redop);
       }
 
-      static inline void log_instance_memory_constraint(ApEvent inst_event,
+      static inline void log_instance_memory_constraint(LgEvent inst_event,
                                                      Memory::Kind kind)
       {
         log_spy.print("Instance Memory Constraint " IDFMT " %d", 
                       inst_event.id, kind);
       }
 
-      static inline void log_instance_field_constraint(ApEvent inst_event,
+      static inline void log_instance_field_constraint(LgEvent inst_event,
                       bool contiguous, bool inorder, size_t num_fields)
       {
         log_spy.print("Instance Field Constraint " IDFMT " %d %d %zd",
             inst_event.id, (contiguous ? 1 : 0), (inorder ? 1 : 0), num_fields);
       }
 
-      static inline void log_instance_field_constraint_field(ApEvent inst_event,
+      static inline void log_instance_field_constraint_field(LgEvent inst_event,
                                                              FieldID fid)
       {
         log_spy.print("Instance Field Constraint Field " IDFMT " %d",
                       inst_event.id, fid);
       }
 
-      static inline void log_instance_ordering_constraint(ApEvent inst_event,
+      static inline void log_instance_ordering_constraint(LgEvent inst_event,
                                   bool contiguous, size_t num_dimensions)
       {
         log_spy.print("Instance Ordering Constraint " IDFMT " %d %zd",
@@ -1336,34 +1352,34 @@ namespace Legion {
       }
 
       static inline void log_instance_ordering_constraint_dimension(
-                                    ApEvent inst_event, DimensionKind dim)
+                                    LgEvent inst_event, DimensionKind dim)
       {
         log_spy.print("Instance Ordering Constraint Dimension " IDFMT " %d",
                       inst_event.id, dim);
       }
 
-      static inline void log_instance_splitting_constraint(ApEvent inst_event,
-                              DimensionKind dim, size_t value, bool chunks)
+      static inline void log_instance_tiling_constraint(LgEvent inst_event,
+                              DimensionKind dim, size_t value, bool tiles)
       {
         log_spy.print("Instance Splitting Constraint " IDFMT " %d %zd %d",
-                      inst_event.id, dim, value, (chunks ? 1 : 0));
+                      inst_event.id, dim, value, (tiles ? 1 : 0));
       }
 
-      static inline void log_instance_dimension_constraint(ApEvent inst_event,
+      static inline void log_instance_dimension_constraint(LgEvent inst_event,
                         DimensionKind dim, EqualityKind eqk, size_t value)
       {
         log_spy.print("Instance Dimension Constraint " IDFMT " %d %d %zd",
                       inst_event.id, dim, eqk, value);
       }
 
-      static inline void log_instance_alignment_constraint(ApEvent inst_event,
+      static inline void log_instance_alignment_constraint(LgEvent inst_event,
                           FieldID fid, EqualityKind eqk, size_t alignment)
       {
         log_spy.print("Instance Alignment Constraint " IDFMT " %d %d %zd",
                       inst_event.id, fid, eqk, alignment);
       }
 
-      static inline void log_instance_offset_constraint(ApEvent inst_event,
+      static inline void log_instance_offset_constraint(LgEvent inst_event,
                                       FieldID fid, long offset)
       {
         log_spy.print("Instance Offset Constraint " IDFMT " %d %ld",
@@ -1377,14 +1393,14 @@ namespace Legion {
       }
 
       static inline void log_mapping_decision(UniqueID unique_id, 
-                                unsigned index, FieldID fid, ApEvent inst_event)
+                                unsigned index, FieldID fid, LgEvent inst_event)
       {
         log_spy.print("Mapping Decision %llu %d %d " IDFMT "", unique_id,
 		      index, fid, inst_event.id);
       }
 
       static inline void log_post_mapping_decision(UniqueID unique_id, 
-                                unsigned index, FieldID fid, ApEvent inst_event)
+                                unsigned index, FieldID fid, LgEvent inst_event)
       {
         log_spy.print("Post Mapping Decision %llu %d %d " IDFMT "", unique_id,
 		      index, fid, inst_event.id);
@@ -1406,28 +1422,39 @@ namespace Legion {
         log_spy.print("Task Premapping %llu %d", unique_id, index);
       }
 
+      static inline char to_ascii(unsigned value)
+      {
+        return value < 10 ? '0' + value : 'A' + (value - 10);
+      }
+
       static inline void log_tunable_value(UniqueID unique_id, unsigned index,
                                     const void *value, size_t num_bytes)
       {
-        // Build a hex string for the value 
-        // For now the result must be a multiple of 4 bytes
-        assert((num_bytes % 4) == 0);
+        // Build a hex string for the value
         size_t buffer_size = ((8 * num_bytes) / 4) + 1;
         char *buffer = (char*)malloc(buffer_size);
-        unsigned *src = (unsigned*)value;
         unsigned byte_index = 0;
-        for (unsigned word_idx = 0; word_idx < (num_bytes/4); word_idx++)
+
         {
-          unsigned word = src[word_idx];
-          // Every 4 bits get's a hex character 
-          for (unsigned i = 0; i < (8*sizeof(word)/4); i++, byte_index++)
+          const unsigned *src = (const unsigned*)value;
+          for (unsigned word_idx = 0; word_idx < (num_bytes/4); word_idx++)
           {
-            // Get the next four bits
-            unsigned offset = (word >> (i*4)) & 0xF; 
-            if (offset < 10)
-              buffer[byte_index] = '0' + offset;
-            else
-              buffer[byte_index] = 'A' + (offset-10);
+            unsigned word = src[word_idx];
+            // Every 4 bits get's a hex character
+            for (unsigned i = 0; i < (8*sizeof(word)/4); i++, byte_index++)
+              // Get the next four bits
+              buffer[byte_index] = to_ascii((word >> (i*4)) & 0xF);
+          }
+        }
+        // Convert remaining bytes
+        {
+          const char *src = (const char*)value;
+          for (unsigned char_index = (num_bytes/4)*4; char_index < num_bytes;
+               char_index++)
+          {
+            unsigned word = src[char_index];
+            for (unsigned i = 0; i < 2; i++, byte_index++)
+              buffer[byte_index] = to_ascii((word >> (i*4)) & 0xF);
           }
         }
         buffer[byte_index] = '\0';
@@ -1448,6 +1475,13 @@ namespace Legion {
       {
         log_spy.print("Phase Barrier Wait %llu " IDFMT "",
                       unique_id, previous.id);
+      }
+
+      static inline void log_collective_rendezvous(UniqueID unique_id,
+                  unsigned requirement_index, unsigned analysis_index)
+      {
+        log_spy.print("Collective Rendezvous %llu %u %u", unique_id, 
+                                  requirement_index, analysis_index);
       }
 
       // The calls above this ifdef record the basic information about
@@ -1473,6 +1507,13 @@ namespace Legion {
         if (one != two)
           log_spy.print("Event Event " IDFMT " " IDFMT, 
 			one.id, two.id);
+      }
+
+      static inline void log_reservation_acquire(Reservation r, 
+                                                 LgEvent pre, LgEvent post)
+      {
+        log_spy.print("Reservation " IDFMT " " IDFMT " " IDFMT,
+                      r.id, pre.id, post.id);
       }
 
       static inline void log_ap_user_event(ApUserEvent event)
@@ -1522,16 +1563,17 @@ namespace Legion {
                                          IndexSpaceExprID expr_id,
                                          RegionTreeID src_tree_id,
                                          RegionTreeID dst_tree_id,
-                                         LgEvent pre, LgEvent post)
+                                         LgEvent pre, LgEvent post,
+                                         CollectiveKind collective)
       {
-        log_spy.print("Copy Events %llu %lld %d %d " IDFMT " " IDFMT,
+        log_spy.print("Copy Events %llu %lld %d %d " IDFMT " " IDFMT " %d",
                       op_unique_id, expr_id, src_tree_id,
-                      dst_tree_id, pre.id, post.id);
+                      dst_tree_id, pre.id, post.id, collective);
       }
 
       static inline void log_copy_field(LgEvent post, FieldID src_fid,
-                                        ApEvent src_event, FieldID dst_fid,
-                                        ApEvent dst_event, ReductionOpID redop)
+                                        LgEvent src_event, FieldID dst_fid,
+                                        LgEvent dst_event, ReductionOpID redop)
       {
         log_spy.print("Copy Field " IDFMT " %d " IDFMT " %d " IDFMT " %d",
                   post.id, src_fid, src_event.id, dst_fid, dst_event.id, redop);
@@ -1547,8 +1589,8 @@ namespace Legion {
       }
 
       static inline void log_indirect_field(LgEvent post, FieldID src_fid,
-                                        ApEvent src_event, int src_indirect,
-                                        FieldID dst_fid, ApEvent dst_event, 
+                                        LgEvent src_event, int src_indirect,
+                                        FieldID dst_fid, LgEvent dst_event, 
                                         int dst_indirect, ReductionOpID redop)
       {
         log_spy.print("Indirect Field " IDFMT " %d " IDFMT " %d %d " IDFMT
@@ -1557,14 +1599,14 @@ namespace Legion {
       }
 
       static inline void log_indirect_instance(unsigned indirection_id,
-                        unsigned index, ApEvent inst_event, FieldID fid)
+                        unsigned index, LgEvent inst_event, FieldID fid)
       {
         log_spy.print("Indirect Instance %u %u " IDFMT " %d",
                       indirection_id, index, inst_event.id, fid);
       }
 
       static inline void log_indirect_group(unsigned indirection_id,
-                        unsigned index, ApEvent inst_event, IDType index_space)
+                        unsigned index, LgEvent inst_event, IDType index_space)
       {
         log_spy.print("Indirect Group %u %u " IDFMT " %llu",
           indirection_id, index, inst_event.id, index_space);
@@ -1575,31 +1617,33 @@ namespace Legion {
                                          FieldSpace handle,
                                          RegionTreeID tree_id,
                                          LgEvent pre, LgEvent post,
-                                         UniqueID fill_unique_id)
+                                         UniqueID fill_unique_id,
+                                         CollectiveKind collective)
       {
-        log_spy.print("Fill Events %llu %lld %d %d " IDFMT " " IDFMT " %llu",
+        log_spy.print("Fill Events %llu %lld %d %d " IDFMT " " IDFMT " %llu %d",
 		      op_unique_id, expr_id, handle.get_id(), tree_id,
-		      pre.id, post.id, fill_unique_id);
+		      pre.id, post.id, fill_unique_id, collective);
       }
 
       static inline void log_fill_field(LgEvent post, 
-                                        FieldID fid, ApEvent dst_event)
+                                        FieldID fid, LgEvent dst_event)
       {
         log_spy.print("Fill Field " IDFMT " %d " IDFMT, 
                       post.id, fid, dst_event.id);
       }
 
       static inline void log_deppart_events(UniqueID op_unique_id,
-                                            IndexSpace handle,
-                                            LgEvent pre, LgEvent post)
+                                            IndexSpaceExprID expr_id,
+                                            LgEvent pre, LgEvent post,
+                                            DepPartOpKind op_kind)
       {
         // Realm has an optimization where if it can do the deppart op
         // immediately it just returns the precondition as the postcondition
         // which of course breaks Legion Spy's way of logging deppart
         // operations uniquely as their completion event
         assert(pre != post);
-        log_spy.print("Deppart Events %llu %d " IDFMT " " IDFMT,
-                      op_unique_id, handle.get_id(), pre.id, post.id);
+        log_spy.print("Deppart Events %llu %lld " IDFMT " " IDFMT " %d",
+                      op_unique_id, expr_id, pre.id, post.id, op_kind);
       }
 
       // We use this call as a special guard call to know when 
@@ -1610,6 +1654,22 @@ namespace Legion {
       {
         log_spy.print("Replay Operation %llu", op_unique_id);
       } 
+
+      // Logging for equivalence set creation
+      static inline void log_equivalence_set(DistributedID did,
+                                             IndexSpaceExprID expr_id,
+                                             RegionTreeID tid,
+                                             UniqueID creator_uid)
+      {
+        log_spy.print("Equivalence Set %llx %lld %d %llu",
+            did, expr_id, tid, creator_uid);
+      }
+
+      static inline void log_equivalence_set_use(DistributedID did,
+                                                 UniqueID uid, unsigned index)
+      {
+        log_spy.print("Equivalence Use %llx %llu %d", did, uid, index);
+      }
 #endif
     }; // namespace LegionSpy
 

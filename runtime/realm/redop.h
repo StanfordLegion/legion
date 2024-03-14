@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,7 +24,12 @@
 #include "realm/cuda/cuda_redop.h"
 #endif
 
+#ifdef REALM_USE_HIP
+#include "realm/hip/hip_redop.h"
+#endif
+
 #include <cstddef>
+#include <type_traits>
 
 namespace Realm {
 
@@ -74,6 +79,21 @@ namespace Realm {
       //  to look up the actual kernels
       void *cuda_apply_excl_fn, *cuda_apply_nonexcl_fn;
       void *cuda_fold_excl_fn, *cuda_fold_nonexcl_fn;
+
+      // These function pointers make the connection to the app's runtime
+      // instance in order to properly translate and capture the correct
+      // function to launch.
+      // The runtime function pointer to launch these shadow symbols
+      void *cudaLaunchKernel_fn;
+      // The runtime function pointer to translate the host shadow symbol to a driver function
+      void *cudaGetFuncBySymbol_fn;
+#endif
+#ifdef REALM_USE_HIP
+      // HIP kernels for apply/fold - these are not actually the functions,
+      //  but just information (e.g. host wrapper fnptr) that can be used
+      //  to look up the actual kernels
+      void *hip_apply_excl_fn, *hip_apply_nonexcl_fn;
+      void *hip_fold_excl_fn, *hip_fold_nonexcl_fn;
 #endif
 
       ReductionOpUntyped()
@@ -92,14 +112,38 @@ namespace Realm {
       , cuda_apply_nonexcl_fn(0)
       , cuda_fold_excl_fn(0)
       , cuda_fold_nonexcl_fn(0)
+      , cudaLaunchKernel_fn(0)
+      , cudaGetFuncBySymbol_fn(0)
+#endif
+#ifdef REALM_USE_HIP
+      , hip_apply_excl_fn(0)
+      , hip_apply_nonexcl_fn(0)
+      , hip_fold_excl_fn(0)
+      , hip_fold_nonexcl_fn(0)
 #endif
       {}
 
       template <class REDOP>
       static ReductionOpUntyped *create_reduction_op(void)
       {
-        ReductionOpUntyped *redop = new ReductionOp<REDOP>;
-        return redop;
+        // reduction ops are allowed to use helper constructors, but are
+        //  type-erased inside of realm, so must be trivially copyable and
+        //  trivially destructible (we will use malloc/memcpy/free instead
+        //  of new/delete)
+        // FIXME:
+        // TODO:
+        // Re-enable when the examples used in legion CI are fixed.
+#if 0 && (REALM_CXX_STANDARD >= 11)
+        static_assert(std::is_trivially_copyable<ReductionOp<REDOP>>::value &&
+                          std::is_trivially_destructible<ReductionOp<REDOP>>::value,
+                      "ReductionOp<REDOP> must be trivially copyable/destructible");
+#endif
+        void *ptr = malloc(sizeof(ReductionOp<REDOP>));
+        if(ptr) {
+          ReductionOpUntyped *redop = new(ptr) ReductionOp<REDOP>;
+          return redop;
+        } else
+          return nullptr;
       }
 
       static ReductionOpUntyped *clone_reduction_op(const ReductionOpUntyped *redop);
@@ -163,6 +207,35 @@ namespace Realm {
       static void if_member_is_true(ReductionOpUntyped *redop) { Cuda::add_cuda_redop_kernels<T>(redop); }
     };
 #endif
+	
+#if defined(REALM_USE_HIP) && ( defined (__CUDACC__) || defined (__HIPCC__) )
+    // with a hip-capable compiler, we'll automatically add hip reduction
+    //  kernels if the REDOP class defines has_hip_reductions AND it's true
+    // this requires a bunch of SFINAE template-fu
+    template <typename T>
+    struct HasHasHipReductions {
+      struct YES { char dummy[1]; };
+      struct NO { char dummy[2]; };
+      struct AltnerativeDefinition { static const bool has_hip_reductions = false; };
+      template <typename T2> struct Combined : public T2, public AltnerativeDefinition {};
+      template <typename T2, T2> struct CheckAmbiguous {};
+      template <typename T2> static NO has_member(CheckAmbiguous<const bool *, &Combined<T2>::has_hip_reductions> *);
+      template <typename T2> static YES has_member(...);
+      const static bool value = sizeof(has_member<T>(0)) == sizeof(YES);
+    };
+
+    template <typename T, bool OK> struct MaybeAddHipReductions;
+    template <typename T>
+    struct MaybeAddHipReductions<T, false> {
+      static void if_member_exists(ReductionOpUntyped *redop) {};
+      static void if_member_is_true(ReductionOpUntyped *redop) {};
+    };
+    template <typename T>
+    struct MaybeAddHipReductions<T, true> {
+      static void if_member_exists(ReductionOpUntyped *redop) { MaybeAddHipReductions<T, T::has_hip_reductions>::if_member_is_true(redop); }
+      static void if_member_is_true(ReductionOpUntyped *redop) { Hip::add_hip_redop_kernels<T>(redop); }
+    };
+#endif
 
     template <typename REDOP>
     struct ReductionOp : public ReductionOpUntyped {
@@ -188,6 +261,11 @@ namespace Realm {
         // if REDOP defines/sets 'has_cuda_reductions' to true, try to
         //  automatically build wrappers for apply_cuda<> and fold_cuda<>
         MaybeAddCudaReductions<REDOP, HasHasCudaReductions<REDOP>::value>::if_member_exists(this);
+#endif
+#if defined(REALM_USE_HIP) && ( defined (__CUDACC__) || defined (__HIPCC__) )
+        // if REDOP defines/sets 'has_hip_reductions' to true, try to
+        //  automatically build wrappers for apply_hip<> and fold_hip<>
+        MaybeAddHipReductions<REDOP, HasHasHipReductions<REDOP>::value>::if_member_exists(this);
 #endif
       }
 

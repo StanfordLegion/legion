@@ -1,4 +1,4 @@
--- Copyright 2022 Stanford University
+-- Copyright 2024 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -60,7 +60,7 @@ terra create_logical_partition(runtime : c.legion_runtime_t,
                                cs : c.legion_index_space_t)
   var ip = c.legion_index_partition_create_equal(runtime, context,
     lr.index_space, cs, 1, c.AUTO_GENERATE_ID)
-  return c.legion_logical_partition_create(runtime, context, lr, ip)
+  return c.legion_logical_partition_create(runtime, lr, ip)
 end
 
 function gen_test(import_ispace, import_region1, import_region2, import_partition1, import_partition2)

@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University
+/* Copyright 2024 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -31,7 +31,7 @@ using namespace Legion::Mapping;
 /// Mapper
 ///
 
-static LegionRuntime::Logger::Category log_circuit("circuit");
+static Logger log_circuit("circuit");
 
 class CircuitMapper : public DefaultMapper
 {
@@ -43,12 +43,12 @@ public:
                 std::map<Memory, std::vector<Processor> >* sysmem_local_procs,
                 std::map<Processor, Memory>* proc_sysmems,
                 std::map<Processor, Memory>* proc_regmems);
-  virtual Processor default_policy_select_initial_processor(
-                                    MapperContext ctx, const Task &task);
-  virtual void default_policy_select_target_processors(
+  Processor default_policy_select_initial_processor(
+                                    MapperContext ctx, const Task &task) override;
+  void default_policy_select_target_processors(
                                     MapperContext ctx,
                                     const Task &task,
-                                    std::vector<Processor> &target_procs);
+                                    std::vector<Processor> &target_procs) override;
 private:
   // std::vector<Processor>& procs_list;
   // std::vector<Memory>& sysmems_list;

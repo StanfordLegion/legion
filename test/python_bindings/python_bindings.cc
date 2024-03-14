@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University
+/* Copyright 2024 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -44,7 +44,23 @@ int main(int argc, char **argv)
 #ifndef PYTHON_MODULES_PATH
 #error PYTHON_MODULES_PATH not available at compile time
 #endif
-  setenv("PYTHONPATH", PYTHON_MODULES_PATH, true /*overwrite*/);
+  char *previous_python_path = getenv("PYTHONPATH");
+  if (previous_python_path != 0) {
+    size_t bufsize = 8192;
+    char *buffer = (char *)calloc(bufsize, sizeof(char));
+    assert(buffer != 0);
+
+    assert(strlen(previous_python_path) + strlen(PYTHON_MODULES_PATH) + 2 < bufsize);
+    // Concatenate PYTHON_MODULES_PATH to the end of PYTHONPATH.
+    bufsize--;
+    strncat(buffer, previous_python_path, bufsize);
+    bufsize -= strlen(previous_python_path);
+    strncat(buffer, ":" PYTHON_MODULES_PATH, bufsize);
+    bufsize -= strlen(":" PYTHON_MODULES_PATH);
+    setenv("PYTHONPATH", buffer, true /*overwrite*/);
+  } else {
+    setenv("PYTHONPATH", PYTHON_MODULES_PATH, true /*overwrite*/);
+  }
 
   Realm::Python::PythonModule::import_python_module("python_bindings");
 

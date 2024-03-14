@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# Copyright 2022 Stanford University
+# Copyright 2024 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -58,24 +58,23 @@ else:
     extern_task = pygion.extern_task
 
 read_config = pygion.extern_task(
-    task_id=10000,
+    task_id=10005,
     argument_types=[],
     privileges=[],
     return_type=config,
     calling_convention='regent')
 
 read_partitions = pygion.extern_task(
-    task_id=10001,
+    task_id=10006,
     argument_types=[Region, Region, Region, config],
     privileges=[N, N, N],
     return_type=mesh_partitions,
     calling_convention='regent')
 
 initialize_topology = extern_task(
-    task_id=10003,
-    argument_types=[config, pygion.int64, Region, Region, Region, Region, Region],
+    task_id=10008,
+    argument_types=[config, Region, Region, Region, Region, Region],
     privileges=[
-        None,
         None,
         RW('znump'),
         RW('px_x', 'px_y', 'has_bcx', 'has_bcy'),
@@ -86,21 +85,21 @@ initialize_topology = extern_task(
     calling_convention='regent')
 
 init_pointers = extern_task(
-    task_id=10004,
+    task_id=10009,
     argument_types=[Region, Region, Region, Region],
     privileges=[N, N, N, RW('mapsp1', 'mapsp1_r', 'mapsp2', 'mapsp2_r')],
     return_type=pygion.void,
     calling_convention='regent')
 
 init_mesh_zones = extern_task(
-    task_id=10005,
+    task_id=10010,
     argument_types=[Region],
     privileges=[RW('zx_x', 'zx_y', 'zarea', 'zvol')],
     return_type=pygion.void,
     calling_convention='regent')
 
 init_side_fracs = extern_task(
-    task_id=10006,
+    task_id=10011,
     argument_types=[Region, Region, Region, Region],
     privileges=[
         R('zarea'),
@@ -111,7 +110,7 @@ init_side_fracs = extern_task(
     calling_convention='regent')
 
 init_hydro = extern_task(
-    task_id=10007,
+    task_id=10012,
     argument_types=[Region, pygion.float64, pygion.float64, pygion.float64, pygion.float64, pygion.float64, pygion.float64, pygion.float64, pygion.float64],
     privileges=[
         R('zx_x', 'zx_y', 'zvol') + RW('zr', 'ze', 'zwrate', 'zm', 'zetot')],
@@ -119,7 +118,7 @@ init_hydro = extern_task(
     calling_convention='regent')
 
 init_radial_velocity = extern_task(
-    task_id=10008,
+    task_id=10013,
     argument_types=[Region, pygion.float64],
     privileges=[
         R('px_x', 'px_y') + RW('pu_x', 'pu_y')],
@@ -127,7 +126,7 @@ init_radial_velocity = extern_task(
     calling_convention='regent')
 
 init_step_points = extern_task(
-    task_id=10009,
+    task_id=10014,
     argument_types=[Region, pygion.bool_],
     privileges=[
         RW('pmaswt', 'pf_x', 'pf_y')],
@@ -135,7 +134,7 @@ init_step_points = extern_task(
     calling_convention='regent')
 
 adv_pos_half = extern_task(
-    task_id=10010,
+    task_id=10015,
     argument_types=[Region, pygion.float64, pygion.bool_],
     privileges=[
         R('px_x', 'px_y', 'pu_x', 'pu_y') + RW('px0_x', 'px0_y', 'pxp_x', 'pxp_y', 'pu0_x', 'pu0_y')],
@@ -143,7 +142,7 @@ adv_pos_half = extern_task(
     calling_convention='regent')
 
 init_step_zones = extern_task(
-    task_id=10011,
+    task_id=10016,
     argument_types=[Region, pygion.bool_],
     privileges=[
         R('zvol') + RW('zvol0')],
@@ -151,7 +150,7 @@ init_step_zones = extern_task(
     calling_convention='regent')
 
 calc_centers = extern_task(
-    task_id=10012,
+    task_id=10017,
     argument_types=[Region, Region, Region, Region, pygion.bool_],
     privileges=[
         R('znump') + RW('zxp_x', 'zxp_y'),
@@ -162,7 +161,7 @@ calc_centers = extern_task(
     calling_convention='regent')
 
 calc_volumes = extern_task(
-    task_id=10013,
+    task_id=10018,
     argument_types=[Region, Region, Region, Region, pygion.bool_],
     privileges=[
         R('zxp_x', 'zxp_y', 'znump') + RW('zareap', 'zvolp'),
@@ -173,7 +172,7 @@ calc_volumes = extern_task(
     calling_convention='regent')
 
 calc_char_len = extern_task(
-    task_id=10014,
+    task_id=10019,
     argument_types=[Region, Region, Region, Region, pygion.bool_],
     privileges=[
         R('znump') + RW('zdl'),
@@ -184,7 +183,7 @@ calc_char_len = extern_task(
     calling_convention='regent')
 
 calc_rho_half = extern_task(
-    task_id=10015,
+    task_id=10020,
     argument_types=[Region, pygion.bool_],
     privileges=[
         R('zvolp', 'zm') + RW('zrp')],
@@ -192,7 +191,7 @@ calc_rho_half = extern_task(
     calling_convention='regent')
 
 sum_point_mass = extern_task(
-    task_id=10016,
+    task_id=10021,
     argument_types=[Region, Region, Region, Region, pygion.bool_],
     privileges=[
         R('zareap', 'zrp'),
@@ -203,7 +202,7 @@ sum_point_mass = extern_task(
     calling_convention='regent')
 
 calc_state_at_half = extern_task(
-    task_id=10017,
+    task_id=10022,
     argument_types=[Region, pygion.float64, pygion.float64, pygion.float64, pygion.bool_],
     privileges=[
         R('zvol0', 'zvolp', 'zm', 'zr', 'ze', 'zwrate') + RW('zp', 'zss')],
@@ -211,7 +210,7 @@ calc_state_at_half = extern_task(
     calling_convention='regent')
 
 calc_force_pgas_tts = extern_task(
-    task_id=10018,
+    task_id=10023,
     argument_types=[Region, Region, Region, Region, pygion.float64, pygion.float64, pygion.bool_],
     privileges=[
         R('zxp_x', 'zxp_y', 'zareap', 'zrp', 'zss', 'zp'),
@@ -222,7 +221,7 @@ calc_force_pgas_tts = extern_task(
     calling_convention='regent')
 
 qcs_zone_center_velocity = extern_task(
-    task_id=10019,
+    task_id=10024,
     argument_types=[Region, Region, Region, Region, pygion.bool_],
     privileges=[
         R('znump') + RW('zuc_x', 'zuc_y'),
@@ -233,7 +232,7 @@ qcs_zone_center_velocity = extern_task(
     calling_convention='regent')
 
 qcs_corner_divergence = extern_task(
-    task_id=10020,
+    task_id=10025,
     argument_types=[Region, Region, Region, Region, pygion.bool_],
     privileges=[
         R('zxp_x', 'zxp_y', 'zuc_x', 'zuc_y'),
@@ -244,7 +243,7 @@ qcs_corner_divergence = extern_task(
     calling_convention='regent')
 
 qcs_qcn_force = extern_task(
-    task_id=10021,
+    task_id=10026,
     argument_types=[Region, Region, Region, Region, pygion.float64, pygion.float64, pygion.float64, pygion.bool_],
     privileges=[
         R('zrp', 'zss'),
@@ -255,7 +254,7 @@ qcs_qcn_force = extern_task(
     calling_convention='regent')
 
 qcs_force = extern_task(
-    task_id=10022,
+    task_id=10027,
     argument_types=[Region, Region, Region, Region, pygion.bool_],
     privileges=[
         N,
@@ -266,7 +265,7 @@ qcs_force = extern_task(
     calling_convention='regent')
 
 qcs_vel_diff = extern_task(
-    task_id=10023,
+    task_id=10028,
     argument_types=[Region, Region, Region, Region, pygion.float64, pygion.float64, pygion.bool_],
     privileges=[
         R('zss') + RW('zdu', 'z0tmp'),
@@ -277,7 +276,7 @@ qcs_vel_diff = extern_task(
     calling_convention='regent')
 
 sum_point_force = extern_task(
-    task_id=10024,
+    task_id=10029,
     argument_types=[Region, Region, Region, Region, pygion.bool_],
     privileges=[
         R('znump'),
@@ -288,7 +287,7 @@ sum_point_force = extern_task(
     calling_convention='regent')
 
 apply_boundary_conditions = extern_task(
-    task_id=10025,
+    task_id=10030,
     argument_types=[Region, pygion.bool_],
     privileges=[
         R('has_bcx', 'has_bcy') + RW('pu0_x', 'pu0_y', 'pf_x', 'pf_y')],
@@ -296,7 +295,7 @@ apply_boundary_conditions = extern_task(
     calling_convention='regent')
 
 adv_pos_full = extern_task(
-    task_id=10026,
+    task_id=10031,
     argument_types=[Region, pygion.float64, pygion.bool_],
     privileges=[
         R('px0_x', 'px0_y', 'pu0_x', 'pu0_y', 'pf_x', 'pf_y', 'pmaswt') + RW('px_x', 'px_y', 'pu_x', 'pu_y')],
@@ -304,7 +303,7 @@ adv_pos_full = extern_task(
     calling_convention='regent')
 
 calc_centers_full = extern_task(
-    task_id=10027,
+    task_id=10032,
     argument_types=[Region, Region, Region, Region, pygion.bool_],
     privileges=[
         R('znump') + RW('zx_x', 'zx_y'),
@@ -315,7 +314,7 @@ calc_centers_full = extern_task(
     calling_convention='regent')
 
 calc_volumes_full = extern_task(
-    task_id=10028,
+    task_id=10033,
     argument_types=[Region, Region, Region, Region, pygion.bool_],
     privileges=[
         R('zx_x', 'zx_y', 'znump') + RW('zarea', 'zvol'),
@@ -326,7 +325,7 @@ calc_volumes_full = extern_task(
     calling_convention='regent')
 
 calc_work = extern_task(
-    task_id=10029,
+    task_id=10034,
     argument_types=[Region, Region, Region, Region, pygion.float64, pygion.bool_],
     privileges=[
         R('znump') + RW('zw', 'zetot'),
@@ -337,7 +336,7 @@ calc_work = extern_task(
     calling_convention='regent')
 
 calc_work_rate_energy_rho_full = extern_task(
-    task_id=10030,
+    task_id=10035,
     argument_types=[Region, pygion.float64, pygion.bool_],
     privileges=[
         R('zvol0', 'zvol', 'zm', 'zw', 'zp', 'zetot') + RW('zwrate', 'ze', 'zr')],
@@ -345,7 +344,7 @@ calc_work_rate_energy_rho_full = extern_task(
     calling_convention='regent')
 
 calc_dt_hydro = extern_task(
-    task_id=10031,
+    task_id=10036,
     argument_types=[Region, pygion.float64, pygion.float64, pygion.float64, pygion.float64, pygion.bool_, pygion.bool_],
     privileges=[
         R('zdl', 'zvol0', 'zvol', 'zss', 'zdu')],
@@ -353,21 +352,21 @@ calc_dt_hydro = extern_task(
     calling_convention='regent')
 
 calc_global_dt = pygion.extern_task(
-    task_id=10032,
+    task_id=10037,
     argument_types=[pygion.float64, pygion.float64, pygion.float64, pygion.float64, pygion.float64, pygion.float64, pygion.float64, pygion.int64],
     privileges=[],
     return_type=pygion.float64,
     calling_convention='regent')
 
 read_input_sequential = pygion.extern_task(
-    task_id=10041,
+    task_id=10046,
     argument_types=[Region, Region, Region, config],
     privileges=[RW, RW, RW],
     return_type=mesh_colorings,
     calling_convention='regent')
 
 validate_output_sequential = pygion.extern_task(
-    task_id=10042,
+    task_id=10047,
     argument_types=[Region, Region, Region, config],
     privileges=[R, R, R],
     return_type=pygion.void,
@@ -499,7 +498,7 @@ def main():
             index_launch(
                 pieces,
                 initialize_topology,
-                c, ID,
+                c,
                 zones_part[ID],
                 private_part[ID],
                 shared_part[ID],
@@ -508,7 +507,7 @@ def main():
         else:
             for i in IndexLaunch(pieces):
                 initialize_topology(
-                    conf, i,
+                    conf,
                     zones_part[i],
                     private_part[i],
                     shared_part[i],

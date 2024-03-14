@@ -1,4 +1,4 @@
--- Copyright 2022 Stanford University, NVIDIA Corporation
+-- Copyright 2024 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -21,16 +21,17 @@ local base = {}
 
 base.config, base.args = config.args()
 
--- Hack: Terra symbols don't support the hash() method so monkey patch
--- it in here. This allows deterministic hashing of Terra symbols,
--- which is currently required by OpenMP codegen.
-do
-  local terralib_symbol = getmetatable(terralib.newsymbol(int))
-  function terralib_symbol:hash()
-    local hash_value = "__terralib_symbol_#" .. tostring(self.id)
-    return hash_value
-  end
+local cpu_fast, gpu_fast = false, "contract"
+if terralib.llvm_version < 50 then
+  gpu_fast = false
 end
+if base.config["fast-math"] == 0 then
+  cpu_fast, gpu_fast = false, false
+elseif base.config["fast-math"] >= 1 then
+  cpu_fast, gpu_fast = true, true
+end
+base.opt_profile = {fastmath = cpu_fast}
+base.gpu_opt_profile = {fastmath = gpu_fast}
 
 -- Helpers for zero/min/max values of various types.
 
@@ -55,6 +56,35 @@ end
 -- ## Legion Bindings
 -- #################
 
+local dlfcn
+local function dlopen_library(library_name)
+  local ffi = require("ffi")
+
+  if not dlfcn then
+    dlfcn = terralib.includec("dlfcn.h")
+  end
+
+  -- Right now we do this globally and do not attempt to unload
+  -- libraries (and really, there is no safe way to do so because
+  -- LuaJIT and LLVM will both get unloaded before we're ready)
+  local ok = dlfcn.dlopen(library_name, bit.bor(dlfcn.RTLD_LAZY, dlfcn.RTLD_GLOBAL))
+  if ffi.cast("intptr_t", ok) == 0LL then
+    print("dlopen failed while opening '" .. tostring(library_name) .. "': " .. tostring(dlfcn.dlerror()))
+    print("retrying with terralib.linklibrary (hopefully this provides a better error)")
+    terralib.linklibrary(library_name)
+    assert(false, "if you got here, terralib.linklibrary worked but dlopen failed????")
+  end
+end
+
+local function link_library(library_name)
+  local suffix = string.sub(library_name, "-3")
+  if suffix == ".ll" or suffix == ".bc" then
+    terralib.linklibrary(library_name)
+  else
+    dlopen_library(library_name)
+  end
+end
+
 do
 local linked_libraries = terralib.newlist()
 
@@ -62,18 +92,19 @@ function base.linklibrary(library_name)
   if base.config["offline"] then
     linked_libraries:insert(library_name)
   else
-    terralib.linklibrary(library_name)
+    link_library(library_name)
   end
 end
 
 function base.load_all_libraries()
   assert(data.is_luajit())
   linked_libraries:map(function(library)
-    terralib.linklibrary(library)
+    link_library(library)
   end)
 end
 
-if os.execute("bash -c \"[ `uname` == 'Darwin' ]\"") == 0 then
+local ffi = require("ffi")
+if ffi.os == "OSX" then
   base.binding_library = "libregent.dylib"
 else
   base.binding_library = "libregent.so"
@@ -446,6 +477,30 @@ function base.get_reduction_op(privilege)
   return string.sub(privilege, string.len("reduces ") + 1)
 end
 
+-- Assign the basic types IDs for interop with Pygion.
+do
+  local primitive_types =
+    terralib.newlist({ int8, int16, int32, int64, uint8, uint16, uint32, uint64, float, double, bool})
+  local base_id = 101
+  local type_ids = data.newmap()
+  function base.register_type_id(t)
+    local type_id = base_id
+    base_id = base_id + 1
+    if t ~= nil then
+      type_ids[t] = type_id
+    end
+  end
+  for _, t in ipairs(primitive_types) do
+    base.register_type_id(t)
+  end
+  function base.get_type_semantic_tag()
+    return 54321 -- Hack: pick a value that seems unlikely to conflict
+  end
+  function base.get_type_id(t)
+    return type_ids[t]
+  end
+end
+
 function base.meet_privilege(a, b)
   if a == b then
     return a
@@ -667,17 +722,17 @@ function base.group_task_privileges_by_field_path(privileges, privilege_field_pa
                                                   privilege_field_types,
                                                   privilege_coherence_modes,
                                                   privilege_flags)
-  local privileges_by_field_path = {}
+  local privileges_by_field_path = data.newmap()
   local coherence_modes_by_field_path
   if privilege_coherence_modes ~= nil then
-    coherence_modes_by_field_path = {}
+    coherence_modes_by_field_path = data.newmap()
   end
   for i, privilege in ipairs(privileges) do
     local field_paths = privilege_field_paths[i]
     for _, field_path in ipairs(field_paths) do
-      privileges_by_field_path[field_path:hash()] = privilege
+      privileges_by_field_path[field_path] = privilege
       if coherence_modes_by_field_path ~= nil then
-        coherence_modes_by_field_path[field_path:hash()] =
+        coherence_modes_by_field_path[field_path] =
           privilege_coherence_modes[i]
       end
     end
@@ -971,11 +1026,6 @@ function symbol:getlabel()
     self.symbol_label = terralib.newlabel(self.symbol_name)
   end
   return self.symbol_label
-end
-
-function symbol:hash()
-  local hash_value = "__symbol_#" .. tostring(self.symbol_id)
-  return hash_value
 end
 
 function symbol:__tostring()
@@ -1525,6 +1575,8 @@ function base.task:set_name(name)
   self.unique_task_identifier = make_unique_task_identifier(name)
   if base.config["separate"] then
     self.taskid:setname("__regent_task_" .. self.unique_task_identifier .. "_task_id")
+    self.mapper_id:setname("__regent_task_" .. self.unique_task_identifier .. "_mapper_id")
+    self.mapping_tag_id:setname("__regent_task_" .. self.unique_task_identifier .. "_mapping_tag_id")
   end
 end
 

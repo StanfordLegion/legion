@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -141,7 +141,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    size_t ShimMapper::Task::get_context_index(void) const
+    uint64_t ShimMapper::Task::get_context_index(void) const
     //--------------------------------------------------------------------------
     {
       return context_index;
@@ -169,6 +169,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    const std::string& ShimMapper::Task::get_provenance_string(bool human) const
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+      return *(new std::string());
+    }
+
+    //--------------------------------------------------------------------------
     const char* ShimMapper::Task::get_task_name(void) const
     //--------------------------------------------------------------------------
     {
@@ -182,6 +190,34 @@ namespace Legion {
       // This method didn't exist back then anyway
       assert(false);
       return Domain::NO_DOMAIN;
+    }
+
+    //--------------------------------------------------------------------------
+    ShardID ShimMapper::Task::get_shard_id(void) const
+    //--------------------------------------------------------------------------
+    {
+      return 0;
+    }
+
+    //--------------------------------------------------------------------------
+    size_t ShimMapper::Task::get_total_shards(void) const
+    //--------------------------------------------------------------------------
+    {
+      return 1;
+    }
+
+    //--------------------------------------------------------------------------
+    DomainPoint ShimMapper::Task::get_shard_point(void) const
+    //--------------------------------------------------------------------------
+    {
+      return DomainPoint(0);
+    }
+
+    //--------------------------------------------------------------------------
+    Domain ShimMapper::Task::get_shard_domain(void) const
+    //--------------------------------------------------------------------------
+    {
+      return Domain(DomainPoint(0), DomainPoint(0));
     }
 
     //--------------------------------------------------------------------------
@@ -245,7 +281,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    size_t ShimMapper::Inline::get_context_index(void) const
+    uint64_t ShimMapper::Inline::get_context_index(void) const
     //--------------------------------------------------------------------------
     {
       return context_index;
@@ -263,6 +299,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return parent_task;
+    }
+
+    //--------------------------------------------------------------------------
+    const std::string& ShimMapper::Inline::get_provenance_string(
+                                                               bool human) const
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+      return *(new std::string());
     }
     
     //--------------------------------------------------------------------------
@@ -326,7 +371,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    size_t ShimMapper::Copy::get_context_index(void) const
+    uint64_t ShimMapper::Copy::get_context_index(void) const
     //--------------------------------------------------------------------------
     {
       return context_index;
@@ -344,6 +389,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return parent_task;
+    }
+
+    //--------------------------------------------------------------------------
+    const std::string& ShimMapper::Copy::get_provenance_string(bool human) const
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+      return *(new std::string());
     }
 
     //--------------------------------------------------------------------------

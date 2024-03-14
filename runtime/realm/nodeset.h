@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -40,8 +40,15 @@ namespace Realm {
   class NodeSet;
 
   // we do not support mutation of a nodeset, so we're a const_iterator
-  class REALM_INTERNAL_API_EXTERNAL_LINKAGE NodeSetIterator : public std::iterator<std::input_iterator_tag, NodeID> {
+  class REALM_INTERNAL_API_EXTERNAL_LINKAGE NodeSetIterator {
   public:
+    // explicitly set iterator traits
+    typedef std::input_iterator_tag iterator_category;
+    typedef NodeID value_type;
+    typedef std::ptrdiff_t difference_type;
+    typedef NodeID *pointer;
+    typedef NodeID& reference;
+
     NodeSetIterator();
     NodeSetIterator(const NodeSet& _nodeset);
 

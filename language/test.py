@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# Copyright 2022 Stanford University
+# Copyright 2024 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -138,10 +138,13 @@ def run_prof(out_dir, logfiles, verbose, py_exe_path):
         '-o', result_dir,
     ] + logfiles
     if verbose: print('Running', ' '.join(cmd))
+    cmd_env = dict(os.environ.items())
+    cmd_env["USE_TYPE_CHECK"] = "1"
     proc = subprocess.Popen(
         cmd,
         stdout=None if verbose else subprocess.PIPE,
-        stderr=None if verbose else subprocess.STDOUT)
+        stderr=None if verbose else subprocess.STDOUT,
+        env=cmd_env)
     output, _ = proc.communicate()
     retcode = proc.wait()
     if retcode != 0:
@@ -162,9 +165,68 @@ def run_prof_rs(out_dir, logfiles, verbose, legion_prof_rs):
         raise TestFailure(' '.join(cmd), retcode, output.decode('utf-8') if output is not None else None)
     return result_dir
 
+def run_prof_rs_archive(out_dir, logfiles, verbose, legion_prof_rs):
+    result_dir = os.path.join(out_dir, 'legion_prof_rs_archive')
+    cmd = [legion_prof_rs, '--archive', '--levels', '3', '--zstd-compression', '1', '-o', result_dir,] + logfiles
+    if verbose: print('Running', ' '.join(cmd))
+    proc = subprocess.Popen(
+        cmd,
+        stdout=None if verbose else subprocess.PIPE,
+        stderr=None if verbose else subprocess.STDOUT)
+    output, _ = proc.communicate()
+    retcode = proc.wait()
+    if retcode != 0:
+        raise TestFailure(' '.join(cmd), retcode, output.decode('utf-8') if output is not None else None)
+    return result_dir
+
+def run_prof_subnode(out_dir, logfiles, verbose, subnodes, py_exe_path):
+    result_dir = os.path.join(out_dir, 'legion_prof_filter_input')
+    cmd = [
+        py_exe_path,
+        os.path.join(regent.root_dir(), 'tools', 'legion_prof_verify_subnodes.py'),
+        '--outdir', out_dir,
+        '--nodes', str(subnodes),
+    ] + logfiles
+    if verbose: 
+        print('Running', ' '.join(cmd))
+    cmd_env = dict(os.environ.items())
+    cmd_env["USE_TYPE_CHECK"] = "1"
+    proc = subprocess.Popen(
+        cmd,
+        stdout=None if verbose else subprocess.PIPE,
+        stderr=None if verbose else subprocess.STDOUT,
+        env=cmd_env)
+    output, _ = proc.communicate()
+    retcode = proc.wait()
+    if retcode != 0:
+        raise TestFailure(' '.join(cmd), retcode, output.decode('utf-8') if output is not None else None)
+    return result_dir
+
+def run_prof_rs_subnode(out_dir, logfiles, verbose, subnodes, py_exe_path, legion_prof_rs):
+    result_dir = os.path.join(out_dir, 'legion_prof_filter_input_rs')
+    cmd = [
+        py_exe_path,
+        os.path.join(regent.root_dir(), 'tools', 'legion_prof_verify_subnodes.py'),
+        '--outdir', out_dir,
+        '--nodes', str(subnodes),
+        '--rust',
+        '--rustexe', legion_prof_rs,
+    ] +  logfiles
+    if verbose:
+        print('Running rs', ' '.join(cmd))
+    proc = subprocess.Popen(
+        cmd,
+        stdout=None if verbose else subprocess.PIPE,
+        stderr=None if verbose else subprocess.STDOUT)
+    output, _ = proc.communicate()
+    retcode = proc.wait()
+    if retcode != 0:
+        raise TestFailure(' '.join(cmd), retcode, output.decode('utf-8') if output is not None else None)
+    return result_dir
+
 def compare_prof_results(verbose, py_exe_path, profile_dirs):
     cmd = ['diff', '-r', '-u',
-           '--exclude', 'legion_prof_ops.tsv',
+           '--exclude', 'critical_path.json',
            ] + profile_dirs
     if verbose: print('Running', ' '.join(cmd))
     proc = subprocess.Popen(
@@ -228,7 +290,7 @@ def test_run_pass(filename, debug, verbose, short, timelimit, py_exe_path, legio
 def test_spy(filename, debug, verbose, short, timelimit, py_exe_path, legion_prof_rs, flags, env):
     spy_dir = tempfile.mkdtemp(dir=os.path.dirname(os.path.abspath(filename)))
     spy_log = os.path.join(spy_dir, 'spy_%.log')
-    spy_flags = ['-level', 'legion_spy=2', '-logfile', spy_log]
+    spy_flags = ['-lg:spy', '-level', 'legion_spy=2', '-logfile', spy_log]
 
     runs_with = find_labeled_flags(filename, 'runs-with', short)
     try:
@@ -238,6 +300,9 @@ def test_spy(filename, debug, verbose, short, timelimit, py_exe_path, legion_pro
             spy_logs = glob.glob(os.path.join(spy_dir, 'spy_*.log'))
             assert len(spy_logs) > 0
             run_spy(spy_logs, verbose, py_exe_path)
+            # Run legion_prof_rs too so that we can be sure it's at least parsing all the logs
+            if legion_prof_rs is not None:
+                run_prof_rs(spy_dir, spy_logs, verbose, legion_prof_rs)
     finally:
         shutil.rmtree(spy_dir)
 
@@ -258,6 +323,9 @@ def test_gc(filename, debug, verbose, short, timelimit, py_exe_path, legion_prof
         shutil.rmtree(gc_dir)
 
 def test_prof(filename, debug, verbose, short, timelimit, py_exe_path, legion_prof_rs, flags, env):
+    if legion_prof_rs is None:
+        raise Exception('Need to specify the path to legion_prof_rs via --legion-prof-rs')
+
     prof_dir = tempfile.mkdtemp(dir=os.path.dirname(os.path.abspath(filename)))
     prof_log = os.path.join(prof_dir, 'prof_%.gz')
     prof_flags = ['-hl:prof', '1024', '-hl:prof_logfile', prof_log]
@@ -272,6 +340,12 @@ def test_prof(filename, debug, verbose, short, timelimit, py_exe_path, legion_pr
             result_py = run_prof(prof_dir, prof_logs, verbose, py_exe_path)
             result_rs = run_prof_rs(prof_dir, prof_logs, verbose, legion_prof_rs)
             compare_prof_results(verbose, py_exe_path, [result_py, result_rs])
+            run_prof_rs_archive(prof_dir, prof_logs, verbose, legion_prof_rs)
+            # we only test subnodes when running on multi-node
+            if os.environ.get('LAUNCHER'):
+                result_subnodes_py = run_prof_subnode(prof_dir, prof_logs, verbose, 1, py_exe_path)
+                result_subnodes_rs = run_prof_rs_subnode(prof_dir, prof_logs, verbose, 1, py_exe_path, legion_prof_rs)
+                compare_prof_results(verbose, py_exe_path, [result_subnodes_py, result_subnodes_rs])
     finally:
         shutil.rmtree(prof_dir)
 
@@ -305,7 +379,7 @@ class Counter:
         self.passed = 0
         self.failed = 0
 
-def get_test_specs(legion_dir, use_run, use_spy, use_gc, use_prof, use_hdf5, use_openmp, use_cuda, use_python, max_dim, no_pretty, extra_flags):
+def get_test_specs(legion_dir, use_run, use_spy, use_gc, use_prof, use_hdf5, use_openmp, use_gpu, use_python, max_dim, no_pretty, extra_flags):
     base_env = {
     }
     run_env = {
@@ -361,19 +435,20 @@ def get_test_specs(legion_dir, use_run, use_spy, use_gc, use_prof, use_hdf5, use
          )),
     ]
     openmp = [
-        ('compile_fail', (test_compile_fail, (['-fbounds-checks', '1', "-fopenmp", "1", "-fopenmp-offline", "1"] + extra_flags, base_env)),
+        ('compile_fail', (test_compile_fail, (['-fbounds-checks', '1'] + extra_flags, base_env)),
          (os.path.join('tests', 'openmp', 'compile_fail'),
          )),
         ('run_pass', (test_run_pass, ([] + extra_flags, run_env)),
          (os.path.join('tests', 'openmp', 'run_pass'),
          )),
     ]
-    cuda = [
-        ('compile_fail', (test_compile_fail, (['-fbounds-checks', '1', "-fcuda", "1", "-fcuda-offline", "1"] + extra_flags, base_env)),
+    gpu = [
+        ('compile_fail', (test_compile_fail, (['-fbounds-checks', '1'] + extra_flags, base_env)),
          (os.path.join('tests', 'cuda', 'compile_fail'),
          )),
-        ('run_pass', (test_run_pass, ([] + extra_flags, run_env)),
+        ('run_pass', (test_run_pass, (['-fgpu', use_gpu] + extra_flags, run_env)),
          (os.path.join('tests', 'cuda', 'run_pass'),
+          os.path.join('tests', 'cuda', 'examples'),
          )),
     ]
     python = [
@@ -390,7 +465,7 @@ def get_test_specs(legion_dir, use_run, use_spy, use_gc, use_prof, use_hdf5, use
         ]
 
     result = []
-    if not (use_run or use_spy or use_gc or use_prof or use_hdf5 or use_cuda):
+    if not (use_run or use_spy or use_gc or use_prof or use_hdf5 or use_gpu):
         result.extend(base)
         if not no_pretty:
             result.extend(pretty)
@@ -407,8 +482,8 @@ def get_test_specs(legion_dir, use_run, use_spy, use_gc, use_prof, use_hdf5, use
         result.extend(hdf5)
     if use_openmp:
         result.extend(openmp)
-    if use_cuda:
-        result.extend(cuda)
+    if use_gpu:
+        result.extend(gpu)
     if use_python:
         result.extend(python)
     for dim in range(4, min(max_dim, 8) + 1):
@@ -416,7 +491,7 @@ def get_test_specs(legion_dir, use_run, use_spy, use_gc, use_prof, use_hdf5, use
     return result
 
 def run_all_tests(thread_count, debug, max_dim, run, spy, gc, prof, hdf5,
-                  openmp, cuda, python, extra_flags, verbose, quiet,
+                  openmp, gpu, python, extra_flags, verbose, quiet,
                   only_patterns, skip_patterns, timelimit, poll_interval,
                   short, no_pretty, legion_prof_rs):
     # run only one test at a time if '-j' isn't set
@@ -432,7 +507,7 @@ def run_all_tests(thread_count, debug, max_dim, run, spy, gc, prof, hdf5,
     py_exe_path = detect_python_interpreter()
 
     # Run tests asynchronously.
-    tests = get_test_specs(legion_dir, run, spy, gc, prof, hdf5, openmp, cuda, python, max_dim, no_pretty, extra_flags)
+    tests = get_test_specs(legion_dir, run, spy, gc, prof, hdf5, openmp, gpu, python, max_dim, no_pretty, extra_flags)
     for test_name, test_fn, test_dirs in tests:
         test_paths = []
         for test_dir in test_dirs:
@@ -594,9 +669,9 @@ def test_driver(argv):
     parser.add_argument('--openmp',
                         action='store_true',
                         help='run OpenMP tests')
-    parser.add_argument('--cuda',
-                        action='store_true',
-                        help='run CUDA tests')
+    parser.add_argument('--gpu',
+                        choices=['cuda', 'hip'],
+                        help='run GPU tests')
     parser.add_argument('--python',
                         action='store_true',
                         help='run Python tests')
@@ -642,7 +717,6 @@ def test_driver(argv):
                         help='disable pretty-printing tests',
                         dest='no_pretty')
     parser.add_argument('--legion-prof-rs',
-                        default='legion_prof',
                         help='location of Legion Prof Rust binary')
     args = parser.parse_args(argv[1:])
 
@@ -656,7 +730,7 @@ def test_driver(argv):
         args.prof,
         args.hdf5,
         args.openmp,
-        args.cuda,
+        args.gpu,
         args.python,
         args.extra_flags,
         args.verbose,

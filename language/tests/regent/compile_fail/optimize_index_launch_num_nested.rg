@@ -1,4 +1,4 @@
--- Copyright 2022 Stanford University
+-- Copyright 2024 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -12,8 +12,11 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+-- runs-with:
+-- [["-findex-launch-dynamic", "0"]]
+
 -- fails-with:
--- optimize_index_launch_num_nested.rg:46: loop optimization failed: argument 1 is not provably projectable or invariant
+-- optimize_index_launch_num_nested.rg:49: loop optimization failed: argument 1 interferes with itself
 --       g(s[compute_index(i, j)][j])
 --        ^
 

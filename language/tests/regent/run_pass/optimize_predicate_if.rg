@@ -1,4 +1,4 @@
--- Copyright 2022 Stanford University
+-- Copyright 2024 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -11,6 +11,12 @@
 -- WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
+
+-- runs-with:
+-- [
+--   ["-fpredicate", "1"],
+--   ["-fpredicate", "0"]
+-- ]
 
 import "regent"
 
@@ -98,8 +104,8 @@ task main()
   regentlib.assert(u == 456, "test failed")
   regentlib.assert(v == 789, "test failed")
 
-  -- Nested conditions are ok but right now we will only predicate the
-  -- innermost one.
+  -- Nested conditions are ok.
+  __demand(__predicate)
   if condition1() then
     __demand(__predicate)
     if condition2() then

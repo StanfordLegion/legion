@@ -120,11 +120,14 @@ To get started with Legion, you'll need:
 
   * Linux, macOS, or another Unix
   * A C++ 11 (or newer) compiler (GCC, Clang, Intel, or PGI) and GNU Make
-  * *Optional*: Python 3.5 or newer (used for profiling/debugging tools)
-  * *Optional*: CUDA 7.0 or newer (for NVIDIA GPUs)
+  * *Optional*: CMake 3.16 or newer
+  * *Optional*: Python 3.5 or newer (used for tools and Python bindings)
+      * Note: Python 3.8 or newer is required for `tools/legion_prof.py`
+  * *Optional*: Rust 1.67 or newer (used for Rust profiler)
+  * *Optional*: CUDA 10.0 or newer (for NVIDIA GPUs)
   * *Optional*: [GASNet](https://gasnet.lbl.gov/) (for networking, see
      [installation instructions](http://legion.stanford.edu/gasnet/))
-  * *Optional*: LLVM 3.5-3.9 (for dynamic code generation)
+  * *Optional*: LLVM 7-14 (for dynamic code generation)
   * *Optional*: HDF5 (for file I/O)
 
 ## Installing
@@ -178,7 +181,7 @@ parameters. Below are some of the more commonly used flags:
     directs [logging output](http://legion.stanford.edu/debugging/#logging-infrastructure) to `filename`
   * `-ll:cpu <int>`: CPU processors to create per process
   * `-ll:gpu <int>`: GPU processors to create per process
-  * `-ll:cpu <int>`: utility processors to create per process
+  * `-ll:util <int>`: utility processors to create per process
   * `-ll:csize <int>`: size of CPU DRAM memory per process (in MB)
   * `-ll:gsize <int>`: size of GASNET global memory available per process (in MB)
   * `-ll:rsize <int>`: size of GASNET registered RDMA memory available per process (in MB)

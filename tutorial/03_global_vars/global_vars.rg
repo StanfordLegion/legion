@@ -1,4 +1,4 @@
--- Copyright 2022 Stanford University
+-- Copyright 2024 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -20,10 +20,13 @@ local c = regentlib.c
 -- scope. (Regent does not support mutable global variables.)
 local global_constant = 4
 
--- Function pointers (such as to printf) may vary between nodes and runs.
+-- Function pointers (such as to testfn) may vary between nodes and runs.
+terra testfn()
+end
+testfn:setinlined(false)
 
 task main()
   c.printf("The value of global_constant %d will always be the same\n", global_constant)
-  c.printf("The function pointer to printf %p may be different on different processors\n", c.printf)
+  c.printf("The function pointer to testfn %p may be different on different processors\n", testfn)
 end
 regentlib.start(main)

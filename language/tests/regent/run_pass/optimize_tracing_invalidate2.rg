@@ -1,4 +1,4 @@
--- Copyright 2022 Stanford University
+-- Copyright 2024 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -65,6 +65,7 @@ task toplevel()
   __demand(__trace)
   for i = 0, 10 do
     var x = foo(r)
+    __forbid(__predicate) -- FIXME: conflict between predication and tracing
     if x == 1 then bar(r) end
   end
 end

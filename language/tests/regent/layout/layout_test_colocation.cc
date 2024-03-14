@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, Los Alamos National Laboratory
+/* Copyright 2024 Stanford University, Los Alamos National Laboratory
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -31,7 +31,7 @@ using namespace Legion::Mapping;
 /// Mapper
 ///
 
-static LegionRuntime::Logger::Category log_layout_test("layout_test");
+static Logger log_layout_test("layout_test");
 
 class layout_testMapper : public DefaultMapper
 {
@@ -43,21 +43,21 @@ public:
                 std::map<Memory, std::vector<Processor> >* sysmem_local_procs,
                 std::map<Processor, Memory>* proc_sysmems,
                 std::map<Processor, Memory>* proc_regmems);
-  virtual void map_task(const MapperContext      ctx,
-                        const Task&              task,
-                        const MapTaskInput&      input,
-                              MapTaskOutput&     output);
-  virtual LogicalRegion default_policy_select_instance_region(
+  void map_task(const MapperContext      ctx,
+                const Task&              task,
+                const MapTaskInput&      input,
+                      MapTaskOutput&     output) override;
+  LogicalRegion default_policy_select_instance_region(
                                 MapperContext ctx, Memory target_memory,
                                 const RegionRequirement &req,
                                 const LayoutConstraintSet &constraints,
                                 bool force_new_instances,
-                                bool meets_constraints);
-  //virtual void default_policy_select_instance_fields(
+                                bool meets_constraints) override;
+  // void default_policy_select_instance_fields(
   //                              MapperContext ctx,
   //                              const RegionRequirement &req,
   //                              const std::set<FieldID> &needed_fields,
-  //                              std::vector<FieldID> &fields);
+  //                              std::vector<FieldID> &fields) override;
 
 private:
   // std::vector<Processor>& procs_list;

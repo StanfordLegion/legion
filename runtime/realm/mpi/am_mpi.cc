@@ -1,4 +1,4 @@
-/* Copyright 2022 Argonne National Laboratory
+/* Copyright 2024 Argonne National Laboratory
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,12 +18,12 @@
 #define AM_MSG_HEADER_SIZE (4 * sizeof(int) + sizeof(uintptr_t))
 #define AM_BUF_SIZE_W_HEADER  (AM_BUF_SIZE + AM_MSG_HEADER_SIZE)
 
+// if defined, replaces use of MPI_Put with two-sided send/recv
+//define REALM_MPI_USE_TWO_SIDED_ONLY
 
 static MPI_Win g_am_win = MPI_WIN_NULL;
 static void *g_am_base = NULL;
 static Realm::IncomingMessageManager *g_message_manager = NULL;
-static REALM_THREAD_LOCAL int thread_id = 0;
-static REALM_THREAD_LOCAL int am_seq = 0;
 static Realm::atomic<unsigned int> num_threads(0);
 static unsigned char buf_recv_list[AM_BUF_COUNT][AM_BUF_SIZE_W_HEADER];
 static unsigned char *buf_recv = buf_recv_list[0];
@@ -34,27 +34,36 @@ static int node_size;
 static int node_this;
 static MPI_Comm comm_medium;
 int i_recv_list = 0;
+static const int TAG_COMMAND = 0x1;
+static const int TAG_DATA_BASE = 0x2;
 
 namespace Realm {
 namespace MPI {
 
+  atomic<unsigned> data_tags_used(0);
   atomic<size_t> messages_sent(0);
   atomic<size_t> messages_rcvd(0);
 
 
-void AM_Init(int *p_node_this, int *p_node_size)
+int AM_Init(int *p_node_this, int *p_node_size)
 {
     char *s;
+    int mpi_thread_model = MPI_THREAD_MULTIPLE;
 
     MPI_Initialized(&pre_initialized);
     if (pre_initialized) {
-        int mpi_thread_model;
         MPI_Query_thread(&mpi_thread_model);
-        assert(mpi_thread_model == MPI_THREAD_MULTIPLE);
     } else {
         int mpi_thread_model;
         MPI_Init_thread(NULL, NULL, MPI_THREAD_MULTIPLE, &mpi_thread_model);
-        assert(mpi_thread_model == MPI_THREAD_MULTIPLE);
+    }
+    if (mpi_thread_model < MPI_THREAD_MULTIPLE) {
+      fprintf(stderr,
+              "MPI: Unsupported threading module found for MPI, please ensure "
+              "your MPI implementation supports MPI_THREAD_MULTIPLE and no "
+              "other networking modules loaded initialized prior to MPI "
+              "requires a different threading model\n");
+      return -1;
     }
     MPI_Comm_size(MPI_COMM_WORLD, &node_size);
     MPI_Comm_rank(MPI_COMM_WORLD, &node_this);
@@ -66,9 +75,10 @@ void AM_Init(int *p_node_this, int *p_node_size)
         n_am_mult_recv = atoi(s);
     }
     for (int  i = 0; i<n_am_mult_recv; i++) {
-        CHECK_MPI( MPI_Irecv(buf_recv_list[i], AM_BUF_SIZE_W_HEADER, MPI_CHAR, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &req_recv_list[i]) );
+        CHECK_MPI( MPI_Irecv(buf_recv_list[i], AM_BUF_SIZE_W_HEADER, MPI_CHAR, MPI_ANY_SOURCE, TAG_COMMAND, MPI_COMM_WORLD, &req_recv_list[i]) );
     }
     MPI_Comm_dup(MPI_COMM_WORLD, &comm_medium);
+    return 0;
 }
 
 void AM_Finalize()
@@ -114,7 +124,7 @@ static void incoming_message_handled(NodeID sender,
     msg.comp_ptr = comp_ptr;
 
     CHECK_MPI( MPI_Send(&msg, AM_MSG_HEADER_SIZE, MPI_CHAR,
-			sender, 0x1, MPI_COMM_WORLD) );
+			sender, TAG_COMMAND, MPI_COMM_WORLD) );
     messages_sent.fetch_add(1);
 }
 
@@ -153,6 +163,13 @@ void AMPoll()
             memcpy(&offset, msg->stuff, sizeof(int32_t));
             header = msg->stuff + 4;
             payload = (char *) g_am_base + offset;
+#ifdef REALM_MPI_USE_TWO_SIDED_ONLY
+            // if we weren't allowed to do an MPI_Put on the sender, post
+            //  receives here to actually get the data
+            int32_t msg_tag;
+            memcpy(&msg_tag, msg->stuff + msg->header_size + 4, sizeof(int32_t));
+            CHECK_MPI( MPI_Recv(payload, msg->payload_size, MPI_BYTE, tn_src, msg_tag, MPI_COMM_WORLD, &status) );
+#endif
 	    payload_mode = PAYLOAD_KEEP;  // already in dest memory
         } else if (msg->type == 3) {
 	    AMComplete(reinterpret_cast<void *>(msg->comp_ptr));
@@ -182,7 +199,7 @@ void AMPoll()
 	        completion = msg->comp_ptr;
         }
 
-        CHECK_MPI( MPI_Irecv(buf_recv_list[i_recv_list], AM_BUF_SIZE_W_HEADER, MPI_CHAR, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &req_recv_list[i_recv_list]) );
+        CHECK_MPI( MPI_Irecv(buf_recv_list[i_recv_list], AM_BUF_SIZE_W_HEADER, MPI_CHAR, MPI_ANY_SOURCE, TAG_COMMAND, MPI_COMM_WORLD, &req_recv_list[i_recv_list]) );
         i_recv_list = (i_recv_list + 1) % n_am_mult_recv;
         buf_recv = buf_recv_list[i_recv_list];
 
@@ -201,6 +218,15 @@ void AMPoll_cancel()
     }
 }
 
+static int32_t generate_payload_tag()
+{
+  // wrap a monotonically-incrementing `data_tags_used` counter to the
+  //  range [TAG_DATA_BASE,MPI_TAG_UB]
+  unsigned count = data_tags_used.fetch_add(1);
+  int32_t tag = (TAG_DATA_BASE + (count % (MPI_TAG_UB + 1 - TAG_DATA_BASE)));
+  return tag;
+}
+
 void AMSend(int tgt, int msgid, int header_size, int payload_size, const char *header, const char *payload, int payload_lines, int payload_line_stride, int has_dest, MPI_Aint dest, void *remote_comp)
 {
     char buf_send[AM_BUF_SIZE_W_HEADER];
@@ -214,6 +240,7 @@ void AMSend(int tgt, int msgid, int header_size, int payload_size, const char *h
 
     if (has_dest) {
         assert(g_am_win);
+#ifndef REALM_MPI_USE_TWO_SIDED_ONLY
 	if (payload_lines > 1) {
 	  int line_size = payload_size / payload_lines;
 	  for (int i = 0; i < payload_lines; i++)
@@ -222,14 +249,26 @@ void AMSend(int tgt, int msgid, int header_size, int payload_size, const char *h
 	} else
 	  CHECK_MPI( MPI_Put(payload, payload_size, MPI_BYTE, tgt, dest, payload_size, MPI_BYTE, g_am_win) );
         CHECK_MPI( MPI_Win_flush(tgt, g_am_win) );
+#endif
 
         msg->type = 2;
         int32_t dest_as_int32 = dest;
         memcpy(msg_header, &dest_as_int32, sizeof(int32_t));
         memcpy(msg_header + 4, header, header_size);
         int n = AM_MSG_HEADER_SIZE + 4 + header_size;
+#ifdef REALM_MPI_USE_TWO_SIDED_ONLY
+        int32_t msg_tag = generate_payload_tag();
+        memcpy(msg_header + 4 + header_size, &msg_tag, sizeof(int32_t));
+        n += 4;
+#endif
         assert(tgt != node_this);
-        CHECK_MPI( MPI_Send(buf_send, n, MPI_BYTE, tgt, 0x1, MPI_COMM_WORLD) );
+        CHECK_MPI( MPI_Send(buf_send, n, MPI_BYTE, tgt, TAG_COMMAND, MPI_COMM_WORLD) );
+#ifdef REALM_MPI_USE_TWO_SIDED_ONLY
+        // after the header (which contains the destination address, use
+        //  old-school MPI_Send to ship the data over
+        assert(payload_lines <= 1); // TODO: multi-line means sending line count/stride to receiver
+        CHECK_MPI( MPI_Send(payload, payload_size, MPI_BYTE, tgt, msg_tag, MPI_COMM_WORLD) );
+#endif
     } else if (header_size + payload_size <= AM_BUF_SIZE) {
         msg->type = 0;
         if (header_size > 0) {
@@ -246,20 +285,15 @@ void AMSend(int tgt, int msgid, int header_size, int payload_size, const char *h
         }
         int n = AM_MSG_HEADER_SIZE + header_size + payload_size;
         assert(tgt != node_this);
-        CHECK_MPI( MPI_Send(buf_send, n, MPI_CHAR, tgt, 0x1, MPI_COMM_WORLD) );
+        CHECK_MPI( MPI_Send(buf_send, n, MPI_CHAR, tgt, TAG_COMMAND, MPI_COMM_WORLD) );
     } else {
         msg->type = 1;
-        int32_t msg_tag = 0x0;
-        if (thread_id == 0) {
-            thread_id = num_threads.fetch_add_acqrel(1) + 1;
-        }
-        am_seq = (am_seq + 1) & 0x1f;
-        msg_tag = (thread_id << 10) + am_seq;
+        int32_t msg_tag = generate_payload_tag();
         memcpy(msg_header, &msg_tag, sizeof(int32_t));
         memcpy(msg_header + 4, header, header_size);
         int n = AM_MSG_HEADER_SIZE + 4 + header_size;
         assert(tgt != node_this);
-        CHECK_MPI( MPI_Send(buf_send, n, MPI_BYTE, tgt, 0x1, MPI_COMM_WORLD) );
+        CHECK_MPI( MPI_Send(buf_send, n, MPI_BYTE, tgt, TAG_COMMAND, MPI_COMM_WORLD) );
         assert(tgt != node_this);
 	assert(payload_lines <= 1); // not supporting 2d payloads here yet
         CHECK_MPI( MPI_Send(payload, payload_size, MPI_BYTE, tgt, msg_tag, comm_medium) );

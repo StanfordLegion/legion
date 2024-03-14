@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -71,15 +71,15 @@ namespace Realm {
     //  up front can avoid a copy if the source location is directly accessible
     //  by the networking hardware
     ActiveMessage(NodeID _target, const void *_data, size_t _datalen);
-    ActiveMessage(NodeID _target, const void *_data, size_t _datalen,
-		  const RemoteAddress& _dest_payload_addr);
+    ActiveMessage(NodeID _target, const LocalAddress &_src_payload_addr, size_t _datalen,
+                  const RemoteAddress &_dest_payload_addr);
     ActiveMessage(const Realm::NodeSet &_targets,
 		  const void *_data, size_t _datalen);
     ActiveMessage(NodeID _target, const void *_data, size_t _bytes_per_line,
 		  size_t _lines, size_t _line_stride);
-    ActiveMessage(NodeID _target, const void *_data, size_t _bytes_per_line,
-		  size_t _lines, size_t _line_stride,
-		  const RemoteAddress& _dest_payload_addr);
+    ActiveMessage(NodeID _target, const LocalAddress &_src_payload_addr,
+                  size_t _bytes_per_line, size_t _lines, size_t _line_stride,
+                  const RemoteAddress &_dest_payload_addr);
     ActiveMessage(const Realm::NodeSet &_targets,
 		  const void *_data, size_t _bytes_per_line,
 		  size_t _lines, size_t _line_stride);
@@ -93,14 +93,14 @@ namespace Realm {
 	      size_t _max_payload_size, const RemoteAddress& _dest_payload_addr);
     void init(const Realm::NodeSet &_targets, size_t _max_payload_size = 0);
     void init(NodeID _target, const void *_data, size_t _datalen);
-    void init(NodeID _target, const void *_data, size_t _datalen,
-	      const RemoteAddress& _dest_payload_addr);
+    void init(NodeID _target, const LocalAddress &_src_payload_addr, size_t _datalen,
+              const RemoteAddress &_dest_payload_addr);
     void init(const Realm::NodeSet &_targets, const void *_data, size_t _datalen);
     void init(NodeID _target, const void *_data, size_t _bytes_per_line,
 	      size_t _lines, size_t _line_stride);
-    void init(NodeID _target, const void *_data, size_t _bytes_per_line,
-	      size_t _lines, size_t _line_stride,
-	      const RemoteAddress& _dest_payload_addr);
+    void init(NodeID _target, const LocalAddress &_src_payload_addr,
+              size_t _bytes_per_line, size_t _lines, size_t _line_stride,
+              const RemoteAddress &_dest_payload_addr);
     void init(const Realm::NodeSet &_targets,
 	      const void *_data, size_t _bytes_per_line,
 	      size_t _lines, size_t _line_stride);
@@ -127,11 +127,10 @@ namespace Realm {
 					  const void *data, size_t bytes_per_line,
 					  size_t lines, size_t line_stride,
 					  bool with_congestion);
-    static size_t recommended_max_payload(NodeID target,
-					  const void *data, size_t bytes_per_line,
-					  size_t lines, size_t line_stride,
-					  const RemoteAddress &dest_payload_addr,
-					  bool with_congestion);
+    static size_t
+    recommended_max_payload(NodeID target, const LocalAddress &src_payload_addr,
+                            size_t bytes_per_line, size_t lines, size_t line_stride,
+                            const RemoteAddress &dest_payload_addr, bool with_congestion);
 
     // operator-> gives access to the header structure
     T *operator->(void);

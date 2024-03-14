@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -30,33 +30,31 @@
 #include <iostream>
 #include <vector>
 
+/**
+ * \file sparsity.h
+ * This file provides the interface for sparsity maps, which are used to
+ * represent the sparsity of index spaces.
+ */
+
 namespace Realm {
 
   template <int N, typename T /*= int*/> struct Point;
   template <int N, typename T /*= int*/> struct Rect;
   template <int N, typename T = int> class HierarchicalBitMap;
 
-  // a SparsityMap is a Realm handle to sparsity data for one or more index spaces - all
-  //  SparsityMap's use the same ID namespace (i.e. regardless of N and T), but the
-  //  template parameters are kept to avoid losing dimensionality information upon iteration/etc.
-
-  // there are three layers to the SparsityMap onion:
-  // a) SparsityMap is the Realm handle that (like all other handles) can be copied/stored
-  //     whereever and represents a name for a distributed object with a known "creator" node,
-  //     with valid data for the object existing on one or more nodes (which may or may not
-  //     include the creator node) - methods on this "object" simply forward to the actual
-  //     implementation object, described next
-  // b) SparsityMapPublicImpl is the public subset of the storage and functionality of the actual
-  //     sparsity map implementation - this should be sufficient for all the needs of user code,
-  //     but not for Realm internals (e.g. the part that actually computes new sparsity maps) -
-  //     these objects are not allocated directly
-  // c) SparsityMapImpl is the actual dynamically allocated object that exists on each "interested"
-  //     node for a given SparsityMap - it inherits from SparsityMapPublicImpl and adds the "private"
-  //     storage and functionality - this separation is primarily to avoid the installed version of
-  //     of Realm having to include all the internal .h files
-
   template <int N, typename T> class SparsityMapPublicImpl;
 
+  /**
+   * \class SparistyMap
+   * SparsityMap is the Realm handle that (like all other handles) can be
+   * copied/stored whereever and represents a name for a distributed object with
+   * a known "creator" node, with valid data for the object existing on one or
+   * more nodes (which may or may not include the creator node) - methods on
+   * this "object" simply forward to the actual implementation object.
+   *
+   * There are three layers to the SparsityMap onion: SpartisyMap,
+   * SparsityMapPublicImpl, and SparsityMapImpl.
+   */
   template <int N, typename T>
   class REALM_PUBLIC_API SparsityMap {
   public:
@@ -67,21 +65,57 @@ namespace Realm {
     bool operator!=(const SparsityMap<N,T> &rhs) const;
 
     //static const SparsityMap<N,T> NO_SPACE;
+
+    /**
+     * Check if this sparsity map exists.
+     * @return true if this sparsity map exists, false otherwise
+     */
     REALM_CUDA_HD
     bool exists(void) const;
 
-    // looks up the public subset of the implementation object
+    /**
+     * Destroy the sparsity map.
+     * @param wait_on a precondition event
+     */
+    void destroy(Event wait_on = Event::NO_EVENT);
+
+    /**
+     * Add one reference to the sparsity map.
+     */
+    void add_references(unsigned count = 1);
+
+    /**
+     * Remove references from the sparsity map.
+     * @param count a number of references to remove
+     */
+    void remove_references(unsigned count = 1);
+
+    /**
+     * Lookup the public implementation object for this sparsity map.
+     * @return the public implementation object for this sparsity map
+     */
     REALM_INTERNAL_API_EXTERNAL_LINKAGE
     SparsityMapPublicImpl<N,T> *impl(void) const;
 
-    // if 'always_create' is false and the points/rects completely fill their
-    //  bounding box, returns NO_SPACE (i.e. id == 0)
+    ///@{
+    /**
+     * Construct a sparsity map from a set of points or rectangles.
+     * @param points/rects a vector of points/rects.
+     * @param always_create if true, always create a sparsity map, even if the points
+     *                     completely fill their bounding box
+     *                     if false, return NO_SPACE if the points completely fill their
+     *                     bounding box (i.e. id == 0)
+     * @param disjoint if true, the points are assumed to be disjoint
+     * @return a sparsity map
+     */
     REALM_INTERNAL_API_EXTERNAL_LINKAGE
     static SparsityMap<N,T> construct(const std::vector<Point<N,T> >& points,
 				      bool always_create, bool disjoint);
     REALM_INTERNAL_API_EXTERNAL_LINKAGE
     static SparsityMap<N,T> construct(const std::vector<Rect<N,T> >& rects,
 				      bool always_create, bool disjoint);
+    ///@}
+
   };
 
   template <int N, typename T>
@@ -99,6 +133,16 @@ namespace Realm {
   REALM_PUBLIC_API
   std::ostream& operator<<(std::ostream& os, const SparsityMapEntry<N,T>& entry);
 
+  /**
+   * \class SparsityMapPublicImpl
+   *
+   * SparsityMapPublicImpl is the public subset of the storage and functionality
+   * of the actual sparsity map implementation - this should be sufficient for
+   * all the needs of user code, but not for Realm internals (e.g. the part that
+   * actually computes new sparsity maps) - these objects are not allocated
+   * directly.
+   *
+   */
   template <int N, typename T>
   class REALM_INTERNAL_API_EXTERNAL_LINKAGE SparsityMapPublicImpl {
   protected:
@@ -106,34 +150,75 @@ namespace Realm {
     SparsityMapPublicImpl(void);
 
   public:
-    // application side code should only ever look at "completed" sparsity maps (i.e. ones
-    //  that have reached their steady-state immutable value - this is computed in a deferred
-    //  fashion and fetched by other nodes on demand, so the application code needs to call
-    //  make_valid() before attempting to use the contents and either wait on the event or 
-    //  otherwise defer the actual use until the event has triggered
+   /**
+    * Make this sparsity map valid.
+    * Applications should call this method before attempting to use the contents
+    * of a sparsity map or otherwise defer the actual use until the returned
+    * event has triggered.
+    *
+    * The valid sparsity map is called "completed" and is computed
+    * in a deferred fashion and fetched by other nodes on demand.
+    * @param precise if true, the sparsity map is computed precisely
+    * @return an event that triggers when the sparsity map is valid
+    */
+    REALM_PUBLIC_API
     Event make_valid(bool precise = true);
+
+    /**
+     * Check if this sparsity map is valid.
+     * @param precise if true, the sparsity map is computed precisely
+     * @return true if the sparsity map is valid, false otherwise
+     */
+    REALM_PUBLIC_API
     bool is_valid(bool precise = true);
 
-    // a sparsity map entry is similar to an IndexSpace - it's a rectangle and optionally a
-    //  reference to another SparsityMap OR a pointer to a HierarchicalBitMap, which is a 
-    //  dense array of bits describing the validity of each point in the rectangle
+    /**
+     * Get the entries of this sparsity map.
+     * A sparsity map entry is similar to an IndexSpace - it's a rectangle and
+     * optionally a reference to another SparsityMap OR a pointer to a
+     * HierarchicalBitMap, which is a dense array of bits describing the
+     * validity of each point in the rectangle.
+     * @return the entries of this sparsity map
+     */
+    REALM_PUBLIC_API
+    const std::vector<SparsityMapEntry<N, T>> &get_entries(void);
 
-    const std::vector<SparsityMapEntry<N,T> >& get_entries(void);
-    
-    // a sparsity map can exist in an approximate form as well - this is a bounded list of rectangles
-    //  that are guaranteed to cover all actual entries
+    /**
+     * Get the approximate rectangles of this sparsity map.
+     * A sparsity map can exist in an approximate form as well - this is a
+     * bounded list of rectangles that are guaranteed to cover all actual
+     * entries.
+     * @return the approximate rectangles of this sparsity map
+     */
+    REALM_PUBLIC_API
+    const std::vector<Rect<N, T>> &get_approx_rects(void);
 
-    const std::vector<Rect<N,T> >& get_approx_rects(void);
+    /**
+     * Check if this sparsity map overlaps another sparsity map.
+     * This method is not cheap - try bounds-based checks first (see
+     * IndexSpace::overlaps).
+     * @param other the other sparsity map
+     * @param bounds the bounds of the other sparsity map
+     * @param approx if true, use the approximate rectangles of this sparsity map
+     * @return true if this sparsity map overlaps the other sparsity map, false
+     * otherwise
+     */
+    REALM_PUBLIC_API
+    bool overlaps(SparsityMapPublicImpl<N, T> *other, const Rect<N, T> &bounds,
+                  bool approx);
 
-    // membership test between two (presumably-different) sparsity maps are not
-    //  cheap - try bounds-based checks first (see IndexSpace::overlaps)
-    bool overlaps(SparsityMapPublicImpl<N,T> *other,
-		  const Rect<N,T>& bounds, bool approx);
-
-    // see IndexSpace<N,T>::compute_covering for a description of this
-    bool compute_covering(const Rect<N,T> &bounds,
-			  size_t max_rects, int max_overhead,
-			  std::vector<Rect<N,T> >& covering);
+    /**
+     * Attempt to compute a set of covering rectangles.
+     * See IndexSpace<N,T>::compute_covering for a description of this.
+     * @param bounds the bounds of the rectangle
+     * @param max_rects Maximum number of rectangles to use (0 = no limit).
+     * @param max_overhead Maximum relative storage overhead (0 = no limit).
+     * @param covering Vector to fill in with covering rectangles.
+     * @return true if the covering was computed, false otherwise
+     */
+    REALM_PUBLIC_API
+    bool compute_covering(const Rect<N, T> &bounds, size_t max_rects, int max_overhead,
+                          std::vector<Rect<N, T>> &covering);
 
   protected:
     atomic<bool> entries_valid, approx_valid;

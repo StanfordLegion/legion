@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -54,19 +54,13 @@ namespace Legion {
     public:
       LayoutDescription& operator=(const LayoutDescription &rhs);
     public:
-      void log_instance_layout(ApEvent inst_event) const;
+      void log_instance_layout(LgEvent inst_event) const;
     public:
       void compute_copy_offsets(const FieldMask &copy_mask, 
                                 const PhysicalInstance instance,  
-#ifdef LEGION_SPY
-                                const ApEvent inst_event, 
-#endif
                                 std::vector<CopySrcDstField> &fields);
       void compute_copy_offsets(const std::vector<FieldID> &copy_fields,
                                 const PhysicalInstance instance,
-#ifdef LEGION_SPY
-                                const ApEvent inst_event,
-#endif
                                 std::vector<CopySrcDstField> &fields);
     public:
       void get_fields(std::set<FieldID> &fields) const;
@@ -106,6 +100,62 @@ namespace Legion {
     }; 
 
     /**
+     * \class CollectiveMapping
+     * A collective mapping is an ordering of unique address spaces
+     * and can be used to construct broadcast and reduction trees.
+     * This is especialy useful for collective instances and for
+     * parts of control replication.
+     */
+    class CollectiveMapping : public Collectable {
+    public:
+      CollectiveMapping(const std::vector<AddressSpaceID> &spaces,size_t radix);
+      CollectiveMapping(const ShardMapping &shard_mapping, size_t radix);
+      CollectiveMapping(Deserializer &derez, size_t total_spaces);
+      CollectiveMapping(const CollectiveMapping &rhs);
+    public:
+      inline AddressSpaceID operator[](unsigned idx) const
+#ifdef DEBUG_LEGION
+        { assert(idx < size()); return unique_sorted_spaces.get_index(idx); }
+#else
+        { return unique_sorted_spaces.get_index(idx); }
+#endif
+      inline unsigned find_index(const AddressSpaceID space) const
+        { return unique_sorted_spaces.find_index(space); }
+      inline const NodeSet& get_unique_spaces(void) const 
+        { return unique_sorted_spaces; }
+      inline size_t size(void) const { return total_spaces; }
+      inline AddressSpaceID get_origin(void) const 
+#ifdef DEBUG_LEGION
+        { assert(size() > 0); return unique_sorted_spaces.find_first_set(); }
+#else
+        { return unique_sorted_spaces.find_first_set(); }
+#endif
+      bool operator==(const CollectiveMapping &rhs) const;
+      bool operator!=(const CollectiveMapping &rhs) const;
+    public:
+      AddressSpaceID get_parent(const AddressSpaceID origin, 
+                                const AddressSpaceID local) const;
+      size_t count_children(const AddressSpaceID origin,
+                            const AddressSpaceID local) const;
+      void get_children(const AddressSpaceID origin, const AddressSpaceID local,
+                        std::vector<AddressSpaceID> &children) const;
+      AddressSpaceID find_nearest(AddressSpaceID start) const;
+      inline bool contains(const AddressSpaceID space) const
+        { return unique_sorted_spaces.contains(space); }
+      bool contains(const CollectiveMapping &rhs) const;
+      CollectiveMapping* clone_with(AddressSpace space) const;
+      void pack(Serializer &rez) const;
+      static void pack_null(Serializer &rez);
+    protected:
+      unsigned convert_to_offset(unsigned index, unsigned origin) const;
+      unsigned convert_to_index(unsigned offset, unsigned origin) const;
+    protected:
+      NodeSet unique_sorted_spaces;
+      size_t total_spaces;
+      size_t radix;
+    };
+
+    /**
      * \class InstanceManager
      * This is the abstract base class for all instances of a physical
      * resource manager for memory.
@@ -113,48 +163,31 @@ namespace Legion {
     class InstanceManager : public DistributedCollectable {
     public:
       enum {
-        EXTERNAL_CODE = 0x10,
-        REDUCTION_CODE = 0x20,
-        COLLECTIVE_CODE = 0x40,
+        EXTERNAL_CODE = 0x20,
+        REDUCTION_CODE = 0x40,
       };
     public:
-      InstanceManager(RegionTreeForest *forest, AddressSpaceID owner, 
+      InstanceManager(RegionTreeForest *forest,
                       DistributedID did, LayoutDescription *layout,
                       FieldSpaceNode *node, IndexSpaceExpression *domain,
-                      RegionTreeID tree_id, bool register_now);
+                      RegionTreeID tree_id, bool register_now,
+                      CollectiveMapping *mapping = NULL);
       virtual ~InstanceManager(void);
     public:
-      virtual LegionRuntime::Accessor::RegionAccessor<
-        LegionRuntime::Accessor::AccessorType::Generic>
-          get_accessor(void) const = 0;
-      virtual LegionRuntime::Accessor::RegionAccessor<
-        LegionRuntime::Accessor::AccessorType::Generic>
-          get_field_accessor(FieldID fid) const = 0;
-    public: 
-      virtual ApEvent get_use_event(void) const = 0;
-      virtual ApEvent get_unique_event(void) const = 0;
-      virtual PhysicalInstance get_instance(const DomainPoint &key) const = 0;
-      virtual PointerConstraint 
-                     get_pointer_constraint(const DomainPoint &key) const = 0;
-      virtual InstanceView* create_instance_top_view(InnerContext *context,
-                                            AddressSpaceID logical_owner) = 0;
+      virtual PointerConstraint get_pointer_constraint(void) const = 0;
     public:
       inline bool is_reduction_manager(void) const;
       inline bool is_physical_manager(void) const;
       inline bool is_virtual_manager(void) const;
       inline bool is_external_instance(void) const;
-      inline bool is_collective_manager(void) const;
       inline PhysicalManager* as_physical_manager(void) const;
       inline VirtualManager* as_virtual_manager(void) const;
-      inline IndividualManager* as_individual_manager(void) const;
-      inline CollectiveManager* as_collective_manager(void) const;
     public:
       static inline DistributedID encode_instance_did(DistributedID did,
-                        bool external, bool reduction, bool collective);
+                                          bool external, bool reduction);
       static inline bool is_physical_did(DistributedID did);
       static inline bool is_reduction_did(DistributedID did);
       static inline bool is_external_did(DistributedID did);
-      static inline bool is_collective_did(DistributedID did);
     public:
       // Interface to the mapper for layouts
       inline void get_fields(std::set<FieldID> &fields) const
@@ -167,18 +200,15 @@ namespace Legion {
                     it != fields.end(); it++) it->second = false; } 
       inline void remove_space_fields(std::set<FieldID> &fields) const
         { if (layout != NULL) layout->remove_space_fields(fields);
-          else fields.clear(); }
+          else fields.clear(); } 
     public:
-      bool meets_region_tree(const std::vector<LogicalRegion> &regions) const; 
-      bool entails(LayoutConstraints *constraints, const DomainPoint &key,
+      bool entails(LayoutConstraints *constraints,
                    const LayoutConstraint **failed_constraint) const;
       bool entails(const LayoutConstraintSet &constraints, 
-                   const DomainPoint &key,
                    const LayoutConstraint **failed_constraint) const;
-      bool conflicts(LayoutConstraints *constraints, const DomainPoint &key,
+      bool conflicts(LayoutConstraints *constraints,
                      const LayoutConstraint **conflict_constraint) const;
       bool conflicts(const LayoutConstraintSet &constraints,
-                     const DomainPoint &key,
                      const LayoutConstraint **conflict_constraint) const;
     public:
       RegionTreeForest *const context;
@@ -189,142 +219,346 @@ namespace Legion {
     };
 
     /**
+     * A small interface for subscribing to notifications for
+     * when an instance is deleted
+     */
+    class InstanceDeletionSubscriber {
+    public:
+      virtual ~InstanceDeletionSubscriber(void) { }
+      virtual void notify_instance_deletion(PhysicalManager *manager) = 0;
+      virtual void add_subscriber_reference(PhysicalManager *manager) = 0;
+      virtual bool remove_subscriber_reference(PhysicalManager *manager) = 0;
+    };
+
+    /**
      * \class PhysicalManager 
      * This is an abstract intermediate class for representing an allocation
      * of data; this includes both individual instances and collective instances
      */
-    class PhysicalManager : public InstanceManager {
+    class PhysicalManager : public InstanceManager, 
+                            public LegionHeapify<PhysicalManager> {
     public:
-      struct GarbageCollectionArgs : public LgTaskArgs<GarbageCollectionArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_DEFERRED_COLLECT_ID;
-      public:
-        GarbageCollectionArgs(CollectableView *v, std::set<ApEvent> *collect)
-          : LgTaskArgs<GarbageCollectionArgs>(implicit_provenance), 
-            view(v), to_collect(collect) { }
-      public:
-        CollectableView *const view;
-        std::set<ApEvent> *const to_collect;
+      static const AllocationType alloc_type = PHYSICAL_MANAGER_ALLOC;
+    public:
+      enum InstanceKind {
+        // Normal Realm allocations
+        INTERNAL_INSTANCE_KIND,
+        // External allocations imported by attach operations
+        EXTERNAL_ATTACHED_INSTANCE_KIND,
+        // Allocations drawn from the eager pool
+        EAGER_INSTANCE_KIND,
+        // Instance not yet bound
+        UNBOUND_INSTANCE_KIND,
+      };
+      enum GarbageCollectionState {
+        VALID_GC_STATE,
+        COLLECTABLE_GC_STATE,
+        PENDING_COLLECTED_GC_STATE,
+        COLLECTED_GC_STATE,
       };
     public:
-      struct CollectableInfo {
+      struct DeferPhysicalManagerArgs : 
+        public LgTaskArgs<DeferPhysicalManagerArgs> {
       public:
-        CollectableInfo(void) : events_added(0) { }
+        static const LgTaskID TASK_ID = LG_DEFER_PHYSICAL_MANAGER_TASK_ID;
       public:
-        std::set<ApEvent> view_events;
-        // This event tracks when tracing is completed and it is safe
-        // to resume pruning of users from this view
-        RtEvent collect_event;
-        // Events added since the last collection of view events
-        unsigned events_added;
+        DeferPhysicalManagerArgs(DistributedID d,
+            Memory m, PhysicalInstance i, size_t f, IndexSpaceExpression *lx,
+            const PendingRemoteExpression &pending, FieldSpace h, 
+            RegionTreeID tid, LayoutConstraintID l, ApEvent use, LgEvent unique,
+            InstanceKind kind, ReductionOpID redop, const void *piece_list,
+            size_t piece_list_size, GarbageCollectionState state);
+      public:
+        const DistributedID did;
+        const Memory mem;
+        const PhysicalInstance inst;
+        const size_t footprint;
+        const PendingRemoteExpression pending;
+        IndexSpaceExpression *local_expr;
+        const FieldSpace handle;
+        const RegionTreeID tree_id;
+        const LayoutConstraintID layout_id;
+        const ApEvent use_event;
+        const LgEvent unique_event;
+        const InstanceKind kind;
+        const ReductionOpID redop;
+        const void *const piece_list;
+        const size_t piece_list_size;
+        const GarbageCollectionState state;
       };
     public:
-      PhysicalManager(RegionTreeForest *ctx, LayoutDescription *layout, 
-                      DistributedID did, AddressSpaceID owner_space, 
-                      const size_t footprint, ReductionOpID redop_id, 
-                      const ReductionOp *rop, FieldSpaceNode *node,
-                      IndexSpaceExpression *index_domain, 
+      struct DeferDeletePhysicalManager :
+        public LgTaskArgs<DeferDeletePhysicalManager> {
+      public:
+        static const LgTaskID TASK_ID =
+          LG_DEFER_DELETE_PHYSICAL_MANAGER_TASK_ID;
+      public:
+        DeferDeletePhysicalManager(PhysicalManager *manager_);
+      public:
+        PhysicalManager *manager;
+      };
+      struct RemoteCreateViewArgs : public LgTaskArgs<RemoteCreateViewArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_REMOTE_VIEW_CREATION_TASK_ID;
+      public:
+        RemoteCreateViewArgs(PhysicalManager *man, InnerContext *ctx, 
+                             AddressSpaceID log, CollectiveMapping *map,
+                             std::atomic<DistributedID> *tar, 
+                             AddressSpaceID src, RtUserEvent done)
+          : LgTaskArgs<RemoteCreateViewArgs>(implicit_provenance),
+            manager(man), context(ctx), logical_owner(log), mapping(map),
+            target(tar), source(src), done_event(done) { }
+      public:
+        PhysicalManager *const manager;
+        InnerContext *const context;
+        const AddressSpaceID logical_owner;
+        CollectiveMapping *const mapping;
+        std::atomic<DistributedID> *const target;
+        const AddressSpaceID source;
+        const RtUserEvent done_event;
+      }; 
+    public:
+      struct BroadcastFunctor {
+        BroadcastFunctor(Runtime *rt, Serializer &r) : runtime(rt), rez(r) { }
+        inline void apply(AddressSpaceID target)
+          { runtime->send_manager_update(target, rez); }
+        Runtime *runtime;
+        Serializer &rez;
+      };
+    public:
+      PhysicalManager(RegionTreeForest *ctx, DistributedID did,
+                      MemoryManager *memory, PhysicalInstance inst, 
+                      IndexSpaceExpression *instance_domain,
                       const void *piece_list, size_t piece_list_size,
-                      RegionTreeID tree_id, ApEvent unique, 
-                      bool register_now, bool shadow_instance = false);
+                      FieldSpaceNode *node, RegionTreeID tree_id,
+                      LayoutDescription *desc, ReductionOpID redop, 
+                      bool register_now, size_t footprint,
+                      ApEvent use_event, LgEvent unique_event,
+                      InstanceKind kind, const ReductionOp *op = NULL,
+                      CollectiveMapping *collective_mapping = NULL,
+                      ApEvent producer_event = ApEvent::NO_AP_EVENT);
+      PhysicalManager(const PhysicalManager &rhs) = delete;
       virtual ~PhysicalManager(void);
     public:
-      virtual ApEvent get_unique_event(void) const { return unique_event; }
+      PhysicalManager& operator=(const PhysicalManager &rhs) = delete;
+    public:
+      virtual PointerConstraint get_pointer_constraint(void) const;
     public:
       void log_instance_creation(UniqueID creator_id, Processor proc,
-                     const std::vector<LogicalRegion> &regions) const; 
+                                 const std::vector<LogicalRegion> &regions) const;
+    public: 
+      ApEvent get_use_event(ApEvent e = ApEvent::NO_AP_EVENT) const;
+      inline LgEvent get_unique_event(void) const { return unique_event; }
+      PhysicalInstance get_instance(void) const;
+      inline Memory get_memory(void) const { return memory_manager->memory; }
+      void compute_copy_offsets(const FieldMask &copy_mask,
+                                std::vector<CopySrcDstField> &fields);
     public:
-      virtual ApEvent fill_from(FillView *fill_view,
-                                ApEvent precondition, PredEvent predicate_guard,
-                                IndexSpaceExpression *expression,
-                                const FieldMask &fill_mask,
-                                const PhysicalTraceInfo &trace_info,
-                                const FieldMaskSet<FillView> *tracing_srcs,
-                                const FieldMaskSet<InstanceView> *tracing_dsts,
-                                std::set<RtEvent> &effects_applied,
-                                CopyAcrossHelper *across_helper = NULL) = 0;
-      virtual ApEvent copy_from(PhysicalManager *manager, ApEvent precondition,
-                                PredEvent predicate_guard, ReductionOpID redop,
-                                IndexSpaceExpression *expression,
-                                const FieldMask &copy_mask,
-                                const PhysicalTraceInfo &trace_info,
-                                const FieldMaskSet<InstanceView> *tracing_srcs,
-                                const FieldMaskSet<InstanceView> *tracing_dsts,
-                                std::set<RtEvent> &effects_applied,
-                                CopyAcrossHelper *across_helper = NULL) = 0;
-      virtual void compute_copy_offsets(const FieldMask &copy_mask,
-                                std::vector<CopySrcDstField> &fields) = 0;
+      inline void add_base_valid_ref(ReferenceSource source, int cnt = 1);
+      inline void add_nested_valid_ref(DistributedID source, int cnt = 1);
+      inline bool acquire_instance(ReferenceSource source);
+      inline bool acquire_instance(DistributedID source);
+      inline bool remove_base_valid_ref(ReferenceSource source, int cnt = 1);
+      inline bool remove_nested_valid_ref(DistributedID source, int cnt = 1);
     public:
-      virtual void send_manager(AddressSpaceID target) = 0; 
-      static void handle_manager_request(Deserializer &derez, 
-                          Runtime *runtime, AddressSpaceID source);
-    public:
-      virtual bool acquire_instance(ReferenceSource source, 
-                                    ReferenceMutator *mutator) = 0;
-      virtual void perform_deletion(RtEvent deferred_event) = 0;
-      virtual void force_deletion(void) = 0;
-      virtual void set_garbage_collection_priority(MapperID mapper_id, 
-                                Processor p, GCPriority priority) = 0; 
-      virtual RtEvent attach_external_instance(void) = 0;
-      virtual RtEvent detach_external_instance(void) = 0;
-      virtual bool has_visible_from(const std::set<Memory> &memories) const = 0;
-      virtual Memory get_memory(void) const = 0; 
-      inline size_t get_instance_size(void) const { return instance_footprint; }
-#ifdef LEGION_GPU_REDUCTIONS
-    public:
-      virtual bool is_gpu_visible(PhysicalManager *other) const = 0;
-      virtual ReductionView* find_or_create_shadow_reduction(unsigned fidx,
-          ReductionOpID redop, AddressSpaceID request_space, UniqueID opid) = 0;
-      virtual void record_remote_shadow_reduction(unsigned fidx,
-          ReductionOpID redop, ReductionView *view) = 0;
-      static void handle_create_shadow_request(Runtime *runtime,
-                                AddressSpaceID source, Deserializer &derez);
-      static void handle_create_shadow_response(Runtime *runtime,
-                                                Deserializer &derez);
+      void pack_valid_ref(void);
+      void unpack_valid_ref(void);
+    protected:
+      // Internal valid reference counting 
+      void add_valid_reference(int cnt, bool need_check = true);
+#ifdef DEBUG_LEGION_GC
+      void add_base_valid_ref_internal(ReferenceSource source, int cnt); 
+      void add_nested_valid_ref_internal(DistributedID source, int cnt);
+      bool remove_base_valid_ref_internal(ReferenceSource source, int cnt);
+      bool remove_nested_valid_ref_internal(DistributedID source, int cnt);
+      template<typename T>
+      bool acquire_internal(T source, std::map<T,int> &valid_references);
+#else
+      bool acquire_internal(void);
+      bool remove_valid_reference(int cnt);
 #endif
+      void notify_valid(bool need_check);
+      bool notify_invalid(AutoLock &i_lock);
+    public:
+      virtual void send_manager(AddressSpaceID target);
+      static void handle_manager_request(Deserializer &derez, Runtime *runtime);
+    public:
+      virtual void notify_local(void);
+    public:
+      bool is_collected(void) const;
+      bool can_collect(bool &already_collected) const;
+      bool acquire_collect(std::set<ApEvent> &gc_events, 
+          uint64_t &sent_valid, uint64_t &received_valid);
+      bool collect(RtEvent &collected, AutoLock *i_lock = NULL);
+      void notify_remote_deletion(void);
+      RtEvent set_garbage_collection_priority(MapperID mapper_id, Processor p, 
+                                  AddressSpaceID source, GCPriority priority);
+      void perform_deletion(AddressSpaceID source, AutoLock *i_lock = NULL);
+      void force_deletion(void);
+      RtEvent update_garbage_collection_priority(AddressSpaceID source,
+                                                 GCPriority priority);
+      RtEvent attach_external_instance(void);
+      void detach_external_instance(void);
+      bool has_visible_from(const std::set<Memory> &memories) const;
+      uintptr_t get_instance_pointer(void) const; 
+      size_t get_instance_size(void) const;
+      void update_instance_footprint(size_t footprint)
+        { instance_footprint = footprint; }
+    public:
+      bool update_physical_instance(PhysicalInstance new_instance,
+                                    size_t new_footprint,
+                                    uintptr_t new_pointer = 0);
+      void broadcast_manager_update(void);
+      static void handle_send_manager_update(Runtime *runtime,
+                                             AddressSpaceID source,
+                                             Deserializer &derez);
+      void pack_fields(Serializer &rez, 
+                       const std::vector<CopySrcDstField> &fields) const;
+      void initialize_across_helper(CopyAcrossHelper *across_helper,
+                                    const FieldMask &mask,
+                                    const std::vector<unsigned> &src_indexes,
+                                    const std::vector<unsigned> &dst_indexes);
     public:
       // Methods for creating/finding/destroying logical top views
-      virtual InstanceView* create_instance_top_view(InnerContext *context,
-                                            AddressSpaceID logical_owner);
-      void register_active_context(InnerContext *context);
+      IndividualView* find_or_create_instance_top_view(InnerContext *context,
+          AddressSpaceID logical_owner, CollectiveMapping *mapping);
+      IndividualView* construct_top_view(AddressSpaceID logical_owner,
+                                         DistributedID did, InnerContext *ctx,
+                                         CollectiveMapping *mapping);
+      bool register_deletion_subscriber(InstanceDeletionSubscriber *subscriber);
+      void unregister_deletion_subscriber(InstanceDeletionSubscriber *subscrib);
       void unregister_active_context(InnerContext *context); 
     public:
       PieceIteratorImpl* create_piece_iterator(IndexSpaceNode *privilege_node);
-      void defer_collect_user(CollectableView *view, ApEvent term_event,
-                              RtEvent collect, std::set<ApEvent> &to_collect, 
-                              bool &add_ref, bool &remove_ref);
+      void record_instance_user(ApEvent term_event, std::set<RtEvent> &applied);
+      void process_remote_reference_mismatch(uint64_t sent, uint64_t received);
       void find_shutdown_preconditions(std::set<ApEvent> &preconditions);
     public:
       bool meets_regions(const std::vector<LogicalRegion> &regions,
-                         bool tight_region_bounds = false) const;
+                         bool tight_region_bounds = false,
+                         const Domain *padding_delta = NULL) const;
       bool meets_expression(IndexSpaceExpression *expr, 
-                            bool tight_bounds = false) const;
+                            bool tight_bounds = false,
+                            const Domain *padding_delta = NULL) const;
+    public:
+      void find_padded_reservations(const FieldMask &mask,
+                                    Operation *op, unsigned index);
+      void find_field_reservations(const FieldMask &mask,
+                                   std::vector<Reservation> &results);
+      static void handle_padded_reservation_request(Runtime *runtime,
+                                  Deserializer &derez, AddressSpaceID source);
+      void update_field_reservations(const FieldMask &mask,
+                                  const std::vector<Reservation> &reservations);
+      static void handle_padded_reservation_response(Runtime *runtime,
+                                                     Deserializer &derez);
     protected:
-      void prune_gc_events(void);
+      void pack_garbage_collection_state(Serializer &rez,
+                                         AddressSpaceID target, bool need_lock);
+      void initialize_remote_gc_state(GarbageCollectionState state);
+    public:
+      static void handle_send_manager(Runtime *runtime, 
+                                      AddressSpaceID source,
+                                      Deserializer &derez); 
+      static void handle_defer_manager(const void *args, Runtime *runtime);
+      static void handle_defer_perform_deletion(const void *args,
+                                                Runtime *runtime);
+      static void create_remote_manager(Runtime *runtime, DistributedID did,
+          Memory mem, PhysicalInstance inst,
+          size_t inst_footprint, IndexSpaceExpression *inst_domain,
+          const void *piece_list, size_t piece_list_size,
+          FieldSpaceNode *space_node, RegionTreeID tree_id,
+          LayoutConstraints *constraints, ApEvent use_event, LgEvent unique,
+          InstanceKind kind, ReductionOpID redop, GarbageCollectionState state);
     public: 
       static ApEvent fetch_metadata(PhysicalInstance inst, ApEvent use_event);
+      static void process_top_view_request(PhysicalManager *manager,
+          InnerContext *context, AddressSpaceID logical_owner,
+          CollectiveMapping *mapping, std::atomic<DistributedID> *target,
+          AddressSpaceID source, RtUserEvent done_event, Runtime *runtime);
+      static void handle_top_view_request(Deserializer &derez, Runtime *runtime,
+                                          AddressSpaceID source);
+      static void handle_top_view_response(Deserializer &derez);
+      static void handle_top_view_creation(const void *args, Runtime *runtime);
+      static void handle_acquire_request(Runtime *runtime,
+          Deserializer &derez, AddressSpaceID source);
+      static void handle_acquire_response(Deserializer &derez, 
+          AddressSpaceID source);
+      static void handle_garbage_collection_request(Runtime *runtime,
+          Deserializer &derez, AddressSpaceID source);
+      static void handle_garbage_collection_response(Deserializer &derez);
+      static void handle_garbage_collection_acquire(Runtime *runtime,
+          Deserializer &derez);
+      static void handle_garbage_collection_failed(Deserializer &derez);
+      static void handle_garbage_collection_mismatch(Runtime *runtime,
+          Deserializer &derez);
+      static void handle_garbage_collection_notify(Runtime *runtime,
+          Deserializer &derez);
+      static void handle_garbage_collection_priority_update(Runtime *runtime,
+          Deserializer &derez, AddressSpaceID source);
+      static void handle_garbage_collection_debug_request(Runtime *runtime,
+          Deserializer &derez, AddressSpaceID source);
+      static void handle_garbage_collection_debug_response(Deserializer &derez); 
+      static void handle_record_event(Runtime *runtime, Deserializer &derez);
     public:
-      const size_t instance_footprint;
-      const ReductionOp *reduction_op;
-      const ReductionOpID redop;
+      MemoryManager *const memory_manager;
       // Unique identifier event that is common across nodes
-      const ApEvent unique_event;
+      // Note this is just an LgEvent which suggests you shouldn't be using
+      // it for anything other than logging
+      const LgEvent unique_event;
+      size_t instance_footprint;
+      const ReductionOp *reduction_op;
+      const ReductionOpID redop; 
       const void *const piece_list;
       const size_t piece_list_size;
-      const bool shadow_instance;
+    public:
+      PhysicalInstance instance;
+      // Event that needs to trigger before we can start using
+      // this physical instance.
+      ApUserEvent use_event;
+      // Event that signifies if the instance name is available
+      RtUserEvent instance_ready;
+      InstanceKind kind;
+      // Keep the pointer for owned external instances
+      uintptr_t external_pointer;
+      // Completion event of the task that sets a realm instance
+      // to this manager. Valid only when the kind is UNBOUND
+      // initially, otherwise NO_AP_EVENT.
+      const ApEvent producer_event;
     protected:
       mutable LocalLock inst_lock;
-      std::set<InnerContext*> active_contexts;
-#ifdef LEGION_GPU_REDUCTIONS
+      std::set<InstanceDeletionSubscriber*> subscribers;
+      typedef std::pair<IndividualView*,unsigned> ViewEntry;
+      std::map<DistributedID,ViewEntry> context_views;
+      std::map<DistributedID,RtUserEvent> pending_views;
     protected:
-      std::map<std::pair<unsigned/*fidx*/,ReductionOpID>,ReductionView*>
-                                              shadow_reduction_instances;
-      std::map<std::pair<unsigned/*fidx*/,ReductionOpID>,RtEvent>
-                                              pending_reduction_shadows;
-#endif
+      // Stuff for garbage collection
+      std::atomic<GarbageCollectionState> gc_state; 
+      unsigned pending_changes;
+      std::atomic<unsigned> failed_collection_count;
+      RtEvent collection_ready;
+      // Garbage collection priorities
+      GCPriority min_gc_priority;
+      RtEvent priority_update_done;
+      std::map<std::pair<MapperID,Processor>,GCPriority> mapper_gc_priorities;
+    protected:
+      // Events for application users of this instance that must trigger
+      // before we could possibly do a deferred deletion
+      std::set<ApEvent> gc_events;
+      // The number of events added since the last time we pruned the list
+      unsigned added_gc_events;
     private:
-      // Events that have to trigger before we can remove our GC reference
-      std::map<CollectableView*,CollectableInfo> gc_events;
+#ifdef DEBUG_LEGION_GC
+      int valid_references;
+#else
+      std::atomic<int> valid_references;
+#endif
+      uint64_t sent_valid_references, received_valid_references;
+      std::map<unsigned,Reservation> *padded_reservations;
+#ifdef DEBUG_LEGION_GC
+    private:
+      std::map<ReferenceSource,int> detailed_base_valid_references;
+      std::map<DistributedID,int> detailed_nested_valid_references;
+#endif
     };
 
     /**
@@ -350,356 +584,33 @@ namespace Legion {
       FieldMask convert_src_to_dst(const FieldMask &src_mask);
       FieldMask convert_dst_to_src(const FieldMask &dst_mask);
     public:
+      unsigned convert_src_to_dst(unsigned index);
+      unsigned convert_dst_to_src(unsigned index);
+    public:
       std::vector<CopySrcDstField> offsets; 
       LegionDeque<std::pair<FieldMask,FieldMask> > compressed_cache;
-    };
-
-    /**
-     * \class IndividualManager 
-     * The individual manager class represents a single physical instance
-     * that lives in memory in a given location in the system. This is the
-     * most common kind of instance that gets made.
-     */
-    class IndividualManager : public PhysicalManager,
-                              public LegionHeapify<IndividualManager> { 
-    public:
-      static const AllocationType alloc_type = INDIVIDUAL_INST_MANAGER_ALLOC;
-    public:
-      struct DeferIndividualManagerArgs : 
-        public LgTaskArgs<DeferIndividualManagerArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_DEFER_INDIVIDUAL_MANAGER_TASK_ID;
-      public:
-        DeferIndividualManagerArgs(DistributedID d, AddressSpaceID own, 
-            Memory m, PhysicalInstance i, size_t f, IndexSpaceExpression *lx,
-            const PendingRemoteExpression &pending, FieldSpace h, 
-            RegionTreeID tid, LayoutConstraintID l, ApEvent use,
-            ReductionOpID redop, const void *piece_list, size_t piece_list_size,
-            AddressSpaceID src, bool shadow_instance);
-      public:
-        const DistributedID did;
-        const AddressSpaceID owner;
-        const Memory mem;
-        const PhysicalInstance inst;
-        const size_t footprint;
-        const PendingRemoteExpression pending;
-        IndexSpaceExpression *local_expr;
-        const FieldSpace handle;
-        const RegionTreeID tree_id;
-        const LayoutConstraintID layout_id;
-        const ApEvent use_event;
-        const ReductionOpID redop;
-        const void *const piece_list;
-        const size_t piece_list_size;
-        const AddressSpaceID source;
-        const bool shadow_instance;
-      };
-    public:
-      IndividualManager(RegionTreeForest *ctx, DistributedID did,
-                        AddressSpaceID owner_space,
-                        MemoryManager *memory, PhysicalInstance inst, 
-                        IndexSpaceExpression *instance_domain,
-                        const void *piece_list, size_t piece_list_size,
-                        FieldSpaceNode *node, RegionTreeID tree_id,
-                        LayoutDescription *desc, ReductionOpID redop, 
-                        bool register_now, size_t footprint,
-                        ApEvent use_event, bool external_instance,
-                        const ReductionOp *op = NULL,
-                        bool shadow_instance = false);
-      IndividualManager(const IndividualManager &rhs);
-      virtual ~IndividualManager(void);
-    public:
-      IndividualManager& operator=(const IndividualManager &rhs);
-    public:
-      virtual void notify_active(ReferenceMutator *mutator);
-      virtual void notify_inactive(ReferenceMutator *mutator);
-      virtual void notify_valid(ReferenceMutator *mutator);
-      virtual void notify_invalid(ReferenceMutator *mutator);
-    public:
-      virtual LegionRuntime::Accessor::RegionAccessor<
-        LegionRuntime::Accessor::AccessorType::Generic>
-          get_accessor(void) const;
-      virtual LegionRuntime::Accessor::RegionAccessor<
-        LegionRuntime::Accessor::AccessorType::Generic>
-          get_field_accessor(FieldID fid) const;
-    public:
-      virtual ApEvent get_use_event(void) const { return use_event; }
-      virtual PhysicalInstance get_instance(const DomainPoint &key) const 
-                                                   { return instance; }
-      virtual PointerConstraint
-                     get_pointer_constraint(const DomainPoint &key) const;
-    public:
-      virtual ApEvent fill_from(FillView *fill_view,
-                                ApEvent precondition, PredEvent predicate_guard,
-                                IndexSpaceExpression *expression,
-                                const FieldMask &fill_mask,
-                                const PhysicalTraceInfo &trace_info,
-                                const FieldMaskSet<FillView> *tracing_srcs,
-                                const FieldMaskSet<InstanceView> *tracing_dsts,
-                                std::set<RtEvent> &effects_applied,
-                                CopyAcrossHelper *across_helper = NULL);
-      virtual ApEvent copy_from(PhysicalManager *manager, ApEvent precondition,
-                                PredEvent predicate_guard, ReductionOpID redop,
-                                IndexSpaceExpression *expression,
-                                const FieldMask &copy_mask,
-                                const PhysicalTraceInfo &trace_info,
-                                const FieldMaskSet<InstanceView> *tracing_srcs,
-                                const FieldMaskSet<InstanceView> *tracing_dsts,
-                                std::set<RtEvent> &effects_applied,
-                                CopyAcrossHelper *across_helper = NULL);
-      virtual void compute_copy_offsets(const FieldMask &copy_mask,
-                                std::vector<CopySrcDstField> &fields);
-    public:
-      void initialize_across_helper(CopyAcrossHelper *across_helper,
-                                    const FieldMask &mask,
-                                    const std::vector<unsigned> &src_indexes,
-                                    const std::vector<unsigned> &dst_indexes);
-    public:
-      virtual void send_manager(AddressSpaceID target);
-      static void handle_send_manager(Runtime *runtime, 
-                                      AddressSpaceID source,
-                                      Deserializer &derez); 
-      static void handle_defer_manager(const void *args, Runtime *runtime);
-      static void create_remote_manager(Runtime *runtime, DistributedID did,
-          AddressSpaceID owner_space, Memory mem, PhysicalInstance inst,
-          size_t inst_footprint, IndexSpaceExpression *inst_domain,
-          const void *piece_list, size_t piece_list_size,
-          FieldSpaceNode *space_node, RegionTreeID tree_id,
-          LayoutConstraints *constraints, ApEvent use_event,
-          ReductionOpID redop, bool shadow_instance);
-    public:
-      virtual bool acquire_instance(ReferenceSource source, 
-                                    ReferenceMutator *mutator);
-      virtual void perform_deletion(RtEvent deferred_event);
-      virtual void force_deletion(void);
-      virtual void set_garbage_collection_priority(MapperID mapper_id, 
-                                Processor p, GCPriority priority); 
-      virtual RtEvent attach_external_instance(void);
-      virtual RtEvent detach_external_instance(void);
-      virtual bool has_visible_from(const std::set<Memory> &memories) const;
-      virtual Memory get_memory(void) const;
-#ifdef LEGION_GPU_REDUCTIONS
-    public:
-      virtual bool is_gpu_visible(PhysicalManager *other) const;
-      virtual ReductionView* find_or_create_shadow_reduction(unsigned fidx,
-          ReductionOpID redop, AddressSpaceID request_space, UniqueID opid); 
-      virtual void record_remote_shadow_reduction(unsigned fidx,
-          ReductionOpID redop, ReductionView *view);
-#endif
-    public:
-      MemoryManager *const memory_manager;
-      const PhysicalInstance instance;
-      // Event that needs to trigger before we can start using
-      // this physical instance.
-      const ApEvent use_event; 
-    };
-
-    /**
-     * \class CollectiveManager
-     * The collective instance manager class supports the interface
-     * of a single instance but is actually contains N distributed 
-     * copies of the same data and will perform collective operations
-     * as part of any reads, writes, or reductions performed to it.
-     */
-    class CollectiveManager : public PhysicalManager,
-              public LegionHeapify<CollectiveManager> {
-    public:
-      static const AllocationType alloc_type = COLLECTIVE_INST_MANAGER_ALLOC;
-    public:
-      enum MessageKind {
-        ACTIVATE_MESSAGE,
-        DEACTIVATE_MESSAGE,
-        VALIDATE_MESSAGE,
-        INVALIDATE_MESSAGE,
-        PERFORM_DELETE_MESSAGE,
-        FORCE_DELETE_MESSAGE,
-        SET_GC_PRIORITY_MESSAGE,
-        DETACH_EXTERNAL_MESSAGE,
-        FINALIZE_MESSAGE,
-      };
-    public:
-      struct DeferCollectiveManagerArgs : 
-        public LgTaskArgs<DeferCollectiveManagerArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_DEFER_COLLECTIVE_MANAGER_TASK_ID;
-      public:
-        DeferCollectiveManagerArgs(DistributedID d, AddressSpaceID own, 
-            IndexSpace p, size_t f, IndexSpaceExpression *lx, 
-            const PendingRemoteExpression &pending, FieldSpace h, 
-            RegionTreeID tid, LayoutConstraintID l, ApEvent use, 
-            ReductionOpID redop, const void *piece_list,
-            size_t piece_list_size, AddressSpaceID source);
-      public:
-        const DistributedID did;
-        const AddressSpaceID owner;
-        IndexSpace point_space;
-        const size_t footprint;
-        IndexSpaceExpression *const local_expr;
-        const PendingRemoteExpression pending;
-        const FieldSpace handle;
-        const RegionTreeID tree_id;
-        const LayoutConstraintID layout_id;
-        const ApEvent use_event;
-        const ReductionOpID redop;
-        const void *const piece_list;
-        const size_t piece_list_size;
-        const AddressSpaceID source;
-      };
-    public:
-      CollectiveManager(RegionTreeForest *ctx, DistributedID did,
-                        AddressSpaceID owner_space, IndexSpaceNode *point_space,
-                        IndexSpaceExpression *instance_domain,
-                        const void *piece_list, size_t piece_list_size,
-                        FieldSpaceNode *node, RegionTreeID tree_id,
-                        LayoutDescription *desc, ReductionOpID redop, 
-                        bool register_now, size_t footprint,
-                        ApEvent unique_event, bool external_instance);
-      CollectiveManager(const CollectiveManager &rhs);
-      virtual ~CollectiveManager(void);
-    public:
-      CollectiveManager& operator=(const CollectiveManager &rh);
-    public:
-      void finalize_collective_instance(ApUserEvent instance_event);
-    public:
-      virtual ApEvent get_use_event(void) const;
-      virtual PhysicalInstance get_instance(const DomainPoint &key) const;
-      virtual PointerConstraint
-                     get_pointer_constraint(const DomainPoint &key) const;
-    public:
-      virtual void notify_active(ReferenceMutator *mutator);
-      virtual void notify_inactive(ReferenceMutator *mutator);
-      virtual void notify_valid(ReferenceMutator *mutator);
-      virtual void notify_invalid(ReferenceMutator *mutator);
-    public:
-      virtual LegionRuntime::Accessor::RegionAccessor<
-        LegionRuntime::Accessor::AccessorType::Generic>
-          get_accessor(void) const;
-      virtual LegionRuntime::Accessor::RegionAccessor<
-        LegionRuntime::Accessor::AccessorType::Generic>
-          get_field_accessor(FieldID fid) const;
-    protected:
-      void activate_collective(ReferenceMutator *mutator);
-      void deactivate_collective(ReferenceMutator *mutator);
-      void validate_collective(ReferenceMutator *mutator);
-      void invalidate_collective(ReferenceMutator *mutator);
-    public:
-      virtual bool acquire_instance(ReferenceSource source, 
-                                    ReferenceMutator *mutator);
-      virtual void perform_deletion(RtEvent deferred_event);
-      virtual void force_deletion(void);
-      virtual void set_garbage_collection_priority(MapperID mapper_id, 
-                                    Processor p, GCPriority priority); 
-      virtual RtEvent attach_external_instance(void);
-      virtual RtEvent detach_external_instance(void);
-      virtual bool has_visible_from(const std::set<Memory> &memories) const;
-      virtual Memory get_memory(void) const;
-    protected:
-      void perform_delete(RtEvent deferred_event, bool left); 
-      void force_delete(bool left);
-      void set_gc_priority(MapperID mapper_id, Processor p, 
-                           GCPriority priority, bool left);
-      void detach_external(RtUserEvent to_trigger, bool left, 
-                  RtEvent full_detach = RtEvent::NO_RT_EVENT);
-      bool finalize_message(void);
-    protected:
-      void collective_deletion(RtEvent deferred_event);
-      void collective_force(void);
-      void collective_set_gc_priority(MapperID mapper_id, Processor proc,
-                                      GCPriority priority);
-      void collective_detach(std::set<RtEvent> &detach_events);
-    public:
-      virtual ApEvent fill_from(FillView *fill_view,
-                                ApEvent precondition, PredEvent predicate_guard,
-                                IndexSpaceExpression *expression,
-                                const FieldMask &fill_mask,
-                                const PhysicalTraceInfo &trace_info,
-                                const FieldMaskSet<FillView> *tracing_srcs,
-                                const FieldMaskSet<InstanceView> *tracing_dsts,
-                                std::set<RtEvent> &effects_applied,
-                                CopyAcrossHelper *across_helper = NULL);
-      virtual ApEvent copy_from(PhysicalManager *manager, ApEvent precondition,
-                                PredEvent predicate_guard, ReductionOpID redop,
-                                IndexSpaceExpression *expression,
-                                const FieldMask &copy_mask,
-                                const PhysicalTraceInfo &trace_info,
-                                const FieldMaskSet<InstanceView> *tracing_srcs,
-                                const FieldMaskSet<InstanceView> *tracing_dsts,
-                                std::set<RtEvent> &effects_applied,
-                                CopyAcrossHelper *across_helper = NULL);
-      virtual void compute_copy_offsets(const FieldMask &copy_mask,
-                                std::vector<CopySrcDstField> &fields);
-#ifdef LEGION_GPU_REDUCTIONS
-    public:
-      virtual bool is_gpu_visible(PhysicalManager *other) const;
-      virtual ReductionView* find_or_create_shadow_reduction(unsigned fidx,
-          ReductionOpID redop, AddressSpaceID request_space, UniqueID opid);
-      virtual void record_remote_shadow_reduction(unsigned fidx,
-          ReductionOpID redop, ReductionView *view);
-#endif
-    public:
-      virtual void send_manager(AddressSpaceID target);
-    public:
-      static void handle_send_manager(Runtime *runtime, 
-                                      AddressSpaceID source,
-                                      Deserializer &derez);
-      static void handle_defer_manager(const void *args, Runtime *runtime);
-      static void handle_collective_message(Deserializer &derez,
-                                            Runtime *runtime);
-      static void create_collective_manager(Runtime *runtime, DistributedID did,
-          AddressSpaceID owner_space, IndexSpaceNode *point_space,
-          size_t inst_footprint, IndexSpaceExpression *inst_domain, 
-          const void *piece_list, size_t piece_list_size, 
-          FieldSpaceNode *space_node, RegionTreeID tree_id, 
-          LayoutConstraints *constraints,ApEvent use_event,ReductionOpID redop);
-    public:
-      IndexSpaceNode *const point_space;
-    protected:
-      std::vector<MemoryManager*> memories; // local memories
-      std::vector<PhysicalInstance> instances; // local instances
-      std::vector<AddressSpaceID> right_spaces;
-      AddressSpaceID left_space;
-    protected:
-      RtEvent detached;
-      unsigned finalize_messages;
-      bool deleted_or_detached;
     };
 
     /**
      * \class VirtualManager
      * This is a singleton class of which there will be exactly one
      * on every node in the machine. The virtual manager class will
-     * represent all the virtual virtual/composite instances.
+     * represent all the virtual instances.
      */
     class VirtualManager : public InstanceManager,
                            public LegionHeapify<VirtualManager> {
     public:
       VirtualManager(Runtime *runtime, DistributedID did, 
-                     LayoutDescription *layout);
+                     LayoutDescription *layout, CollectiveMapping *mapping);
       VirtualManager(const VirtualManager &rhs);
       virtual ~VirtualManager(void);
     public:
       VirtualManager& operator=(const VirtualManager &rhs);
     public:
-      virtual LegionRuntime::Accessor::RegionAccessor<
-        LegionRuntime::Accessor::AccessorType::Generic>
-          get_accessor(void) const;
-      virtual LegionRuntime::Accessor::RegionAccessor<
-        LegionRuntime::Accessor::AccessorType::Generic>
-          get_field_accessor(FieldID fid) const;
-    public:
-      virtual void notify_active(ReferenceMutator *mutator);
-      virtual void notify_inactive(ReferenceMutator *mutator);
-      virtual void notify_valid(ReferenceMutator *mutator);
-      virtual void notify_invalid(ReferenceMutator *mutator);
+      virtual void notify_local(void) { }
     public: 
-      virtual ApEvent get_use_event(void) const;
-      virtual ApEvent get_unique_event(void) const;
-      virtual PhysicalInstance get_instance(const DomainPoint &key) const;
-      virtual PointerConstraint
-                     get_pointer_constraint(const DomainPoint &key) const;
+      virtual PointerConstraint get_pointer_constraint(void) const;
       virtual void send_manager(AddressSpaceID target);
-      virtual InstanceView* create_instance_top_view(InnerContext *context,
-                                            AddressSpaceID logical_owner);
     };
 
     /**
@@ -715,24 +626,19 @@ namespace Legion {
           creator_id(cid), instance(PhysicalInstance::NO_INST), 
           field_space_node(NULL), instance_domain(NULL), tree_id(0),
           redop_id(0), reduction_op(NULL), realm_layout(NULL), piece_list(NULL),
-          piece_list_size(0), shadow_instance(false), valid(false) { }
+          piece_list_size(0), valid(false) { }
       InstanceBuilder(const std::vector<LogicalRegion> &regs,
                       IndexSpaceExpression *expr, FieldSpaceNode *node,
                       RegionTreeID tree_id, const LayoutConstraintSet &cons, 
                       Runtime *rt, MemoryManager *memory, UniqueID cid,
-                      const void *piece_list, size_t piece_list_size, 
-                      bool shadow_instance);
+                      const void *piece_list, size_t piece_list_size); 
       virtual ~InstanceBuilder(void);
     public:
       void initialize(RegionTreeForest *forest);
       PhysicalManager* create_physical_instance(RegionTreeForest *forest,
-                        CollectiveManager *collective, DomainPoint *point,
-                        LayoutConstraintKind *unsat_kind,
-                        unsigned *unsat_index, size_t *footprint = NULL);
-      CollectiveManager* create_collective_instance(RegionTreeForest *forest,
-                        Memory::Kind mem_kind, IndexSpaceNode *point_space,
-                        LayoutConstraintKind *unsat_kind, unsigned *unsat_index,
-                        ApEvent ready_event, size_t *footprint = NULL);
+            LayoutConstraintKind *unsat_kind,
+                        unsigned *unsat_index, size_t *footprint = NULL,
+                        RtEvent collection_done = RtEvent::NO_RT_EVENT);
     public:
       virtual void handle_profiling_response(const ProfilingResponseBase *base,
                                       const Realm::ProfilingResponse &response,
@@ -764,27 +670,25 @@ namespace Legion {
       Realm::InstanceLayoutGeneric *realm_layout;
       void *piece_list;
       size_t piece_list_size;
-      bool shadow_instance;
     public:
       bool valid;
     };
 
     //--------------------------------------------------------------------------
     /*static*/ inline DistributedID InstanceManager::encode_instance_did(
-              DistributedID did, bool external, bool reduction, bool collective)
+                               DistributedID did, bool external, bool reduction)
     //--------------------------------------------------------------------------
     {
       return LEGION_DISTRIBUTED_HELP_ENCODE(did, PHYSICAL_MANAGER_DC | 
                                         (external ? EXTERNAL_CODE : 0) | 
-                                        (reduction ? REDUCTION_CODE : 0) |
-                                        (collective ? COLLECTIVE_CODE : 0));
+                                        (reduction ? REDUCTION_CODE : 0));
     }
 
     //--------------------------------------------------------------------------
     /*static*/ inline bool InstanceManager::is_physical_did(DistributedID did)
     //--------------------------------------------------------------------------
     {
-      return ((LEGION_DISTRIBUTED_HELP_DECODE(did) & 0xF) == 
+      return ((LEGION_DISTRIBUTED_HELP_DECODE(did) & (DIST_TYPE_LAST_DC-1)) ==
                                                         PHYSICAL_MANAGER_DC);
     }
 
@@ -793,7 +697,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const unsigned decode = LEGION_DISTRIBUTED_HELP_DECODE(did);
-      if ((decode & 0xF) != PHYSICAL_MANAGER_DC)
+      if ((decode & (DIST_TYPE_LAST_DC-1)) != PHYSICAL_MANAGER_DC)
         return false;
       return ((decode & REDUCTION_CODE) != 0);
     }
@@ -803,19 +707,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const unsigned decode = LEGION_DISTRIBUTED_HELP_DECODE(did);
-      if ((decode & 0xF) != PHYSICAL_MANAGER_DC)
+      if ((decode & (DIST_TYPE_LAST_DC-1)) != PHYSICAL_MANAGER_DC)
         return false;
       return ((decode & EXTERNAL_CODE) != 0);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ inline bool InstanceManager::is_collective_did(DistributedID did)
-    //--------------------------------------------------------------------------
-    {
-      const unsigned decode = LEGION_DISTRIBUTED_HELP_DECODE(did);
-      if ((decode & 0xF) != PHYSICAL_MANAGER_DC)
-        return false;
-      return ((decode & COLLECTIVE_CODE) != 0);
     }
 
     //--------------------------------------------------------------------------
@@ -847,13 +741,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    inline bool InstanceManager::is_collective_manager(void) const
-    //--------------------------------------------------------------------------
-    {
-      return is_collective_did(did);
-    }
-
-    //--------------------------------------------------------------------------
     inline PhysicalManager* InstanceManager::as_physical_manager(void) const
     //--------------------------------------------------------------------------
     {
@@ -874,25 +761,181 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    inline IndividualManager* InstanceManager::as_individual_manager(void) const
+    inline void PhysicalManager::add_base_valid_ref(
+                                         ReferenceSource source, int cnt /*=1*/)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(!is_collective_manager());
+      assert(cnt >= 0);
 #endif
-      return 
-        static_cast<IndividualManager*>(const_cast<InstanceManager*>(this));
+#ifdef LEGION_GC
+      log_base_ref<true>(VALID_REF_KIND, did, local_space, source, cnt);
+#endif
+#ifdef DEBUG_LEGION_GC
+      add_base_valid_ref_internal(source, cnt);
+#else
+      int current = valid_references.load();
+      while (current > 0)
+      {
+        int next = current + cnt;
+        if (valid_references.compare_exchange_weak(current, next))
+          return;
+      }
+      add_valid_reference(cnt);
+#endif
     }
 
     //--------------------------------------------------------------------------
-    inline CollectiveManager* InstanceManager::as_collective_manager(void) const
+    inline void PhysicalManager::add_nested_valid_ref(
+                                           DistributedID source, int cnt /*=1*/)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(is_collective_manager());
+      assert(cnt >= 0);
 #endif
-      return 
-        static_cast<CollectiveManager*>(const_cast<InstanceManager*>(this));
+#ifdef LEGION_GC
+      log_nested_ref<true>(VALID_REF_KIND, did, local_space, source, cnt);
+#endif
+#ifdef DEBUG_LEGION_GC
+      add_nested_valid_ref_internal(LEGION_DISTRIBUTED_ID_FILTER(source), cnt);
+#else
+      int current = valid_references.load();
+      while (current > 0)
+      {
+        int next = current + cnt;
+        if (valid_references.compare_exchange_weak(current, next))
+          return;
+      }
+      add_valid_reference(cnt);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    inline bool PhysicalManager::acquire_instance(ReferenceSource source) 
+    //--------------------------------------------------------------------------
+    {
+#ifndef DEBUG_LEGION_GC
+      // Note that we cannot do this for external instances as they might
+      // have been detached while still holding valid references so they
+      // have to go through the full path every time
+      if (!is_external_instance())
+      {
+        // Check to see if we can do the add without the lock first
+        int current = valid_references.load();
+        while (current > 0)
+        {
+          int next = current + 1;
+          if (valid_references.compare_exchange_weak(current, next))
+          {
+#ifdef LEGION_GC
+            log_base_ref<true>(VALID_REF_KIND, did, local_space, source, 1);
+#endif
+            return true;
+          }
+        }
+      }
+      bool result = acquire_internal();
+#else
+      bool result = acquire_internal(source, detailed_base_valid_references);
+#endif
+#ifdef LEGION_GC
+      if (result)
+        log_base_ref<true>(VALID_REF_KIND, did, local_space, source, 1);
+#endif
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    inline bool PhysicalManager::acquire_instance(DistributedID source) 
+    //--------------------------------------------------------------------------
+    {
+#ifndef DEBUG_LEGION_GC
+      // Note that we cannot do this for external instances as they might
+      // have been detached while still holding valid references so they
+      // have to go through the full path every time
+      if (!is_external_instance())
+      {
+        // Check to see if we can do the add without the lock first
+        int current = valid_references.load();
+        while (current > 0)
+        {
+          int next = current + 1;
+          if (valid_references.compare_exchange_weak(current, next))
+          {
+#ifdef LEGION_GC
+            log_nested_ref<true>(VALID_REF_KIND, did, local_space, source, 1);
+#endif
+            return true;
+          }
+        }
+      }
+      bool result = acquire_internal();
+#else
+      bool result = acquire_internal(LEGION_DISTRIBUTED_ID_FILTER(source),
+                                     detailed_nested_valid_references);
+#endif
+#ifdef LEGION_GC
+      if (result)
+        log_nested_ref<true>(VALID_REF_KIND, did, local_space, source, 1);
+#endif
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    inline bool PhysicalManager::remove_base_valid_ref(
+                                         ReferenceSource source, int cnt /*=1*/)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(cnt >= 0);
+#endif
+#ifdef LEGION_GC
+      log_base_ref<false>(VALID_REF_KIND, did, local_space, source, cnt);
+#endif
+#ifdef DEBUG_LEGION_GC
+      return remove_base_valid_ref_internal(source, cnt);
+#else
+      int current = valid_references.load();
+#ifdef DEBUG_LEGION
+      assert(current >= cnt);
+#endif
+      while (current > cnt)
+      {
+        int next = current - cnt;
+        if (valid_references.compare_exchange_weak(current, next))
+          return false;
+      }
+      return remove_valid_reference(cnt);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    inline bool PhysicalManager::remove_nested_valid_ref(
+                                           DistributedID source, int cnt /*=1*/)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(cnt >= 0);
+#endif
+#ifdef LEGION_GC
+      log_nested_ref<false>(VALID_REF_KIND, did, local_space, source, cnt);
+#endif
+#ifdef DEBUG_LEGION_GC
+      return remove_nested_valid_ref_internal(
+          LEGION_DISTRIBUTED_ID_FILTER(source), cnt);
+#else
+      int current = valid_references.load();
+#ifdef DEBUG_LEGION
+      assert(current >= cnt);
+#endif
+      while (current > cnt)
+      {
+        int next = current - cnt;
+        if (valid_references.compare_exchange_weak(current, next))
+          return false;
+      }
+      return remove_valid_reference(cnt);
+#endif
     }
 
   }; // namespace Internal 

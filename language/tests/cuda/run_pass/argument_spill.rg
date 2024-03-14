@@ -1,4 +1,4 @@
--- Copyright 2022 Stanford University, NVIDIA
+-- Copyright 2024 Stanford University, NVIDIA
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 -- runs-with:
--- [["-fcuda", "1", "-ll:gpu", "1"]]
+-- [["-ll:gpu", "1"]]
 
 import "regent"
 

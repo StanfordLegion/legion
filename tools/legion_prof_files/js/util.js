@@ -199,6 +199,7 @@ function redoData(proc) {
 		    level_to_set = d.level;
 		var d_ready = {
                     id: d.id+items[level].length+1, // unique id
+		    op_id: d.op_id,
                     level: level_to_set,
 		    level_ready: d.level,
                     ready: d.ready,
@@ -213,7 +214,8 @@ function redoData(proc) {
                     children: d.children,
                     parents: d.parents,
                     prof_uid: d.prof_uid,
-                    proc: d.proc
+                    proc: d.proc,
+                    instances: d.instances
 		};
 		// switch levels if we need to
 		if (d.level_ready_set == undefined || d.level_ready_set == false)
@@ -244,7 +246,7 @@ function redoData(proc) {
 }
 
 function readyData(proc) {
-    redoData(proc);
+  redoData(proc);
 }
 
 function filterAndMergeBlocks(state) {
@@ -262,10 +264,10 @@ function filterAndMergeBlocks(state) {
       var items = state.processorData[timelineElement.full_text];
       var memoryRegex = /Memory/;
       var isMemory = memoryRegex.exec(timelineElement.text);
-	if (state.ready_selected) {
-	    readyData(timelineElement);
-	    items = dataReady;
-	}
+      if (state.ready_selected) {
+        readyData(timelineElement);
+        items = dataReady;
+      }
 
       for (var level in items) {
         // gap merging below assumes intervals are sorted - do that first
@@ -312,6 +314,7 @@ function filterAndMergeBlocks(state) {
             if (count > 1) {
               state.dataToDraw.push({
                 id: d.id,
+                op_id: d.op_id,
                 prof_uid: d.prof_uid,
                 proc: timelineElement,
                 level: d.level,
@@ -323,12 +326,15 @@ function filterAndMergeBlocks(state) {
                 in: [],
                 out: [],
                 children: [],
-                parents: []
+                parents: [],
+                instances: d.instances,
+                is_highlighted: false
               });
               i += (count - 1);
             } else {
               var elem = {
                 id: d.id,
+                op_id: d.op_id,
                 prof_uid: d.prof_uid,
                 proc: timelineElement,
                 level: d.level,
@@ -341,7 +347,9 @@ function filterAndMergeBlocks(state) {
                 in: d.in,
                 out: d.out,
                 children: d.children,
-                parents: d.parents
+                parents: d.parents,
+                instances: d.instances,
+                is_highlighted: false
               }
               state.dataToDraw.push(elem);
               if (isMemory) {
@@ -351,6 +359,7 @@ function filterAndMergeBlocks(state) {
           } else {
             var elem = {
               id: d.id,
+              op_id: d.op_id,
               prof_uid: d.prof_uid,
               proc: timelineElement,
               level: d.level,
@@ -364,7 +373,9 @@ function filterAndMergeBlocks(state) {
               in: d.in,
               out: d.out,
               children: d.children,
-              parents: d.parents
+              parents: d.parents,
+              instances: d.instances,
+              is_highlighted: false
             }
             state.dataToDraw.push(elem);
             if (isMemory) {

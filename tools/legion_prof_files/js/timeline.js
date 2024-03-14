@@ -42,6 +42,23 @@ String.prototype.hashCode = function() {
   return Math.abs(hash);
 }
 
+function getProvenanceString(d) {
+  var provenance = "";
+  if (d.op_id != -1) {
+      provenance = state.operations[d.op_id].provenance;
+  }
+  if ((provenance == "") && (d.initiation != undefined) && (d.initiation != "")) {
+      provenance = state.operations[d.initiation].provenance;
+  }
+  return provenance;
+}
+
+function operationMatchesRegex(regex, d) {
+  return regex.exec(d.title) != null ||
+         regex.exec(d.initiation) != null ||
+         regex.exec(getProvenanceString(d)) != null;
+}
+
 function parseURLParameters() {
   var match,
   pl     = /\+/g,  // Regex for replacing addition symbol with a space
@@ -194,6 +211,8 @@ function getLineColor(elem) {
   const colorMap = {
     "CPU": "steelblue",
     "GPU": "olivedrab",
+    "GPU Device": "olivedrab",
+    "GPU Host": "orangered",
     "Utility": "crimson",
     "IO": "orangered",
     "Proc Group": "orangered",
@@ -406,24 +425,63 @@ function getMouseOver() {
     var delay = d.start - d.ready;
     total = parseFloat(total.toFixed(3))
     delay = parseFloat(delay.toFixed(3))
-    var initiation = "";
+
+    var provenance = getProvenanceString(d);
+
     // Insert texts in reverse order
+    if (provenance != "") {
+      // provenance strings are in this form:
+      // "(human readable string)$(key1),(value1)|(key2),(value2)|..."
+      var tokens = provenance.split("\$");
+
+      // If the provenance string doesn't match the format,
+      // we render it verbatim.
+      if (tokens.length != 2) descTexts.push("Provenance: " + provenance);
+      else {
+          var to_parse = tokens[1];
+          var pairs = to_parse.split("|");
+          pairs.forEach(pair => {
+              var tokens = pair.split(",");
+              descTexts.push(tokens[0] + ": " + tokens[1]);
+          });
+      }
+      // Add a line break to separate provenance info from the rest
+      descTexts.push(" ");
+    }
+
+    // Add instances
+    if ((d.instances != undefined) && d.instances != "") {
+      for (var i = 0; i < d.instances.length; i+=3) {
+        var instances = [];
+        // to limit the space, we only show 3 instances per row
+        var end_idx = i+3 > d.instances.length ? d.instances.length : i+3;
+        for (var j = i; j < end_idx; j++) {
+          instances.push(d.instances[j][0]);
+        }
+        if (j == d.instances.length) {
+          descTexts.push("Instances: " + instances);
+        } else {
+          descTexts.push("           " + instances);
+        }
+      }
+    }
+
     if ((d.ready != undefined) && (d.ready != "") && (delay != 0)) {
-	descTexts.push("Ready State: " + get_time_str(delay,false));
+      descTexts.push("Ready State: " + get_time_str(delay,false));
     }
     descTexts.push("End:   " + get_time_str(d.end, false));
     descTexts.push("Start: " + get_time_str(d.start, false));
     descTexts.push("Total: " + get_time_str(total, true));
-    if ((d.initiation != undefined) && d.initiation != "") {
+    if ((d.initiation != undefined) && d.initiation != "" && d.initiation != 0) {
       descTexts.push("Initiator: " + state.operations[d.initiation].desc);
     } 
 
    // split d.title
     var titles =  d.title.split("$");
       if (titles.length > 0) {
-	  for (var i = titles.length-1; i >= 0; --i) {
-	      descTexts.push(titles[i]);
-	  }
+	for (var i = titles.length-1; i >= 0; --i) {
+	  descTexts.push(titles[i]);
+	}
       }
     var title = text.append("tspan")
       .attr("x", x)
@@ -463,7 +521,10 @@ function getMouseOver() {
 var sizeHistory = 10;
 var currentPos;
 var nextPos;
+var clickBoxProf_uid = null;
 var searchRegex = null;
+var searchInstRegex = null; // this is not a regext, just an array of prof_uid
+var searchInstRegexLength = 0;
 
 function showSlider() {
     $('#lowerLimit').text($('#node_slider').slider("values", 0));
@@ -1279,11 +1340,26 @@ function timelineElementStrokeCalculator(elem) {
 }
 
 function timelineEventMouseDown(_timelineEvent) {
+  // event.preventDefault();
+  d3.event.stopPropagation();
+  
   // only the first event of this uid will have information
   var timelineEvent = prof_uid_map[_timelineEvent.prof_uid][0];
+	
+  // draw instances
+  var hasInstances = timelineEvent.instances.length != 0;	
+  if (hasInstances) {
+    if (d3.event.button === 0) {
+      // record the coordinattes of the mouse
+      var mouse_coordinates = d3.mouse(this);
+      state.mouse_x = mouse_coordinates[0];
+      state.mouse_y = mouse_coordinates[1];
+    }
+  }
+	
+  // draw dependencies
   var hasDependencies = ((timelineEvent.in.length != 0) || 
                          (timelineEvent.out.length != 0));
-
   if (hasDependencies) {
     if (timelineEventsExistAndEqual(timelineEvent, state.dependencyEvent)) {
       if (d3.event.button === 0) {
@@ -1309,6 +1385,38 @@ function timelineEventMouseDown(_timelineEvent) {
   }
 }
 
+function timelineEventMouseUp(_timelineEvent) {
+  d3.event.stopPropagation();
+  // only the first event of this uid will have information
+  var timelineEvent = prof_uid_map[_timelineEvent.prof_uid][0];
+
+  // draw instances
+  var hasInstances = timelineEvent.instances.length != 0;
+  if (hasInstances) {
+    if (d3.event.button === 0) {
+      // if mouse does not move, let's do the highlighting, otherwise, this is a zoom, we give up.
+      var mouse_coordinates = d3.mouse(this);
+      if (mouse_coordinates[0] == state.mouse_x && mouse_coordinates[1] == state.mouse_y) {
+        if (!state.searchInstEnabled) {
+          searchInstRegexLength = timelineEvent.instances.length;
+          state.searchInstEnabled = true;
+          clickBoxProf_uid = timelineEvent.prof_uid;
+          searchInstRegex = new Array(searchInstRegexLength);
+          for (let i = 0; i < searchInstRegexLength; i++) {
+            var re = timelineEvent.instances[i][1];
+            searchInstRegex[i] = re;
+          }
+        } else {
+          state.searchInstEnabled = false;
+          searchInstRegex = null;
+          clickBoxProf_uid = null;
+        }
+        redraw();
+      }
+    }
+  }
+}
+
 function drawTimeline() {
   showLoaderIcon()
 
@@ -1329,10 +1437,25 @@ function drawTimeline() {
     .attr("x", function(d) { return convertToPos(state, d.start); })
     .attr("y", timelineLevelCalculator)
     .style("fill", function(d) {
-      if (!state.searchEnabled ||
-          searchRegex[currentPos].exec(d.title) == null)
-        return d.color;
-      else return "#ff0000";
+      var color = d.color;
+      d.is_highlighted = false;
+      if (state.searchEnabled && operationMatchesRegex(searchRegex[currentPos], d)) {
+        color = "#ff0000";
+        d.is_highlighted = true;
+      }
+      if (state.searchInstEnabled) {
+        for (let i = 0; i < searchInstRegexLength; i++) {
+          if (searchInstRegex[i] == d.prof_uid) {
+            color = "#ff0000";
+            d.is_highlighted = true;
+            break;
+          }
+        }
+        if (clickBoxProf_uid == d.prof_uid) {
+          d.is_highlighted = true;
+        }
+      }
+      return color;
     })
     .attr("width", function(d) {
       return Math.max(constants.min_feature_width, convertToPos(state, d.end - d.start));
@@ -1353,19 +1476,22 @@ function drawTimeline() {
     })
     .attr("height", state.thickness)
     .style("opacity", function(d) {
-      if (!state.searchEnabled || searchRegex[currentPos].exec(d.title) != null || searchRegex[currentPos].exec(d.initiation) != null) {
-        return d.opacity;
+      var opacity = d.opacity;
+      if (state.searchEnabled || state.searchInstEnabled) {
+        if (d.is_highlighted == false) {
+          opacity = 0.05;
+        }
       }
-      else return 0.05;
+      return opacity;
     })
-    .on("mouseout", function(d, i) { 
+    .on("mouseout", function(d, i) {
       if ((d.in.length != 0) || (d.out.length != 0)) {
         d3.select(this).style("cursor", "default");
       }
       state.timelineSvg.selectAll("#desc").remove();
     })
     .on("mousedown", timelineEventMouseDown)
-
+    .on("mouseup", timelineEventMouseUp)
 
   timelineText.enter().append("text");
 
@@ -1886,7 +2012,7 @@ function drawExpandBox() {
         + "</div>"
         + "<div style='margin: 0 auto; margin-top: 10px; text-align: center;'>" 
           + "<input class='button' type='button' value='CPUs' onclick='evalExpandRequest(\"CPU\")'></input>" 
-          + "<input class='button' type='button' value='GPUs' onclick='evalExpandRequest(\"GPU\")'></input>" 
+          + "<input class='button' type='button' value='GPUs' onclick='evalExpandRequest(\"GPU\");evalExpandRequest(\"GPU Device\");evalExpandRequest(\"GPU Host\")'></input>"
           + "<input class='button' type='button' value='Utilities' onclick='evalExpandRequest(\"Utility\")'></input>" 
           + "<input class='button' type='button' value='IOs' onclick='evalExpandRequest(\"IO\")'></input>" 
           + "<input class='button' type='button' value='Memories' onclick='evalExpandRequest(\"Memory\")'></input>" 
@@ -2284,59 +2410,65 @@ function defaultKeyUp(e) {
 }
 
 function load_proc_timeline(proc) {
-    var proc_name = proc.full_text;
-    state.processorData[proc_name] = {};
-    var num_levels_ready = proc.num_levels;
-    if (state.ready_selected) {
-	proc.num_levels_ready = proc.num_levels;
-    }
+  var proc_name = proc.full_text;
+  state.processorData[proc_name] = {};
+  var num_levels_ready = proc.num_levels;
+  if (state.ready_selected) {
+    proc.num_levels_ready = proc.num_levels;
+  }
   d3.tsv(proc.tsv,
     function(d, i) {
-        var level = +d.level;
-        var ready = +d.ready;
-        var start = +d.start;
-        var end = +d.end;
-        var level_ready = +d.level_ready;
-        var total = end - start;
-        var _in = d.in === "" ? [] : JSON.parse(d.in)
-        var out = d.out === "" ? [] : JSON.parse(d.out)
-        var children = d.children === "" ? [] : JSON.parse(d.children)
-        var parents = d.parents === "" ? [] : JSON.parse(d.parents)
-        if (total > state.resolution) {
-            return {
-                id: i,
-                level: level,
-                level_ready: level_ready,
-                ready: ready,
-                start: start,
-                end: end,
-                color: d.color,
-                opacity: d.opacity,
-                initiation: d.initiation,
-                title: d.title,
-                in: _in,
-                out: out,
-                children: children,
-                parents: parents,
-                prof_uid: d.prof_uid,
-                proc: proc
-            };
-        }
+      var level = +d.level;
+      var ready = +d.ready;
+      var start = +d.start;
+      var end = +d.end;
+      var level_ready = +d.level_ready;
+      var total = end - start;
+      var _in = d.in === "" ? [] : JSON.parse(d.in)
+      var out = d.out === "" ? [] : JSON.parse(d.out)
+      var children = d.children === "" ? [] : JSON.parse(d.children)
+      var parents = d.parents === "" ? [] : JSON.parse(d.parents)
+      // if op_id is empty, then we set it to -1
+      var op_id = d.op_id == "" ? -1 : parseInt(d.op_id)
+      var instances = d.instances === "" ? [] : JSON.parse(d.instances)
+      if (total > state.resolution) {
+        return {
+          id: i,
+          level: level,
+          level_ready: level_ready,
+          ready: ready,
+          start: start,
+          end: end,
+          color: d.color,
+          opacity: d.opacity,
+          initiation: d.initiation,
+          title: d.title,
+          in: _in,
+          out: out,
+          children: children,
+          parents: parents,
+          prof_uid: d.prof_uid,
+          op_id: op_id,
+          proc: proc,
+          instances: instances,
+          is_highlighted: false
+        };
+      }
     },
     function(data) {
-	var num_levels_ready=0
+      var num_levels_ready=0
       // split profiling items by which level they're on
       for(var i = 0; i < data.length; i++) {
-	  var d = data[i];
-	  var level_sel=d.level;
-          if (level_sel in state.processorData[proc_name]) {
-              state.processorData[proc_name][level_sel].push(d);
-          } else {
-              state.processorData[proc_name][level_sel] = [d];
-          }
-	  if ((d.level_ready != undefined) && (d.level_ready != 0) &&
-	      num_levels_ready < d.level_ready)
-	      num_levels_ready = d.level_ready;
+	var d = data[i];
+	var level_sel=d.level;
+        if (level_sel in state.processorData[proc_name]) {
+          state.processorData[proc_name][level_sel].push(d);
+        } else {
+          state.processorData[proc_name][level_sel] = [d];
+        }
+	if ((d.level_ready != undefined) && (d.level_ready != 0) &&
+	  num_levels_ready < d.level_ready)
+	  num_levels_ready = d.level_ready;
 
         if (d.prof_uid != undefined && d.prof_uid !== "") {
           if (d.prof_uid in prof_uid_map) {
@@ -2347,9 +2479,9 @@ function load_proc_timeline(proc) {
         }
       }
     if (num_levels_ready > proc.num_levels)
-	proc.num_levels_ready = num_levels_ready;
+      proc.num_levels_ready = num_levels_ready;
     else
-	proc.num_levels_ready = proc.num_levels;
+      proc.num_levels_ready = proc.num_levels;
     proc.loaded = true;
     hideLoaderIcon();
     redraw();
@@ -2359,7 +2491,7 @@ function load_proc_timeline(proc) {
 
 function initTimelineElements() {
   var timelineGroup = state.timelineSvg.append("g")
-      .attr("id", "timeline");
+        .attr("id", "timeline");
 
   $("#timeline").scrollLeft(0);
   parseURLParameters();
@@ -2373,13 +2505,13 @@ function initTimelineElements() {
   // set scroll callback
   var timer = null;
   $("#timeline").scroll(function() {
-      if (timer !== null) {
-        clearTimeout(timer);
-      }
-      timer = setTimeout(function() {
-        filterAndMergeBlocks(state);
-        drawTimeline();
-      }, 100);
+    if (timer !== null) {
+      clearTimeout(timer);
+    }
+    timer = setTimeout(function() {
+      filterAndMergeBlocks(state);
+      drawTimeline();
+    }, 100);
   });
   if (!state.collapseAll) {
     // initially load in all the cpu processors and the "all util"
@@ -2666,6 +2798,9 @@ function initializeState() {
   state.height = constants.max_level * state.thickness;
   state.resolution = 10; // time (in us) of the smallest feature we want to load
   state.searchEnabled = false;
+  state.searchInstEnabled = false;
+  state.mouse_x = 0;
+  state.mouse_y = 0;
   state.rangeZoom = true;
   state.collapseAll = false;
   state.display_critical_path = false;

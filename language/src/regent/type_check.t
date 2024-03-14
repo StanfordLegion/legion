@@ -1,4 +1,4 @@
--- Copyright 2022 Stanford University, NVIDIA Corporation
+-- Copyright 2024 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -413,9 +413,9 @@ function type_check.conditions(cx, node, params)
     param_index_by_symbol[param.symbol] = i
   end
 
-  local result = {}
-  result[std.arrives] = {}
-  result[std.awaits] = {}
+  local result = data.newmap()
+  result[std.arrives] = data.newmap()
+  result[std.awaits] = data.newmap()
 
   node:map(
     function(condition)
@@ -610,6 +610,8 @@ function type_check.expr_field_access(cx, node)
       })
   elseif std.is_partition(std.as_read(unpack_type)) and node.field_name == "colors" then
     field_type = std.as_read(unpack_type):colors()
+  elseif std.is_cross_product(std.as_read(unpack_type)) and node.field_name == "colors" then
+    field_type = std.as_read(unpack_type):partition():colors()
   elseif std.type_is_opaque_to_field_accesses(std.as_read(unpack_type)) then
     local hint = ""
     if std.is_region(std.as_read(unpack_type)) and
@@ -893,7 +895,7 @@ function type_check.expr_method_call(cx, node)
     local args_with_casts = terralib.newlist()
     assert(not defs[1].type.isvararg)
     local param_types = defs[1].type.parameters
-    for idx, arg_type in pairs(arg_types) do
+    for idx, arg_type in ipairs(arg_types) do
       args_with_casts:insert(
         insert_implicit_cast(args[idx], arg_type, param_types[idx + 1]))
     end
@@ -1053,9 +1055,9 @@ function type_check.expr_call(cx, node)
         -- we individually check privileges for fields because they can be renamed via
         -- field polymorphism.
         if not std.is_fspace_instance(fspace) then
-          local field_path_mapping = data.map_from_table(data.dict(data.zip(
+          local field_path_mapping = data.dict(data.zip(
                   std.flatten_struct_fields(fspace),
-                  std.flatten_struct_fields(arg_region:gettype():fspace()))))
+                  std.flatten_struct_fields(arg_region:gettype():fspace())))
 
           std.get_absolute_field_paths(fspace, field_path):map(function(field_path)
             local arg_field_path = field_path_mapping[field_path]
@@ -1447,10 +1449,7 @@ function type_check.expr_dynamic_cast(cx, node)
       report.error(node, "type mismatch in dynamic_cast: expected a pointer to " .. tostring(node.expr_type.points_to_type) .. ", got " .. tostring(value_type.points_to_type))
     end
 
-    local ok, message = node.expr_type:bounds() -- check bounds validity
-    if not ok then
-      report.error(node, message)
-    end
+    std.check_bounds(node, node.expr_type)
 
   elseif std.is_partition(node.expr_type) then
     if not std.is_partition(value_type) then
@@ -1546,7 +1545,7 @@ function type_check.expr_unsafe_cast(cx, node)
   if not std.is_bounded_type(expr_type) then
     report.error(node, "unsafe_cast requires ptr type as argument 1, got " .. tostring(expr_type))
   end
-  if #expr_type:bounds() ~= 1 then
+  if #std.check_bounds(node, expr_type) ~= 1 then
     report.error(node, "unsafe_cast requires single ptr type as argument 1, got " .. tostring(expr_type))
   end
   if not std.validate_implicit_cast(value_type, node.expr_type.index_type) then
@@ -2003,7 +2002,7 @@ function type_check.expr_image(cx, node)
     if std.type_eq(ty, opaque) or std.type_eq(ty, int64) then
       return true
     elseif ty:isstruct() then
-      for _, entry in pairs(ty:getentries()) do
+      for _, entry in ipairs(ty:getentries()) do
         local entry_type = entry[2] or entry.type
         if not is_base_type_64bit(entry_type) then return false end
       end
@@ -2200,7 +2199,7 @@ function type_check.expr_preimage(cx, node)
       if std.type_eq(ty, opaque) or std.type_eq(ty, int64) then
         return true
       elseif ty:isstruct() then
-        for _, entry in pairs(ty:getentries()) do
+        for _, entry in ipairs(ty:getentries()) do
           local entry_type = entry[2] or entry.type
           if not is_base_type_64bit(entry_type) then return false end
         end
@@ -3357,7 +3356,7 @@ function type_check.expr_deref(cx, node)
 
   if not (value_type:ispointer() or
           (std.is_bounded_type(value_type) and
-           std.is_region(value_type:bounds()[1])))
+           std.is_region(std.check_bounds(node, value_type)[1])))
   then
     report.error(node, "dereference of non-pointer type " .. tostring(value_type))
   end
@@ -3543,7 +3542,7 @@ end
 function type_check.expr_import_cross_product(cx, node)
   local partitions = node.partitions:map(function(p) return type_check.expr(cx, p) end)
   local partition_type
-  for idx, p in pairs(partitions) do
+  for idx, p in ipairs(partitions) do
     partition_type = std.as_read(p.expr_type)
     if not std.is_partition(partition_type) then
       report.error(p,
@@ -3554,10 +3553,10 @@ function type_check.expr_import_cross_product(cx, node)
 
   local colors = type_check.expr(cx, node.colors)
   local colors_type = std.as_read(colors.expr_type)
-  if not std.validate_implicit_cast(colors_type, uint32[#partitions]) then
+  if not std.validate_implicit_cast(colors_type, std.c.legion_color_t[#partitions]) then
     report.error(colors,
       "type mismatch in argument " .. tostring(#partitions + 1) ..
-        ": expected uint32[" .. #partitions ..  "] but got " ..  tostring(colors_type))
+        ": expected legion_color_t[" .. #partitions ..  "] but got " ..  tostring(colors_type))
   end
 
   local value = type_check.expr(cx, node.value)
@@ -4233,10 +4232,7 @@ function type_check.stat_var(cx, node)
       report.error(node, "variable of type " .. tostring(var_type) .. " must be initialized")
     end
     if std.is_bounded_type(var_type) then
-      local ok, message = var_type:bounds() -- check bounds validity
-      if not ok then
-        report.error(node, message)
-      end
+      std.check_bounds(node, var_type)
     end
   else
     if not value then

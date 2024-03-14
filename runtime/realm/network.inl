@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -112,7 +112,7 @@ namespace Realm {
 							 unsigned short msgid,
 							 size_t header_size,
 							 size_t max_payload_size,
-							 const void *src_payload_addr,
+                                                         const LocalAddress& src_payload_addr,
 							 size_t src_payload_lines,
 							 size_t src_payload_line_stride,
 							 const RemoteAddress& dest_payload_addr,
@@ -130,6 +130,27 @@ namespace Realm {
 							  src_payload_addr,
 							  src_payload_lines,
 							  src_payload_line_stride,
+							  dest_payload_addr,
+							  storage_base,
+							  storage_size);
+    }
+
+    inline ActiveMessageImpl *create_active_message_impl(NodeID target,
+							 unsigned short msgid,
+							 size_t header_size,
+							 size_t max_payload_size,
+							 const RemoteAddress& dest_payload_addr,
+							 void *storage_base,
+							 size_t storage_size)
+    {
+#ifdef REALM_USE_MULTIPLE_NETWORKS
+      if(REALM_UNLIKELY(single_network == 0)) {
+      } else
+#endif
+	return single_network->create_active_message_impl(target,
+							  msgid,
+							  header_size,
+							  max_payload_size,
 							  dest_payload_addr,
 							  storage_base,
 							  storage_size);
@@ -236,7 +257,8 @@ namespace Realm {
     }
 
     inline size_t recommended_max_payload(NodeID target,
-					  const void *data, size_t bytes_per_line,
+                                          const LocalAddress& src_payload_addr,
+					  size_t bytes_per_line,
 					  size_t lines, size_t line_stride,
 					  const RemoteAddress& dest_payload_addr,
 					  bool with_congestion,
@@ -247,7 +269,8 @@ namespace Realm {
       } else
 #endif
 	return single_network->recommended_max_payload(target,
-						       data, bytes_per_line,
+						       src_payload_addr,
+                                                       bytes_per_line,
 						       lines, line_stride,
 						       dest_payload_addr,
 						       with_congestion,

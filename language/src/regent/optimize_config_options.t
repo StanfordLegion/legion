@@ -1,4 +1,4 @@
--- Copyright 2022 Stanford University, NVIDIA Corporation
+-- Copyright 2024 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -202,13 +202,6 @@ local analyze_leaf_node = ast.make_single_dispatch(
   {ast.typed.expr, ast.typed.stat},
   always_true)
 
-local function analyze_leaf(cx, node)
-  return ast.mapreduce_node_postorder(
-    analyze_leaf_node(),
-    all_with_provenance,
-    node, {true})
-end
-
 local node_is_inner = {
   -- Expressions:
   [ast.typed.expr.Deref] = function(node)
@@ -338,13 +331,6 @@ local analyze_inner_node = ast.make_single_dispatch(
   node_is_inner,
   {ast.typed.expr, ast.typed.stat},
   always_true)
-
-local function analyze_inner(cx, node)
-  return ast.mapreduce_node_postorder(
-    analyze_inner_node(),
-    all_with_provenance,
-    node, {true})
-end
 
 local node_is_idempotent = {
   -- Expressions:
@@ -476,13 +462,6 @@ local analyze_idempotent_node = ast.make_single_dispatch(
   {ast.typed.expr, ast.typed.stat},
   always_true)
 
-local function analyze_idempotent(cx, node)
-  return ast.mapreduce_node_postorder(
-    analyze_idempotent_node(),
-    all_with_provenance,
-    node, {true})
-end
-
 local node_is_replicable = {
   -- Expressions:
 
@@ -509,7 +488,16 @@ local node_is_replicable = {
             node}
   end,
 
-  [ast.typed.expr.MethodCall] = always_false,
+  [ast.typed.expr.MethodCall] = function(node)
+    local value_type = std.as_read(node.value.expr_type)
+    local methods = rawget(value_type, "methods")
+    if methods then
+      local method = rawget(methods, node.method_name)
+      return {method and type(method) == "table" and rawget(method, "replicable") or false, node}
+    end
+    return {false, node}
+  end,
+
   [ast.typed.expr.Adjust]     = always_false,
   [ast.typed.expr.Arrive]     = always_false,
   [ast.typed.expr.Await]      = always_false,
@@ -623,13 +611,6 @@ local analyze_replicable_node = ast.make_single_dispatch(
   node_is_replicable,
   {ast.typed.expr, ast.typed.stat},
   always_true)
-
-local function analyze_replicable(cx, node)
-  return ast.mapreduce_node_postorder(
-    analyze_replicable_node(),
-    all_with_provenance,
-    node, {true})
-end
 
 local function analyze_all_node(cx)
   local analyze_leaf_node = analyze_leaf_node()

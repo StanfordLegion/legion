@@ -1,6 +1,6 @@
 #!/bin/bash -eu
 
-# Copyright 2022 Stanford University, NVIDIA Corporation
+# Copyright 2024 Stanford University, NVIDIA Corporation
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -21,5 +21,5 @@ if [ $# -ne 1 ]; then
 fi
 APPNAME="$1"
 
-gdb -p `pgrep "$APPNAME"` -ex 'set width 0' -ex 'thread apply all backtrace' -ex 'quit'
+gdb -p `pgrep "$APPNAME"` -ex 'set confirm off' -ex 'set height 0' -ex 'set width 0' -ex 'thread apply all backtrace' -ex 'quit'
 

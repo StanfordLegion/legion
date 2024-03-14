@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------#
-# Copyright 2022 Kitware, Inc.
+# Copyright 2024 Kitware, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
 # limitations under the License.
 #------------------------------------------------------------------------------#
 
-cmake_minimum_required(VERSION 3.1)
+cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
 project(LegionExample_implicit_top_task)
 
 # Only search if were building stand-alone and not as part of Legion
@@ -24,6 +24,7 @@ endif()
 
 add_executable(implicit_top_task implicit_top_task.cc)
 target_link_libraries(implicit_top_task Legion::Legion)
+target_compile_options(implicit_top_task PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
 if(Legion_ENABLE_TESTING)
   add_test(NAME implicit_top_task COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:implicit_top_task> ${Legion_TEST_ARGS})
 endif()

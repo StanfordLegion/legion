@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,7 +28,6 @@
 #include <functional>
 #include <stdlib.h>
 #include "legion/legion_config.h"
-#include "legion/legion_template_help.h" // StaticAssert
 #include <utility>
 
 namespace Legion {
@@ -43,6 +42,7 @@ namespace Legion {
       FUTURE_ALLOC,
       FUTURE_MAP_ALLOC,
       PHYSICAL_REGION_ALLOC,
+      OUTPUT_REGION_ALLOC,
       EXTERNAL_RESOURCES_ALLOC,
       STATIC_TRACE_ALLOC,
       DYNAMIC_TRACE_ALLOC,
@@ -52,12 +52,13 @@ namespace Legion {
       REDUCTION_ALLOC,
       PREDICATE_ALLOC,
       FUTURE_RESULT_ALLOC,
-      INDIVIDUAL_INST_MANAGER_ALLOC,
-      COLLECTIVE_INST_MANAGER_ALLOC,
+      PHYSICAL_MANAGER_ALLOC,
       TREE_CLOSE_ALLOC,
       TREE_CLOSE_IMPL_ALLOC,
       MATERIALIZED_VIEW_ALLOC,
       REDUCTION_VIEW_ALLOC,
+      REPLICATED_VIEW_ALLOC,
+      ALLREDUCE_VIEW_ALLOC,
       FILL_VIEW_ALLOC,
       PHI_VIEW_ALLOC,
       INDIVIDUAL_TASK_ALLOC,
@@ -74,6 +75,7 @@ namespace Legion {
       CREATION_OP_ALLOC,
       DELETION_OP_ALLOC,
       CLOSE_OP_ALLOC,
+      REFINEMENT_OP_ALLOC,
       DYNAMIC_COLLECTIVE_OP_ALLOC,
       FUTURE_PRED_OP_ALLOC,
       NOT_PRED_OP_ALLOC,
@@ -90,13 +92,10 @@ namespace Legion {
       PENDING_PARTITION_OP_ALLOC,
       DEPENDENT_PARTITION_OP_ALLOC,
       FILL_OP_ALLOC,
+      DISCARD_OP_ALLOC,
       ATTACH_OP_ALLOC,
       DETACH_OP_ALLOC,
       MESSAGE_BUFFER_ALLOC,
-      EXECUTING_CHILD_ALLOC,
-      EXECUTED_CHILD_ALLOC,
-      COMPLETE_CHILD_ALLOC,
-      PHYSICAL_MANAGER_ALLOC,
       LOGICAL_VIEW_ALLOC,
       LOGICAL_FIELD_VERSIONS_ALLOC,
       LOGICAL_FIELD_STATE_ALLOC,
@@ -149,7 +148,7 @@ namespace Legion {
     inline void* legion_alloc_aligned(size_t cnt)
     //--------------------------------------------------------------------------
     {
-      LEGION_STATIC_ASSERT((SIZE % ALIGNMENT) == 0, 
+      static_assert((SIZE % ALIGNMENT) == 0, 
           "SIZE must be evenly divisible by ALIGNMENT");
       size_t alloc_size = cnt;
       if (!BYTES)

@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -36,6 +36,7 @@ namespace Realm {
   class ByteArray;
   class ActiveMessageImpl;
   class IncomingMessageManager;
+  class NetworkSegment;
 
   // a RemoteAddress is used to name the target of an RDMA operation - in some
   //  cases it's as simple as a pointer, but in others additional info is needed
@@ -46,15 +47,26 @@ namespace Realm {
 	uintptr_t ptr;
 	uintptr_t extra;
       };
-      unsigned char raw_bytes[16];
+      unsigned char raw_bytes[384];
     };
   };
-  
+
+  // a LocalAddress is used to name the local source of an RDMA write or target
+  //  of an RDMA read
+  struct LocalAddress {
+    const NetworkSegment *segment;
+    uintptr_t offset;
+  };
+
   namespace Network {
     // a few globals for efficiency
     extern NodeID my_node_id;
     extern NodeID max_node_id;
     extern NodeSet all_peers;
+    // all peers that can access shared memory from this node
+    // NOTE: This is an over-estimation.  Users should be robust to the fact that this may
+    //       include peers that are not able to access shared memory.
+    extern NodeSet shared_peers;
 
     // in most cases, there will be a single network module - if so, we set
     //  this so we don't have to do a per-node lookup
@@ -94,16 +106,15 @@ namespace Realm {
 						  void *storage_base,
 						  size_t storage_size);
 
-    ActiveMessageImpl *create_active_message_impl(NodeID target,
-						  unsigned short msgid,
-						  size_t header_size,
-						  size_t max_payload_size,
-						  const void *src_payload_addr,
-						  size_t src_payload_lines,
-						  size_t src_payload_line_stride,
-						  const RemoteAddress& dest_payload_addr,
-						  void *storage_base,
-						  size_t storage_size);
+    ActiveMessageImpl *create_active_message_impl(
+        NodeID target, unsigned short msgid, size_t header_size, size_t max_payload_size,
+        const LocalAddress &src_payload_addr, size_t src_payload_lines,
+        size_t src_payload_line_stride, const RemoteAddress &dest_payload_addr,
+        void *storage_base, size_t storage_size);
+
+    ActiveMessageImpl *create_active_message_impl(
+        NodeID target, unsigned short msgid, size_t header_size, size_t max_payload_size,
+        const RemoteAddress &dest_payload_addr, void *storage_base, size_t storage_size);
 
     ActiveMessageImpl *create_active_message_impl(const NodeSet& targets,
 						  unsigned short msgid,
@@ -134,15 +145,12 @@ namespace Realm {
 				   size_t lines, size_t line_stride,
 				   bool with_congestion,
 				   size_t header_size);
-    size_t recommended_max_payload(NodeID target,
-				   const void *data, size_t bytes_per_line,
-				   size_t lines, size_t line_stride,
-				   const RemoteAddress& dest_payload_addr,
-				   bool with_congestion,
-				   size_t header_size);
+    size_t recommended_max_payload(NodeID target, const LocalAddress &src_payload_addr,
+                                   size_t bytes_per_line, size_t lines,
+                                   size_t line_stride,
+                                   const RemoteAddress &dest_payload_addr,
+                                   bool with_congestion, size_t header_size);
   };
-
-  class NetworkSegment;
 
   // a network module provides additional functionality on top of a normal Realm
   //  module
@@ -157,6 +165,9 @@ namespace Realm {
     // 2) fix the command line if the spawning system hijacked it
     //static NetworkModule *create_network_module(RuntimeImpl *runtime,
     //                                            int *argc, const char ***argv);
+
+    // Enumerates all the peers that the current node could potentially share memory with
+    virtual void get_shared_peers(NodeSet &shared_peers) = 0;
 
     // actual parsing of the command line should wait until here if at all
     //  possible
@@ -179,6 +190,8 @@ namespace Realm {
 			   const void *val_in, void *val_out, size_t bytes) = 0;
     virtual void gather(NodeID root,
 			const void *val_in, void *vals_out, size_t bytes) = 0;
+    virtual void allgatherv(const char *val_in, size_t bytes, std::vector<char> &vals_out,
+                            std::vector<size_t> &lengths) = 0;
 
     virtual size_t sample_messages_received_count(void) = 0;
     virtual bool check_for_quiescence(size_t sampled_receive_count) = 0;
@@ -199,16 +212,17 @@ namespace Realm {
 							  void *storage_base,
 							  size_t storage_size) = 0;
 
-    virtual ActiveMessageImpl *create_active_message_impl(NodeID target,
-							  unsigned short msgid,
-							  size_t header_size,
-							  size_t max_payload_size,
-							  const void *src_payload_addr,
-							  size_t src_payload_lines,
-							  size_t src_payload_line_stride,
-							  const RemoteAddress& dest_payload_addr,
-							  void *storage_base,
-							  size_t storage_size) = 0;
+    virtual ActiveMessageImpl *create_active_message_impl(
+        NodeID target, unsigned short msgid, size_t header_size, size_t max_payload_size,
+        const LocalAddress &src_payload_addr, size_t src_payload_lines,
+        size_t src_payload_line_stride, const RemoteAddress &dest_payload_addr,
+        void *storage_base, size_t storage_size) = 0;
+
+    virtual ActiveMessageImpl *
+    create_active_message_impl(NodeID target, unsigned short msgid, size_t header_size,
+                               size_t max_payload_size,
+                               const RemoteAddress &dest_payload_addr, void *storage_base,
+                               size_t storage_size) = 0;
 
     virtual ActiveMessageImpl *create_active_message_impl(const NodeSet& targets,
 							  unsigned short msgid,
@@ -241,11 +255,11 @@ namespace Realm {
 					   bool with_congestion,
 					   size_t header_size) = 0;
     virtual size_t recommended_max_payload(NodeID target,
-					   const void *data, size_t bytes_per_line,
-					   size_t lines, size_t line_stride,
-					   const RemoteAddress& dest_payload_addr,
-					   bool with_congestion,
-					   size_t header_size) = 0;
+                                           const LocalAddress &src_payload_addr,
+                                           size_t bytes_per_line, size_t lines,
+                                           size_t line_stride,
+                                           const RemoteAddress &dest_payload_addr,
+                                           bool with_congestion, size_t header_size) = 0;
   };
 
   namespace NetworkSegmentInfo {
@@ -261,26 +275,34 @@ namespace Realm {
 
     // generic memory that is read/write-able by the host CPUs
     static const MemoryType HostMem = 1;
+
+    // optional flags for a network segment
+    typedef unsigned FlagsType;
+    struct OptionFlags {
+      // registration should be performed on-demand rather than eagerly
+      static const FlagsType OnDemandRegistration = 1U << 0;
+    };
   };
 
   class REALM_INTERNAL_API_EXTERNAL_LINKAGE NetworkSegment {
   public:
     NetworkSegment();
-    
+
     // normally a request will just be for a particular size
-    void request(NetworkSegmentInfo::MemoryType _memtype,
-		 size_t _bytes, size_t _alignment,
-		 NetworkSegmentInfo::MemoryTypeExtraData _memextra = 0);
+    void request(NetworkSegmentInfo::MemoryType _memtype, size_t _bytes,
+                 size_t _alignment, NetworkSegmentInfo::MemoryTypeExtraData _memextra = 0,
+                 NetworkSegmentInfo::FlagsType _flags = 0);
 
     // but it can also be for a pre-allocated chunk of memory with a fixed address
-    void assign(NetworkSegmentInfo::MemoryType _memtype,
-		void *_base, size_t _bytes,
-		NetworkSegmentInfo::MemoryTypeExtraData _memextra = 0);
+    void assign(NetworkSegmentInfo::MemoryType _memtype, void *_base, size_t _bytes,
+                NetworkSegmentInfo::MemoryTypeExtraData _memextra = 0,
+                NetworkSegmentInfo::FlagsType _flags = 0);
 
     void *base;  // once this is non-null, it cannot be changed
     size_t bytes, alignment;
     NetworkSegmentInfo::MemoryType memtype;
     NetworkSegmentInfo::MemoryTypeExtraData memextra;
+    NetworkSegmentInfo::FlagsType flags;
 
     // again, a single network puts itself here in addition to adding to the map
     NetworkModule *single_network;
@@ -293,6 +315,15 @@ namespace Realm {
     void add_rdma_info(NetworkModule *network,
 		       const void *data, size_t len);
     const ByteArray *get_rdma_info(NetworkModule *network) const;
+
+    // returns whether the segment is registered for all networks,
+    //  or for a specific network
+    bool is_registered() const;
+    bool is_registered(NetworkModule *network) const;
+
+    // tests whether an address range is in segment
+    bool in_segment(const void *range_base, size_t range_bytes) const;
+    bool in_segment(uintptr_t range_base, size_t range_bytes) const;
   };
 
 }; // namespace Realm

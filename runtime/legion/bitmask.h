@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -59,6 +59,9 @@
 #if defined(__AVX__) || defined(__AVX2__)
 #include <immintrin.h>
 #endif
+#endif
+#ifdef __ARM_NEON
+#include "arm_neon.h"
 #endif
 #ifndef BITMASK_MAX_ALIGNMENT
 #define BITMASK_MAX_ALIGNMENT   (2*sizeof(void *))
@@ -253,6 +256,57 @@
         const T *const ptr;
       };
 #endif
+#ifdef __ARM_NEON
+      template<bool READ_ONLY, typename T = uint64_t>
+      class NeonView {
+      public:
+        inline NeonView(T *base, unsigned index) 
+          : ptr(base + ((sizeof(float32x4_t)/sizeof(T))*index)) { }
+      public:
+        inline operator uint32x4_t(void) const {
+          uint32x4_t result;
+          memcpy(&result, ptr, sizeof(result));
+          return result;
+        }
+        inline operator float32x4_t(void) const {
+          float32x4_t result;
+          memcpy(&result, ptr, sizeof(result));
+          return result;
+        };
+      public:
+        inline void operator=(const uint32x4_t &value) {
+          memcpy(ptr, &value, sizeof(value));
+        }
+        inline void operator=(const float32x4_t &value) {
+          memcpy(ptr, &value, sizeof(value));
+        }
+        template<bool WHOCARES>
+        inline void operator=(const NeonView<WHOCARES> &rhs) {
+          memcpy(ptr, rhs.ptr, sizeof(float32x4_t));
+        }
+      public:
+        T *const ptr;
+      };
+      template<typename T>
+      class NeonView<true,T> {
+      public:
+        inline NeonView(const T *base, unsigned index) 
+          : ptr(base + ((sizeof(float32x4_t)/sizeof(T))*index)) { }
+      public:
+        inline operator uint32x4_t(void) const {
+          uint32x4_t result;
+          memcpy(&result, ptr, sizeof(result));
+          return result;
+        }
+        inline operator float32x4_t(void) const {
+          float32x4_t result;
+          memcpy(&result, ptr, sizeof(result));
+          return result;
+        };
+      public:
+        const T *const ptr;
+      };
+#endif
 
       // Help with safe type-punning of bit representations
       // This is only because C++ is a stupid fucking language
@@ -278,6 +332,12 @@
           { return PPCView<false,ELEMENT_TYPE>(bit_vector, index); }
         inline PPCView<true,ELEMENT_TYPE> ppc_view(unsigned index) const
           { return PPCView<true,ELEMENT_TYPE>(bit_vector, index); }
+#endif
+#ifdef __ARM_NEON
+        inline NeonView<false,ELEMENT_TYPE> neon_view(unsigned index)
+          { return NeonView<false,ELEMENT_TYPE>(bit_vector, index); }
+        inline NeonView<true,ELEMENT_TYPE> neon_view(unsigned index) const
+          { return NeonView<true,ELEMENT_TYPE>(bit_vector, index); }
 #endif
       public:
         // Number of bits in the bit vector based element
@@ -1028,6 +1088,190 @@
       uint64_t sum_mask; 
     };
 #endif // __ALTIVEC__
+       
+#ifdef __ARM_NEON
+    /////////////////////////////////////////////////////////////
+    // Neon Bit Mask  
+    /////////////////////////////////////////////////////////////
+    template<unsigned int MAX>
+    class alignas(16) NeonBitMask
+      : public BitMaskHelp::Heapify<NeonBitMask<MAX> > {
+    public:
+      static constexpr unsigned ELEMENT_SIZE =
+        BitMaskHelp::BitVector<MAX>::ELEMENT_SIZE;
+      static constexpr unsigned BIT_ELMTS = MAX/ELEMENT_SIZE;
+      static constexpr unsigned NEON_ELMTS = MAX/128;
+      static constexpr unsigned MAXSIZE = MAX;
+    public:
+      explicit NeonBitMask(uint64_t init = 0);
+      NeonBitMask(const NeonBitMask &rhs);
+      ~NeonBitMask(void);
+    public:
+      inline void set_bit(unsigned bit);
+      inline void unset_bit(unsigned bit);
+      inline void assign_bit(unsigned bit, bool val);
+      inline bool is_set(unsigned bit) const;
+      inline int find_first_set(void) const;
+      inline int find_next_set(unsigned start) const;
+      inline int find_index(unsigned bit) const;
+      inline int get_index(unsigned index) const;
+      inline bool empty(void) const;
+      inline void clear(void);
+    public:
+      inline size_t size(void) const { return pop_count(); }
+      inline bool contains(unsigned bit) const { return is_set(bit); }
+      inline void add(unsigned bit) { set_bit(bit); }
+      inline void insert(unsigned bit) { set_bit(bit); }
+      inline void remove(unsigned bit) { unset_bit(bit); }
+    public:
+      inline bool operator==(const NeonBitMask &rhs) const;
+      inline bool operator<(const NeonBitMask &rhs) const;
+      inline bool operator!=(const NeonBitMask &rhs) const;
+    public:
+      inline BitMaskHelp::NeonView<true> 
+        operator()(const unsigned &idx) const;
+      inline BitMaskHelp::NeonView<false>
+        operator()(const unsigned &idx);
+      inline const uint64_t& operator[](const unsigned &idx) const;
+      inline uint64_t& operator[](const unsigned &idx);
+      inline NeonBitMask& operator=(const NeonBitMask &rhs);
+    public:
+      inline NeonBitMask operator~(void) const;
+      inline NeonBitMask operator|(const NeonBitMask &rhs) const;
+      inline NeonBitMask operator&(const NeonBitMask &rhs) const;
+      inline NeonBitMask operator^(const NeonBitMask &rhs) const;
+    public:
+      inline NeonBitMask& operator|=(const NeonBitMask &rhs);
+      inline NeonBitMask& operator&=(const NeonBitMask &rhs);
+      inline NeonBitMask& operator^=(const NeonBitMask &rhs);
+    public:
+      // Use * for disjointness testing
+      inline bool operator*(const NeonBitMask &rhs) const;
+      // Set difference
+      inline NeonBitMask operator-(const NeonBitMask &rhs) const;
+      inline NeonBitMask& operator-=(const NeonBitMask &rhs);
+      // Test to see if everything is zeros
+      inline bool operator!(void) const;
+    public:
+      inline NeonBitMask operator<<(unsigned shift) const;
+      inline NeonBitMask operator>>(unsigned shift) const;
+    public:
+      inline NeonBitMask& operator<<=(unsigned shift);
+      inline NeonBitMask& operator>>=(unsigned shift);
+    public:
+      inline uint64_t get_hash_key(void) const;
+      inline const uint64_t* base(void) const;
+      template<typename ST>
+      inline void serialize(ST &rez) const;
+      template<typename DT>
+      inline void deserialize(DT &derez);
+      // The functor class must have an 'apply' method that
+      // takes one unsigned argument. This method will map
+      // the functor over all the entries in the mask.
+      template<typename FUNCTOR>
+      inline void map(FUNCTOR &functor) const;
+    public:
+      // Allocates memory that becomes owned by the caller
+      inline char* to_string(void) const;
+    public:
+      inline unsigned pop_count(void) const;
+      static inline unsigned pop_count(const NeonBitMask<MAX> &mask);
+    protected:
+      BitMaskHelp::BitVector<MAX> bits; 
+    };
+    
+    /////////////////////////////////////////////////////////////
+    // Neon Two-Level Bit Mask  
+    /////////////////////////////////////////////////////////////
+    template<unsigned int MAX>
+    class alignas(16) NeonTLBitMask
+      : public BitMaskHelp::Heapify<NeonTLBitMask<MAX> > {
+    public:
+      static constexpr unsigned ELEMENT_SIZE =
+        BitMaskHelp::BitVector<MAX>::ELEMENT_SIZE;
+      static constexpr unsigned BIT_ELMTS = MAX/ELEMENT_SIZE;
+      static constexpr unsigned NEON_ELMTS = MAX/128;
+      static constexpr unsigned MAXSIZE = MAX;
+    public:
+      explicit NeonTLBitMask(uint64_t init = 0);
+      NeonTLBitMask(const NeonTLBitMask &rhs);
+      ~NeonTLBitMask(void);
+    public:
+      inline void set_bit(unsigned bit);
+      inline void unset_bit(unsigned bit);
+      inline void assign_bit(unsigned bit, bool val);
+      inline bool is_set(unsigned bit) const;
+      inline int find_first_set(void) const;
+      inline int find_next_set(unsigned start) const;
+      inline int find_index(unsigned bit) const;
+      inline int get_index(unsigned index) const;
+      inline bool empty(void) const;
+      inline void clear(void);
+    public:
+      inline size_t size(void) const { return pop_count(); }
+      inline bool contains(unsigned bit) const { return is_set(bit); }
+      inline void add(unsigned bit) { set_bit(bit); }
+      inline void insert(unsigned bit) { set_bit(bit); }
+      inline void remove(unsigned bit) { unset_bit(bit); }
+    public:
+      inline bool operator==(const NeonTLBitMask &rhs) const;
+      inline bool operator<(const NeonTLBitMask &rhs) const;
+      inline bool operator!=(const NeonTLBitMask &rhs) const;
+    public:
+      inline BitMaskHelp::NeonView<true> 
+        operator()(const unsigned &idx) const;
+      inline BitMaskHelp::NeonView<false>
+        operator()(const unsigned &idx);
+      inline const uint64_t& operator[](const unsigned &idx) const;
+      inline uint64_t& operator[](const unsigned &idx);
+      inline NeonTLBitMask& operator=(const NeonTLBitMask &rhs);
+    public:
+      inline NeonTLBitMask operator~(void) const;
+      inline NeonTLBitMask operator|(const NeonTLBitMask &rhs) const;
+      inline NeonTLBitMask operator&(const NeonTLBitMask &rhs) const;
+      inline NeonTLBitMask operator^(const NeonTLBitMask &rhs) const;
+    public:
+      inline NeonTLBitMask& operator|=(const NeonTLBitMask &rhs);
+      inline NeonTLBitMask& operator&=(const NeonTLBitMask &rhs);
+      inline NeonTLBitMask& operator^=(const NeonTLBitMask &rhs);
+    public:
+      // Use * for disjointness testing
+      inline bool operator*(const NeonTLBitMask &rhs) const;
+      // Set difference
+      inline NeonTLBitMask operator-(const NeonTLBitMask &rhs) const;
+      inline NeonTLBitMask& operator-=(const NeonTLBitMask &rhs);
+      // Test to see if everything is zeros
+      inline bool operator!(void) const;
+    public:
+      inline NeonTLBitMask operator<<(unsigned shift) const;
+      inline NeonTLBitMask operator>>(unsigned shift) const;
+    public:
+      inline NeonTLBitMask& operator<<=(unsigned shift);
+      inline NeonTLBitMask& operator>>=(unsigned shift);
+    public:
+      inline uint64_t get_hash_key(void) const;
+      inline const uint64_t* base(void) const;
+      template<typename ST>
+      inline void serialize(ST &rez) const;
+      template<typename DT>
+      inline void deserialize(DT &derez);
+      // The functor class must have an 'apply' method that
+      // takes one unsigned argument. This method will map
+      // the functor over all the entries in the mask.
+      template<typename FUNCTOR>
+      inline void map(FUNCTOR &functor) const;
+    public:
+      // Allocates memory that becomes owned by the caller
+      inline char* to_string(void) const;
+    public:
+      inline unsigned pop_count(void) const;
+      static inline unsigned pop_count(const NeonTLBitMask<MAX> &mask);
+      static inline uint64_t extract_mask(uint32x4_t value);
+    protected:
+      BitMaskHelp::BitVector<MAX> bits;
+      uint64_t sum_mask; 
+    };
+#endif // __ARM_NEON
 
     template<typename DT, unsigned BLOAT=1, bool BIDIR=true>
     class CompoundBitMask {
@@ -1425,7 +1669,7 @@
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
         unsigned local = __builtin_popcountll(bit_vector[idx]);
-        if (index <= local)
+        if (index < local)
         {
           for (unsigned j = 0; j < ELEMENT_SIZE; j++)
           {
@@ -1848,9 +2092,6 @@
       else
       {
         // Slow case with merging words
-        T carry_mask = 0;
-        for (unsigned idx = 0; idx < local; idx++)
-          carry_mask |= (1 << idx);
         for (unsigned idx = 0; idx < (BIT_ELMTS-(range+1)); idx++)
         {
           T right = bit_vector[idx+range] >> local;
@@ -2141,7 +2382,7 @@
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
         unsigned local = __builtin_popcountll(bit_vector[idx]);
-        if (index <= local)
+        if (index < local)
         {
           for (unsigned j = 0; j < ELEMENT_SIZE; j++)
           {
@@ -2609,9 +2850,6 @@
       else
       {
         // Slow case with merging words
-        T carry_mask = 0;
-        for (unsigned idx = 0; idx < local; idx++)
-          carry_mask |= (1 << idx);
         for (unsigned idx = 0; idx < (BIT_ELMTS-(range+1)); idx++)
         {
           T right = bit_vector[idx+range] >> local;
@@ -2912,7 +3150,7 @@
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
         unsigned local = __builtin_popcountll(bits.bit_vector[idx]);
-        if (index <= local)
+        if (index < local)
         {
           for (unsigned j = 0; j < ELEMENT_SIZE; j++)
           {
@@ -3343,9 +3581,6 @@
       else
       {
         // Slow case with merging words
-        uint64_t carry_mask = 0;
-        for (unsigned idx = 0; idx < local; idx++)
-          carry_mask |= (1 << idx);
         for (unsigned idx = 0; idx < (BIT_ELMTS-(range+1)); idx++)
         {
           uint64_t right = bits.bit_vector[idx+range] >> local;
@@ -3610,7 +3845,7 @@
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
         unsigned local = __builtin_popcountll(bits.bit_vector[idx]);
-        if (index <= local)
+        if (index < local)
         {
           for (unsigned j = 0; j < ELEMENT_SIZE; j++)
           {
@@ -4097,9 +4332,6 @@
       else
       {
         // Slow case with merging words
-        uint64_t carry_mask = 0;
-        for (unsigned idx = 0; idx < local; idx++)
-          carry_mask |= (1 << idx);
         for (unsigned idx = 0; idx < (BIT_ELMTS-(range+1)); idx++)
         {
           uint64_t right = bits.bit_vector[idx+range] >> local;
@@ -4377,7 +4609,7 @@
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
         unsigned local = __builtin_popcountll(bits.bit_vector[idx]);
-        if (index <= local)
+        if (index < local)
         {
           for (unsigned j = 0; j < ELEMENT_SIZE; j++)
           {
@@ -4875,9 +5107,6 @@
       else
       {
         // Slow case with merging words
-        uint64_t carry_mask = 0;
-        for (unsigned idx = 0; idx < local; idx++)
-          carry_mask |= (1 << idx);
         for (unsigned idx = 0; idx < (BIT_ELMTS-(range+1)); idx++)
         {
           uint64_t right = bits.bit_vector[idx+range] >> local;
@@ -5142,7 +5371,7 @@
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
         unsigned local = __builtin_popcountll(bits.bit_vector[idx]);
-        if (index <= local)
+        if (index < local)
         {
           for (unsigned j = 0; j < ELEMENT_SIZE; j++)
           {
@@ -5709,9 +5938,6 @@
       else
       {
         // Slow case with merging words
-        uint64_t carry_mask = 0;
-        for (unsigned idx = 0; idx < local; idx++)
-          carry_mask |= (1 << idx);
         for (unsigned idx = 0; idx < (BIT_ELMTS-(range+1)); idx++)
         {
           uint64_t right = bits.bit_vector[idx+range] >> local;
@@ -6009,7 +6235,7 @@
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
         unsigned local = __builtin_popcountll(bits.bit_vector[idx]);
-        if (index <= local)
+        if (index < local)
         {
           for (unsigned j = 0; j < ELEMENT_SIZE; j++)
           {
@@ -6458,9 +6684,6 @@
       else
       {
         // Slow case with merging words
-        uint64_t carry_mask = 0;
-        for (unsigned idx = 0; idx < local; idx++)
-          carry_mask |= (1 << idx);
         for (unsigned idx = 0; idx < (BIT_ELMTS-(range+1)); idx++)
         {
           uint64_t right = bits.bit_vector[idx+range] >> local;
@@ -6725,7 +6948,7 @@
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
         unsigned local = __builtin_popcountll(bits.bit_vector[idx]);
-        if (index <= local)
+        if (index < local)
         {
           for (unsigned j = 0; j < ELEMENT_SIZE; j++)
           {
@@ -7240,9 +7463,6 @@
       else
       {
         // Slow case with merging words
-        uint64_t carry_mask = 0;
-        for (unsigned idx = 0; idx < local; idx++)
-          carry_mask |= (1 << idx);
         for (unsigned idx = 0; idx < (BIT_ELMTS-(range+1)); idx++)
         {
           uint64_t right = bits.bit_vector[idx+range] >> local;
@@ -7376,6 +7596,1511 @@
       return (left | right);
     }
 #endif // __ALTIVEC__
+
+#ifdef __ARM_NEON
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    NeonBitMask<MAX>::NeonBitMask(uint64_t init /*= 0*/)
+    //-------------------------------------------------------------------------
+    {
+      static_assert((MAX % 128) == 0, "Bad MAX");
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        bits.bit_vector[idx] = init;
+      }
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    NeonBitMask<MAX>::NeonBitMask(const NeonBitMask &rhs)
+    //-------------------------------------------------------------------------
+    {
+      static_assert((MAX % 128) == 0, "Bad MAX");
+      for (unsigned idx = 0; idx < NEON_ELMTS; idx++)
+      {
+        bits.neon_view(idx) = rhs(idx);
+      }
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    NeonBitMask<MAX>::~NeonBitMask(void)
+    //-------------------------------------------------------------------------
+    {
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline void NeonBitMask<MAX>::set_bit(unsigned bit)
+    //-------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(bit < MAX);
+#endif
+      unsigned idx = bit >> 6;
+      bits.bit_vector[idx] |= (1UL << (bit & 0x3F));
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline void NeonBitMask<MAX>::unset_bit(unsigned bit)
+    //-------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(bit < MAX);
+#endif
+      unsigned idx = bit >> 6;
+      bits.bit_vector[idx] &= ~(1UL << (bit & 0x3F));
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline void NeonBitMask<MAX>::assign_bit(unsigned bit, bool val)
+    //-------------------------------------------------------------------------
+    {
+      if (val)
+        set_bit(bit);
+      else
+        unset_bit(bit);
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline bool NeonBitMask<MAX>::is_set(unsigned bit) const
+    //-------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(bit < MAX);
+#endif
+      unsigned idx = bit >> 6;
+      return (bits.bit_vector[idx] & (1UL << (bit & 0x3F)));
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline int NeonBitMask<MAX>::find_first_set(void) const
+    //-------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        if (bits.bit_vector[idx])
+        {
+          for (unsigned j = 0; j < ELEMENT_SIZE; j++)
+          {
+            if (bits.bit_vector[idx] & (1UL << j))
+            {
+              return (idx*ELEMENT_SIZE + j);
+            }
+          }
+        }
+      }
+      return -1;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline int NeonBitMask<MAX>::find_index(unsigned bit) const
+    //-------------------------------------------------------------------------
+    {
+      unsigned element = bit >> bits.SHIFT; 
+      unsigned offset = bit & bits.MASK;
+      if (bits.bit_vector[element] & (1ULL << offset))
+      {
+        int index = 0;
+        for (unsigned idx = 0; idx < element; idx++)
+          index += __builtin_popcountll(bits.bit_vector[idx]);
+        // Handle dumb c++ shift overflow
+        if (offset == 0)
+          return index;
+        // Just count the bits up to but not including the actual
+        // bit we're looking for since indexes are zero-base
+        index += __builtin_popcountll(
+            bits.bit_vector[element] << (ELEMENT_SIZE - offset));
+        return index;
+      }
+      else // It's not set otherwise so we couldn't find an index
+        return -1;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline int NeonBitMask<MAX>::get_index(unsigned index) const
+    //-------------------------------------------------------------------------
+    {
+      int offset = 0;
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        unsigned local = __builtin_popcountll(bits.bit_vector[idx]);
+        if (index < local)
+        {
+          for (unsigned j = 0; j < ELEMENT_SIZE; j++)
+          {
+            if (bits.bit_vector[idx] & (1ULL << j))
+            {
+              if (index == 0)
+                return (offset + j);
+              index--;
+            }
+          }
+        }
+        index -= local;
+        offset += ELEMENT_SIZE;
+      }
+      return -1;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline int NeonBitMask<MAX>::find_next_set(unsigned start) const
+    //-------------------------------------------------------------------------
+    {
+      int idx = start / ELEMENT_SIZE; // truncate
+      int offset = idx * ELEMENT_SIZE; 
+      int j = start % ELEMENT_SIZE;
+      if (j > 0) // if we are already in the middle of element search it
+      {
+        for ( ; j < int(ELEMENT_SIZE); j++)
+        {
+          if (bits.bit_vector[idx] & (1ULL << j))
+            return (offset + j);
+        }
+        idx++;
+        offset += ELEMENT_SIZE;
+      }
+      for ( ; idx < int(BIT_ELMTS); idx++)
+      {
+        if (bits.bit_vector[idx] > 0) // if it has any valid entries, find next
+        {
+          for (j = 0; j < int(ELEMENT_SIZE); j++)
+          {
+            if (bits.bit_vector[idx] & (1ULL << j))
+              return (offset + j);
+          }
+        }
+        offset += ELEMENT_SIZE;
+      }
+      return -1;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline void NeonBitMask<MAX>::clear(void)
+    //-------------------------------------------------------------------------
+    {
+      const uint32x4_t zero_vec = vdupq_n_u32(0);
+      for (unsigned idx = 0; idx < NEON_ELMTS; idx++)
+      {
+        bits.neon_view(idx) = zero_vec;
+      }
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline BitMaskHelp::NeonView<true>
+                    NeonBitMask<MAX>::operator()(const unsigned int &idx) const
+    //-------------------------------------------------------------------------
+    {
+      return bits.neon_view(idx);
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline BitMaskHelp::NeonView<false>
+                          NeonBitMask<MAX>::operator()(const unsigned int &idx)
+    //-------------------------------------------------------------------------
+    {
+      return bits.neon_view(idx);
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline const uint64_t& NeonBitMask<MAX>::operator[](
+                                                 const unsigned int &idx) const
+    //-------------------------------------------------------------------------
+    {
+      return bits.bit_vector[idx];
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline uint64_t& NeonBitMask<MAX>::operator[](const unsigned int &idx) 
+    //-------------------------------------------------------------------------
+    {
+      return bits.bit_vector[idx]; 
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline bool NeonBitMask<MAX>::operator==(const NeonBitMask &rhs) const
+    //-------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+	if (bits.bit_vector[idx] != rhs[idx])
+          return false;
+      }
+      return true;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline bool NeonBitMask<MAX>::operator<(const NeonBitMask &rhs) const
+    //-------------------------------------------------------------------------
+    {
+      // Only be less than if the bits are a subset of the rhs bits
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        if (bits.neon_view(idx) < rhs[idx])
+          return true;
+        else if (bits.bits_vector[idx] > rhs[idx])
+          return false;
+      }
+      // Otherwise they are equal so false
+      return false;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline bool NeonBitMask<MAX>::operator!=(const NeonBitMask &rhs) const
+    //-------------------------------------------------------------------------
+    {
+      return !(*this == rhs);
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline NeonBitMask<MAX>& NeonBitMask<MAX>::operator=(
+                                                        const NeonBitMask &rhs)
+    //-------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < NEON_ELMTS; idx++)
+      {
+        bits.neon_view(idx) = rhs(idx);
+      }
+      return *this;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline NeonBitMask<MAX> NeonBitMask<MAX>::operator~(void) const
+    //-------------------------------------------------------------------------
+    {
+      NeonBitMask<MAX> result;
+      for (unsigned idx = 0; idx < NEON_ELMTS; idx++)
+      {
+        uint32x4_t rhs = bits.neon_view(idx);
+        result(idx) = vmvnq_u32(rhs);
+      }
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline NeonBitMask<MAX> NeonBitMask<MAX>::operator|(
+                                                  const NeonBitMask &rhs) const
+    //-------------------------------------------------------------------------
+    {
+      NeonBitMask<MAX> result;
+      for (unsigned idx = 0; idx < NEON_ELMTS; idx++)
+      {
+        uint32x4_t rhs1 = bits.neon_view(idx);
+        uint32x4_t rhs2 = rhs(idx);
+        result(idx) = vorrq_u32(rhs1, rhs2);
+      }
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline NeonBitMask<MAX> NeonBitMask<MAX>::operator&(
+                                                  const NeonBitMask &rhs) const
+    //-------------------------------------------------------------------------
+    {
+      NeonBitMask<MAX> result;
+      for (unsigned idx = 0; idx < NEON_ELMTS; idx++)
+      {
+        uint32x4_t rhs1 = bits.neon_view(idx);
+        uint32x4_t rhs2 = rhs(idx);
+        result(idx) = vandq_u32(rhs1, rhs2);
+      }
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline NeonBitMask<MAX> NeonBitMask<MAX>::operator^(
+                                                  const NeonBitMask &rhs) const
+    //-------------------------------------------------------------------------
+    {
+      NeonBitMask<MAX> result;
+      for (unsigned idx = 0; idx < NEON_ELMTS; idx++)
+      {
+        uint32x4_t rhs1 = bits.neon_view(idx);
+        uint32x4_t rhs2 = rhs(idx);
+        result(idx) = veorq_u32(rhs1, rhs2);
+      }
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline NeonBitMask<MAX>& NeonBitMask<MAX>::operator|=(
+                                                        const NeonBitMask &rhs) 
+    //-------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < NEON_ELMTS; idx++)
+      {
+        uint32x4_t rhs1 = bits.neon_view(idx);
+        uint32x4_t rhs2 = rhs(idx);
+        bits.neon_view(idx) = vorrq_u32(rhs1, rhs2);
+      }
+      return *this;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline NeonBitMask<MAX>& NeonBitMask<MAX>::operator&=(
+                                                        const NeonBitMask &rhs)
+    //-------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < NEON_ELMTS; idx++)
+      {
+        uint32x4_t rhs1 = bits.neon_view(idx);
+        uint32x4_t rhs2 = rhs(idx);
+        bits.neon_view(idx) = vandq_u32(rhs1, rhs2);
+      }
+      return *this;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline NeonBitMask<MAX>& NeonBitMask<MAX>::operator^=(
+                                                        const NeonBitMask &rhs)
+    //-------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < NEON_ELMTS; idx++)
+      {
+        uint32x4_t rhs1 = bits.neon_view(idx);
+        uint32x4_t rhs2 = rhs(idx);
+        bits.neon_view(idx) = veorq_u32(rhs1, rhs2);
+      }
+      return *this;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline bool NeonBitMask<MAX>::operator*(const NeonBitMask &rhs) const
+    //-------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        if (bits.bit_vector[idx] & rhs[idx])
+          return false;
+      }
+      return true;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline NeonBitMask<MAX> NeonBitMask<MAX>::operator-(
+                                                  const NeonBitMask &rhs) const
+    //-------------------------------------------------------------------------
+    {
+      NeonBitMask<MAX> result;
+      for (unsigned idx = 0; idx < NEON_ELMTS; idx++)
+      {
+        uint32x4_t rhs1 = bits.neon_view(idx);
+        uint32x4_t rhs2 = rhs(idx);
+        result(idx) = vandq_u32(rhs1, vmvnq_u32(rhs2));
+      }
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline NeonBitMask<MAX>& NeonBitMask<MAX>::operator-=(
+                                                        const NeonBitMask &rhs)
+    //-------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < NEON_ELMTS; idx++)
+      {
+        uint32x4_t rhs1 = bits.neon_view(idx);
+        uint32x4_t rhs2 = rhs(idx);
+        bits.neon_view(idx) = vandq_u32(rhs1, ~rhs2);
+      }
+      return *this;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline bool NeonBitMask<MAX>::empty(void) const
+    //-------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        if (bits.bit_vector[idx] != 0)
+          return false;
+      }
+      return true;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline bool NeonBitMask<MAX>::operator!(void) const
+    //-------------------------------------------------------------------------
+    {
+      return empty();
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline NeonBitMask<MAX> NeonBitMask<MAX>::operator<<(unsigned shift) const
+    //-------------------------------------------------------------------------
+    {
+      // Find the range
+      unsigned range = shift >> 6;
+      unsigned local = shift & 0x3F;
+      NeonBitMask<MAX> result;
+      if (!local)
+      {
+        // Fast case where we just have to move the individual words
+        for (int idx = (BIT_ELMTS-1); idx >= int(range); idx--)
+        {
+          result[idx] = bits.bit_vector[idx-range]; 
+        }
+        // fill in everything else with zeros
+        for (unsigned idx = 0; idx < range; idx++)
+          result[idx] = 0;
+      }
+      else
+      {
+        // Slow case with merging words
+        for (int idx = (BIT_ELMTS-1); idx > int(range); idx--)
+        {
+          uint64_t left = bits.bit_vector[idx-range] << local;
+          uint64_t right = bits.bit_vector[idx-(range+1)] >> ((1 << 6) - local);
+          result[idx] = left | right;
+        }
+        // Handle the last case
+        result[range] = bits.bit_vector[0] << local; 
+        // Fill in everything else with zeros
+        for (unsigned idx = 0; idx < range; idx++)
+          result[idx] = 0;
+      }
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline NeonBitMask<MAX> NeonBitMask<MAX>::operator>>(unsigned shift) const
+    //-------------------------------------------------------------------------
+    {
+      unsigned range = shift >> 6;
+      unsigned local = shift & 0x3F;
+      NeonBitMask<MAX> result;
+      if (!local)
+      {
+        // Fast case where we just have to move individual words
+        for (unsigned idx = 0; idx < (BIT_ELMTS-range); idx++)
+        {
+          result[idx] = bits.bit_vector[idx+range];
+        }
+        // Fill in everything else with zeros
+        for (unsigned idx = (BIT_ELMTS-range); idx < (BIT_ELMTS); idx++)
+          result[idx] = 0;
+      }
+      else
+      {
+        // Slow case with merging words
+        for (unsigned idx = 0; idx < (BIT_ELMTS-(range+1)); idx++)
+        {
+          uint64_t right = bits.bit_vector[idx+range] >> local;
+          uint64_t left = bits.bit_vector[idx+range+1] << ((1 << 6) - local);
+          result[idx] = left | right;
+        }
+        // Handle the last case
+        result[BIT_ELMTS-(range+1)] = bits.bit_vector[BIT_ELMTS-1] >> local;
+        // Fill in everything else with zeros
+        for (unsigned idx = (BIT_ELMTS-range); idx < BIT_ELMTS; idx++)
+          result[idx] = 0;
+      }
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline NeonBitMask<MAX>& NeonBitMask<MAX>::operator<<=(unsigned shift)
+    //-------------------------------------------------------------------------
+    {
+      // Find the range
+      unsigned range = shift >> 6;
+      unsigned local = shift & 0x3F;
+      if (!local)
+      {
+        // Fast case where we just have to move the individual words
+        for (int idx = (BIT_ELMTS-1); idx >= int(range); idx--)
+        {
+          bits.bit_vector[idx] = bits.bit_vector[idx-range]; 
+        }
+        // fill in everything else with zeros
+        for (unsigned idx = 0; idx < range; idx++)
+          bits.bit_vector[idx] = 0;
+      }
+      else
+      {
+        // Slow case with merging words
+        for (int idx = (BIT_ELMTS-1); idx > int(range); idx--)
+        {
+          uint64_t left = bits.bit_vector[idx-range] << local;
+          uint64_t right = bits.bit_vector[idx-(range+1)] >> ((1 << 6) - local);
+          bits.bit_vector[idx] = left | right;
+        }
+        // Handle the last case
+        bits.bit_vector[range] = bits.bit_vector[0] << local; 
+        // Fill in everything else with zeros
+        for (unsigned idx = 0; idx < range; idx++)
+          bits.bit_vector[idx] = 0;
+      }
+      return *this;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline NeonBitMask<MAX>& NeonBitMask<MAX>::operator>>=(unsigned shift)
+    //-------------------------------------------------------------------------
+    {
+      unsigned range = shift >> 6;
+      unsigned local = shift & 0x3F;
+      if (!local)
+      {
+        // Fast case where we just have to move individual words
+        for (unsigned idx = 0; idx < (BIT_ELMTS-range); idx++)
+        {
+          bits.bit_vector[idx] = bits.bit_vector[idx+range];
+        }
+        // Fill in everything else with zeros
+        for (unsigned idx = (BIT_ELMTS-range); idx < (BIT_ELMTS); idx++)
+          bits.bit_vector[idx] = 0;
+      }
+      else
+      {
+        // Slow case with merging words
+        for (unsigned idx = 0; idx < (BIT_ELMTS-(range+1)); idx++)
+        {
+          uint64_t right = bits.bit_vector[idx+range] >> local;
+          uint64_t left = bits.bit_vector[idx+range+1] << ((1 << 6) - local);
+          bits.bit_vector[idx] = left | right;
+        }
+        // Handle the last case
+        bits.bit_vector[BIT_ELMTS-(range+1)] = 
+                                      bits.bit_vector[BIT_ELMTS-1] >> local;
+        // Fill in everything else with zeros
+        for (unsigned idx = (BIT_ELMTS-range); idx < BIT_ELMTS; idx++)
+          bits.bit_vector[idx] = 0;
+      }
+      return *this;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline uint64_t NeonBitMask<MAX>::get_hash_key(void) const
+    //-------------------------------------------------------------------------
+    {
+      uint64_t result = 0;
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        result |= bits.bit_vector[idx];
+      }
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline const uint64_t* NeonBitMask<MAX>::base(void) const
+    //-------------------------------------------------------------------------
+    {
+      return bits.bit_vector;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX> template<typename ST>
+    inline void NeonBitMask<MAX>::serialize(ST &rez) const
+    //-------------------------------------------------------------------------
+    {
+      rez.serialize(bits.bit_vector, (MAX/8));
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX> template<typename DT>
+    inline void NeonBitMask<MAX>::deserialize(DT &derez)
+    //-------------------------------------------------------------------------
+    {
+      derez.deserialize(bits.bit_vector, (MAX/8));
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX> template<typename FUNCTOR>
+    inline void NeonBitMask<MAX>::map(FUNCTOR &functor) const
+    //-------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        if (bits.bit_vector[idx])
+        {
+          unsigned value = idx * ELEMENT_SIZE;
+          for (unsigned i = 0; i < ELEMENT_SIZE; i++, value++)
+            if (bits.bit_vector[idx] & (1ULL << i))
+              functor.apply(value);
+        }
+      }
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline char* NeonBitMask<MAX>::to_string(void) const
+    //-------------------------------------------------------------------------
+    {
+      return BitMaskHelp::to_string(bits.bit_vector, MAX);
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline unsigned NeonBitMask<MAX>::pop_count(void) const
+    //-------------------------------------------------------------------------
+    {
+      unsigned result = 0;
+#ifndef VALGRIND
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        result += __builtin_popcountll(bits.bit_vector[idx]);
+      }
+#else
+      for (unsigned idx = 0; idx < MAX; idx++)
+      {
+        if (is_set(idx))
+          result++;
+      }
+#endif
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    /*static*/ inline unsigned NeonBitMask<MAX>::pop_count(
+                                                  const NeonBitMask<MAX> &mask)
+    //-------------------------------------------------------------------------
+    {
+      unsigned result = 0;
+#ifndef VALGRIND
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        result += __builtin_popcountll(mask[idx]);
+      }
+#else
+      for (unsigned idx = 0; idx < MAX; idx++)
+      {
+        if (mask.is_set(idx))
+          result++;
+      }
+#endif
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    NeonTLBitMask<MAX>::NeonTLBitMask(uint64_t init /*= 0*/)
+      : sum_mask(init)
+    //-------------------------------------------------------------------------
+    {
+      static_assert((MAX % 128) == 0, "Bad MAX");
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        bits.bit_vector[idx] = init;
+      }
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    NeonTLBitMask<MAX>::NeonTLBitMask(const NeonTLBitMask &rhs)
+      : sum_mask(rhs.sum_mask)
+    //-------------------------------------------------------------------------
+    {
+      static_assert((MAX % 128) == 0, "Bad MAX");
+      for (unsigned idx = 0; idx < NEON_ELMTS; idx++)
+      {
+        bits.neon_view(idx) = rhs(idx);
+      }
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    NeonTLBitMask<MAX>::~NeonTLBitMask(void)
+    //-------------------------------------------------------------------------
+    {
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline void NeonTLBitMask<MAX>::set_bit(unsigned bit)
+    //-------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(bit < MAX);
+#endif
+      unsigned idx = bit >> 6;
+      const uint64_t set_mask = (1UL << (bit & 0x3F));
+      bits.bit_vector[idx] |= set_mask;
+      sum_mask |= set_mask;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline void NeonTLBitMask<MAX>::unset_bit(unsigned bit)
+    //-------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(bit < MAX);
+#endif
+      unsigned idx = bit >> 6;
+      const uint64_t set_mask = (1UL << (bit & 0x3F));
+      const uint64_t unset_mask = ~set_mask;
+      bits.bit_vector[idx] &= unset_mask;
+      // Unset the summary mask and then reset if necessary
+      sum_mask &= unset_mask;
+      for (unsigned i = 0; i < BIT_ELMTS; i++)
+        sum_mask |= bits.bit_vector[i];
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline void NeonTLBitMask<MAX>::assign_bit(unsigned bit, bool val)
+    //-------------------------------------------------------------------------
+    {
+      if (val)
+        set_bit(bit);
+      else
+        unset_bit(bit);
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline bool NeonTLBitMask<MAX>::is_set(unsigned bit) const
+    //-------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(bit < MAX);
+#endif
+      unsigned idx = bit >> 6;
+      return (bits.bit_vector[idx] & (1UL << (bit & 0x3F)));
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline int NeonTLBitMask<MAX>::find_first_set(void) const
+    //-------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        if (bits.bit_vector[idx])
+        {
+          for (unsigned j = 0; j < ELEMENT_SIZE; j++)
+          {
+            if (bits.bit_vector[idx] & (1UL << j))
+            {
+              return (idx*ELEMENT_SIZE + j);
+            }
+          }
+        }
+      }
+      return -1;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline int NeonTLBitMask<MAX>::find_index(unsigned bit) const
+    //-------------------------------------------------------------------------
+    {
+      unsigned element = bit >> bits.SHIFT; 
+      unsigned offset = bit & bits.MASK;
+      if (bits.bit_vector[element] & (1ULL << offset))
+      {
+        int index = 0;
+        for (unsigned idx = 0; idx < element; idx++)
+          index += __builtin_popcountll(bits.bit_vector[idx]);
+        // Handle dumb c++ shift overflow
+        if (offset == 0)
+          return index;
+        // Just count the bits up to but not including the actual
+        // bit we're looking for since indexes are zero-base
+        index += __builtin_popcountll(
+            bits.bit_vector[element] << (ELEMENT_SIZE - offset));
+        return index;
+      }
+      else // It's not set otherwise so we couldn't find an index
+        return -1;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline int NeonTLBitMask<MAX>::get_index(unsigned index) const
+    //-------------------------------------------------------------------------
+    {
+      int offset = 0;
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        unsigned local = __builtin_popcountll(bits.bit_vector[idx]);
+        if (index < local)
+        {
+          for (unsigned j = 0; j < ELEMENT_SIZE; j++)
+          {
+            if (bits.bit_vector[idx] & (1ULL << j))
+            {
+              if (index == 0)
+                return (offset + j);
+              index--;
+            }
+          }
+        }
+        index -= local;
+        offset += ELEMENT_SIZE;
+      }
+      return -1;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline int NeonTLBitMask<MAX>::find_next_set(unsigned start) const
+    //-------------------------------------------------------------------------
+    {
+      int idx = start / ELEMENT_SIZE; // truncate
+      int offset = idx * ELEMENT_SIZE; 
+      int j = start % ELEMENT_SIZE;
+      if (j > 0) // if we are already in the middle of element search it
+      {
+        for ( ; j < int(ELEMENT_SIZE); j++)
+        {
+          if (bits.bit_vector[idx] & (1ULL << j))
+            return (offset + j);
+        }
+        idx++;
+        offset += ELEMENT_SIZE;
+      }
+      for ( ; idx < int(BIT_ELMTS); idx++)
+      {
+        if (bits.bit_vector[idx] > 0) // if it has any valid entries, find next
+        {
+          for (j = 0; j < int(ELEMENT_SIZE); j++)
+          {
+            if (bits.bit_vector[idx] & (1ULL << j))
+              return (offset + j);
+          }
+        }
+        offset += ELEMENT_SIZE;
+      }
+      return -1;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline void NeonTLBitMask<MAX>::clear(void)
+    //-------------------------------------------------------------------------
+    {
+      const uint32x4_t zero_vec = vdupq_n_u32(0);
+      for (unsigned idx = 0; idx < NEON_ELMTS; idx++)
+      {
+        bits.neon_view(idx) = zero_vec; 
+      }
+      sum_mask = 0;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline BitMaskHelp::NeonView<true>
+                  NeonTLBitMask<MAX>::operator()(const unsigned int &idx) const
+    //-------------------------------------------------------------------------
+    {
+      return bits.neon_view(idx);
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline BitMaskHelp::NeonView<false>
+                        NeonTLBitMask<MAX>::operator()(const unsigned int &idx)
+    //-------------------------------------------------------------------------
+    {
+      return bits.neon_view(idx);
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline const uint64_t& NeonTLBitMask<MAX>::operator[](
+                                                 const unsigned int &idx) const
+    //-------------------------------------------------------------------------
+    {
+      return bits.bit_vector[idx];
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline uint64_t& NeonTLBitMask<MAX>::operator[](const unsigned int &idx) 
+    //-------------------------------------------------------------------------
+    {
+      return bits.bit_vector[idx]; 
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline bool NeonTLBitMask<MAX>::operator==(const NeonTLBitMask &rhs) const
+    //-------------------------------------------------------------------------
+    {
+      if (sum_mask != rhs.sum_mask)
+        return false;
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+	if (bits.bit_vector[idx] != rhs[idx])
+          return false;
+      }
+      return true;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline bool NeonTLBitMask<MAX>::operator<(const NeonTLBitMask &rhs) const
+    //-------------------------------------------------------------------------
+    {
+      // Only be less than if the bits are a subset of the rhs bits
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        if (bits.bit_vector[idx] < rhs[idx])
+          return true;
+        else if (bits.bit_vector[idx] > rhs[idx])
+          return false;
+      }
+      // Otherwise they are equal so false
+      return false;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline bool NeonTLBitMask<MAX>::operator!=(const NeonTLBitMask &rhs) const
+    //-------------------------------------------------------------------------
+    {
+      return !(*this == rhs);
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline NeonTLBitMask<MAX>& NeonTLBitMask<MAX>::operator=(
+                                                      const NeonTLBitMask &rhs)
+    //-------------------------------------------------------------------------
+    {
+      sum_mask = rhs.sum_mask;
+      for (unsigned idx = 0; idx < NEON_ELMTS; idx++)
+      {
+        bits.neon_view(idx) = rhs(idx);
+      }
+      return *this;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline NeonTLBitMask<MAX> NeonTLBitMask<MAX>::operator~(void) const
+    //-------------------------------------------------------------------------
+    {
+      NeonTLBitMask<MAX> result;
+      uint32x4_t result_mask = vdupq_n_u32(0);
+      for (unsigned idx = 0; idx < NEON_ELMTS; idx++)
+      {
+        uint32x4_t rhs = bits.neon_view(idx);
+        uint32x4_t lhs = vmvnq_u32(rhs);
+        result(idx) = lhs;
+        result_mask = vorrq_u32(result_mask, lhs);
+      }
+      result.sum_mask = extract_mask(result_mask);
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline NeonTLBitMask<MAX> NeonTLBitMask<MAX>::operator|(
+                                                const NeonTLBitMask &rhs) const
+    //-------------------------------------------------------------------------
+    {
+      NeonTLBitMask<MAX> result;
+      result.sum_mask = sum_mask | rhs.sum_mask;
+      for (unsigned idx = 0; idx < NEON_ELMTS; idx++)
+      {
+        uint32x4_t rhs1 = bits.neon_view(idx);
+        uint32x4_t rhs2 = rhs(idx);
+        result(idx) = vorrq_u32(rhs1, rhs2);
+      }
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline NeonTLBitMask<MAX> NeonTLBitMask<MAX>::operator&(
+                                                const NeonTLBitMask &rhs) const
+    //-------------------------------------------------------------------------
+    {
+      NeonTLBitMask<MAX> result;
+      // If they are independent then we are done
+      if (sum_mask & rhs.sum_mask)
+      {
+        uint32x4_t temp_sum = vdupq_n_u32(0);
+        for (unsigned idx = 0; idx < NEON_ELMTS; idx++)
+        {
+          uint32x4_t rhs1 = bits.neon_view(idx);
+          uint32x4_t rhs2 = rhs(idx);
+          uint32x4_t lhs = vandq_u32(rhs1, rhs2);
+          result(idx) = lhs;
+          temp_sum = vorrq_u32(temp_sum, lhs);
+        }
+        result.sum_mask = extract_mask(temp_sum); 
+      }
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline NeonTLBitMask<MAX> NeonTLBitMask<MAX>::operator^(
+                                                const NeonTLBitMask &rhs) const
+    //-------------------------------------------------------------------------
+    {
+      NeonTLBitMask<MAX> result;
+      uint32x4_t temp_sum = vdupq_n_u32(0);
+      for (unsigned idx = 0; idx < NEON_ELMTS; idx++)
+      {
+        uint32x4_t rhs1 = bits.neon_view(idx);
+        uint32x4_t rhs2 = rhs(idx);
+        uint32x4_t lhs = veorq_u32(rhs1, rhs2);
+        result(idx) = lhs;
+        temp_sum = vorrq_u32(temp_sum, lhs);
+      }
+      result.sum_mask = extract_mask(temp_sum);
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline NeonTLBitMask<MAX>& NeonTLBitMask<MAX>::operator|=(
+                                                      const NeonTLBitMask &rhs)
+    //-------------------------------------------------------------------------
+    {
+      sum_mask |= rhs.sum_mask;
+      for (unsigned idx = 0; idx < NEON_ELMTS; idx++)
+      {
+        uint32x4_t rhs1 = bits.neon_view(idx);
+        uint32x4_t rhs2 = rhs(idx);
+        bits.neon_view(idx) = vorrq_u32(rhs1, rhs2);
+      }
+      return *this;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline NeonTLBitMask<MAX>& NeonTLBitMask<MAX>::operator&=(
+                                                      const NeonTLBitMask &rhs)
+    //-------------------------------------------------------------------------
+    {
+      if (sum_mask & rhs.sum_mask)
+      {
+        uint32x4_t temp_sum = vdupq_n_u32(0);
+        for (unsigned idx = 0; idx < NEON_ELMTS; idx++)
+        {
+          uint32x4_t rhs1 = bits.neon_view(idx);
+          uint32x4_t rhs2 = rhs(idx);
+          uint32x4_t lhs = vandq_u32(rhs1, rhs2);
+          bits.neon_view(idx) = lhs;
+          temp_sum = vorrq_u32(temp_sum, lhs);
+        }
+        sum_mask = extract_mask(temp_sum); 
+      }
+      else
+      {
+        sum_mask = 0;
+        const uint32x4_t zero_vec = vdupq_n_u32(0);
+        for (unsigned idx = 0; idx < NEON_ELMTS; idx++)
+          bits.neon_view(idx) = zero_vec;
+      }
+      return *this;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline NeonTLBitMask<MAX>& NeonTLBitMask<MAX>::operator^=(
+                                                      const NeonTLBitMask &rhs)
+    //-------------------------------------------------------------------------
+    {
+      uint32x4_t temp_sum = vdupq_n_u32(0);
+      for (unsigned idx = 0; idx < NEON_ELMTS; idx++)
+      {
+        uint32x4_t rhs1 = bits.neon_view(idx);
+        uint32x4_t rhs2 = rhs(idx);
+        uint32x4_t lhs = veorq_u32(rhs1, rhs2);
+        bits.neon_view(idx) = lhs;
+        temp_sum = vorrq_u32(temp_sum, lhs);
+      }
+      sum_mask = extract_mask(temp_sum);
+      return *this;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline bool NeonTLBitMask<MAX>::operator*(const NeonTLBitMask &rhs) const
+    //-------------------------------------------------------------------------
+    {
+      if (sum_mask & rhs.sum_mask)
+      {
+        for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+        {
+          if (bits.bit_vector[idx] & rhs[idx])
+            return false;
+        }
+      }
+      return true;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline NeonTLBitMask<MAX> NeonTLBitMask<MAX>::operator-(
+                                                const NeonTLBitMask &rhs) const
+    //-------------------------------------------------------------------------
+    {
+      NeonTLBitMask<MAX> result;
+      uint32x4_t temp_sum = vdupq_n_u32(0);
+      for (unsigned idx = 0; idx < NEON_ELMTS; idx++)
+      {
+        uint32x4_t rhs1 = bits.neon_view(idx);
+        uint32x4_t rhs2 = rhs(idx);
+        uint32x4_t lhs = vandq_u32(rhs1, vmvnq_u32(rhs2));
+        result(idx) = lhs;
+        temp_sum = vorrq_u32(temp_sum, lhs);
+      }
+      result.sum_mask = extract_mask(temp_sum);
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline NeonTLBitMask<MAX>& NeonTLBitMask<MAX>::operator-=(
+                                                      const NeonTLBitMask &rhs)
+    //-------------------------------------------------------------------------
+    {
+      uint32x4_t temp_sum = vdupq_n_u32(0);
+      for (unsigned idx = 0; idx < NEON_ELMTS; idx++)
+      {
+        uint32x4_t rhs1 = bits.neon_view(idx);
+        uint32x4_t rhs2 = rhs(idx);
+        uint32x4_t lhs = vandq_u32(rhs1, vmvnq_u32(rhs2));
+        bits.neon_view(idx) = lhs;
+        temp_sum = vorrq_u32(temp_sum, lhs);
+      }
+      sum_mask = extract_mask(temp_sum);
+      return *this;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline bool NeonTLBitMask<MAX>::empty(void) const
+    //-------------------------------------------------------------------------
+    {
+      // A great reason to have a summary mask
+      return (sum_mask == 0);
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline bool NeonTLBitMask<MAX>::operator!(void) const
+    //-------------------------------------------------------------------------
+    {
+      return empty();
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline NeonTLBitMask<MAX> NeonTLBitMask<MAX>::operator<<(
+                                                          unsigned shift) const
+    //-------------------------------------------------------------------------
+    {
+      // Find the range
+      unsigned range = shift >> 6;
+      unsigned local = shift & 0x3F;
+      NeonTLBitMask<MAX> result;
+      if (!local)
+      {
+        // Fast case where we just have to move the individual words
+        for (int idx = (BIT_ELMTS-1); idx >= int(range); idx--)
+        {
+          result[idx] = bits.bit_vector[idx-range]; 
+          result.sum_mask |= result[idx];
+        }
+        // fill in everything else with zeros
+        for (unsigned idx = 0; idx < range; idx++)
+          result[idx] = 0;
+      }
+      else
+      {
+        // Slow case with merging words
+        for (int idx = (BIT_ELMTS-1); idx > int(range); idx--)
+        {
+          uint64_t left = bits.bit_vector[idx-range] << local;
+          uint64_t right = bits.bit_vector[idx-(range+1)] >> ((1 << 6) - local);
+          result[idx] = left | right;
+          result.sum_mask |= result[idx];
+        }
+        // Handle the last case
+        result[range] = bits.bit_vector[0] << local; 
+        result.sum_mask |= result[range];
+        // Fill in everything else with zeros
+        for (unsigned idx = 0; idx < range; idx++)
+          result[idx] = 0;
+      }
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline NeonTLBitMask<MAX> NeonTLBitMask<MAX>::operator>>(
+                                                          unsigned shift) const
+    //-------------------------------------------------------------------------
+    {
+      unsigned range = shift >> 6;
+      unsigned local = shift & 0x3F;
+      NeonTLBitMask<MAX> result;
+      if (!local)
+      {
+        // Fast case where we just have to move individual words
+        for (unsigned idx = 0; idx < (BIT_ELMTS-range); idx++)
+        {
+          result[idx] = bits.bit_vector[idx+range];
+          result.sum_mask |= result[idx];
+        }
+        // Fill in everything else with zeros
+        for (unsigned idx = (BIT_ELMTS-range); idx < (BIT_ELMTS); idx++)
+          result[idx] = 0;
+      }
+      else
+      {
+        // Slow case with merging words
+        for (unsigned idx = 0; idx < (BIT_ELMTS-(range+1)); idx++)
+        {
+          uint64_t right = bits.bit_vector[idx+range] >> local;
+          uint64_t left = bits.bit_vector[idx+range+1] << ((1 << 6) - local);
+          result[idx] = left | right;
+          result.sum_mask |= result[idx];
+        }
+        // Handle the last case
+        result[BIT_ELMTS-(range+1)] = bits.bit_vector[BIT_ELMTS-1] >> local;
+        result.sum_mask |= result[BIT_ELMTS-(range+1)];
+        // Fill in everything else with zeros
+        for (unsigned idx = (BIT_ELMTS-range); idx < BIT_ELMTS; idx++)
+          result[idx] = 0;
+      }
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline NeonTLBitMask<MAX>& NeonTLBitMask<MAX>::operator<<=(unsigned shift)
+    //-------------------------------------------------------------------------
+    {
+      // Find the range
+      unsigned range = shift >> 6;
+      unsigned local = shift & 0x3F;
+      sum_mask = 0;
+      if (!local)
+      {
+        // Fast case where we just have to move the individual words
+        for (int idx = (BIT_ELMTS-1); idx >= int(range); idx--)
+        {
+          bits.bit_vector[idx] = bits.bit_vector[idx-range]; 
+          sum_mask |= bits.bit_vector[idx];
+        }
+        // fill in everything else with zeros
+        for (unsigned idx = 0; idx < range; idx++)
+          bits.bit_vector[idx] = 0;
+      }
+      else
+      {
+        // Slow case with merging words
+        for (int idx = (BIT_ELMTS-1); idx > int(range); idx--)
+        {
+          uint64_t left = bits.bit_vector[idx-range] << local;
+          uint64_t right = bits.bit_vector[idx-(range+1)] >> ((1 << 6) - local);
+          bits.bit_vector[idx] = left | right;
+          sum_mask |= bits.bit_vector[idx];
+        }
+        // Handle the last case
+        bits.bit_vector[range] = bits.bit_vector[0] << local; 
+        sum_mask |= bits.bit_vector[range];
+        // Fill in everything else with zeros
+        for (unsigned idx = 0; idx < range; idx++)
+          bits.bit_vector[idx] = 0;
+      }
+      return *this;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline NeonTLBitMask<MAX>& NeonTLBitMask<MAX>::operator>>=(unsigned shift)
+    //-------------------------------------------------------------------------
+    {
+      unsigned range = shift >> 6;
+      unsigned local = shift & 0x3F;
+      sum_mask = 0;
+      if (!local)
+      {
+        // Fast case where we just have to move individual words
+        for (unsigned idx = 0; idx < (BIT_ELMTS-range); idx++)
+        {
+          bits.bit_vector[idx] = bits.bit_vector[idx+range];
+          sum_mask |= bits.bit_vector[idx];
+        }
+        // Fill in everything else with zeros
+        for (unsigned idx = (BIT_ELMTS-range); idx < (BIT_ELMTS); idx++)
+          bits.bit_vector[idx] = 0;
+      }
+      else
+      {
+        // Slow case with merging words
+        for (unsigned idx = 0; idx < (BIT_ELMTS-(range+1)); idx++)
+        {
+          uint64_t right = bits.bit_vector[idx+range] >> local;
+          uint64_t left = bits.bit_vector[idx+range+1] << ((1 << 6) - local);
+          bits.bit_vector[idx] = left | right;
+          sum_mask |= bits.bit_vector[idx];
+        }
+        // Handle the last case
+        bits.bit_vector[BIT_ELMTS-(range+1)] = 
+                                        bits.bit_vector[BIT_ELMTS-1] >> local;
+        sum_mask |= bits.bit_vector[BIT_ELMTS-(range+1)];
+        // Fill in everything else with zeros
+        for (unsigned idx = (BIT_ELMTS-range); idx < BIT_ELMTS; idx++)
+          bits.bit_vector[idx] = 0;
+      }
+      return *this;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline uint64_t NeonTLBitMask<MAX>::get_hash_key(void) const
+    //-------------------------------------------------------------------------
+    {
+      return sum_mask;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline const uint64_t* NeonTLBitMask<MAX>::base(void) const
+    //-------------------------------------------------------------------------
+    {
+      return bits.bit_vector;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX> template<typename ST>
+    inline void NeonTLBitMask<MAX>::serialize(ST &rez) const
+    //-------------------------------------------------------------------------
+    {
+      rez.serialize(sum_mask);
+      rez.serialize(bits.bit_vector, (MAX/8));
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX> template<typename DT>
+    inline void NeonTLBitMask<MAX>::deserialize(DT &derez)
+    //-------------------------------------------------------------------------
+    {
+      derez.deserialize(sum_mask);
+      derez.deserialize(bits.bit_vector, (MAX/8));
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX> template<typename FUNCTOR>
+    inline void NeonTLBitMask<MAX>::map(FUNCTOR &functor) const
+    //-------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        if (bits.bit_vector[idx])
+        {
+          unsigned value = idx * ELEMENT_SIZE;
+          for (unsigned i = 0; i < ELEMENT_SIZE; i++, value++)
+            if (bits.bit_vector[idx] & (1ULL << i))
+              functor.apply(value);
+        }
+      }
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline char* NeonTLBitMask<MAX>::to_string(void) const
+    //-------------------------------------------------------------------------
+    {
+      return BitMaskHelp::to_string(bits.bit_vector, MAX);
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline unsigned NeonTLBitMask<MAX>::pop_count(void) const
+    //-------------------------------------------------------------------------
+    {
+      if (!sum_mask)
+        return 0;
+      unsigned result = 0;
+#ifndef VALGRIND
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        result += __builtin_popcountll(bits.bit_vector[idx]);
+      }
+#else
+      for (unsigned idx = 0; idx < MAX; idx++)
+      {
+        if (is_set(idx))
+          result++;
+      }
+#endif
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    /*static*/ inline unsigned NeonTLBitMask<MAX>::pop_count(
+                                                const NeonTLBitMask<MAX> &mask)
+    //-------------------------------------------------------------------------
+    {
+      unsigned result = 0;
+#ifndef VALGRIND
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        result += __builtin_popcountll(mask[idx]);
+      }
+#else
+      for (unsigned idx = 0; idx < MAX; idx++)
+      {
+        if (mask.is_set(idx))
+          result++;
+      }
+#endif
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    /*static*/ inline uint64_t NeonTLBitMask<MAX>::extract_mask(
+                                                              uint32x4_t value)
+    //-------------------------------------------------------------------------
+    {
+      uint64_t zero = vgetq_lane_u32(value, 0);
+      uint64_t one = vgetq_lane_u32(value, 1);
+      uint64_t two = vgetq_lane_u32(value, 2);
+      uint64_t three = vgetq_lane_u32(value, 3);
+      one <<= 32;
+      three <<= 32;
+      return (zero | one | two | three);
+    }
+#endif // __ARM_NEON
 
     //-------------------------------------------------------------------------
     template<typename DT, unsigned BLOAT, bool BIDIR>
@@ -7561,10 +9286,6 @@
     inline int CompoundBitMask<DT,BLOAT,BIDIR>::find_index(unsigned bit) const
     //-------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(bit >= 0);
-      assert(bit < pop_count());
-#endif
       if (is_sparse())
       {
         // Binary search for it
@@ -8232,12 +9953,13 @@
     {
       if (is_sparse())
       {
-        char *result = (char*)malloc(1024*sizeof(char));
-        sprintf(result,"Compound Sparse %d:", sparse_size);
+        size_t count = 1024;
+        char *result = (char*)malloc(count*sizeof(char));
+        snprintf(result, count, "Compound Sparse %d:", sparse_size);
         for (unsigned idx = 0; idx < sparse_size; idx++)
         {
           char temp[64];
-          sprintf(temp, " %d", mask.sparse[idx]);
+          snprintf(temp, sizeof temp, " %d", mask.sparse[idx]);
           strcat(result,temp);
         }
         return result;

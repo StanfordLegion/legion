@@ -1,4 +1,4 @@
--- Copyright 2022 Stanford University, NVIDIA Corporation
+-- Copyright 2024 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -305,14 +305,14 @@ end
 local function map_regions(diff)
   local result = terralib.newlist()
   if diff then
-    local region_types_by_polarity = {}
+    local region_types_by_polarity = data.newmap()
     for region_type, polarity in diff:items() do
       if not region_types_by_polarity[polarity] then
         region_types_by_polarity[polarity] = terralib.newlist()
       end
       region_types_by_polarity[polarity]:insert(region_type)
     end
-    for polarity, region_types in pairs(region_types_by_polarity) do
+    for polarity, region_types in region_types_by_polarity:items() do
       if polarity == inline then
         result:insert(
           ast.typed.stat.MapRegions {

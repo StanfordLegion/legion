@@ -1,4 +1,4 @@
--- Copyright 2022 Stanford University
+-- Copyright 2024 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 -- runs-with:
--- [["-ffuture", "1"], ["-ffuture", "0"], ["-findex-launch", "0"]]
+-- [["-ffuture", "1"], ["-ffuture", "0"], ["-findex-launch", "0"], ["-fflow", "0"]]
 
 import "regent"
 
@@ -30,49 +30,49 @@ terra e_bad(x : c.legion_runtime_t) : int
   return 3
 end
 
-task f(r : region(int)) : int
+task f(r : region(ispace(int1d), int)) : int
 where reads(r) do
   return 5
 end
 
-task f2(r : region(int), s : region(int)) : int
+task f2(r : region(ispace(int1d), int), s : region(ispace(int1d), int)) : int
 where reads(r, s) do
   return 5
 end
 
-task g(r : region(int)) : int
+task g(r : region(ispace(int1d), int)) : int
 where reads(r), writes(r) do
   return 5
 end
 
-task g2(r : region(int), s : region(int)) : int
+task g2(r : region(ispace(int1d), int), s : region(ispace(int1d), int)) : int
 where reads(r, s), writes(r) do
   return 5
 end
 
-task h(r : region(int)) : int
+task h(r : region(ispace(int1d), int)) : int
 where reduces +(r) do
   return 5
 end
 
-task h2(r : region(int), s : region(int)) : int
+task h2(r : region(ispace(int1d), int), s : region(ispace(int1d), int)) : int
 where reduces +(r, s) do
   return 5
 end
 
-task h2b(r : region(int), s : region(int)) : int
+task h2b(r : region(ispace(int1d), int), s : region(ispace(int1d), int)) : int
 where reduces +(r), reduces *(s) do
   return 5
 end
 
 task return_2468() return 2468 end
 
-task return_partition(r : region(int),
+task return_partition(r : region(ispace(int1d), int),
                       p : partition(disjoint, r, ispace(int1d)))
   return p
 end
 
-task check(r : region(int), v : int)
+task check(r : region(ispace(int1d), int), v : int)
 where reads(r)
 do
   for e in r do
@@ -80,39 +80,60 @@ do
   end
 end
 
+-- FIXME: Dataflow analysis currently can't handle aliased regions
+-- with no common ancestor.
+
+if not regentlib.config["flow"] then
+  task with_partitions(cs : ispace(int1d),
+                       r0 : region(ispace(int1d), int),
+                       p0_disjoint : partition(disjoint, r0, cs),
+                       r1 : region(ispace(int1d), int),
+                       p1_disjoint : partition(disjoint, r1, cs))
+  where reads writes(r0, r1) do
+    -- not optimized: projectable argument is (statically) interfering
+    for i in cs do
+      g2(p0_disjoint[i], p1_disjoint[i])
+    end
+
+    -- not optimized: projectable argument is (statically) interfering
+    for i in cs do
+      h2b(p0_disjoint[i], p1_disjoint[i])
+    end
+
+    -- optimized: projectable argument is non-interfering
+    __demand(__index_launch)
+    for i in cs do
+      h2(p0_disjoint[i], p1_disjoint[i])
+    end
+
+    -- optimized: projectable argument is non-interfering
+    __demand(__index_launch)
+    for i in cs do
+      g(p0_disjoint[i])
+    end
+  end
+end -- not flow
+
 task main()
   var n = 5
-  var cs = ispace(int1d, n)
-  var r = region(ispace(ptr, n), int)
-  var x0 = dynamic_cast(ptr(int, r), 0)
-  var x1 = dynamic_cast(ptr(int, r), 1)
-  var x2 = dynamic_cast(ptr(int, r), 2)
-  var x3 = dynamic_cast(ptr(int, r), 3)
-  var x4 = dynamic_cast(ptr(int, r), 4)
+  var r = region(ispace(int1d, n), int)
   fill(r, 1)
 
+  var cs = ispace(int1d, n)
   var p_disjoint = partition(equal, r, cs)
   var r0 = p_disjoint[0]
   var r1 = p_disjoint[1]
   var p0_disjoint = partition(equal, r0, cs)
   var p1_disjoint = partition(equal, r1, cs)
 
-  var rc = c.legion_coloring_create()
-  c.legion_coloring_add_point(rc, 0, __raw(x0))
-  c.legion_coloring_add_point(rc, 0, __raw(x1))
-  c.legion_coloring_add_point(rc, 1, __raw(x0))
-  c.legion_coloring_add_point(rc, 1, __raw(x1))
-  c.legion_coloring_add_point(rc, 1, __raw(x2))
-  c.legion_coloring_add_point(rc, 2, __raw(x1))
-  c.legion_coloring_add_point(rc, 2, __raw(x2))
-  c.legion_coloring_add_point(rc, 2, __raw(x3))
-  c.legion_coloring_add_point(rc, 3, __raw(x2))
-  c.legion_coloring_add_point(rc, 3, __raw(x3))
-  c.legion_coloring_add_point(rc, 3, __raw(x4))
-  c.legion_coloring_add_point(rc, 4, __raw(x3))
-  c.legion_coloring_add_point(rc, 4, __raw(x4))
-  var p_aliased = partition(aliased, r, rc)
-  c.legion_coloring_destroy(rc)
+  var s = region(cs, rect1d)
+  s[0] = rect1d { 0, 1 }
+  s[1] = rect1d { 0, 2 }
+  s[2] = rect1d { 1, 3 }
+  s[3] = rect1d { 2, 4 }
+  s[4] = rect1d { 3, 4 }
+  var ps = partition(equal, s, cs)
+  var p_aliased = image(r, ps, s)
 
   -- not optimized: body is not a single statement
   for i in cs do
@@ -154,6 +175,12 @@ task main()
   end
 
   -- not optimized: reduction is interfering
+  for i in cs do
+    r[0] += f(p_disjoint[i])
+  end
+
+  -- not optimized: reduction is interfering
+  var x0 = &r[0]
   for i in cs do
     @x0 += f(p_disjoint[i])
   end
@@ -240,6 +267,12 @@ task main()
     check(p1_disjoint[i], 12345)
   end
 
-  -- with_partitions(r0, p0_disjoint, r1, p1_disjoint, n)
+  rescape
+    if not regentlib.config["flow"] then
+      remit rquote
+        with_partitions(cs, r0, p0_disjoint, r1, p1_disjoint)
+      end
+    end
+  end
 end
 regentlib.start(main)

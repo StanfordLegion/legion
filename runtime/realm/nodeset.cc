@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -36,28 +36,6 @@ static unsigned popcount(uint64_t v)
 #endif
 #else
   return __builtin_popcountll(v);
-#endif
-}
-
-static unsigned ctz(uint64_t v)
-{
-#ifdef REALM_ON_WINDOWS
-  unsigned long index;
-#ifdef _WIN64
-  if(_BitScanForward64(&index, v))
-    return index;
-#else
-  unsigned v_lo = v;
-  unsigned v_hi = v >> 32;
-  if(_BitScanForward(&index, v_lo))
-    return index;
-  else if(_BitScanForward(&index, v_hi))
-    return index + 32;
-#endif
-  else
-    return 0;
-#else
-  return __builtin_ctzll(v);
 #endif
 }
 

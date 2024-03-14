@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -115,6 +115,19 @@ namespace Realm {
 					   bool poisoned,
 					   TimeLimit work_until) = 0;
 
+    // helpers used by the above when an instance being allocated or released
+    //  is using an external resource
+    virtual bool attempt_register_external_resource(RegionInstanceImpl *inst,
+                                                    size_t& inst_offset);
+    virtual void unregister_external_resource(RegionInstanceImpl *inst);
+
+    // for re-registration purposes, generate an ExternalInstanceResource *
+    //  (if possible) for a given instance, or a subset of one
+    virtual ExternalInstanceResource *generate_resource_info(RegionInstanceImpl *inst,
+							     const IndexSpaceGeneric *subspace,
+							     span<const FieldID> fields,
+							     bool read_only);
+
     // TODO: try to rip these out?
     virtual void get_bytes(off_t offset, void *dst, size_t size) = 0;
     virtual void put_bytes(off_t offset, const void *src, size_t size) = 0;
@@ -126,13 +139,24 @@ namespace Realm {
 
     // gets info related to rdma access from other nodes
     const ByteArray *get_rdma_info(NetworkModule *network) const;
-    
+
+    // rdma transfers need to use LocalAddress and RemoteAddress helper objects
+    //  rather than raw pointers
+    virtual bool get_local_addr(off_t offset, LocalAddress &local_addr);
     virtual bool get_remote_addr(off_t offset, RemoteAddress& remote_addr);
 
     // gets the network segment info for potential registration
     NetworkSegment *get_network_segment();
 
     Memory::Kind get_kind(void) const;
+
+    // TODO: lift into a helper superclass?
+    template <typename T>
+    T *find_module_specific();
+    template <typename T>
+    const T *find_module_specific() const;
+
+    void add_module_specific(ModuleSpecificInfo *info);
 
     struct InstanceList {
       std::vector<RegionInstanceImpl *> instances;
@@ -146,6 +170,7 @@ namespace Realm {
     MemoryKind kind;
     Memory::Kind lowlevel_kind;
     NetworkSegment *segment;
+    ModuleSpecificInfo *module_specific;
 
     // we keep a dedicated instance list for locally created
     //  instances, but we use a map indexed by creator node for others,
@@ -153,6 +178,14 @@ namespace Realm {
     std::map<NodeID, InstanceList *> instances_by_creator;
     Mutex instance_map_mutex;
     InstanceList local_instances;
+  };
+
+  class MemSpecificInfo {
+  public:
+    MemSpecificInfo();
+    virtual ~MemSpecificInfo() {}
+
+    MemSpecificInfo *next;
   };
 
   class PendingIBRequests {
@@ -201,6 +234,11 @@ namespace Realm {
 
     BasicRangeAllocator(void);
     ~BasicRangeAllocator(void);
+
+    BasicRangeAllocator(const BasicRangeAllocator &) = default;
+    BasicRangeAllocator &operator=(const BasicRangeAllocator &) = default;
+    BasicRangeAllocator(BasicRangeAllocator &&) noexcept = default;
+    BasicRangeAllocator &operator=(BasicRangeAllocator &&) noexcept = default;
 
     void swap(BasicRangeAllocator<RT, TT>& swap_with);
 
@@ -299,6 +337,18 @@ namespace Realm {
 
       virtual ~LocalCPUMemory(void);
 
+      // LocalCPUMemory supports ExternalMemoryResource
+      virtual bool attempt_register_external_resource(RegionInstanceImpl *inst,
+                                                      size_t& inst_offset);
+      virtual void unregister_external_resource(RegionInstanceImpl *inst);
+
+      // for re-registration purposes, generate an ExternalInstanceResource *
+      //  (if possible) for a given instance, or a subset of one
+      virtual ExternalInstanceResource *generate_resource_info(RegionInstanceImpl *inst,
+							       const IndexSpaceGeneric *subspace,
+							       span<const FieldID> fields,
+							       bool read_only);
+
       virtual void get_bytes(off_t offset, void *dst, size_t size);
       virtual void put_bytes(off_t offset, const void *src, size_t size);
       virtual void *get_direct_ptr(off_t offset, size_t size);
@@ -352,8 +402,14 @@ namespace Realm {
 					     bool poisoned,
 					     TimeLimit work_until);
 
+      // FileMemory supports ExternalFileResource
+      virtual bool attempt_register_external_resource(RegionInstanceImpl *inst,
+                                                      size_t& inst_offset);
+      virtual void unregister_external_resource(RegionInstanceImpl *inst);
+
       // the 'mem_specific' data for a file instance contains OpenFileInfo
-      struct OpenFileInfo {
+      class OpenFileInfo : public MemSpecificInfo {
+      public:
 	int fd;
 	size_t offset;
       };
@@ -388,6 +444,9 @@ namespace Realm {
       virtual void get_bytes(off_t offset, void *dst, size_t size);
       virtual void put_bytes(off_t offset, const void *src, size_t size);
       virtual void *get_direct_ptr(off_t offset, size_t size);
+      private:
+      // For mapped remote memory, this is non-null
+      void *base;
     };
 
 
@@ -430,6 +489,11 @@ namespace Realm {
       static void handle_message(NodeID sender, const MemStorageReleaseResponse &msg,
 				 const void *data, size_t datalen);
     };
+
+    /// @brief Returns the full path for use in SharedMemoryInfo::create and SharedMemoryInfo::open given the realm id
+    /// @param id identifier of the realm object to get the name of
+    /// @return shared memory name of the requested object
+    std::string get_shm_name(realm_id_t id);
 
 }; // namespace Realm
 

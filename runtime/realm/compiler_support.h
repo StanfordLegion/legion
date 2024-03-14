@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -31,12 +31,13 @@
 // REALM_COMPILER_IS_HIPCC - defined if compiler is hipcc
 #if defined(__HIPCC__)
   #define REALM_COMPILER_IS_HIPCC
+// Detect nvc++ before testing __CUDACC__
+#elif defined(__PGIC__) || defined(__NVCOMPILER)
+  #define REALM_COMPILER_IS_PGI
 #elif defined(__CUDACC__)
   #define REALM_COMPILER_IS_NVCC
 #elif defined(__ICC)
   #define REALM_COMPILER_IS_ICC
-#elif defined(__PGIC__)
-  #define REALM_COMPILER_IS_PGI
 #elif defined(__clang__)
   #define REALM_COMPILER_IS_CLANG
 #elif defined(_MSC_VER)
@@ -70,6 +71,13 @@
       #define REALM_CXX_STANDARD 0
     #endif
   #endif
+#endif
+
+// REALM_NOEXCEPT - indicates that the declaration does not throw exceptions
+#if REALM_CXX_STANDARD >= 11
+  #define REALM_NOEXCEPT noexcept
+#else
+  #define REALM_NOEXCEPT throw()
 #endif
 
 // REALM_ON_LINUX   - defined if Realm is being built for a Linux host

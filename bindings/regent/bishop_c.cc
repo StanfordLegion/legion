@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -34,7 +34,7 @@ static bishop_mapper_state_init_fn_t mapper_init;
 
 namespace Legion {
   namespace Mapping {
-    extern LegionRuntime::Logger::Category log_bishop;
+    extern Logger log_bishop;
   }
 }
 

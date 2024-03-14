@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,65 +22,40 @@
 #include "realm/deppart/inst_helper.h"
 #include "realm/deppart/image.h"
 #include "realm/logging.h"
+#include <ctime>
 
 namespace Realm {
 
   extern Logger log_part;
   extern Logger log_uop_timing;
 
-
   template <int N, typename T>
   template <int N2, typename T2>
-  Event IndexSpace<N,T>::create_subspaces_by_preimage(const std::vector<FieldDataDescriptor<IndexSpace<N,T>,Point<N2,T2> > >& field_data,
-						       const std::vector<IndexSpace<N2,T2> >& targets,
-						       std::vector<IndexSpace<N,T> >& preimages,
-						       const ProfilingRequestSet &reqs,
-						       Event wait_on /*= Event::NO_EVENT*/) const
-  {
-    // output vector should start out empty
-    assert(preimages.empty());
+  Event IndexSpace<N, T>::create_subspaces_by_preimage(
+      const DomainTransform<N2, T2, N, T> &domain_transform,
+      const std::vector<IndexSpace<N2, T2> > &targets,
+      std::vector<IndexSpace<N, T> > &preimages,
+      const ProfilingRequestSet &reqs,
+      Event wait_on /*= Event::NO_EVENT*/) const {
+   // output vector should start out empty
+   assert(preimages.empty());
 
-    GenEventImpl *finish_event = GenEventImpl::create_genevent();
-    Event e = finish_event->current_event();
-    PreimageOperation<N,T,N2,T2> *op = new PreimageOperation<N,T,N2,T2>(*this, field_data, reqs, finish_event, ID(e).event_generation());
+   GenEventImpl *finish_event = GenEventImpl::create_genevent();
+   Event e = finish_event->current_event();
+   PreimageOperation<N, T, N2, T2> *op = new PreimageOperation<N, T, N2, T2>(
+       *this, domain_transform, reqs, finish_event, ID(e).event_generation());
 
-    size_t n = targets.size();
-    preimages.resize(n);
-    for(size_t i = 0; i < n; i++) {
-      preimages[i] = op->add_target(targets[i]);
-      log_dpops.info() << "preimage: " << *this << " tgt=" << targets[i] << " -> " << preimages[i] << " (" << e << ")";
-    }
+   size_t n = targets.size();
+   preimages.resize(n);
+   for (size_t i = 0; i < n; i++) {
+    preimages[i] = op->add_target(targets[i]);
+    log_dpops.info() << "preimage: " << *this << " tgt=" << targets[i] << " -> "
+                     << preimages[i] << " (" << e << ")";
+   }
 
-    op->launch(wait_on);
-    return e;
+   op->launch(wait_on);
+   return e;
   }
-
-  template <int N, typename T>
-  template <int N2, typename T2>
-  Event IndexSpace<N,T>::create_subspaces_by_preimage(const std::vector<FieldDataDescriptor<IndexSpace<N,T>,Rect<N2,T2> > >& field_data,
-						       const std::vector<IndexSpace<N2,T2> >& targets,
-						       std::vector<IndexSpace<N,T> >& preimages,
-						       const ProfilingRequestSet &reqs,
-						       Event wait_on /*= Event::NO_EVENT*/) const
-  {
-    // output vector should start out empty
-    assert(preimages.empty());
-
-    GenEventImpl *finish_event = GenEventImpl::create_genevent();
-    Event e = finish_event->current_event();
-    PreimageOperation<N,T,N2,T2> *op = new PreimageOperation<N,T,N2,T2>(*this, field_data, reqs, finish_event, ID(e).event_generation());
-
-    size_t n = targets.size();
-    preimages.resize(n);
-    for(size_t i = 0; i < n; i++) {
-      preimages[i] = op->add_target(targets[i]);
-      log_dpops.info() << "preimage: " << *this << " tgt=" << targets[i] << " -> " << preimages[i] << " (" << e << ")";
-    }
-
-    op->launch(wait_on);
-    return e;
-  }
-
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -213,8 +188,14 @@ namespace Realm {
       return;
     }
 
-    // instance index spaces should always be valid
-    assert(inst_space.is_valid(true /*precise*/));
+    // Need valid data for the instance space
+    if (!inst_space.dense()) {
+      // it's safe to add the count after the registration only because we initialized
+      //  the count to 2 instead of 1
+      bool registered = SparsityMapImpl<N,T>::lookup(inst_space.sparsity)->add_waiter(this, true /*precise*/);
+      if(registered)
+        wait_count.fetch_add(1);
+    }
 
     // need valid data for each target
     for(size_t i = 0; i < targets.size(); i++) {
@@ -278,32 +259,18 @@ namespace Realm {
   // class PreimageOperation<N,T,N2,T2>
 
   template <int N, typename T, int N2, typename T2>
-  PreimageOperation<N,T,N2,T2>::PreimageOperation(const IndexSpace<N,T>& _parent,
-						  const std::vector<FieldDataDescriptor<IndexSpace<N,T>,Point<N2,T2> > >& _field_data,
-						  const ProfilingRequestSet &reqs,
-						  GenEventImpl *_finish_event,
-						  EventImpl::gen_t _finish_gen)
-    : PartitioningOperation(reqs, _finish_event, _finish_gen)
-    , parent(_parent)
-    , ptr_data(_field_data)
-    , overlap_tester(0)
-    , dummy_overlap_uop(0)
-  {
-    areg.force_instantiation();
+  PreimageOperation<N, T, N2, T2>::PreimageOperation(
+      const IndexSpace<N, T> &_parent,
+      const DomainTransform<N2, T2, N, T> &_domain_transform,
+      const ProfilingRequestSet &reqs, GenEventImpl *_finish_event,
+      EventImpl::gen_t _finish_gen)
+      : PartitioningOperation(reqs, _finish_event, _finish_gen),
+        parent(_parent),
+        domain_transform(_domain_transform),
+        overlap_tester(0),
+        dummy_overlap_uop(0) {
+   areg.force_instantiation();
   }
-
-  template <int N, typename T, int N2, typename T2>
-  PreimageOperation<N,T,N2,T2>::PreimageOperation(const IndexSpace<N,T>& _parent,
-						  const std::vector<FieldDataDescriptor<IndexSpace<N,T>,Rect<N2,T2> > >& _field_data,
-						  const ProfilingRequestSet &reqs,
-						  GenEventImpl *_finish_event,
-						  EventImpl::gen_t _finish_gen)
-    : PartitioningOperation(reqs, _finish_event, _finish_gen)
-    , parent(_parent)
-    , range_data(_field_data)
-    , overlap_tester(0)
-    , dummy_overlap_uop(0)
-  {}
 
   template <int N, typename T, int N2, typename T2>
   PreimageOperation<N,T,N2,T2>::~PreimageOperation(void)
@@ -328,11 +295,18 @@ namespace Realm {
     int target_node;
     if(!target.dense())
       target_node = ID(target.sparsity).sparsity_creator_node();
+    else if (!domain_transform.ptr_data.empty())
+     target_node =
+         ID(domain_transform
+                .ptr_data[targets.size() % domain_transform.ptr_data.size()]
+                .inst)
+             .instance_owner_node();
     else
-      if(!ptr_data.empty())
-	target_node = ID(ptr_data[targets.size() % ptr_data.size()].inst).instance_owner_node();
-      else
-	target_node = ID(range_data[targets.size() % range_data.size()].inst).instance_owner_node();
+     target_node =
+         ID(domain_transform
+                .range_data[targets.size() % domain_transform.range_data.size()]
+                .inst)
+             .instance_owner_node();
     SparsityMap<N,T> sparsity = get_runtime()->get_available_sparsity_impl(target_node)->me.convert<SparsityMap<N,T> >();
     preimage.sparsity = sparsity;
 
@@ -343,81 +317,97 @@ namespace Realm {
   }
 
   template <int N, typename T, int N2, typename T2>
-  void PreimageOperation<N,T,N2,T2>::execute(void)
-  {
-    if(!DeppartConfig::cfg_disable_intersection_optimization) {
-      // build the overlap tester based on the targets, since they're at least known
-      ComputeOverlapMicroOp<N2,T2> *uop = new ComputeOverlapMicroOp<N2,T2>(this);
-
-      remaining_sparse_images.store(ptr_data.size() + range_data.size());
-      contrib_counts.resize(preimages.size(), atomic<int>(0));
-
-      // create a dummy async microop that lives until we've received all the sparse images
-      dummy_overlap_uop = new AsyncMicroOp(this, 0);
-      add_async_work_item(dummy_overlap_uop);
-
-      // add each target, but also generate a bounding box for all of them
-      Rect<N2,T2> target_bbox;
-      for(size_t i = 0; i < targets.size(); i++) {
-	uop->add_input_space(targets[i]);
-	if(i == 0)
-	  target_bbox = targets[i].bounds;
-	else
-	  target_bbox = target_bbox.union_bbox(targets[i].bounds);
-      }
-
-      for(size_t i = 0; i < ptr_data.size(); i++) {
-	// in parallel, we will request the approximate images of each instance's
-	//  data (ideally limited to the target_bbox)
-	ImageMicroOp<N2,T2,N,T> *img = new ImageMicroOp<N2,T2,N,T>(target_bbox,
-								   ptr_data[i].index_space,
-								   ptr_data[i].inst,
-								   ptr_data[i].field_offset,
-								   false /*ptrs*/);
-	img->add_approx_output(i, this);
-	img->dispatch(this, false /* do not run in this thread */);
-      }
-
-      for(size_t i = 0; i < range_data.size(); i++) {
-	// in parallel, we will request the approximate images of each instance's
-	//  data (ideally limited to the target_bbox)
-	ImageMicroOp<N2,T2,N,T> *img = new ImageMicroOp<N2,T2,N,T>(target_bbox,
-								   range_data[i].index_space,
-								   range_data[i].inst,
-								   range_data[i].field_offset,
-								   true /*ranges*/);
-	img->add_approx_output(i + ptr_data.size(), this);
-	img->dispatch(this, false /* do not run in this thread */);
-      }
-
-      uop->dispatch(this, true /* ok to run in this thread */);
-    } else {
-      for(size_t i = 0; i < preimages.size(); i++)
-	SparsityMapImpl<N,T>::lookup(preimages[i])->set_contributor_count(ptr_data.size() +
-									  range_data.size());
-
-      for(size_t i = 0; i < ptr_data.size(); i++) {
-	PreimageMicroOp<N,T,N2,T2> *uop = new PreimageMicroOp<N,T,N2,T2>(parent,
-									 ptr_data[i].index_space,
-									 ptr_data[i].inst,
-									 ptr_data[i].field_offset,
-									 false /*ptrs*/);
-	for(size_t j = 0; j < targets.size(); j++)
-	  uop->add_sparsity_output(targets[j], preimages[j]);
-	uop->dispatch(this, true /* ok to run in this thread */);
-      }
-
-      for(size_t i = 0; i < range_data.size(); i++) {
-	PreimageMicroOp<N,T,N2,T2> *uop = new PreimageMicroOp<N,T,N2,T2>(parent,
-									 range_data[i].index_space,
-									 range_data[i].inst,
-									 range_data[i].field_offset,
-									 true /*ranges*/);
-	for(size_t j = 0; j < targets.size(); j++)
-	  uop->add_sparsity_output(targets[j], preimages[j]);
-	uop->dispatch(this, true /* ok to run in this thread */);
-      }
+  void PreimageOperation<N, T, N2, T2>::execute(void) {
+   if (domain_transform.type ==
+       DomainTransform<N2, T2, N, T>::DomainTransformType::STRUCTURED) {
+    for (size_t i = 0; i < preimages.size(); i++) {
+     SparsityMapImpl<N, T>::lookup(preimages[i])->set_contributor_count(1);
     }
+
+    StructuredPreimageMicroOp<N, T, N2, T2> *micro_op =
+        new StructuredPreimageMicroOp<N, T, N2, T2>(
+            domain_transform.structured_transform, parent);
+
+    for (size_t j = 0; j < targets.size(); j++) {
+     micro_op->add_sparsity_output(targets[j], preimages[j]);
+    }
+    micro_op->dispatch(this, true);
+   } else {
+    if (!DeppartConfig::cfg_disable_intersection_optimization) {
+     // build the overlap tester based on the targets, since they're at least
+     // known
+     ComputeOverlapMicroOp<N2, T2> *uop =
+         new ComputeOverlapMicroOp<N2, T2>(this);
+
+     remaining_sparse_images.store(domain_transform.ptr_data.size() +
+                                   domain_transform.range_data.size());
+     contrib_counts.resize(preimages.size(), atomic<int>(0));
+
+     // create a dummy async microop that lives until we've received all the
+     // sparse images
+     dummy_overlap_uop = new AsyncMicroOp(this, 0);
+     add_async_work_item(dummy_overlap_uop);
+
+     // add each target, but also generate a bounding box for all of them
+     Rect<N2, T2> target_bbox;
+     for (size_t i = 0; i < targets.size(); i++) {
+      uop->add_input_space(targets[i]);
+      if (i == 0)
+       target_bbox = targets[i].bounds;
+      else
+       target_bbox = target_bbox.union_bbox(targets[i].bounds);
+     }
+
+     for (size_t i = 0; i < domain_transform.ptr_data.size(); i++) {
+      // in parallel, we will request the approximate images of each instance's
+      //  data (ideally limited to the target_bbox)
+      ImageMicroOp<N2, T2, N, T> *img = new ImageMicroOp<N2, T2, N, T>(
+          target_bbox, domain_transform.ptr_data[i].index_space,
+          domain_transform.ptr_data[i].inst,
+          domain_transform.ptr_data[i].field_offset, false /*ptrs*/);
+      img->add_approx_output(i, this);
+      img->dispatch(this, false /* do not run in this thread */);
+     }
+
+     for (size_t i = 0; i < domain_transform.range_data.size(); i++) {
+      // in parallel, we will request the approximate images of each instance's
+      //  data (ideally limited to the target_bbox)
+      ImageMicroOp<N2, T2, N, T> *img = new ImageMicroOp<N2, T2, N, T>(
+          target_bbox, domain_transform.range_data[i].index_space,
+          domain_transform.range_data[i].inst,
+          domain_transform.range_data[i].field_offset, true /*ranges*/);
+      img->add_approx_output(i + domain_transform.ptr_data.size(), this);
+      img->dispatch(this, false /* do not run in this thread */);
+     }
+
+     uop->dispatch(this, true /* ok to run in this thread */);
+    } else {
+     for (size_t i = 0; i < preimages.size(); i++)
+      SparsityMapImpl<N, T>::lookup(preimages[i])
+          ->set_contributor_count(domain_transform.ptr_data.size() +
+                                  domain_transform.range_data.size());
+
+     for (size_t i = 0; i < domain_transform.ptr_data.size(); i++) {
+      PreimageMicroOp<N, T, N2, T2> *uop = new PreimageMicroOp<N, T, N2, T2>(
+          parent, domain_transform.ptr_data[i].index_space,
+          domain_transform.ptr_data[i].inst,
+          domain_transform.ptr_data[i].field_offset, false /*ptrs*/);
+      for (size_t j = 0; j < targets.size(); j++)
+       uop->add_sparsity_output(targets[j], preimages[j]);
+      uop->dispatch(this, true /* ok to run in this thread */);
+     }
+
+     for (size_t i = 0; i < domain_transform.range_data.size(); i++) {
+      PreimageMicroOp<N, T, N2, T2> *uop = new PreimageMicroOp<N, T, N2, T2>(
+          parent, domain_transform.range_data[i].index_space,
+          domain_transform.range_data[i].inst,
+          domain_transform.range_data[i].field_offset, true /*ranges*/);
+      for (size_t j = 0; j < targets.size(); j++)
+       uop->add_sparsity_output(targets[j], preimages[j]);
+      uop->dispatch(this, true /* ok to run in this thread */);
+     }
+    }
+   }
   }
 
   template <int N, typename T, int N2, typename T2>
@@ -439,14 +429,13 @@ namespace Realm {
       // see which of the targets this image overlaps
       std::set<int> overlaps;
       overlap_tester->test_overlap(rects, count, overlaps);
-      if((size_t)index < ptr_data.size()) {
+      if((size_t)index < domain_transform.ptr_data.size()) {
 	log_part.info() << "image of ptr_data[" << index << "] overlaps " << overlaps.size() << " targets";
-	PreimageMicroOp<N,T,N2,T2> *uop = new PreimageMicroOp<N,T,N2,T2>(parent,
-									 ptr_data[index].index_space,
-									 ptr_data[index].inst,
-									 ptr_data[index].field_offset,
-									 false /*ptrs*/);
-	for(std::set<int>::const_iterator it2 = overlaps.begin();
+        PreimageMicroOp<N, T, N2, T2> *uop = new PreimageMicroOp<N, T, N2, T2>(
+            parent, domain_transform.ptr_data[index].index_space,
+            domain_transform.ptr_data[index].inst,
+            domain_transform.ptr_data[index].field_offset, false /*ptrs*/);
+        for(std::set<int>::const_iterator it2 = overlaps.begin();
 	    it2 != overlaps.end();
 	    it2++) {
 	  int j = *it2;
@@ -455,15 +444,15 @@ namespace Realm {
 	}
 	uop->dispatch(this, false /* do not run in this thread */);
       } else {
-	size_t rel_index = index - ptr_data.size();
-	assert(rel_index < range_data.size());
+	size_t rel_index = index - domain_transform.ptr_data.size();
+	assert(rel_index < domain_transform.range_data.size());
 	log_part.info() << "image of range_data[" << rel_index << "] overlaps " << overlaps.size() << " targets";
-	PreimageMicroOp<N,T,N2,T2> *uop = new PreimageMicroOp<N,T,N2,T2>(parent,
-									 range_data[rel_index].index_space,
-									 range_data[rel_index].inst,
-									 range_data[rel_index].field_offset,
-									 true /*ranges*/);
-	for(std::set<int>::const_iterator it2 = overlaps.begin();
+        PreimageMicroOp<N, T, N2, T2> *uop = new PreimageMicroOp<N, T, N2, T2>(
+            parent, domain_transform.range_data[rel_index].index_space,
+            domain_transform.range_data[rel_index].inst,
+            domain_transform.range_data[rel_index].field_offset,
+            true /*ranges*/);
+        for(std::set<int>::const_iterator it2 = overlaps.begin();
 	    it2 != overlaps.end();
 	    it2++) {
 	  int j = *it2;
@@ -507,14 +496,14 @@ namespace Realm {
 	// see which of the targets that image overlaps
 	std::set<int> overlaps;
 	overlap_tester->test_overlap(&it->second[0], it->second.size(), overlaps);
-	if(idx < ptr_data.size()) {
+	if(idx < domain_transform.ptr_data.size()) {
 	  log_part.info() << "image of ptr_data[" << idx << "] overlaps " << overlaps.size() << " targets";
-	  PreimageMicroOp<N,T,N2,T2> *uop = new PreimageMicroOp<N,T,N2,T2>(parent,
-									   ptr_data[idx].index_space,
-									   ptr_data[idx].inst,
-									   ptr_data[idx].field_offset,
-									   false /*ptrs*/);
-	  for(std::set<int>::const_iterator it2 = overlaps.begin();
+          PreimageMicroOp<N, T, N2, T2> *uop =
+              new PreimageMicroOp<N, T, N2, T2>(
+                  parent, domain_transform.ptr_data[idx].index_space,
+                  domain_transform.ptr_data[idx].inst,
+                  domain_transform.ptr_data[idx].field_offset, false /*ptrs*/);
+          for(std::set<int>::const_iterator it2 = overlaps.begin();
 	      it2 != overlaps.end();
 	      it2++) {
 	    int j = *it2;
@@ -523,15 +512,16 @@ namespace Realm {
 	  }
 	  uop->dispatch(this, true /* ok to run in this thread */);
 	} else {
-	  size_t rel_index = idx - ptr_data.size();
-	  assert(rel_index < range_data.size());
+	  size_t rel_index = idx - domain_transform.ptr_data.size();
+	  assert(rel_index < domain_transform.range_data.size());
 	  log_part.info() << "image of range_data[" << rel_index << "] overlaps " << overlaps.size() << " targets";
-	  PreimageMicroOp<N,T,N2,T2> *uop = new PreimageMicroOp<N,T,N2,T2>(parent,
-									   range_data[rel_index].index_space,
-									   range_data[rel_index].inst,
-									   range_data[rel_index].field_offset,
-									   true /*ranges*/);
-	  for(std::set<int>::const_iterator it2 = overlaps.begin();
+          PreimageMicroOp<N, T, N2, T2> *uop =
+              new PreimageMicroOp<N, T, N2, T2>(
+                  parent, domain_transform.range_data[rel_index].index_space,
+                  domain_transform.range_data[rel_index].inst,
+                  domain_transform.range_data[rel_index].field_offset,
+                  true /*ranges*/);
+          for(std::set<int>::const_iterator it2 = overlaps.begin();
 	      it2 != overlaps.end();
 	      it2++) {
 	    int j = *it2;
@@ -579,6 +569,118 @@ namespace Realm {
 			     datalen / sizeof(Rect<T::DIM2, typename T::IDXTYPE2>));
   }
 
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class StructuredPreimageMicroOp<N,T,N2,T2>
+
+  template <int N, typename T, int N2, typename T2>
+  StructuredPreimageMicroOp<N, T, N2, T2>::StructuredPreimageMicroOp(
+      const StructuredTransform<N2, T2, N, T> &_transform,
+      IndexSpace<N, T> _parent_space)
+      : transform(_transform), parent_space(_parent_space) {}
+
+  template <int N, typename T, int N2, typename T2>
+  StructuredPreimageMicroOp<N, T, N2, T2>::~StructuredPreimageMicroOp(void) {}
+
+  template <int N, typename T, int N2, typename T2>
+  void StructuredPreimageMicroOp<N, T, N2, T2>::add_sparsity_output(
+      IndexSpace<N2, T2> _target, SparsityMap<N, T> _sparsity) {
+   targets.push_back(_target);
+   sparsity_outputs.push_back(_sparsity);
+  }
+
+  template <int N, typename T, int N2, typename T2>
+  template <typename BM>
+  void StructuredPreimageMicroOp<N, T, N2, T2>::populate_bitmasks(
+      std::map<int, BM *> &bitmasks) {
+   Rect<N2, T2> target_bbox = targets[0].bounds;
+   for (size_t i = 1; i < targets.size(); i++) {
+    target_bbox = target_bbox.union_bbox(targets[i].bounds);
+   }
+   for (IndexSpaceIterator<N, T> it2(parent_space); it2.valid; it2.step()) {
+    Rect<N2, T2> parent_bbox;
+    parent_bbox.lo = transform[it2.rect.lo];
+    parent_bbox.hi = transform[it2.rect.hi];
+
+    if (target_bbox.intersection(parent_bbox).empty()) continue;
+
+    for (PointInRectIterator<N, T> pir(it2.rect); pir.valid; pir.step()) {
+     Point<N2, T2> target_point = transform[pir.p];
+     for (size_t i = 0; i < targets.size(); i++) {
+      if (targets[i].contains(target_point)) {
+       BM *&bmp = bitmasks[i];
+       if (!bmp) bmp = new BM;
+       bmp->add_point(pir.p);
+      }
+     }
+    }
+   }
+  }
+
+  template <int N, typename T, int N2, typename T2>
+  void StructuredPreimageMicroOp<N,T,N2,T2>::execute(void)
+  {
+    TimeStamp ts("PreimageMicroOp::execute", true, &log_uop_timing);
+    std::map<int, DenseRectangleList<N,T> *> rect_map;
+
+    populate_bitmasks(rect_map);
+#ifdef DEBUG_PARTITIONING
+    std::cout << rect_map.size() << " non-empty preimages present in instance "
+              << inst << std::endl;
+    for (typename std::map<int, DenseRectangleList<N, T> *>::const_iterator it =
+             rect_map.begin();
+         it != rect_map.end(); it++)
+      std::cout << "  " << targets[it->first] << " = "
+                << it->second->rects.size() << " rectangles" << std::endl;
+#endif
+    // iterate over sparsity outputs and contribute to all (even if we
+    // didn't have any points found for it)
+    int empty_count = 0;
+    for (size_t i = 0; i < sparsity_outputs.size(); i++) {
+      SparsityMapImpl<N, T> *impl =
+          SparsityMapImpl<N, T>::lookup(sparsity_outputs[i]);
+      typename std::map<int, DenseRectangleList<N, T> *>::const_iterator it2 =
+          rect_map.find(i);
+      if (it2 != rect_map.end()) {
+        impl->contribute_dense_rect_list(it2->second->rects, true /*disjoint*/);
+        delete it2->second;
+      } else {
+        impl->contribute_nothing();
+        empty_count++;
+      }
+    }
+
+    if (empty_count > 0) {
+      log_part.info() << empty_count << " empty preimages (out of "
+                      << sparsity_outputs.size() << ")";
+    }
+  }
+
+  template <int N, typename T, int N2, typename T2>
+  void StructuredPreimageMicroOp<N, T, N2, T2>::dispatch(
+      PartitioningOperation *op, bool inline_ok) {
+    // need valid data for each target
+    for (size_t i = 0; i < targets.size(); i++) {
+      if (!targets[i].dense()) {
+        // it's safe to add the count after the registration only because we
+        // initialized the count to 2 instead of 1
+        bool registered = SparsityMapImpl<N2, T2>::lookup(targets[i].sparsity)
+                              ->add_waiter(this, true /*precise*/);
+        if (registered) wait_count.fetch_add(1);
+      }
+    }
+
+    // need valid data for the parent space too
+    if (!parent_space.dense()) {
+      // it's safe to add the count after the registration only because we
+      // initialized the count to 2 instead of 1
+      bool registered = SparsityMapImpl<N, T>::lookup(parent_space.sparsity)
+                            ->add_waiter(this, true /*precise*/);
+      if (registered) wait_count.fetch_add(1);
+    }
+
+    finish_dispatch(op, inline_ok);
+  }
 
   // instantiations of templates handled in preimage_tmpl.cc
 

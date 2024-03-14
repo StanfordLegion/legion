@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -38,6 +38,8 @@ namespace Realm {
       ~CompiledInstanceLayout();
 
       virtual void *allocate_memory(size_t bytes);
+
+      virtual void commit_updates();
 
       void reset();
 
@@ -107,6 +109,8 @@ namespace Realm {
       void recycle_instance(void);
 
     public: //protected:
+      void send_metadata(const NodeSet& early_reqs);
+
       friend class RegionInstance;
 
       RegionInstance me;
@@ -124,6 +128,8 @@ namespace Realm {
       static const size_t INSTOFFSET_MAXVALID = size_t(-5);
       class Metadata : public MetadataBase {
       public:
+        Metadata();
+
 	void *serialize(size_t& out_size) const;
 
 	template<typename T>
@@ -145,8 +151,36 @@ namespace Realm {
 	bool need_alloc_result, need_notify_dealloc;
 	InstanceLayoutGeneric *layout;
 	ExternalInstanceResource *ext_resource;
-	void *mem_specific;  // a place for memory's to hang info
+	MemSpecificInfo *mem_specific;  // a place for memory's to hang info
 	CompiledInstanceLayout lookup_program;
+
+        template <typename T>
+        T *find_mem_specific()
+        {
+          MemSpecificInfo *info = mem_specific;
+          while(info) {
+            T *downcast = dynamic_cast<T *>(info);
+            if(downcast)
+              return downcast;
+            info = info->next;
+          }
+          return 0;
+        }
+
+        template <typename T>
+        const T *find_mem_specific() const
+        {
+          const MemSpecificInfo *info = mem_specific;
+          while(info) {
+            const T *downcast = dynamic_cast<const T *>(info);
+            if(downcast)
+              return downcast;
+            info = info->next;
+          }
+          return 0;
+        }
+
+        void add_mem_specific(MemSpecificInfo *info);
       };
 
       // used for atomic access to metadata

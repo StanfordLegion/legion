@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------#
-# Copyright 2022 Stanford University
+# Copyright 2024 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
 # limitations under the License.
 #------------------------------------------------------------------------------#
 
-cmake_minimum_required(VERSION 3.1)
+cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
 project(LegionExample_realm_stencil)
 
 # Only search if were building stand-alone and not as part of Legion
@@ -27,6 +27,7 @@ target_compile_definitions(realm_stencil PRIVATE DTYPE=double)
 target_compile_definitions(realm_stencil PRIVATE RESTRICT=__restrict__)
 target_compile_definitions(realm_stencil PRIVATE RADIUS=2)
 target_link_libraries(realm_stencil Legion::Legion)
+target_compile_options(realm_stencil PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
 if(Legion_ENABLE_TESTING)
   add_test(NAME realm_stencil COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:realm_stencil> ${Legion_TEST_ARGS} -ll:cpu 4)
 endif()

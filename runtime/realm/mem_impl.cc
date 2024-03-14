@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@
 #include "realm/proc_impl.h"
 #include "realm/logging.h"
 #include "realm/serialize.h"
+#include "realm/idx_impl.h"
 #include "realm/inst_impl.h"
 #include "realm/runtime_impl.h"
 #include "realm/profiling.h"
@@ -73,19 +74,19 @@ namespace Realm {
       assert(0);
     }
 
-    /*static*/ const Memory Memory::NO_MEMORY = { 0 };
+    /*static*/ const Memory Memory::NO_MEMORY = {/* zero-initialization */};
 
-
-  ////////////////////////////////////////////////////////////////////////
-  //
-  // class MemoryImpl
-  //
+    ////////////////////////////////////////////////////////////////////////
+    //
+    // class MemoryImpl
+    //
 
     MemoryImpl::MemoryImpl(Memory _me, size_t _size,
 			   MemoryKind _kind, Memory::Kind _lowlevel_kind,
 			   NetworkSegment *_segment)
       : me(_me), size(_size), kind(_kind), lowlevel_kind(_lowlevel_kind)
       , segment(_segment)
+      , module_specific(0)
     {}
 
     MemoryImpl::~MemoryImpl(void)
@@ -106,6 +107,19 @@ namespace Realm {
 	    delete *it2;
 	delete it->second;
       }
+
+      // free any module-specific info we have
+      while(module_specific) {
+        ModuleSpecificInfo *next = module_specific->next;
+        delete module_specific;
+        module_specific = next;
+      }
+    }
+
+    void MemoryImpl::add_module_specific(ModuleSpecificInfo *info)
+    {
+      info->next = module_specific;
+      module_specific = info;
     }
 
     // default implementation handles deferral, but falls through to
@@ -121,19 +135,48 @@ namespace Realm {
 
       // check precondition on allocation
       bool alloc_poisoned = false;
+      AllocationResult result;
+      size_t inst_offset = 0;
       if(precondition.has_triggered_faultaware(alloc_poisoned)) {
-	// attempt immediate allocation (it'll handle poison)
-	return allocate_storage_immediate(inst, need_alloc_result,
-					  alloc_poisoned,
-					  TimeLimit::responsive());
+	if(alloc_poisoned) {
+	  // a poisoned creation works a lot like a failed creation
+	  inst->notify_allocation(ALLOC_CANCELLED,
+				  RegionInstanceImpl::INSTOFFSET_FAILED,
+				  TimeLimit::responsive());
+	  return ALLOC_INSTANT_FAILURE;
+        }
+
+        if(inst->metadata.ext_resource != 0) {
+          // hopefully this memory can handle this kind of external resource
+          if(attempt_register_external_resource(inst, inst_offset)) {
+            result = ALLOC_INSTANT_SUCCESS;
+          } else {
+            log_inst.warning() << "attempt to register unsupported external resource: mem=" << me << " resource=" << *(inst->metadata.ext_resource);
+            result = ALLOC_INSTANT_FAILURE;
+          }
+        } else {
+          // attempt immediate allocation (this will notify as needed on
+          //  its own)
+          return allocate_storage_immediate(inst, need_alloc_result,
+                                            false /*!alloc_poisoned*/,
+                                            TimeLimit::responsive());
+        }
       } else {
 	// defer allocation attempt
 	inst->metadata.inst_offset = RegionInstanceImpl::INSTOFFSET_DELAYEDALLOC;
 	inst->deferred_create.defer(inst, this,
 				    need_alloc_result,
 				    precondition);
-	return ALLOC_DEFERRED /*asynchronous notification*/;
+	result = ALLOC_DEFERRED /*asynchronous notification*/;
       }
+
+      // if we needed an alloc result, send deferred responses too
+      if((result != ALLOC_DEFERRED) || need_alloc_result) {
+        inst->notify_allocation(result, inst_offset,
+                                TimeLimit::responsive());
+      }
+
+      return result;
     }
 
     void MemoryImpl::release_storage_deferrable(RegionInstanceImpl *inst,
@@ -153,6 +196,30 @@ namespace Realm {
 	// ask the instance to tell us when the precondition is satisified
 	inst->deferred_destroy.defer(inst, this, precondition);
       }
+    }
+
+    bool MemoryImpl::attempt_register_external_resource(RegionInstanceImpl *inst,
+                                                        size_t& inst_offset)
+    {
+      // nothing supported in base memory implementation
+      return false;
+    }
+
+    void MemoryImpl::unregister_external_resource(RegionInstanceImpl *inst)
+    {
+      // nothing to do
+    }
+
+    // for re-registration purposes, generate an ExternalInstanceResource *
+    //  (if possible) for a given instance, or a subset of one
+    ExternalInstanceResource *MemoryImpl::generate_resource_info(RegionInstanceImpl *inst,
+								 const IndexSpaceGeneric *subspace,
+								 span<const FieldID> fields,
+								 bool read_only)
+    {
+      // we don't know about any specific types of external resources in
+      //  the base class
+      return 0;
     }
 
 #if 0
@@ -447,6 +514,29 @@ namespace Realm {
       return segment;
     }
 
+    bool MemoryImpl::get_local_addr(off_t offset, LocalAddress &local_addr)
+    {
+      if(segment) {
+        local_addr.segment = segment;
+        local_addr.offset = offset;
+        return true;
+      } else
+        return false;
+    }
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class MemSpecificInfo
+  //
+
+  MemSpecificInfo::MemSpecificInfo()
+    : next(0)
+  {}
+
+  std::string get_shm_name(realm_id_t id)
+  {
+    return "realm_shm." + std::to_string(id) + '.' + std::to_string(Config::job_id);
+  }
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -511,19 +601,11 @@ namespace Realm {
       AllocationResult result;
       size_t inst_offset = 0;
       if(inst->metadata.ext_resource != 0) {
-	// this is an external allocation - it had better be a memory resource
-	ExternalMemoryResource *res = dynamic_cast<ExternalMemoryResource *>(inst->metadata.ext_resource);
-	if(res != 0) {
-	  // automatic success - make the "offset" be the difference between the
-	  //  base address we were given and our own allocation's base
-	  void *mem_base = get_direct_ptr(0, 0); // only our subclasses know this
-	  // assert(mem_base != 0);
-	  // underflow is ok here - it'll work itself out when we add the mem_base
-	  //  back in on accesses
-	  inst_offset = res->base - reinterpret_cast<uintptr_t>(mem_base);
+        // hopefully this memory can handle this kind of external resource
+        if(attempt_register_external_resource(inst, inst_offset)) {
 	  result = ALLOC_INSTANT_SUCCESS;
 	} else {
-	  log_inst.warning() << "attempt to register non-memory resource: mem=" << me << " resource=" << *(inst->metadata.ext_resource);
+	  log_inst.warning() << "attempt to register unsupported external resource: mem=" << me << " resource=" << *(inst->metadata.ext_resource);
 	  result = ALLOC_INSTANT_FAILURE;
 	}
       } else {
@@ -634,7 +716,9 @@ namespace Realm {
 
       // ignore external instances here - we can't reuse their memory for
       //  future allocations
-      if(inst->metadata.ext_resource == 0) {
+      if(inst->metadata.ext_resource != 0) {
+        unregister_external_resource(inst);
+      } else {
 	// this release may satisfy pending allocation requests
 	std::vector<std::pair<RegionInstanceImpl *, size_t> > successful_allocs;
 
@@ -794,13 +878,13 @@ namespace Realm {
 #ifdef DEBUG_DEFERRED_ALLOCATIONS
   Logger log_defalloc("defalloc");
 
-  std::ostream& operator<<(std::ostream& os, const MemoryImpl::PendingAlloc& p)
+  std::ostream& operator<<(std::ostream& os, const LocalManagedMemory::PendingAlloc& p)
   {
     os << p.inst->me << "(" << ((void *)(p.inst)) << "," << p.bytes << "," << p.alignment << "," << p.last_release_seqid << ")";
     return os;
   }
 
-  std::ostream& operator<<(std::ostream& os, const MemoryImpl::PendingRelease& p)
+  std::ostream& operator<<(std::ostream& os, const LocalManagedMemory::PendingRelease& p)
   {
     os << p.inst->me << "(" << ((void *)(p.inst)) << "," << p.is_ready << "," << p.seqid << ")";
     return os;
@@ -827,6 +911,9 @@ namespace Realm {
       return false;
     }
 
+    // if we have to unwind allocs we thought were successful, don't nuke the
+    //  ones that were known good before our experiment
+    size_t orig_num_success = successful_allocs.size();
     std::vector<PendingAlloc>::iterator a_now = pending_allocs.begin();
     BasicRangeAllocator<size_t, RegionInstance> test_allocator = release_allocator;
     while(a_now != pending_allocs.end()) {
@@ -917,7 +1004,10 @@ namespace Realm {
       } else {
 	// nope - it didn't work - unwind everything and clear out
 	//  the allocations we thought we could do
-	successful_allocs.clear();
+#ifdef DEBUG_DEFERRED_ALLOCATIONS
+	log_defalloc.print() << "unwind allocs: " << PrettyVector<std::pair<RegionInstanceImpl *, size_t> >(successful_allocs) << " " << orig_num_success;
+#endif
+	successful_allocs.resize(orig_num_success);
 	return false;
       }
     }
@@ -931,8 +1021,10 @@ namespace Realm {
       // for external instances, all we have to do is ack the destruction (assuming
       //  it wasn't poisoned)
       if(inst->metadata.ext_resource != 0) {
-	if(!poisoned)
+	if(!poisoned) {
+          unregister_external_resource(inst);
 	  inst->notify_deallocation();
+        }
 	return;
       }
 
@@ -1185,25 +1277,39 @@ namespace Realm {
   // class LocalCPUMemory
   //
 
-  LocalCPUMemory::LocalCPUMemory(Memory _me, size_t _size, 
-                                 int _numa_node, Memory::Kind _lowlevel_kind,
-				 void *prealloc_base /*= 0*/,
-				 NetworkSegment *_segment /*= 0*/)
-    : LocalManagedMemory(_me, _size, MKIND_SYSMEM, ALIGNMENT,
-			 _lowlevel_kind, _segment),
-      numa_node(_numa_node)
+  LocalCPUMemory::LocalCPUMemory(Memory _me, size_t _size, int _numa_node,
+                                 Memory::Kind _lowlevel_kind, void *prealloc_base /*= 0*/,
+                                 NetworkSegment *_segment /*= 0*/)
+    : LocalManagedMemory(_me, _size, MKIND_SYSMEM, ALIGNMENT, _lowlevel_kind, _segment)
+    , numa_node(_numa_node), base(nullptr), base_orig(nullptr), prealloced(false)
   {
     if(prealloc_base) {
       base = (char *)prealloc_base;
       prealloced = true;
-    } else {
-      if(_size > 0) {
+    } else if (_size > 0) {
+#if defined(REALM_USE_SHM)
+      SharedMemoryInfo shared_memory;
+      log_malloc.debug() << "Trying to create shm for " << me;
+#if defined(REALM_USE_ANONYMOUS_SHARED_MEMORY)
+      if(SharedMemoryInfo::create(shared_memory, size, nullptr, numa_node))
+#else
+      std::string name = get_shm_name(mem->memory_id);
+      if(SharedMemoryInfo::create(shared_memory, size, name.c_str(), numa_node))
+#endif
+      {
+        base = shared_memory.get_ptr<char>();
+        get_runtime()->local_shared_memory_mappings
+          .emplace(ID(me).id, std::move(shared_memory));
+      } else
+#endif
+      {
         // allocate our own space
         // enforce alignment on the whole memory range
+        // TODO: replace with numasysif and memalign
         base_orig = static_cast<char *>(malloc(_size + ALIGNMENT - 1));
         if(!base_orig) {
-          log_malloc.fatal() << "insufficient system memory: "
-                             << size << " bytes needed (from -ll:csize)";
+          log_malloc.fatal() << "insufficient system memory: " << size
+                              << " bytes needed (from -ll:csize)";
           abort();
         }
         size_t ofs = reinterpret_cast<size_t>(base_orig) % ALIGNMENT;
@@ -1212,28 +1318,97 @@ namespace Realm {
         } else {
           base = base_orig;
         }
-        prealloced = false;
-
-        // we should not have been given a NetworkSegment by our caller
-        assert(!segment);
-        // advertise our allocation in case the network can register it
-        local_segment.assign(NetworkSegmentInfo::HostMem,
-                             base, _size);
-        segment = &local_segment;
-      } else {
-        base = 0;
-        prealloced = true;
       }
+      prealloced = false;
+      // we should not have been given a NetworkSegment by our caller
+      assert(!segment);
+      // advertise our allocation in case the network can register it
+      local_segment.assign(NetworkSegmentInfo::HostMem, base, _size);
+      segment = &local_segment;
+    } else {
+      base = 0;
+      prealloced = true;
     }
-    log_malloc.debug("CPU memory at %p, size = %zd%s%s", base, _size, 
-		     prealloced ? " (prealloced)" : "",
-		     (segment && segment->single_network) ? " (registered)" : "");
+    log_malloc.debug("CPU memory at %p, size = %zd%s%s", static_cast<void *>(base), _size,
+                     prealloced ? " (prealloced)" : "",
+                     (segment && segment->single_network) ? " (registered)" : "");
   }
 
   LocalCPUMemory::~LocalCPUMemory(void)
   {
-    if(!prealloced)
+    if(!prealloced && (base_orig != nullptr))
       free(base_orig);
+  }
+
+  // LocalCPUMemory supports ExternalMemoryResource
+  bool LocalCPUMemory::attempt_register_external_resource(RegionInstanceImpl *inst,
+                                                          size_t& inst_offset)
+  {
+    ExternalMemoryResource *res = dynamic_cast<ExternalMemoryResource *>(inst->metadata.ext_resource);
+    if(res != 0) {
+      // automatic success - make the "offset" be the difference between the
+      //  base address we were given and our own allocation's base
+      void *mem_base = get_direct_ptr(0, 0); // only our subclasses know this
+      // underflow is ok here - it'll work itself out when we add the mem_base
+      //  back in on accesses
+      inst_offset = res->base - reinterpret_cast<uintptr_t>(mem_base);
+      return true;
+    }
+
+    // not a kind we recognize
+    return false;
+  }
+
+  void LocalCPUMemory::unregister_external_resource(RegionInstanceImpl *inst)
+  {
+    // nothing actually to clean up
+  }
+
+  // for re-registration purposes, generate an ExternalInstanceResource *
+  //  (if possible) for a given instance, or a subset of one
+  ExternalInstanceResource *LocalCPUMemory::generate_resource_info(RegionInstanceImpl *inst,
+								   const IndexSpaceGeneric *subspace,
+								   span<const FieldID> fields,
+								   bool read_only)
+  {
+    // TODO: handle subspaces
+    //assert(subspace == 0);
+
+    // compute the bounds of the instance relative to our base
+    assert(inst->metadata.is_valid() &&
+	   "instance metadata must be valid before accesses are performed");
+    assert(inst->metadata.layout);
+    InstanceLayoutGeneric *ilg = inst->metadata.layout;
+    uintptr_t rel_base, extent;
+    if(subspace == 0) {
+      // want full instance
+      rel_base = 0;
+      extent = ilg->bytes_used;
+    } else {
+      assert(!fields.empty());
+      uintptr_t limit;
+      for(size_t i = 0; i < fields.size(); i++) {
+        uintptr_t f_base, f_limit;
+        if(!subspace->impl->compute_affine_bounds(ilg, fields[i], f_base, f_limit))
+          return 0;
+        if(i == 0) {
+          rel_base = f_base;
+          limit = f_limit;
+        } else {
+          rel_base = std::min(rel_base, f_base);
+          limit = std::max(limit, f_limit);
+        }
+      }
+      extent = limit - rel_base;
+    }
+
+    void *mem_base = get_direct_ptr(inst->metadata.inst_offset + rel_base,
+                                    extent); // only our subclasses know this
+    if(!mem_base)
+      return 0;
+
+    return new ExternalMemoryResource(reinterpret_cast<uintptr_t>(mem_base),
+                                      extent, read_only);
   }
 
   void LocalCPUMemory::get_bytes(off_t offset, void *dst, size_t size)
@@ -1248,8 +1423,8 @@ namespace Realm {
 
   void *LocalCPUMemory::get_direct_ptr(off_t offset, size_t size)
   {
-//    assert((offset >= 0) && ((size_t)(offset + size) <= this->size));
-    return (base + offset);
+    //    assert((offset >= 0) && ((size_t)(offset + size) <= this->size));
+    return base ? base + offset : reinterpret_cast<void *>(offset);
   }
 
   
@@ -1261,7 +1436,13 @@ namespace Realm {
     RemoteMemory::RemoteMemory(Memory _me, size_t _size, Memory::Kind k,
 			       MemoryKind mk /*= MKIND_REMOTE */)
       : MemoryImpl(_me, _size, mk, k, nullptr /*no segment*/)
-    {}
+    {
+      std::unordered_map<realm_id_t, SharedMemoryInfo>::iterator it =
+          get_runtime()->remote_shared_memory_mappings.find(ID(me).id);
+      if(it != get_runtime()->remote_shared_memory_mappings.end()) {
+        base = it->second.get_ptr<void>();
+      }
+    }
 
     RemoteMemory::~RemoteMemory(void)
     {}
@@ -1337,19 +1518,24 @@ namespace Realm {
 
     void RemoteMemory::put_bytes(off_t offset, const void *src, size_t size)
     {
-      // can't read/write a remote memory
-      assert(0);
+      void *ptr = get_direct_ptr(offset, size);
+      assert(ptr != nullptr);
+      memcpy(ptr, src, size);
     }
 
     void RemoteMemory::get_bytes(off_t offset, void *dst, size_t size)
     {
-      // can't read/write a remote memory
-      assert(0);
+      void *ptr = get_direct_ptr(offset, size);
+      assert(ptr != nullptr);
+      memcpy(dst, ptr, size);
     }
 
     void *RemoteMemory::get_direct_ptr(off_t offset, size_t size)
     {
-      return 0;
+      if (base != nullptr) {
+        return static_cast<char *>(base) + offset;
+      }
+      return nullptr;
     }
 
 

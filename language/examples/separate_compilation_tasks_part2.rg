@@ -1,4 +1,4 @@
--- Copyright 2022 Stanford University
+-- Copyright 2024 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -19,21 +19,14 @@
 
 import "regent"
 
-assert(regentlib.config["separate"], "test requires separate compilation")
+require("separate_compilation_common")
+require("separate_compilation_tasks_part1_header")
 
-struct fs {
-  x : int
-  y : int
-  z : int
-}
-
-extern task my_regent_task(r : region(ispace(int1d), fs), x : int, y : double, z : bool)
-where reads writes(r.{x, y}), reads(r.z) end
-
+local format = require("std/format")
 
 task other_regent_task(r : region(ispace(int1d), fs), s : region(ispace(int1d), fs))
 where reads writes(r.{x, y}, s.z), reads(r.z, s.x), reduces+(s.y) do
-  regentlib.c.printf("Task with two region requirements\n")
+  format.println("Task with two region requirements")
   my_regent_task(r, 3, 4, false)
 end
 
@@ -41,4 +34,4 @@ end
 local root_dir = arg[0]:match(".*/") or "./"
 local separate_compilation_tasks_part2_h = root_dir .. "separate_compilation_tasks_part2.h"
 local separate_compilation_tasks_part2_so = root_dir .. "libseparate_compilation_tasks_part2.so"
-regentlib.save_tasks(separate_compilation_tasks_part2_h, separate_compilation_tasks_part2_so)
+regentlib.save_tasks(separate_compilation_tasks_part2_h, separate_compilation_tasks_part2_so, nil, nil, nil, nil, false)

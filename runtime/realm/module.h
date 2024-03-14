@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@
 #define REALM_MODULE_H
 
 #include "realm/realm_config.h"
+#include "realm/module_config.h"
 
 // to provide Realm functionality via the module interface, you need to:
 //
@@ -29,6 +30,7 @@
 
 #include <vector>
 #include <string>
+#include <map>
 
 namespace Realm {
 
@@ -88,6 +90,18 @@ namespace Realm {
     std::string name;
   };
 
+  // module-specific information can be attached to processors/memories/etc.
+  //  as a sort of "mix-in", providing module-specific data and/or methods
+  // finding module-specific info is based on knowing the type and finding it
+  //  via dynamic casts
+  class ModuleSpecificInfo {
+  public:
+    ModuleSpecificInfo();
+    virtual ~ModuleSpecificInfo();
+
+    ModuleSpecificInfo *next;
+  };
+
   // helper class for module registration - supports modules compiled in statically
   //  and the other for dynamically-loaded modules
 
@@ -100,22 +114,27 @@ namespace Realm {
 				int *argc, const char ***argv);
 
     // called by the runtime during init
-    void create_static_modules(std::vector<std::string>& cmdline,
-			       std::vector<Module *>& modules);
+    void create_static_modules(std::vector<Module *>& modules);
 
     // called by the runtime during init
-    void create_dynamic_modules(std::vector<std::string>& cmdline,
-				std::vector<Module *>& modules);
+    void create_dynamic_modules(std::vector<Module *>& modules);
 
     // called by runtime after all modules have been cleaned up
     void unload_module_sofiles(void);
+
+    // called by the runtime::create_configs
+    void create_static_module_configs(std::map<std::string, ModuleConfig *>& module_configs);
+
+    // called by the runtime::create_configs
+    void create_dynamic_module_configs(std::vector<std::string>& cmdline,
+				       std::map<std::string, ModuleConfig *>& module_configs);
 
     // TODO: consider some sort of "priority" scheme to order modules' inits?
     class StaticRegistrationBase {
     public:
       StaticRegistrationBase() : next(0) {}
-      virtual Module *create_module(RuntimeImpl *runtime,
-				    std::vector<std::string>& cmdline) const = 0;
+      virtual Module *create_module(RuntimeImpl *runtime) const = 0;
+      virtual ModuleConfig *create_module_config(RuntimeImpl *runtime) const = 0;		    
       StaticRegistrationBase *next;
     };
     template <typename T>
@@ -126,10 +145,14 @@ namespace Realm {
 	ModuleRegistrar::add_static_registration(this);
       }
 
-      virtual Module *create_module(RuntimeImpl *runtime,
-				    std::vector<std::string>& cmdline) const
+      virtual Module *create_module(RuntimeImpl *runtime) const
       {
-	return T::create_module(runtime, cmdline);
+	return T::create_module(runtime);
+      }
+
+      virtual ModuleConfig *create_module_config(RuntimeImpl *runtime) const
+      {
+	return T::create_module_config(runtime);
       }
     };
 
@@ -142,40 +165,49 @@ namespace Realm {
     class NetworkRegistrationBase {
     public:
       NetworkRegistrationBase() : next(0) {}
-      virtual NetworkModule *create_network_module(RuntimeImpl *runtime,
-						   int *argc,
-						   const char ***argv) const = 0;
+      virtual NetworkModule *
+      create_network_module(RuntimeImpl *runtime, int *argc,
+                            const char ***argv) const = 0;
       NetworkRegistrationBase *next;
     };
     template <typename T>
     class NetworkRegistration : public NetworkRegistrationBase {
     public:
-      NetworkRegistration(void)
-      {
-	ModuleRegistrar::add_network_registration(this);
+      NetworkRegistration(const std::string &name, size_t order = 9999) {
+        ModuleRegistrar::add_network_registration(this, name, order);
       }
 
       virtual NetworkModule *create_network_module(RuntimeImpl *runtime,
-						   int *argc,
-						   const char ***argv) const
-      {
-	return T::create_network_module(runtime, argc, argv);
+                                                   int *argc,
+                                                   const char ***argv) const {
+        return T::create_network_module(runtime, argc, argv);
       }
     };
 
     // called by the module registration helpers
-    static void add_network_registration(NetworkRegistrationBase *reg);
+    static void add_network_registration(NetworkRegistrationBase *reg, const std::string& name, size_t order = 9999);
+
+  protected:
+    // called by create_dynamic_module_configs to load sofiles
+    void load_module_sofiles(std::vector<std::string>& cmdline);
 
   protected:
     RuntimeImpl *runtime;
-    std::vector<void *> sofile_handles;
+    bool sofile_loaded;
+    std::vector<void *> module_sofile_handles;
+    std::vector<void *> network_sofile_handles;
   };
 	
   // macros used within a module when being built as a dynamic shared object
+#define REGISTER_REALM_MODULE_CONFIG_DYNAMIC(classname) \
+  extern "C" { \
+    REALM_INTERNAL_API_EXTERNAL_LINKAGE char realm_module_version[] = REALM_VERSION; \
+    REALM_INTERNAL_API_EXTERNAL_LINKAGE Realm::ModuleConfig *create_realm_module_config(Realm::RuntimeImpl *runtime) { return classname::create_module_config(runtime); } \
+  }
 #define REGISTER_REALM_MODULE_DYNAMIC(classname) \
   extern "C" { \
     REALM_INTERNAL_API_EXTERNAL_LINKAGE char realm_module_version[] = REALM_VERSION; \
-    REALM_INTERNAL_API_EXTERNAL_LINKAGE Realm::Module *create_realm_module(Realm::RuntimeImpl *runtime, std::vector<std::string>& cmdline) { return classname::create_module(runtime, cmdline); } \
+    REALM_INTERNAL_API_EXTERNAL_LINKAGE Realm::Module *create_realm_module(Realm::RuntimeImpl *runtime) { return classname::create_module(runtime); } \
   }
 #define REGISTER_REALM_NETWORK_MODULE_DYNAMIC(classname) \
   extern "C" { \

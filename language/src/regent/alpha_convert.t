@@ -1,4 +1,4 @@
--- Copyright 2022 Stanford University
+-- Copyright 2024 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -287,7 +287,6 @@ local node_alpha_conversion = {
   [ast.specialized.expr.Projection]                 = pass_through,
 
   [ast.specialized.expr.LuaTable] = function(cx, node, continuation)
-    for k, v in pairs(node.value) do print(k, v) end
     report.error(node, "unable to specialize value of type table")
   end,
 

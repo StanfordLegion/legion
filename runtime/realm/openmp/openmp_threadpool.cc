@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@
 #include "realm/openmp/openmp_threadpool.h"
 
 #include "realm/logging.h"
+#include "realm/proc_impl.h"
 
 namespace Realm {
 
@@ -279,11 +280,13 @@ namespace Realm {
   //
   // class ThreadPool
 
-  ThreadPool::ThreadPool(int _num_workers,
+  ThreadPool::ThreadPool(Processor _proc,
+                         int _num_workers,
 			 const std::string& _name_prefix,
 			 int _numa_node, size_t _stack_size,
 			 CoreReservationSet& crs)
-    : num_workers(_num_workers)
+    : proc(_proc)
+    , num_workers(_num_workers)
     , workers_running(false)
   {
     // create per-worker core reservations
@@ -350,6 +353,9 @@ namespace Realm {
   void ThreadPool::worker_entry(void)
   {
     log_pool.info() << "new worker thread";
+
+    // set TLS so that we respond properly to get_executing_processor
+    ThreadLocal::current_processor = proc;
 
     // choose an ID by finding an info to change from STARTING->IDLE
     int id = 1;

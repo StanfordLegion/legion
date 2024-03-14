@@ -1,4 +1,4 @@
--- Copyright 2022 Stanford University
+-- Copyright 2024 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 -- runs-with:
--- [["-fcuda", "1", "-foverride-demand-cuda", "1", "-ll:gpu", "1", "-fflow", "0" ]]
+-- [["-foverride-demand-cuda", "1", "-ll:gpu", "1", "-fflow", "0" ]]
 
 import "regent"
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# Copyright 2022 Stanford University
+# Copyright 2024 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -76,8 +76,8 @@ else:
 
 init_piece = extern_task(
     task_id=10002,
-    argument_types=[pygion.int32, Config, Region, Region, Region, Region, Region],
-    privileges=[None, None, WD, WD, WD, N, WD],
+    argument_types=[Config, Region, Region, Region, Region, Region],
+    privileges=[None, WD, WD, WD, N, WD],
     return_type=pygion.void,
     calling_convention='regent')
 
@@ -106,7 +106,7 @@ distribute_charge = extern_task(
     task_id=10005,
     argument_types=[Region, Region, Region, Region],
     privileges=[
-        Reduce('+', 'charge'),
+        RW('charge'),
         Reduce('+', 'charge'),
         Reduce('+', 'charge'),
         R('in_ptr', 'in_ptr_r', 'out_ptr', 'out_ptr_r', 'current_0', 'current_9')],
@@ -115,8 +115,9 @@ distribute_charge = extern_task(
 
 update_voltages = extern_task(
     task_id=10006,
-    argument_types=[pygion.bool_, Region, Region, Region],
+    argument_types=[pygion.bool_, pygion.bool_, Region, Region, Region],
     privileges=[
+        None,
         None,
         R('node_cap', 'leakage') + RW('node_voltage', 'charge'),
         R('node_cap', 'leakage') + RW('node_voltage', 'charge'),
@@ -161,6 +162,8 @@ def main():
         ('voltage_%d' % i, pygion.float32) for i in range(WIRE_SEGMENTS - 1)
     ]))
     timestamp = Fspace(OrderedDict([
+        ('init_start', pygion.int64),
+        ('init_stop', pygion.int64),
         ('start', pygion.int64),
         ('stop', pygion.int64),
     ]))
@@ -209,12 +212,15 @@ def main():
 
     times_part = Partition.equal(all_times, launch_domain)
 
-    if False: # _constant_time_launches:
+    for f in ['init_start', 'init_stop', 'start', 'stop']:
+        pygion.fill(all_times, f, 0)
+
+    if _constant_time_launches:
         c = Future(conf[0], value_type=Config)
-        index_launch(launch_domain, init_piece, ID, c, ghost_ranges_part[ID], private_part[ID], shared_part[ID], all_shared, wires_part[ID])
+        index_launch(launch_domain, init_piece, c, ghost_ranges_part[ID], private_part[ID], shared_part[ID], all_shared, wires_part[ID])
     else:
         for i in IndexLaunch(launch_domain):
-            init_piece(i, conf[0], ghost_ranges_part[i], private_part[i], shared_part[i], all_shared, wires_part[i])
+            init_piece(conf[0], ghost_ranges_part[i], private_part[i], shared_part[i], all_shared, wires_part[i])
 
     ghost_part = Partition.image(all_shared, ghost_ranges_part, 'rect', launch_domain)
 
@@ -240,7 +246,7 @@ def main():
                 index_launch(
                     launch_domain, distribute_charge, private_part[ID], shared_part[ID], ghost_part[ID], wires_part[ID])
                 index_launch(
-                    launch_domain, update_voltages, False, private_part[ID], shared_part[ID], times_part[ID])
+                    launch_domain, update_voltages, False, False, private_part[ID], shared_part[ID], times_part[ID])
             else:
                 for i in IndexLaunch(launch_domain):
                     calculate_new_currents(
@@ -249,7 +255,7 @@ def main():
                     distribute_charge(private_part[i], shared_part[i], ghost_part[i], wires_part[i])
                 for i in IndexLaunch(launch_domain):
                     update_voltages(
-                        False, private_part[i], shared_part[i], times_part[i])
+                        False, False, private_part[i], shared_part[i], times_part[i])
         if j == num_loops - prune - 1:
             pygion.execution_fence(block=True)
             stop_time = pygion.c.legion_get_current_time_in_nanos()

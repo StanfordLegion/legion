@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,6 +14,11 @@
  */
 
 #include "realm_saxpy.h"
+
+#ifdef REALM_USE_HIP
+#include "hip_cuda_compat/hip_cuda.h"
+#include "realm/hip/hiphijack_api.h"
+#endif
 
 extern Logger log_app;
 
@@ -87,7 +92,11 @@ void gpu_saxpy_task(const void *args, size_t arglen,
 
   size_t cta_threads = 256;
   size_t total_ctas = (num_elements + (cta_threads-1))/cta_threads;
-  gpu_saxpy<<<total_ctas, cta_threads>>>(saxpy_args->alpha, saxpy_args->bounds,
+  gpu_saxpy<<<total_ctas, cta_threads
+#ifdef REALM_USE_HIP
+              , 0, hipGetTaskStream()
+#endif
+           >>>(saxpy_args->alpha, saxpy_args->bounds,
 					 ra_x, ra_y, ra_z);
   // LOOK: NO WAIT! :)
 }

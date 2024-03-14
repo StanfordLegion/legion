@@ -1,5 +1,5 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
- * Copyright 2022 Los Alamos National Laboratory
+/* Copyright 2024 Stanford University, NVIDIA Corporation
+ * Copyright 2024 Los Alamos National Laboratory
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -68,8 +68,9 @@ static int fsync(int fd)
 
 namespace Realm {
 
-  extern Logger log_inst;
-  
+    extern Logger log_inst;
+    Logger log_disk("disk");
+
     DiskMemory::DiskMemory(Memory _me, size_t _size, std::string _file)
       : LocalManagedMemory(_me, _size, MKIND_DISK, ALIGNMENT,
 			   Memory::DISK_MEM, 0)
@@ -77,7 +78,7 @@ namespace Realm {
     {
       printf("file = %s\n", _file.c_str());
       // do not overwrite an existing file
-      fd = open(_file.c_str(), O_CREAT | O_EXCL | O_RDWR, 00777);
+      fd = open(_file.c_str(), O_CREAT | O_EXCL | O_RDWR, 00666);
       assert(fd != -1);
       // resize the file to what we want
       int ret =	ftruncate(fd, _size);
@@ -156,64 +157,85 @@ namespace Realm {
       return 0; // cannot provide a pointer for it;
     }
 
+    // FileMemory supports ExternalFileResource
+    bool FileMemory::attempt_register_external_resource(RegionInstanceImpl *inst,
+                                                        size_t& inst_offset)
+    {
+      {
+        ExternalFileResource *res = dynamic_cast<ExternalFileResource *>(inst->metadata.ext_resource);
+        if(res) {
+          // try to open the file
+          int fd;
+          switch(res->mode) {
+          case LEGION_FILE_READ_ONLY:
+            {
+              fd = open(res->filename.c_str(), O_RDONLY);
+              break;
+            }
+          case LEGION_FILE_READ_WRITE:
+            {
+              fd = open(res->filename.c_str(), O_RDWR);
+              break;
+            }
+          case LEGION_FILE_CREATE:
+            {
+              fd = open(res->filename.c_str(), O_CREAT | O_RDWR, 0666);
+              if(fd == -1) {
+                log_disk.fatal() << "unable to open file '" << res->filename << "': " << strerror(errno);
+                abort();
+              }
+              // resize the file to what we want
+              int ret = ftruncate(fd, inst->metadata.layout->bytes_used);
+              if(ret == -1) {
+                log_disk.fatal() << "failed to truncate file '" << res->filename << "': " << strerror(errno);
+                abort();
+              }
+              break;
+            }
+          default:
+            assert(0);
+          }
+
+          if(fd == -1) {
+            log_disk.fatal() << "unable to open file '" << res->filename << "': " << strerror(errno);
+            abort();
+          }
+
+          OpenFileInfo *info = new OpenFileInfo;
+          info->fd = fd;
+          info->offset = res->offset;
+
+          inst->metadata.add_mem_specific(info);
+          return true;
+        }
+      }
+
+      // not a kind we recognize
+      return false;
+    }
+
+    void FileMemory::unregister_external_resource(RegionInstanceImpl *inst)
+    {
+      OpenFileInfo *info = inst->metadata.find_mem_specific<OpenFileInfo>();
+      assert(info != 0);
+      int ret = close(info->fd);
+      if(ret == -1) {
+        log_disk.warning() << "file failed to close cleanly, disk contents may be corrupted";
+      }
+    }
+
     MemoryImpl::AllocationResult FileMemory::allocate_storage_immediate(RegionInstanceImpl *inst,
 									bool need_alloc_result,
 									bool poisoned,
 									TimeLimit work_until)
     {
-      // if the allocation request doesn't include an external file resource,
-      //  we fail it immediately
-      ExternalFileResource *res = dynamic_cast<ExternalFileResource *>(inst->metadata.ext_resource);
-      if(res == 0) {
-	if(inst->metadata.ext_resource)
-	  log_inst.warning() << "attempt to register non-file resource: mem=" << me << " resource=" << *(inst->metadata.ext_resource);
-	else
-	  log_inst.warning() << "attempt to allocate memory in file memory: layout=" << *(inst->metadata.layout);
-	inst->notify_allocation(ALLOC_INSTANT_FAILURE, 0, work_until);
-	return ALLOC_INSTANT_FAILURE;
-      }
+      // we can't actually allocate anything in a FileMemory
+      if(inst->metadata.ext_resource)
+        log_inst.warning() << "attempt to register non-file resource: mem=" << me << " resource=" << *(inst->metadata.ext_resource);
+      else
+        log_inst.warning() << "attempt to allocate memory in file memory: layout=" << *(inst->metadata.layout);
 
-      // poisoned preconditions cancel the allocation request
-      if(poisoned) {
-	inst->notify_allocation(ALLOC_CANCELLED, 0, work_until);
-	return ALLOC_CANCELLED;
-      }
-
-      // try to open the file
-      int fd;
-      switch(res->mode) {
-      case LEGION_FILE_READ_ONLY:
-	{
-	  fd = open(res->filename.c_str(), O_RDONLY);
-	  break;
-	}
-      case LEGION_FILE_READ_WRITE:
-	{
-	  fd = open(res->filename.c_str(), O_RDWR);
-	  break;
-	}
-      case LEGION_FILE_CREATE:
-	{
-	  fd = open(res->filename.c_str(), O_CREAT | O_RDWR, 0777);
-	  assert(fd != -1);
-	  // resize the file to what we want
-	  int ret = ftruncate(fd, inst->metadata.layout->bytes_used);
-	  assert(ret == 0);
-	  break;
-	}
-      default:
-	assert(0);
-      }
-
-      assert(fd != -1);
-
-      OpenFileInfo *info = new OpenFileInfo;
-      info->fd = fd;
-      info->offset = res->offset;
-
-      inst->metadata.mem_specific = info;
-
-      AllocationResult result = ALLOC_INSTANT_SUCCESS;
+      AllocationResult result = ALLOC_INSTANT_FAILURE;
       size_t inst_offset = 0;
       inst->notify_allocation(result, inst_offset, work_until);
 
@@ -229,13 +251,15 @@ namespace Realm {
       if(poisoned)
 	return;
 
-      OpenFileInfo *info = reinterpret_cast<OpenFileInfo *>(inst->metadata.mem_specific);
-      assert(info != 0);
-      close(info->fd);
-      delete info;
-      inst->metadata.mem_specific = 0;
+      // for external instances, all we have to do is ack the destruction
+      if(inst->metadata.ext_resource != 0) {
+        unregister_external_resource(inst);
+        inst->notify_deallocation();
+	return;
+      }
 
-      inst->notify_deallocation();
+      // shouldn't get here - no allocation
+      assert(0);
     }
 
 

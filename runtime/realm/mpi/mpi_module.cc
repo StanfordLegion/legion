@@ -1,5 +1,5 @@
 
-/* Copyright 2022 Stanford University, NVIDIA Corporation, Argonne National Laboratory
+/* Copyright 2024 Stanford University, NVIDIA Corporation, Argonne National Laboratory
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,6 +24,22 @@
 #include "realm/runtime_impl.h"
 #include "realm/mem_impl.h"
 #include "realm/transfer/ib_memory.h"
+
+#include <limits.h>
+
+#if !defined(REALM_MPI_HAS_COMM_SPLIT_TYPE) && defined(OMPI_MAJOR_VERSION)
+#if (OMPI_MAJOR_VERSION*100 + OMPI_MINOR_VERSION) >= 107
+#define REALM_MPI_HAS_COMM_SPLIT_TYPE 1
+#endif
+#endif
+
+#if SIZE_MAX == UINT_MAX
+#define REALM_MPI_SIZE_T MPI_UNSIGNED
+#elif SIZE_MAX == ULONG_MAX
+#define REALM_MPI_SIZE_T MPI_UNSIGNED_LONG
+#elif SIZE_MAX == ULLONG_MAX
+#define REALM_MPI_SIZE_T MPI_UNSIGNED_LONG_LONG
+#endif
 
 void enqueue_message(int target, int msgid,
                      const void *args, size_t arg_size,
@@ -626,11 +642,14 @@ namespace Realm {
     }
 #endif
     int mpi_rank, mpi_size;
-    Realm::MPI::AM_Init(&mpi_rank, &mpi_size);
+    if (Realm::MPI::AM_Init(&mpi_rank, &mpi_size) != 0) {
+      return NULL;
+    }
     Network::my_node_id = mpi_rank;
     Network::max_node_id = mpi_size - 1;
     Network::all_peers.add_range(0, mpi_size - 1);
     Network::all_peers.remove(mpi_rank);
+
 #ifdef DEBUG_REALM_STARTUP
     { // once we're convinced there isn't skew here, reduce this to rank 0
       char s[80];
@@ -641,6 +660,47 @@ namespace Realm {
     }
 #endif
     return new MPIModule;
+  }
+
+  void MPIModule::get_shared_peers(NodeSet &shared_peers)
+  {
+    // Enumerate all the local ranks
+#if defined(REALM_MPI_HAS_COMM_SPLIT_TYPE)
+      // This version is more accurate as it uses topology information rather than hostname,
+      // but this is only available on certain versions of MPI.
+      MPI_Comm shared_comm;
+      int shared_peers_size = 0;
+      CHECK_MPI(MPI_Comm_split_type(MPI_COMM_WORLD, MPI_COMM_TYPE_SHARED, 0,
+                                    MPI_INFO_NULL, &shared_comm));
+      CHECK_MPI(MPI_Comm_size(shared_comm, &shared_peers_size));
+      if(shared_peers_size > 0) {
+        // Request the global rank ids from all the shared peers
+        std::vector<int> shared_ranks(shared_peers_size, -1);
+        CHECK_MPI(MPI_Allgather(&Network::my_node_id, 1, MPI_INT, shared_ranks.data(), 1,
+                                MPI_INT, shared_comm));
+        for(int i = 0; i < shared_peers_size; i++) {
+          if(shared_ranks[i] == Network::my_node_id)
+            continue;
+          shared_peers.add(shared_ranks[i]);
+        }
+      }
+      CHECK_MPI(MPI_Comm_free(&shared_comm));
+#else
+      char mpi_proc_name[MPI_MAX_PROCESSOR_NAME];
+      int mpi_proc_name_len = sizeof(mpi_proc_name) - 1;
+      unsigned mpi_name_hash = 5381;
+      std::vector<unsigned> all_hashes(Network::max_node_id + 1, 0);
+      CHECK_MPI(MPI_Get_processor_name(mpi_proc_name, &mpi_proc_name_len));
+      for(int i = 0; i < mpi_proc_name_len; i++) {
+        mpi_name_hash = (((mpi_name_hash << 5)) + mpi_name_hash) + static_cast<unsigned>(mpi_proc_name[i]);
+      }
+      CHECK_MPI(MPI_Allgather(&mpi_name_hash, 1, MPI_UNSIGNED, all_hashes.data(), 1, MPI_UNSIGNED, MPI_COMM_WORLD));
+      for(NodeID i = 0; i < (Network::max_node_id + 1); i++) {
+        if((i != Network::my_node_id) && (all_hashes[i] == mpi_name_hash)) {
+          shared_peers.add(i);
+        }
+      }
+#endif
   }
 
   // actual parsing of the command line should wait until here if at all
@@ -670,6 +730,8 @@ namespace Realm {
         if((*it)->bytes == 0) continue;
         if((*it)->base != 0) continue;
 	if((*it)->memtype != NetworkSegmentInfo::HostMem) continue;
+        if(((*it)->flags & NetworkSegmentInfo::OptionFlags::OnDemandRegistration) != 0)
+          continue;
         attach_size += (*it)->bytes;
     }
 
@@ -739,10 +801,36 @@ namespace Realm {
     }
     CHECK_MPI( MPI_Bcast(val_out, bytes, MPI_BYTE, root, MPI_COMM_WORLD) );
   }
-  
+
   void MPIModule::gather(NodeID root, const void *val_in, void *vals_out, size_t bytes)
   {
     CHECK_MPI( MPI_Gather(val_in, bytes, MPI_BYTE, vals_out, bytes, MPI_BYTE, root, MPI_COMM_WORLD) );
+  }
+
+  void MPIModule::allgatherv(const char *val_in, size_t bytes,
+                             std::vector<char> &vals_out, std::vector<size_t> &lengths)
+  {
+    lengths.resize(Network::max_node_id + 1);
+    // Retrieve the sizes of the buffers
+    CHECK_MPI(MPI_Allgather(&bytes, 1, REALM_MPI_SIZE_T, lengths.data(), 1,
+                            REALM_MPI_SIZE_T, MPI_COMM_WORLD));
+    // Set up the receive buffer and describe the final buffer layout
+    size_t total = lengths[0];
+    std::vector<int> offsets(Network::max_node_id + 1);
+    std::vector<int> sizes(Network::max_node_id + 1);
+
+    offsets[0] = 0;
+    sizes[0] = lengths[0];
+    for(size_t i = 1; i < offsets.size(); i++) {
+      sizes[i] = static_cast<int>(lengths[i]);
+      offsets[i] = offsets[i - 1] + static_cast<int>(lengths[i]);
+      total += lengths[i];
+    }
+    vals_out.resize(total);
+
+    // Perform the allgatherv!
+    CHECK_MPI(MPI_Allgatherv(val_in, bytes, MPI_BYTE, vals_out.data(), sizes.data(),
+                             offsets.data(), MPI_BYTE, MPI_COMM_WORLD));
   }
 
   size_t MPIModule::sample_messages_received_count(void)
@@ -834,26 +922,28 @@ namespace Realm {
     return impl;
   }
 
-  ActiveMessageImpl *MPIModule::create_active_message_impl(NodeID target,
-							    unsigned short msgid,
-							    size_t header_size,
-							    size_t max_payload_size,
-							    const void *src_payload_addr,
-							    size_t src_payload_lines,
-							    size_t src_payload_line_stride,
-							    const RemoteAddress& dest_payload_addr,
-							    void *storage_base,
-							    size_t storage_size)
+  ActiveMessageImpl *MPIModule::create_active_message_impl(
+      NodeID target, unsigned short msgid, size_t header_size, size_t max_payload_size,
+      const LocalAddress &src_payload_addr, size_t src_payload_lines,
+      size_t src_payload_line_stride, const RemoteAddress &dest_payload_addr,
+      void *storage_base, size_t storage_size)
   {
     assert(storage_size >= sizeof(MPIMessageImpl));
-    MPIMessageImpl *impl = new(storage_base) MPIMessageImpl(target,
-						              msgid,
-							      header_size,
-							      max_payload_size,
-							      src_payload_addr,
-							      src_payload_lines,
-							      src_payload_line_stride,
-							      dest_payload_addr);
+    char *src_ptr =
+        (static_cast<char *>(src_payload_addr.segment->base) + src_payload_addr.offset);
+    MPIMessageImpl *impl = new(storage_base)
+        MPIMessageImpl(target, msgid, header_size, max_payload_size, src_ptr,
+                       src_payload_lines, src_payload_line_stride, dest_payload_addr);
+    return impl;
+  }
+
+  ActiveMessageImpl *MPIModule::create_active_message_impl(
+      NodeID target, unsigned short msgid, size_t header_size, size_t max_payload_size,
+      const RemoteAddress &dest_payload_addr, void *storage_base, size_t storage_size)
+  {
+    assert(storage_size >= sizeof(MPIMessageImpl));
+    MPIMessageImpl *impl = new(storage_base) MPIMessageImpl(
+        target, msgid, header_size, max_payload_size, 0, 0, 0, dest_payload_addr);
     return impl;
   }
 
@@ -924,11 +1014,11 @@ namespace Realm {
   }
 
   size_t MPIModule::recommended_max_payload(NodeID target,
-					    const void *data, size_t bytes_per_line,
-					    size_t lines, size_t line_stride,
-					    const RemoteAddress& dest_payload_addr,
-					    bool with_congestion,
-					    size_t header_size)
+                                            const LocalAddress &src_payload_addr,
+                                            size_t bytes_per_line, size_t lines,
+                                            size_t line_stride,
+                                            const RemoteAddress &dest_payload_addr,
+                                            bool with_congestion, size_t header_size)
   {
     // we don't care about source data location
     return recommended_max_payload(target, dest_payload_addr,

@@ -1,4 +1,4 @@
--- Copyright 2022 Stanford University
+-- Copyright 2024 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -12,44 +12,65 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- runs-with:
--- []
-
--- FIXME:
+-- FIXME: this test has a lot commented out because Legion does not
+-- support aliased regions in index launches even with simultaneous
+-- coherence.
 
 import "regent"
 
 local c = regentlib.c
 
-task f(s0 : region(int), s1 : region(int))
+task f(s0 : region(ispace(int1d), int), s1 : region(ispace(int1d), int))
 where
   reads writes simultaneous(s0),
   reads writes simultaneous(s1)
 do
 end
 
+task g(s0 : region(ispace(int1d), int))
+where
+  reads writes simultaneous(s0)
+do
+end
+
 task main()
-  var s = region(ispace(ptr, 5), int)
-  var y0 = dynamic_cast(ptr(int, s), 0)
-  var y1 = dynamic_cast(ptr(int, s), 1)
-  var y2 = dynamic_cast(ptr(int, s), 2)
+  var s = region(ispace(int1d, 5), int)
 
-  var rc = c.legion_coloring_create()
-  c.legion_coloring_add_point(rc, 0, __raw(y0))
-  c.legion_coloring_add_point(rc, 1, __raw(y1))
-  c.legion_coloring_add_point(rc, 2, __raw(y2))
-  var p1 = partition(disjoint, s, rc)
-  var p2 = partition(aliased, s, rc)
-  c.legion_coloring_destroy(rc)
+  var cs = ispace(int1d, 5)
+  var p1 = partition(equal, s, cs)
+
+  var t = region(cs, rect1d)
+  t[0] = rect1d { 0, 1 }
+  t[1] = rect1d { 0, 2 }
+  t[2] = rect1d { 1, 3 }
+  t[3] = rect1d { 2, 4 }
+  t[4] = rect1d { 3, 4 }
+  var pt = partition(equal, t, cs)
+  var p2 = image(s, pt, t)
+
+  -- __demand(__index_launch)
+  -- for idx = 0, 1 do
+  --   f(p1[0], p1[1]) -- disjoint regions
+  -- end
+
+  -- __demand(__index_launch)
+  -- for idx = 0, 1 do
+  --   f(p2[0], p2[1]) -- aliased regions
+  -- end
+
+  -- __demand(__index_launch)
+  -- for idx in cs do
+  --   g(p2[idx]) -- aliased regions
+  -- end
+
+  -- __demand(__index_launch)
+  -- for idx in cs do
+  --   f(p1[idx], p2[idx]) -- p1 and p2 alias (and p2 self-aliases)
+  -- end
 
   __demand(__index_launch)
-  for idx = 0, 1 do
-    f(p1[0], p1[1])
-  end
-
-  __demand(__index_launch)
-  for idx = 0, 1 do
-    f(p2[0], p2[1])
+  for idx = 0, 1 do -- in cs do
+    g(p1[0]) -- same region to all tasks
   end
 end
 regentlib.start(main)

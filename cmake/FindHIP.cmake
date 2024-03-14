@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------#
-# Copyright 2022 Kitware, Inc.
+# Copyright 2024 Kitware, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -15,14 +15,26 @@
 #------------------------------------------------------------------------------#
 
 # find hip package
-if(NOT DEFINED HIP_PATH)
-  if(NOT DEFINED ENV{HIP_PATH})
-      set(HIP_PATH "/opt/rocm/hip" CACHE PATH "Path to where HIP has been installed")
+if(NOT DEFINED ROCM_PATH)
+  if(NOT DEFINED ENV{ROCM_PATH})
+    set(ROCM_PATH "/opt/rocm" CACHE PATH "Path to where ROCm has been installed")
   else()
-      set(HIP_PATH $ENV{HIP_PATH} CACHE PATH "Path to where HIP has been installed")
+    set(ROCM_PATH $ENV{ROCM_PATH} CACHE PATH "Path to where ROCm has been installed")
   endif()
 endif()
-include(${HIP_PATH}/cmake/FindHIP.cmake)
+# As of ROCm 6.0, there is no $ROCM_PATH/hip and everything is instead under lib
+if(EXISTS "${ROCM_PATH}/lib/cmake/hip/FindHIP.cmake")
+  include(${ROCM_PATH}/lib/cmake/hip/FindHIP.cmake)
+else()
+  include(${ROCM_PATH}/hip/cmake/FindHIP.cmake)
+endif()
+
+if(NOT HIP_INCLUDE_DIRS)
+  list(APPEND HIP_INCLUDE_DIRS
+    ${HIP_THRUST_ROOT_DIR} ${HIP_ROOT_DIR}/include
+  )
+  set(HIP_INCLUDE_DIRS "${HIP_INCLUDE_DIRS}" CACHE STRING "List of HIP include paths")
+endif()
 
 ###############################################################################
 # (Internal) helper for manually added hip source files with specific targets
@@ -45,24 +57,4 @@ endmacro()
 ###############################################################################
 macro(HIP_COMPILE generated_files)
   hip_compile_base(hip_compile OBJ ${generated_files} ${ARGN})
-endmacro()
-
-###############################################################################
-# HIPIFY_CUDA_FILE
-###############################################################################
-macro(HIPIFY_CUDA_FILE hip_files cuda_files)
-  set(_hip_generated_files "")
-  foreach(file ${cuda_files})
-    get_filename_component(filename ${file} NAME_WE)
-    get_filename_component(directory ${file} DIRECTORY)
-    set(hip_file ${filename}.cpp)
-    # message( STATUS "hip file: ${hip_file}" )
-    # message( STATUS "cuda file: ${file}" )
-    add_custom_command(
-      OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${hip_file}
-      COMMAND hipify-perl ${CMAKE_CURRENT_SOURCE_DIR}/${file} > ${CMAKE_CURRENT_BINARY_DIR}/${hip_file}
-      VERBATIM)
-    list(APPEND _hip_generated_files ${CMAKE_CURRENT_BINARY_DIR}/${hip_file})
-  endforeach()
-  set(${hip_files} ${_hip_generated_files})
 endmacro()

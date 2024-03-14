@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,6 +24,14 @@
 #include "realm/atomics.h"
 
 #include <stdint.h>
+
+// if enabled, we count how many times a doorbell is passed over and
+//  print warnings if it seems like a lot - this has known false positives
+//  (e.g. an UnfairCondVar used to wake up any one of a pool of sleeping
+//  threads or an UnfairMutex under heavy contention), so do not enable
+//  by default
+// TODO: control with command-line switch?
+//define REALM_ENABLE_STARVATION_CHECKS
 
 namespace Realm {
 
@@ -57,6 +65,49 @@ namespace Realm {
 #else
   typedef UnfairMutex Mutex;
 #endif
+
+  // a mutual exclusion checker does not guarantee mutual exclusion, but
+  //  instead tests dynamically whether mutual exclusion has been achieved
+  //  through other means
+  // unlike real mutexes where "lock" has memory acquire semantics and
+  //  "unlock" has memory release semantics, the checker tries to impose
+  //  as little memory ordering as possible
+  // finally, although the MutexChecker is compatible with the templated
+  //  AutoLock, it's encouraged to use 'MutexChecker::CheckedScope' for
+  //  the better diagnostic info
+  class REALM_INTERNAL_API_EXTERNAL_LINKAGE MutexChecker : public noncopyable {
+  public:
+    MutexChecker(const char *_name, void *_object = 0, int _limit = 1);
+    ~MutexChecker();
+
+    // no associated CondVar
+
+    class CheckedScope {
+    public:
+      CheckedScope(MutexChecker& _checker, const char *_name, void *_object = 0);
+      ~CheckedScope();
+
+    protected:
+      friend class MutexChecker;
+
+      MutexChecker& checker;
+      const char *name;
+      void *object;
+    };
+
+    void lock(CheckedScope *cs = 0);
+    bool trylock(CheckedScope *cs = 0);
+    void unlock(CheckedScope *cs = 0);
+
+  protected:
+    void lock_fail(int actval, CheckedScope *cs);
+    void unlock_fail(int actval, CheckedScope *cs);
+
+    const char *name;
+    void *object;
+    int limit;
+    atomic<int> cur_count;
+  };
 
   // a doorbell is used to notify a thread that whatever condition it has been
   //  waiting for has been satisfied - all operations are lock-free in user space,
@@ -115,6 +166,13 @@ namespace Realm {
 
     // useful for debugging
     uintptr_t owner_tid;
+#ifdef REALM_ENABLE_STARVATION_CHECKS
+    // lower bound on number of times this doorbell has been passed over
+    int starvation_count;
+
+    static atomic<int> starvation_limit;
+    void increase_starvation_count(int to_add, void *db_list);
+#endif
 
     friend class DoorbellList;
     Doorbell *next_doorbell;
@@ -153,6 +211,10 @@ namespace Realm {
     //  a) the first Doorbell in the waiting stack, or
     //  b) 2*extra_notifies - 1, if notifies are waiting for matching doorbells
     atomic<uintptr_t> head_or_count;
+
+#ifdef DEBUG_REALM
+    MutexChecker mutex_check;
+#endif
   };
 
   class REALM_INTERNAL_API_EXTERNAL_LINKAGE UnfairMutex : public noncopyable {
@@ -224,12 +286,7 @@ namespace Realm {
     //  but if we don't define it here, we run afoul of
     //  rules type-punning, so use macros to let mutex.cc's inclusion
     //  of this file behave a little differently
-    union {
-      uint64_t placeholder[8]; // 64 bytes, at least 8 byte aligned
-#ifdef REALM_KERNEL_MUTEX_IMPL
-      REALM_KERNEL_MUTEX_IMPL;
-#endif
-    };
+    alignas(8) uint64_t placeholder[8]; // 64 bytes, at least 8 byte aligned
   };
 
 
@@ -318,12 +375,7 @@ namespace Realm {
     //  but if we don't define it here, we run afoul of
     //  rules type-punning, so use macros to let mutex.cc's inclusion
     //  of this file behave a little differently
-    union {
-      uint64_t placeholder[8]; // 64 bytes, at least 8 byte aligned
-#ifdef REALM_KERNEL_CONDVAR_IMPL
-      REALM_KERNEL_CONDVAR_IMPL;
-#endif
-    };
+    alignas(8) uint64_t placeholder[8]; // 64 bytes, at least 8 byte aligned
   };
 
   template <typename LT = Mutex>
@@ -399,17 +451,12 @@ namespace Realm {
     //  but if we don't define it here, we run afoul of
     //  rules type-punning, so use macros to let mutex.cc's inclusion
     //  of this file behave a little differently
-    union {
 #ifdef REALM_ON_MACOS
       // apparently pthread_rwlock_t's are LARGE on macOS
-      uint64_t placeholder[32]; // 256 bytes, at least 8 byte aligned
+      alignas(8) uint64_t placeholder[32]; // 256 bytes, at least 8 byte aligned
 #else
-      uint64_t placeholder[8]; // 64 bytes, at least 8 byte aligned
+      alignas(8) uint64_t placeholder[8]; // 64 bytes, at least 8 byte aligned
 #endif
-#ifdef REALM_RWLOCK_IMPL
-      REALM_RWLOCK_IMPL;
-#endif
-    };
   };
 };
 

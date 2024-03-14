@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -78,19 +78,20 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     inline IndexSpaceT<DIM,T> MapperRuntime::create_index_space(
-                                    MapperContext ctx, Rect<DIM,T> bounds) const
+                  MapperContext ctx, Rect<DIM,T> bounds, const char *prov) const
     //--------------------------------------------------------------------------
     {
       DomainT<DIM,T> realm_is((Realm::IndexSpace<DIM,T>(bounds)));
       const Domain dom(realm_is);
       return IndexSpaceT<DIM,T>(create_index_space(ctx, dom,
-            Legion::Internal::NT_TemplateHelper::template encode_tag<DIM,T>()));
+       Legion::Internal::NT_TemplateHelper::template encode_tag<DIM,T>(),prov));
     }
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     inline IndexSpaceT<DIM,T> MapperRuntime::create_index_space(
-              MapperContext ctx, const std::vector<Point<DIM,T> > &points) const
+              MapperContext ctx, const std::vector<Point<DIM,T> > &points,
+              const char *provenance) const
     //--------------------------------------------------------------------------
     {
       // C++ type system is dumb
@@ -100,13 +101,14 @@ namespace Legion {
       DomainT<DIM,T> realm_is((Realm::IndexSpace<DIM,T>(realm_points)));
       const Domain dom(realm_is);
       return IndexSpaceT<DIM,T>(create_index_space(ctx, dom,
-                Internal::NT_TemplateHelper::template encode_tag<DIM,T>()));
+        Internal::NT_TemplateHelper::template encode_tag<DIM,T>(), provenance));
     }
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     inline IndexSpaceT<DIM,T> MapperRuntime::create_index_space(
-                MapperContext ctx, const std::vector<Rect<DIM,T> > &rects) const
+                MapperContext ctx, const std::vector<Rect<DIM,T> > &rects,
+                const char *provenance) const
     //--------------------------------------------------------------------------
     {
       // C++ type system is dumb
@@ -116,43 +118,46 @@ namespace Legion {
       DomainT<DIM,T> realm_is((Realm::IndexSpace<DIM,T>(realm_rects)));
       const Domain dom(realm_is);
       return IndexSpaceT<DIM,T>(create_index_space(ctx, dom,
-                Internal::NT_TemplateHelper::template encode_tag<DIM,T>()));
+        Internal::NT_TemplateHelper::template encode_tag<DIM,T>(), provenance));
     }
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     inline IndexSpaceT<DIM,T> MapperRuntime::union_index_spaces(
-          MapperContext ctx, const std::vector<IndexSpaceT<DIM,T> > &srcs) const
+          MapperContext ctx, const std::vector<IndexSpaceT<DIM,T> > &srcs,
+          const char *provenance) const
     //--------------------------------------------------------------------------
     {
       // C++ type system is dumb
       std::vector<IndexSpace> sources(srcs.size());
       for (unsigned idx = 0; idx < sources.size(); idx++)
         sources[idx] = srcs[idx];
-      return IndexSpaceT<DIM,T>(union_index_spaces(ctx, sources));
+      return IndexSpaceT<DIM,T>(union_index_spaces(ctx, sources, provenance));
     }
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     inline IndexSpaceT<DIM,T> MapperRuntime::intersect_index_spaces(
-          MapperContext ctx, const std::vector<IndexSpaceT<DIM,T> > &srcs) const
+          MapperContext ctx, const std::vector<IndexSpaceT<DIM,T> > &srcs,
+          const char *provenance) const
     //--------------------------------------------------------------------------
     {
       // C++ type system is dumb
       std::vector<IndexSpace> sources(srcs.size());
       for (unsigned idx = 0; idx < sources.size(); idx++)
         sources[idx] = srcs[idx];
-      return IndexSpaceT<DIM,T>(intersect_index_spaces(ctx, sources));
+      return IndexSpaceT<DIM,T>(intersect_index_spaces(ctx,sources,provenance));
     }
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     inline IndexSpaceT<DIM,T> MapperRuntime::subtract_index_spaces(
-     MapperContext ctx, IndexSpaceT<DIM,T> left, IndexSpaceT<DIM,T> right) const
+                         MapperContext ctx, IndexSpaceT<DIM,T> left,
+                         IndexSpaceT<DIM,T> right, const char *provenance) const
     //--------------------------------------------------------------------------
     {
       return IndexSpaceT<DIM,T>(subtract_index_spaces(ctx, 
-                                (IndexSpace)left, (IndexSpace)right));
+                              (IndexSpace)left, (IndexSpace)right), provenance);
     }
 
     //--------------------------------------------------------------------------

@@ -1,4 +1,4 @@
--- Copyright 2022 Stanford University
+-- Copyright 2024 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -221,7 +221,7 @@ function pretty.annotations(cx, node)
   local fields = node:get_fields()
   local demand = terralib.newlist()
   local forbid = terralib.newlist()
-  for k, v in pairs(fields) do
+  for k, v in fields:items() do
     if v:is(ast.annotation.Demand) then
       demand:insert("__" .. k)
     end
@@ -1458,8 +1458,8 @@ end
 
 function pretty.top_task_conditions(cx, node)
   local result = terralib.newlist()
-  for condition, values in pairs(node) do
-    for _, value in pairs(values) do
+  for condition, values in node:items() do
+    for _, value in values:items() do
       result:insert(join({tostring(condition), "(", tostring(value), ")" }))
     end
   end

@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -134,6 +134,9 @@ namespace Realm {
 
   inline bool DoorbellList::add_doorbell(Doorbell *db)
   {
+#ifdef REALM_ENABLE_STARVATION_CHECKS
+    db->starvation_count = 0;
+#endif
     uintptr_t oldval = head_or_count.load();
     while(true) {
       if((oldval & 1) == 0) {
@@ -238,6 +241,79 @@ namespace Realm {
       // fall back to slow path
       unlock_slow();
     }
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class MutexChecker
+  //
+
+  inline MutexChecker::MutexChecker(const char *_name, void *_object /*= 0*/,
+                                    int _limit /*= 1*/)
+    : name(_name)
+    , object(_object)
+    , limit(_limit)
+    , cur_count(0)
+  {}
+
+  inline MutexChecker::~MutexChecker()
+  {
+    // count should be 0 on destruction
+    int actval = cur_count.load();
+    if(REALM_UNLIKELY(actval != 0))
+      lock_fail(actval, 0);
+  }
+
+  inline void MutexChecker::lock(CheckedScope *cs /*= 0*/)
+  {
+    // unconditional increment of count - if it exceeds the limit we've
+    //  violated the supposed invariant
+    int actval = cur_count.fetch_add(1);  // NOTE: intentionally relaxed MO
+    if(REALM_UNLIKELY((actval < 0) || (actval >= limit)))
+      lock_fail(actval, cs);
+  }
+
+  inline bool MutexChecker::trylock(CheckedScope *cs /*= 0*/)
+  {
+    // contention is not allowed, so just fall through to lock
+    lock(cs);
+    return true;
+  }
+
+  inline void MutexChecker::unlock(CheckedScope *cs /*= 0*/)
+  {
+    // use a (relaxed) CAS here because if the count was too high, we want
+    //  to try to catch all the threads that were in (or about to enter) the
+    //  guarded region
+    int expval = cur_count.load();
+    while(true) {
+      if(REALM_UNLIKELY((expval <= 0) || (expval > limit)))
+        unlock_fail(expval, cs);
+      if(cur_count.compare_exchange_relaxed(expval, expval - 1))
+        break;
+    }
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class MutexChecker::CheckedScope
+  //
+
+  inline MutexChecker::CheckedScope::CheckedScope(MutexChecker& _checker,
+                                                  const char *_name,
+                                                  void *_object /*= 0*/)
+    : checker(_checker)
+    , name(_name)
+    , object(_object)
+  {
+    checker.lock(this);
+  }
+
+  inline MutexChecker::CheckedScope::~CheckedScope()
+  {
+    checker.unlock(this);
   }
 
 

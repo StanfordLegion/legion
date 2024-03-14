@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -1085,6 +1085,8 @@ namespace Legion {
           case Memory::LEVEL3_CACHE: return "LEVEL3_CACHE";
           case Memory::LEVEL2_CACHE: return "LEVEL2_CACHE";
           case Memory::LEVEL1_CACHE: return "LEVEL1_CACHE";
+          case Memory::GPU_MANAGED_MEM: return "GPU_MANAGED_MEM";
+          case Memory::GPU_DYNAMIC_MEM: return "GPU_DYNAMIC_MEM";
           default: assert(false); return "";
         }
       }
@@ -1114,6 +1116,10 @@ namespace Legion {
           case LEGION_ATOMIC: return "ATOMIC";
           case LEGION_SIMULTANEOUS: return "SIMULTANEOUS";
           case LEGION_RELAXED: return "RELAXED";
+          case LEGION_COLLECTIVE_EXCLUSIVE: return "COLLECTIVE_EXCLUSIVE";
+          case LEGION_COLLECTIVE_ATOMIC: return "COLLECTIVE_ATOMIC";
+          case LEGION_COLLECTIVE_SIMULTANEOUS: return "COLLECTIVE_SIMULTANEOUS";
+          case LEGION_COLLECTIVE_RELAXED: return "COLLECTIVE_RELAXED";
           default: assert(false); return "";
         }
       }
@@ -1149,6 +1155,20 @@ namespace Legion {
           default: assert(false);
         }
         return "";
+      }
+
+      //------------------------------------------------------------------------
+      std::string to_string(MapperRuntime* runtime,
+                            const MapperContext ctx,
+                            LogicalRegion lr)
+      //------------------------------------------------------------------------
+      {
+        std::stringstream ss;
+        ss << "(" << lr.get_tree_id() << ",("
+           << lr.get_index_space().get_id() << ","
+           << lr.get_index_space().get_tree_id() << "),"
+           << lr.get_field_space().get_id() << ")";
+        return ss.str();
       }
 
       //------------------------------------------------------------------------
@@ -1238,7 +1258,7 @@ namespace Legion {
       //------------------------------------------------------------------------
       {
         std::stringstream ss;
-        ss << "PhysicalInstance";
+        ss << "Instance";
         if (inst.is_virtual_instance()) {
           ss << "(VIRTUAL)";
           return ss.str();
@@ -1250,10 +1270,9 @@ namespace Legion {
         if (inst.is_external_instance()) {
           ss << "EXTERNAL,";
         }
-        if (inst.is_collective_instance()) {
-          ss << "COLLECTIVE,";
-        }
-        ss << "memory=" << inst.get_location();
+        ss << "region=(" << inst.get_tree_id() << ",*,"
+           << inst.get_field_space().get_id() << ")";
+        ss << ",memory=" << inst.get_location();
         ss << ",domain=" << to_string(runtime, ctx, inst.get_instance_domain());
         std::set<FieldID> fields;
         inst.get_fields(fields);
@@ -1273,7 +1292,7 @@ namespace Legion {
       //------------------------------------------------------------------------
       {
         std::stringstream ss;
-        ss << "RegionRequirement";
+        ss << "Requirement";
         ss << "[" << req_idx << "]";
         ss << "(privilege=" << to_string(req.privilege);
         if (req.is_restricted()) {
@@ -1282,21 +1301,12 @@ namespace Legion {
         if (req.prop != LEGION_EXCLUSIVE) {
           ss << ",prop=" << to_string(req.prop);
         }
-        RegionTreeID tree;
-        IndexSpace is;
-        FieldSpace fs;
-        if (req.region.exists()) {
-          tree = req.region.get_tree_id();
-          is = req.region.get_index_space();
-          fs = req.region.get_field_space();
-        } else {
-          assert(req.partition.exists());
-          tree = req.partition.get_tree_id();
-          is = runtime->get_parent_index_space(
-              ctx, req.partition.get_index_partition());
-          fs = req.partition.get_field_space();
-        }
-        ss << ",tree=" << tree;
+        LogicalRegion lr =
+          req.region.exists() ? req.region
+          : runtime->get_parent_logical_region(ctx, req.partition);
+        IndexSpace is = lr.get_index_space();
+        FieldSpace fs = lr.get_field_space();
+        ss << ",region=" << to_string(runtime, ctx, lr);
         ss << ",domain=" << to_string(runtime, ctx, is);
         ss << ",fields=" << to_string(runtime, ctx, fs, req.privilege_fields);
         ss << ")";
@@ -1315,9 +1325,42 @@ namespace Legion {
         if (include_index_point && task.is_index_space) {
           ss << "(index_point=" << task.index_point << ")";
         }
+        ss << "<" << task.get_unique_id() << ">";
+        if (!task.get_provenance_string().empty())
+          ss << " @ " << task.get_provenance_string();
         return ss.str();
       }
 
+      //------------------------------------------------------------------------
+      std::string to_string(MapperRuntime* runtime,
+                            const MapperContext ctx,
+                            const InlineMapping& inline_op)
+      //------------------------------------------------------------------------
+      {
+        std::stringstream ss;
+        ss << "InlineMapping" << "<" << inline_op.get_unique_id() << ">";
+        if (!inline_op.get_provenance_string().empty())
+          ss << " @ " << inline_op.get_provenance_string();
+        return ss.str();
+      }
+
+      //------------------------------------------------------------------------
+      std::string to_string(MapperRuntime* runtime,
+                            const MapperContext ctx,
+                            const Copy& copy,
+                            bool include_index_point)
+      //------------------------------------------------------------------------
+      {
+        std::stringstream ss;
+        ss << "Copy";
+        if (include_index_point && copy.is_index_space) {
+          ss << "(index_point=" << copy.index_point << ")";
+        }
+        ss << "<" << copy.get_unique_id() << ">";
+        if (!copy.get_provenance_string().empty())
+          ss << " @ " << copy.get_provenance_string();
+        return ss.str();
+      }
     }; // namespace Utilities
   }; // namespace Mapping
 }; // namespace Legion

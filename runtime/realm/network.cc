@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -50,6 +50,7 @@ namespace Realm {
     REALM_INTERNAL_API_EXTERNAL_LINKAGE NodeID my_node_id = 0;
     REALM_INTERNAL_API_EXTERNAL_LINKAGE NodeID max_node_id = 0;
     REALM_INTERNAL_API_EXTERNAL_LINKAGE NodeSet all_peers;
+    REALM_INTERNAL_API_EXTERNAL_LINKAGE NodeSet shared_peers;
     NetworkModule *single_network = 0;
 
     bool check_for_quiescence(IncomingMessageManager *message_manager)
@@ -108,24 +109,28 @@ namespace Realm {
   {}
 #endif
 
-  void NetworkSegment::request(NetworkSegmentInfo::MemoryType _memtype,
-			       size_t _bytes, size_t _alignment,
-			       NetworkSegmentInfo::MemoryTypeExtraData _memextra /*= 0*/)
+  void NetworkSegment::request(NetworkSegmentInfo::MemoryType _memtype, size_t _bytes,
+                               size_t _alignment,
+                               NetworkSegmentInfo::MemoryTypeExtraData _memextra /*= 0*/,
+                               NetworkSegmentInfo::FlagsType _flags /*= 0*/)
   {
     memtype = _memtype;
     bytes = _bytes;
     alignment = _alignment;
     memextra = _memextra;
+    flags = _flags;
   }
 
-  void NetworkSegment::assign(NetworkSegmentInfo::MemoryType _memtype,
-			      void *_base, size_t _bytes,
-			      NetworkSegmentInfo::MemoryTypeExtraData _memextra /*= 0*/)
+  void NetworkSegment::assign(NetworkSegmentInfo::MemoryType _memtype, void *_base,
+                              size_t _bytes,
+                              NetworkSegmentInfo::MemoryTypeExtraData _memextra /*= 0*/,
+                              NetworkSegmentInfo::FlagsType _flags /*= 0*/)
   {
     memtype = _memtype;
     base = _base;
     bytes = _bytes;
     memextra = _memextra;
+    flags = _flags;
   }
 
 
@@ -143,6 +148,9 @@ namespace Realm {
   public:
     static NetworkModule *create_network_module(RuntimeImpl *runtime,
 						int *argc, const char ***argv);
+
+    // Enumerates all the peers that the current node could potentially share memory with
+    virtual void get_shared_peers(NodeSet &shared_peers);
 
     // actual parsing of the command line should wait until here if at all
     //  possible
@@ -165,6 +173,8 @@ namespace Realm {
 			   const void *val_in, void *val_out, size_t bytes);
     virtual void gather(NodeID root,
 			const void *val_in, void *vals_out, size_t bytes);
+    virtual void allgatherv(const char *val_in, size_t bytes, std::vector<char> &vals_out,
+                            std::vector<size_t> &lengths);
 
     virtual size_t sample_messages_received_count(void);
     virtual bool check_for_quiescence(size_t sampled_receive_count);
@@ -185,16 +195,15 @@ namespace Realm {
 							  void *storage_base,
 							  size_t storage_size);
 
-    virtual ActiveMessageImpl *create_active_message_impl(NodeID target,
-							  unsigned short msgid,
-							  size_t header_size,
-							  size_t max_payload_size,
-							  const void *src_payload_addr,
-							  size_t src_payload_lines,
-							  size_t src_payload_line_stride,
-							  const RemoteAddress& dest_payload_addr,
-							  void *storage_base,
-							  size_t storage_size);
+    virtual ActiveMessageImpl *create_active_message_impl(
+        NodeID target, unsigned short msgid, size_t header_size, size_t max_payload_size,
+        const LocalAddress &src_payload_addr, size_t src_payload_lines,
+        size_t src_payload_line_stride, const RemoteAddress &dest_payload_addr,
+        void *storage_base, size_t storage_size);
+
+    virtual ActiveMessageImpl *create_active_message_impl(
+        NodeID target, unsigned short msgid, size_t header_size, size_t max_payload_size,
+        const RemoteAddress &dest_payload_addr, void *storage_base, size_t storage_size);
 
     virtual ActiveMessageImpl *create_active_message_impl(const NodeSet& targets,
 							  unsigned short msgid,
@@ -227,11 +236,11 @@ namespace Realm {
 					   bool with_congestion,
 					   size_t header_size);
     virtual size_t recommended_max_payload(NodeID target,
-					   const void *data, size_t bytes_per_line,
-					   size_t lines, size_t line_stride,
-					   const RemoteAddress& dest_payload_addr,
-					   bool with_congestion,
-					   size_t header_size);
+                                           const LocalAddress &src_payload_addr,
+                                           size_t bytes_per_line, size_t lines,
+                                           size_t line_stride,
+                                           const RemoteAddress &dest_payload_addr,
+                                           bool with_congestion, size_t header_size);
   };
 
   LoopbackNetworkModule::LoopbackNetworkModule()
@@ -243,6 +252,8 @@ namespace Realm {
   {
     return new LoopbackNetworkModule;
   }
+
+  void LoopbackNetworkModule::get_shared_peers(NodeSet &shared_peers) {}
 
   // actual parsing of the command line should wait until here if at all
   //  possible
@@ -315,6 +326,15 @@ namespace Realm {
     memcpy(vals_out, val_in, bytes);
   }
 
+  void LoopbackNetworkModule::allgatherv(const char *val_in, size_t bytes,
+                                         std::vector<char> &vals_out,
+                                         std::vector<size_t> &lengths)
+  {
+    vals_out.resize(bytes);
+    lengths[0] = bytes;
+    memcpy(vals_out.data(), val_in, bytes);
+  }
+
   size_t LoopbackNetworkModule::sample_messages_received_count(void)
   {
     return 0;
@@ -354,16 +374,19 @@ namespace Realm {
     abort();
   }
 
-  ActiveMessageImpl *LoopbackNetworkModule::create_active_message_impl(NodeID target,
-								       unsigned short msgid,
-								       size_t header_size,
-								       size_t max_payload_size,
-								       const void *src_payload_addr,
-								       size_t src_payload_lines,
-								       size_t src_payload_line_stride,
-								       const RemoteAddress& dest_payload_addr,
-								       void *storage_base,
-								       size_t storage_size)
+  ActiveMessageImpl *LoopbackNetworkModule::create_active_message_impl(
+      NodeID target, unsigned short msgid, size_t header_size, size_t max_payload_size,
+      const LocalAddress &src_payload_addr, size_t src_payload_lines,
+      size_t src_payload_line_stride, const RemoteAddress &dest_payload_addr,
+      void *storage_base, size_t storage_size)
+  {
+    // should never be called
+    abort();
+  }
+
+  ActiveMessageImpl *LoopbackNetworkModule::create_active_message_impl(
+      NodeID target, unsigned short msgid, size_t header_size, size_t max_payload_size,
+      const RemoteAddress &dest_payload_addr, void *storage_base, size_t storage_size)
   {
     // should never be called
     abort();
@@ -433,12 +456,10 @@ namespace Realm {
     return 0;
   }
 
-  size_t LoopbackNetworkModule::recommended_max_payload(NodeID target,
-							const void *data, size_t bytes_per_line,
-							size_t lines, size_t line_stride,
-							const RemoteAddress& dest_payload_addr,
-							bool with_congestion,
-							size_t header_size)
+  size_t LoopbackNetworkModule::recommended_max_payload(
+      NodeID target, const LocalAddress &src_payload_addr, size_t bytes_per_line,
+      size_t lines, size_t line_stride, const RemoteAddress &dest_payload_addr,
+      bool with_congestion, size_t header_size)
   {
     // should never be called
     abort();
@@ -477,16 +498,65 @@ namespace Realm {
       return 0;
     }
   }
-  
-  
+
+  bool NetworkSegment::is_registered() const
+  {
+    // first part - need rdma info
+    if(single_network && single_network_data)
+      return true;
+#ifdef REALM_USE_MULTIPLE_NETWORKS
+    // TODO: how do we know if a network is missing?
+    return false;
+#endif
+
+    return false;
+  }
+
+  bool NetworkSegment::is_registered(NetworkModule *network) const
+  {
+    if(single_network) {
+      return ((single_network == network) && single_network_data);
+    }
+#ifdef REALM_USE_MULTIPLE_NETWORKS
+    if(networks.find(network) != networks.end())
+      return true;
+#endif
+
+    return false;
+  }
+
+  bool NetworkSegment::in_segment(uintptr_t range_base, size_t range_bytes) const
+  {
+    uintptr_t reg_lo = reinterpret_cast<uintptr_t>(base);
+
+    if(reg_lo == 0)
+      return true;
+    if(range_base < reg_lo)
+      return false;
+
+    uintptr_t reg_hi = reg_lo + (bytes - 1);
+    if((bytes > 0) && ((range_base + range_bytes - 1) > reg_hi))
+      return false;
+
+    return true;
+  }
+
+  bool NetworkSegment::in_segment(const void *range_base, size_t range_bytes) const
+  {
+    return in_segment(reinterpret_cast<uintptr_t>(range_base), range_bytes);
+  }
+
+
   ////////////////////////////////////////////////////////////////////////
   //
   // class ModuleRegistrar
   //
 
   namespace {
-    ModuleRegistrar::NetworkRegistrationBase *network_modules_head = 0;
-    ModuleRegistrar::NetworkRegistrationBase **network_modules_tail = &network_modules_head;
+    typedef std::map<std::string, ModuleRegistrar::NetworkRegistrationBase*> NetworkModuleRegistrationMap;
+    typedef std::vector<std::pair<size_t, ModuleRegistrar::NetworkRegistrationBase*> > NetworkModuleOrderedRegistrationList;
+    NetworkModuleRegistrationMap *registered_network_modules = NULL;
+    NetworkModuleOrderedRegistrationList *registered_ordered_network_modules = NULL;
   };
 
 #ifdef REALM_USE_DLFCN
@@ -569,11 +639,11 @@ namespace Realm {
       NetworkModule *m = ((NetworkModule *(*)(RuntimeImpl *, int *, const char ***))sym)(runtime, argc, argv);
       if(m) {
         modules.push_back(m);
-#ifndef REALM_USE_MULTIPLE_NETWORKS
-        assert(Network::single_network == 0);
-#endif
         Network::single_network = m;
         count++;
+#ifndef REALM_USE_MULTIPLE_NETWORKS
+        break;  // Found a network module that works, no need to load the rest
+#endif
       }
     }
 
@@ -586,22 +656,54 @@ namespace Realm {
 					       int *argc, const char ***argv)
   {
     // iterate over the network module list, trying to create each module
+    // if need_loopback == false, it means a network module has been created
     bool need_loopback = true;
-    for(const NetworkRegistrationBase *nreg = network_modules_head;
-	nreg;
-	nreg = nreg->next) {
-      NetworkModule *m = nreg->create_network_module(runtime, argc, argv);
-      if(m) {
-	modules.push_back(m);
+
+    // this is for -ll:networks none, and we do not enable any network, but use LoopbackNetworkModule
+    bool disable_network = false;
+
+    // TODO: Check for the argument, if it exists, tokenize it and load each module
+    // else, load each module and pick the first one that works
+    if (registered_network_modules != NULL) {
+      CommandLineParser cp;
+      std::vector<std::string> network_list;
+      cp.add_option_stringlist("-ll:networks", network_list);
+      if (!cp.parse_command_line(*argc, *argv)) {
+        std::cerr << "Unable to parse network command line" << std::endl;
+        abort();
+      }
+      for (const std::string& name : network_list) {
+
+        // if -ll:networks is none, do not enable any networks
+        if (name == "none") {
+          // make sure none is not passed with other values
+          if (network_list.size() != 1) {
+            std::cerr << "Cannot specify both 'none' and another value in -ll:networks" << std::endl;
+            abort();
+          }
+          disable_network = true;
+          break;
+        }
+        NetworkModuleRegistrationMap::const_iterator it = registered_network_modules->find(name);
+        if (it == registered_network_modules->end()) {
+          std::cerr << "Unable to find specified registered network module '" << name << '\'' << std::endl;
+          abort();
+        }
+        NetworkModule *m = it->second->create_network_module(runtime, argc, argv);
+        if (m == NULL) {
+          std::cerr << "Unable to create specified registered network module '" << name << '\'' << std::endl;
+          abort();
+        }
+        modules.push_back(m);
+        Network::single_network = m;
+        need_loopback = false;
 #ifndef REALM_USE_MULTIPLE_NETWORKS
-	assert(Network::single_network == 0);
+        break;  // Found one network backend that works, no need to create the rest
 #endif
-	Network::single_network = m;
-	need_loopback = false;
       }
     }
 
-    {
+    if (need_loopback && !disable_network) {
       const char *e = getenv("REALM_DYNAMIC_NETWORK_MODULES");
       if(e) {
 #ifdef REALM_USE_DLFCN
@@ -612,7 +714,7 @@ namespace Realm {
         }
 
         int count = load_network_module_list(e, runtime, argc, argv,
-                                             sofile_handles, modules);
+                                             network_sofile_handles, modules);
         if(count > 0)
           need_loopback = false;
 #else
@@ -620,6 +722,24 @@ namespace Realm {
         std::cerr << "FATAL: loading of dynamic Realm modules requested, but REALM_USE_DLFCN=0!";
         abort();
 #endif
+      }
+    }
+
+    // networks were not specified on command-line,
+    // so fallback to loading all the modules and
+    // picking the first one
+    if (need_loopback && !disable_network && (registered_ordered_network_modules != NULL)) {
+      for (const NetworkModuleOrderedRegistrationList::value_type &v :
+          *registered_ordered_network_modules) {
+        NetworkModule *m = v.second->create_network_module(runtime, argc, argv);
+        if (m) {
+          modules.push_back(m);
+          Network::single_network = m;
+          need_loopback = false;
+#ifndef REALM_USE_MULTIPLE_NETWORKS
+          break;  // Found one network backend that works, no need to create the rest
+#endif
+        }
       }
     }
 
@@ -632,12 +752,26 @@ namespace Realm {
     }
   }
 
-  /*static*/ void ModuleRegistrar::add_network_registration(NetworkRegistrationBase *reg)
-  {
-    // done during init, so single-threaded
-    *network_modules_tail = reg;
-    network_modules_tail = &(reg->next);
-  }
-  
+  /*static*/ void
+  ModuleRegistrar::add_network_registration(NetworkRegistrationBase *reg,
+                                            const std::string &name,
+                                            size_t order /*= 9999*/ ) {
+    // Enforce a constructor order for the global network registration
+    // map by defining it static here and capture a global pointer to it.
+    static NetworkModuleRegistrationMap registered_network_module_map;
+    static NetworkModuleOrderedRegistrationList ordered_network_modules;
+    registered_network_modules = &registered_network_module_map;
+    registered_ordered_network_modules = &ordered_network_modules;
 
+    if (!registered_network_modules->insert(std::make_pair(name, reg)).second) {
+      std::cerr << "Failed to register network module " << name << std::endl;
+      abort();
+    }
+    // Insert in order based on the order given
+    NetworkModuleOrderedRegistrationList::value_type p = std::make_pair(order, reg);
+    ordered_network_modules.insert(
+      std::upper_bound(ordered_network_modules.begin(), ordered_network_modules.end(), p),
+      p
+    );
+  }
 };

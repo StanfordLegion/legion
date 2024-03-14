@@ -1,5 +1,5 @@
-/* Copyright 2022 Stanford University
- * Copyright 2022 Los Alamos National Laboratory 
+/* Copyright 2024 Stanford University
+ * Copyright 2024 Los Alamos National Laboratory
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -218,7 +218,7 @@ void task_launcher(const void *args, size_t arglen,
       assert(tta->instance.exists());
 
       Processor::TaskFuncID task_id = DUMMY_TASK;
-#ifdef REALM_USE_CUDA
+#if defined(REALM_USE_CUDA) || defined(REALM_USE_HIP)
       if((*it).kind() == Processor::TOC_PROC)
 	task_id = DUMMY_GPU_TASK;
 #endif
@@ -280,7 +280,7 @@ void top_level_task(const void *args, size_t arglen,
       Memory m = Machine::MemoryQuery(Machine::get_machine())
 	.has_affinity_to(p)
 	.first();
-#ifdef REALM_USE_CUDA
+#if defined(REALM_USE_CUDA) || defined(REALM_USE_HIP)
       // instance is used by host-side code, so pick a sysmem for GPUs
       if(p.kind() == Processor::TOC_PROC)
 	m = Machine::MemoryQuery(Machine::get_machine())
@@ -299,18 +299,18 @@ void top_level_task(const void *args, size_t arglen,
 				      ProfilingRequestSet()).wait();
       assert(i.exists());
 
+      i.fetch_metadata(p).wait();
       launch_args.instances[p] = i;
       {
-	std::vector<CopySrcDstField> dsts(1);
-	dsts[0].inst = i;
-	dsts[0].field_id = FieldIDs::TASKDATA;
-	dsts[0].size = sizeof(TestTaskData);
-	TestTaskData ival;
-	ival.first_count = 0;
-	ival.last_count = 0;
-	ival.start_time = 0;
-	r.fill(dsts, ProfilingRequestSet(),
-	       &ival, sizeof(ival)).wait();
+        std::vector<CopySrcDstField> dsts(1);
+        dsts[0].inst = i;
+        dsts[0].field_id = FieldIDs::TASKDATA;
+        dsts[0].size = sizeof(TestTaskData);
+        TestTaskData ival;
+        ival.first_count = 0;
+        ival.last_count = 0;
+        ival.start_time = 0;
+        r.fill(dsts, ProfilingRequestSet(), &ival, sizeof(ival)).wait();
       }
     }
   }
@@ -387,7 +387,7 @@ int main(int argc, char **argv)
   r.register_task(TASK_LAUNCHER, task_launcher);
   r.register_task(DUMMY_TASK, dummy_cpu_task);
   r.register_task(PROFILER_TASK, profiler_task);
-#ifdef REALM_USE_CUDA
+#if defined(REALM_USE_CUDA) || defined(REALM_USE_HIP)
   Processor::register_task_by_kind(Processor::TOC_PROC,
 				   false /*!global*/,
 				   DUMMY_GPU_TASK,

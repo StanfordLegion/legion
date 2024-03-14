@@ -1,4 +1,4 @@
--- Copyright 2022 Stanford University
+-- Copyright 2024 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -24,5 +24,4 @@ task f()
   var x : int1d(is)
   return @x
 end
-
-f()
+f:compile()

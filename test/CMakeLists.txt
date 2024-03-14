@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------#
-# Copyright 2022 Stanford University
+# Copyright 2024 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -14,22 +14,27 @@
 # limitations under the License.
 #------------------------------------------------------------------------------#
 
-cmake_minimum_required(VERSION 3.1)
+cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
 
 if(NOT Legion_SOURCE_DIR)
   find_package(Legion REQUIRED)
 endif()
 
-# enable build warnings for all tutorials/examples/tests/etc.
-add_compile_options(${CXX_BUILD_WARNING_FLAGS})
-
 add_subdirectory(attach_file_mini)
-add_subdirectory(legion_stl)
+add_subdirectory(output_requirements)
+add_subdirectory(reduce_future)
+add_subdirectory(ctrl_repl_safety)
 add_subdirectory(rendering)
 add_subdirectory(realm)
 add_subdirectory(gather_perf)
 add_subdirectory(performance/realm/event_latency)
 add_subdirectory(performance/realm/task_throughput)
+add_subdirectory(performance/realm/event_ubench)
+add_subdirectory(performance/realm/task_ubench)
+add_subdirectory(performance/realm/memcpy)
+add_subdirectory(legion_redop_test)
+add_subdirectory(disjoint_complete)
+add_subdirectory(nested_replication)
 
 if(Legion_USE_HDF5)
   add_subdirectory(hdf_attach_subregion_parallel)

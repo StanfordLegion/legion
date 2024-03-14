@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University
+/* Copyright 2024 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,7 +22,7 @@
 using namespace Legion;
 using namespace Legion::Mapping;
 
-static LegionRuntime::Logger::Category log_stencil("stencil");
+static Logger log_stencil("stencil");
 
 class StencilMapper : public DefaultMapper
 {
@@ -30,32 +30,29 @@ public:
   StencilMapper(MapperRuntime *rt, Machine machine, Processor local,
                 const char *mapper_name,
                 std::vector<Processor>* procs_list);
-  virtual void select_task_options(const MapperContext    ctx,
-                                   const Task&            task,
-                                         TaskOptions&     output);
-  virtual void default_policy_rank_processor_kinds(
+  void default_policy_rank_processor_kinds(
                                     MapperContext ctx, const Task &task,
-                                    std::vector<Processor::Kind> &ranking);
-  virtual Processor default_policy_select_initial_processor(
-                                    MapperContext ctx, const Task &task);
-  virtual void default_policy_select_target_processors(
+                                    std::vector<Processor::Kind> &ranking) override;
+  Processor default_policy_select_initial_processor(
+                                    MapperContext ctx, const Task &task) override;
+  void default_policy_select_target_processors(
                                     MapperContext ctx,
                                     const Task &task,
-                                    std::vector<Processor> &target_procs);
-  virtual LogicalRegion default_policy_select_instance_region(
+                                    std::vector<Processor> &target_procs) override;
+  LogicalRegion default_policy_select_instance_region(
                                 MapperContext ctx, Memory target_memory,
                                 const RegionRequirement &req,
                                 const LayoutConstraintSet &constraints,
                                 bool force_new_instances,
-                                bool meets_constraints);
-  virtual void map_task(const MapperContext ctx,
+                                bool meets_constraints) override;
+  void map_task(const MapperContext ctx,
                         const Task &task,
                         const MapTaskInput &input,
-                        MapTaskOutput &output);
-  virtual void map_copy(const MapperContext ctx,
+                        MapTaskOutput &output) override;
+  void map_copy(const MapperContext ctx,
                         const Copy &copy,
                         const MapCopyInput &input,
-                        MapCopyOutput &output);
+                        MapCopyOutput &output) override;
   template<bool IS_SRC>
   void stencil_create_copy_instance(MapperContext ctx, const Copy &copy,
                                     const RegionRequirement &req, unsigned index,
@@ -70,20 +67,6 @@ StencilMapper::StencilMapper(MapperRuntime *rt, Machine machine, Processor local
   : DefaultMapper(rt, machine, local, mapper_name)
   , procs_list(*_procs_list)
 {
-}
-
-void StencilMapper::select_task_options(const MapperContext    ctx,
-                                        const Task&            task,
-                                              TaskOptions&     output)
-{
-  output.initial_proc = default_policy_select_initial_processor(ctx, task);
-  output.inline_task = false;
-  output.stealable = stealing_enabled;
-#ifdef MAP_LOCALLY
-  output.map_locally = true;
-#else
-  output.map_locally = false;
-#endif
 }
 
 void StencilMapper::default_policy_rank_processor_kinds(MapperContext ctx,
@@ -177,7 +160,6 @@ void StencilMapper::map_task(const MapperContext      ctx,
         }
         continue;
       }
-      assert(input.valid_instances[idx].size() == 1);
       output.chosen_instances[idx] = input.valid_instances[idx];
       bool ok = runtime->acquire_and_filter_instances(ctx, output.chosen_instances);
       if (!ok) {

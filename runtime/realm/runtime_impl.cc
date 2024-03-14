@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -42,17 +42,38 @@
 #include "realm/kokkos_interop.h"
 #endif
 
+#ifdef REALM_USE_NVTX
+#include "realm/nvtx.h"
+#endif
+
 #include <string.h>
+#include <thread>
+#include <sstream>
+#include <fstream>
 
 #if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
 #include <unistd.h>
 #include <signal.h>
+#include <sys/types.h>
+#endif
+
+// for cpu resource discovery
+#if defined(REALM_ON_LINUX) || defined(REALM_ON_FREEBSD)
+#include <sys/sysinfo.h>
+#endif
+
+#ifdef REALM_ON_MACOS
+#include <sys/sysctl.h>
 #endif
 
 #ifdef REALM_ON_WINDOWS
+#include <winsock2.h>
 #include <windows.h>
 #include <processthreadsapi.h>
 #include <synchapi.h>
+#include <sysinfoapi.h>
+
+#pragma comment(lib, "ws2_32.lib")
 
 static void sleep(int seconds)
 {
@@ -91,6 +112,8 @@ TYPE_IS_SERIALIZABLE(Realm::Memory);
 TYPE_IS_SERIALIZABLE(Realm::Memory::Kind);
 TYPE_IS_SERIALIZABLE(Realm::Channel::SupportedPath);
 TYPE_IS_SERIALIZABLE(Realm::XferDesKind);
+TYPE_IS_SERIALIZABLE(Realm::Machine::ProcessorMemoryAffinity);
+TYPE_IS_SERIALIZABLE(Realm::Machine::ProcessInfo);
 
 namespace Realm {
 
@@ -113,6 +136,10 @@ namespace Realm {
   //
   // signal handlers
   //
+
+  namespace ThreadLocal {
+    static REALM_THREAD_LOCAL int error_signal_value = 0;
+  };
 
   static void register_error_signal_handler(void (*handler)(int))
   {
@@ -257,8 +284,8 @@ namespace Realm {
 	if (b->generations.empty())
 	  continue;
 
-	os << "Barrier " << b->me << ": gen=" << b->generation
-	   << " subscr=" << b->gen_subscribed << "\n";
+	os << "Barrier " << b->me << ": gen=" << b->generation.load()
+	   << " subscr=" << b->gen_subscribed.load() << "\n";
 	for (std::map<EventImpl::gen_t, BarrierImpl::Generation*>::const_iterator git = 
 	       b->generations.begin(); git != b->generations.end(); git++) {
 	  const EventWaiter::EventWaiterList &waiters = git->second->local_waiters;
@@ -366,6 +393,12 @@ namespace Realm {
       : impl(0)
     {
       // ok to construct extra ones - we will make sure only one calls init() though
+      if (runtime_singleton) {
+        impl = runtime_singleton;
+      } else {
+        impl = new RuntimeImpl;
+        runtime_singleton = static_cast<RuntimeImpl *>(impl);
+      }
     }
 
     /*static*/ Runtime Runtime::get_runtime(void)
@@ -386,7 +419,7 @@ namespace Realm {
       return realm_library_version;
     }
 
-#if defined(REALM_USE_MPI) || defined(REALM_USE_GASNET1) || defined(REALM_USE_GASNETEX) || defined(REALM_USE_KOKKOS)
+#if defined(REALM_USE_UCX) || defined(REALM_USE_MPI) || defined(REALM_USE_GASNET1) || defined(REALM_USE_GASNETEX) || defined(REALM_USE_KOKKOS)
     // global flag that tells us if a realm runtime has already been
     //  initialized in this process - some underlying libraries (e.g. mpi,
     //  gasnet, kokkos) do not permit reinitialization
@@ -398,9 +431,12 @@ namespace Realm {
     //  (instead of e.g. mpi spawner information)
     bool Runtime::network_init(int *argc, char ***argv)
     {
-#if defined(REALM_USE_MPI) || defined(REALM_USE_GASNET1) || defined(REALM_USE_GASNETEX) || defined(REALM_USE_KOKKOS)
+#if defined(REALM_USE_UCX) || defined(REALM_USE_MPI) || defined(REALM_USE_GASNET1) || defined(REALM_USE_GASNETEX) || defined(REALM_USE_KOKKOS)
       if(runtime_initialized) {
         fprintf(stderr, "ERROR: reinitialization not supported by these Realm components:"
+#ifdef REALM_USE_UCX
+                " ucx"
+#endif
 #ifdef REALM_USE_MPI
                 " mpi"
 #endif
@@ -419,14 +455,37 @@ namespace Realm {
       runtime_initialized = true;
 #endif
 
-      if(runtime_singleton != 0) {
-	fprintf(stderr, "ERROR: cannot initialize more than one Realm runtime at a time!\n");
-	return false;
-      }
-
-      impl = new RuntimeImpl;
-      runtime_singleton = static_cast<RuntimeImpl *>(impl);
+      assert(runtime_singleton != 0);
       return static_cast<RuntimeImpl *>(impl)->network_init(argc, argv);
+    }
+
+        void Runtime::parse_command_line(int argc, char **argv)
+    {
+      assert(impl != 0);
+      std::vector<std::string> cmdline;
+      cmdline.reserve(argc);
+      for(int i = 1; i < argc; i++)
+        cmdline.push_back(argv[i]);
+      static_cast<RuntimeImpl *>(impl)->parse_command_line(cmdline);
+    }
+
+    void Runtime::parse_command_line(std::vector<std::string> &cmdline,
+                                                bool remove_realm_args /*= false*/)
+    {
+      assert(impl != 0);
+      if(remove_realm_args) {
+        static_cast<RuntimeImpl *>(impl)->parse_command_line(cmdline);
+      } else {
+        // pass in a copy so we don't mess up the original
+        std::vector<std::string> cmdline_copy(cmdline);
+        static_cast<RuntimeImpl *>(impl)->parse_command_line(cmdline_copy);
+      }
+    }
+
+    void Runtime::finish_configure(void)
+    {
+      assert(impl != 0);
+      static_cast<RuntimeImpl *>(impl)->finish_configure();
     }
 
     // configures the runtime from the provided command line - after this 
@@ -474,6 +533,8 @@ namespace Realm {
       if(!argv) argv = &my_argv;
 
       if(!network_init(argc, argv)) return false;
+      if(!create_configs(*argc, *argv))
+        return false;
       if(!configure_from_command_line(*argc, *argv)) return false;
       start();
       return true;
@@ -487,13 +548,12 @@ namespace Realm {
 
       CodeDescriptor codedesc(taskptr);
       ProfilingRequestSet prs;
-      std::set<Event> events;
+      std::vector<Event> events;
       std::vector<ProcessorImpl *>& procs = ((RuntimeImpl *)impl)->nodes[Network::my_node_id].processors;
-      for(std::vector<ProcessorImpl *>::iterator it = procs.begin();
-	  it != procs.end();
-	  it++) {
-	Event e = (*it)->me.register_task(taskid, codedesc, prs);
-	events.insert(e);
+      for (std::vector<ProcessorImpl *>::iterator it = procs.begin();
+           it != procs.end(); it++) {
+        Event e = (*it)->me.register_task(taskid, codedesc, prs);
+        events.push_back(e);
       }
 
       Event merged = Event::merge_events(events);
@@ -643,6 +703,26 @@ namespace Realm {
       return result;
     }
 
+    bool Runtime::create_configs(int argc, char **argv)
+    {
+      return ((RuntimeImpl *)impl)->create_configs(argc, argv);
+    }
+
+    ModuleConfig* Runtime::get_module_config(const std::string name)
+    {
+      return ((RuntimeImpl *)impl)->get_module_config(name);
+    }
+
+    Module *Runtime::get_module_untyped(const char *name)
+    {
+      if(runtime_singleton) {
+	return runtime_singleton->get_module_untyped(name);
+      } else {
+	// modules don't exist if we're not initialized yet
+	return 0;
+      }
+    }
+
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -653,39 +733,261 @@ namespace Realm {
     // if true, worker threads that might have used user-level thread switching
     //  fall back to kernel threading
     bool force_kernel_threads = false;
+    unsigned long long job_id = 0;
   };
+
+  CoreModuleConfig::CoreModuleConfig(void)
+    : ModuleConfig("core")
+  {
+    config_map.insert({"cpu", &num_cpu_procs});
+    config_map.insert({"util", &num_util_procs});
+    config_map.insert({"io", &num_io_procs});
+    config_map.insert({"sysmem", &sysmem_size});
+    config_map.insert({"stack_size", &stack_size});
+    config_map.insert({"pin_util_procs", &pin_util_procs});
+    config_map.insert({"use_ext_sysmem", &use_ext_sysmem});
+    config_map.insert({"regmem", &reg_mem_size});
+
+    resource_map.insert({"cpu", &res_num_cpus});
+    resource_map.insert({"sysmem", &res_sysmem_size});
+  }
+
+#ifdef REALM_ON_WINDOWS
+static DWORD CountSetBits(ULONG_PTR bitMask)
+{
+    DWORD LSHIFT = sizeof(ULONG_PTR)*8 - 1;
+    DWORD bitSetCount = 0;
+    ULONG_PTR bitTest = (ULONG_PTR)1 << LSHIFT;    
+    DWORD i;
+    
+    for (i = 0; i <= LSHIFT; ++i)
+    {
+        bitSetCount += ((bitMask & bitTest)?1:0);
+        bitTest/=2;
+    }
+
+    return bitSetCount;
+}
+#endif
+
+  bool CoreModuleConfig::discover_resource(void)
+  {
+#ifdef REALM_ON_LINUX
+    // system memory
+    struct sysinfo memInfo;
+    sysinfo (&memInfo);
+    res_sysmem_size = memInfo.totalram;
+    // phyical cores
+    std::ifstream infile("/proc/cpuinfo");
+    if (infile.fail()) return false;
+    std::string line;
+    int cpu_id = 0;
+    int cpu_cores = 0;
+    std::map<int, int> cpus;
+    while (std::getline(infile, line)) {
+      if (strncmp(line.c_str(), "physical id", 11) == 0) {
+        std::istringstream iss(line);
+        std::string x, y, z;
+        if (!(iss >> x >> y >> z >> cpu_id)) {
+          infile.close();
+          return false;
+        };
+      }
+      if (strncmp(line.c_str(), "cpu cores", 9) == 0) {
+        std::istringstream iss(line);
+        std::string x, y, z;
+        if (!(iss >> x >> y >> z >> cpu_cores)) {
+          infile.close();
+          return false;
+        }
+        std::map<int, int>::iterator it = cpus.find(cpu_id);
+        if (it == cpus.end()) {
+          cpus.insert({cpu_id, cpu_cores});
+        } else {
+          assert(it->second == cpu_cores);
+        }
+      }
+    }
+    for (std::map<int, int>::iterator it = cpus.begin(); it != cpus.end(); it++) {
+      res_num_cpus += it->second;
+    }
+    infile.close();
+#endif
+#ifdef REALM_ON_WINDOWS
+    // system memory
+    MEMORYSTATUSEX memInfo;
+    memInfo.dwLength = sizeof(MEMORYSTATUSEX);
+    GlobalMemoryStatusEx(&memInfo);
+    res_sysmem_size = static_cast<size_t>(memInfo.ullTotalPageFile);
+    // physical cores
+    PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX buffer = nullptr;
+    DWORD buffer_size = 0;
+
+    // Get the required buffer size
+    if(!GetLogicalProcessorInformationEx(RelationAll, nullptr, &buffer_size)) {
+      DWORD last_err = GetLastError();
+      if(last_err != ERROR_INSUFFICIENT_BUFFER) {
+        return false;
+      }
+      assert(buffer_size != 0);
+    }
+
+    buffer = reinterpret_cast<PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX>(new char[buffer_size]);
+    if (!GetLogicalProcessorInformationEx(RelationAll, buffer, &buffer_size)) {
+      delete[] buffer;
+      return false;
+    }
+    PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX ptr = buffer;
+    while (reinterpret_cast<LPBYTE>(ptr) < reinterpret_cast<LPBYTE>(buffer) + buffer_size) {
+      if (ptr->Relationship == RelationProcessorCore) {
+        DWORD logical_processor_count = 0;
+        for (DWORD i = 0; i < ptr->Processor.GroupCount; i++) {
+          logical_processor_count += CountSetBits(ptr->Processor.GroupMask[i].Mask);
+        }
+        if (logical_processor_count == 1) {
+          res_num_cpus++;
+        }
+      }
+      ptr = reinterpret_cast<PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX>(reinterpret_cast<LPBYTE>(ptr) + ptr->Size);
+    }
+    delete[] buffer;
+#endif
+#ifdef REALM_ON_FREEBSD
+    // system memory
+    size_t buflen = sizeof(size_t);
+    sysctlbyname("hw.physmem", &res_sysmem_size, &buflen, NULL, 0);
+    // phyical cores
+    buflen = sizeof(int);
+    sysctlbyname("hw.ncpu", &res_num_cpus, &buflen, NULL, 0);
+#endif
+#ifdef REALM_ON_MACOS
+    // system memory
+    size_t buflen = sizeof(size_t);
+    sysctlbyname("hw.memsize", &res_sysmem_size, &buflen, NULL, 0);
+    // phyical cores
+    buflen = sizeof(int);
+    sysctlbyname("hw.physicalcpu", &res_num_cpus, &buflen, NULL, 0);
+#endif
+    log_runtime.info("Discover resource cpu cores %d, sysmem %zu", res_num_cpus, res_sysmem_size);
+    resource_discover_finished = true;
+    return resource_discover_finished;
+  }
+
+  void CoreModuleConfig::configure_from_cmdline(std::vector<std::string>& cmdline)
+  {
+    assert(finish_configured == false);
+    // parse command line arguments
+    CommandLineParser cp;
+
+    // config for CoreModule
+    cp.add_option_int("-ll:cpu", num_cpu_procs)
+      .add_option_int("-ll:util", num_util_procs)
+      .add_option_int("-ll:io", num_io_procs)
+      .add_option_int("-ll:concurrent_io", concurrent_io_threads)
+      .add_option_int_units("-ll:csize", sysmem_size, 'm')
+      .add_option_int_units("-ll:stacksize", stack_size, 'm')
+      .add_option_bool("-ll:pin_util", pin_util_procs)
+      .add_option_int("-ll:cpu_bgwork", cpu_bgwork_timeslice)
+      .add_option_int("-ll:util_bgwork", util_bgwork_timeslice)
+      .add_option_int("-ll:ext_sysmem", use_ext_sysmem);
+
+    // config for RuntimeImpl
+    // low-level runtime parameters
+    if(Network::max_node_id > 0)
+      reg_ib_mem_size = 256 << 20; // for inter-node copies
+    else
+      reg_ib_mem_size = 64 << 20; // for local transposes/serdez
+
+
+    // This dummy network list is actually handled in network_init()
+    // this is just here to help verify low-level arguement
+    std::vector<std::string> dummy_network_list;
+
+    cp.add_option_int_units("-ll:rsize", reg_mem_size, 'm')
+      .add_option_int_units("-ll:ib_rsize", reg_ib_mem_size, 'm')
+      .add_option_int_units("-ll:dsize", disk_mem_size, 'm')
+      .add_option_int("-ll:dma", dma_worker_threads)
+      .add_option_bool("-ll:pin_dma", pin_dma_threads)
+      .add_option_int("-ll:dummy_rsrv_ok", dummy_reservation_ok)
+      .add_option_bool("-ll:show_rsrv", show_reservations)
+      .add_option_int("-ll:ht_sharing", hyperthread_sharing)
+      .add_option_int_units("-ll:bitset_chunk", bitset_chunk_size, 'k')
+      .add_option_int("-ll:bitset_twolevel", bitset_twolevel);
+
+
+    cp.add_option_string("-ll:eventtrace", event_trace_file)
+      .add_option_string("-ll:locktrace", lock_trace_file);
+
+#ifdef NODE_LOGGING
+    cp.add_option_string("-ll:prefix", RuntimeImpl::prefix);
+#else
+    std::string dummy_prefix;
+    cp.add_option_string("-ll:prefix", dummy_prefix);
+#endif
+
+    cp.add_option_int("-ll:ahandlers", active_msg_handler_threads);
+    cp.add_option_int("-ll:handler_bgwork", active_msg_handler_bgwork);
+    cp.add_option_stringlist("-ll:networks", dummy_network_list);
+    cp.add_option_int_units("-ll:replheap", replheap_size);
+
+    // The default of path_cache_size is 0, when it is set to non-zero, the caching is enabled.
+    cp.add_option_int("-ll:path_cache_size", Config::path_cache_lru_size);
+
+    bool cmdline_ok = cp.parse_command_line(cmdline);
+
+    if(!cmdline_ok) {
+      fprintf(stderr, "ERROR: failure parsing command line options\n");
+      exit(1);
+    }
+
+#ifndef EVENT_TRACING
+    if(!event_trace_file.empty()) {
+      fprintf(stderr, "WARNING: event tracing requested, but not enabled at compile time!\n");
+    }
+#endif
+
+#ifndef LOCK_TRACING
+    if(!lock_trace_file.empty()) {
+        fprintf(stderr, "WARNING: lock tracing requested, but not enabled at compile time!\n");
+    }
+#endif
+
+#ifndef NODE_LOGGING
+    if(!dummy_prefix.empty()) {
+      fprintf(stderr,"WARNING: prefix set, but NODE_LOGGING not enabled at compile time!\n");
+    }
+#endif
+  }
 
   CoreModule::CoreModule(void)
     : Module("core")
-    , num_cpu_procs(1), num_util_procs(1), num_io_procs(0)
-    , concurrent_io_threads(1)  // Legion does not support values > 1 right now
-    , sysmem_size(512 << 20), stack_size(2 << 20)
-    , pin_util_procs(false)
-    , cpu_bgwork_timeslice(0)
-    , util_bgwork_timeslice(0)
+    , config(nullptr)
   {}
 
   CoreModule::~CoreModule(void)
-  {}
+  {
+    assert(config != nullptr);
+    config = nullptr;
+  }
 
-  /*static*/ Module *CoreModule::create_module(RuntimeImpl *runtime,
-					       std::vector<std::string>& cmdline)
+  /*static*/ ModuleConfig *CoreModule::create_module_config(RuntimeImpl *runtime)
+  {
+    CoreModuleConfig *config = new CoreModuleConfig();
+    config->discover_resource();
+    return config;
+  }
+
+  /*static*/ Module *CoreModule::create_module(RuntimeImpl *runtime)
   {
     CoreModule *m = new CoreModule;
 
-    // parse command line arguments
-    CommandLineParser cp;
-    cp.add_option_int("-ll:cpu", m->num_cpu_procs)
-      .add_option_int("-ll:util", m->num_util_procs)
-      .add_option_int("-ll:io", m->num_io_procs)
-      .add_option_int("-ll:concurrent_io", m->concurrent_io_threads)
-      .add_option_int_units("-ll:csize", m->sysmem_size, 'm')
-      .add_option_int_units("-ll:stacksize", m->stack_size, 'm', true /*binary*/, true /*keep*/)
-      .add_option_bool("-ll:pin_util", m->pin_util_procs)
-      .add_option_int("-ll:cpu_bgwork", m->cpu_bgwork_timeslice)
-      .add_option_int("-ll:util_bgwork", m->util_bgwork_timeslice)
-      .add_option_int("-ll:ext_sysmem", m->use_ext_sysmem)
-      .parse_command_line(cmdline);
+    CoreModuleConfig *config =
+        checked_cast<CoreModuleConfig *>(runtime->get_module_config("core"));
+    assert(config != nullptr);
+    assert(config->finish_configured);
+    assert(m->name == config->get_name());
+    assert(m->config == nullptr);
+    m->config = config;
 
     return m;
   }
@@ -697,9 +999,9 @@ namespace Realm {
     Module::create_memories(runtime);
 
     MemoryImpl *sysmem;
-    if(sysmem_size > 0) {
+    if(config->sysmem_size > 0) {
       Memory m = runtime->next_local_memory_id();
-      sysmem = new LocalCPUMemory(m, sysmem_size,
+      sysmem = new LocalCPUMemory(m, config->sysmem_size,
                                   -1/*don't care numa domain*/,
                                   Memory::SYSTEM_MEM);
       runtime->add_memory(sysmem);
@@ -709,7 +1011,7 @@ namespace Realm {
     // create a memory that will hold external instances (the sysmem above
     //  might get registered with network and/or gpus, but external instances
     //  usually won't have those affinities)
-    if(use_ext_sysmem || !sysmem) {
+    if(config->use_ext_sysmem || !sysmem) {
       Memory m = runtime->next_local_memory_id();
       ext_sysmem = new LocalCPUMemory(m, 0 /*size*/,
                                       -1 /*don't care numa domain*/,
@@ -726,32 +1028,32 @@ namespace Realm {
   {
     Module::create_processors(runtime);
 
-    for(int i = 0; i < num_util_procs; i++) {
+    for(int i = 0; i < config->num_util_procs; i++) {
       Processor p = runtime->next_local_processor_id();
       ProcessorImpl *pi = new LocalUtilityProcessor(p, runtime->core_reservation_set(),
-						    stack_size,
+						    config->stack_size,
 						    Config::force_kernel_threads,
-                                                    pin_util_procs,
+                                                    config->pin_util_procs,
 						    &runtime->bgwork,
-						    util_bgwork_timeslice);
+						    config->util_bgwork_timeslice);
       runtime->add_processor(pi);
     }
 
-    for(int i = 0; i < num_io_procs; i++) {
+    for(int i = 0; i < config->num_io_procs; i++) {
       Processor p = runtime->next_local_processor_id();
       ProcessorImpl *pi = new LocalIOProcessor(p, runtime->core_reservation_set(),
-					       stack_size,
-					       concurrent_io_threads);
+					       config->stack_size,
+					       config->concurrent_io_threads);
       runtime->add_processor(pi);
     }
 
-    for(int i = 0; i < num_cpu_procs; i++) {
+    for(int i = 0; i < config->num_cpu_procs; i++) {
       Processor p = runtime->next_local_processor_id();
       ProcessorImpl *pi = new LocalCPUProcessor(p, runtime->core_reservation_set(),
-						stack_size,
+						config->stack_size,
 						Config::force_kernel_threads,
 						&runtime->bgwork,
-						cpu_bgwork_timeslice);
+						config->cpu_bgwork_timeslice);
       runtime->add_processor(pi);
     }
   }
@@ -802,15 +1104,10 @@ namespace Realm {
   //
 
     RuntimeImpl *runtime_singleton = 0;
-
-  // these should probably be member variables of RuntimeImpl?
-    static size_t stack_size;
   
     RuntimeImpl::RuntimeImpl(void)
       : machine(0), 
-#ifdef NODE_LOGGING
-	prefix("."),
-#endif
+        num_untriggered_events(0),
 	nodes(0),
 	local_event_free_list(0), local_barrier_free_list(0),
 	local_reservation_free_list(0),
@@ -828,7 +1125,8 @@ namespace Realm {
 	num_local_memories(0), num_local_ib_memories(0),
 	num_local_processors(0),
 	module_registrar(this),
-        modules_created(false)
+        modules_created(false),
+	module_configs_created(false)
     {
       machine = new MachineImpl;
     }
@@ -909,11 +1207,6 @@ namespace Realm {
       machine->add_proc_mem_affinity(pma);
     }
 
-    void RuntimeImpl::add_mem_mem_affinity(const Machine::MemoryMemoryAffinity& mma)
-    {
-      machine->add_mem_mem_affinity(mma);
-    }
-
     CoreReservationSet& RuntimeImpl::core_reservation_set(void)
     {
       assert(core_reservations);
@@ -974,31 +1267,6 @@ namespace Realm {
 	}
     }
 
-    static void add_mem_mem_affinities(MachineImpl *machine,
-				       const std::set<Memory>& mems1,
-				       const std::set<Memory>& mems2,
-				       int bandwidth,
-				       int latency)
-    {
-      for(std::set<Memory>::const_iterator it1 = mems1.begin();
-	  it1 != mems1.end();
-	  it1++) 
-	for(std::set<Memory>::const_iterator it2 = mems2.begin();
-	    it2 != mems2.end();
-	    it2++) {
-	  std::vector<Machine::MemoryMemoryAffinity> mmas;
-	  machine->get_mem_mem_affinity(mmas, *it1, *it2);
-	  if(!mmas.empty()) continue;
-	  log_runtime.debug() << "adding missing affinity: " << *it1 << " " << *it2 << " " << bandwidth << " " << latency;
-	  Machine::MemoryMemoryAffinity mma;
-	  mma.m1 = *it1;
-	  mma.m2 = *it2;
-	  mma.bandwidth = bandwidth;
-	  mma.latency = latency;
-	  machine->add_mem_mem_affinity(mma);
-	}
-    }
-
     bool RuntimeImpl::network_init(int *argc, char ***argv)
     {
       // if we're given empty or non-existent argc/argv, start from a
@@ -1018,9 +1286,6 @@ namespace Realm {
         local_argv = dummy_cmdline_args;
       }
 
-      module_registrar.create_network_modules(network_modules,
-					      &local_argc, &local_argv);
-      
       // TODO: this is here to match old behavior, but it'd probably be
       //  better to have REALM_DEFAULT_ARGS only be visible to Realm...
 
@@ -1083,6 +1348,8 @@ namespace Realm {
 	}
       }
 
+      module_registrar.create_network_modules(network_modules, &local_argc, &local_argv);
+
       if(argc) *argc = local_argc;
       if(argv) *argv = const_cast<char **>(local_argv);
 
@@ -1090,7 +1357,17 @@ namespace Realm {
     }
 
     template <typename T>
-    static bool serialize_announce(T& serializer, ProcessorImpl *impl,
+    static bool serialize_announce(T &serializer,
+                                   const Machine::ProcessInfo *process_info,
+                                   NetworkModule *net)
+    {
+      bool ok =
+          ((serializer << NODE_ANNOUNCE_PROCESS_INFO) && (serializer << *process_info));
+      return ok;
+    }
+
+    template <typename T>
+    static bool serialize_announce(T &serializer, const ProcessorImpl *impl,
                                    NetworkModule *net)
     {
       Processor p = impl->me;
@@ -1105,7 +1382,7 @@ namespace Realm {
     }
 
     template <typename T>
-    static bool serialize_announce(T& serializer, MemoryImpl *impl,
+    static bool serialize_announce(T &serializer, const MemoryImpl *impl,
                                    NetworkModule *net)
     {
       Memory m = impl->me;
@@ -1124,7 +1401,7 @@ namespace Realm {
     }
 
     template <typename T>
-    static bool serialize_announce(T& serializer, IBMemory *ibmem,
+    static bool serialize_announce(T &serializer, const IBMemory *ibmem,
                                    NetworkModule *net)
     {
       Memory m = ibmem->me;
@@ -1147,30 +1424,12 @@ namespace Realm {
                                    const Machine::ProcessorMemoryAffinity& pma,
                                    NetworkModule *net)
     {
-      bool ok = ((serializer << NODE_ANNOUNCE_PMA) &&
-                 (serializer << pma.p) &&
-                 (serializer << pma.m) &&
-                 (serializer << pma.bandwidth) &&
-                 (serializer << pma.latency));
+      bool ok = ((serializer << NODE_ANNOUNCE_PMA) && (serializer << pma));
       return ok;
     }
 
     template <typename T>
-    static bool serialize_announce(T& serializer,
-                                   const Machine::MemoryMemoryAffinity& mma,
-                                   NetworkModule *net)
-    {
-      bool ok = ((serializer << NODE_ANNOUNCE_MMA) &&
-                 (serializer << mma.m1) &&
-                 (serializer << mma.m2) &&
-                 (serializer << mma.bandwidth) &&
-                 (serializer << mma.latency));
-      return ok;
-    }
-
-    template <typename T>
-    static bool serialize_announce(T& serializer, Channel *ch,
-                                   NetworkModule *net)
+    static bool serialize_announce(T &serializer, const Channel *ch, NetworkModule *net)
     {
       RemoteChannelInfo *rci = ch->construct_remote_info();
       bool ok = ((serializer << NODE_ANNOUNCE_DMA_CHANNEL) &&
@@ -1179,38 +1438,282 @@ namespace Realm {
       return ok;
     }
 
-    template <typename T>
-    static int fragmented_announce(const NodeSet& targets,
-                                   NetworkModule *net,
-                                   Serialization::DynamicBufferSerializer& dbs,
-                                   size_t max_frag_size,
-                                   T thing)
+    template <typename T, typename Elem>
+    static bool serialize_announce(T &serializer, const std::vector<Elem> &elements,
+                                   NetworkModule *net)
     {
-      size_t prev_size = dbs.bytes_used();
-      bool ok = serialize_announce(dbs, thing, net);
-      assert(ok);
-
-      size_t size = dbs.bytes_used();
-      if(size > max_frag_size) {
-        // send the data that we had before this object
-        assert(prev_size > 0);
-        ActiveMessage<NodeAnnounceMessage> amsg(targets, prev_size);
-        amsg->num_fragments = 0; // count not known yet
-        amsg.add_payload(dbs.get_buffer(), prev_size); // copy now
-        amsg.commit();
-        dbs.reset();
-        // re-serialize this object
-        bool ok = serialize_announce(dbs, thing, net);
-        assert(ok);
-#ifdef DEBUG_REALM
-        assert(dbs.bytes_used() <= max_frag_size);
-#endif
-        return 1;
-      } else
-        return 0;
+      // TODO: rather than have each element push a tag, we can instead push a tag and
+      // size once here, compacting the announcement data
+      bool ok = true;
+      for(const Elem &element : elements) {
+        ok = serialize_announce(serializer, element, net);
+        if(!ok) {
+          break;
+        }
+      }
+      return ok;
     }
 
-    bool RuntimeImpl::configure_from_command_line(std::vector<std::string> &cmdline)
+    template <typename T>
+    static bool serialize_announce(T &serializer, const Node *node,
+                                   const MachineImpl *machine_impl, NetworkModule *net)
+    {
+      bool ok = true;
+      std::vector<Machine::ProcessorMemoryAffinity> pmas;
+      ok = serialize_announce(serializer, node->processors, net);
+      if(!ok) {
+        return ok;
+      }
+      ok = serialize_announce(serializer, node->memories, net);
+      if(!ok) {
+        return ok;
+      }
+      ok = serialize_announce(serializer, node->memories, net);
+      if(!ok) {
+        return ok;
+      }
+      ok = serialize_announce(serializer, node->ib_memories, net);
+      if(!ok) {
+        return ok;
+      }
+      for(ProcessorImpl *proc : node->processors) {
+        get_machine()->get_proc_mem_affinity(pmas, proc->me);
+        ok = serialize_announce(serializer, pmas, net);
+        if(!ok) {
+          return ok;
+        }
+      }
+      ok = serialize_announce(serializer, node->dma_channels, net);
+      if(!ok) {
+        return ok;
+      }
+      ok = serialize_announce(
+          serializer, (machine_impl->nodeinfos.at(Network::my_node_id))->process_info,
+          net);
+      return ok;
+    }
+
+    /// Internal auxilary class to handle active messages for sharing CPU memory objects
+    struct ShareableMemoryMessageHandler {
+      struct Payload {
+        realm_id_t memory_id; // The memory which is being shared
+        size_t sz;            // The size of the memory
+      };
+      static Mutex mutex;
+      static Mutex::CondVar cond_var;
+      static size_t num_msgs_handled;
+      static void handle_message(NodeID sender, const ShareableMemoryMessageHandler &args,
+                                 const void *data, size_t len)
+      {
+        const Payload *msg = reinterpret_cast<const Payload *>(data);
+        const Payload *end_msg = msg + len / sizeof(*msg);
+        // Iterate all the payloads passed here.
+        AutoLock<> al(ShareableMemoryMessageHandler::mutex);
+        for (; msg != end_msg; ++msg) {
+          assert(ID(msg->memory_id).is_memory() && "Parsed id is not a memory id");
+          assert((sender == NodeID(ID(msg->memory_id).memory_owner_node())) &&
+                 "Sender is not owner of sent memory");
+          SharedMemoryInfo shm;
+          std::string path = get_shm_name(msg->memory_id);
+
+          if(!SharedMemoryInfo::open(shm, path, msg->sz)) {
+            log_runtime.warning() << "Failed to open shared memory " << ID(msg->memory_id)
+                                  << ':' << msg->sz << ' ' << path;
+          }
+          else {
+            get_runtime()->remote_shared_memory_mappings.emplace(msg->memory_id, std::move(shm));
+          }
+        }
+        // Count the number of messages handled, there should be one for every shareable
+        // peer
+        num_msgs_handled++;
+        if (num_msgs_handled == Network::shared_peers.size()) {
+          // All done opening shared memory regions for all the shared peers, wake up the
+          // runtime initialization
+          ShareableMemoryMessageHandler::cond_var.signal();
+        }
+      }
+    };
+    Mutex ShareableMemoryMessageHandler::mutex;
+    Mutex::CondVar ShareableMemoryMessageHandler::cond_var(ShareableMemoryMessageHandler::mutex);
+    size_t ShareableMemoryMessageHandler::num_msgs_handled = 0;
+
+    static ActiveMessageHandlerReg<ShareableMemoryMessageHandler> shareable_memory_message_handler;
+
+#if defined(REALM_USE_SHM) && defined(REALM_USE_ANONYMOUS_SHARED_MEMORY)
+    static std::string get_mailbox_name(NodeID id) {
+      return std::to_string(id) + '.' + std::to_string(Config::job_id);
+    }
+#endif
+
+    void RuntimeImpl::create_shared_peers(void)
+    {
+#if defined(REALM_USE_SHM) and defined(REALM_USE_ANONYMOUS_SHARED_MEMORY)
+      std::vector<OsHandle> handles;
+      OsHandle all_node_mailbox =
+          Realm::ipc_mailbox_create(get_mailbox_name(Network::my_node_id));
+      Network::barrier(); // Wait for everyone to create their ipc mailboxes
+      if(all_node_mailbox != Realm::INVALID_OS_HANDLE) {
+        NodeSet send_nodes;
+        for(NodeID node_id : Network::all_peers) {
+          std::string slot_name = get_mailbox_name(node_id);
+          if(!Realm::ipc_mailbox_send(all_node_mailbox, slot_name, handles,
+                                      &(Network::my_node_id), sizeof(NodeID))) {
+            log_runtime.info("Create shared_peers using ipc mailbox, but unable to "
+                             "send msg to node %u, skipping",
+                             (unsigned)node_id);
+            continue;
+          }
+          send_nodes.add(node_id);
+        }
+        for(NodeID node_id : send_nodes) {
+          NodeID recv_data = 0;
+          size_t data_sz;
+          std::string slot_name = get_mailbox_name(node_id);
+          if(!Realm::ipc_mailbox_recv(all_node_mailbox, slot_name, handles, &recv_data,
+                                      data_sz, sizeof(NodeID))) {
+            log_runtime.warning("Create shared_peers using ipc mailbox, but unable to "
+                                "recv msg from node %u, skipping",
+                                (unsigned)node_id);
+            continue;
+          }
+          assert(send_nodes.contains(recv_data) && "Received from unexpected node");
+          Network::shared_peers.add(node_id);
+        }
+        shared_peers_use_network_module = false;
+      } else {
+        log_runtime.warning("Failed to create ipc mailbox for building shared_peers, so "
+                            "fall back to use network modules");
+      }
+
+      // Wait for everyone to complete coordinating their shared_peers
+      Network::barrier();
+      close_handle(all_node_mailbox);
+#endif
+      if(shared_peers_use_network_module) {
+        Network::shared_peers.empty();
+        for(NetworkModule *module : network_modules) {
+          module->get_shared_peers(Network::shared_peers);
+        }
+      }
+    }
+
+    bool RuntimeImpl::share_memories(void)
+    {
+#if defined(REALM_USE_SHM)
+#if defined(REALM_USE_ANONYMOUS_SHARED_MEMORY)
+      // Temporary structure defining the layout of the data sent along in the mailbox
+      struct MessagePayload {
+        realm_id_t mem;
+        size_t size;
+        MessagePayload() {}
+        MessagePayload(realm_id_t _mem, size_t _size)
+          : mem(_mem)
+          , size(_size)
+        {}
+      };
+      std::vector<OsHandle> my_handles, peer_handles;
+      std::vector<MessagePayload> my_mem_ids, peer_mem_ids;
+      static const size_t MAX_PEER_MEMORIES = 1024;
+      OsHandle intra_node_mailbox =
+          Realm::ipc_mailbox_create(get_mailbox_name(Network::my_node_id));
+      if(intra_node_mailbox == Realm::INVALID_OS_HANDLE) {
+        log_runtime.error("Failed to create ipc mailbox");
+        return false;
+      }
+      {
+        size_t idx = 0;
+        my_handles.resize(local_shared_memory_mappings.size(), Realm::INVALID_OS_HANDLE);
+        my_mem_ids.resize(local_shared_memory_mappings.size());
+        for(std::unordered_map<realm_id_t, SharedMemoryInfo>::iterator it =
+                local_shared_memory_mappings.begin();
+            it != local_shared_memory_mappings.end(); ++it) {
+          realm_id_t id = it->first;
+          SharedMemoryInfo &shm = it->second;
+          assert(shm.get_handle() != Realm::INVALID_OS_HANDLE);
+          my_handles[idx] = shm.get_handle();
+          my_mem_ids[idx] = MessagePayload(id, shm.get_size());
+          idx++;
+        }
+      }
+
+      log_runtime.info() << "Found " << my_handles.size() << " shared memories";
+
+      Network::barrier(); // Wait for everyone to create their ipc mailboxes
+                          // (TODO: only do on shared peers)
+      // Share all the sharable memories.  Do this AFTER the network barrier to ensure
+      // all the intra_node_mailboxes have been created
+      for(NodeSetIterator it = Network::shared_peers.begin();
+          it != Network::shared_peers.end(); ++it) {
+        size_t data_sz;
+        std::string slot_name = get_mailbox_name(*it);
+        if(!Realm::ipc_mailbox_send(intra_node_mailbox, slot_name, my_handles,
+                                    my_mem_ids.data(),
+                                    my_mem_ids.size() * sizeof(my_mem_ids[0]))) {
+          log_runtime.warning(
+              "Unable to send shared memory information to node %u, skipping",
+              (unsigned)*it);
+          continue;
+        }
+        // TODO: modify ipc_mailbox_recv to peek and resize the data buffer the same as
+        // the peer handles
+        peer_mem_ids.resize(MAX_PEER_MEMORIES);
+        if(!Realm::ipc_mailbox_recv(intra_node_mailbox, slot_name, peer_handles,
+                                    peer_mem_ids.data(), data_sz,
+                                    peer_mem_ids.size() * sizeof(peer_mem_ids[0]))) {
+          log_runtime.warning(
+              "Unable to recv shared memory information from node %u, skipping",
+              (unsigned)*it);
+          continue;
+        }
+        assert(peer_handles.size() * sizeof(peer_mem_ids[0]) == data_sz &&
+               "Mismatch in received handles and ids");
+        for(size_t p = 0; p < peer_handles.size(); p++) {
+          SharedMemoryInfo peer_shm;
+          if(!SharedMemoryInfo::open(peer_shm, peer_handles[p], peer_mem_ids[p].size)) {
+            log_runtime.warning()
+                << "Failed to open shared memory " << peer_mem_ids[p].mem;
+            close_handle(peer_handles[p]);
+          } else {
+            peer_shm.unlink(); // No need to keep the OS resources around
+            remote_shared_memory_mappings.emplace(peer_mem_ids[p].mem, std::move(peer_shm));
+          }
+        }
+      }
+      // Wait for everyone to complete opening their sharing
+      // TODO: only do on shared peers
+      Network::barrier();
+      close_handle(intra_node_mailbox);
+      return true;
+#else  // REALM_USE_ANONYMOUS_SHARED_MEMORY
+      ActiveMessage<ShareableMemoryMessageHandler> msg(
+          Network::shared_peers, local_shared_memory_mappings.size() *
+                                     sizeof(ShareableMemoryMessageHandler::Payload));
+      for(std::unordered_map<realm_id_t, SharedMemoryInfo>::iterator it =
+              local_shared_memory_mappings.begin();
+          it != local_shared_memory_mappings.end(); ++it) {
+        ShareableMemoryMessageHandler::Payload payload;
+        payload.memory_id = it->first;
+        payload.sz = it->second.get_size();
+        msg.add_payload(&payload, sizeof(payload));
+      }
+      msg.commit();
+      { // Wait for everyone to send their mappings
+        AutoLock<> al(ShareableMemoryMessageHandler::mutex);
+        while(ShareableMemoryMessageHandler::num_msgs_handled !=
+              Network::shared_peers.size()) {
+          ShareableMemoryMessageHandler::cond_var.wait();
+        }
+      }
+      Network::barrier(); // Wait for everyone to get all their mappings from us
+      return true;
+#endif // REALM_USE_ANONYMOUS_MEMORY
+#else  // REALM_USE_SHM
+      return true;
+#endif
+    }
+
+    void RuntimeImpl::parse_command_line(std::vector<std::string> &cmdline)
     {
       // very first thing - let the logger initialization happen
       Logger::configure_from_cmdline(cmdline);
@@ -1227,117 +1730,97 @@ namespace Realm {
       }
       Clock::calibrate(use_cpu_tsc, force_cpu_tsq_freq);
 
-      // start up the threading subsystem - modules will likely want threads
-      if(!Threading::initialize()) exit(1);
+#ifdef REALM_USE_NVTX
+      // need to init nvtx at the very beginning
+      std::vector<std::string> nvtx_module_list;
+      {
+        CommandLineParser cp;
+        // modules are defined as the key of the nvtx_categories_predefined in nvtx.cc
+        //   if all is passed, all modules will be enabled. 
+        cp.add_option_stringlist("-ll:nvtx_modules", nvtx_module_list);
+        bool ok = cp.parse_command_line(cmdline);
+        assert(ok);
+      }
+      init_nvtx(nvtx_module_list);
+#endif
 
       // configure network modules
       for(std::vector<NetworkModule *>::const_iterator it = network_modules.begin();
-	  it != network_modules.end();
-	  it++)
-	(*it)->parse_command_line(this, cmdline);
+          it != network_modules.end();
+          it++)
+        (*it)->parse_command_line(this, cmdline);
 
-      // now load modules
-      module_registrar.create_static_modules(cmdline, modules);
-      module_registrar.create_dynamic_modules(cmdline, modules);
-      modules_created = true;
+      // configure module configs
+      std::map<std::string, ModuleConfig*>::iterator it;
+      for (it = module_configs.begin(); it != module_configs.end(); it++) {
+        ModuleConfig *module_config = it->second;
+        module_config->configure_from_cmdline(cmdline);
+      }
 
       PartitioningOpQueue::configure_from_cmdline(cmdline);
 
-      // low-level runtime parameters
-      size_t reg_ib_mem_size;
-      if(Network::max_node_id > 0)
-	reg_ib_mem_size = 256 << 20; // for inter-node copies
-      else
-	reg_ib_mem_size = 64 << 20; // for local transposes/serdez
-
-      size_t reg_mem_size = 0;
-      size_t disk_mem_size = 0;
-      // Static variable for stack size since we need to 
-      // remember it when we launch threads in run 
-      stack_size = 2 << 20;
-      //unsigned cpu_worker_threads = 1;
-      unsigned dma_worker_threads = 0;  // unused - warning on application use
-#ifdef EVENT_TRACING
-      size_t   event_trace_block_size = 1 << 20;
-      double   event_trace_exp_arrv_rate = 1e3;
-#endif
-#ifdef LOCK_TRACING
-      size_t   lock_trace_block_size = 1 << 20;
-      double   lock_trace_exp_arrv_rate = 1e2;
-#endif
-      // should local proc threads get dedicated cores?
-      bool dummy_reservation_ok = true;
-      bool show_reservations = false;
-      // are hyperthreads considered to share a physical core
-      bool hyperthread_sharing = true;
-      bool pin_dma_threads = false; // unused - silently ignored on cmdline
-      size_t bitset_chunk_size = 32 << 10; // 32KB
-      // based on some empirical measurements, 1024 nodes seems like
-      //  a reasonable cutoff for switching to twolevel nodeset bitmasks
-      //  (measured on an E5-2698 v4)
-      int bitset_twolevel = -1024; // i.e. yes if > 1024 nodes
-      int active_msg_handler_threads = 0; // default is none (use bgwork)
-      bool active_msg_handler_bgwork = true;
-
-      CommandLineParser cp;
-      cp.add_option_int_units("-ll:rsize", reg_mem_size, 'm')
-	.add_option_int_units("-ll:ib_rsize", reg_ib_mem_size, 'm')
-	.add_option_int_units("-ll:dsize", disk_mem_size, 'm')
-	.add_option_int_units("-ll:stacksize", stack_size, 'm')
-	.add_option_int("-ll:dma", dma_worker_threads)
-        .add_option_bool("-ll:pin_dma", pin_dma_threads)
-	.add_option_int("-ll:dummy_rsrv_ok", dummy_reservation_ok)
-	.add_option_bool("-ll:show_rsrv", show_reservations)
-	.add_option_int("-ll:ht_sharing", hyperthread_sharing)
-	.add_option_int_units("-ll:bitset_chunk", bitset_chunk_size, 'k')
-	.add_option_int("-ll:bitset_twolevel", bitset_twolevel);
-
-      std::string event_trace_file, lock_trace_file;
-
-      cp.add_option_string("-ll:eventtrace", event_trace_file)
-	.add_option_string("-ll:locktrace", lock_trace_file);
-
-#ifdef NODE_LOGGING
-      cp.add_option_string("-ll:prefix", RuntimeImpl::prefix);
-#else
-      std::string dummy_prefix;
-      cp.add_option_string("-ll:prefix", dummy_prefix);
-#endif
-
-      cp.add_option_int("-realm:eventloopcheck", Config::event_loop_detection_limit);
-      cp.add_option_bool("-ll:force_kthreads", Config::force_kernel_threads);
-      cp.add_option_bool("-ll:frsrv_fallback", Config::use_fast_reservation_fallback);
-      cp.add_option_int("-ll:machine_query_cache", Config::use_machine_query_cache);
-      cp.add_option_int("-ll:defalloc", Config::deferred_instance_allocation);
-      cp.add_option_int("-ll:amprofile", Config::profile_activemsg_handlers);
-      cp.add_option_int("-ll:aminline", Config::max_inline_message_time);
-      cp.add_option_int("-ll:ahandlers", active_msg_handler_threads);
-      cp.add_option_int("-ll:handler_bgwork", active_msg_handler_bgwork);
-
-      bool cmdline_ok = cp.parse_command_line(cmdline);
-
-      if(!cmdline_ok) {
-	fprintf(stderr, "ERROR: failure parsing command line options\n");
-	exit(1);
+      // parse the global Config
+      {
+        CommandLineParser cp;
+        cp.add_option_int("-realm:eventloopcheck", Config::event_loop_detection_limit);
+        cp.add_option_bool("-ll:force_kthreads", Config::force_kernel_threads);
+        cp.add_option_bool("-ll:frsrv_fallback", Config::use_fast_reservation_fallback);
+        cp.add_option_int("-ll:machine_query_cache", Config::use_machine_query_cache);
+        cp.add_option_int("-ll:defalloc", Config::deferred_instance_allocation);
+        cp.add_option_int("-ll:amprofile", Config::profile_activemsg_handlers);
+        cp.add_option_int("-ll:aminline", Config::max_inline_message_time);
+        bool cmdline_ok = cp.parse_command_line(cmdline);
+        if(!cmdline_ok) {
+          fprintf(stderr, "ERROR: failure parsing command line options for Config\n");
+          exit(1);
+        }
       }
 
-#ifndef EVENT_TRACING
-      if(!event_trace_file.empty()) {
-	fprintf(stderr, "WARNING: event tracing requested, but not enabled at compile time!\n");
-      }
-#endif
+      // load the CoreModuleConfig
+      CoreModuleConfig *config =
+          checked_cast<CoreModuleConfig *>(get_module_config("core"));
+      assert(config != nullptr);
 
-#ifndef LOCK_TRACING
-      if(!lock_trace_file.empty()) {
-          fprintf(stderr, "WARNING: lock tracing requested, but not enabled at compile time!\n");
-      }
-#endif
+      core_map = CoreMap::discover_core_map(config->hyperthread_sharing);
+      core_reservations = new CoreReservationSet(core_map);
 
-#ifndef NODE_LOGGING
-      if(!dummy_prefix.empty()) {
-	fprintf(stderr,"WARNING: prefix set, but NODE_LOGGING not enabled at compile time!\n");
+      sampling_profiler.configure_from_cmdline(cmdline, *core_reservations);
+
+      bgwork.configure_from_cmdline(cmdline);
+
+      // now that we've done all of our argument parsing, scan through what's
+      //  left and see if anything starts with -ll: - probably a misspelled
+      //  argument
+      for(std::vector<std::string>::const_iterator it = cmdline.begin();
+        it != cmdline.end();
+        it++)
+      if(it->compare(0, 4, "-ll:") == 0) {
+        fprintf(stderr, "ERROR: unrecognized lowlevel option: %s\n", it->c_str());
+        assert(0);
       }
-#endif
+    }
+
+    void RuntimeImpl::finish_configure(void)
+    {
+      // mark all module config as finished
+      std::map<std::string, ModuleConfig*>::iterator it;
+      for (it = module_configs.begin(); it != module_configs.end(); it++) {
+        ModuleConfig *module_config = it->second;
+        module_config->finish_configure();
+      }
+
+      // start up the threading subsystem - modules will likely want threads
+      if(!Threading::initialize()) exit(1);
+
+      // now load modules
+      module_registrar.create_static_modules(modules);
+      module_registrar.create_dynamic_modules(modules);
+      modules_created = true;
+
+      // load the CoreModuleConfig
+      CoreModuleConfig *config = dynamic_cast<CoreModuleConfig *>(get_module_config("core"));
+      assert(config != nullptr);
+      assert(config->finish_configured);
 
       // Check that we have enough resources for the number of nodes we are using
       if (Network::max_node_id > (NodeID)(ID::MAX_NODE_ID))
@@ -1360,12 +1843,6 @@ namespace Realm {
       }
 #endif
 
-      core_map = CoreMap::discover_core_map(hyperthread_sharing);
-      core_reservations = new CoreReservationSet(core_map);
-
-      sampling_profiler.configure_from_cmdline(cmdline, *core_reservations);
-
-      bgwork.configure_from_cmdline(cmdline);
       event_triggerer.add_to_manager(&bgwork);
 
       // initialize barrier timestamp
@@ -1377,16 +1854,16 @@ namespace Realm {
       {
 	// choose a chunk size that's roughly the requested size, but
 	//  clamp to [8,1024]
-	size_t bitsets_per_chunk = ((bitset_chunk_size << 3) /
+	size_t bitsets_per_chunk = ((config->bitset_chunk_size << 3) /
 				    (Network::max_node_id + 1));
 	if(bitsets_per_chunk < 8)
 	  bitsets_per_chunk = 8;
 	if(bitsets_per_chunk > 1024)
 	  bitsets_per_chunk = 1024;
 	// negative values of bitset_twolevel are a threshold
-	bool use_twolevel = ((bitset_twolevel > 0) ||
-			     ((bitset_twolevel < 0) &&
-			      (Network::max_node_id >= -bitset_twolevel)));
+	bool use_twolevel = ((config->bitset_twolevel > 0) ||
+			     ((config->bitset_twolevel < 0) &&
+			      (Network::max_node_id >= -config->bitset_twolevel)));
 	NodeSetBitmask::configure_allocator(Network::max_node_id,
 					    bitsets_per_chunk,
 					    use_twolevel);
@@ -1430,14 +1907,14 @@ namespace Realm {
       }
 
       // form requests for network-registered memory
-      if(reg_ib_mem_size > 0) {
+      if(config->reg_ib_mem_size > 0) {
 	reg_ib_mem_segment.request(NetworkSegmentInfo::HostMem,
-				   reg_ib_mem_size, 64);
+				   config->reg_ib_mem_size, 64);
 	network_segments.push_back(&reg_ib_mem_segment);
       }
-      if(reg_mem_size > 0) {
+      if(config->reg_mem_size > 0) {
 	reg_mem_segment.request(NetworkSegmentInfo::HostMem,
-				reg_mem_size, 64);
+				config->reg_mem_size, 64);
 	network_segments.push_back(&reg_mem_segment);
       }
 
@@ -1446,12 +1923,27 @@ namespace Realm {
 
       // and also our incoming active message manager
       message_manager = new IncomingMessageManager(Network::max_node_id + 1,
-						   active_msg_handler_threads,
+						   config->active_msg_handler_threads,
 						   *core_reservations);
-      if(active_msg_handler_bgwork)
+      if(config->active_msg_handler_bgwork)
 	message_manager->add_to_manager(&bgwork);
       else
-	assert(active_msg_handler_threads > 0);
+	assert(config->active_msg_handler_threads > 0);
+
+        // Coordinate a job identifer across all the nodes in order to use it for
+        // generating names in the system namespace (like files or sockets).  This needs
+        // to come before the modules make their memories, but after the network is
+        // initialized.  This cannot be currently done if GASNET1 is enabled, as the
+        // broadcast function is not available until after Module::attach
+#if !defined(REALM_USE_GASNET1)
+      {
+        Config::job_id =
+            Network::broadcast(0, Clock::current_time_in_nanoseconds(true) + rand());
+      }
+#endif
+
+      // create shared_peers either using ipc mailbox or network modules
+      create_shared_peers();
 
       // initialize modules and create memories before we do network attach
       //  so that we have a chance to register these other memories for
@@ -1461,47 +1953,34 @@ namespace Realm {
 	  it++)
 	(*it)->initialize(this);
 
-      for(std::vector<Module *>::const_iterator it = modules.begin();
-	  it != modules.end();
-	  it++)
-	(*it)->create_memories(this);
+    for(std::vector<Module *>::const_iterator it = modules.begin(); it != modules.end();
+        it++)
+      (*it)->create_memories(this);
 
-      Node *n = &nodes[Network::my_node_id];
-      for(MemoryImpl *mem : n->memories) {
-	NetworkSegment *seg = mem->get_network_segment();
-	if(seg)
-	  network_segments.push_back(seg);
-      }
-      for(IBMemory *ibm : n->ib_memories) {
-	NetworkSegment *seg = ibm->get_network_segment();
-	if(seg)
-	  network_segments.push_back(seg);
-      }
+    Node *n = &nodes[Network::my_node_id];
+    for(MemoryImpl *mem : n->memories) {
+      NetworkSegment *seg = mem->get_network_segment();
+      if(seg)
+        network_segments.push_back(seg);
+    }
+    for(IBMemory *ibm : n->ib_memories) {
+      NetworkSegment *seg = ibm->get_network_segment();
+      if(seg)
+        network_segments.push_back(seg);
+    }
 
-      // attach to the network
-      for(std::vector<NetworkModule *>::const_iterator it = network_modules.begin();
-	  it != network_modules.end();
-	  it++)
-	(*it)->attach(this, network_segments);
+    // attach to the network
+    for(std::vector<NetworkModule *>::const_iterator it = network_modules.begin();
+        it != network_modules.end(); it++)
+      (*it)->attach(this, network_segments);
 
-      // now that we've done all of our argument parsing, scan through what's
-      //  left and see if anything starts with -ll: - probably a misspelled
-      //  argument
-      for(std::vector<std::string>::const_iterator it = cmdline.begin();
-	  it != cmdline.end();
-	  it++)
-	if(it->compare(0, 4, "-ll:") == 0) {
-	  fprintf(stderr, "ERROR: unrecognized lowlevel option: %s\n", it->c_str());
-          assert(0);
-	}
-
-      {
-	// try to get all nodes to have roughly the same idea of the "zero
-	//  "time" by using network barriers
-	Network::barrier();
-	Realm::Clock::set_zero_time();
-	Network::barrier();
-      }
+    {
+      // try to get all nodes to have roughly the same idea of the "zero
+      //  "time" by using network barriers
+      Network::barrier();
+      Realm::Clock::set_zero_time();
+      Network::barrier();
+    }
 
 #ifdef DEADLOCK_TRACE
       next_thread = 0;
@@ -1561,18 +2040,20 @@ namespace Realm {
       //CHECK_GASNET( gasnet_getSegmentInfo(seginfos, num_nodes) );
 
       // network-specific memories are created after attachment
-      for(std::vector<NetworkModule *>::const_iterator it = network_modules.begin();
-	  it != network_modules.end();
-	  it++)
-	(*it)->create_memories(this);
+      for(NetworkModule *module : network_modules) {
+        module->create_memories(this);
+      }
+      for(NodeID node_id : Network::shared_peers) {
+        log_runtime.debug() << Network::my_node_id << " is shareable with " << node_id;
+      }
 
       LocalCPUMemory *regmem;
-      if(reg_mem_size > 0) {
+      if(config->reg_mem_size > 0) {
 	void *regmem_base = reg_mem_segment.base;
 	assert(regmem_base != 0);
 	Memory m = get_runtime()->next_local_memory_id();
 	regmem = new LocalCPUMemory(m,
-				    reg_mem_size,
+				    config->reg_mem_size,
                                     -1/*don't care numa domain*/,
                                     Memory::REGDMA_MEM,
 				    regmem_base,
@@ -1587,12 +2068,12 @@ namespace Realm {
 	(*it)->create_processors(this);
 
       IBMemory *reg_ib_mem;
-      if(reg_ib_mem_size > 0) {
+      if(config->reg_ib_mem_size > 0) {
 	void *reg_ib_mem_base = reg_ib_mem_segment.base;
 	assert(reg_ib_mem_base != 0);
 	Memory m = get_runtime()->next_local_ib_memory_id();
 	reg_ib_mem = new IBMemory(m,
-				  reg_ib_mem_size,
+				  config->reg_ib_mem_size,
 				  MemoryImpl::MKIND_SYSMEM,
 				  Memory::REGDMA_MEM,
 				  reg_ib_mem_base,
@@ -1603,12 +2084,12 @@ namespace Realm {
 
       // create local disk memory
       DiskMemory *diskmem;
-      if(disk_mem_size > 0) {
+      if(config->disk_mem_size > 0) {
         char file_name[30];
-        sprintf(file_name, "disk_file%d.tmp", Network::my_node_id);
+        snprintf(file_name, sizeof file_name, "disk_file%d.tmp", Network::my_node_id);
         Memory m = get_runtime()->next_local_memory_id();
         diskmem = new DiskMemory(m,
-                                 disk_mem_size,
+                                 config->disk_mem_size,
                                  std::string(file_name));
         get_runtime()->add_memory(diskmem);
       } else
@@ -1625,7 +2106,7 @@ namespace Realm {
       
       // start dma system at the very ending of initialization
       // since we need list of local gpus to create channels
-      if(dma_worker_threads > 0) {
+      if(config->dma_worker_threads > 0) {
         // warn about use of old flags
         log_runtime.warning() << "-ll:dma specified on command line no longer has effect - use -ll:bgwork to control background worker threads (which include dma work)";
       }
@@ -1634,15 +2115,33 @@ namespace Realm {
       // now that we've created all the processors/etc., we can try to come up with core
       //  allocations that satisfy everybody's requirements - this will also start up any
       //  threads that have already been requested
-      bool ok = core_reservations->satisfy_reservations(dummy_reservation_ok);
+      bool ok = core_reservations->satisfy_reservations(config->dummy_reservation_ok);
       if(ok) {
-	if(show_reservations) {
+	if(config->show_reservations) {
 	  std::cout << *core_map << std::endl;
 	  core_reservations->report_reservations(std::cout);
 	}
       } else {
 	printf("HELP!  Could not satisfy all core reservations!\n");
 	exit(1);
+      }
+
+      // create the "replicated heap" that puts instance layouts and sparsity
+      //  maps where non-CPU devices can see them
+      repl_heap.init(config->replheap_size, 1 /*chunks*/);
+
+      if (!Network::shared_peers.empty() && local_shared_memory_mappings.size() > 0) {
+        if (!share_memories()) {
+          log_runtime.fatal("Failed to share memories with peers");
+          abort();
+        }
+        for(std::unordered_map<realm_id_t, SharedMemoryInfo>::iterator it =
+                local_shared_memory_mappings.begin();
+            it != local_shared_memory_mappings.end(); ++it) {
+          // We're done communicating our shared memories, so there's no need to keep the
+          // sharing handles active, so unlink them now.
+          it->second.unlink();
+        }
       }
 
       for(std::vector<Module *>::const_iterator it = modules.begin();
@@ -1731,27 +2230,6 @@ namespace Realm {
 				  );
 	}
 
-	add_mem_mem_affinities(machine,
-			       mems_by_kind[Memory::SYSTEM_MEM],
-			       mems_by_kind[Memory::GLOBAL_MEM],
-			       30,  // "lower" bandwidth
-			       25  // "higher" latency
-			       );
-
-	add_mem_mem_affinities(machine,
-			       mems_by_kind[Memory::SYSTEM_MEM],
-			       mems_by_kind[Memory::DISK_MEM],
-			       15,  // "low" bandwidth
-			       50  // "high" latency
-			       );
-
-	add_mem_mem_affinities(machine,
-			       mems_by_kind[Memory::SYSTEM_MEM],
-			       mems_by_kind[Memory::FILE_MEM],
-			       15,  // "low" bandwidth
-			       50  // "high" latency
-			       );
-
 	for(std::set<Processor::Kind>::const_iterator it = local_cpu_kinds.begin();
 	    it != local_cpu_kinds.end();
 	    it++) {
@@ -1764,124 +2242,94 @@ namespace Realm {
 				  3   // "small" latency
 				  );
 	}
+
+      }
+
+      // retrieve process info
+      {
+        Machine::ProcessInfo process_info;
+        int errcode =
+            gethostname(process_info.hostname, Machine::ProcessInfo::MAX_HOSTNAME_LENGTH);
+        if(errcode != 0) {
+          log_runtime.warning() << "gethostname failed with " << errno;
+        }
+#ifdef REALM_ON_WINDOWS
+        process_info.processid = GetCurrentProcessId();
+        std::hash<std::string> hostname_hasher;
+        process_info.hostid = hostname_hasher(process_info.hostname);
+#else
+        process_info.processid = getpid();
+        process_info.hostid = gethostid();
+#endif
+        machine->add_process_info(Network::my_node_id, process_info);
       }
 
       // announce by network type
-      for(std::vector<NetworkModule *>::iterator nit = network_modules.begin();
-	  nit != network_modules.end();
-	  ++nit) {
-	// first, build the set of nodes we'll talk to
-	bool empty = true;
-	NodeSet targets;
-	for(NodeID i = 0; i <= Network::max_node_id; i++)
-	  if((i != Network::my_node_id) && (Network::get_network(i) == *nit)) {
-	    empty = false;
-	    targets.add(i);
-	  }
-	if(empty) continue;
-	
-	Serialization::DynamicBufferSerializer dbs(4096);
+      Serialization::DynamicBufferSerializer dbs(4096);
 
-        // when the preferred message size is small, we'll send multiple
-        //  fragments
-        size_t max_frag_size = ActiveMessage<NodeAnnounceMessage>::recommended_max_payload(targets, false /*!with_congestion*/);
-        int num_fragments = 0;
+      for(NetworkModule *module : network_modules) {
+        // first, build the set of nodes we'll talk to
+        NodeSet targets;
+        for(NodeID i = 0; i <= Network::max_node_id; i++) {
+          if((i != Network::my_node_id) && (Network::get_network(i) == module)) {
+            targets.add(i);
+          }
+        }
+        if(targets.empty()) {
+          continue;
+        }
 
-#ifdef DEBUG_REALM_STARTUP
-	if(Network::my_node_id == 0) {
-	  TimeStamp ts("sending announcements", false);
-	  fflush(stdout);
-	}
-#endif
+        dbs.reset();
+        ok = serialize_announce(dbs, n, machine, module);
+        assert(ok && "Failed to serialize node for announcement");
 
-	// announce each processor
-	for(std::vector<ProcessorImpl *>::const_iterator it = n->processors.begin();
-	    it != n->processors.end();
-	    it++)
-	  if(*it)
-            num_fragments += fragmented_announce(targets, *nit,
-                                                 dbs, max_frag_size, *it);
+        // Now that all of this node's network-specific information is collected, time to
+        // send it all out
+        {
+          std::vector<char> all_announcements;
+          std::vector<size_t> lengths(targets.size() + 1);
+          char *buffer = nullptr;
+          size_t rank = 0;
 
-	// now each memory
-	for(std::vector<MemoryImpl *>::const_iterator it = n->memories.begin();
-	    it != n->memories.end();
-	    it++)
-	  if(*it)
-            num_fragments += fragmented_announce(targets, *nit,
-                                                 dbs, max_frag_size, *it);
-
-        for (std::vector<IBMemory *>::const_iterator it = n->ib_memories.begin();
-             it != n->ib_memories.end();
-             it++)
-          if(*it)
-            num_fragments += fragmented_announce(targets, *nit,
-                                                 dbs, max_frag_size, *it);
-
-	// announce each processor's affinities
-	for(std::vector<ProcessorImpl *>::const_iterator it = n->processors.begin();
-	    it != n->processors.end();
-	    it++)
-	  if(*it) {
-	    Processor p = (*it)->me;
-	    std::vector<Machine::ProcessorMemoryAffinity> pmas;
-	    machine->get_proc_mem_affinity(pmas, p);
-
-	    for(std::vector<Machine::ProcessorMemoryAffinity>::const_iterator it2 = pmas.begin();
-		it2 != pmas.end();
-		it2++)
-              num_fragments += fragmented_announce(targets, *nit,
-                                                   dbs, max_frag_size, *it2);
-	  }
-
-	// now each memory's affinities with other memories
-	for(std::vector<MemoryImpl *>::const_iterator it = n->memories.begin();
-	    it != n->memories.end();
-	    it++)
-	  if(*it) {
-	    Memory m = (*it)->me;
-	    std::vector<Machine::MemoryMemoryAffinity> mmas;
-	    machine->get_mem_mem_affinity(mmas, m);
-
-	    for(std::vector<Machine::MemoryMemoryAffinity>::const_iterator it2 = mmas.begin();
-		it2 != mmas.end();
-		it2++) {
-	      // only announce intra-node ones and only those with this memory as m1 to avoid
-	      //  duplicates
-	      if((it2->m1 != m) || ((NodeID)(it2->m2.address_space()) != Network::my_node_id))
-		continue;
-
-              num_fragments += fragmented_announce(targets, *nit,
-                                                   dbs, max_frag_size, *it2);
-	    }
-	  }
-
-	for(std::vector<Channel *>::const_iterator it = n->dma_channels.begin();
-	    it != n->dma_channels.end();
-	    ++it)
-	  if(*it)
-            num_fragments += fragmented_announce(targets, *nit,
-                                                 dbs, max_frag_size, *it);
-
-        // have to send one final message with the remaining data and a valid
-        //  fragment count
-	ActiveMessage<NodeAnnounceMessage> amsg(targets, dbs.bytes_used());
-        amsg->num_fragments = num_fragments + 1;
-        amsg.add_payload(dbs.get_buffer(), dbs.bytes_used()); // copy now
-	amsg.commit();
+          // Use the networking module to exchange all the announcement information, by
+          // whatever optimal path is available.  We assume a non-symmetric machine here,
+          // so we use allgatherv.
+          module->allgatherv(reinterpret_cast<const char *>(dbs.get_buffer()),
+                             dbs.bytes_used(), all_announcements, lengths);
+          buffer = all_announcements.data();
+          // Traverse the nodes _in-order_, as their data is laid out in the same order
+          for(NodeID node_id = 0; node_id <= Network::max_node_id; node_id++) {
+            if(node_id != Network::my_node_id) {
+              if(!targets.contains(node_id)) {
+                // Not a node that's collaborating here, so skip it and don't update the
+                // buffer pointer
+                continue;
+              }
+              machine->parse_node_announce_data(node_id, buffer, lengths[rank], true);
+            }
+            // Increment to the next section of the buffer with data for the next node id
+            buffer += lengths[rank];
+            rank++;
+          }
+        }
       }
 
-      // once we've sent to everybody, wait for all responses
-      {
-	NodeAnnounceMessage::await_all_announcements();
+      // Now that we have full knowledge of the machine, update the machine model's
+      // internal representation Start with the kind maps
+      machine->update_kind_maps();
+      // and the mem_mem affinities
+      machine->enumerate_mem_mem_affinities();
 
-#ifdef DEBUG_REALM_STARTUP
-	if(Network::my_node_id == 0) {
-	  TimeStamp ts("received all announcements", false);
-	  fflush(stdout);
-	}
-#endif
+      if (Config::path_cache_lru_size) {
+        assert(Config::path_cache_lru_size > 0);
+        init_path_cache();
       }
+    }
 
+    bool RuntimeImpl::configure_from_command_line(std::vector<std::string> &cmdline)
+    {
+      parse_command_line(cmdline);
+      finish_configure();
       return true;
     }
 
@@ -1906,12 +2354,12 @@ namespace Realm {
 		     const void *args, size_t arglen,
 		     Event start_event, int priority)
   {
-    std::set<Event> events;
-    for(typename T::const_iterator it = container_of_procs.begin();
-	it != container_of_procs.end();
-	it++) {
-      Event e = (*it)->me.spawn(func_id, args, arglen, ProfilingRequestSet(), start_event, priority);
-      events.insert(e);
+    std::vector<Event> events;
+    for (typename T::const_iterator it = container_of_procs.begin();
+         it != container_of_procs.end(); it++) {
+        Event e = (*it)->me.spawn(func_id, args, arglen, ProfilingRequestSet(),
+                                  start_event, priority);
+        events.push_back(e);
     }
     return Event::merge_events(events);
   }
@@ -1960,14 +2408,14 @@ namespace Realm {
 	Network::gather(root, wait_on, all_events);
 
 	// step 2: merge all the events
-	std::set<Event> event_set;
+	std::vector<Event> events;
 	for(NodeID i = 0; i <= Network::max_node_id; i++) {
 	  //log_collective.info() << "ev " << i << ": " << all_events[i];
 	  if(all_events[i].exists())
-	    event_set.insert(all_events[i]);
+	    events.push_back(all_events[i]);
 	}
 
-	Event merged_event = Event::merge_events(event_set);
+	Event merged_event = Event::merge_events(events);
 	log_collective.info() << "merged precondition: proc=" << target_proc << " func=" << task_id << " priority=" << priority << " before=" << merged_event;
 
 	// step 3: run the task
@@ -2001,7 +2449,9 @@ namespace Realm {
 						bool one_per_node /*= false*/,
 						Event wait_on /*= Event::NO_EVENT*/, int priority /*= 0*/)
     {
-      log_collective.info() << "collective spawn: kind=" << target_kind << " func=" << task_id << " priority=" << priority << " before=" << wait_on;
+      log_collective.info()
+          << "collective spawn: kind=" << target_kind << " func=" << task_id
+          << " priority=" << priority << " before=" << wait_on;
 
 #ifdef DEBUG_COLLECTIVES
       broadcast_check(target_kind, "target_kind");
@@ -2010,100 +2460,104 @@ namespace Realm {
       broadcast_check(priority, "priority");
 #endif
 
-      // every node is involved in this one, so the root is arbitrary - we'll pick node 0
+      // every node is involved in this one, so the root is arbitrary - we'll
+      // pick node 0
 
       Event merged_event;
 
-      if(Network::my_node_id == 0) {
-	// ROOT NODE
+      if (Network::my_node_id == 0) {
+        // ROOT NODE
 
-	// step 1: receive wait_on from every node
-	std::vector<Event> all_events;
-	Network::gather(0 /*root*/, wait_on, all_events);
+        // step 1: receive wait_on from every node
+        std::vector<Event> all_events;
+        Network::gather(0 /*root*/, wait_on, all_events);
 
-	// step 2: merge all the events
-	std::set<Event> event_set;
-	for(NodeID i = 0; i <= Network::max_node_id; i++) {
-	  //log_collective.info() << "ev " << i << ": " << all_events[i];
-	  if(all_events[i].exists())
-	    event_set.insert(all_events[i]);
-	}
+        // step 2: merge all the events
+        // Remove all the non-existant events
+        all_events.erase(std::remove_if(all_events.begin(), all_events.end(),
+                                        [](Event e) { return !e.exists(); }),
+                         all_events.end());
 
-	merged_event = Event::merge_events(event_set);
+        merged_event = Event::merge_events(all_events);
 
-	// step 3: broadcast the merged event back to everyone else
-	(void) Network::broadcast(0 /*root*/, merged_event);
+        // step 3: broadcast the merged event back to everyone else
+        (void)Network::broadcast(0 /*root*/, merged_event);
       } else {
-	// NON-ROOT NODE
+        // NON-ROOT NODE
 
-	// step 1: send our wait_on to the root for merging
-	Network::gather(0 /*root*/, wait_on);
+        // step 1: send our wait_on to the root for merging
+        Network::gather(0 /*root*/, wait_on);
 
-	// step 2: twiddle thumbs
+        // step 2: twiddle thumbs
 
-	// step 3: receive merged wait_on event
-	merged_event = Network::broadcast(0 /*root*/, Event::NO_EVENT);
+        // step 3: receive merged wait_on event
+        merged_event = Network::broadcast(0 /*root*/, Event::NO_EVENT);
       }
 
       // now spawn 0 or more local tasks
-      std::set<Event> event_set;
+      std::vector<Event> events;
 
-      const std::vector<ProcessorImpl *>& local_procs = nodes[Network::my_node_id].processors;
+      const std::vector<ProcessorImpl *> &local_procs =
+          nodes[Network::my_node_id].processors;
 
-      for(std::vector<ProcessorImpl *>::const_iterator it = local_procs.begin();
-	  it != local_procs.end();
-	  it++)
-	if((target_kind == Processor::NO_KIND) || ((*it)->kind == target_kind)) {
-	  Event e = (*it)->me.spawn(task_id, args, arglen, ProfilingRequestSet(),
-				    merged_event, priority);
-	  log_collective.info() << "spawn by kind: proc=" << (*it)->me << " func=" << task_id << " before=" << merged_event << " after=" << e;
-	  if(e.exists())
-	    event_set.insert(e);
+      for (std::vector<ProcessorImpl *>::const_iterator it =
+               local_procs.begin();
+           it != local_procs.end(); it++)
+        if ((target_kind == Processor::NO_KIND) ||
+            ((*it)->kind == target_kind)) {
+          Event e =
+              (*it)->me.spawn(task_id, args, arglen, ProfilingRequestSet(),
+                              merged_event, priority);
+          log_collective.info()
+              << "spawn by kind: proc=" << (*it)->me << " func=" << task_id
+              << " before=" << merged_event << " after=" << e;
+          if (e.exists())
+            events.push_back(e);
 
-	  if(one_per_node)
-	    break;
-	}
+          if (one_per_node)
+            break;
+        }
 
       // local merge
-      Event my_finish = Event::merge_events(event_set);
+      Event my_finish = Event::merge_events(events);
 
-      if(Network::my_node_id == 0) {
-	// ROOT NODE
+      if (Network::my_node_id == 0) {
+        // ROOT NODE
 
-	// step 1: receive wait_on from every node
-	std::vector<Event> all_events;
-	Network::gather(0 /*root*/, my_finish, all_events);
+        // step 1: receive wait_on from every node
+        std::vector<Event> all_events;
+        Network::gather(0 /*root*/, my_finish, all_events);
+        // Remove all the non-existant events
+        all_events.erase(std::remove_if(all_events.begin(), all_events.end(),
+                                        [](Event e) { return !e.exists(); }),
+                         all_events.end());
 
-	// step 2: merge all the events
-	std::set<Event> event_set;
-	for(NodeID i = 0; i <= Network::max_node_id; i++) {
-	  //log_collective.info() << "ev " << i << ": " << all_events[i];
-	  if(all_events[i].exists())
-	    event_set.insert(all_events[i]);
-	}
+        Event merged_finish = Event::merge_events(all_events);
 
-	Event merged_finish = Event::merge_events(event_set);
+        // step 3: broadcast the merged event back to everyone
+        (void)Network::broadcast(0 /*root*/, merged_finish);
 
-	// step 3: broadcast the merged event back to everyone
-	(void) Network::broadcast(0 /*root*/, merged_finish);
+        log_collective.info()
+            << "collective spawn: kind=" << target_kind << " func=" << task_id
+            << " priority=" << priority << " after=" << merged_finish;
 
-	log_collective.info() << "collective spawn: kind=" << target_kind << " func=" << task_id << " priority=" << priority << " after=" << merged_finish;
-
-	return merged_finish;
+        return merged_finish;
       } else {
-	// NON-ROOT NODE
+        // NON-ROOT NODE
 
-	// step 1: send our wait_on to the root for merging
-	Network::gather(0 /*root*/, my_finish);
+        // step 1: send our wait_on to the root for merging
+        Network::gather(0 /*root*/, my_finish);
 
-	// step 2: twiddle thumbs
+        // step 2: twiddle thumbs
 
-	// step 3: receive merged wait_on event
-	Event merged_finish = Network::broadcast(0 /*root*/, Event::NO_EVENT);
+        // step 3: receive merged wait_on event
+        Event merged_finish = Network::broadcast(0 /*root*/, Event::NO_EVENT);
 
-	log_collective.info() << "collective spawn: kind=" << target_kind << " func=" << task_id << " priority=" << priority << " after=" << merged_finish;
+        log_collective.info()
+            << "collective spawn: kind=" << target_kind << " func=" << task_id
+            << " priority=" << priority << " after=" << merged_finish;
 
-	return merged_finish;
+        return merged_finish;
       }
     }
 
@@ -2241,9 +2695,9 @@ namespace Realm {
     {
       // sleep until shutdown has been requested by somebody
       {
-	AutoLock<> al(shutdown_mutex);
-	while(!shutdown_initiated)
-	  shutdown_condvar.wait();
+        AutoLock<> al(shutdown_mutex);
+        while (!shutdown_initiated)
+          shutdown_condvar.wait();
       }
       log_runtime.info("shutdown request received - terminating");
 
@@ -2252,47 +2706,57 @@ namespace Realm {
       //  the shutdown) has finished - in legacy mode this is the "shutdown"
       //  task, otherwise it's just a NOP (task 0)
       {
-	Processor::TaskFuncID flush_task_id = (run_method_called ?
-					         Processor::TASK_ID_PROCESSOR_SHUTDOWN :
-					         Processor::TASK_ID_PROCESSOR_NOP);
+        Processor::TaskFuncID flush_task_id =
+            (run_method_called ? Processor::TASK_ID_PROCESSOR_SHUTDOWN
+                               : Processor::TASK_ID_PROCESSOR_NOP);
 
-	// legacy shutdown - call shutdown task on processors
-	log_runtime.info() << "local processor shutdown tasks initiated";
+        // legacy shutdown - call shutdown task on processors
+        log_runtime.info() << "local processor shutdown tasks initiated";
 
-	const std::vector<ProcessorImpl *>& local_procs = nodes[Network::my_node_id].processors;
-	Event e = spawn_on_all(local_procs, flush_task_id, 0, 0,
-			       Event::NO_EVENT,
-			       INT_MIN); // runs with lowest priority
-	e.external_wait();
-	log_runtime.info() << "local processor shutdown tasks complete";
+        const std::vector<ProcessorImpl *> &local_procs =
+            nodes[Network::my_node_id].processors;
+        Event e =
+            spawn_on_all(local_procs, flush_task_id, 0, 0, Event::NO_EVENT,
+                         INT_MIN); // runs with lowest priority
+        e.external_wait();
+        log_runtime.info() << "local processor shutdown tasks complete";
+      }
+
+      {
+        size_t n = num_untriggered_events.load();
+        if (n != 0) {
+          log_runtime.fatal() << n << " pending operations during shutdown!";
+          abort();
+        }
       }
 
       // the operation tables on every rank should be clear of work
       optable.shutdown_check();
 
       // make sure the network is completely quiescent
-      if(Network::max_node_id > 0) {
-	int tries = 0;
-	while(true) {
-	  tries++;
-	  bool done = Network::check_for_quiescence(message_manager);
-	  if(done) {
-	    if(Network::my_node_id == 0)
-	      log_runtime.info() << "quiescent after " << tries << " attempts";
-	    break;
-	  }
+      if (Network::max_node_id > 0) {
+        int tries = 0;
+        while (true) {
+          tries++;
+          bool done = Network::check_for_quiescence(message_manager);
+          if (done) {
+            if (Network::my_node_id == 0)
+              log_runtime.info() << "quiescent after " << tries << " attempts";
+            break;
+          }
 
-	  if(tries >= 10) {
-	    log_runtime.fatal() << "network still not quiescent after " << tries << " attempts";
-	    abort();
-	  }
-	}
+          if (tries >= 10) {
+            log_runtime.fatal()
+                << "network still not quiescent after " << tries << " attempts";
+            abort();
+          }
+        }
       }
-      
+
       // mark that a shutdown is in progress so that we can hopefully catch
       //  things that try to run during teardown
       shutdown_in_progress.store(true);
-      
+
 #ifdef REALM_USE_KOKKOS
       // finalize the kokkos runtime
       KokkosInterop::kokkos_finalize(nodes[Network::my_node_id].processors);
@@ -2303,34 +2767,36 @@ namespace Realm {
       // stop processors before most other things, as they may be helping with
       //  background work
       {
-	std::vector<ProcessorImpl *>& local_procs = nodes[Network::my_node_id].processors;
-	for(std::vector<ProcessorImpl *>::const_iterator it = local_procs.begin();
-	    it != local_procs.end();
-	    it++)
-	  (*it)->shutdown();
+        std::vector<ProcessorImpl *> &local_procs =
+            nodes[Network::my_node_id].processors;
+        for (std::vector<ProcessorImpl *>::const_iterator it =
+                 local_procs.begin();
+             it != local_procs.end(); it++)
+          (*it)->shutdown();
       }
 
       // threads that cause inter-node communication have to stop first
       PartitioningOpQueue::stop_worker_threads();
 
-      for(std::vector<Channel *>::iterator it = nodes[Network::my_node_id].dma_channels.begin();
-	  it != nodes[Network::my_node_id].dma_channels.end();
-	  ++it)
-	(*it)->shutdown();
+      for (std::vector<Channel *>::iterator it =
+               nodes[Network::my_node_id].dma_channels.begin();
+           it != nodes[Network::my_node_id].dma_channels.end(); ++it)
+        (*it)->shutdown();
       stop_dma_system();
 
+      repl_heap.cleanup();
+
       // let network-dependent cleanup happen before we detach
-      for(std::vector<Module *>::iterator it = modules.begin();
-          it != modules.end();
-          it++) {
+      for (std::vector<Module *>::iterator it = modules.begin();
+           it != modules.end(); it++) {
         (*it)->pre_detach_cleanup();
       }
 
       // detach from the network
-      for(std::vector<NetworkModule *>::const_iterator it = network_modules.begin();
-	  it != network_modules.end();
-	  it++)
-	(*it)->detach(this, network_segments);
+      for (std::vector<NetworkModule *>::const_iterator it =
+               network_modules.begin();
+           it != network_modules.end(); it++)
+        (*it)->detach(this, network_segments);
 
 #ifdef DEBUG_REALM
       event_triggerer.shutdown_work_item();
@@ -2343,20 +2809,19 @@ namespace Realm {
 
       sampling_profiler.shutdown();
 
-      if(Config::profile_activemsg_handlers)
-	activemsg_handler_table.report_message_handler_stats();
+      if (Config::profile_activemsg_handlers)
+        activemsg_handler_table.report_message_handler_stats();
 
 #ifdef EVENT_TRACING
-      if(event_trace_file) {
-	printf("writing event trace to %s\n", event_trace_file);
+      if (event_trace_file) {
+        printf("writing event trace to %s\n", event_trace_file);
         Tracer<EventTraceItem>::dump_trace(event_trace_file, false);
-	free(event_trace_file);
-	event_trace_file = 0;
+        free(event_trace_file);
+        event_trace_file = 0;
       }
 #endif
 #ifdef LOCK_TRACING
-      if (lock_trace_file)
-      {
+      if (lock_trace_file) {
         printf("writing lock trace to %s\n", lock_trace_file);
         Tracer<LockTraceItem>::dump_trace(lock_trace_file, false);
         free(lock_trace_file);
@@ -2368,78 +2833,102 @@ namespace Realm {
       {
         RuntimeImpl *rt = get_runtime();
         printf("node %d realm resource usage: ev=%d, rsrv=%d, idx=%d, pg=%d\n",
-               Network::my_node_id,
-               rt->local_event_free_list->next_alloc,
+               Network::my_node_id, rt->local_event_free_list->next_alloc,
                rt->local_reservation_free_list->next_alloc,
                rt->local_index_space_free_list->next_alloc,
                rt->local_proc_group_free_list->next_alloc);
       }
 #endif
       cleanup_query_caches();
-      // delete processors, memories, nodes, etc.
       {
-	for(NodeID i = 0; i <= Network::max_node_id; i++) {
-	  Node& n = nodes[i];
+        // Clean up all the modules before tearing down the runtime state.
+        for (std::vector<Module *>::iterator it = modules.begin();
+             it != modules.end(); it++) {
+          (*it)->cleanup();
+          delete (*it);
+        }
 
-	  delete_container_contents(n.memories);
-	  delete_container_contents(n.processors);
-	  delete_container_contents(n.ib_memories);
-	  delete_container_contents(n.dma_channels);
-
-	  for(std::vector<atomic<DynamicTable<SparsityMapTableAllocator> *> >::iterator it = n.sparsity_maps.begin();
-	      it != n.sparsity_maps.end();
-	      ++it)
-	    delete it->load();
-
-	  for(std::vector<atomic<DynamicTable<SubgraphTableAllocator> *> >::iterator it = n.subgraphs.begin();
-	      it != n.subgraphs.end();
-	      ++it)
-	    delete it->load();
-
-	  for(std::vector<atomic<DynamicTable<ProcessorGroupTableAllocator> *> >::iterator it = n.proc_groups.begin();
-	      it != n.proc_groups.end();
-	      ++it)
-	    delete it->load();
-	}
-	
-	delete[] nodes;
-	delete local_event_free_list;
-	delete local_barrier_free_list;
-	delete local_reservation_free_list;
-	delete local_compqueue_free_list;
-	delete_container_contents(local_sparsity_map_free_lists);
-	delete_container_contents(local_subgraph_free_lists);
-	delete_container_contents(local_proc_group_free_lists);
-
-	// same for code translators
-	delete_container_contents(code_translators);
-
-	NodeSetBitmask::free_allocations();
-
-	for(std::vector<Module *>::iterator it = modules.begin();
-	    it != modules.end();
-	    it++) {
-	  (*it)->cleanup();
-	  delete (*it);
-	}
-
-	for(std::vector<NetworkModule *>::iterator it = network_modules.begin();
-	    it != network_modules.end();
-	    it++) {
-	  (*it)->cleanup();
-	  delete (*it);
-	}
+        for (std::vector<NetworkModule *>::iterator it =
+                 network_modules.begin();
+             it != network_modules.end(); it++) {
+          (*it)->cleanup();
+          delete (*it);
+        }
         Network::single_network = 0;
 
-	module_registrar.unload_module_sofiles();
+        // clean up all the module configs
+        for(std::map<std::string, ModuleConfig *>::iterator it = module_configs.begin();
+            it != module_configs.end(); it++) {
+          delete(it->second);
+          it->second = nullptr;
+        }
+
+        // dlclose all dynamic module handles
+        module_registrar.unload_module_sofiles();
+
+        delete[] nodes;
+        delete local_event_free_list;
+        delete local_barrier_free_list;
+        delete local_reservation_free_list;
+        delete local_compqueue_free_list;
+        delete_container_contents(local_sparsity_map_free_lists);
+        delete_container_contents(local_subgraph_free_lists);
+        delete_container_contents(local_proc_group_free_lists);
+
+        // same for code translators
+        delete_container_contents(code_translators);
+
+        // Clear the global nodesets that potentially reference dynamic bitmasks that will
+        // be free'd when we free the allocations.
+        // TODO: properly manage the life-time of the nodeset bitmask allocations to avoid
+        // this issue for future nodesets
+        Network::all_peers.clear();
+        Network::shared_peers.clear();
+
+        NodeSetBitmask::free_allocations();
       }
 
-      if(!Threading::cleanup()) exit(1);
+      if (!Threading::cleanup())
+        exit(1);
 
       // very last step - unregister our signal handlers
       unregister_error_signal_handler();
 
+      if (Config::path_cache_lru_size) {
+        finalize_path_cache();
+      }
+
+#ifdef REALM_USE_NVTX
+      // finalize nvtx
+      finalize_nvtx();
+#endif
+
       return shutdown_result_code;
+    }
+
+    bool RuntimeImpl::create_configs(int argc, char **argv)
+    {
+      if (!module_configs_created) {
+        std::vector<std::string> cmdline;
+        cmdline.reserve(argc);
+        for(int i = 1; i < argc; i++)
+          cmdline.push_back(argv[i]);
+        module_registrar.create_static_module_configs(module_configs);
+        module_registrar.create_dynamic_module_configs(cmdline, module_configs);
+        module_configs_created = true;
+      }
+      return true;
+    }
+
+    ModuleConfig* RuntimeImpl::get_module_config(const std::string name)
+    {
+      std::map<std::string, ModuleConfig*>::iterator it;
+      it = module_configs.find(name);
+      if (it == module_configs.end()) {
+        return NULL;
+      } else {
+        return it->second;
+      }
     }
 
     EventImpl *RuntimeImpl::get_event_impl(Event e)
@@ -2731,8 +3220,18 @@ namespace Realm {
     /*static*/
     void RuntimeImpl::realm_backtrace(int signal)
     {
+      // the signal handler has been called before, it is called again because
+      // an error is occured during printing the trace, to avoid handling signals 
+      // recursively, we just exit.
+      if (ThreadLocal::error_signal_value != 0) {
+        std::cerr << "Signal " << signal 
+                  << " raised inside realm signal handler, previous caught signal " << ThreadLocal::error_signal_value
+                  << std::endl;
+        unregister_error_signal_handler();
+        abort();
+      }
 #if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
-      assert((signal == SIGILL) || (signal == SIGFPE) ||
+      assert((signal == SIGINT) || (signal == SIGFPE) ||
              (signal == SIGABRT) || (signal == SIGSEGV) ||
              (signal == SIGBUS) || (signal == SIGILL));
 #endif
@@ -2798,7 +3297,7 @@ namespace Realm {
       free(buffer);
       free(funcname);
 #endif
-      unregister_error_signal_handler();
+      ThreadLocal::error_signal_value = signal;
       std::cerr << "Signal " << signal << " received by node " << Network::my_node_id
 #ifdef REALM_ON_WINDOWS
                 << ", process " << GetCurrentProcessId()
@@ -2838,10 +3337,30 @@ namespace Realm {
   // class Node
   //
 
-    Node::Node(void)
-    {
-    }
+    Node::Node(void) {}
 
+    Node::~Node(void)
+    {
+      // delete processors, memories, nodes, etc.
+      delete_container_contents(memories);
+      delete_container_contents(processors);
+      delete_container_contents(ib_memories);
+      delete_container_contents(dma_channels);
+
+      for(atomic<DynamicTable<SparsityMapTableAllocator> *> &atomic_sparsity :
+          sparsity_maps) {
+        delete atomic_sparsity.load();
+      }
+
+      for(atomic<DynamicTable<SubgraphTableAllocator> *> &atomic_subgraph : subgraphs) {
+        delete atomic_subgraph.load();
+      }
+
+      for(atomic<DynamicTable<ProcessorGroupTableAllocator> *> &atomic_proc_group :
+          proc_groups) {
+        delete atomic_proc_group.load();
+      }
+    }
 
   ////////////////////////////////////////////////////////////////////////
   //

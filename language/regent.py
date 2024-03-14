@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# Copyright 2022 Stanford University
+# Copyright 2024 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -46,6 +46,17 @@ if cuda_dir:
     cuda_dir = os.path.realpath(cuda_dir)
 cuda_include_dir = os.path.join(cuda_dir, 'include') if cuda_dir is not None else None
 
+# Find HIP.
+rocm_dir = os.environ.get('ROCM_PATH')
+hip_dir = os.environ.get('HIP_PATH') or (os.path.join(rocm_dir, 'hip') if rocm_dir is not None else None)
+hip_cub_dir = os.path.join(rocm_dir, 'hipcub') if rocm_dir is not None else None
+
+hip_include_dir = os.path.join(hip_dir, 'include') if hip_dir is not None else None
+hip_cub_include_dir = os.path.join(hip_cub_dir, 'include') if hip_cub_dir is not None else None
+
+# Thrust only needs to be manually located with HIP, where we need an older version to work around a bug.
+thrust_dir = os.environ.get('THRUST_PATH')
+
 # Find RDIR.
 if 'USE_RDIR' in os.environ:
     use_rdir = os.environ['USE_RDIR']
@@ -62,15 +73,28 @@ else:
     cmake = load_json_config(cmake_config_filename)
 cmake_build_dir = os.path.join(regent_dir, 'build')
 
+legion_install_prefix_filename = os.path.join(regent_dir, '.legion_install_prefix.json')
+legion_install_prefix = None
+if os.path.exists(legion_install_prefix_filename):
+    legion_install_prefix = load_json_config(legion_install_prefix_filename)
+
 include_path = (
     (os.environ['INCLUDE_PATH'].split(';')
      if 'INCLUDE_PATH' in os.environ else []) +
     [bindings_dir,
      runtime_dir,
     ] +
-    ([os.path.join(cmake_build_dir, 'runtime')] if cmake else []))
+    ([os.path.join(cmake_build_dir, 'runtime')] if cmake else []) +
+    ([os.path.join(legion_install_prefix, 'include')] if legion_install_prefix is not None else []))
 if cuda_include_dir is not None:
     include_path.append(cuda_include_dir)
+if hip_include_dir is not None:
+    include_path.append(hip_include_dir)
+if hip_cub_include_dir is not None:
+    include_path.append(hip_cub_include_dir)
+# per runtime/runtime.mk, has to go ahead of HIP_PATH
+if thrust_dir is not None:
+    include_path.insert(0, thrust_dir)
 
 LD_LIBRARY_PATH = 'LD_LIBRARY_PATH'
 if os_name == 'Darwin':
@@ -79,8 +103,14 @@ if os_name == 'Darwin':
 lib_path = (
     (os.environ[LD_LIBRARY_PATH].split(':')
      if LD_LIBRARY_PATH in os.environ else []) +
-    [os.path.join(terra_dir, 'build'),
-     (os.path.join(cmake_build_dir, 'lib') if cmake else bindings_dir)])
+    [os.path.join(terra_dir, 'build')])
+
+if legion_install_prefix is not None:
+    lib_path += [os.path.join(legion_install_prefix, 'lib')]
+elif cmake:
+    lib_path += [os.path.join(cmake_build_dir, 'lib')]
+else:
+    lib_path += [bindings_dir]
 
 def root_dir():
     return os.path.dirname(runtime_dir)
@@ -134,6 +164,9 @@ def regent(args, env={}, cwd=None, **kwargs):
         'CMAKE_BUILD_DIR': cmake_build_dir,
         'USE_RDIR': use_rdir,
     }
+
+    if legion_install_prefix is not None:
+        terra_env['LEGION_INSTALL_PREFIX'] = legion_install_prefix
 
     if cuda_dir is not None:
         terra_env['CUDA_HOME'] = cuda_dir

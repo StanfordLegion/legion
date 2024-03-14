@@ -1,7 +1,17 @@
 #include <stdio.h>
 #include <assert.h>
+
+#include "realm_defines.h"
+
+#ifdef REALM_USE_CUDA
 #include <cuda.h>
 //include <cuda_runtime.h>
+#endif
+
+#ifdef REALM_USE_HIP
+#include "hip_cuda_compat/hip_cuda.h"
+#include "realm/hip/hiphijack_api.h"
+#endif
 
 extern "C" {
   double gpu_seqwr_test(void *buffer, size_t reps, size_t elements);
@@ -193,7 +203,11 @@ double gpu_seqwr_test(void *buffer, size_t reps, size_t elements)
   cudaEventCreate(&t_start);
   cudaEventCreate(&t_end);
   cudaEventRecord(t_start, 0);
-  gpu_seqwr_kernel<<< grid_size, block_size >>>((int *)buffer, reps, elements);
+  gpu_seqwr_kernel<<< grid_size, block_size
+#ifdef REALM_USE_HIP
+                      , 0, hipGetTaskStream()
+#endif
+                  >>>((int *)buffer, reps, elements);
   cudaEventRecord(t_end, 0);
   
   cudaError_t ret = cudaEventSynchronize(t_end);
@@ -219,7 +233,11 @@ double gpu_seqrd_test(void *buffer, size_t reps, size_t elements)
   cudaEventCreate(&t_start);
   cudaEventCreate(&t_end);
   cudaEventRecord(t_start, 0);
-  gpu_seqrd_kernel<<< grid_size, block_size >>>((int *)buffer, reps, elements);
+  gpu_seqrd_kernel<<< grid_size, block_size
+#ifdef REALM_USE_HIP
+                      , 0, hipGetTaskStream()
+#endif
+                  >>>((int *)buffer, reps, elements);
   cudaEventRecord(t_end, 0);
   
   cudaError_t ret = cudaEventSynchronize(t_end);
@@ -248,7 +266,11 @@ double gpu_rndwr_test(void *buffer, size_t reps, size_t elements)
   cudaEventCreate(&t_start);
   cudaEventCreate(&t_end);
   cudaEventRecord(t_start, 0);
-  gpu_rndwr_kernel<<< grid_size, block_size >>>((int *)buffer, reps, steps, elements);
+  gpu_rndwr_kernel<<< grid_size, block_size
+#ifdef REALM_USE_HIP
+                      , 0, hipGetTaskStream()
+#endif
+                  >>>((int *)buffer, reps, steps, elements);
   cudaEventRecord(t_end, 0);
   
   cudaError_t ret = cudaEventSynchronize(t_end);
@@ -277,7 +299,11 @@ double gpu_rndrd_test(void *buffer, size_t reps, size_t elements)
   cudaEventCreate(&t_start);
   cudaEventCreate(&t_end);
   cudaEventRecord(t_start, 0);
-  gpu_rndrd_kernel<<< grid_size, block_size >>>((int *)buffer, reps, steps, elements);
+  gpu_rndrd_kernel<<< grid_size, block_size
+#ifdef REALM_USE_HIP
+                      , 0, hipGetTaskStream()
+#endif
+                  >>>((int *)buffer, reps, steps, elements);
   cudaEventRecord(t_end, 0);
   
   cudaError_t ret = cudaEventSynchronize(t_end);
@@ -307,13 +333,21 @@ double gpu_latency_test(void *buffer, size_t reps, size_t elements)
   //  in 'steps' tries
   size_t delta = (((steps >> 2) - 3) / (steps + 1.0)) * elements;
   if(delta == 0) delta = 1;
-  gpu_latency_setup_kernel<<< grid_size, block_size >>>((int *)buffer, delta, elements);
+  gpu_latency_setup_kernel<<< grid_size, block_size
+#ifdef REALM_USE_HIP
+                          , 0, hipGetTaskStream()
+#endif
+                          >>>((int *)buffer, delta, elements);
 
   cudaEvent_t t_start, t_end;
   cudaEventCreate(&t_start);
   cudaEventCreate(&t_end);
   cudaEventRecord(t_start, 0);
-  gpu_latency_kernel<<< 1, 1 >>>((int *)buffer, reps, steps, elements);
+  gpu_latency_kernel<<< 1, 1
+#ifdef REALM_USE_HIP
+                    , 0, hipGetTaskStream()
+#endif
+                    >>>((int *)buffer, reps, steps, elements);
   cudaEventRecord(t_end, 0);
   
   cudaError_t ret = cudaEventSynchronize(t_end);

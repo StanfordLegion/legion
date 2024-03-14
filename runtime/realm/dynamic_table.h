@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -62,11 +62,11 @@ namespace Realm {
 
       size_t max_entries(void) const;
       bool has_entry(IT index) const;
-      ET *lookup_entry(IT index, int owner, typename ALLOCATOR::FreeList *free_list = 0);
+      ET *lookup_entry(IT index, int owner, ET **free_list_head = 0, ET **free_list_tail = 0);
 
     protected:
       NodeBase *new_tree_node(int level, IT first_index, IT last_index,
-			      int owner, typename ALLOCATOR::FreeList *free_list);
+			      int owner, ET **free_list_head, ET **free_list_tail);
 
       // lock protects _changes_ to 'root', but not access to it
       LT lock;
@@ -89,7 +89,12 @@ namespace Realm {
       typedef typename ALLOCATOR::ET ET;
       typedef typename ALLOCATOR::LT LT;
 
-      DynamicTableFreeList(DynamicTable<ALLOCATOR>& _table, int _owner);
+      DynamicTableFreeList(DynamicTable<ALLOCATOR>& _table, int _owner, DynamicTableFreeList<ALLOCATOR> *_parent_list = nullptr);
+
+      void push_front(ET *entry);
+      void push_front(ET *head, ET *tail);
+      ET *pop_front_underlock(void);
+      ET *pop_front(void);
 
       ET *alloc_entry(void);
       void free_entry(ET *entry);
@@ -99,6 +104,8 @@ namespace Realm {
       void alloc_range(int requested, IT& first_id, IT& last_id);
 
       DynamicTable<ALLOCATOR>& table;
+      // Free list from which we will coordinate reservation of IDs from
+      DynamicTableFreeList<ALLOCATOR> *parent_list;
       int owner;
       LT lock;
       atomic<ET *> first_free;
