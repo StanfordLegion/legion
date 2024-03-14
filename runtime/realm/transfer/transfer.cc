@@ -3438,8 +3438,6 @@ namespace Realm {
                          << " to dst_node=" << NodeID(ID(ind_ib_mem).memory_owner_node())
                          << " ind_mem=" << ind_ib_mem
                          << " ind_mem_kind=" << ind_ib_mem.kind();
-
-
         MemPathInfo addr_path;
         bool ok =
             find_shortest_path(inst.get_location(), ind_ib_mem, 0 /*no serdez*/,
@@ -3752,7 +3750,6 @@ namespace Realm {
                          << " to dst_node=" << NodeID(ID(ind_ib_mem).memory_owner_node())
                          << " ind_mem=" << ind_ib_mem
                          << " ind_mem_kind=" << ind_ib_mem.kind();
-
         // do we have to do anything to get the addresses into a cpu-readable
         //  memory on that node?
         MemPathInfo addr_path;
