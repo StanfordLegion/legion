@@ -259,7 +259,7 @@ namespace Legion {
     // The algorithm that should be used to compute the repeats.
     enum NonOverlappingAlgorithm {
       SUFFIX_TREE_WALK = 0,
-      // TODO (broman): Add your new algorithm here, and update the parser/printer.
+      QUICK_MATCHING_OF_SUBSTRINGS = 1,
       NO_ALGORITHM,
     };
     NonOverlappingAlgorithm parse_non_overlapping_algorithm(const std::string&);
@@ -339,6 +339,271 @@ namespace Legion {
       }
     }
 
+    // Suffix array construction in O(n*log n) time.
+    // The code has been implemented based on the explanations
+    // from here http://www.cs.cmu.edu/~15451-f20/LectureNotes/lec25-suffarray.pdf,
+    // with special treatment of radix sort to make it O(n*log n).
+    template<typename T>
+    void suffix_array(const std::vector<T>& str,
+                      std::vector<size_t>& sarray,
+                      std::vector<int64_t>& surrogate) {
+      size_t n = str.size();
+      if (n == 0) return;
+      // Define a struct for sorting the input string. To handle an
+      // arbitrary type T, we use a boolean `present` to ensure that
+      // tokens without a "next" value are sorted before any other tokens.
+      struct Key {
+        T start;
+        bool present;
+        T next;
+        size_t idx;
+        bool operator<(const Key& rhs) const {
+          return std::tie(start, present, next, idx) <
+            std::tie(rhs.start, rhs.present, rhs.next, rhs.idx);
+        }
+      };
+
+      // First round - O(n log n) sort. We unroll the loop from the
+      // lecture notes above once, as we have to do an O(nlog(n)) sort
+      // first before we can transition to the radix sorts below.
+      std::vector<Key> w(n);
+      int64_t v = 0;
+      {
+        for (size_t i = 0; i < n; i++) {
+          w[i] = Key {
+            .start = str[i],
+            .present = i + 1 < n,
+            .next = i + 1 < n ? str[i + 1] : T{},
+            .idx = i,
+          };
+        }
+        std::sort(w.begin(), w.end());
+        T x0 = w[0].start;
+        T x1 = w[0].next;
+        surrogate[w[0].idx] = 0;
+        for (size_t i = 1; i < n; i++) {
+          if (x0 != w[i].start || x1 != w[i].next) v++;
+          surrogate[w[i].idx] = v;
+          x0 = w[i].start;
+          x1 = w[i].next;
+        }
+        // In case we're done, reconstruct the suffix array directly
+        // from the w vector.
+        if (v >= n - 1) {
+          for (size_t i = 0; i < n; i++) {
+            sarray[i] = w[i].idx;
+          }
+          return;
+        }
+      }
+
+      // After the first round of sorting, we don't need to
+      // look at the string anymore, and can just sort based
+      // on surrogates computed by the previous sorting step.
+      struct SKey {
+        int64_t start;
+        int64_t next;
+        size_t idx;
+        bool operator<(const SKey& rhs) const {
+          return std::tie(start, next, idx) <
+                 std::tie(rhs.start, rhs.next, rhs.idx);
+        }
+      };
+
+      // Use the surrogates from the previous iteration to construct
+      // a new surrogate that represents larger and larger suffixes of
+      // the input string.
+      size_t shift = 2;
+      std::vector<size_t> count(n + 2);
+      std::vector<SKey> tmp(n);
+      std::vector<SKey> surrogate_sorter(n);
+      while (true) {
+        // Update sort table.
+        for (size_t i = 0; i < n; i++) {
+          surrogate_sorter[i] = SKey {
+              .start = surrogate[i],
+              .next = (i + shift) < n ? surrogate[i + shift] : -1,
+              .idx = i,
+          };
+        }
+
+        // Radix sort O(n) - rolled out, 2 digits. The index in the third
+        // element is not needed to be sorted. The radix sort algorithm
+        // sorts two digits corresponding to the first and second element in
+        // the triple. See for instance https://hacktechhub.com/radix-sort/ for
+        // the general idea of radix sort. First, clear the counts.
+        std::fill(count.begin(), count.begin() + v + 2, 0);
+        // Next, count the frequency of each occurence.
+        for (size_t i = 0; i < n; i++) {
+          count[surrogate_sorter[i].next + 1]++;
+        }
+        // Update count to contain actual positions.
+        for (size_t i = 1; i < v + 2; i++) {
+          count[i] += count[i - 1];
+        }
+        // Construct output array based on second digit.
+        for (int64_t i = n - 1; i >= 0; i--) {
+          tmp[(count[surrogate_sorter[i].next + 1]--) - 1] = surrogate_sorter[i];
+        }
+        // Clear count. Next, sort on first digit.
+        std::fill(count.begin(), count.begin() + v + 2, 0);
+        // The source is in tmp. Count freq. on first digit.
+        for (size_t i = 0; i < n; i++) {
+          count[tmp[i].start + 1]++;
+        }
+        // Update count to contain actual positions.
+        for (size_t i = 1; i < v + 2; i++) {
+          count[i] += count[i - 1];
+        }
+        // Output to array w from tmp.
+        for (int64_t i = n - 1; i >= 0; i--) {
+          surrogate_sorter[(count[tmp[i].start + 1]--) - 1] = tmp[i];
+        }
+
+        v = 0;
+        // Construct surrogate array. We have to do an extra case here
+        // depending on whether this is the first iteration or not, as
+        // the types are not the same.
+        int64_t x0 = surrogate_sorter[0].start;
+        int64_t x1 = surrogate_sorter[0].next;
+        surrogate[surrogate_sorter[0].idx] = 0;
+        for (size_t i = 1; i < n; i++) {
+          if (x0 != surrogate_sorter[i].start || x1 != surrogate_sorter[i].next) v++;
+          surrogate[surrogate_sorter[i].idx] = v;
+          x0 = surrogate_sorter[i].start;
+          x1 = surrogate_sorter[i].next;
+        }
+
+        // End if done.
+        if (v >= n-1) break;
+        shift *= 2;
+      }
+      // Reconstruct the suffix array.
+      for (size_t i = 0; i < n; i++) {
+        sarray[i] = surrogate_sorter[i].idx;
+      }
+    }
+
+    // Computes the LCP in O(n) time. This is Kasai's algorithm. See e.g.,
+    // http://www.cs.cmu.edu/~15451-f20/LectureNotes/lec25-suffarray.pdf for an explanation.
+    // The original paper can be found here:
+    // https://link.springer.com/chapter/10.1007/3-540-48194-X_17
+    template<typename T>
+    std::vector<size_t> compute_lcp(const std::vector<T>& str,
+                                    const std::vector<size_t>& sarray,
+                                    const std::vector<int64_t>& surrogate) {
+      size_t n = str.size();
+      int k = 0;
+      std::vector<size_t> lcp(n, 0);
+      for(size_t i = 0; i < n; i++){
+        if(surrogate[i] == n - 1)
+          k = 0;
+        else{
+          size_t j = sarray[surrogate[i] + 1];
+          for(; i + k < n && j + k < n && str[i + k] == str[j + k]; k++);
+          lcp[surrogate[i]] = k;
+          k = std::max(k - 1, 0);
+        }
+      }
+      return lcp;
+    }
+
+    // The function computes non-overlapping matching substrings in O(n log n) time.
+    // This is a new algorithm designed by David Broman in 2024.
+    // Please see the following Git repo for a reference implementation and a short explanation:
+    // https://github.com/david-broman/matching-substrings
+    std::vector<NonOverlappingRepeatsResult>
+    quick_matching_of_substrings(size_t min_length,
+                                 const std::vector<size_t>& sarray,
+                                 const std::vector<size_t>& lcp) {
+      std::vector<NonOverlappingRepeatsResult> result;
+      size_t le = sarray.size();
+      using triple = std::tuple<size_t, size_t, size_t>;
+      using pair = std::tuple<size_t, size_t>;
+
+      // Construct tuple array O(n)
+      std::vector<triple> a(le * 2 - 2);
+      size_t k = 0;
+      size_t m = 0;
+      size_t pre_l = 0;
+      for(size_t i = 0; i < le - 1; i++){
+        int l1 = lcp[i];
+        int s1 = sarray[i];
+        int s2 = sarray[i + 1];
+        if(s2 >= s1 + l1 || s2 <= s1 - l1){
+          // Non-overlapping
+          if(pre_l != l1)
+            m += 1;
+          a[k++] = std::make_tuple(le - l1, m, s1);
+          a[k++] = std::make_tuple(le - l1, m, s2);
+          pre_l = l1;
+        }
+        else if(s2 > s1 && s2 < s1 + l1){
+          // Overlapping, increasing index
+          size_t d = s2 - s1;
+          size_t l3 = (((l1 + d) / 2) / d) * d;
+          if(pre_l != l3)
+            m += 1;
+          a[k++] = std::make_tuple(le - l3, m, s1);
+          a[k++] = std::make_tuple(le - l3, m, s1 + l3);
+          pre_l = l3;
+        }
+        else if(s1 > s2 && s1 < s2 + l1){
+          // Overlapping, decreasing index
+          size_t d = s1 - s2;
+          size_t l3 = (((l1 + d) / 2) / d) * d;
+          if(pre_l != l3)
+            m += 1;
+          a[k++] = std::make_tuple(le - l3, m, s2);
+          a[k++] = std::make_tuple(le - l3, m, s2 + l3);
+          pre_l = l3;
+        }
+      }
+      a.resize(k);
+
+      // Sort tuple vector: O(n log n)
+      std::sort(a.begin(), a.end());
+
+      // Construct matching intervals: O(n)
+      std::vector<bool> flag(le, false);
+      std::vector<pair> r;
+      size_t m_pre = 0;
+      size_t next_k = 0;
+      const size_t min_repeats = 2;
+      for(size_t i = 0; i < a.size(); i++){
+        int l = std::get<0>(a[i]);
+        size_t m = std::get<1>(a[i]);
+        size_t k = std::get<2>(a[i]);
+        size_t le2 = le - l;
+        if(m != m_pre){
+          if(r.size() >= min_repeats){
+            result.push_back(NonOverlappingRepeatsResult{
+                .start = std::get<0>(r[0]),
+                .end = std::get<1>(r[0]),
+                .repeats = r.size()});
+            for(const pair &p : r)
+              for(size_t j = std::get<0>(p); j < std::get<1>(p); j++)
+                flag[j] = true;
+          }
+          r.clear();
+          next_k = 0;
+        }
+        m_pre = m;
+        if(le2 != 0 && le2 >= min_length && k >= next_k &&
+           !(flag[k]) && !(flag[k + le2 - 1])){
+          r.push_back(std::make_tuple(k, k + le2));
+          next_k = k + le2;
+        }
+      }
+      if(r.size() >= min_repeats){
+        result.push_back(NonOverlappingRepeatsResult{
+            .start = std::get<0>(r[0]),
+            .end = std::get<1>(r[0]),
+            .repeats = r.size()});
+      }
+      return result;
+    }
+
     // The input string must also be formatted correctly for the suffix tree (unique last character).
     template<typename T>
     std::vector<NonOverlappingRepeatsResult> compute_longest_nonoverlapping_repeats(
@@ -371,7 +636,17 @@ namespace Legion {
           result.erase(result.begin() + copyidx, result.end());
           return result;
         }
-        // TODO (broman): Add dispatch here.
+      case NonOverlappingAlgorithm::QUICK_MATCHING_OF_SUBSTRINGS: {
+        if(str.size() < 2)
+          return {};
+        std::vector<size_t> sarray(str.size());
+        std::vector<int64_t> surrogate(str.size());
+        suffix_array(str, sarray, surrogate);
+        std::vector<size_t> lcp = compute_lcp(str, sarray, surrogate);
+        std::vector<NonOverlappingRepeatsResult> result =
+          quick_matching_of_substrings(min_length, sarray, lcp);
+        return result;
+      }
         default:
           assert(false);
       }
