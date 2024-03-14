@@ -3437,9 +3437,8 @@ namespace Realm {
                          << NodeID(ID(inst.get_location()).memory_owner_node())
                          << " to dst_node=" << NodeID(ID(ind_ib_mem).memory_owner_node())
                          << " ind_mem=" << ind_ib_mem
-                         << " ind_mem_kind=" << ind_ib_mem.kind()
-			 << " og_ind_kind=" << inst.get_location().kind()
-			 << " og_ind_inst=" << inst;
+                         << " ind_mem_kind=" << ind_ib_mem.kind();
+
 
         MemPathInfo addr_path;
         bool ok =
@@ -3752,9 +3751,7 @@ namespace Realm {
                          << NodeID(ID(inst.get_location()).memory_owner_node())
                          << " to dst_node=" << NodeID(ID(ind_ib_mem).memory_owner_node())
                          << " ind_mem=" << ind_ib_mem
-                         << " ind_mem_kind=" << ind_ib_mem.kind()
-			 << " og_ind_kind=" << inst.get_location().kind()
-			 << " og_ind_inst=" << inst;
+                         << " ind_mem_kind=" << ind_ib_mem.kind();
 
         // do we have to do anything to get the addresses into a cpu-readable
         //  memory on that node?
@@ -4933,10 +4930,11 @@ namespace Realm {
 
       for(size_t i = 0; i < graph.ib_edges.size(); i++) {
         log_xplan.debug() << "analysis: plan=" << (void *)this << " ibs[" << i
-                          << "]: memory=" << graph.ib_edges[i].memory
-			  << ":" << graph.ib_edges[i].memory.kind()
+                          << "]: memory=" << graph.ib_edges[i].memory << ":"
+                          << graph.ib_edges[i].memory.kind()
                           << " size=" << graph.ib_edges[i].size;
       }
+
       if(!graph.ib_edges.empty()) {
         log_xplan.debug() << "analysis: plan=" << (void *)this
                           << " ib_alloc=" << PrettyVector<unsigned>(graph.ib_alloc_order);
