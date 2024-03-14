@@ -662,20 +662,22 @@ namespace Legion {
       if (this->operation_start_idx > opidx) {
         return;
       }
-      log_auto_trace.info() << "Replaying trace " << tid
-                             << " of length "
-                             << (opidx - this->operation_start_idx)
-                             << " at opidx: " << opidx;
       // Similar logic as flush_buffer, but issue a begin and end trace
       // around the flushed operations.
       this->executor->issue_begin_trace(tid);
       uint64_t difference = opidx - this->operation_start_idx;
       this->operation_start_idx += difference;
+      uint64_t traced_ops = 0;
       for (uint64_t i = 0; i < difference; i++) {
         auto& pending = this->operations.front();
         this->executor->issue_operation(pending.operation, pending.dependences);
+        if (!is_operation_ignorable_in_traces(pending.operation)) traced_ops++;
         this->operations.pop();
       }
+      log_auto_trace.info() << "Replaying trace " << tid
+                            << " of length "
+                            << traced_ops
+                            << " at opidx: " << opidx;
       this->executor->issue_end_trace(tid);
     }
 
