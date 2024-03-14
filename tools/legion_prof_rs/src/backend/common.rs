@@ -127,7 +127,7 @@ impl StatePostprocess for State {
             if !mem.is_visible() {
                 continue;
             }
-            if !mem.time_points(None).is_empty() {
+            if !mem.util_time_points(None).is_empty() {
                 let nodes = [None, Some(mem.mem_id.node_id())];
                 for node in nodes {
                     let group = MemGroup(node, mem.kind);
@@ -148,7 +148,7 @@ impl StatePostprocess for State {
             if !chan.is_visible() {
                 continue;
             }
-            if !chan.time_points(None).is_empty() && chan_id.node_id().is_some() {
+            if !chan.util_time_points(None).is_empty() && chan_id.node_id().is_some() {
                 // gathers/scatters
                 let mut nodes = vec![None];
                 if chan_id.dst.is_some() && chan_id.dst.unwrap() != MemID(0) {
