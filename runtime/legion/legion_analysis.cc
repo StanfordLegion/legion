@@ -644,9 +644,6 @@ namespace Legion {
                                                         size_t total_arrivals)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(bar.exists());
-#endif
       if (local_space != origin_space)
       {
         ShardID owner = 0;
