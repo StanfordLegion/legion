@@ -15,8 +15,8 @@ use crate::backend::common::{
 };
 use crate::state::{
     Chan, ChanEntry, ChanID, ChanPoint, Config, Container, ContainerEntry, DeviceKind, Mem, MemID,
-    MemKind, MemPoint, MemProcAffinity, NodeID, OperationInstInfo, Proc, ProcEntryKind, ProcID,
-    ProcKind, ProcPoint, ProfUID, SpyState, State, Timestamp,
+    MemKind, MemPoint, MemProcAffinity, NodeID, OpID, OperationInstInfo, Proc, ProcEntryKind,
+    ProcID, ProcKind, ProcPoint, ProfUID, SpyState, State, Timestamp,
 };
 
 use crate::conditional_assert;
@@ -76,21 +76,21 @@ struct DataRecord<'a> {
     color: &'a str,
     opacity: f64,
     title: &'a str,
-    initiation: Option<u64>,
+    initiation: Option<OpID>,
     #[serde(rename = "in")]
     in_: &'a str,
     out: &'a str,
     children: &'a str,
     parents: &'a str,
     prof_uid: u64,
-    op_id: Option<u64>,
+    op_id: Option<OpID>,
     instances: &'a str,
 }
 
 #[derive(Serialize, Copy, Clone)]
 struct OpRecord<'a> {
-    op_id: u64,
-    parent_id: Option<u64>,
+    op_id: OpID,
+    parent_id: Option<OpID>,
     desc: &'a str,
     proc: Option<&'a str>,
     level: Option<u32>,
@@ -185,14 +185,14 @@ impl Proc {
             // FIXME: Elliott: special case on ProfTask to match legion_prof.py behavior
             ProcEntryKind::ProfTask => None,
             // And another special case, because for MapperCalls only, we set default to 0 to match with python
-            ProcEntryKind::MapperCall(_) => Some(initiation_op.map_or(0, |op_id| op_id.0)),
-            _ => initiation_op.map(|op_id| op_id.0),
+            ProcEntryKind::MapperCall(_) => Some(initiation_op.unwrap_or(OpID::ZERO)),
+            _ => initiation_op,
         };
 
         let op_id = match entry.kind {
             // FIXME: Elliott: special case on ProfTask to match legion_prof.py behavior
-            ProcEntryKind::ProfTask => Some(initiation_op.unwrap().0),
-            _ => op_id.map(|id| id.0),
+            ProcEntryKind::ProfTask => Some(initiation_op.unwrap()),
+            _ => op_id,
         };
 
         let render_op = |prof_uid: &ProfUID| prof_uid_record(*prof_uid, state);
@@ -492,7 +492,7 @@ impl Chan {
             color: &color,
             opacity: 1.0,
             title: &name,
-            initiation: Some(initiation.unwrap().0),
+            initiation,
             in_: "",
             out: "",
             children: "",
@@ -657,7 +657,7 @@ impl Mem {
             color: &color,
             opacity: 0.45,
             title: &format!("{} (deferred)", &name),
-            initiation: Some(initiation.unwrap().0),
+            initiation,
             in_: "",
             out: "",
             children: "",
@@ -676,7 +676,7 @@ impl Mem {
             color: &color,
             opacity: 1.0,
             title: &name,
-            initiation: Some(initiation.unwrap().0),
+            initiation,
             in_: "",
             out: "",
             children: "",
@@ -1120,7 +1120,7 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
             .delimiter(b'\t')
             .from_path(filename)?;
         for (op_id, op) in &state.operations {
-            let parent_id = op.parent_id.map(|x| x.0);
+            let parent_id = op.parent_id;
             let provenance = Some(op.provenance.as_deref().unwrap_or(""));
             if let Some(proc_id) = state.tasks.get(op_id) {
                 let proc = state.procs.get(proc_id).unwrap();
@@ -1144,7 +1144,7 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
                 };
 
                 file.serialize(OpRecord {
-                    op_id: op_id.0,
+                    op_id: *op_id,
                     parent_id,
                     desc: &desc,
                     proc: Some(&proc_full_text),
@@ -1161,7 +1161,7 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
                     .unwrap();
 
                 file.serialize(OpRecord {
-                    op_id: op_id.0,
+                    op_id: *op_id,
                     parent_id,
                     desc: &format!("{} <{}>", task_name, op_id.0),
                     proc: None,
@@ -1175,7 +1175,7 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
                 );
 
                 file.serialize(OpRecord {
-                    op_id: op_id.0,
+                    op_id: *op_id,
                     parent_id,
                     desc: &desc,
                     proc: None,
