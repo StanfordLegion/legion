@@ -2016,7 +2016,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplMergeCloseOp::trigger_mapping(void)
+    void ReplMergeCloseOp::trigger_ready(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2024,7 +2024,20 @@ namespace Legion {
 #endif
       Runtime::phase_barrier_arrive(mapped_barrier, 1/*count*/);
       // Then complete the mapping once the barrier has triggered
-      complete_mapping(mapped_barrier);
+      // A small performance optimization here: if we have a physical trace
+      // and we're replaying it then we don't need to actually do the 
+      // synchronization across the shards since we know all the shards
+      // can replay independently
+      if (trace->has_physical_trace())
+      {
+        PhysicalTrace *physical = trace->get_physical_trace();
+        if (physical->is_replaying())
+          complete_mapping();
+        else
+          complete_mapping(mapped_barrier);
+      }
+      else
+        complete_mapping(mapped_barrier);
       complete_execution();
     }
 

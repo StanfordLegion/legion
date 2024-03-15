@@ -2173,6 +2173,7 @@ namespace Legion {
     public:
       virtual unsigned find_parent_index(unsigned idx);
       virtual void trigger_dependence_analysis(void);
+      virtual void trigger_ready(void);
     protected:
       unsigned parent_req_index; 
     protected:

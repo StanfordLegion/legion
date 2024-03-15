@@ -11441,6 +11441,14 @@ namespace Legion {
         perform_logging(create_op, creator_req_idx, true/*merge close*/);
     }
 
+    //--------------------------------------------------------------------------
+    void MergeCloseOp::trigger_ready(void)
+    //--------------------------------------------------------------------------
+    {
+      complete_mapping();
+      complete_execution();
+    }
+
     /////////////////////////////////////////////////////////////
     // Post Close Operation 
     /////////////////////////////////////////////////////////////

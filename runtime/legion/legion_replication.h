@@ -2073,7 +2073,7 @@ namespace Legion {
       virtual void deactivate(bool free = true);
     public:
       void set_repl_close_info(RtBarrier mapped_barrier);
-      virtual void trigger_mapping(void); 
+      virtual void trigger_ready(void);
     protected:
       RtBarrier mapped_barrier;
     };
