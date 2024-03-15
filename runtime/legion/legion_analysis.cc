@@ -13477,7 +13477,7 @@ namespace Legion {
     void EquivalenceSet::update_set(UpdateAnalysis &analysis,
                                     IndexSpaceExpression *expr,
                                     const bool expr_covers,
-                                    FieldMask user_mask,
+                                    const FieldMask &user_mask,
                                     std::set<RtEvent> &deferral_events,
                                     std::set<RtEvent> &applied_events,
                                     const bool already_deferred/*=false*/)
@@ -13608,7 +13608,11 @@ namespace Legion {
             for (FieldMaskSet<InstanceView>::const_iterator it =
                   analysis.target_views[idx].begin(); it !=
                   analysis.target_views[idx].end(); it++)
-              update_tracing_write_discard_view(it->first, expr, it->second);
+            {
+              const FieldMask overlap = user_mask & it->second;
+              if (!!overlap)
+                update_tracing_write_discard_view(it->first, expr, overlap);
+            }
           }
         }
         // Issue copy-out copies for any restricted fields
@@ -13689,9 +13693,6 @@ namespace Legion {
             // Remove the current guard since it doesn't matter anymore
             it.filter(update_mask);
           }
-          user_mask -= guard_mask;
-          if (!user_mask)
-            break;
         }
         if (!to_add.empty())
         {
@@ -13742,7 +13743,11 @@ namespace Legion {
             for (FieldMaskSet<InstanceView>::const_iterator it =
                   analysis.target_views[idx].begin(); it !=
                   analysis.target_views[idx].end(); it++)
-              update_tracing_read_only_view(it->first, expr, it->second);
+            {
+              const FieldMask overlap = it->second & user_mask; 
+              if (!!overlap)
+                update_tracing_read_only_view(it->first, expr, overlap);
+            }
           }
         }
       }
@@ -13806,10 +13811,15 @@ namespace Legion {
             for (FieldMaskSet<InstanceView>::const_iterator it =
                   analysis.target_views[idx].begin(); it !=
                   analysis.target_views[idx].end(); it++)
+            {
+              const FieldMask overlap = user_mask & it->second;
+              if (!overlap)
+                continue;
               if (IS_READ_ONLY(analysis.usage))
-                update_tracing_read_only_view(it->first, expr, it->second);
+                update_tracing_read_only_view(it->first, expr, overlap);
               else
-                update_tracing_read_write_view(it->first, expr, it->second);
+                update_tracing_read_write_view(it->first, expr, overlap);
+            }
           }
         }
       }
@@ -16556,7 +16566,11 @@ namespace Legion {
           for (FieldMaskSet<InstanceView>::const_iterator it =
                 analysis.target_views[idx].begin(); it !=
                 analysis.target_views[idx].end(); it++)
-            update_tracing_reduced_view(it->first, expr, it->second);
+          {
+            const FieldMask overlap = user_mask & it->second;
+            if (!!overlap)
+              update_tracing_reduced_view(it->first, expr, overlap);
+          }
         }
       }
     }
@@ -18545,7 +18559,11 @@ namespace Legion {
 #endif
         for (FieldMaskSet<LogicalView>::const_iterator it =
               analysis.views.begin(); it != analysis.views.end(); it++)
-          update_tracing_write_discard_view(it->first, expr, it->second);
+        {
+          const FieldMask overlap = overwrite_mask & it->second;
+          if (!!overlap)
+            update_tracing_write_discard_view(it->first, expr, overlap);
+        }
       }
     }
 

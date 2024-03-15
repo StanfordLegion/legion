@@ -3410,7 +3410,7 @@ namespace Legion {
                                 std::set<RtEvent> &applied_events,
                                 const bool already_deferred = false);
       void update_set(UpdateAnalysis &analysis, IndexSpaceExpression *expr,
-                      const bool expr_covers, FieldMask user_mask,
+                      const bool expr_covers, const FieldMask &user_mask,
                       std::set<RtEvent> &deferral_events,
                       std::set<RtEvent> &applied_events,
                       const bool already_deferred = false);
