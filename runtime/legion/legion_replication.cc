@@ -2028,7 +2028,7 @@ namespace Legion {
       // and we're replaying it then we don't need to actually do the 
       // synchronization across the shards since we know all the shards
       // can replay independently
-      if (trace->has_physical_trace())
+      if ((trace != NULL) && trace->has_physical_trace())
       {
         PhysicalTrace *physical = trace->get_physical_trace();
         if (physical->is_replaying())
