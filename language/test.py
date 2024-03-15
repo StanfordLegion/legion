@@ -16,7 +16,7 @@
 #
 
 from __future__ import print_function
-import argparse, codecs, glob, itertools, json, multiprocessing, os, optparse, queue, re, resource, shutil, signal, subprocess, sys, tempfile, traceback, time
+import argparse, codecs, glob, itertools, json, multiprocessing, os, optparse, queue, re, shutil, signal, subprocess, sys, tempfile, traceback, time
 from collections import OrderedDict
 import regent
 
@@ -62,8 +62,10 @@ def run(filename, debug, verbose, timelimit, flags, env):
     if verbose: print('Running', ' '.join(args))
 
     def set_timeout():
-        # set hard limit above soft limit so we might get SIGXCPU return code
-        resource.setrlimit(resource.RLIMIT_CPU, (timelimit, timelimit+1))
+        def timeout_handler(signum, frame):
+            raise TimeoutError("Timed-out for "+filename)
+        signal.signal(signal.SIGALRM, timeout_handler)
+        signal.setitimer(signal.ITIMER_REAL, timelimit)
 
     proc = regent.regent(
         args,
