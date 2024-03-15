@@ -13087,7 +13087,7 @@ namespace Legion {
                 // Alias on fields and instances, check expressions
                 FieldMaskSet<LogicalView>::const_iterator total_finder =
                   total_valid_instances.find(cit->first);
-                if (!total_finder != total_valid_instances.end())
+                if (total_finder != total_valid_instances.end())
                 {
                   invalid_mask -= total_finder->second;
                   if (!invalid_mask)
