@@ -3041,8 +3041,14 @@ local function make_partition_projection_functor(cx, expr, loop_index,
     return 0 -- Identity projection functor.
   end
 
-  -- Cache projection functors with the same expr, index type, free and loop vars.
+  -- Partitions are not captured in the cache key.
+  local base_type = std.as_read(util.get_base_indexed_node(expr).expr_type)
   local cache_key = expr
+  if std.is_partition(base_type) then
+    cache_key = cache_key.index
+  end
+
+  -- Cache projection functors with the same expr, index type, free and loop vars.
   local cached_id = lookup_projection_functor_cache(cache_key, loop_index, free_vars, loop_vars)
   if cached_id then
     return cached_id
@@ -3094,7 +3100,6 @@ local function make_partition_projection_functor(cx, expr, loop_index,
     assert(free_vars_setup)
 
     local parent = terralib.newsymbol(c.legion_logical_partition_t, "parent")
-    local base_type = std.as_read(util.get_base_indexed_node(expr).expr_type)
     local depth = 0
     if std.is_partition(base_type) then
       expr = wrap_partition_internal(expr, parent)

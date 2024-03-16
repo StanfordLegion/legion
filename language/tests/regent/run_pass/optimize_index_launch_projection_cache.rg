@@ -48,21 +48,21 @@ end
 task f2(r : region(ispace(int2d), int), i : int1d)
 where reads(r) do
   for x in r do
-    regentlib.assert(x == (i + 1) % 5, "test failed")
+    regentlib.assert(int1d(x.x) == (i + 1) % 5, "test failed")
   end
 end
 
 task g2(r : region(ispace(int2d), int), i : int1d)
 where reads writes(r) do
   for x in r do
-    regentlib.assert(x == (i + 1) % 5, "test failed")
+    regentlib.assert(int1d(x.x) == (i + 1) % 5, "test failed")
   end
 end
 
 task h2(r : region(ispace(int2d), int), i : int1d) : int
 where reduces+(r) do
   for x in r do
-    regentlib.assert(x == (i + 1) % 5, "test failed")
+    regentlib.assert(int1d(x.x) == (i + 1) % 5, "test failed")
   end
   return 5
 end
@@ -70,61 +70,113 @@ end
 task main()
   var n = 5
   var r = region(ispace(int1d, n), int)
-  var s = region(ispace(int2d, {n, n}), int)
+  var s = region(ispace(int2d, {n, 1}), int)
   fill(r, 1)
   fill(s, 1)
 
   var cs = ispace(int1d, n)
-  var p_disjoint = partition(equal, r, cs)
-  var q_disjoint = partition(equal, q, cs)
+  var r_part = partition(equal, r, cs)
+  var s_part = partition(equal, s, cs)
 
   var x = 0
-  -- case 1. no capture
+
+  -- #######################################################
+  -- ### case 1. no capture
   __demand(__index_launch)
   for i in cs do
-    f1(p_disjoint[(i + 1) % 5], i)
+    f1(r_part[(i + 1) % 5], i)
   end
   __demand(__index_launch)
   for i in cs do
-    g1(p_disjoint[(i + 1) % 5], i)
+    g1(r_part[(i + 1) % 5], i)
   end
   x = 0
   __demand(__index_launch)
   for i in cs do
-    x += h1(p_disjoint[(i + 1) % 5], i)
+    x += h1(r_part[(i + 1) % 5], i)
   end
   regentlib.assert(x == 25, "test failed")
 
-  -- case 2. capture one variable
+  -- a different partition will also reuse the same projection functor
   __demand(__index_launch)
   for i in cs do
-    f1(p_disjoint[(i + 1) % n], i)
+    f2(s_part[(i + 1) % 5], i)
   end
   __demand(__index_launch)
   for i in cs do
-    g1(p_disjoint[(i + 1) % n], i)
+    g2(s_part[(i + 1) % 5], i)
   end
   x = 0
   __demand(__index_launch)
   for i in cs do
-    x += h1(p_disjoint[(i + 1) % n], i)
+    x += h2(s_part[(i + 1) % 5], i)
   end
   regentlib.assert(x == 25, "test failed")
 
-  -- case 2. capture two variables
+  -- #######################################################
+  -- ### case 2. capture one variable
+  __demand(__index_launch)
+  for i in cs do
+    f1(r_part[(i + 1) % n], i)
+  end
+  __demand(__index_launch)
+  for i in cs do
+    g1(r_part[(i + 1) % n], i)
+  end
+  x = 0
+  __demand(__index_launch)
+  for i in cs do
+    x += h1(r_part[(i + 1) % n], i)
+  end
+  regentlib.assert(x == 25, "test failed")
+
+  -- a different partition will also reuse the same projection functor
+  __demand(__index_launch)
+  for i in cs do
+    f2(s_part[(i + 1) % n], i)
+  end
+  __demand(__index_launch)
+  for i in cs do
+    g2(s_part[(i + 1) % n], i)
+  end
+  x = 0
+  __demand(__index_launch)
+  for i in cs do
+    x += h2(s_part[(i + 1) % n], i)
+  end
+  regentlib.assert(x == 25, "test failed")
+
+  -- #######################################################
+  -- ### case 3. capture two variables
   var k = 1
   __demand(__index_launch)
   for i in cs do
-    f1(p_disjoint[(i + k) % n], i)
+    f1(r_part[(i + k) % n], i)
   end
   __demand(__index_launch)
   for i in cs do
-    g1(p_disjoint[(i + k) % n], i)
+    g1(r_part[(i + k) % n], i)
   end
   x = 0
   __demand(__index_launch)
   for i in cs do
-    x += h1(p_disjoint[(i + k) % n], i)
+    x += h1(r_part[(i + k) % n], i)
+  end
+  regentlib.assert(x == 25, "test failed")
+
+  -- a different partition will also reuse the same projection functor
+  __demand(__index_launch)
+  for i in cs do
+    f2(s_part[(i + k) % n], i)
+  end
+  __demand(__index_launch)
+  for i in cs do
+    g2(s_part[(i + k) % n], i)
+  end
+  x = 0
+  __demand(__index_launch)
+  for i in cs do
+    x += h2(s_part[(i + k) % n], i)
   end
   regentlib.assert(x == 25, "test failed")
 end
