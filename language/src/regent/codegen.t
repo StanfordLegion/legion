@@ -2938,10 +2938,7 @@ do
     elseif std.is_symbol(node) then
       return cache[mapping[node] or node]
     else
-      local t = type(node)
-      if t == "number" or t == "string" or t == "boolean" then
-        return cache[node]
-      end
+      return cache[node]
     end
   end
 
@@ -2967,7 +2964,11 @@ do
       result[value] = true
     else
       local t = type(node)
-      if t == "number" or t == "string" or t == "boolean" then
+      -- FIXME: Is it safe to assume we can just cache any value?
+      -- Right now we explicitly list the types we know about
+      if t == "number" or t == "string" or t == "boolean" or
+        (t == "table" and (terralib.types.istype(node) or terralib.isfunction(node) or terralib.ismacro(node)))
+      then
         local result = cache:get_or_default(node, data.newmap)
         result[value] = true
       end
