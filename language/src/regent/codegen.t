@@ -2884,26 +2884,31 @@ do
   local loop_var_cache = terralib.newlist()
   local free_var_cache = data.newmap()
 
+  local zero_length_list_key = {} -- unique entry that will not collide with user values
+
   local function lookup_expr(node, mapping, cache)
     if ast.is_node(node) then
-      local cache = cache[node:type()]
+      local node_type = node:type()
+      local cache = cache[node_type]
       if not cache then
         return
       end
 
       local result
-      for k, child in pairs(node) do
-        if k ~= "node_type" and k ~= "node_id" and k ~= "span" and k ~= "annotations" and k ~= "expr_type" then
+      for _, k in ipairs(node_type.expected_fields) do
+        if k ~= "span" and k ~= "annotations" and k ~= "expr_type" then
           local k_cache = cache[k]
           if not k_cache then
             return
           end
 
+          local child = node[k]
           local child_result = lookup_expr(child, mapping, k_cache)
           if not child_result then
             return
           end
           if result then
+            result = result:copy()
             result:intersect_keys(child_result)
             if result:is_empty() then
               return
@@ -2915,6 +2920,10 @@ do
       end
       return result
     elseif terralib.islist(node) then
+      if #node == 0 then
+        return cache[zero_length_list_key]
+      end
+
       local result
       for i, child in ipairs(node) do
         local i_cache = cache[i]
@@ -2927,6 +2936,7 @@ do
           return
         end
         if result then
+          result = result:copy()
           result:intersect_keys(child_result)
           if result:is_empty() then
             return
@@ -2935,6 +2945,7 @@ do
           result = child_result
         end
       end
+      return result
     elseif std.is_symbol(node) then
       return cache[mapping[node] or node]
     else
@@ -2944,16 +2955,24 @@ do
 
   local function insert_expr(node, mapping, cache, value)
     if ast.is_node(node) then
-      local cache = cache:get_or_default(node:type(), data.newmap)
+      local node_type = node:type()
+      local cache = cache:get_or_default(node_type, data.newmap)
 
-      for k, child in pairs(node) do
-        if k ~= "node_type" and k ~= "node_id" and k ~= "span" and k ~= "annotations" and k ~= "expr_type" then
+      for _, k in ipairs(node_type.expected_fields) do
+        if k ~= "span" and k ~= "annotations" and k ~= "expr_type" then
           local k_cache = cache:get_or_default(k, data.newmap)
 
+          local child = node[k]
           insert_expr(child, mapping, k_cache, value)
         end
       end
     elseif terralib.islist(node) then
+      if #node == 0 then
+        local result = cache:get_or_default(zero_length_list_key, data.newmap)
+        result[value] = true
+        return
+      end
+
       for i, child in ipairs(node) do
         local i_cache = cache:get_or_default(i, data.newmap)
 
@@ -3001,8 +3020,8 @@ do
 
         local cache_var
         for _, k in var_set:keys() do
+          assert(cache_var == nil)
           cache_var = k
-          break
         end
         assert(cache_var and std.is_symbol(cache_var))
         mapping[loop_var.symbol] = cache_var
@@ -3049,8 +3068,8 @@ do
           -- Cache hit, reuse variable
           local cache_var
           for _, k in var_set:keys() do
+            assert(cache_var == nil)
             cache_var = k
-            break
           end
           assert(cache_var and std.is_symbol(cache_var))
           mapping[loop_var.symbol] = cache_var
