@@ -16379,9 +16379,8 @@ namespace Legion {
           {
             if (filter_next)
             {
-              FieldMask dummy_open;
               next_child->close_logical_node(user, overlap, privilege_root,
-                                             path_node, analysis, dummy_open);
+                                             path_node, analysis, open_below);
               finder.filter(overlap);
               if (!finder->second)
               {

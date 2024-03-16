@@ -984,8 +984,8 @@ namespace Legion {
                                        const TraceLocalID &tlid);
       virtual void record_collective_barrier(ApBarrier bar, ApEvent pre,
                     const std::pair<size_t,size_t> &key, size_t arrival_count);
-      virtual ShardID record_managed_barrier(ApBarrier bar,
-                                             size_t total_arrivals);
+      virtual ShardID record_barrier_creation(ApBarrier &bar,
+                                              size_t total_arrivals);
       virtual void record_barrier_arrival(ApBarrier bar, ApEvent pre,
                     size_t arrival_count, std::set<RtEvent> &applied,
                     ShardID owner_shard);
@@ -1326,8 +1326,8 @@ namespace Legion {
                                        const TraceLocalID &tlid);
       virtual void record_collective_barrier(ApBarrier bar, ApEvent pre,
                     const std::pair<size_t,size_t> &key, size_t arrival_count);
-      virtual ShardID record_managed_barrier(ApBarrier bar,
-                                             size_t total_arrivals);
+      virtual ShardID record_barrier_creation(ApBarrier &bar,
+                                              size_t total_arrivals);
       virtual void record_barrier_arrival(ApBarrier bar, ApEvent pre,
                     size_t arrival_count, std::set<RtEvent> &applied,
                     ShardID owner_shard);

@@ -181,6 +181,11 @@ local function check_consistency(options, args)
     assert(false)
   end
 
+  if options["flow-spmd"] then
+    print("WARNING: -fflow-spmd is deprecated, and will be removed in a future release.")
+    print("Please migrate to Legion control replication.")
+  end
+
   return options, args
 end
 

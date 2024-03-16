@@ -240,8 +240,8 @@ namespace Legion {
                  const std::pair<size_t,size_t> &key, size_t arrival_count) = 0;
       // This collective barrier is managed by the template and will be
       // refreshed as necessary when barrier generations are exhausted
-      virtual ShardID record_managed_barrier(ApBarrier bar,
-                                             size_t total_arrivals) = 0;
+      virtual ShardID record_barrier_creation(ApBarrier &bar,
+                                              size_t total_arrivals) = 0;
       virtual void record_barrier_arrival(ApBarrier bar, ApEvent pre,
                     size_t arrival_count, std::set<RtEvent> &applied,
                     ShardID owner_shard) = 0;
@@ -396,8 +396,8 @@ namespace Legion {
                                        const TraceLocalID &tlid);
       virtual void record_collective_barrier(ApBarrier bar, ApEvent pre,
                     const std::pair<size_t,size_t> &key, size_t arrival_count);
-      virtual ShardID record_managed_barrier(ApBarrier bar,
-                                             size_t total_arrivals);
+      virtual ShardID record_barrier_creation(ApBarrier &bar,
+                                              size_t total_arrivals);
       virtual void record_barrier_arrival(ApBarrier bar, ApEvent pre,
                     size_t arrival_count, std::set<RtEvent> &applied,
                     ShardID owner_shard);
@@ -570,11 +570,11 @@ namespace Legion {
           base_sanity_check();
           rec->record_collective_barrier(bar, pre, key, arrival_count);
         }
-      inline ShardID record_managed_barrier(ApBarrier bar, 
-                                            size_t total_arrivals) const
+      inline ShardID record_barrier_creation(ApBarrier &bar,
+                                             size_t total_arrivals) const
         {
           base_sanity_check();
-          return rec->record_managed_barrier(bar, total_arrivals);
+          return rec->record_barrier_creation(bar, total_arrivals);
         }
       inline void record_barrier_arrival(ApBarrier bar, ApEvent pre,
           size_t arrival_count, std::set<RtEvent> &applied, ShardID owner) const
