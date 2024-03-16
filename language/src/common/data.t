@@ -513,6 +513,7 @@ end
 --     M:get(k)
 --     M:has(k)               -- equivalent to M:get(k) (but see default_map)
 --     M:put(k, v)
+--     M:clear()              -- clear all keys and values
 --     for _, k in M:keys()   -- note that the _ is undefined
 --     for _, v in M:values() -- note that the _ is undefined
 --     for k, v in M:items()
@@ -520,6 +521,9 @@ end
 --     M:copy()               -- note: a shallow copy
 --     M:map(fn)              -- map fn over k, v pairs and return a map
 --     M:map_list(fn)         -- map fn over k, v pairs and return a list
+--     M:map_keys(fn)         -- map fn over keys and return a list
+--     M:map_values(fn)       -- map fn over values and return a list
+--     M:intersect_keys(N)    -- remove all keys not in N
 --     tostring(M)            -- human readable representation of the map
 --
 -- The following APIs are NOT SUPPORTED:
@@ -578,6 +582,15 @@ function data.map:get(k)
   return self[values_by_key][k]
 end
 
+function data.map:get_or_default(k, factory)
+  local result = self:get(k)
+  if result == nil then
+    result = factory()
+    self:put(k, result)
+  end
+  return result
+end
+
 function data.map:put(k, v)
   local idx = self[insertion_index_by_key][k]
   if not idx and v ~= nil then
@@ -598,6 +611,13 @@ function data.map:put(k, v)
       self[key_by_insertion_index][idx] = nil
     end
   end
+end
+
+function data.map:clear()
+  self[values_by_key] = {}
+  self[next_insertion_index] = 1
+  self[key_by_insertion_index] = {}
+  self[insertion_index_by_key] = {}
 end
 
 function data.map:next_item(last_k)
@@ -696,6 +716,18 @@ function data.map:map_values(fn)
     result:insert(fn(v))
   end
   return result
+end
+
+function data.map:intersect_keys(other)
+  if not other then
+    self:clear()
+  end
+
+  for _, k in self:keys() do
+    if other:has(k) == nil then
+      self[k] = nil
+    end
+  end
 end
 
 function data.map:__tostring()

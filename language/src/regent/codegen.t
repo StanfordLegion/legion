@@ -2876,9 +2876,151 @@ local function wrap_partition_internal(node, parent)
   }
 end
 
-local function make_partition_projection_functor(cx, expr, loop_index, color_space,
-                                                 free_vars, free_vars_setup, proj_args_raw)
+local lookup_projection_functor_cache
+local insert_projection_functor_cache
+do
+  local loop_index_cache = data.newmap()
+  local expr_cache = data.newmap()
+
+  local function lookup_expr(node, mapping, cache)
+    if ast.is_node(node) then
+      local cache = cache[node:type()]
+      if not cache then
+        return
+      end
+
+      local result
+      for k, child in pairs(node) do
+        if k ~= "node_type" and k ~= "node_id" and k ~= "span" and k ~= "annotations" and k ~= "expr_type" then
+          local k_cache = cache[k]
+          if not k_cache then
+            return
+          end
+
+          local child_result = lookup_expr(child, mapping, k_cache)
+          if not child_result then
+            return
+          end
+          if result then
+            result:intersect_keys(child_result)
+            if result:is_empty() then
+              return
+            end
+          else
+            result = child_result
+          end
+        end
+      end
+      return result
+    elseif terralib.islist(node) then
+      local result
+      for i, child in ipairs(node) do
+        local i_cache = cache[i]
+        if not i_cache then
+          return
+        end
+
+        local child_result = lookup_expr(child, mapping, i_cache)
+        if not child_result then
+          return
+        end
+        if result then
+          result:intersect_keys(child_result)
+          if result:is_empty() then
+            return
+          end
+        else
+          result = child_result
+        end
+      end
+    elseif std.is_symbol(node) then
+      return cache[mapping[node] or node]
+    else
+      local t = type(node)
+      if t == "number" or t == "string" or t == "boolean" then
+        return cache[node]
+      end
+    end
+  end
+
+  local function insert_expr(node, mapping, cache, value)
+    if ast.is_node(node) then
+      local cache = cache:get_or_default(node:type(), data.newmap)
+
+      for k, child in pairs(node) do
+        if k ~= "node_type" and k ~= "node_id" and k ~= "span" and k ~= "annotations" and k ~= "expr_type" then
+          local k_cache = cache:get_or_default(k, data.newmap)
+
+          insert_expr(child, mapping, k_cache, value)
+        end
+      end
+    elseif terralib.islist(node) then
+      for i, child in ipairs(node) do
+        local i_cache = cache:get_or_default(i, data.newmap)
+
+        insert_expr(child, mapping, i_cache, value)
+      end
+    elseif std.is_symbol(node) then
+      local result = cache:get_or_default(mapping[node] or node, data.newmap)
+      result[value] = true
+    else
+      local t = type(node)
+      if t == "number" or t == "string" or t == "boolean" then
+        local result = cache:get_or_default(node, data.newmap)
+        result[value] = true
+      end
+    end
+  end
+
+  function lookup_projection_functor_cache(expr, loop_index, free_vars, loop_vars)
+    if loop_vars and #loop_vars > 0 then
+      -- can't cache projection functors with loop vars
+      return
+    end
+
+    assert(std.is_symbol(loop_index))
+    local cached_index = loop_index_cache[loop_index:gettype()]
+    if not cached_index then
+      return
+    end
+
+    local mapping = data.newmap()
+    mapping[loop_index] = cached_index
+    local result = lookup_expr(expr, mapping, expr_cache)
+    if result then
+      assert(not result:is_empty())
+      for _, k in result:keys() do
+        return k
+      end
+      assert(false, "unreachable")
+    end
+  end
+
+  function insert_projection_functor_cache(expr, loop_index, free_vars, loop_vars, projection_id)
+    if loop_vars and #loop_vars > 0 then
+      -- can't cache projection functors with loop vars
+      return
+    end
+
+    local cached_index = loop_index_cache[loop_index:gettype()]
+    if not cached_index then
+      loop_index_cache[loop_index:gettype()] = loop_index
+    end
+
+    local mapping = data.newmap()
+    mapping[loop_index] = cached_index
+    insert_expr(expr, mapping, expr_cache, projection_id)
+  end
+end
+
+local function make_partition_projection_functor(cx, expr, loop_index,
+                                                 free_vars, loop_vars, free_vars_setup, proj_args_raw)
   cx = cx:new_local_scope()
+
+  assert(
+    ((free_vars and not free_vars:is_empty()) or
+        (loop_vars and #loop_vars > 0)) ==
+    (free_vars_setup and #free_vars_setup > 0))
 
   if expr:is(ast.typed.expr.Projection) then
     expr = expr.region
@@ -2890,6 +3032,13 @@ local function make_partition_projection_functor(cx, expr, loop_index, color_spa
      std.is_partition(std.as_read(util.get_base_indexed_node(expr).expr_type))
   then
     return 0 -- Identity projection functor.
+  end
+
+  -- Cache projection functors with the same expr, index type, free and loop vars.
+  local original_expr = expr
+  local cached_id = lookup_projection_functor_cache(expr, loop_index, free_vars, loop_vars)
+  if cached_id then
+    return cached_id
   end
 
   local index = expr.index
@@ -2932,6 +3081,7 @@ local function make_partition_projection_functor(cx, expr, loop_index, color_spa
     end
   end
 
+  local result
   -- Closure, generate projection functor with args.
   if proj_args_raw and free_vars and not free_vars:is_empty() then
     assert(free_vars_setup)
@@ -2963,7 +3113,7 @@ local function make_partition_projection_functor(cx, expr, loop_index, color_spa
       return [index_access.value].impl
     end
 
-    return std.register_projection_functor(false, true, true, depth, nil, partition_functor)
+    result = std.register_projection_functor(false, true, true, depth, nil, partition_functor)
 
   -- No closure, create projection functor without args.
   else
@@ -2984,8 +3134,11 @@ local function make_partition_projection_functor(cx, expr, loop_index, color_spa
       return subregion
     end
 
-    return std.register_projection_functor(false, true, false, 0, nil, partition_functor)
+    result = std.register_projection_functor(false, true, false, 0, nil, partition_functor)
   end
+
+  insert_projection_functor_cache(original_expr, loop_index, free_vars, loop_vars, result)
+  return result
 end
 
 local function add_region_fields(cx, arg_type, field_paths, field_types, launcher, index)
@@ -3320,7 +3473,8 @@ local function index_launch_free_var_setup(free_vars)
 end
 
 local function expr_call_setup_partition_arg(
-    outer_cx, cx, task, arg_value, arg_type, param_type, partition, loop_index, launcher, index, args_setup, free_vars, loop_vars_setup)
+    outer_cx, cx, task, arg_value, arg_type, param_type, partition, loop_index, launcher, index, args_setup,
+    free_vars, loop_vars, loop_vars_setup)
   assert(index)
   local privileges, privilege_field_paths, privilege_field_types, coherences, flags =
     std.find_task_privileges(param_type, task)
@@ -3389,7 +3543,7 @@ local function expr_call_setup_partition_arg(
     end
     assert(add_requirement)
 
-    local projection_functor = make_partition_projection_functor(outer_cx, arg_value, loop_index, false, free_vars, free_vars_setup, proj_args_raw)
+    local projection_functor = make_partition_projection_functor(outer_cx, arg_value, loop_index, free_vars, loop_vars, free_vars_setup, proj_args_raw)
 
     local requirement = terralib.newsymbol(uint, "requirement")
     local requirement_args = terralib.newlist({
@@ -9316,7 +9470,7 @@ local function stat_index_launch_setup(cx, node, domain, actions)
       assert(partition)
       expr_call_setup_partition_arg(
         cx, loop_cx, fn.value, node.call.args[i], arg_type, param_type, partition.value, node.symbol, launcher, true,
-        args_setup, node.free_vars[i], loop_vars)
+        args_setup, node.free_vars[i], node.loop_vars, loop_vars)
     end
   end
 
