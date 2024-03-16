@@ -510,7 +510,9 @@ end
 --
 --     M[k]                   -- equivalent to M:get(k)
 --     M[k] = v               -- equivalent to M:put(k, v)
+--     M == N                 -- equality (note: order-sensitive)
 --     M:get(k)
+--     M:get_or_default(k, factory) -- initialize with k, factory() if not present
 --     M:has(k)               -- equivalent to M:get(k) (but see default_map)
 --     M:put(k, v)
 --     M:clear()              -- clear all keys and values
@@ -572,6 +574,20 @@ end
 
 function data.map:__newindex(k, v)
   self:put(k, v)
+end
+
+function data.map:__eq(other)
+  local it1, it2, ik = self:items()
+  local ot1, ot2, ok = other:items()
+  repeat
+    local iv, ov
+    ik, iv = it1(it2, ik)
+    ok, ov = ot1(ot2, ok)
+    if ik ~= ok or iv ~= ov then
+      return false
+    end
+  until ik == nil and ok == nil
+  return true
 end
 
 function data.map:has(k)

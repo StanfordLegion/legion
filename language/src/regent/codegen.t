@@ -2881,6 +2881,7 @@ local insert_projection_functor_cache
 do
   local loop_index_cache = data.newmap()
   local expr_cache = data.newmap()
+  local free_var_cache = data.newmap()
 
   local function lookup_expr(node, mapping, cache)
     if ast.is_node(node) then
@@ -2986,13 +2987,18 @@ do
 
     local mapping = data.newmap()
     mapping[loop_index] = cached_index
-    local result = lookup_expr(expr, mapping, expr_cache)
-    if result then
-      assert(not result:is_empty())
-      for _, k in result:keys() do
+    local result_set = lookup_expr(expr, mapping, expr_cache)
+    if not result_set then
+      return
+    end
+
+    -- Even if the expr_cache lookup hits, we can only use hits that
+    -- match in the free_var_cache.
+    for _, k in result_set:keys() do
+      local cached_free_vars = free_var_cache[k]
+      if free_vars == cached_free_vars then
         return k
       end
-      assert(false, "unreachable")
     end
   end
 
@@ -3010,6 +3016,7 @@ do
     local mapping = data.newmap()
     mapping[loop_index] = cached_index
     insert_expr(expr, mapping, expr_cache, projection_id)
+    free_var_cache[projection_id] = free_vars
   end
 end
 
@@ -3035,8 +3042,8 @@ local function make_partition_projection_functor(cx, expr, loop_index,
   end
 
   -- Cache projection functors with the same expr, index type, free and loop vars.
-  local original_expr = expr
-  local cached_id = lookup_projection_functor_cache(expr, loop_index, free_vars, loop_vars)
+  local cache_key = expr
+  local cached_id = lookup_projection_functor_cache(cache_key, loop_index, free_vars, loop_vars)
   if cached_id then
     return cached_id
   end
@@ -3137,7 +3144,7 @@ local function make_partition_projection_functor(cx, expr, loop_index,
     result = std.register_projection_functor(false, true, false, 0, nil, partition_functor)
   end
 
-  insert_projection_functor_cache(original_expr, loop_index, free_vars, loop_vars, result)
+  insert_projection_functor_cache(cache_key, loop_index, free_vars, loop_vars, result)
   return result
 end
 
