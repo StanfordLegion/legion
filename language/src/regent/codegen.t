@@ -2879,8 +2879,9 @@ end
 local lookup_projection_functor_cache
 local insert_projection_functor_cache
 do
-  local loop_index_cache = data.newmap()
   local expr_cache = data.newmap()
+  local loop_index_cache = data.newmap()
+  local loop_var_cache = terralib.newlist()
   local free_var_cache = data.newmap()
 
   local function lookup_expr(node, mapping, cache)
@@ -2974,11 +2975,6 @@ do
   end
 
   function lookup_projection_functor_cache(expr, loop_index, free_vars, loop_vars)
-    if loop_vars and #loop_vars > 0 then
-      -- can't cache projection functors with loop vars
-      return
-    end
-
     assert(std.is_symbol(loop_index))
     local cached_index = loop_index_cache[loop_index:gettype()]
     if not cached_index then
@@ -2987,6 +2983,31 @@ do
 
     local mapping = data.newmap()
     mapping[loop_index] = cached_index
+
+    -- Lookup vars in loop_var_cache and add them to mapping.
+    if loop_vars then
+      for i, loop_var in ipairs(loop_vars) do
+        assert(loop_var:is(ast.typed.stat.Var))
+        local var_cache = loop_var_cache[i]
+        if not var_cache then
+          return
+        end
+
+        local var_set = lookup_expr(loop_var.value, mapping, var_cache)
+        if not var_set then
+          return
+        end
+
+        local cache_var
+        for _, k in var_set:keys() do
+          cache_var = k
+          break
+        end
+        assert(cache_var and std.is_symbol(cache_var))
+        mapping[loop_var.symbol] = cache_var
+      end
+    end
+
     local result_set = lookup_expr(expr, mapping, expr_cache)
     if not result_set then
       return
@@ -3003,11 +3024,6 @@ do
   end
 
   function insert_projection_functor_cache(expr, loop_index, free_vars, loop_vars, projection_id)
-    if loop_vars and #loop_vars > 0 then
-      -- can't cache projection functors with loop vars
-      return
-    end
-
     local cached_index = loop_index_cache[loop_index:gettype()]
     if not cached_index then
       loop_index_cache[loop_index:gettype()] = loop_index
@@ -3015,6 +3031,35 @@ do
 
     local mapping = data.newmap()
     mapping[loop_index] = cached_index
+
+    -- Lookup (or insert) vars in loop_var_cache and add them to mapping.
+    if loop_vars then
+      for i, loop_var in ipairs(loop_vars) do
+        assert(loop_var:is(ast.typed.stat.Var))
+        local var_cache = loop_var_cache[i]
+        if not var_cache then
+          loop_var_cache:insert(data.newmap())
+          var_cache = loop_var_cache[i]
+          assert(var_cache)
+        end
+
+        local var_set = lookup_expr(loop_var.value, mapping, var_cache)
+        if var_set then
+          -- Cache hit, reuse variable
+          local cache_var
+          for _, k in var_set:keys() do
+            cache_var = k
+            break
+          end
+          assert(cache_var and std.is_symbol(cache_var))
+          mapping[loop_var.symbol] = cache_var
+        else
+          -- Cache miss, insert variable
+          insert_expr(loop_var.value, mapping, var_cache, loop_var.symbol)
+        end
+      end
+    end
+
     insert_expr(expr, mapping, expr_cache, projection_id)
     free_var_cache[projection_id] = free_vars
   end

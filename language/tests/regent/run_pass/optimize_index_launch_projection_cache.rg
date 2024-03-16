@@ -179,7 +179,85 @@ task main()
     x += h2(s_part[(i + k) % n], i)
   end
   regentlib.assert(x == 25, "test failed")
+
+  -- #######################################################
+  -- ### case 4. local variable and no captured variables
+  __demand(__index_launch)
+  for i in cs do
+    var y = i + 1
+    f1(r_part[y % 5], i)
+  end
+  __demand(__index_launch)
+  for i in cs do
+    var y = i + 1
+    g1(r_part[y % 5], i)
+  end
+  x = 0
+  __demand(__index_launch)
+  for i in cs do
+    var y = i + 1
+    x += h1(r_part[y % 5], i)
+  end
+  regentlib.assert(x == 25, "test failed")
+
+  -- a different partition will also reuse the same projection functor
+  __demand(__index_launch)
+  for i in cs do
+    var y = i + 1
+    f2(s_part[y % 5], i)
+  end
+  __demand(__index_launch)
+  for i in cs do
+    var y = i + 1
+    g2(s_part[y % 5], i)
+  end
+  x = 0
+  __demand(__index_launch)
+  for i in cs do
+    var y = i + 1
+    x += h2(s_part[y % 5], i)
+  end
+  regentlib.assert(x == 25, "test failed")
+
+  -- #######################################################
+  -- ### case 5. local variable and one captured variable
+  __demand(__index_launch)
+  for i in cs do
+    var y = i + 1
+    f1(r_part[y % n], i)
+  end
+  __demand(__index_launch)
+  for i in cs do
+    var y = i + 1
+    g1(r_part[y % n], i)
+  end
+  x = 0
+  __demand(__index_launch)
+  for i in cs do
+    var y = i + 1
+    x += h1(r_part[y % n], i)
+  end
+  regentlib.assert(x == 25, "test failed")
+
+  -- a different partition will also reuse the same projection functor
+  __demand(__index_launch)
+  for i in cs do
+    var y = i + 1
+    f2(s_part[y % n], i)
+  end
+  __demand(__index_launch)
+  for i in cs do
+    var y = i + 1
+    g2(s_part[y % n], i)
+  end
+  x = 0
+  __demand(__index_launch)
+  for i in cs do
+    var y = i + 1
+    x += h2(s_part[y % n], i)
+  end
+  regentlib.assert(x == 25, "test failed")
 end
 regentlib.start(main)
 print(regentlib.count_projection_functors())
-assert(regentlib.count_projection_functors() == 3)
+assert(regentlib.count_projection_functors() == 5)
