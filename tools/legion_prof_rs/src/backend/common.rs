@@ -148,31 +148,19 @@ impl StatePostprocess for State {
             if !chan.is_visible() {
                 continue;
             }
-            if !chan.util_time_points(None).is_empty() && chan_id.node_id().is_some() {
-                // gathers/scatters
+            if !chan.util_time_points(None).is_empty() {
                 let mut nodes = vec![None];
-                if chan_id.dst.is_some() && chan_id.dst.unwrap() != MemID(0) {
-                    nodes.push(chan_id.dst.map(|dst| dst.node_id()));
+                match *chan_id {
+                    ChanID::Copy { src, dst } => {
+                        nodes.push(Some(src.node_id()));
+                        nodes.push(Some(dst.node_id()));
+                    }
+                    ChanID::Fill { dst } | ChanID::Gather { dst } => {
+                        nodes.push(Some(dst.node_id()))
+                    }
+                    ChanID::Scatter { src } => nodes.push(Some(src.node_id())),
+                    ChanID::DepPart { node_id } => nodes.push(Some(node_id)),
                 }
-                if chan_id.src.is_some() && chan_id.src.unwrap() != MemID(0) {
-                    nodes.push(chan_id.src.map(|src| src.node_id()));
-                }
-                nodes.dedup();
-                for node in nodes {
-                    groups.entry(node).or_insert_with(Vec::new).push(*chan_id)
-                }
-            }
-        }
-
-        // Deppart channels have to go somewhere, but have no
-        // node. Just put them in the first available node.
-        let first_node = groups.keys().filter_map(|x| *x).min();
-        for (chan_id, chan) in &self.chans {
-            if !chan.is_visible() {
-                continue;
-            }
-            if !chan.util_time_points(None).is_empty() && chan_id.node_id().is_none() {
-                let mut nodes = vec![None, first_node];
                 nodes.dedup();
                 for node in nodes {
                     groups.entry(node).or_insert_with(Vec::new).push(*chan_id)
@@ -285,14 +273,18 @@ impl StatePostprocess for State {
             if !chan.is_visible() {
                 continue;
             }
-            if !chan.time_points(None).is_empty() && chan_id.node_id().is_some() {
-                // gathers/scatters
+            if !chan.time_points(None).is_empty() {
                 let mut nodes = vec![None];
-                if chan_id.dst.is_some() && chan_id.dst.unwrap() != MemID(0) {
-                    nodes.push(chan_id.dst.map(|dst| dst.node_id()));
-                }
-                if chan_id.src.is_some() && chan_id.src.unwrap() != MemID(0) {
-                    nodes.push(chan_id.src.map(|src| src.node_id()));
+                match *chan_id {
+                    ChanID::Copy { src, dst } => {
+                        nodes.push(Some(src.node_id()));
+                        nodes.push(Some(dst.node_id()));
+                    }
+                    ChanID::Fill { dst } | ChanID::Gather { dst } => {
+                        nodes.push(Some(dst.node_id()))
+                    }
+                    ChanID::Scatter { src } => nodes.push(Some(src.node_id())),
+                    ChanID::DepPart { node_id } => nodes.push(Some(node_id)),
                 }
                 nodes.dedup();
                 for node in nodes {
