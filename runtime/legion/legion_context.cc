@@ -20101,27 +20101,24 @@ namespace Legion {
         REPORT_LEGION_ERROR(ERROR_ILLEGAL_NESTED_TRACE,
           "Illegal nested trace with ID %d attempted in "
            "task %s (ID %lld)", tid, get_task_name(), get_unique_id())
-      std::map<TraceID,LogicalTrace*>::const_iterator finder = traces.find(tid);
       LogicalTrace *trace = NULL;
+      std::map<TraceID,LogicalTrace*>::const_iterator finder = traces.find(tid);
+      if (finder == traces.end())
       {
-        AutoLock t_lock(trace_lock);
-        if (finder == traces.end())
+        // Trace does not exist yet, so make one and record it
+        trace = new LogicalTrace(this, tid, logical_only, 
+                                 static_trace, provenance, trees);
+        trace->add_reference();
+        if (!deprecated)
         {
-          // Trace does not exist yet, so make one and record it
-          trace = new LogicalTrace(this, tid, logical_only, 
-                                   static_trace, provenance, trees);
-          trace->add_reference();
-          if (!deprecated)
-          {
-            // Need the lock her to avoid look-ups racing with modifying
-            // the trace data structure
-            AutoLock t_lock(trace_lock);
-            traces[tid] = trace;
-          }
+          // Need the lock her to avoid look-ups racing with modifying
+          // the trace data structure
+          AutoLock t_lock(trace_lock);
+          traces[tid] = trace;
         }
-        else
-          trace = finder->second;
       }
+      else
+        trace = finder->second;
 #ifdef DEBUG_LEGION
       assert(trace != NULL);
 #endif
