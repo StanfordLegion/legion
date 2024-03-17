@@ -12924,6 +12924,11 @@ namespace Legion {
               runtime->handle_control_replicate_trace_event_response(derez);
               break;
             }
+          case SEND_REPL_TRACE_EVENT_TRIGGER:
+            {
+              runtime->handle_control_replicate_trace_event_trigger(derez);
+              break;
+            }
           case SEND_REPL_TRACE_FRONTIER_REQUEST:
             {
               runtime->handle_control_replicate_trace_frontier_request(derez,
@@ -22844,6 +22849,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_control_replicate_trace_event_trigger(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(SEND_REPL_TRACE_EVENT_TRIGGER,
+                                      rez, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_control_replicate_trace_frontier_request(
                                          AddressSpaceID target, Serializer &rez) 
     //--------------------------------------------------------------------------
@@ -25229,6 +25243,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       ShardManager::handle_trace_event_response(derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_control_replicate_trace_event_trigger(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      ShardManager::handle_trace_event_trigger(derez, this);
     }
 
     //--------------------------------------------------------------------------

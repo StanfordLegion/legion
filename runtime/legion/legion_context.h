@@ -3224,7 +3224,7 @@ namespace Legion {
 #endif
     public:
       const DomainPoint& get_shard_point(void) const; 
-      PhysicalTemplate* find_current_shard_template(TraceID tid) const;
+      ShardedPhysicalTemplate* find_current_shard_template(TraceID tid) const;
     public:
       static void register_attach_detach_sharding_functor(Runtime *runtime);
       ShardingFunction* get_attach_detach_sharding_function(void);

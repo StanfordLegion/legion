@@ -22542,7 +22542,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalTemplate* ReplicateContext::find_current_shard_template(
+    ShardedPhysicalTemplate* ReplicateContext::find_current_shard_template(
                                                               TraceID tid) const
     //--------------------------------------------------------------------------
     {
@@ -22557,7 +22557,15 @@ namespace Legion {
       assert(physical->is_recording());
       assert(physical->has_current_template());
 #endif
-      return physical->get_current_template();
+      PhysicalTemplate *tpl = physical->get_current_template();
+#ifdef DEBUG_LEGION
+      ShardedPhysicalTemplate *result = 
+        static_cast<ShardedPhysicalTemplate*>(tpl);
+      assert(result != NULL);
+      return result;
+#else
+      return static_cast<ShardedPhysicalTemplate*>(tpl);
+#endif
     }
 
     //--------------------------------------------------------------------------

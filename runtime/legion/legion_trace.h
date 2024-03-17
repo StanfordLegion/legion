@@ -1317,6 +1317,8 @@ namespace Legion {
       virtual RtEvent refresh_managed_barriers(void);
       virtual void finish_replay(std::set<ApEvent> &postconditions);
       virtual ApEvent get_completion_for_deletion(void) const;
+      virtual void record_trigger_event(ApUserEvent lhs, ApEvent rhs,
+                                        const TraceLocalID &tlid);
       using PhysicalTemplate::record_merge_events;
       virtual void record_merge_events(ApEvent &lhs, 
                                        const std::set<ApEvent>& rhs,
@@ -1380,6 +1382,8 @@ namespace Legion {
       void record_trace_shard_frontier(unsigned frontier, ApBarrier result);
       void handle_trace_update(Deserializer &derez, AddressSpaceID source);
       static void handle_deferred_trace_update(const void *args, Runtime *rt);
+      bool record_shard_event_trigger(ApUserEvent lhs, ApEvent rhs,
+                                      const TraceLocalID &tlid);
     protected:
       bool handle_update_mutated_inst(const UniqueInst &inst, 
                             IndexSpaceExpression *ex, Deserializer &derez, 

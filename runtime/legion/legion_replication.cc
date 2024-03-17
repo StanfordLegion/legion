@@ -9208,7 +9208,7 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(slow_barrier_id > 0);
-      assert(slow_barrier = NULL);
+      assert(slow_barrier == NULL);
       ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
       assert(repl_ctx != NULL);
 #else
@@ -11427,6 +11427,73 @@ namespace Legion {
 
       physical_template->record_trace_shard_event(event, result);
       Runtime::trigger_event(done_event);
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent ShardManager::send_trace_event_trigger(TraceID tid, 
+        AddressSpaceID target, ApUserEvent lhs, ApEvent rhs,
+        const TraceLocalID &tlid)
+    //--------------------------------------------------------------------------
+    {
+      if (target != local_space)
+      {
+#ifdef DEBUG_LEGION
+        assert(collective_mapping != NULL);
+        assert(collective_mapping->contains(target));
+#endif
+        const RtUserEvent done = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize(tid);
+          rez.serialize(lhs);
+          rez.serialize(rhs);
+          tlid.serialize(rez);
+          rez.serialize(done);
+        }
+        runtime->send_control_replicate_trace_event_trigger(target, rez);
+        return done;
+      }
+      else
+      {
+        for (std::vector<ShardTask*>::const_iterator it = 
+              local_shards.begin(); it != local_shards.end(); it++)
+        {
+          ReplicateContext *ctx = (*it)->get_replicate_context();
+          ShardedPhysicalTemplate *tpl = ctx->find_current_shard_template(tid); 
+          if (tpl->record_shard_event_trigger(lhs, rhs, tlid))
+            return RtEvent::NO_RT_EVENT;
+        }
+        // Should never get here, we shold always find it
+        assert(false);
+        return RtEvent::NO_RT_EVENT;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ShardManager::handle_trace_event_trigger(
+                                          Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID repl_id;
+      derez.deserialize(repl_id);
+      TraceID tid;
+      derez.deserialize(tid);
+      ApUserEvent lhs;
+      derez.deserialize(lhs);
+      ApEvent rhs;
+      derez.deserialize(rhs);
+      TraceLocalID tlid;
+      tlid.deserialize(derez);
+      RtUserEvent done_event;
+      derez.deserialize(done_event);
+
+      ShardManager *manager = runtime->find_shard_manager(repl_id);
+      RtEvent done = manager->send_trace_event_trigger(tid,
+          runtime->address_space, lhs, rhs, tlid);
+      Runtime::trigger_event(done_event, done);
     }
 
     //--------------------------------------------------------------------------

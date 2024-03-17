@@ -8157,6 +8157,49 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
+    void ShardedPhysicalTemplate::record_trigger_event(ApUserEvent lhs,
+                                          ApEvent rhs, const TraceLocalID &tlid)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(lhs.exists());
+#endif
+      const AddressSpaceID event_space = find_event_space(lhs);
+      if ((event_space == trace->runtime->address_space) &&
+          record_shard_event_trigger(lhs, rhs, tlid))
+        return;
+      RtEvent done = repl_ctx->shard_manager->send_trace_event_trigger(
+          trace->logical_trace->tid, event_space, lhs, rhs, tlid);
+      if (done.exists())
+        done.wait();
+    }
+
+    //--------------------------------------------------------------------------
+    bool ShardedPhysicalTemplate::record_shard_event_trigger(ApUserEvent lhs,
+        ApEvent rhs, const TraceLocalID &tlid)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(lhs.exists());
+#endif
+      AutoLock tpl_lock(template_lock);
+#ifdef DEBUG_LEGION
+      assert(is_recording());
+#endif
+      std::map<ApEvent,unsigned>::const_iterator finder = event_map.find(lhs);
+      if (finder == event_map.end())
+        return false;
+#ifdef DEBUG_LEGION
+      assert(finder->second != NO_INDEX);
+#endif
+      const unsigned rhs_ =
+        rhs.exists() ? find_event(rhs, tpl_lock) : fence_completion_id;
+      events.push_back(ApEvent());
+      insert_instruction(new TriggerEvent(*this, finder->second, rhs_, tlid));
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
     void ShardedPhysicalTemplate::record_merge_events(ApEvent &lhs,
                          const std::set<ApEvent> &rhs, const TraceLocalID &tlid)
     //--------------------------------------------------------------------------

@@ -913,6 +913,7 @@ namespace Legion {
       SEND_REPL_CREATED_REGIONS,
       SEND_REPL_TRACE_EVENT_REQUEST,
       SEND_REPL_TRACE_EVENT_RESPONSE,
+      SEND_REPL_TRACE_EVENT_TRIGGER,
       SEND_REPL_TRACE_FRONTIER_REQUEST,
       SEND_REPL_TRACE_FRONTIER_RESPONSE,
       SEND_REPL_TRACE_UPDATE,
@@ -1238,6 +1239,7 @@ namespace Legion {
         "Send Replicate Created Regions Return",                      \
         "Send Replicate Trace Event Request",                         \
         "Send Replicate Trace Event Response",                        \
+        "Send Replicate Trace Event Trigger",                         \
         "Send Replicate Trace Frontier Request",                      \
         "Send Replicate Trace Frontier Response",                     \
         "Send Replicate Trace Update",                                \
