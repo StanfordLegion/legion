@@ -164,6 +164,22 @@ impl StatePostprocess for State {
             }
         }
 
+        // Deppart channels have to go somewhere, but have no
+        // node. Just put them in the first available node.
+        let first_node = groups.keys().filter_map(|x| *x).min();
+        for (chan_id, chan) in &self.chans {
+            if !chan.is_visible() {
+                continue;
+            }
+            if !chan.util_time_points(None).is_empty() && chan_id.node_id().is_none() {
+                let mut nodes = vec![None, first_node];
+                nodes.dedup();
+                for node in nodes {
+                    groups.entry(node).or_insert_with(Vec::new).push(*chan_id)
+                }
+            }
+        }
+
         groups
     }
 
