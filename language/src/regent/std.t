@@ -3813,6 +3813,10 @@ do
   end
 end
 
+function std.count_projection_functors()
+  return #projection_functors
+end
+
 local variants = terralib.newlist()
 
 function std.register_variant(variant)
