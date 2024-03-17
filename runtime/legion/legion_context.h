@@ -3224,6 +3224,7 @@ namespace Legion {
 #endif
     public:
       const DomainPoint& get_shard_point(void) const; 
+      PhysicalTemplate* find_current_shard_template(TraceID tid) const;
     public:
       static void register_attach_detach_sharding_functor(Runtime *runtime);
       ShardingFunction* get_attach_detach_sharding_function(void);
@@ -3264,6 +3265,10 @@ namespace Legion {
       ShardTask *const owner_shard;
       ShardManager *const shard_manager;
       const size_t total_shards;
+    protected:
+      // Need an extra trace lock here for when we go to look-up traces
+      // to find the current template
+      mutable LocalLock trace_lock;
     protected: 
       typedef ReplBarrier<RtBarrier,false> RtReplBar;
       typedef ReplBarrier<ApBarrier,false> ApReplBar;

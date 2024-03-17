@@ -933,8 +933,7 @@ namespace Legion {
       virtual void add_recorder_reference(void) { /*do nothing*/ }
       virtual bool remove_recorder_reference(void) 
         { /*do nothing, never delete*/ return false; }
-      virtual void pack_recorder(Serializer &rez, 
-                                 std::set<RtEvent> &applied);
+      virtual void pack_recorder(Serializer &rez); 
     public:
       void record_premap_output(MemoizableOp *memo,
                                 const Mapper::PremapTaskOutput &output,
@@ -1310,6 +1309,7 @@ namespace Legion {
         return continuation_pre;
       }
     public:
+      virtual void pack_recorder(Serializer &rez);
       virtual size_t get_sharded_template_index(void) const
         { return template_index; }
       virtual void initialize_replay(ApEvent fence_completion, bool recurrent);

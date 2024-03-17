@@ -7005,15 +7005,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::pack_recorder(Serializer &rez,
-                                         std::set<RtEvent> &applied_events)
+    void PhysicalTemplate::pack_recorder(Serializer &rez)
     //--------------------------------------------------------------------------
     {
       rez.serialize(trace->runtime->address_space);
       rez.serialize(this);
-      RtUserEvent remote_applied = Runtime::create_rt_user_event();
-      rez.serialize(remote_applied);
-      applied_events.insert(remote_applied);
+      rez.serialize<DistributedID>(0); // no coll
     }
 
     //--------------------------------------------------------------------------
@@ -9186,6 +9183,16 @@ namespace Legion {
       }
     }
 #endif
+
+    //--------------------------------------------------------------------------
+    void ShardedPhysicalTemplate::pack_recorder(Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize(trace->runtime->address_space);
+      rez.serialize(this);
+      rez.serialize(repl_ctx->shard_manager->did);
+      rez.serialize(trace->logical_trace->tid);
+    }
 
     //--------------------------------------------------------------------------
     void ShardedPhysicalTemplate::initialize_replay(ApEvent completion,

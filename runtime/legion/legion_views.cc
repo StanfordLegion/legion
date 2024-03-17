@@ -289,8 +289,9 @@ namespace Legion {
       RtUserEvent registered_event, applied_event;
       derez.deserialize(registered_event);
       derez.deserialize(applied_event);
+      std::set<RtEvent> applied_events;
       const PhysicalTraceInfo trace_info = 
-        PhysicalTraceInfo::unpack_trace_info(derez, runtime);
+        PhysicalTraceInfo::unpack_trace_info(derez, runtime, applied_events);
 
       if (ready.exists() && !ready.has_triggered())
         ready.wait();
@@ -301,7 +302,6 @@ namespace Legion {
 #endif
       InstanceView *inst_view = view->as_instance_view();
       std::vector<RtEvent> registered_events;
-      std::set<RtEvent> applied_events;
       ApEvent pre = inst_view->register_user(usage, user_mask, user_expr,
                                              op_id, op_ctx_index, index,
                                              match_space, term_event,
@@ -2576,7 +2576,7 @@ namespace Legion {
                   rez.serialize<DistributedID>(0);
                 dst_inst.serialize(rez);
                 rez.serialize(manager->get_unique_event());
-                trace_info.pack_trace_info(rez, applied_events);
+                trace_info.pack_trace_info(rez);
                 rez.serialize(recorded);
                 rez.serialize(applied);
                 if (trace_info.recording)
@@ -2650,7 +2650,7 @@ namespace Legion {
                 rez.serialize(copy_mask);
                 dst_inst.serialize(rez);
                 rez.serialize(manager->get_unique_event());
-                trace_info.pack_trace_info(rez, applied_events);
+                trace_info.pack_trace_info(rez);
                 rez.serialize(recorded);
                 rez.serialize(applied);
                 if (trace_info.recording)
@@ -2720,7 +2720,7 @@ namespace Legion {
                 rez.serialize(src_point->did);
               else
                 rez.serialize<DistributedID>(0);
-              trace_info.pack_trace_info(rez, applied_events);
+              trace_info.pack_trace_info(rez);
               rez.serialize(COLLECTIVE_NONE);
               rez.serialize(recorded);
               rez.serialize(applied);
@@ -3031,7 +3031,7 @@ namespace Legion {
           rez.serialize(index);
           rez.serialize(match_space);
           rez.serialize(origin);
-          result_info->pack_trace_info(rez, applied_events);
+          result_info->pack_trace_info(rez);
           analysis_mapping->pack(rez);
           rez.serialize(term_event);
           rez.serialize(result);
@@ -3079,7 +3079,7 @@ namespace Legion {
                                             ApEvent remote_term_event,
                                             ApUserEvent remote_ready_event,
                                             RtUserEvent remote_registered,
-                                            RtUserEvent remote_applied)
+                                            std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3112,7 +3112,8 @@ namespace Legion {
         if (remote_term_event.exists())
           finder->second.term_events.push_back(remote_term_event);
         Runtime::trigger_event(remote_registered, finder->second.registered);
-        Runtime::trigger_event(remote_applied, finder->second.applied);
+        if (finder->second.applied.exists())
+          applied_events.insert(finder->second.applied);
         if (!finder->second.ready_event.exists())
           finder->second.remote_ready_events[remote_ready_event] =
             new PhysicalTraceInfo(trace_info);
@@ -3157,7 +3158,7 @@ namespace Legion {
           rez.serialize(index);
           rez.serialize(match_space);
           rez.serialize(origin);
-          to_perform.trace_info->pack_trace_info(rez, applied_events);
+          to_perform.trace_info->pack_trace_info(rez);
           rez.serialize(term_event);
           rez.serialize(to_perform.ready_event);
           rez.serialize(to_perform.registered);
@@ -3224,8 +3225,9 @@ namespace Legion {
       derez.deserialize(match_space);
       AddressSpaceID origin;
       derez.deserialize(origin);
+      std::set<RtEvent> applied_events;
       PhysicalTraceInfo trace_info = 
-        PhysicalTraceInfo::unpack_trace_info(derez, runtime); 
+        PhysicalTraceInfo::unpack_trace_info(derez, runtime, applied_events);
       size_t num_spaces;
       derez.deserialize(num_spaces);
 #ifdef DEBUG_LEGION
@@ -3246,7 +3248,12 @@ namespace Legion {
 
       view->process_collective_user_registration(op_ctx_index, index, 
           match_space, origin, trace_info, mapping, term_event,
-          ready_event, registered_event, applied_event);
+          ready_event, registered_event, applied_events);
+      if (!applied_events.empty())
+        Runtime::trigger_event(applied_event,
+            Runtime::merge_events(applied_events));
+      else
+        Runtime::trigger_event(applied_event);
       if (mapping->remove_reference())
         delete mapping;
     }
@@ -3479,7 +3486,7 @@ namespace Legion {
       derez.deserialize(applied);
       std::set<RtEvent> applied_events;
       const PhysicalTraceInfo trace_info = 
-        PhysicalTraceInfo::unpack_trace_info(derez, runtime);
+        PhysicalTraceInfo::unpack_trace_info(derez, runtime, applied_events);
 
       // This blocks the virtual channel, but keeps queries in-order 
       // with respect to updates from the same node which is necessary
@@ -3831,7 +3838,7 @@ namespace Legion {
             rez.serialize(ready_event);
             rez.serialize(registered_event);
             rez.serialize(applied_event);
-            trace_info.pack_trace_info(rez, applied_events);
+            trace_info.pack_trace_info(rez);
           }
           runtime->send_view_register_user(logical_owner, rez);
           registered.push_back(registered_event);
@@ -4082,7 +4089,7 @@ namespace Legion {
             rez.serialize(index);
             rez.serialize(ready_event);
             rez.serialize(applied);
-            trace_info.pack_trace_info(rez, applied_events);
+            trace_info.pack_trace_info(rez);
           }
           runtime->send_view_find_copy_preconditions_request(logical_owner,rez);
           applied_events.insert(applied);
@@ -5770,7 +5777,7 @@ namespace Legion {
           rez.serialize(ready_event);
           rez.serialize(registered_event);
           rez.serialize(applied_event);
-          trace_info.pack_trace_info(rez, applied_events);
+          trace_info.pack_trace_info(rez);
         }
         runtime->send_view_register_user(logical_owner, rez);
         registered.push_back(registered_event);
@@ -5830,7 +5837,7 @@ namespace Legion {
           rez.serialize(index);
           rez.serialize(ready_event);
           rez.serialize(applied);
-          trace_info.pack_trace_info(rez, applied_events);
+          trace_info.pack_trace_info(rez);
         }
         runtime->send_view_find_copy_preconditions_request(logical_owner, rez);
         applied_events.insert(applied);
@@ -7034,7 +7041,7 @@ namespace Legion {
           rez.serialize(collective_match_space);
           rez.serialize(op->get_context_index());
           rez.serialize(fill_mask);
-          trace_info.pack_trace_info(rez, applied_events);
+          trace_info.pack_trace_info(rez);
           rez.serialize(recorded);
           rez.serialize(applied);
           if (trace_info.recording)
@@ -7200,7 +7207,7 @@ namespace Legion {
             rez.serialize(collective_match_space);
             rez.serialize(op->get_context_index());
             rez.serialize(copy_mask);
-            trace_info.pack_trace_info(rez, applied_events);
+            trace_info.pack_trace_info(rez);
             rez.serialize(recorded);
             rez.serialize(applied);
             if (trace_info.recording)
@@ -7333,7 +7340,7 @@ namespace Legion {
             else
               rez.serialize<DistributedID>(0);
             rez.serialize(op->get_unique_op_id());
-            trace_info.pack_trace_info(rez, applied_events);
+            trace_info.pack_trace_info(rez);
             rez.serialize(recorded);
             rez.serialize(applied);
             if (trace_info.recording)
@@ -7406,7 +7413,7 @@ namespace Legion {
           rez.serialize(index);
           rez.serialize(collective_match_space);
           rez.serialize(copy_mask);
-          trace_info.pack_trace_info(rez, applied_events);
+          trace_info.pack_trace_info(rez);
           rez.serialize(recorded);
           rez.serialize(applied);
           rez.serialize(all_done);
@@ -7573,8 +7580,9 @@ namespace Legion {
       derez.deserialize(match_space);
       FieldMask copy_mask;
       derez.deserialize(copy_mask);
+      std::set<RtEvent> recorded_events, applied_events;
       PhysicalTraceInfo trace_info =
-        PhysicalTraceInfo::unpack_trace_info(derez, runtime);
+        PhysicalTraceInfo::unpack_trace_info(derez, runtime, applied_events);
       RtUserEvent recorded, applied;
       derez.deserialize(recorded);
       derez.deserialize(applied);
@@ -7590,7 +7598,6 @@ namespace Legion {
           wait_on.wait();
       }
       
-      std::set<RtEvent> recorded_events, applied_events;
       const ApEvent done = collective->collective_fuse_gather(sources,
           precondition, predicate_guard, op, index, match_space, copy_mask,
           trace_info, recorded_events, applied_events, copy_restricted,
@@ -7654,7 +7661,7 @@ namespace Legion {
             rez.serialize(ready_event);
             rez.serialize(registered_event);
             rez.serialize(applied_event);
-            trace_info.pack_trace_info(rez, applied_events);
+            trace_info.pack_trace_info(rez);
           }
           runtime->send_view_register_user(target->owner_space, rez);
           registered.push_back(registered_event);
@@ -8587,8 +8594,9 @@ namespace Legion {
       derez.deserialize(did);
       PhysicalManager *manager =
         runtime->find_or_request_instance_manager(did, manager_ready);
+      std::set<RtEvent> applied_events;
       RemoteCollectiveAnalysis *analysis = 
-        RemoteCollectiveAnalysis::unpack(derez, runtime);
+        RemoteCollectiveAnalysis::unpack(derez, runtime, applied_events);
       analysis->add_reference();
       RtUserEvent applied;
       derez.deserialize(applied);
@@ -8597,7 +8605,6 @@ namespace Legion {
         view_ready.wait();
       if (manager_ready.exists() && !manager_ready.has_triggered())
         manager_ready.wait();
-      std::set<RtEvent> applied_events;
       collective_view->register_collective_analysis(manager, analysis,
                                                     applied_events);
       if (!applied_events.empty())
@@ -9210,7 +9217,7 @@ namespace Legion {
           rez.serialize(match_space);
           rez.serialize(op_context_index);
           rez.serialize(fill_mask);
-          local_info.pack_trace_info(rez, applied_events);
+          local_info.pack_trace_info(rez);
           rez.serialize(recorded);
           rez.serialize(applied);
           if (local_info.recording)
@@ -9335,7 +9342,7 @@ namespace Legion {
       derez.deserialize(fill_mask);
       std::set<RtEvent> recorded_events, applied_events;
       PhysicalTraceInfo trace_info =
-        PhysicalTraceInfo::unpack_trace_info(derez, runtime);
+        PhysicalTraceInfo::unpack_trace_info(derez, runtime, applied_events);
       RtUserEvent recorded, applied;
       derez.deserialize(recorded);
       derez.deserialize(applied);
@@ -9540,7 +9547,7 @@ namespace Legion {
       DistributedID src_inst_did;
       derez.deserialize(src_inst_did);
       PhysicalTraceInfo trace_info =
-        PhysicalTraceInfo::unpack_trace_info(derez, runtime);
+        PhysicalTraceInfo::unpack_trace_info(derez, runtime, applied_events);
       CollectiveKind collective_kind;
       derez.deserialize(collective_kind);
       RtUserEvent recorded, applied;
@@ -9739,7 +9746,7 @@ namespace Legion {
           rez.serialize(match_space);
           rez.serialize(op_ctx_index);
           rez.serialize(copy_mask);
-          local_info.pack_trace_info(rez, applied_events);
+          local_info.pack_trace_info(rez);
           rez.serialize(recorded);
           rez.serialize(applied);
           if (local_info.recording)
@@ -10472,7 +10479,7 @@ namespace Legion {
       FieldMask copy_mask;
       derez.deserialize(copy_mask);
       PhysicalTraceInfo trace_info =
-        PhysicalTraceInfo::unpack_trace_info(derez, runtime);
+        PhysicalTraceInfo::unpack_trace_info(derez, runtime, applied_events);
       RtUserEvent recorded, applied;
       derez.deserialize(recorded);
       derez.deserialize(applied);
@@ -10599,7 +10606,7 @@ namespace Legion {
           rez.serialize(match_space);
           rez.serialize(op_ctx_index);
           rez.serialize(copy_mask);
-          trace_info.pack_trace_info(rez, applied_events);
+          trace_info.pack_trace_info(rez);
           rez.serialize(recorded);
           rez.serialize(applied);
           if (trace_info.recording)
@@ -10763,7 +10770,7 @@ namespace Legion {
       FieldMask copy_mask;
       derez.deserialize(copy_mask);
       PhysicalTraceInfo trace_info =
-        PhysicalTraceInfo::unpack_trace_info(derez, runtime);
+        PhysicalTraceInfo::unpack_trace_info(derez, runtime, applied_events);
       RtUserEvent recorded, applied;
       derez.deserialize(recorded);
       derez.deserialize(applied);
@@ -10851,7 +10858,7 @@ namespace Legion {
           rez.serialize(match_space);
           rez.serialize(copy_mask);
           rez.serialize(src_inst_did);
-          trace_info.pack_trace_info(rez, applied_events);
+          trace_info.pack_trace_info(rez);
           rez.serialize(recorded);
           rez.serialize(applied);
           rez.serialize(all_done);
@@ -10923,7 +10930,7 @@ namespace Legion {
           rez.serialize(src_inst_did);
           local_inst.serialize(rez);
           rez.serialize(local_manager->get_unique_event());
-          trace_info.pack_trace_info(rez, applied_events);
+          trace_info.pack_trace_info(rez);
           rez.serialize(recorded);
           rez.serialize(applied);
           if (trace_info.recording)
@@ -11018,7 +11025,7 @@ namespace Legion {
             rez.serialize(match_space);
             rez.serialize(op->get_context_index());
             rez.serialize(copy_mask);
-            trace_info.pack_trace_info(rez, applied_events);
+            trace_info.pack_trace_info(rez);
             rez.serialize(recorded);
             rez.serialize(applied);
             if (trace_info.recording)
@@ -11131,7 +11138,7 @@ namespace Legion {
       derez.deserialize(src_inst_did);
       std::set<RtEvent> recorded_events, applied_events;
       PhysicalTraceInfo trace_info =
-        PhysicalTraceInfo::unpack_trace_info(derez, runtime);
+        PhysicalTraceInfo::unpack_trace_info(derez, runtime, applied_events);
       RtUserEvent recorded, applied;
       derez.deserialize(recorded);
       derez.deserialize(applied);
@@ -11246,7 +11253,7 @@ namespace Legion {
           rez.serialize(copy_mask);
           rez.serialize(src_inst_did);
           rez.serialize(src_inst_did_op);
-          trace_info.pack_trace_info(rez, applied_events);
+          trace_info.pack_trace_info(rez);
           rez.serialize(recorded);
           rez.serialize(applied);
           if (local_info.recording)
@@ -11382,7 +11389,7 @@ namespace Legion {
             dst_inst.serialize(rez);
             rez.serialize(local_manager->get_unique_event());
             rez.serialize(local_src_inst_did);
-            inst_info.pack_trace_info(rez, applied_events);
+            inst_info.pack_trace_info(rez);
             rez.serialize(collective_kind);
             rez.serialize(recorded);
             rez.serialize(applied);
@@ -11468,7 +11475,7 @@ namespace Legion {
       derez.deserialize(src_inst_did_op);
       std::set<RtEvent> recorded_events, applied_events;
       PhysicalTraceInfo trace_info =
-        PhysicalTraceInfo::unpack_trace_info(derez, runtime);
+        PhysicalTraceInfo::unpack_trace_info(derez, runtime, applied_events);
       RtUserEvent recorded, applied;
       derez.deserialize(recorded);
       derez.deserialize(applied);
@@ -11797,7 +11804,7 @@ namespace Legion {
           rez.serialize<DistributedID>(0); // no source point in this case
           local_inst.serialize(rez);
           rez.serialize(local_manager->get_unique_event());
-          trace_info.pack_trace_info(rez, applied_events);
+          trace_info.pack_trace_info(rez);
           rez.serialize(recorded);
           rez.serialize(applied);
           if (trace_info.recording)
@@ -12155,7 +12162,7 @@ namespace Legion {
       LgEvent dst_unique_event;
       derez.deserialize(dst_unique_event);
       PhysicalTraceInfo trace_info =
-        PhysicalTraceInfo::unpack_trace_info(derez, runtime);
+        PhysicalTraceInfo::unpack_trace_info(derez, runtime, applied_events);
       RtUserEvent recorded, applied;
       derez.deserialize(recorded);
       derez.deserialize(applied);
@@ -12258,7 +12265,7 @@ namespace Legion {
           rez.serialize(dst_mask);
           dst_inst.serialize(rez);
           rez.serialize(dst_unique_event);
-          trace_info.pack_trace_info(rez, applied_events);
+          trace_info.pack_trace_info(rez);
           rez.serialize(recorded);
           rez.serialize(applied);
           if (trace_info.recording)
@@ -12368,7 +12375,7 @@ namespace Legion {
       LgEvent dst_unique_event;
       derez.deserialize(dst_unique_event);
       PhysicalTraceInfo trace_info =
-        PhysicalTraceInfo::unpack_trace_info(derez, runtime);
+        PhysicalTraceInfo::unpack_trace_info(derez, runtime, applied_events);
       RtUserEvent recorded, applied;
       derez.deserialize(recorded);
       derez.deserialize(applied);

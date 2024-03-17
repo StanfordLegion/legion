@@ -4128,12 +4128,10 @@ namespace Legion {
       // Check to see if we need to make a remote trace recorder
       if (is_remote() && is_recording() && (remote_trace_recorder == NULL))
       {
-        const RtUserEvent remote_applied = Runtime::create_rt_user_event();
         remote_trace_recorder = new RemoteTraceRecorder(runtime,
-            orig_proc.address_space(), runtime->address_space, 
-            get_trace_local_id(), tpl, remote_applied);
+            orig_proc.address_space(), get_trace_local_id(), tpl,
+            0/*did*/, 0/*tid*/, map_applied_conditions);
         remote_trace_recorder->add_recorder_reference();
-        map_applied_conditions.insert(remote_applied);
 #ifdef DEBUG_LEGION
         assert(!single_task_termination.exists());
 #endif
@@ -4354,11 +4352,6 @@ namespace Legion {
         RtEvent record_replay_precondition;
         if (!map_applied_conditions.empty())
         {
-          // If we have a remote trace recorder, make sure we don't
-          // accidentally include ourselves in the preconditions for
-          // ourself which will cause a recording deadlock
-          if (remote_trace_recorder != NULL)
-            map_applied_conditions.erase(remote_trace_recorder->applied_event);
           record_replay_precondition =
             Runtime::merge_events(map_applied_conditions);
           map_applied_conditions.clear();

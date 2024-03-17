@@ -3212,7 +3212,11 @@ namespace Legion {
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
     protected:
+      void perform_template_creation_barrier(void);
+    protected:
       LogicalTrace *previous;
+      SlowBarrier *slow_barrier;
+      CollectiveID slow_barrier_id;
       bool has_blocking_call;
       bool has_intermediate_fence;
       bool remove_trace_reference;

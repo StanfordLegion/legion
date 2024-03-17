@@ -362,7 +362,7 @@ namespace Legion {
                                             ApEvent remote_term_event,
                                             ApUserEvent remote_ready_event,
                                             RtUserEvent remote_registered,
-                                            RtUserEvent remote_applied);
+                                            std::set<RtEvent> &applied_events);
     public:
       static void handle_view_find_copy_pre_request(Deserializer &derez,
                         Runtime *runtime, AddressSpaceID source);

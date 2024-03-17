@@ -20103,17 +20103,25 @@ namespace Legion {
            "task %s (ID %lld)", tid, get_task_name(), get_unique_id())
       std::map<TraceID,LogicalTrace*>::const_iterator finder = traces.find(tid);
       LogicalTrace *trace = NULL;
-      if (finder == traces.end())
       {
-        // Trace does not exist yet, so make one and record it
-        trace = new LogicalTrace(this, tid, logical_only, 
-                                 static_trace, provenance, trees);
-        if (!deprecated)
-          traces[tid] = trace;
-        trace->add_reference();
+        AutoLock t_lock(trace_lock);
+        if (finder == traces.end())
+        {
+          // Trace does not exist yet, so make one and record it
+          trace = new LogicalTrace(this, tid, logical_only, 
+                                   static_trace, provenance, trees);
+          trace->add_reference();
+          if (!deprecated)
+          {
+            // Need the lock her to avoid look-ups racing with modifying
+            // the trace data structure
+            AutoLock t_lock(trace_lock);
+            traces[tid] = trace;
+          }
+        }
+        else
+          trace = finder->second;
       }
-      else
-        trace = finder->second;
 #ifdef DEBUG_LEGION
       assert(trace != NULL);
 #endif
@@ -22534,6 +22542,25 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return shard_manager->shard_points[owner_shard->shard_id];
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalTemplate* ReplicateContext::find_current_shard_template(
+                                                              TraceID tid) const
+    //--------------------------------------------------------------------------
+    {
+      AutoLock t_lock(trace_lock,1,false/*exclusive*/);
+      std::map<TraceID,LogicalTrace*>::const_iterator finder = traces.find(tid);
+#ifdef DEBUG_LEGION
+      assert(finder != traces.end());
+      assert(finder->second->has_physical_trace());
+#endif
+      PhysicalTrace *physical = finder->second->get_physical_trace();
+#ifdef DEBUG_LEGION
+      assert(physical->is_recording());
+      assert(physical->has_current_template());
+#endif
+      return physical->get_current_template();
     }
 
     //--------------------------------------------------------------------------
