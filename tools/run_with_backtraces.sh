@@ -20,8 +20,8 @@
 # Run ./my_app ... and get backtraces after 10 minutes:
 #     ./run_with_backtraces.sh ./my_app ...
 #
-# Same, with a 20 minute wait:
-#     WAIT_BEFORE_BACKTRACE=20m ./run_with_backtraces.sh ./my_app ...
+# Same, with a 20 minute sleep:
+#     SLEEP_BEFORE_BACKTRACE=20m ./run_with_backtraces.sh ./my_app ...
 #
 # Note: if you do not want the script to kill your application, set:
 #     KILL_PROCESS_AFTER_BACKTRACE=0
@@ -31,14 +31,14 @@ set -e
 "$@" &
 pid=$!
 
-wait ${WAIT_BEFORE_BACKTRACE:-10m}
+sleep ${SLEEP_BEFORE_BACKTRACE:-10m}
 
 gdb -p $pid -ex 'set confirm off' -ex 'set height 0' -ex 'set width 0' -ex 'thread apply all backtrace' -ex 'quit'
 
 # wait for backtraces to complete and then kill the process
 if [[ ${KILL_PROCESS_AFTER_BACKTRACE:-1} = 1 ]]; then
-    wait 2m
+    sleep 2m
     kill $pid
-    wait 1m
+    sleep 1m
     kill -9 $pid
 fi
