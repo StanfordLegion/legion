@@ -3265,7 +3265,11 @@ namespace Legion {
 #endif
 #ifdef DEBUG_LEGION
         // Should only be writing to instances that this future instance owns
-        assert(own_instance);
+        // Might also happen if we have an "external" (not really external but
+        // made-using-malloc instance) that is bigger than the copy and we 
+        // make an intermediate instance to handle that.
+        assert(own_instance || 
+            (own_dst && external_allocation && (copy_size < size)));
 #endif
         std::vector<Realm::CopySrcDstField> srcs(1);
         std::vector<Realm::CopySrcDstField> dsts(1);
