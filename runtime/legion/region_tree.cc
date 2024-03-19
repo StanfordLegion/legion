@@ -16192,7 +16192,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       state.sanity_check();
 #endif
-      LegionDeque<FieldState> new_states;
+      // These are fields for which the next_child is already open but it was
+      // in the wrong state so we still need to add a new state for them
+      FieldMask next_child_fields;
       // Now we can look at all the children
       for (LegionList<FieldState>::iterator it = 
             state.field_states.begin(); it != 
@@ -16231,8 +16233,8 @@ namespace Legion {
                 // Not-read only so traverse the interfering children and
                 // close up anything that is not the next child
                 perform_close_operations(user, closing_mask, it->open_children,
-                    privilege_root, this, next_child, open_below, 
-                    analysis, true/*filter next*/);
+                    privilege_root, this, analysis, open_below, next_child,
+                    &next_child_fields, true/*filter next*/);
                 // See if there are still any valid open fields
                 if (!it->valid_fields())
                   it = state.field_states.erase(it);
@@ -16245,8 +16247,7 @@ namespace Legion {
             {
               // Close up any interfering children that conflict
               perform_close_operations(user, closing_mask, it->open_children,
-                  privilege_root, this, next_child, open_below, 
-                  analysis, false/*filter next*/);
+                  privilege_root, this, analysis, open_below, next_child);
               if (!it->valid_fields())
                 it = state.field_states.erase(it);
               else
@@ -16275,8 +16276,8 @@ namespace Legion {
                 // Need to close up the open field since we're going
                 // to have to do it anyway
                 perform_close_operations(user, closing_mask, it->open_children,
-                    privilege_root, this, next_child, open_below,
-                    analysis, true/*filter next*/);
+                    privilege_root, this, analysis, open_below, next_child,
+                    &next_child_fields, true/*filter next*/);
                 if (!it->valid_fields())
                   it = state.field_states.erase(it);
                 else
@@ -16292,15 +16293,17 @@ namespace Legion {
       // a new field state and add it into the set of new states
       if (next_child != NULL)
       {
-        const FieldMask open_mask = closing_mask - open_below;
+        FieldMask open_mask = closing_mask;
+        if (!!open_below)
+          open_mask -= open_below;
+        if (!!next_child_fields)
+          open_mask |= next_child_fields;
         if (!!open_mask)
         {
           FieldState new_state(user.usage, open_mask, next_child);
-          new_states.emplace_back(std::move(new_state));
+          merge_new_field_state(state, new_state);
         }
       }
-      if (!new_states.empty())
-        merge_new_field_states(state, new_states);
 #ifdef DEBUG_LEGION
       state.sanity_check();
 #endif
@@ -16312,10 +16315,11 @@ namespace Legion {
                                         OrderedFieldMaskChildren &children,
                                         LogicalRegion privilege_root,
                                         RegionTreeNode *path_node,
-                                        RegionTreeNode *next_child,
-                                        FieldMask &open_below,
                                         LogicalAnalysis &analysis,
-                                        const bool filter_next)
+                                        FieldMask &open_below,
+                                        RegionTreeNode *next_child,
+                                        FieldMask *next_child_fields,
+                                        const bool filter_next_child)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime, 
@@ -16377,10 +16381,19 @@ namespace Legion {
           FieldMask overlap = closing_mask & finder->second;
           if (!!overlap)
           {
-            if (filter_next)
+            if (filter_next_child)
             {
+#ifdef DEBUG_LEGION
+              assert(next_child_fields != NULL);
+#endif
+              FieldMask child_fields;
               next_child->close_logical_node(user, overlap, privilege_root,
-                                             path_node, analysis, open_below);
+                                             path_node, analysis, child_fields);
+              if (!!child_fields)
+              {
+                open_below |= child_fields;
+                (*next_child_fields) |= child_fields;
+              }
               finder.filter(overlap);
               if (!finder->second)
               {
@@ -16471,8 +16484,7 @@ namespace Legion {
             continue;
           }
           perform_close_operations(user, overlap, it->open_children,
-              privilege_root, path_node, NULL/*next child*/, still_open,
-              logical_analysis, false/*filter next*/);
+              privilege_root, path_node, logical_analysis, still_open);
           // Remove the state if it is now empty
           if (!it->valid_fields())
             it = state.field_states.erase(it);
@@ -16504,18 +16516,6 @@ namespace Legion {
       }
       // Otherwise just push it on the back
       state.field_states.emplace_back(std::move(new_state));
-    }
-
-    //--------------------------------------------------------------------------
-    void RegionTreeNode::merge_new_field_states(LogicalState &state,
-                                            LegionDeque<FieldState> &new_states)
-    //--------------------------------------------------------------------------
-    {
-      for (unsigned idx = 0; idx < new_states.size(); idx++)
-        merge_new_field_state(state, new_states[idx]);
-#ifdef DEBUG_LEGION
-      state.sanity_check();
-#endif
     }
 
     //--------------------------------------------------------------------------

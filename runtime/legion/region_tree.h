@@ -4413,10 +4413,11 @@ namespace Legion {
                                     OrderedFieldMaskChildren &children,
                                     LogicalRegion privilege_root,
                                     RegionTreeNode *path_node,
-                                    RegionTreeNode *next_child,
-                                    FieldMask &open_below,
                                     LogicalAnalysis &analysis,
-                                    const bool filter_next);
+                                    FieldMask &open_below,
+                                    RegionTreeNode *next_child = NULL,
+                                    FieldMask *next_child_fields = NULL,
+                                    const bool filter_next_child = false);
       void close_logical_node(const LogicalUser &user,
                               const FieldMask &closing_mask,
                               LogicalRegion privilege_root,
@@ -4436,8 +4437,6 @@ namespace Legion {
                                          LogicalRegion privilege_root,
                                          LogicalAnalysis &logical_analysis);
       void merge_new_field_state(LogicalState &state, FieldState &new_state);
-      void merge_new_field_states(LogicalState &state, 
-                                  LegionDeque<FieldState> &new_states);
       void filter_prev_epoch_users(LogicalState &state, const FieldMask &mask);
       void filter_curr_epoch_users(LogicalState &state, const FieldMask &mask);
       void report_uninitialized_usage(Operation *op, unsigned index,
