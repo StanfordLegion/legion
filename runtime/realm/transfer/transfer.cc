@@ -3095,8 +3095,9 @@ namespace Realm {
       ChannelCopyInfo copy_info = channel_copy_info;
       copy_info.dst_mem = partials[i].ib_mem;
       copy_info.is_direct = false;
-      if(channel_copy_info.is_scatter)
+      if(channel_copy_info.is_scatter) {
         copy_info.ind_mem = Memory::NO_MEMORY;
+      }
       if(best_channel_for_mem_pair(copy_info,
                                    serdez_id, 0 /*no dst serdez*/,
                                    0 /*no redop on not-last hops*/,
@@ -3181,8 +3182,9 @@ namespace Realm {
       XferDesKind kind;
       ChannelCopyInfo copy_info = channel_copy_info;
       copy_info.src_mem = partials[i].ib_mem;
-      if(!channel_copy_info.is_scatter)
+      if(!channel_copy_info.is_scatter) {
         copy_info.ind_mem = Memory::NO_MEMORY;
+      }
       copy_info.is_direct = false;
       if(best_channel_for_mem_pair(copy_info,
                                    0 /*no src serdez*/, serdez_id, redop_id,
