@@ -365,7 +365,7 @@ namespace Legion {
         static constexpr double SCORE_CAP_MULT = 10;
         // REPLAY_SCALE is at most how much a score should be increased
         // to favor replays.
-        static constexpr double REPLAY_SCALE = 1.5;
+        static constexpr double REPLAY_SCALE = 1.75;
         // IDEMPOTENT_VISIT_SCALE is at most how much a score should
         // be increased to favor idempotent replays.
         static constexpr double IDEMPOTENT_VISIT_SCALE = 2.0;
