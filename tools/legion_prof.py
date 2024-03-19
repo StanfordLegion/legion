@@ -3578,7 +3578,7 @@ class State(object):
                            gc: bool, inorder: bool,
                            safe_mapper: bool, safe_runtime: bool,
                            safe_ctrlrepl: bool, part_checks: bool,
-                           resilient: bool):
+                           resilient: bool) -> None:
         pass
 
     # MachineDesc
