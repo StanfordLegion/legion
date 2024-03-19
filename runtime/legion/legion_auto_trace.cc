@@ -581,7 +581,7 @@ namespace Legion {
     constexpr Murmur3Hasher::Hash TraceIdentifier::SENTINEL;
     constexpr double TraceReplayer::TraceMeta::R;
     constexpr double TraceReplayer::TraceMeta::SCORE_CAP_MULT;
-    constexpr uint64_t TraceReplayer::TraceMeta::REPLAY_SCALE;
+    constexpr double TraceReplayer::TraceMeta::REPLAY_SCALE;
     constexpr double TraceReplayer::TraceMeta::IDEMPOTENT_VISIT_SCALE;
 
     void TraceReplayer::TraceMeta::visit(uint64_t opidx) {
@@ -626,9 +626,9 @@ namespace Legion {
       score = std::min(score, SCORE_CAP_MULT * ((double)this->length));
       // Then, increase the score a little bit if a trace has already been
       // replayed to favor replays.
-      uint64_t capped_replays = std::max(std::min(REPLAY_SCALE, this->replays), (uint64_t)1);
+      double capped_replays = std::max(std::min(REPLAY_SCALE, (double)this->replays), (double)1);
       double capped_idemp_visits = std::max(std::min(IDEMPOTENT_VISIT_SCALE, this->decaying_idempotent_visits), 1.0);
-      return score * (double)capped_replays * capped_idemp_visits;
+      return score * capped_replays * capped_idemp_visits;
     }
 
     void TraceReplayer::flush_buffer() {
