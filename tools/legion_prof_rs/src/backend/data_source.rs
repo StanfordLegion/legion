@@ -12,6 +12,9 @@ use legion_prof_viewer::{
     timestamp as ts,
 };
 
+#[cfg(debug_assertions)]
+use log::info;
+
 use slice_group_by::GroupBy;
 
 use crate::backend::common::{
@@ -615,10 +618,10 @@ impl StateDataSource {
             })
             .saturating_sub(1);
 
-        let mut last_index = step_utilization.partition_point(|&(t, _)| {
+        let mut last_index = step_utilization[first_index..].partition_point(|&(t, _)| {
             let t: ts::Timestamp = t.into();
             t < interval.stop
-        });
+        }) + first_index;
         if last_index + 1 < step_utilization.len() {
             last_index = last_index + 1;
         }
@@ -761,102 +764,129 @@ impl StateDataSource {
             item_metas.resize_with(levels, Vec::new);
         }
         merged.resize(levels, 0u64);
-        let points = cont.time_points(device);
+        let points_stacked = cont.time_points_stacked(device);
 
-        for point in points {
-            assert!(point.first);
+        for (level, points) in points_stacked.iter().enumerate() {
+            let items = &mut items[level];
+            let mut item_metas = item_metas.as_mut().map(|m| &mut m[level]);
+            let merged = &mut merged[level];
 
-            let entry = cont.entry(point.entry);
-            let (base, time_range, waiters) = (&entry.base(), entry.time_range(), &entry.waiters());
-
-            let point_interval: ts::Interval = time_range.into();
-            if !point_interval.overlaps(tile_id.0) {
-                continue;
-            }
-            let mut view_interval = point_interval.intersection(tile_id.0);
-
-            let level = base.level.unwrap() as usize;
-
-            let expand = !full
-                && Self::expand_item(
-                    &mut view_interval,
-                    tile_id,
-                    items[level].last(),
-                    merged[level],
-                );
-
-            if let Some(last) = items[level].last_mut() {
-                let last_meta = if let Some(ref mut item_metas) = item_metas {
-                    item_metas[level].last_mut()
-                } else {
-                    None
-                };
-                if Self::merge_items(
-                    view_interval,
-                    tile_id,
-                    last,
-                    last_meta,
-                    self.fields.num_items,
-                    &mut merged[level],
-                ) {
-                    continue;
-                }
-            }
-
-            let color = entry.color(&self.state);
-            let color: Color32 = color.into();
-            let color: Rgba = color.into();
-
-            let item_meta = item_metas.as_ref().map(|_| {
-                get_meta(
-                    entry,
-                    ItemInfo {
-                        point_interval,
-                        expand,
-                    },
-                )
+            let first_index = points.partition_point(|p| {
+                let stop: ts::Timestamp = cont.entry(p.entry).time_range().stop.unwrap().into();
+                stop < tile_id.0.start
             });
+            let last_index = points[first_index..].partition_point(|p| {
+                let start: ts::Timestamp = cont.entry(p.entry).time_range().start.unwrap().into();
+                start < tile_id.0.stop
+            }) + first_index;
 
-            let mut add_item = |interval: ts::Interval, opacity: f32, status: Option<FieldID>| {
-                if !interval.overlaps(tile_id.0) {
-                    return;
+            #[cfg(debug_assertions)]
+            {
+                info!("Debug assertions enabled: checking point overlap. This can be expensive.");
+                for point in &points[..first_index] {
+                    let time_range = cont.entry(point.entry).time_range();
+                    let point_interval: ts::Interval = time_range.into();
+                    assert!(!point_interval.overlaps(tile_id.0));
                 }
-                let view_interval = interval.intersection(tile_id.0);
-                let color = (Rgba::WHITE.multiply(1.0 - opacity) + color.multiply(opacity)).into();
-                let item = Item {
-                    item_uid: base.prof_uid.into(),
-                    interval: view_interval,
-                    color,
-                };
-                items[level].push(item);
-                if let Some(ref mut item_metas) = item_metas {
-                    let mut item_meta = item_meta.clone().unwrap();
-                    if let Some(status) = status {
-                        item_meta
-                            .fields
-                            .insert(1, (status, Field::Interval(interval)));
+                for point in &points[last_index..] {
+                    let time_range = cont.entry(point.entry).time_range();
+                    let point_interval: ts::Interval = time_range.into();
+                    assert!(!point_interval.overlaps(tile_id.0));
+                }
+            }
+
+            for point in &points[first_index..last_index] {
+                assert!(point.first);
+
+                let entry = cont.entry(point.entry);
+                let (base, time_range, waiters) =
+                    (&entry.base(), entry.time_range(), &entry.waiters());
+
+                let point_interval: ts::Interval = time_range.into();
+                assert!(point_interval.overlaps(tile_id.0));
+                let mut view_interval = point_interval.intersection(tile_id.0);
+
+                assert_eq!(level, base.level.unwrap() as usize);
+
+                let expand =
+                    !full && Self::expand_item(&mut view_interval, tile_id, items.last(), *merged);
+
+                if let Some(last) = items.last_mut() {
+                    let last_meta = if let Some(ref mut item_metas) = item_metas {
+                        item_metas.last_mut()
+                    } else {
+                        None
+                    };
+                    if Self::merge_items(
+                        view_interval,
+                        tile_id,
+                        last,
+                        last_meta,
+                        self.fields.num_items,
+                        merged,
+                    ) {
+                        continue;
                     }
-                    item_metas[level].push(item_meta);
                 }
-            };
-            if let Some(waiters) = waiters {
-                let mut start = time_range.start.unwrap();
-                for wait in &waiters.wait_intervals {
-                    let running_interval = ts::Interval::new(start.into(), wait.start.into());
-                    let waiting_interval = ts::Interval::new(wait.start.into(), wait.ready.into());
-                    let ready_interval = ts::Interval::new(wait.ready.into(), wait.end.into());
-                    add_item(running_interval, 1.0, Some(self.fields.status_running));
-                    add_item(waiting_interval, 0.15, Some(self.fields.status_waiting));
-                    add_item(ready_interval, 0.45, Some(self.fields.status_ready));
-                    start = max(start, wait.end);
+
+                let color = entry.color(&self.state);
+                let color: Color32 = color.into();
+                let color: Rgba = color.into();
+
+                let item_meta = item_metas.as_ref().map(|_| {
+                    get_meta(
+                        entry,
+                        ItemInfo {
+                            point_interval,
+                            expand,
+                        },
+                    )
+                });
+
+                let mut add_item =
+                    |interval: ts::Interval, opacity: f32, status: Option<FieldID>| {
+                        if !interval.overlaps(tile_id.0) {
+                            return;
+                        }
+                        let view_interval = interval.intersection(tile_id.0);
+                        let color =
+                            (Rgba::WHITE.multiply(1.0 - opacity) + color.multiply(opacity)).into();
+                        let item = Item {
+                            item_uid: base.prof_uid.into(),
+                            interval: view_interval,
+                            color,
+                        };
+                        items.push(item);
+                        if let Some(ref mut item_metas) = item_metas {
+                            let mut item_meta = item_meta.clone().unwrap();
+                            if let Some(status) = status {
+                                item_meta
+                                    .fields
+                                    .insert(1, (status, Field::Interval(interval)));
+                            }
+                            item_metas.push(item_meta);
+                        }
+                    };
+                if let Some(waiters) = waiters {
+                    let mut start = time_range.start.unwrap();
+                    for wait in &waiters.wait_intervals {
+                        let running_interval = ts::Interval::new(start.into(), wait.start.into());
+                        let waiting_interval =
+                            ts::Interval::new(wait.start.into(), wait.ready.into());
+                        let ready_interval = ts::Interval::new(wait.ready.into(), wait.end.into());
+                        add_item(running_interval, 1.0, Some(self.fields.status_running));
+                        add_item(waiting_interval, 0.15, Some(self.fields.status_waiting));
+                        add_item(ready_interval, 0.45, Some(self.fields.status_ready));
+                        start = max(start, wait.end);
+                    }
+                    let stop = time_range.stop.unwrap();
+                    if start < stop {
+                        let running_interval = ts::Interval::new(start.into(), stop.into());
+                        add_item(running_interval, 1.0, Some(self.fields.status_running));
+                    }
+                } else {
+                    add_item(view_interval, 1.0, None);
                 }
-                let stop = time_range.stop.unwrap();
-                if start < stop {
-                    let running_interval = ts::Interval::new(start.into(), stop.into());
-                    add_item(running_interval, 1.0, Some(self.fields.status_running));
-                }
-            } else {
-                add_item(view_interval, 1.0, None);
             }
         }
         items
@@ -907,7 +937,7 @@ impl StateDataSource {
                 ));
             }
         }
-        Field::U64(op_id.0)
+        Field::U64(op_id.0.get())
     }
 
     fn generate_inst_link(&self, inst_uid: InstUID, prefix: &str) -> Option<Field> {
@@ -974,7 +1004,7 @@ impl StateDataSource {
                 // FIXME: You might think that initiation_op is None rather than
                 // needing this check with zero, but backwards compatibility is hard
                 // You can remove this check once we stop needing to be compatible with Python
-                if initiation_op.0 > 0 {
+                if initiation_op != OpID::ZERO {
                     fields.push((self.fields.operation, self.generate_op_link(initiation_op)));
                 }
             }
@@ -1132,7 +1162,7 @@ impl StateDataSource {
                 // FIXME: You might think that initiation_op is None rather than
                 // needing this check with zero, but backwards compatibility is hard
                 // You can remove this check once we stop needing to be compatible with Python
-                if initiation_op.0 > 0 {
+                if initiation_op != OpID::ZERO {
                     fields.push((self.fields.operation, self.generate_op_link(initiation_op)));
                 }
             }
@@ -1356,7 +1386,7 @@ impl StateDataSource {
                 // FIXME: You might think that initiation_op is None rather than
                 // needing this check with zero, but backwards compatibility is hard
                 // You can remove this check once we stop needing to be compatible with Python
-                if initiation_op.0 > 0 {
+                if initiation_op != OpID::ZERO {
                     fields.push((self.fields.operation, self.generate_op_link(initiation_op)));
                 }
             }
@@ -1421,8 +1451,8 @@ impl DataSource for StateDataSource {
     fn fetch_summary_tile(&self, entry_id: &EntryID, tile_id: TileID, full: bool) -> SummaryTile {
         // Pick this number to be approximately the number of pixels we expect
         // the user to have on their screen. If this is a full tile, increase
-        // 10x so that we get more resolution when zoomed in.
-        let samples = if full { 10_000 } else { 1_000 };
+        // this so that we get more resolution when zoomed in.
+        let samples = if full { 4_000 } else { 800 };
 
         let step_utilization = self.generate_step_utilization(entry_id);
 

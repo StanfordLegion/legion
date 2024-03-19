@@ -6699,20 +6699,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ShardID PhysicalTemplate::record_managed_barrier(ApBarrier bar,
-                                                     size_t total_arrivals)
+    ShardID PhysicalTemplate::record_barrier_creation(ApBarrier &bar,
+                                                      size_t total_arrivals)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(!bar.exists());
+#endif
+      bar = ApBarrier(Realm::Barrier::create_barrier(total_arrivals));
       AutoLock tpl_lock(template_lock);
 #ifdef DEBUG_LEGION
-      assert(bar.exists());
       assert(is_recording());
-      assert(event_map.find(bar) == event_map.end());
-      assert(managed_barriers.find(bar) == managed_barriers.end());
-      const unsigned lhs = convert_event(bar, false/*check*/);
-#else
-      const unsigned lhs = convert_event(bar);
 #endif
+      const unsigned lhs = convert_event(bar);
       BarrierAdvance *advance =
         new BarrierAdvance(*this, bar, lhs, total_arrivals, true/*owner*/);
       insert_instruction(advance);
@@ -7795,11 +7794,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ShardID ShardedPhysicalTemplate::record_managed_barrier(ApBarrier bar,
+    ShardID ShardedPhysicalTemplate::record_barrier_creation(ApBarrier &bar,
                                                           size_t total_arrivals)
     //--------------------------------------------------------------------------
     {
-      PhysicalTemplate::record_managed_barrier(bar, total_arrivals);
+      PhysicalTemplate::record_barrier_creation(bar, total_arrivals);
       return local_shard;
     }
 

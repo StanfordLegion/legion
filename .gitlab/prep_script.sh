@@ -15,11 +15,10 @@ cp -r $CI_PROJECT_DIR $EXTERNAL_WORKDIR
 cd $EXTERNAL_WORKDIR
 
 # setup environment
-if [[ "$LMOD_SYSTEM_NAME" = crusher ]]; then
+if [[ "$LMOD_SYSTEM_NAME" = frontier ]]; then
     cat >>env.sh <<EOF
 module load PrgEnv-gnu
 module load rocm/$ROCM_VERSION
-export HIP_PATH="\$ROCM_PATH/hip"
 export CC=cc
 export CXX=CC
 if [[ "\$REALM_NETWORKS" != "" ]]; then

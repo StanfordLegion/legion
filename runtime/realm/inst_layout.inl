@@ -1789,7 +1789,9 @@ namespace Realm {
       const PieceLookup::Instruction *i = start_inst;
       while(true) {
 #ifdef DEBUG_REALM
+#ifndef __HIP_DEVICE_COMPILE__
 	assert(i != 0);
+#endif
 #endif
 	if(i->opcode() == PieceLookup::Opcodes::OP_AFFINE_PIECE) {
 	  const PieceLookup::AffinePiece<N,T> *ap =

@@ -317,11 +317,13 @@ namespace Legion {
       struct FutureInstanceTracker {
       public:
         FutureInstanceTracker(void) : instance(NULL) { }
-        FutureInstanceTracker(FutureInstance *inst, ApEvent ready)
-          : instance(inst), ready_event(ready) { }
+        FutureInstanceTracker(FutureInstance *inst, ApEvent ready,
+            ApUserEvent remote = ApUserEvent::NO_AP_USER_EVENT)
+          : instance(inst), ready_event(ready), remote_postcondition(remote) { }
       public:
         FutureInstance *const instance;
         const ApEvent ready_event;
+        ApUserEvent remote_postcondition;
         std::vector<ApEvent> read_events;
       };
     public:

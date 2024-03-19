@@ -911,16 +911,30 @@ namespace Legion {
       for (std::map<Memory,FutureInstanceTracker>::iterator
             it = instances.begin(); it != instances.end(); it++)
       {
-        // Merge together all the events for destroying this future instance
-        ApEvent precondition = it->second.ready_event;
-        if (!it->second.read_events.empty())
+        if (it->second.remote_postcondition.exists())
         {
-          if (precondition.exists())
-            it->second.read_events.push_back(precondition);
-          precondition = Runtime::merge_events(NULL, it->second.read_events);
-        }
-        if (!it->second.instance->defer_deletion(precondition))
+          // This is a remote instance that we unpacked and nobody
+          // used it so we can just clean it up since we don't own it
+#ifdef DEBUG_LEGION
+          assert(it->second.read_events.empty());
+#endif
+          Runtime::trigger_event(NULL, it->second.remote_postcondition,
+              it->second.ready_event);
           delete it->second.instance;
+        }
+        else
+        {
+          // Merge together all the events for destroying this future instance
+          ApEvent precondition = it->second.ready_event;
+          if (!it->second.read_events.empty())
+          {
+            if (precondition.exists())
+              it->second.read_events.push_back(precondition);
+            precondition = Runtime::merge_events(NULL, it->second.read_events);
+          }
+          if (!it->second.instance->defer_deletion(precondition))
+            delete it->second.instance;
+        }
       }
       if (producer_op != NULL)
         producer_op->remove_mapping_reference(op_gen);
@@ -1972,7 +1986,15 @@ namespace Legion {
 #endif
       ready_event =
         instance->copy_from(tracker.instance, op, tracker.ready_event); 
-      if (ready_event.exists())
+      if (tracker.remote_postcondition.exists())
+      {
+        // This is a remote instance that we don't own so once we're
+        // done with the copy we can clean it up
+        Runtime::trigger_event(NULL, tracker.remote_postcondition, ready_event);
+        delete tracker.instance;
+        instances.erase(source);
+      }
+      else if (ready_event.exists())
         tracker.read_events.push_back(ready_event);
       instances.emplace(std::make_pair(memory, 
             FutureInstanceTracker(instance, ready_event)));
@@ -2185,6 +2207,7 @@ namespace Legion {
       assert(metadata == NULL);
 #endif
       derez.deserialize(future_size);
+      future_size_set = true;
       derez.deserialize(result_set_space);
       if (future_size > 0)
       {
@@ -2238,32 +2261,34 @@ namespace Legion {
             derez.deserialize(precondition);
             ApUserEvent postcondition;
             derez.deserialize(postcondition);
+            if (pending_instances.empty())
+            {
+              // Save this in the list of instances to consume once 
+              // someone tries to read from it
+              instances.emplace(std::make_pair(instance->memory,
+                FutureInstanceTracker(instance, precondition, postcondition)));
+            }
+            else
+            {
+              std::map<Memory,PendingInstance>::iterator pending =
+                pending_instances.begin();
+              // Issue the copy to the pending instance
+              ApEvent ready = pending->second.instance->copy_from(instance,
+                    pending->second.op, precondition);
+              Runtime::trigger_event(NULL, postcondition, ready);
+              instances.emplace(std::make_pair(pending->second.instance->memory,
+                    FutureInstanceTracker(pending->second.instance, ready)));
 #ifdef DEBUG_LEGION
-            assert(!pending_instances.empty());
+              assert(!local_visible_memory.exists());
 #endif
-            std::map<Memory,PendingInstance>::iterator pending =
-              pending_instances.begin();
-            // Issue the copy to the pending instance
-            ApEvent ready = pending->second.instance->copy_from(instance,
-                  pending->second.op, precondition);
-            Runtime::trigger_event(NULL, postcondition, ready);
-            instances.emplace(std::make_pair(pending->second.instance->memory,
-                  FutureInstanceTracker(pending->second.instance, ready)));
-#ifdef DEBUG_LEGION
-            assert(!local_visible_memory.exists());
-#endif
-            if (pending->second.instance->is_meta_visible)
-              local_visible_memory = pending->second.instance->memory;
-            pending_instances.erase(pending);
-            delete instance;
+              if (pending->second.instance->is_meta_visible)
+                local_visible_memory = pending->second.instance->memory;
+              pending_instances.erase(pending);
+              delete instance;
+            }
           }
         }
       }
-      if (!instances.empty())
-        future_size = instances.begin()->second.instance->size;
-      else
-        future_size = 0;
-      future_size_set = true;
       if (future_complete.exists())
       {
         ApUserEvent to_trigger;
@@ -2793,9 +2818,11 @@ namespace Legion {
         }
         if (!target_memories.empty())
         {
-#ifdef DEBUG_LEGION
-          assert(target_memories.size() < instances.size());
-#endif
+          // Check to see if we're packing all our instances to send away.
+          // If we are we still need to keep one of them around to be able
+          // to copy from it if we need to
+          const Memory keep = (target_memories.size() < instances.size()) ?
+           Memory::NO_MEMORY : find_best_source(runtime->runtime_system_memory);
           // Send the instances to the future impl that should own them
           rez.serialize<size_t>(target_memories.size());
           for (std::vector<Memory>::const_iterator mit =
@@ -2810,14 +2837,26 @@ namespace Legion {
             finder->second.instance->pack_instance(rez, ApEvent::NO_AP_EVENT,
                 true/*move ownership*/, false/*allow by value*/);
             rez.serialize(finder->second.ready_event);
+            if ((*mit) == keep)
+            {
+              finder->second.remote_postcondition = 
+                Runtime::create_ap_user_event(NULL);
+              finder->second.read_events.push_back(
+                  finder->second.remote_postcondition);
+            }
             rez.serialize<size_t>(finder->second.read_events.size());
             for (std::vector<ApEvent>::const_iterator it =
                   finder->second.read_events.begin(); it !=
                   finder->second.read_events.end(); it++)
               rez.serialize(*it);
-            // Now we can delete the instance remove it from the entry
-            delete finder->second.instance;
-            instances.erase(finder);
+            if ((*mit) != keep)
+            {
+              // Now we can delete the instance remove it from the entry
+              delete finder->second.instance;
+              instances.erase(finder);
+            }
+            else
+              finder->second.read_events.clear();
           }
         }
         else
@@ -3228,7 +3267,11 @@ namespace Legion {
 #endif
 #ifdef DEBUG_LEGION
         // Should only be writing to instances that this future instance owns
-        assert(own_instance);
+        // Might also happen if we have an "external" (not really external but
+        // made-using-malloc instance) that is bigger than the copy and we 
+        // make an intermediate instance to handle that.
+        assert(own_instance || 
+            (own_dst && external_allocation && (copy_size < size)));
 #endif
         std::vector<Realm::CopySrcDstField> srcs(1);
         std::vector<Realm::CopySrcDstField> dsts(1);

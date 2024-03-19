@@ -119,6 +119,7 @@ local default_options = {
   ["no-dynamic-branches-assert"] = false,
   ["override-demand-index-launch"] = false,
   ["index-launch-dynamic"] = true,
+  ["index-launch-licm"] = true,
   ["override-demand-openmp"] = false,
   ["override-demand-cuda"] = false,
   ["pretty"] = false,
@@ -179,6 +180,11 @@ local function check_consistency(options, args)
   if options["gpu-offline"] == 1 and options["gpu-arch"] == "unspecified" then
     print("conflicting command line arguments: requested -fgpu-offline 1 but -fgpu-arch is unspecified")
     assert(false)
+  end
+
+  if options["flow-spmd"] then
+    print("WARNING: -fflow-spmd is deprecated, and will be removed in a future release.")
+    print("Please migrate to Legion control replication.")
   end
 
   return options, args

@@ -916,8 +916,18 @@ if(Legion_USE_CUDA)
 
   set_target_cuda_warnings_and_errors(LegionRuntime WARN_AS_ERROR ${Legion_BUILD_WARN_AS_ERROR})
 
-  # complex reduction ops bring in a public dependency on cuda headers
   if(Legion_REDOP_COMPLEX)
+    # Thrust is required for complex reductions; let cmake find it.
+    # By including Thrust before the CUDA headers we make sure the Thrust installation
+    # we pass to cmake will take priority against whatever version is bundled with CUDA.
+    find_package(Thrust CONFIG)
+    # If we can't find a standalone Thrust then don't do anything and just let the build
+    # pick up the version that comes bundled with CUDA.
+    if(Thrust_FOUND)
+      thrust_create_target(Thrust)
+      target_link_libraries(LegionRuntime PUBLIC Thrust)
+    endif()
+    # complex reduction ops bring in a public dependency on cuda headers
     target_link_libraries(LegionRuntime PUBLIC CUDA::toolkit)
   endif()
 
