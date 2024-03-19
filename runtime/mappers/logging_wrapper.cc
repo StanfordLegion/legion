@@ -92,6 +92,12 @@ class MessageBuffer {
 LoggingWrapper::LoggingWrapper(Mapper* mapper, Logger* _logger)
     : ForwardingMapper(mapper),
       logger(_logger != NULL ? _logger : &log_maplog) {
+  {
+    std::stringstream ss;
+    ss << "LoggingWrapper(" << mapper->get_mapper_name() << ")";
+    name = ss.str();
+  }
+
   if (!logger->want_info()) return;
   MessageBuffer buf(runtime, NULL, logger);
   Machine machine = Machine::get_machine();
@@ -194,6 +200,10 @@ void LoggingWrapper::select_sharding_functor(
   select_sharding_functor_impl(ctx, copy, input, output);
 }
 #endif // NO_LEGION_CONTROL_REPLICATION
+
+const char* LoggingWrapper::get_mapper_name(void) const {
+  return name.c_str();
+}
 
 void LoggingWrapper::slice_task(const MapperContext ctx,
                                 const Task& task,
