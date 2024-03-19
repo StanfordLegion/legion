@@ -87,6 +87,19 @@ namespace Legion {
          << "max_dim:maxdim:" << sizeof(unsigned)
          << "}" << std::endl;
 
+      ss << "RuntimeConfig {"
+         << "id:" << RUNTIME_CONFIG_ID << delim
+         << "debug:bool:" << sizeof(bool) << delim
+         << "spy:bool:" << sizeof(bool) << delim
+         << "gc:bool:" << sizeof(bool) << delim
+         << "inorder:bool:" << sizeof(bool) << delim
+         << "safe_mapper:bool:" << sizeof(bool) << delim
+         << "safe_runtime:bool:" << sizeof(bool) << delim
+         << "safe_ctrlrepl:bool:" << sizeof(bool) << delim
+         << "part_checks:bool:" << sizeof(bool) << delim
+         << "resilient:bool:" << sizeof(bool)
+         << "}" << std::endl;
+
       ss << "MachineDesc {"
          << "id:" << MACHINE_DESC_ID                  << delim
          << "node_id:unsigned:"   << sizeof(unsigned) << delim
@@ -497,6 +510,24 @@ namespace Legion {
       lp_fwrite(f, (char*)&(max_dim_desc.max_dim),
 		sizeof(max_dim_desc.max_dim));
 
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfBinarySerializer::serialize(
+                                    const LegionProfDesc::RuntimeConfig &config)
+    //--------------------------------------------------------------------------
+    {
+      int ID = RUNTIME_CONFIG_ID;
+      lp_fwrite(f, (char*)&ID, sizeof(ID));
+      lp_fwrite(f, (char*)&config.debug, sizeof(config.debug));
+      lp_fwrite(f, (char*)&config.spy, sizeof(config.spy));
+      lp_fwrite(f, (char*)&config.gc, sizeof(config.gc));
+      lp_fwrite(f, (char*)&config.inorder, sizeof(config.inorder));
+      lp_fwrite(f, (char*)&config.safe_mapper, sizeof(config.safe_mapper));
+      lp_fwrite(f, (char*)&config.safe_runtime, sizeof(config.safe_runtime));
+      lp_fwrite(f, (char*)&config.safe_ctrlrepl, sizeof(config.safe_ctrlrepl));
+      lp_fwrite(f, (char*)&config.part_checks, sizeof(config.part_checks));
+      lp_fwrite(f, (char*)&config.resilient, sizeof(config.resilient));
     }
 
     //--------------------------------------------------------------------------
@@ -1627,6 +1658,18 @@ namespace Legion {
     {
       log_prof.print("Max Dim Desc %d",
                      max_dim_desc.max_dim);
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfASCIISerializer::serialize(
+                                    const LegionProfDesc::RuntimeConfig &config)
+    //--------------------------------------------------------------------------
+    {
+      log_prof.print("Runtime Config %d %d %d %d %d %d %d %d %d",
+          config.debug ? 1 : 0, config.spy ? 1 : 0, config.gc ? 1 : 0,
+          config.inorder ? 1 : 0, config.safe_mapper ? 1 : 0,
+          config.safe_runtime ? 1 : 0, config.safe_ctrlrepl ? 1 : 0,
+          config.part_checks ? 1 : 0, config.resilient ? 1 : 0);
     }
 
     //--------------------------------------------------------------------------

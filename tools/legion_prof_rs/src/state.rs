@@ -3792,6 +3792,7 @@ fn process_record(
         Record::MaxDimDesc { max_dim } => {
             state.max_dim = *max_dim;
         }
+        Record::RuntimeConfig { .. } => {}
         Record::MachineDesc { num_nodes, .. } => {
             state.num_nodes = *num_nodes;
         }
