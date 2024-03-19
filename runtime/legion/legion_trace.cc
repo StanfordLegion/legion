@@ -10286,14 +10286,22 @@ namespace Legion {
                             const bool recurrent_replay)
     //--------------------------------------------------------------------------
     {
+      std::map<TraceLocalID,MemoizableOp*>::const_iterator finder =
+        operations.find(owner);
+      if (finder == operations.end())
+      {
+        // Remote copy, should still be able to find the owner op here
+        TraceLocalID local = owner; 
+        local.index_point = DomainPoint();
+        finder = operations.find(local);
+      }
 #ifdef DEBUG_LEGION
-      assert(operations.find(owner) != operations.end());
-      assert(operations.find(owner)->second != NULL);
+      assert(finder != operations.end());
+      assert(finder->second != NULL);
 #endif
-      MemoizableOp *op = operations[owner];
       ApEvent precondition = events[precondition_idx];
-      const PhysicalTraceInfo trace_info(op, -1U);
-      events[lhs] = expr->issue_copy(op, trace_info, dst_fields, 
+      const PhysicalTraceInfo trace_info(finder->second, -1U);
+      events[lhs] = expr->issue_copy(finder->second, trace_info, dst_fields,
                                      src_fields, reservations,
 #ifdef LEGION_SPY
                                      src_tree_id, dst_tree_id,
@@ -10371,16 +10379,24 @@ namespace Legion {
                               const bool recurrent_replay)
     //--------------------------------------------------------------------------
     {
+      std::map<TraceLocalID,MemoizableOp*>::const_iterator finder =
+        operations.find(owner);
+      if (finder == operations.end())
+      {
+        // Remote copy, should still be able to find the owner op here
+        TraceLocalID local = owner; 
+        local.index_point = DomainPoint();
+        finder = operations.find(local);
+      }
 #ifdef DEBUG_LEGION
-      assert(operations.find(owner) != operations.end());
-      assert(operations.find(owner)->second != NULL);
+      assert(finder != operations.end());
+      assert(finder->second != NULL);
 #endif
-      MemoizableOp *op = operations[owner];
       ApEvent copy_pre = events[copy_precondition];
       ApEvent src_indirect_pre = events[src_indirect_precondition];
       ApEvent dst_indirect_pre = events[dst_indirect_precondition];
-      const PhysicalTraceInfo trace_info(op, -1U);
-      events[lhs] = executor->execute(op, PredEvent::NO_PRED_EVENT,
+      const PhysicalTraceInfo trace_info(finder->second, -1U);
+      events[lhs] = executor->execute(finder->second, PredEvent::NO_PRED_EVENT,
                                       copy_pre, src_indirect_pre,
                                       dst_indirect_pre, trace_info,
                                       true/*replay*/, recurrent_replay);
@@ -10450,14 +10466,22 @@ namespace Legion {
                             const bool recurrent_replay)
     //--------------------------------------------------------------------------
     {
+      std::map<TraceLocalID,MemoizableOp*>::const_iterator finder =
+        operations.find(owner);
+      if (finder == operations.end())
+      {
+        // Remote copy, should still be able to find the owner op here
+        TraceLocalID local = owner; 
+        local.index_point = DomainPoint();
+        finder = operations.find(local);
+      }
 #ifdef DEBUG_LEGION
-      assert(operations.find(owner) != operations.end());
-      assert(operations.find(owner)->second != NULL);
+      assert(finder != operations.end());
+      assert(finder->second != NULL);
 #endif
-      MemoizableOp *op = operations[owner];
       ApEvent precondition = events[precondition_idx];
-      const PhysicalTraceInfo trace_info(op, -1U);
-      events[lhs] = expr->issue_fill(op, trace_info, fields, 
+      const PhysicalTraceInfo trace_info(finder->second, -1U);
+      events[lhs] = expr->issue_fill(finder->second, trace_info, fields,
                                      fill_value, fill_size,
 #ifdef LEGION_SPY
                                      fill_uid, handle, tree_id,
