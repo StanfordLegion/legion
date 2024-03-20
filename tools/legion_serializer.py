@@ -157,7 +157,7 @@ class LegionProfASCIIDeserializer(LegionDeserializer):
         "MetaDesc": re.compile(prefix + r'Prof Meta Desc (?P<kind>[0-9]+) (?P<message>[0-1]) (?P<ordered_vc>[0-1]) (?P<name>[a-zA-Z0-9_ ]+)'),
         "OpDesc": re.compile(prefix + r'Prof Op Desc (?P<kind>[0-9]+) (?P<name>[a-zA-Z0-9_ ]+)'),
         "MaxDimDesc": re.compile(prefix + r'Max Dim Desc (?P<max_dim>[0-9]+)'),
-        "RuntimeConfig": re.compile(prefix +r'Runtime Config (?P<debug>[0-1]) (?P<spy>[0-1]) (?P<gc>[0-1]) (?P<inorder>[0-1]) (?P<safe_mapper>[0-1]) (?P<safe_runtime>[0-1]) (?P<safe_ctrlrepl>[0-1]) (?P<part_checks>[0-1]) (?P<resilient>[0-1])'),
+        "RuntimeConfig": re.compile(prefix +r'Runtime Config (?P<debug>[0-1]) (?P<spy>[0-1]) (?P<gc>[0-1]) (?P<inorder>[0-1]) (?P<safe_mapper>[0-1]) (?P<safe_runtime>[0-1]) (?P<safe_ctrlrepl>[0-1]) (?P<part_checks>[0-1]) (?P<bounds_checks>[0-1]) (?P<resilient>[0-1])'),
         "MachineDesc": re.compile(prefix + r'Machine Desc (?P<node_id>[0-9]+) (?P<num_nodes>[0-9]+) (?P<version>[0-9]+)'),
         "MachineDesc": re.compile(prefix + r'Machine Desc (?P<node_id>[0-9]+) (?P<num_nodes>[0-9]+) (?P<version>[0-9]+) (?P<hostname>[a-zA-Z0-9_ ]+) (?P<host_id>[0-9]+) (?P<process_id>[0-9]+)'),
         "ZeroTime": re.compile(prefix + r'Zero Time (?P<zero_time>[0-9]+)'),
@@ -285,6 +285,7 @@ class LegionProfASCIIDeserializer(LegionDeserializer):
         "safe_runtime": bool,
         "safe_ctrlrepl": bool,
         "part_checks": bool,
+        "bounds_checks": bool,
         "resilient": bool,
     }
 

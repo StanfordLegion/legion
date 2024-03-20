@@ -143,6 +143,7 @@ namespace Legion {
         bool safe_runtime;
         bool safe_ctrlrepl;
         bool part_checks;
+        bool bounds_checks;
         bool resilient;
       };
       struct MachineDesc {

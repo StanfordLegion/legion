@@ -92,7 +92,7 @@ pub enum Record {
     MetaDesc { kind: VariantID, message: bool, ordered_vc: bool, name: String },
     OpDesc { kind: u32, name: String },
     MaxDimDesc { max_dim: MaxDim },
-    RuntimeConfig { debug: bool, spy: bool, gc: bool, inorder: bool, safe_mapper: bool, safe_runtime: bool, safe_ctrlrepl: bool, part_checks: bool, resilient: bool },
+    RuntimeConfig { debug: bool, spy: bool, gc: bool, inorder: bool, safe_mapper: bool, safe_runtime: bool, safe_ctrlrepl: bool, part_checks: bool, bounds_checks: bool, resilient: bool },
     MachineDesc { node_id: NodeID, num_nodes: u32, version: u32, hostname: String, host_id: u64, process_id: u32 },
     ZeroTime { zero_time: i64 },
     ProcDesc { proc_id: ProcID, kind: ProcKind, cuda_device_uuid: Uuid },
@@ -392,6 +392,7 @@ fn parse_runtime_config(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, safe_runtime) = parse_bool(input)?;
     let (input, safe_ctrlrepl) = parse_bool(input)?;
     let (input, part_checks) = parse_bool(input)?;
+    let (input, bounds_checks) = parse_bool(input)?;
     let (input, resilient) = parse_bool(input)?;
     Ok((
         input,
@@ -404,6 +405,7 @@ fn parse_runtime_config(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
             safe_runtime,
             safe_ctrlrepl,
             part_checks,
+            bounds_checks,
             resilient,
         },
     ))

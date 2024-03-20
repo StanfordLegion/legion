@@ -2747,6 +2747,7 @@ pub struct RuntimeConfig {
     pub safe_runtime: bool,
     pub safe_ctrlrepl: bool,
     pub part_checks: bool,
+    pub bounds_checks: bool,
     pub resilient: bool,
 }
 
@@ -2760,6 +2761,7 @@ impl RuntimeConfig {
             || self.safe_runtime
             || self.safe_ctrlrepl
             || self.part_checks
+            || self.bounds_checks
             || self.resilient
     }
 }
@@ -2786,6 +2788,7 @@ impl fmt::Display for RuntimeConfig {
         conf(self.safe_runtime && !self.debug, "Safe Runtime")?;
         conf(self.safe_ctrlrepl, "-lg:safe_ctrlrepl")?;
         conf(self.part_checks, "-lg:partcheck")?;
+        conf(self.bounds_checks, "Bounds Checks")?;
         conf(self.resilient, "Resilience")
     }
 }
@@ -3855,6 +3858,7 @@ fn process_record(
             safe_runtime,
             safe_ctrlrepl,
             part_checks,
+            bounds_checks,
             resilient,
         } => {
             state.runtime_config = RuntimeConfig {
@@ -3866,6 +3870,7 @@ fn process_record(
                 safe_runtime: *safe_runtime,
                 safe_ctrlrepl: *safe_ctrlrepl,
                 part_checks: *part_checks,
+                bounds_checks: *bounds_checks,
                 resilient: *resilient,
             };
         }

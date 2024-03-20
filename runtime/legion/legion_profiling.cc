@@ -1813,6 +1813,11 @@ namespace Legion {
         runtime->check_privileges,
         runtime->safe_control_replication > 0,
         runtime->verify_partitions,
+#ifdef LEGION_BOUNDS_CHECKS
+        true,
+#else
+        false,
+#endif
         runtime->resilient_mode,
       };
       serializer->serialize(config);

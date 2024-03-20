@@ -97,6 +97,7 @@ namespace Legion {
          << "safe_runtime:bool:" << sizeof(bool) << delim
          << "safe_ctrlrepl:bool:" << sizeof(bool) << delim
          << "part_checks:bool:" << sizeof(bool) << delim
+         << "bounds_checks:bool:" << sizeof(bool) << delim
          << "resilient:bool:" << sizeof(bool)
          << "}" << std::endl;
 
@@ -527,6 +528,7 @@ namespace Legion {
       lp_fwrite(f, (char*)&config.safe_runtime, sizeof(config.safe_runtime));
       lp_fwrite(f, (char*)&config.safe_ctrlrepl, sizeof(config.safe_ctrlrepl));
       lp_fwrite(f, (char*)&config.part_checks, sizeof(config.part_checks));
+      lp_fwrite(f, (char*)&config.bounds_checks, sizeof(config.bounds_checks));
       lp_fwrite(f, (char*)&config.resilient, sizeof(config.resilient));
     }
 
@@ -1665,11 +1667,12 @@ namespace Legion {
                                     const LegionProfDesc::RuntimeConfig &config)
     //--------------------------------------------------------------------------
     {
-      log_prof.print("Runtime Config %d %d %d %d %d %d %d %d %d",
+      log_prof.print("Runtime Config %d %d %d %d %d %d %d %d %d %d",
           config.debug ? 1 : 0, config.spy ? 1 : 0, config.gc ? 1 : 0,
           config.inorder ? 1 : 0, config.safe_mapper ? 1 : 0,
           config.safe_runtime ? 1 : 0, config.safe_ctrlrepl ? 1 : 0,
-          config.part_checks ? 1 : 0, config.resilient ? 1 : 0);
+          config.part_checks ? 1 : 0, config.bounds_checks ? 1 : 0,
+          config.resilient ? 1 : 0);
     }
 
     //--------------------------------------------------------------------------
