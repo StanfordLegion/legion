@@ -2165,6 +2165,7 @@ dependencies = [
  "derive_more",
  "env_logger",
  "flate2",
+ "itertools",
  "legion_prof_viewer",
  "log",
  "nom",
@@ -2179,9 +2180,9 @@ dependencies = [
 
 [[package]]
 name = "legion_prof_viewer"
-version = "0.1.0"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e44b0ebe86cf8e54cff3319dc3c1aa0b16d957289d08704522512c865c2e9e65"
+checksum = "7ca8ae90c84b1c681e24b7a17ebe5b18b3e63006a1d55012bfe5ad3119f20bf2"
 dependencies = [
  "actix-cors",
  "actix-web",

@@ -5,6 +5,7 @@ use std::fmt;
 use std::sync::OnceLock;
 
 use derive_more::{Add, From, LowerHex, Sub};
+use itertools::intersperse;
 use nonmax::NonMaxU64;
 use num_enum::TryFromPrimitive;
 
@@ -2738,10 +2739,74 @@ impl ProfUIDAllocator {
 }
 
 #[derive(Debug, Default)]
+pub struct RuntimeConfig {
+    pub debug: bool,
+    pub spy: bool,
+    pub gc: bool,
+    pub inorder: bool,
+    pub safe_mapper: bool,
+    pub safe_runtime: bool,
+    pub safe_ctrlrepl: bool,
+    pub part_checks: bool,
+    pub resilient: bool,
+}
+
+impl RuntimeConfig {
+    pub fn any(&self) -> bool {
+        self.debug
+            || self.spy
+            || self.gc
+            || self.inorder
+            || self.safe_mapper
+            || self.safe_runtime
+            || self.safe_ctrlrepl
+            || self.part_checks
+            || self.resilient
+    }
+}
+
+impl fmt::Display for RuntimeConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut components = Vec::new();
+        if self.debug {
+            components.push("Debug Mode");
+        }
+        if self.spy {
+            components.push("Legion Spy");
+        }
+        if self.gc {
+            components.push("Legion GC");
+        }
+        if self.inorder {
+            components.push("-lg:inorder");
+        }
+        if self.safe_mapper {
+            components.push("-lg:safe_mapper");
+        }
+        if self.safe_runtime {
+            components.push("Safe Runtime");
+        }
+        if self.safe_ctrlrepl {
+            components.push("-lg:safe_ctrlrepl");
+        }
+        if self.part_checks {
+            components.push("-lg:partcheck");
+        }
+        if self.resilient {
+            components.push("Resilience");
+        }
+        intersperse(components, ", ")
+            .map(|x| write!(f, "{}", x))
+            .collect()
+    }
+}
+
+#[derive(Debug, Default)]
 pub struct State {
     prof_uid_allocator: ProfUIDAllocator,
     max_dim: i32,
     pub num_nodes: u32,
+    pub runtime_config: RuntimeConfig,
     pub zero_time: TimestampDelta,
     pub _calibration_err: i64,
     pub procs: BTreeMap<ProcID, Proc>,
@@ -3792,7 +3857,29 @@ fn process_record(
         Record::MaxDimDesc { max_dim } => {
             state.max_dim = *max_dim;
         }
-        Record::RuntimeConfig { .. } => {}
+        Record::RuntimeConfig {
+            debug,
+            spy,
+            gc,
+            inorder,
+            safe_mapper,
+            safe_runtime,
+            safe_ctrlrepl,
+            part_checks,
+            resilient,
+        } => {
+            state.runtime_config = RuntimeConfig {
+                debug: *debug,
+                spy: *spy,
+                gc: *gc,
+                inorder: *inorder,
+                safe_mapper: *safe_mapper,
+                safe_runtime: *safe_runtime,
+                safe_ctrlrepl: *safe_ctrlrepl,
+                part_checks: *part_checks,
+                resilient: *resilient,
+            };
+        }
         Record::MachineDesc { num_nodes, .. } => {
             state.num_nodes = *num_nodes;
         }

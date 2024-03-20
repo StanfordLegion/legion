@@ -1430,6 +1430,16 @@ impl StateDataSource {
         let last_time = last_time + Timestamp::from_ns(last_time.to_ns() / 200);
         ts::Interval::new(ts::Timestamp(0), last_time.into())
     }
+
+    fn generate_warning_message(&self) -> Option<String> {
+        if !self.state.runtime_config.any() {
+            return None;
+        }
+        Some(format!(
+            "This profile was generated with {}. Extreme performance degradation may occur.",
+            self.state.runtime_config
+        ))
+    }
 }
 
 impl DataSource for StateDataSource {
@@ -1445,6 +1455,7 @@ impl DataSource for StateDataSource {
             interval: self.interval(),
             tile_set: TileSet::default(),
             field_schema: self.field_schema.clone(),
+            warning_message: self.generate_warning_message(),
         }
     }
 
