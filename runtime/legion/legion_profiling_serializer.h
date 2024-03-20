@@ -43,6 +43,7 @@ namespace Legion {
 
       virtual bool is_thread_safe(void) const = 0;
       // You must override the following functions in your implementation
+      virtual void serialize(const LegionProfDesc::MapperName&) = 0;
       virtual void serialize(const LegionProfDesc::MapperCallDesc&) = 0;
       virtual void serialize(const LegionProfDesc::RuntimeCallDesc&) = 0;
       virtual void serialize(const LegionProfDesc::MetaDesc&) = 0;
@@ -113,6 +114,7 @@ namespace Legion {
 
       bool is_thread_safe(void) const { return false; }
       // Serialize Methods
+      void serialize(const LegionProfDesc::MapperName&);
       void serialize(const LegionProfDesc::MapperCallDesc&);
       void serialize(const LegionProfDesc::RuntimeCallDesc&);
       void serialize(const LegionProfDesc::MetaDesc&);
@@ -174,6 +176,7 @@ namespace Legion {
 #endif
       enum LegionProfInstanceIDs {
         MESSAGE_DESC_ID,
+        MAPPER_NAME_ID,
         MAPPER_CALL_DESC_ID,
         RUNTIME_CALL_DESC_ID,
         META_DESC_ID,
@@ -234,6 +237,7 @@ namespace Legion {
 
       bool is_thread_safe(void) const { return true; }
       // Serialize Methods
+      void serialize(const LegionProfDesc::MapperName&);
       void serialize(const LegionProfDesc::MapperCallDesc&);
       void serialize(const LegionProfDesc::RuntimeCallDesc&);
       void serialize(const LegionProfDesc::MetaDesc&);

@@ -1033,7 +1033,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LegionProfInstance::record_mapper_call(Processor proc, 
+    void LegionProfInstance::record_mapper_call(Processor proc, MapperID mapper,
                               MappingCallKind kind, UniqueID uid,
                               unsigned long long start, unsigned long long stop,
                               LgEvent finish_event)
@@ -1044,6 +1044,7 @@ namespace Legion {
         return;
       mapper_call_infos.emplace_back(MapperCallInfo());
       MapperCallInfo &info = mapper_call_infos.back();
+      info.mapper = mapper;
       info.kind = kind;
       info.op_id = uid;
       info.start = start;
@@ -2554,6 +2555,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void LegionProfiler::record_mapper_name(MapperID mapper, const char *name)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock p_lock(profiler_lock);
+      if (std::binary_search(mappers.begin(), mappers.end(), mapper))
+        return;
+      mappers.push_back(mapper);
+      std::sort(mappers.begin(), mappers.end());
+      LegionProfDesc::MapperName mapper_name = { mapper, name } ;
+      serializer->serialize(mapper_name);
+    }
+
+    //--------------------------------------------------------------------------
     void LegionProfiler::record_mapper_call_kinds(const char *const *const
                                mapper_call_names, unsigned int num_mapper_calls)
     //--------------------------------------------------------------------------
@@ -2568,8 +2582,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LegionProfiler::record_mapper_call(MappingCallKind kind, UniqueID uid,
-                              unsigned long long start, unsigned long long stop)
+    void LegionProfiler::record_mapper_call(MapperID map, MappingCallKind kind,
+        UniqueID uid, unsigned long long start, unsigned long long stop)
     //--------------------------------------------------------------------------
     {
       LgEvent finish_event;
@@ -2595,8 +2609,8 @@ namespace Legion {
       if (thread_local_profiling_instance == NULL)
         create_thread_local_profiling_instance();
       thread_local_profiling_instance->process_proc_desc(current);
-      thread_local_profiling_instance->record_mapper_call(current, kind, uid, 
-                                                   start, stop, finish_event);
+      thread_local_profiling_instance->record_mapper_call(current, map, kind,
+          uid, start, stop, finish_event);
     }
 
     //--------------------------------------------------------------------------

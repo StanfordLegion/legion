@@ -2037,6 +2037,9 @@ impl Color {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+pub struct MapperID(pub u32);
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct MapperCallKindID(pub u32);
 
 #[derive(Debug)]
@@ -3759,6 +3762,7 @@ fn process_record(
     call_threshold: Timestamp,
 ) {
     match record {
+        Record::MapperName { .. } => {}
         Record::MapperCallDesc { kind, name } => {
             state
                 .mapper_call_kinds
@@ -4251,6 +4255,7 @@ fn process_record(
             state.update_last_time(*stop);
         }
         Record::MapperCallInfo {
+            mapper: _,
             kind,
             op_id,
             start,

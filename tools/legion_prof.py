@@ -3509,6 +3509,7 @@ class State(object):
         self.spy_state: Optional[legion_spy.State] = None
         self.visible_nodes: Optional[List[int]] = None
         self.callbacks = {
+            "MapperName":self.log_mapper_name,
             "MapperCallDesc": self.log_mapper_call_desc,
             "RuntimeCallDesc": self.log_runtime_call_desc,
             "MetaDesc": self.log_meta_desc,
@@ -4017,6 +4018,11 @@ class State(object):
         if kind not in self.op_kinds:
             self.op_kinds[kind] = name
 
+    # MapperName
+    @typecheck
+    def log_mapper_name(self, mapper_id: int, name: str) -> None:
+        pass
+
     # MapperCallDesc
     @typecheck
     def log_mapper_call_desc(self, kind: int, name: str) -> None:
@@ -4025,7 +4031,7 @@ class State(object):
 
     # MapperCallInfo
     @typecheck
-    def log_mapper_call_info(self, kind: int, proc_id: int, 
+    def log_mapper_call_info(self, mapper_id: int, kind: int, proc_id: int, 
                              op_id: int, start: int, stop: int, fevent: int
     ) -> None:
         assert start <= stop

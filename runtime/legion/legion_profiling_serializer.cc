@@ -48,6 +48,12 @@ namespace Legion {
 
       std::string delim = ", ";
 
+      ss << "MapperName {"
+         << "id:" << MAPPER_NAME_ID << delim
+         << "mapper_id:unsigned:" << sizeof(MapperID) << delim
+         << "name:string:" << "-1"
+         << "}" << std::endl;
+
       ss << "MapperCallDesc {" 
          << "id:" << MAPPER_CALL_DESC_ID            << delim
          << "kind:unsigned:"     << sizeof(unsigned) << delim
@@ -400,6 +406,7 @@ namespace Legion {
 
       ss << "MapperCallInfo {"
          << "id:" << MAPPER_CALL_INFO_ID                          << delim
+         << "mapper:MapperID:"      << sizeof(MapperID)
          << "kind:MappingCallKind:" << sizeof(MappingCallKind)    << delim
          << "op_id:UniqueID:"       << sizeof(UniqueID)           << delim
          << "start:timestamp_t:"    << sizeof(timestamp_t)        << delim
@@ -436,6 +443,17 @@ namespace Legion {
       lp_fwrite(f, preamble.c_str(), strlen(preamble.c_str()));
     }
 
+    //--------------------------------------------------------------------------
+    void LegionProfBinarySerializer::serialize(
+                                  const LegionProfDesc::MapperName &mapper_name)
+    //--------------------------------------------------------------------------
+    {
+      int ID = MAPPER_NAME_ID;
+      lp_fwrite(f, (char*)&ID, sizeof(ID));
+      lp_fwrite(f, (char*)&(mapper_name.mapper_id),
+          sizeof(mapper_name.mapper_id));
+      lp_fwrite(f, mapper_name.name, strlen(mapper_name.name) + 1);
+    }
 
     //--------------------------------------------------------------------------
     void LegionProfBinarySerializer::serialize(
@@ -1071,6 +1089,8 @@ namespace Legion {
     {
       int ID = MAPPER_CALL_INFO_ID;
       lp_fwrite(f, (char*)&ID, sizeof(ID));
+      lp_fwrite(f, (char*)&(mapper_call_info.mapper),
+                sizeof(mapper_call_info.mapper));
       lp_fwrite(f, (char*)&(mapper_call_info.kind),    
                 sizeof(mapper_call_info.kind));
       lp_fwrite(f, (char*)&(mapper_call_info.op_id),   
@@ -1586,6 +1606,15 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LegionProfASCIISerializer::serialize(
+                                  const LegionProfDesc::MapperName &mapper_name)
+    //--------------------------------------------------------------------------
+    {
+      log_prof.print("Prof Mapper Name %u %s", 
+                      mapper_name.mapper_id, mapper_name.name);
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfASCIISerializer::serialize(
                          const LegionProfDesc::MapperCallDesc &mapper_call_desc)
     //--------------------------------------------------------------------------
     {
@@ -1863,8 +1892,9 @@ namespace Legion {
                      const LegionProfInstance::MapperCallInfo& mapper_call_info)
     //--------------------------------------------------------------------------
     {
-      log_prof.print("Prof Mapper Call Info %u " IDFMT " %llu %llu %llu",
-        mapper_call_info.kind, mapper_call_info.proc_id, mapper_call_info.op_id,
+      log_prof.print("Prof Mapper Call Info %u %u " IDFMT " %llu %llu %llu",
+        mapper_call_info.mapper, mapper_call_info.kind, 
+        mapper_call_info.proc_id, mapper_call_info.op_id,
         mapper_call_info.start, mapper_call_info.stop);
     }
 
