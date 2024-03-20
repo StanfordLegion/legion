@@ -2165,7 +2165,6 @@ dependencies = [
  "derive_more",
  "env_logger",
  "flate2",
- "itertools",
  "legion_prof_viewer",
  "log",
  "nom",

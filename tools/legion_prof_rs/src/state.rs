@@ -5,7 +5,6 @@ use std::fmt;
 use std::sync::OnceLock;
 
 use derive_more::{Add, From, LowerHex, Sub};
-use itertools::intersperse;
 use nonmax::NonMaxU64;
 use num_enum::TryFromPrimitive;
 
@@ -2767,37 +2766,27 @@ impl RuntimeConfig {
 
 impl fmt::Display for RuntimeConfig {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut components = Vec::new();
-        if self.debug {
-            components.push("Debug Mode");
-        }
-        if self.spy {
-            components.push("Legion Spy");
-        }
-        if self.gc {
-            components.push("Legion GC");
-        }
-        if self.inorder {
-            components.push("-lg:inorder");
-        }
-        if self.safe_mapper {
-            components.push("-lg:safe_mapper");
-        }
-        if self.safe_runtime {
-            components.push("Safe Runtime");
-        }
-        if self.safe_ctrlrepl {
-            components.push("-lg:safe_ctrlrepl");
-        }
-        if self.part_checks {
-            components.push("-lg:partcheck");
-        }
-        if self.resilient {
-            components.push("Resilience");
-        }
-        intersperse(components, ", ")
-            .map(|x| write!(f, "{}", x))
-            .collect()
+        let mut first = true;
+        let mut conf = |cond, name| {
+            if cond {
+                if !first {
+                    write!(f, ", ")?;
+                }
+                write!(f, "{}", name)?;
+                first = false;
+            }
+            Ok(())
+        };
+
+        conf(self.debug, "Debug Mode")?;
+        conf(self.spy, "Legion Spy")?;
+        conf(self.gc, "Legion GC")?;
+        conf(self.inorder, "-lg:inorder")?;
+        conf(self.safe_mapper && !self.debug, "-lg:safe_mapper")?;
+        conf(self.safe_runtime && !self.debug, "Safe Runtime")?;
+        conf(self.safe_ctrlrepl, "-lg:safe_ctrlrepl")?;
+        conf(self.part_checks, "-lg:partcheck")?;
+        conf(self.resilient, "Resilience")
     }
 }
 
