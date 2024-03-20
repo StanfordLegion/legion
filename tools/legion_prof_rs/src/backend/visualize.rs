@@ -185,7 +185,7 @@ impl Proc {
             // FIXME: Elliott: special case on ProfTask to match legion_prof.py behavior
             ProcEntryKind::ProfTask => None,
             // And another special case, because for MapperCalls only, we set default to 0 to match with python
-            ProcEntryKind::MapperCall(_) => Some(initiation_op.unwrap_or(OpID::ZERO)),
+            ProcEntryKind::MapperCall(..) => Some(initiation_op.unwrap_or(OpID::ZERO)),
             _ => initiation_op,
         };
 

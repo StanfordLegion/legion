@@ -4020,7 +4020,7 @@ class State(object):
 
     # MapperName
     @typecheck
-    def log_mapper_name(self, mapper_id: int, name: str) -> None:
+    def log_mapper_name(self, mapper_id: int, mapper_proc: int, name: str) -> None:
         pass
 
     # MapperCallDesc
@@ -4031,7 +4031,7 @@ class State(object):
 
     # MapperCallInfo
     @typecheck
-    def log_mapper_call_info(self, mapper_id: int, kind: int, proc_id: int, 
+    def log_mapper_call_info(self, mapper_id: int, mapper_proc: int, kind: int, proc_id: int,
                              op_id: int, start: int, stop: int, fevent: int
     ) -> None:
         assert start <= stop

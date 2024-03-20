@@ -50,7 +50,8 @@ namespace Legion {
 
       ss << "MapperName {"
          << "id:" << MAPPER_NAME_ID << delim
-         << "mapper_id:unsigned:" << sizeof(MapperID) << delim
+         << "mapper_id:MapperID:" << sizeof(MapperID) << delim
+         << "mapper_proc:ProcID:" << sizeof(ProcID) << delim
          << "name:string:" << "-1"
          << "}" << std::endl;
 
@@ -406,7 +407,8 @@ namespace Legion {
 
       ss << "MapperCallInfo {"
          << "id:" << MAPPER_CALL_INFO_ID                          << delim
-         << "mapper:MapperID:"      << sizeof(MapperID)
+         << "mapper_id:MapperID:"   << sizeof(MapperID)           << delim
+         << "mapper_proc:ProcID:"   << sizeof(ProcID)             << delim
          << "kind:MappingCallKind:" << sizeof(MappingCallKind)    << delim
          << "op_id:UniqueID:"       << sizeof(UniqueID)           << delim
          << "start:timestamp_t:"    << sizeof(timestamp_t)        << delim
@@ -452,6 +454,8 @@ namespace Legion {
       lp_fwrite(f, (char*)&ID, sizeof(ID));
       lp_fwrite(f, (char*)&(mapper_name.mapper_id),
           sizeof(mapper_name.mapper_id));
+      lp_fwrite(f, (char*)&(mapper_name.mapper_proc),
+          sizeof(mapper_name.mapper_proc));
       lp_fwrite(f, mapper_name.name, strlen(mapper_name.name) + 1);
     }
 
@@ -1091,6 +1095,8 @@ namespace Legion {
       lp_fwrite(f, (char*)&ID, sizeof(ID));
       lp_fwrite(f, (char*)&(mapper_call_info.mapper),
                 sizeof(mapper_call_info.mapper));
+      lp_fwrite(f, (char*)&(mapper_call_info.mapper_proc),
+                sizeof(mapper_call_info.mapper_proc));
       lp_fwrite(f, (char*)&(mapper_call_info.kind),    
                 sizeof(mapper_call_info.kind));
       lp_fwrite(f, (char*)&(mapper_call_info.op_id),   
@@ -1609,8 +1615,8 @@ namespace Legion {
                                   const LegionProfDesc::MapperName &mapper_name)
     //--------------------------------------------------------------------------
     {
-      log_prof.print("Prof Mapper Name %u %s", 
-                      mapper_name.mapper_id, mapper_name.name);
+      log_prof.print("Prof Mapper Name %u " IDFMT "%s",
+          mapper_name.mapper_id, mapper_name.mapper_proc, mapper_name.name);
     }
 
     //--------------------------------------------------------------------------
@@ -1892,9 +1898,10 @@ namespace Legion {
                      const LegionProfInstance::MapperCallInfo& mapper_call_info)
     //--------------------------------------------------------------------------
     {
-      log_prof.print("Prof Mapper Call Info %u %u " IDFMT " %llu %llu %llu",
-        mapper_call_info.mapper, mapper_call_info.kind, 
-        mapper_call_info.proc_id, mapper_call_info.op_id,
+      log_prof.print("Prof Mapper Call Info %u " IDFMT " %u " IDFMT 
+                     " %llu %llu %llu",
+        mapper_call_info.mapper, mapper_call_info.proc_id,
+        mapper_call_info.kind, mapper_call_info.proc_id, mapper_call_info.op_id,
         mapper_call_info.start, mapper_call_info.stop);
     }
 

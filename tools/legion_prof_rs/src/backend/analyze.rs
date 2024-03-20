@@ -85,7 +85,7 @@ fn accumulate_statistics(
                     .or_insert(ProcEntryStats::new());
                 update_stats(&entry, stats);
             }
-            ProcEntryKind::MapperCall(_) => {
+            ProcEntryKind::MapperCall(..) => {
                 let stats = mapper_stats
                     .entry(entry.kind)
                     .or_insert(ProcEntryStats::new());
@@ -140,7 +140,7 @@ fn print_statistics(
                         state.meta_variants.get(&variant_id).unwrap().name
                     );
                 }
-                ProcEntryKind::MapperCall(call_kind) => {
+                ProcEntryKind::MapperCall(_, _, call_kind) => {
                     println!(
                         "      Mapper Call {}",
                         state.mapper_call_kinds.get(&call_kind).unwrap().name

@@ -31,6 +31,7 @@ pub enum ValueFormat {
     DepPartOpKind,
     IDType,
     InstID,
+    MapperID,
     MappingCallKind,
     MaxDim,
     MemID,
@@ -87,7 +88,7 @@ pub struct Uuid(pub Vec<u8>);
 #[rustfmt::skip]
 #[derive(Debug, Clone, Serialize)]
 pub enum Record {
-    MapperName { mapper: MapperID, name: String },
+    MapperName { mapper_id: MapperID, mapper_proc: ProcID, name: String },
     MapperCallDesc { kind: MapperCallKindID, name: String },
     RuntimeCallDesc { kind: RuntimeCallKindID, name: String },
     MetaDesc { kind: VariantID, message: bool, ordered_vc: bool, name: String },
@@ -129,7 +130,7 @@ pub enum Record {
     FillInstInfo { dst: MemID, fid: FieldID, dst_inst: InstUID, fevent: EventID },
     InstTimelineInfo { inst_uid: InstUID, inst_id: InstID, mem_id: MemID, size: u64, op_id: OpID, create: Timestamp, ready: Timestamp, destroy: Timestamp, creator: EventID },
     PartitionInfo { op_id: OpID, part_op: DepPartOpKind, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp, creator: EventID },
-    MapperCallInfo { mapper: MapperID, kind: MapperCallKindID, op_id: OpID, start: Timestamp, stop: Timestamp, proc_id: ProcID, fevent: EventID },
+    MapperCallInfo { mapper_id: MapperID, mapper_proc: ProcID, kind: MapperCallKindID, op_id: OpID, start: Timestamp, stop: Timestamp, proc_id: ProcID, fevent: EventID },
     RuntimeCallInfo { kind: RuntimeCallKindID, start: Timestamp, stop: Timestamp, proc_id: ProcID, fevent: EventID },
     ProfTaskInfo { proc_id: ProcID, op_id: OpID, start: Timestamp, stop: Timestamp, creator: EventID, fevent: EventID  },
     CalibrationErr { calibration_err: i64 },
@@ -142,6 +143,7 @@ fn convert_value_format(name: String) -> Option<ValueFormat> {
         "DepPartOpKind" => Some(ValueFormat::DepPartOpKind),
         "IDType" => Some(ValueFormat::IDType),
         "InstID" => Some(ValueFormat::InstID),
+        "MapperID" => Some(ValueFormat::MapperID),
         "MappingCallKind" => Some(ValueFormat::MappingCallKind),
         "maxdim" => Some(ValueFormat::MaxDim),
         "MemID" => Some(ValueFormat::MemID),
@@ -938,12 +940,21 @@ fn parse_partition_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     ))
 }
 fn parse_mapper_name(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
-    let (input, mapper) = parse_mapper_id(input)?;
+    let (input, mapper_id) = parse_mapper_id(input)?;
+    let (input, mapper_proc) = parse_proc_id(input)?;
     let (input, name) = parse_string(input)?;
-    Ok((input, Record::MapperName { mapper, name }))
+    Ok((
+        input,
+        Record::MapperName {
+            mapper_id,
+            mapper_proc,
+            name,
+        },
+    ))
 }
 fn parse_mapper_call_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
-    let (input, mapper) = parse_mapper_id(input)?;
+    let (input, mapper_id) = parse_mapper_id(input)?;
+    let (input, mapper_proc) = parse_proc_id(input)?;
     let (input, kind) = parse_mapper_call_kind_id(input)?;
     let (input, op_id) = parse_op_id(input)?;
     let (input, start) = parse_timestamp(input)?;
@@ -953,7 +964,8 @@ fn parse_mapper_call_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record>
     Ok((
         input,
         Record::MapperCallInfo {
-            mapper,
+            mapper_id,
+            mapper_proc,
             kind,
             op_id,
             start,
