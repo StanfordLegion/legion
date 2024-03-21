@@ -581,6 +581,7 @@ before_script:
       fi
   artifacts:
     name: "$CI_JOB_NAME"
+    when: always
     paths:
       - language/test_output/
   # retry:
