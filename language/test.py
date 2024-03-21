@@ -517,7 +517,7 @@ def run_all_tests(thread_count, debug, out_dir, max_dim, run, spy, gc, prof, hdf
         if not out_dir:
             out_dir = tempfile.mkdtemp(dir=os.getcwd(), prefix='test_output_')
         else:
-            out_dir = os.abspath(out_dir)
+            out_dir = os.path.abspath(out_dir)
             # The user specifically asked for this directory so we
             # just fail if we can't create it
             os.mkdir(out_dir)
