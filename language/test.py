@@ -264,7 +264,7 @@ def find_labeled_flags(filename, prefix, short):
         return flags[:1]
     return flags
 
-def test_compile_fail(filename, debug, verbose, short, timelimit, py_exe_path, legion_prof_rs, flags, env):
+def test_compile_fail(filename, debug, verbose, out_dir, short, timelimit, py_exe_path, legion_prof_rs, flags, env):
     expected_failure = find_labeled_text(filename, 'fails-with')
     if expected_failure is None:
         raise Exception('No fails-with declaration in compile_fail test')
@@ -284,13 +284,13 @@ def test_compile_fail(filename, debug, verbose, short, timelimit, py_exe_path, l
     else:
         raise TestFailure(last_cmd, 1, 'Expected failure, but test ran successfully!')
 
-def test_run_pass(filename, debug, verbose, short, timelimit, py_exe_path, legion_prof_rs, flags, env):
+def test_run_pass(filename, debug, verbose, out_dir, short, timelimit, py_exe_path, legion_prof_rs, flags, env):
     runs_with = find_labeled_flags(filename, 'runs-with', short)
     for params in runs_with:
         run(filename, debug, verbose, timelimit, params + flags, env)
 
-def test_spy(filename, debug, verbose, short, timelimit, py_exe_path, legion_prof_rs, flags, env):
-    spy_dir = tempfile.mkdtemp(dir=os.path.dirname(os.path.abspath(filename)))
+def test_spy(filename, debug, verbose, out_dir, short, timelimit, py_exe_path, legion_prof_rs, flags, env):
+    spy_dir = tempfile.mkdtemp(dir=out_dir, prefix='test_spy_%s_' % (os.path.splitext(os.path.basename(filename))[0]))
     spy_log = os.path.join(spy_dir, 'spy_%.log')
     spy_flags = ['-lg:spy', '-level', 'legion_spy=2', '-logfile', spy_log]
 
@@ -305,11 +305,13 @@ def test_spy(filename, debug, verbose, short, timelimit, py_exe_path, legion_pro
             # Run legion_prof_rs too so that we can be sure it's at least parsing all the logs
             if legion_prof_rs is not None:
                 run_prof_rs(spy_dir, spy_logs, verbose, legion_prof_rs)
-    finally:
+    except:
+        raise
+    else:
         shutil.rmtree(spy_dir)
 
-def test_gc(filename, debug, verbose, short, timelimit, py_exe_path, legion_prof_rs, flags, env):
-    gc_dir = tempfile.mkdtemp(dir=os.path.dirname(os.path.abspath(filename)))
+def test_gc(filename, debug, verbose, out_dir, short, timelimit, py_exe_path, legion_prof_rs, flags, env):
+    gc_dir = tempfile.mkdtemp(dir=out_dir, prefix='test_gc_%s_' % (os.path.splitext(os.path.basename(filename))[0]))
     gc_log = os.path.join(gc_dir, 'gc_%.log')
     gc_flags = ['-level', 'legion_gc=2', '-logfile', gc_log]
 
@@ -321,14 +323,16 @@ def test_gc(filename, debug, verbose, short, timelimit, py_exe_path, legion_prof
             gc_logs = glob.glob(os.path.join(gc_dir, 'gc_*.log'))
             assert len(gc_logs) > 0
             run_gc(gc_logs, verbose, py_exe_path)
-    finally:
+    except:
+        raise
+    else:
         shutil.rmtree(gc_dir)
 
-def test_prof(filename, debug, verbose, short, timelimit, py_exe_path, legion_prof_rs, flags, env):
+def test_prof(filename, debug, verbose, out_dir, short, timelimit, py_exe_path, legion_prof_rs, flags, env):
     if legion_prof_rs is None:
         raise Exception('Need to specify the path to legion_prof_rs via --legion-prof-rs')
 
-    prof_dir = tempfile.mkdtemp(dir=os.path.dirname(os.path.abspath(filename)))
+    prof_dir = tempfile.mkdtemp(dir=out_dir, prefix='test_prof_%s_' % (os.path.splitext(os.path.basename(filename))[0]))
     prof_log = os.path.join(prof_dir, 'prof_%.gz')
     prof_flags = ['-hl:prof', '1024', '-hl:prof_logfile', prof_log]
 
@@ -348,7 +352,9 @@ def test_prof(filename, debug, verbose, short, timelimit, py_exe_path, legion_pr
                 result_subnodes_py = run_prof_subnode(prof_dir, prof_logs, verbose, 1, py_exe_path)
                 result_subnodes_rs = run_prof_rs_subnode(prof_dir, prof_logs, verbose, 1, py_exe_path, legion_prof_rs)
                 compare_prof_results(verbose, py_exe_path, [result_subnodes_py, result_subnodes_rs])
-    finally:
+    except:
+        raise
+    else:
         shutil.rmtree(prof_dir)
 
 red = "\033[1;31m"
@@ -360,21 +366,20 @@ FAIL = 'fail'
 INTERRUPT = 'interrupt'
 INTERNALERROR = 'internalerror'
 
-def test_runner(test_name, test_closure, debug, verbose, filename, timelimit, short, py_exe_path, legion_prof_rs):
+def test_runner(test_name, test_closure, debug, verbose, out_dir, filename, timelimit, short, py_exe_path, legion_prof_rs):
     test_fn, test_args = test_closure
-    saved_temps = []
     try:
-        test_fn(filename, debug, verbose, short, timelimit, py_exe_path, legion_prof_rs, *test_args)
+        test_fn(filename, debug, verbose, out_dir, short, timelimit, py_exe_path, legion_prof_rs, *test_args)
     except KeyboardInterrupt:
-        return test_name, filename, None, [], INTERRUPT, 0, None
+        return test_name, filename, None, INTERRUPT, 0, None
     except TestFailure as e:
-        return test_name, filename, e.command, [], FAIL, e.retcode, e.output
+        return test_name, filename, e.command, FAIL, e.retcode, e.output
     except Exception as e:
         if verbose:
-            return test_name, filename, None, [], INTERNALERROR, 0, ''.join(traceback.format_exception(*sys.exc_info()))
-        return test_name, filename, None, [], INTERNALERROR, 0, ''.join(traceback.format_exception_only(*sys.exc_info()[:2]))
+            return test_name, filename, None, INTERNALERROR, 0, ''.join(traceback.format_exception(*sys.exc_info()))
+        return test_name, filename, None, INTERNALERROR, 0, ''.join(traceback.format_exception_only(*sys.exc_info()[:2]))
     else:
-        return test_name, filename, None, [], PASS, 0, None
+        return test_name, filename, None, PASS, 0, None
 
 class Counter:
     def __init__(self):
@@ -492,7 +497,7 @@ def get_test_specs(legion_dir, use_run, use_spy, use_gc, use_prof, use_hdf5, use
         result.extend(max_dim_tests(dim))
     return result
 
-def run_all_tests(thread_count, debug, max_dim, run, spy, gc, prof, hdf5,
+def run_all_tests(thread_count, debug, out_dir, max_dim, run, spy, gc, prof, hdf5,
                   openmp, gpu, python, extra_flags, verbose, quiet,
                   only_patterns, skip_patterns, timelimit, poll_interval,
                   short, no_pretty, legion_prof_rs):
@@ -507,6 +512,19 @@ def run_all_tests(thread_count, debug, max_dim, run, spy, gc, prof, hdf5,
     legion_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 
     py_exe_path = detect_python_interpreter()
+
+    if spy or gc or prof:
+        if not out_dir:
+            out_dir = tempfile.mkdtemp(dir=os.getcwd(), prefix='test_output_')
+        else:
+            out_dir = os.abspath(out_dir)
+            # The user specifically asked for this directory so we
+            # just fail if we can't create it
+            os.mkdir(out_dir)
+    else:
+        if out_dir is not None:
+            print('Ignoring --output flag because no tests that use output are enabled')
+        out_dir = None
 
     # Run tests asynchronously.
     tests = get_test_specs(legion_dir, run, spy, gc, prof, hdf5, openmp, gpu, python, max_dim, no_pretty, extra_flags)
@@ -532,7 +550,7 @@ def run_all_tests(thread_count, debug, max_dim, run, spy, gc, prof, hdf5,
                 print('ERROR CALLBACK', e)
                 raise e
             thread_pool.apply_async(test_runner,
-                                    (test_name, test_fn, debug, verbose,
+                                    (test_name, test_fn, debug, verbose, out_dir,
                                      test_path, timelimit, short, py_exe_path,
                                      legion_prof_rs),
                                     callback=callback,
@@ -545,7 +563,6 @@ def run_all_tests(thread_count, debug, max_dim, run, spy, gc, prof, hdf5,
         test_counter = Counter()
         test_counters[test_name] = test_counter
 
-    all_saved_temps = []
     num_passed = 0
     num_failed = 0
     num_remaining = num_queued
@@ -555,10 +572,8 @@ def run_all_tests(thread_count, debug, max_dim, run, spy, gc, prof, hdf5,
         while num_remaining:
             # wait for up to 'interval' seconds for something to finish
             try:
-                test_name, filename, command, saved_temps, outcome, retcode, output = result_queue.get(timeout=poll_interval)
+                test_name, filename, command, outcome, retcode, output = result_queue.get(timeout=poll_interval)
                 num_remaining -= 1
-                if len(saved_temps) > 0:
-                    all_saved_temps.append((test_name, filename, saved_temps))
                 if outcome == PASS:
                     if not quiet:
                         print('[%sPASS%s] (%s) %s' % (green, clear, test_name, filename))
@@ -608,15 +623,6 @@ def run_all_tests(thread_count, debug, max_dim, run, spy, gc, prof, hdf5,
         num_failed += num_remaining
         raise
 
-    if len(all_saved_temps) > 0:
-        print()
-        print('The following temporary files have been saved:')
-        print()
-        for test_name, filename, saved_temps in all_saved_temps:
-            print('[%sFAIL%s] (%s) %s' % (red, clear, test_name, filename))
-            for saved_temp in saved_temps:
-                print('  %s' % saved_temp)
-
     if num_queued > 0:
         print()
         print('Summary of test results by category:')
@@ -632,11 +638,18 @@ def run_all_tests(thread_count, debug, max_dim, run, spy, gc, prof, hdf5,
             (float(100*num_passed)/num_queued)))
 
     if num_failed > 0:
+        if out_dir:
+            print()
+            print('Output (e.g., logs) from failed tests has been kept in:')
+            print('    %s' % out_dir)
         if not verbose:
             print()
             print('For detailed information on test failures, run:')
             print('    ./test.py -j1 -v')
         sys.exit(1)
+    else:
+        if out_dir:
+            shutil.rmtree(out_dir)
 
 def test_driver(argv):
     parser = argparse.ArgumentParser(description='Regent compiler test suite')
@@ -648,6 +661,9 @@ def test_driver(argv):
     parser.add_argument('--debug', '-g',
                         action='store_true',
                         help='enable debug mode')
+    parser.add_argument('--output', '-o',
+                        dest='out_dir',
+                        help='directory to be used for test output')
     parser.add_argument('--max-dim',
                         type=int,
                         default=3,
@@ -725,6 +741,7 @@ def test_driver(argv):
     run_all_tests(
         args.thread_count,
         args.debug,
+        args.out_dir,
         args.max_dim,
         args.run_pass,
         args.spy,
