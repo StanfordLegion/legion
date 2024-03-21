@@ -1373,7 +1373,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const AddressSpaceID owner_space = 
-        RegionNode::get_owner_space(handle, runtime);
+        RegionNode::get_owner_space(handle.get_tree_id(), runtime);
       if (mapping != NULL)
       {
         if (mapping->contains(owner_space))
@@ -15848,7 +15848,7 @@ namespace Legion {
       }
       if (added)
       {
-        AddressSpaceID owner_space = get_owner_space();
+        AddressSpaceID owner_space = find_semantic_owner();
         // If we are not the owner and the message 
         // didn't come from the owner, then send it 
         if ((owner_space != context->runtime->address_space) &&
@@ -15874,7 +15874,7 @@ namespace Legion {
     {
       RtEvent wait_on;
       RtUserEvent request;
-      const AddressSpaceID owner_space = get_owner_space();
+      const AddressSpaceID owner_space = find_semantic_owner();
       const bool is_remote = (owner_space != context->runtime->address_space);
       {
         AutoLock n_lock(node_lock);
@@ -17130,21 +17130,6 @@ namespace Legion {
 #endif
 
     //--------------------------------------------------------------------------
-    AddressSpaceID RegionNode::get_owner_space(void) const
-    //--------------------------------------------------------------------------
-    {
-      return get_owner_space(handle, context->runtime);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ AddressSpaceID RegionNode::get_owner_space(LogicalRegion handle,
-                                                          Runtime *runtime)
-    //--------------------------------------------------------------------------
-    {
-      return (handle.tree_id % runtime->runtime_stride);
-    }
-
-    //--------------------------------------------------------------------------
     bool RegionNode::visit_node(PathTraverser *traverser)
     //--------------------------------------------------------------------------
     {
@@ -17414,6 +17399,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    AddressSpaceID RegionNode::find_semantic_owner(void) const
+    //--------------------------------------------------------------------------
+    {
+      // If we're the root, then the owner is the owner of the root
+      // Otherwise the owner is the owner of the corresponding index space
+      if (parent == NULL)
+        return owner_space;
+      else
+        return row_source->owner_space;
+    }
+
+    //--------------------------------------------------------------------------
     void RegionNode::send_semantic_info(AddressSpaceID target,
                                         SemanticTag tag,
                                         const void *buffer, size_t size, 
@@ -17440,7 +17437,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(get_owner_space() == context->runtime->address_space);
+      assert(find_semantic_owner() == context->runtime->address_space);
 #endif
       RtEvent precondition;
       void *result = NULL;
@@ -18167,21 +18164,6 @@ namespace Legion {
 #endif
 
     //--------------------------------------------------------------------------
-    AddressSpaceID PartitionNode::get_owner_space(void) const
-    //--------------------------------------------------------------------------
-    {
-      return get_owner_space(handle, context->runtime);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ AddressSpaceID PartitionNode::get_owner_space(
-                                     LogicalPartition handle, Runtime *runtime)
-    //--------------------------------------------------------------------------
-    {
-      return (handle.tree_id % runtime->total_address_spaces);
-    }
-
-    //--------------------------------------------------------------------------
     bool PartitionNode::visit_node(PathTraverser *traverser)
     //--------------------------------------------------------------------------
     {
@@ -18317,6 +18299,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    AddressSpaceID PartitionNode::find_semantic_owner(void) const
+    //--------------------------------------------------------------------------
+    {
+      // The owner is the owner of our row source partition
+      return row_source->owner_space;
+    }
+
+    //--------------------------------------------------------------------------
     void PartitionNode::send_semantic_info(AddressSpaceID target,
                                            SemanticTag tag,
                                            const void *buffer, size_t size,
@@ -18343,7 +18333,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(get_owner_space() == context->runtime->address_space);
+      assert(find_semantic_owner() == context->runtime->address_space);
 #endif
       RtEvent precondition;
       void *result = NULL;

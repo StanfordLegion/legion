@@ -134,6 +134,18 @@ namespace Legion {
       struct MaxDimDesc {
 	unsigned max_dim;
       };
+      struct RuntimeConfig {
+        bool debug;
+        bool spy;
+        bool gc;
+        bool inorder;
+        bool safe_mapper;
+        bool safe_runtime;
+        bool safe_ctrlrepl;
+        bool part_checks;
+        bool bounds_checks;
+        bool resilient;
+      };
       struct MachineDesc {
         unsigned node_id;
         unsigned num_nodes;
