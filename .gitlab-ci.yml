@@ -579,6 +579,10 @@ before_script:
       if [[ "$USE_CCACHE" -eq 1 ]]; then
         ccache --show-stats
       fi
+  artifacts:
+    name: "$CI_JOB_NAME"
+    paths:
+      - language/test_output/
   retry:
     max: 0
     when:
