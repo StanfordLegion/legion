@@ -3885,6 +3885,7 @@ namespace Legion {
       {
         const DomainPoint color = 
           partition->color_space->delinearize_color_to_point(*itr);
+        ApEvent child_ready;
         Realm::IndexSpace<DIM,T> child_space;
         if (future_map_domain.contains(color))
         {
@@ -3910,11 +3911,12 @@ namespace Legion {
               context->runtime->profiler->add_partition_request(requests,
                                               op, DEP_PART_INTERSECTIONS);
             Realm::IndexSpace<DIM,T> result;
-            ApEvent ready(Realm::IndexSpace<DIM,T>::compute_intersection(
-                parent_space, child_space, result, requests, parent_ready));
+            child_ready = ApEvent(
+                Realm::IndexSpace<DIM,T>::compute_intersection(
+                  parent_space, child_space, result, requests, parent_ready));
             child_space = result;
-            if (ready.exists())
-              result_events.insert(ready);
+            if (child_ready.exists())
+              result_events.insert(child_ready);
           }
         }
         else
@@ -3922,7 +3924,7 @@ namespace Legion {
         IndexSpaceNodeT<DIM,T> *child = 
             static_cast<IndexSpaceNodeT<DIM,T>*>(
                 partition->get_child(*itr));
-        if (child->set_realm_index_space(child_space, ApEvent::NO_AP_EVENT))
+        if (child->set_realm_index_space(child_space, child_ready))
           delete child;
       }
       if (result_events.empty())
