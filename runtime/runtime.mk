@@ -460,8 +460,8 @@ endif
 ifeq ($(strip $(USE_HIP)),1)
   HIP_TARGET ?= ROCM
   USE_GPU_REDUCTIONS ?= 1
-  ifndef HIP_PATH
-    $(error HIP_PATH variable is not defined, aborting build)
+  ifndef ROCM_PATH
+    $(error ROCM_PATH variable is not defined, aborting build)
   endif
   ifeq ($(strip $(HIP_TARGET)),ROCM)
     #HIP on AMD
@@ -470,16 +470,16 @@ ifeq ($(strip $(USE_HIP)),1)
         $(error THRUST_PATH variable is not defined, aborting build)
       endif
       # Please download the thrust from https://github.com/ROCmSoftwarePlatform/Thrust
-      # We need to put thrust inc ahead of HIP_PATH because the thrust comes with hip is broken
+      # We need to put thrust inc ahead of ROCM_PATH because the thrust comes with hip is broken
       INC_FLAGS += -I$(THRUST_PATH)
     endif
-    HIPCC	        ?= $(HIP_PATH)/bin/hipcc
+    HIPCC	        ?= $(ROCM_PATH)/bin/hipcc
     # Latter is preferred, former is for backwards compatability
     REALM_CC_FLAGS  += -DREALM_USE_HIP
     LEGION_CC_FLAGS += -DLEGION_USE_HIP
     CC_FLAGS        += -D__HIP_PLATFORM_AMD__
     HIPCC_FLAGS     += -fno-strict-aliasing
-    INC_FLAGS       += -I$(HIP_PATH)/include -I$(HIP_PATH)/../include
+    INC_FLAGS       += -I$(ROCM_PATH)/include
     ifeq ($(strip $(DEBUG)),1)
       HIPCC_FLAGS	+= -g
     else
@@ -488,7 +488,7 @@ ifeq ($(strip $(USE_HIP)),1)
     ifneq ($(strip $(HIP_ARCH)),)
       HIPCC_FLAGS	+= --offload-arch=$(HIP_ARCH)
     endif
-    LEGION_LD_FLAGS	+= -lm -L$(HIP_PATH)/lib -lamdhip64
+    LEGION_LD_FLAGS	+= -lm -L$(ROCM_PATH)/lib -lamdhip64
   else ifeq ($(strip $(HIP_TARGET)),CUDA)
     # HIP on CUDA
     ifndef CUDA_PATH
@@ -500,7 +500,7 @@ ifeq ($(strip $(USE_HIP)),1)
     LEGION_CC_FLAGS += -DLEGION_USE_HIP
     CC_FLAGS        += -D__HIP_PLATFORM_NVIDIA__
     HIPCC_FLAGS     += -D__HIP_PLATFORM_NVIDIA__
-    INC_FLAGS       += -I$(CUDA_PATH)/include -I$(HIP_PATH)/include  -I$(HIP_PATH)/../include
+    INC_FLAGS       += -I$(CUDA_PATH)/include -I$(ROCM_PATH)/include
     ifeq ($(strip $(DEBUG)),1)
       HIPCC_FLAGS	+= -g -O0
     else

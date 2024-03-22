@@ -4939,7 +4939,7 @@ namespace Realm {
       }
 
       // ask any ipc-able nodes to share handles with us
-      if(config->cfg_use_cuda_ipc) {
+      if(config->cfg_use_cuda_ipc && !gpus.empty()) {
         NodeSet ipc_peers = Network::shared_peers;
 
         if(!ipc_peers.empty()) {
@@ -4952,7 +4952,7 @@ namespace Realm {
             CudaIpcResponseEntry entry;
             const CudaDeviceMemoryInfo *cdm =
                 memImpl->find_module_specific<CudaDeviceMemoryInfo>();
-            if(cdm == nullptr) {
+            if((cdm == nullptr) || (memImpl->size == 0)) {
               continue;
             }
             CUdeviceptr dptr =
@@ -5315,13 +5315,27 @@ namespace Realm {
                                                          const CudaIpcImportRequest &args,
                                                          const void *data, size_t datalen)
     {
+      const CudaIpcResponseEntry *entries = nullptr;
       assert(cuda_module_singleton != nullptr);
 
       log_cudaipc.debug() << "IPC request from " << sender;
 
+      {
+        // Make sure initialization of the cuda module is complete before servicing the
+        // active message. This will always be skipped, except in the rare case the
+        // network module is initialized before the cuda module.
+        AutoLock<> al(cuda_module_singleton->cudaipc_mutex);
+        log_cudaipc.debug(
+            "Waiting for cuda module initialization before processing IPC request");
+        while(!cuda_module_singleton->initialization_complete.load_acquire()) {
+          cuda_module_singleton->cudaipc_condvar.wait();
+        }
+        log_cudaipc.debug("Module initialized, processing IPC request");
+      }
+
       if(args.count == 0) {
-        log_cudaipc.info() << "Sender " << sender << " sent nothing to import";
-        return;
+        log_cudaipc.info("Sender sent no entries to import, skipping import...");
+        goto Done;
       }
 
 #if !defined(REALM_IS_WINDOWS)
@@ -5342,26 +5356,15 @@ namespace Realm {
            (args.hostid != gethostid())) {
           log_cudaipc.info() << "Sender " << sender
                              << " is not an ipc-capable node, skipping import";
-          return;
+          goto Done;
         }
       }
       data = static_cast<const char *>(data) + HOST_NAME_MAX;
       datalen -= HOST_NAME_MAX;
 #endif
 
-      const CudaIpcResponseEntry *entries =
-          static_cast<const CudaIpcResponseEntry *>(data);
+      entries = static_cast<const CudaIpcResponseEntry *>(data);
       assert(datalen == (args.count * sizeof(CudaIpcResponseEntry)));
-
-      {
-        // Make sure initialization of the cuda module is complete before servicing the
-        // active message. This will always be skipped, except in the rare case the
-        // network module is initialized before the cuda module.
-        AutoLock<> al(cuda_module_singleton->cudaipc_mutex);
-        while(!cuda_module_singleton->initialization_complete.load_acquire()) {
-          cuda_module_singleton->cudaipc_condvar.wait();
-        }
-      }
 
       for(GPU *gpu : cuda_module_singleton->gpus) {
         AutoGPUContext agc(gpu);
@@ -5399,17 +5402,18 @@ namespace Realm {
           }
         }
       }
-
-      {
-        // Count the number of peers that have been received and signal to continue
-        // initialization when all of them have been recieved.
-        AutoLock<> al(cuda_module_singleton->cudaipc_mutex);
-        if((cuda_module_singleton->cudaipc_responses_received.fetch_add_acqrel(1) + 1) ==
-           Network::shared_peers.size()) {
-          log_cudaipc.spew() << "Signalling completion!";
-          cuda_module_singleton->cudaipc_condvar.signal();
-        }
+    Done:
+    {
+      // Count the number of peers that have been received and signal to continue
+      // initialization when all of them have been recieved.  This needs to be done for
+      // every message received in order to unblock module initialization
+      AutoLock<> al(cuda_module_singleton->cudaipc_mutex);
+      if((cuda_module_singleton->cudaipc_responses_received.fetch_add_acqrel(1) + 1) ==
+         Network::shared_peers.size()) {
+        log_cudaipc.spew() << "Signalling completion!";
+        cuda_module_singleton->cudaipc_condvar.signal();
       }
+    }
     }
 
     ActiveMessageHandlerReg<CudaIpcImportRequest> cuda_ipc_request_handler;
