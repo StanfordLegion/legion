@@ -623,9 +623,11 @@ namespace Legion {
     {
       std::map<PhysicalInstance,LgEvent>::iterator finder =
         task_local_instances.find(instance);
-#ifdef DEBUG_LEGION
-      assert(finder != task_local_instances.end());
-#endif
+      if (finder == task_local_instances.end())
+        REPORT_LEGION_ERROR(ERROR_DEFERRED_BUFFER_DOUBLE_DELETE,
+            "Detected double deletion of deferred buffer " IDFMT
+            "in parent task %s (UID %lld).",
+            instance.id, get_task_name(), get_unique_id())
       task_local_instances.erase(finder);
       MemoryManager *manager = 
         runtime->find_memory_manager(instance.get_location());
