@@ -20,8 +20,8 @@ impl ProcEntryStats {
     fn new() -> Self {
         ProcEntryStats {
             invocations: 0,
-            total_time: Timestamp::MIN,
-            running_time: Timestamp::MIN,
+            total_time: Timestamp::ZERO,
+            running_time: Timestamp::ZERO,
             min_time: Timestamp::MAX,
             max_time: Timestamp::MIN,
             prev_mean: 0.0,
@@ -64,7 +64,7 @@ fn accumulate_statistics(
             if waiting <= total {
                 total -= waiting;
             } else {
-                total = Timestamp(0);
+                total = Timestamp::ZERO;
             }
         }
         stats.running_time += total;

@@ -15,18 +15,23 @@
 #------------------------------------------------------------------------------#
 
 # find hip package
-if(NOT DEFINED HIP_PATH)
-  if(NOT DEFINED ENV{HIP_PATH})
-      set(HIP_PATH "/opt/rocm/hip" CACHE PATH "Path to where HIP has been installed")
+if(NOT DEFINED ROCM_PATH)
+  if(NOT DEFINED ENV{ROCM_PATH})
+    set(ROCM_PATH "/opt/rocm" CACHE PATH "Path to where ROCm has been installed")
   else()
-      set(HIP_PATH $ENV{HIP_PATH} CACHE PATH "Path to where HIP has been installed")
+    set(ROCM_PATH $ENV{ROCM_PATH} CACHE PATH "Path to where ROCm has been installed")
   endif()
 endif()
-include(${HIP_PATH}/cmake/FindHIP.cmake)
+# As of ROCm 6.0, there is no $ROCM_PATH/hip and everything is instead under lib
+if(EXISTS "${ROCM_PATH}/lib/cmake/hip/FindHIP.cmake")
+  include(${ROCM_PATH}/lib/cmake/hip/FindHIP.cmake)
+else()
+  include(${ROCM_PATH}/hip/cmake/FindHIP.cmake)
+endif()
 
 if(NOT HIP_INCLUDE_DIRS)
   list(APPEND HIP_INCLUDE_DIRS
-    ${HIP_THRUST_ROOT_DIR} ${HIP_ROOT_DIR}/include ${HIP_ROOT_DIR}/../include
+    ${HIP_THRUST_ROOT_DIR} ${HIP_ROOT_DIR}/include
   )
   set(HIP_INCLUDE_DIRS "${HIP_INCLUDE_DIRS}" CACHE STRING "List of HIP include paths")
 endif()

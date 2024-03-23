@@ -2581,11 +2581,11 @@ namespace Legion {
                 rez.serialize(applied);
                 if (trace_info.recording)
                 {
-                  ApBarrier bar(Realm::Barrier::create_barrier(1/*arrivals*/));
-                  const ShardID sid = trace_info.record_managed_barrier(bar, 1);
+                  ApBarrier bar;
+                  ShardID sid =
+                    trace_info.record_barrier_creation(bar, 1/*arrivals*/);
                   rez.serialize(bar);
-                  if (bar.exists())
-                    rez.serialize(sid);
+                  rez.serialize(sid);
                   result = bar;
                 }
                 else
@@ -2655,8 +2655,9 @@ namespace Legion {
                 rez.serialize(applied);
                 if (trace_info.recording)
                 {
-                  ApBarrier bar(Realm::Barrier::create_barrier(1/*arrivals*/));
-                  ShardID sid = trace_info.record_managed_barrier(bar, 1);
+                  ApBarrier bar;
+                  ShardID sid =
+                    trace_info.record_barrier_creation(bar, 1/*arrivals*/);
                   rez.serialize(bar);
                   rez.serialize(sid);
                   result = bar;
@@ -7004,8 +7005,7 @@ namespace Legion {
             ShardID sid = 0;
             if (need_valid_return)
             {
-              bar = ApBarrier(Realm::Barrier::create_barrier(1/*arrivals*/));
-              sid = trace_info.record_managed_barrier(bar, 1/*arrivals*/);
+              sid = trace_info.record_barrier_creation(bar, 1/*arrivals*/);
               result = bar;
             }
             rez.serialize(bar);
@@ -7125,8 +7125,7 @@ namespace Legion {
             (all_done.exists() || (source_view->get_redop() > 0)))
         {
           const size_t arrivals = collective_mapping->size();
-          all_bar = ApBarrier(Realm::Barrier::create_barrier(arrivals));
-          owner_shard = trace_info.record_managed_barrier(all_bar, arrivals);
+          owner_shard = trace_info.record_barrier_creation(all_bar, arrivals);
           // Tracing copy-optimization will eliminate this when
           // the trace gets optimized
           if (all_done.exists())
@@ -7172,8 +7171,9 @@ namespace Legion {
               // all of the different reductions
               if (source_view->get_redop() == 0)
               {
-                ApBarrier copy_bar(Realm::Barrier::create_barrier(1/*count*/));
-                ShardID sid = trace_info.record_managed_barrier(copy_bar, 1);
+                ApBarrier copy_bar;
+                ShardID sid =
+                  trace_info.record_barrier_creation(copy_bar, 1/*arrivals*/);
                 Runtime::trigger_event(&trace_info, copy_done, copy_bar);
                 rez.serialize(copy_bar);
                 rez.serialize(sid);
@@ -7265,8 +7265,7 @@ namespace Legion {
         if (all_done.exists() && trace_info.recording)
         {
           const size_t arrivals = collective_mapping->size();
-          all_bar = ApBarrier(Realm::Barrier::create_barrier(arrivals));
-          owner_shard = trace_info.record_managed_barrier(all_bar, arrivals);
+          owner_shard = trace_info.record_barrier_creation(all_bar, arrivals);
           // Tracing copy-optimization will eliminate this when
           // the trace gets optimized
           Runtime::trigger_event(&trace_info, all_done, all_bar);
@@ -7480,8 +7479,7 @@ namespace Legion {
           if (trace_info.recording)
           {
             const size_t arrivals = collective_mapping->size();
-            all_bar = ApBarrier(Realm::Barrier::create_barrier(arrivals));
-            owner_shard = trace_info.record_managed_barrier(all_bar, arrivals);
+            owner_shard = trace_info.record_barrier_creation(all_bar, arrivals);
             // Tracing copy-optimization will eliminate this when
             // the trace gets optimized
             Runtime::trigger_event(&trace_info, all_done, all_bar);
@@ -9181,9 +9179,7 @@ namespace Legion {
           {
             if (ready_event.exists() && !trace_barrier.exists())
             {
-              trace_barrier =
-                ApBarrier(Realm::Barrier::create_barrier(children.size()));
-              trace_shard = local_info.record_managed_barrier(trace_barrier,
+              trace_shard = local_info.record_barrier_creation(trace_barrier,
                                                             children.size());
               ready_events.push_back(trace_barrier);
             }
@@ -9712,10 +9708,8 @@ namespace Legion {
           {
             if (!broadcast_bar.exists())
             {
-              broadcast_bar =
-                ApBarrier(Realm::Barrier::create_barrier(children.size()));
-              broadcast_shard = local_info.record_managed_barrier(broadcast_bar,
-                                                               children.size());
+              broadcast_shard = local_info.record_barrier_creation(
+                  broadcast_bar, children.size());
               read_events.push_back(broadcast_bar);
             }
             rez.serialize(broadcast_bar);
@@ -10896,8 +10890,9 @@ namespace Legion {
           rez.serialize(applied);
           if (trace_info.recording)
           {
-            ApBarrier bar(Realm::Barrier::create_barrier(1/*arrivals*/));
-            const ShardID sid = trace_info.record_managed_barrier(bar, 1);
+            ApBarrier bar;
+            const ShardID sid =
+              trace_info.record_barrier_creation(bar, 1/*arrivals*/);
             rez.serialize(bar);
             rez.serialize(sid);
             reduced = bar;
@@ -10961,8 +10956,7 @@ namespace Legion {
         if (all_done.exists() && trace_info.recording)
         {
           const size_t arrivals = collective_mapping->size();
-          all_bar = ApBarrier(Realm::Barrier::create_barrier(arrivals));
-          owner_shard = trace_info.record_managed_barrier(all_bar, arrivals);
+          owner_shard = trace_info.record_barrier_creation(all_bar, arrivals);
         }
         for (std::vector<AddressSpaceID>::const_iterator it =
               children.begin(); it != children.end(); it++)
@@ -10993,9 +10987,7 @@ namespace Legion {
             {
               if (!broadcast_bar.exists())
               {
-                broadcast_bar =
-                  ApBarrier(Realm::Barrier::create_barrier(children.size()));
-                broadcast_shard = trace_info.record_managed_barrier(
+                broadcast_shard = trace_info.record_barrier_creation(
                                       broadcast_bar, children.size());
                 broadcast_events.push_back(broadcast_bar);
               }
@@ -11774,15 +11766,12 @@ namespace Legion {
           {
             if (!trace_barrier.exists())
             {
-              trace_barrier = 
-                ApBarrier(Realm::Barrier::create_barrier(children.size()));
-              trace_shard = trace_info.record_managed_barrier(trace_barrier,
+              trace_shard = trace_info.record_barrier_creation(trace_barrier,
                                                               children.size());
               reduce_events.push_back(trace_barrier);
             }
             rez.serialize(trace_barrier);
-            if (trace_barrier.exists())
-              rez.serialize(trace_shard);
+            rez.serialize(trace_shard);
           }
           else
           {
@@ -12238,9 +12227,7 @@ namespace Legion {
           {
             if (!trace_barrier.exists())
             {
-              trace_barrier =
-                ApBarrier(Realm::Barrier::create_barrier(children.size()));
-              trace_shard = trace_info.record_managed_barrier(trace_barrier,
+              trace_shard = trace_info.record_barrier_creation(trace_barrier,
                                                               children.size());
               done_events.push_back(trace_barrier);
             }
@@ -13297,10 +13284,8 @@ namespace Legion {
           {
             if (!src_bar.exists())
             {
-              src_bar = 
-                ApBarrier(Realm::Barrier::create_barrier(total));
               src_bar_shard =
-                trace_info.record_managed_barrier(src_bar, total);
+                trace_info.record_barrier_creation(src_bar, total);
               src_events.push_back(src_bar);
             }
             rez.serialize(src_bar);

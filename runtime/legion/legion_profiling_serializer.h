@@ -48,6 +48,7 @@ namespace Legion {
       virtual void serialize(const LegionProfDesc::MetaDesc&) = 0;
       virtual void serialize(const LegionProfDesc::OpDesc&) = 0;
       virtual void serialize(const LegionProfDesc::MaxDimDesc&) = 0;
+      virtual void serialize(const LegionProfDesc::RuntimeConfig&) = 0;
       virtual void serialize(const LegionProfDesc::MachineDesc&) = 0;
       virtual void serialize(const LegionProfDesc::ZeroTime&) = 0;
       virtual void serialize(const LegionProfDesc::CalibrationErr&) = 0;
@@ -118,6 +119,7 @@ namespace Legion {
       void serialize(const LegionProfDesc::MetaDesc&);
       void serialize(const LegionProfDesc::OpDesc&);
       void serialize(const LegionProfDesc::MaxDimDesc&);
+      void serialize(const LegionProfDesc::RuntimeConfig&);
       void serialize(const LegionProfDesc::MachineDesc&);
       void serialize(const LegionProfDesc::ZeroTime&);
       void serialize(const LegionProfDesc::CalibrationErr&);
@@ -181,6 +183,7 @@ namespace Legion {
         PROC_DESC_ID,
         MEM_DESC_ID,
 	MAX_DIM_DESC_ID,
+        RUNTIME_CONFIG_ID,
 	MACHINE_DESC_ID,
         TASK_KIND_ID,
         TASK_VARIANT_ID,
@@ -239,6 +242,7 @@ namespace Legion {
       void serialize(const LegionProfDesc::MetaDesc&);
       void serialize(const LegionProfDesc::OpDesc&);
       void serialize(const LegionProfDesc::MaxDimDesc&);
+      void serialize(const LegionProfDesc::RuntimeConfig&);
       void serialize(const LegionProfDesc::MachineDesc&);
       void serialize(const LegionProfDesc::ZeroTime&);
       void serialize(const LegionProfDesc::CalibrationErr&);

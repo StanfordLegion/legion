@@ -940,7 +940,7 @@ def build_make(root_dir, tmp_dir, env, thread_count, networks):
     os.mkdir(build_dir)
     os.mkdir(install_dir)
     makefile = os.path.join(build_dir, 'Makefile')
-    cmd(['cp', os.path.join(root_dir, 'apps', 'Makefile.template'), makefile])
+    shutil.copyfile(os.path.join(root_dir, 'apps', 'Makefile.template'), makefile)
     # We'll just always for shared objects here for performance
     env['SHARED_OBJECTS'] = '1'
     # If we have networks always turn on the use of the network

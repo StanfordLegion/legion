@@ -10198,15 +10198,25 @@ namespace Legion {
             local_future_result = inst;
             inst = NULL;
           }
-#ifdef DEBUG_LEGION
-          // In debug mode we'll do a comparison to see if the futures
-          // are bit-wise the same or not and issue a warning if not
-          else if (local_future_result->size != inst->size)
-            REPORT_LEGION_WARNING(LEGION_WARNING_MISMATCHED_REPLICATED_FUTURES,
-                                  "WARNING: futures returned from control "
-                                  "replicated task %s have different sizes!",
-                                  local_shards[0]->get_task_name())
-#endif
+          else
+          {
+            if (local_future_result->size != inst->size)
+              REPORT_LEGION_WARNING(
+                  LEGION_WARNING_MISMATCHED_REPLICATED_FUTURES,
+                                    "WARNING: futures returned from control "
+                                    "replicated task %s have different sizes!",
+                                    local_shards[0]->get_task_name())
+            // Switch to a local future instance if we have one
+            if ((local_future_result->memory.address_space() != local_space) &&
+                local && (inst->memory.address_space() == local_space))
+            {
+              if (!local_future_result->defer_deletion(
+                    Runtime::merge_events(NULL, execution_effects)))
+                delete local_future_result;
+              local_future_result = inst;
+              inst = NULL;
+            }
+          }
         }
       }
       if (notify)

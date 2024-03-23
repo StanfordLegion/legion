@@ -2,21 +2,26 @@ This file lists the major changes as they appear in the stable branch.  No
 attempt is made to keep this list accurate for the master branch.
 
 Version 24.03.0 (March ??, 2024)
+  * Build
+    - ROCm 6.0 is now supported, and support for ROCm 4.x has been removed
   * Legion
     - Support for control replication has been merged
     - Support for discarding region contents on task completion
-    - Long-deprecated APIs, such as the old HighLevel namespace, have
+    - Long-deprecated APIs, such as the old `HighLevel` namespace, have
        been removed
   * Mappers
     - Default mapper support for control replication
     - Default and null mapper now use C++ `override` keyword
   * Regent
     - Support for pure projection functors that capture arguments
+    - Static control replication (SCR) has been deprecated and will be
+       removed in a future release
   * Tools
     - The profiler now correctly recognizes the logger format version
        and throws an error if it does not match
     - Many profiler fixes for correctly rendering runtime and mapper calls
     - Profiler now renders GPU device and host execution separately
+    - Optimizations to improve profiler memory usage and running time
     - Rust profiler now requires at least Rust 1.74
   * Realm
     - Support for registration of dynamically allocated buffers

@@ -187,3 +187,52 @@ do
   local k5b, v5b = it(t, k4)
   assert(k5b == obj1 and v5b == 6)
 end
+
+-- Equality.
+do
+  local m1 = data.newmap()
+  m1["a"] = 1
+  m1["b"] = 2
+  m1["c"] = 3
+
+  local m2 = data.newmap()
+  m2["a"] = 1
+  m2["b"] = 2
+  m2["c"] = 3
+
+  -- A differently ordered map will not match.
+  local m3 = data.newmap()
+  m3["c"] = 3
+  m3["a"] = 1
+  m3["b"] = 2
+
+  -- A map with a subset of elements will not match.
+  local m4 = data.newmap()
+  m4["a"] = 1
+  m4["b"] = 2
+
+  -- A map with a superset of elements will not match.
+  local m5 = data.newmap()
+  m5["a"] = 1
+  m5["b"] = 2
+  m5["c"] = 3
+  m5["d"] = 4
+
+  -- A copy will match.
+  local m6 = m1:copy()
+
+  assert(m1 == m2)
+  assert(m2 == m1)
+
+  assert(m1 ~= m3)
+  assert(m3 ~= m1)
+
+  assert(m1 ~= m4)
+  assert(m4 ~= m1)
+
+  assert(m1 ~= m5)
+  assert(m5 ~= m1)
+
+  assert(m1 == m6)
+  assert(m6 == m1)
+end
