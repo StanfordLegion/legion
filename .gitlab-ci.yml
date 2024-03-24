@@ -67,6 +67,8 @@ cache: &global_cache
   F90: "/opt/intel/oneapi/compiler/2023.1.0/linux/bin/ifx"
   # work around obnoxious warnings about -g without -O0
   EXTRA_CMAKE_ARGS: "-DCMAKE_CXX_FLAGS_DEBUG='-g -O0'"
+  # for libsvml.so, auto-linked by newer Intel compilers
+  LD_LIBRARY_PATH: "/opt/intel/oneapi/compiler/2023.1.0/linux/compiler/lib/intel64_lin"
 .macos_clang: &macos_clang # on macOS, we don't control the compiler version
   CC:  "clang"
   CXX: "clang++"
