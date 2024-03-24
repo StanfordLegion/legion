@@ -65,6 +65,7 @@ cache: &global_cache
   CC: "/opt/intel/oneapi/compiler/2023.1.0/linux/bin/icx"
   CXX: "/opt/intel/oneapi/compiler/2023.1.0/linux/bin/icpx"
   F90: "/opt/intel/oneapi/compiler/2023.1.0/linux/bin/ifx"
+  CMAKE_CXX_FLAGS_DEBUG: "-g -O0"
 .macos_clang: &macos_clang # on macOS, we don't control the compiler version
   CC:  "clang"
   CXX: "clang++"
