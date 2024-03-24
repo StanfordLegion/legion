@@ -713,6 +713,9 @@ bool CheckTask::cpu_impl(const Task *task,
   const AccessorROfloat fa_check(regions[0], task->regions[0].instance_fields[0]);
   LogicalRegion lr = task->regions[0].region;
   bool success = true;
+  // In fast math mode, floating point values are assumed to be not NaN, so
+  // some compilers complain about this check.
+#ifndef __FAST_MATH__
   for (PointInDomainIterator<1> itr(
         runtime->get_index_space_domain(lr.get_index_space())); itr(); itr++)
   {
@@ -720,6 +723,7 @@ bool CheckTask::cpu_impl(const Task *task,
     if (std::isnan(value))
       success = false;
   }
+#endif
   return success;
 }
 
