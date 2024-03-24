@@ -62,9 +62,9 @@ cache: &global_cache
   # cmake gets confused and can't figure out library arch
   EXTRA_CMAKE_ARGS: "-DCMAKE_LIBRARY_ARCHITECTURE=x86_64-linux-gnu"
 .icc212: &icc212
-  CC: "/opt/intel/oneapi/compiler/2023.1.0/linux/bin/intel64/icc"
-  CXX: "/opt/intel/oneapi/compiler/2023.1.0/linux/bin/intel64/icpc"
-  F90: "/opt/intel/oneapi/compiler/2023.1.0/linux/bin/intel64/ifort"
+  CC: "/opt/intel/oneapi/compiler/2023.1.0/linux/bin/icx"
+  CXX: "/opt/intel/oneapi/compiler/2023.1.0/linux/bin/icpx"
+  F90: "/opt/intel/oneapi/compiler/2023.1.0/linux/bin/ifx"
 .macos_clang: &macos_clang # on macOS, we don't control the compiler version
   CC:  "clang"
   CXX: "clang++"
@@ -1321,7 +1321,7 @@ hpcsdk2211_cxx17_debug_cmake_legion:
   variables:
     <<: [*hpcsdk2211, *debug, *cxx17_normal, *cmake, *legion, *ctest, *short, *libdw]
 
-# Intel compiler (icc/icpc) tests:
+# Intel compiler (icx/icpx) tests:
 icc212_cxx17_release_legion:
   <<: [*linux, *image_icc, *tests]
   variables:
@@ -1329,7 +1329,7 @@ icc212_cxx17_release_legion:
 icc212_cxx17_debug_cmake_legion:
   <<: [*linux, *image_icc, *tests]
   variables:
-    <<: [*icc212, *debug, *cxx17_normal, *cmake, *legion, *ctest, *libdw]
+    <<: [*icc212, *debug, *cxx17_normal, *cmake, *legion, *ctest, *short, *libdw]
 
 # MSVC (Realm only):
 msvc169_realm:
