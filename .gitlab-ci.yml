@@ -109,6 +109,9 @@ cache: &global_cache
 .cxx17_hardened: &cxx17_hardened
   CXXFLAGS: "-D_FORTIFY_SOURCE=2 -D_GLIBCXX_ASSERTIONS"
   CXX_STANDARD: "17"
+.cxx17_precise: &cxx17_precise
+  CXXFLAGS: "-fp-model=precise" # Intel compilers turn on fast math by default, so we have to shut that off
+  CXX_STANDARD: "17"
 .cxx20_normal: &cxx20_normal
   CXXFLAGS: ""
   CXX_STANDARD: "20"
@@ -1329,11 +1332,11 @@ hpcsdk2211_cxx17_debug_cmake_legion:
 icc212_cxx17_release_legion:
   <<: [*linux, *image_icc, *tests]
   variables:
-    <<: [*icc212, *release, *cxx17_normal, *legion]
+    <<: [*icc212, *release, *cxx17_precise, *legion]
 icc212_cxx17_debug_cmake_legion:
   <<: [*linux, *image_icc, *tests]
   variables:
-    <<: [*icc212, *debug, *cxx17_normal, *cmake, *legion, *ctest, *short, *libdw]
+    <<: [*icc212, *debug, *cxx17_precise, *cmake, *legion, *ctest, *short, *libdw]
 
 # MSVC (Realm only):
 msvc169_realm:
