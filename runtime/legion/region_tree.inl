@@ -7569,7 +7569,7 @@ namespace Legion {
                 const FieldMask overlap = mask & it->second;
                 if (!overlap)
                   continue;
-                it->first->record_pending_equivalence_set(set, mask);
+                it->first->record_pending_equivalence_set(set, overlap);
               }
             }
           }
