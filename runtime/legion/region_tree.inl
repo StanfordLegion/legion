@@ -8401,7 +8401,14 @@ namespace Legion {
             // to mutate those equivalence sets leading to races. To
             // avoid this we'll check to see if we have any current
             // equivalence sets
-            refine_node(rect, current_mask, true/*refine current*/);
+            if (lefts != NULL)
+            {
+              FieldMask refine = current_mask - lefts->get_valid_mask();
+              if (!!refine)
+                refine_node(rect, refine, true/*refine current*/);
+            }
+            else
+              refine_node(rect, current_mask, true/*refine current*/);
           }
         }
       }
