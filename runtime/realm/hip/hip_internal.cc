@@ -570,8 +570,7 @@ namespace Realm {
                              src_gpu->pinned_sysmems.begin(),
                              src_gpu->pinned_sysmems.end());
       // treat managed memory as usually being on the host as well
-      mapped_cpu_mems.insert(mapped_cpu_mems.end(),
-                             src_gpu->managed_mems.begin(),
+      mapped_cpu_mems.insert(mapped_cpu_mems.end(), src_gpu->managed_mems.begin(),
                              src_gpu->managed_mems.end());
 
       switch(_kind) {

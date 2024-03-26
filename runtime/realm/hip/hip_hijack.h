@@ -62,9 +62,9 @@ namespace Realm {
       bool global;
       bool managed;
 
-      RegisteredVariable(const FatBin  *_fat_bin, const void *_host_var,
-			 const char *_device_name, bool _external,
-			 int _size, bool _constant, bool _global, bool _managed);
+      RegisteredVariable(const FatBin *_fat_bin, const void *_host_var,
+                         const char *_device_name, bool _external, int _size,
+                         bool _constant, bool _global, bool _managed);
     };
 
     class GPU;
