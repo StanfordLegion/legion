@@ -2738,10 +2738,67 @@ impl ProfUIDAllocator {
 }
 
 #[derive(Debug, Default)]
+pub struct RuntimeConfig {
+    pub debug: bool,
+    pub spy: bool,
+    pub gc: bool,
+    pub inorder: bool,
+    pub safe_mapper: bool,
+    pub safe_runtime: bool,
+    pub safe_ctrlrepl: bool,
+    pub part_checks: bool,
+    pub bounds_checks: bool,
+    pub resilient: bool,
+}
+
+impl RuntimeConfig {
+    pub fn any(&self) -> bool {
+        self.debug
+            || self.spy
+            || self.gc
+            || self.inorder
+            || self.safe_mapper
+            || self.safe_runtime
+            || self.safe_ctrlrepl
+            || self.part_checks
+            || self.bounds_checks
+            || self.resilient
+    }
+}
+
+impl fmt::Display for RuntimeConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut first = true;
+        let mut conf = |cond, name| {
+            if cond {
+                if !first {
+                    write!(f, ", ")?;
+                }
+                write!(f, "{}", name)?;
+                first = false;
+            }
+            Ok(())
+        };
+
+        conf(self.debug, "Debug Mode")?;
+        conf(self.spy, "Legion Spy")?;
+        conf(self.gc, "Legion GC")?;
+        conf(self.inorder, "-lg:inorder")?;
+        conf(self.safe_mapper && !self.debug, "-lg:safe_mapper")?;
+        conf(self.safe_runtime && !self.debug, "Safe Runtime")?;
+        conf(self.safe_ctrlrepl, "-lg:safe_ctrlrepl")?;
+        conf(self.part_checks, "-lg:partcheck")?;
+        conf(self.bounds_checks, "Bounds Checks")?;
+        conf(self.resilient, "Resilience")
+    }
+}
+
+#[derive(Debug, Default)]
 pub struct State {
     prof_uid_allocator: ProfUIDAllocator,
     max_dim: i32,
     pub num_nodes: u32,
+    pub runtime_config: RuntimeConfig,
     pub zero_time: TimestampDelta,
     pub _calibration_err: i64,
     pub procs: BTreeMap<ProcID, Proc>,
@@ -3791,6 +3848,31 @@ fn process_record(
         }
         Record::MaxDimDesc { max_dim } => {
             state.max_dim = *max_dim;
+        }
+        Record::RuntimeConfig {
+            debug,
+            spy,
+            gc,
+            inorder,
+            safe_mapper,
+            safe_runtime,
+            safe_ctrlrepl,
+            part_checks,
+            bounds_checks,
+            resilient,
+        } => {
+            state.runtime_config = RuntimeConfig {
+                debug: *debug,
+                spy: *spy,
+                gc: *gc,
+                inorder: *inorder,
+                safe_mapper: *safe_mapper,
+                safe_runtime: *safe_runtime,
+                safe_ctrlrepl: *safe_ctrlrepl,
+                part_checks: *part_checks,
+                bounds_checks: *bounds_checks,
+                resilient: *resilient,
+            };
         }
         Record::MachineDesc { num_nodes, .. } => {
             state.num_nodes = *num_nodes;

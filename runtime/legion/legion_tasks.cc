@@ -4067,10 +4067,11 @@ namespace Legion {
         }
       }
       // Construct the collective mapping
-      std::vector<AddressSpaceID> spaces(output.target_processors.size());
-      for (unsigned idx = 0; idx < spaces.size(); idx++)
-        spaces[idx] =
-          runtime->find_address_space(output.target_processors[idx]);
+      std::vector<AddressSpaceID> spaces(output.target_processors.size()+1);
+      for (unsigned idx = 0; idx < output.target_processors.size(); idx++)
+        spaces[idx] = output.target_processors[idx].address_space();
+      // Make sure we include our local space too
+      spaces.back() = runtime->address_space;
       std::sort(spaces.begin(), spaces.end());
       // Uniquify them
       std::vector<AddressSpaceID>::iterator last = 

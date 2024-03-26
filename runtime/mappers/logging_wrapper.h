@@ -78,6 +78,7 @@ class LoggingWrapper : public ForwardingMapper {
                                SelectShardingFunctorOutput& output) override;
 #endif // NO_LEGION_CONTROL_REPLICATION
  public:
+  const char* get_mapper_name(void) const override;
   void slice_task(const MapperContext ctx,
                   const Task& task,
                   const SliceTaskInput& input,
@@ -108,6 +109,7 @@ class LoggingWrapper : public ForwardingMapper {
                            SelectCopySrcOutput& output) override;
  private:
   Logger* logger;
+  std::string name;
 };
 
 }; // namespace Mapping

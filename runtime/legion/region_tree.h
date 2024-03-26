@@ -4362,6 +4362,7 @@ namespace Legion {
             const void *buffer, size_t size, bool is_mutable, bool local_only);
       bool retrieve_semantic_information(SemanticTag tag,
            const void *&result, size_t &size, bool can_fail, bool wait_until);
+      virtual AddressSpaceID find_semantic_owner(void) const = 0;
       virtual void send_semantic_request(AddressSpaceID target, 
         SemanticTag tag, bool can_fail, bool wait_until, RtUserEvent ready) = 0;
       virtual void send_semantic_info(AddressSpaceID target, SemanticTag tag,
@@ -4398,10 +4399,11 @@ namespace Legion {
                                     OrderedFieldMaskChildren &children,
                                     LogicalRegion privilege_root,
                                     RegionTreeNode *path_node,
-                                    RegionTreeNode *next_child,
-                                    FieldMask &open_below,
                                     LogicalAnalysis &analysis,
-                                    const bool filter_next);
+                                    FieldMask &open_below,
+                                    RegionTreeNode *next_child = NULL,
+                                    FieldMask *next_child_fields = NULL,
+                                    const bool filter_next_child = false);
       void close_logical_node(const LogicalUser &user,
                               const FieldMask &closing_mask,
                               LogicalRegion privilege_root,
@@ -4421,8 +4423,6 @@ namespace Legion {
                                          LogicalRegion privilege_root,
                                          LogicalAnalysis &logical_analysis);
       void merge_new_field_state(LogicalState &state, FieldState &new_state);
-      void merge_new_field_states(LogicalState &state, 
-                                  LegionDeque<FieldState> &new_states);
       void filter_prev_epoch_users(LogicalState &state, const FieldMask &mask);
       void filter_curr_epoch_users(LogicalState &state, const FieldMask &mask);
       void report_uninitialized_usage(Operation *op, unsigned index,
@@ -4454,7 +4454,6 @@ namespace Legion {
       virtual RefinementTracker* create_refinement_tracker(void) = 0;
       virtual bool visit_node(PathTraverser *traverser) = 0;
       virtual bool visit_node(NodeTraverser *traverser) = 0;
-      virtual AddressSpaceID get_owner_space(void) const = 0;
     public:
       virtual bool are_children_disjoint(const LegionColor c1, 
                                          const LegionColor c2) = 0;
@@ -4567,8 +4566,6 @@ namespace Legion {
       virtual RegionNode* as_region_node(void) const;
       virtual PartitionNode* as_partition_node(void) const;
 #endif
-      virtual AddressSpaceID get_owner_space(void) const;
-      static AddressSpaceID get_owner_space(LogicalRegion handle, Runtime *rt);
       virtual bool visit_node(PathTraverser *traverser);
       virtual bool visit_node(NodeTraverser *traverser);
       virtual bool is_complete(void);
@@ -4578,6 +4575,7 @@ namespace Legion {
       static void handle_node_creation(RegionTreeForest *context,
                             Deserializer &derez, AddressSpaceID source);
     public:
+      virtual AddressSpaceID find_semantic_owner(void) const;
       virtual void send_semantic_request(AddressSpaceID target, 
            SemanticTag tag, bool can_fail, bool wait_until, RtUserEvent ready);
       virtual void send_semantic_info(AddressSpaceID target, SemanticTag tag,
@@ -4688,9 +4686,6 @@ namespace Legion {
       virtual RegionNode* as_region_node(void) const;
       virtual PartitionNode* as_partition_node(void) const;
 #endif
-      virtual AddressSpaceID get_owner_space(void) const;
-      static AddressSpaceID get_owner_space(LogicalPartition handle, 
-                                            Runtime *runtime);
       virtual bool visit_node(PathTraverser *traverser);
       virtual bool visit_node(NodeTraverser *traverser);
       virtual bool is_complete(void);
@@ -4698,6 +4693,7 @@ namespace Legion {
       virtual size_t get_num_children(void) const;
       virtual void send_node(Serializer &rez, AddressSpaceID target);
     public:
+      virtual AddressSpaceID find_semantic_owner(void) const;
       virtual void send_semantic_request(AddressSpaceID target, 
            SemanticTag tag, bool can_fail, bool wait_until, RtUserEvent ready);
       virtual void send_semantic_info(AddressSpaceID target, SemanticTag tag,

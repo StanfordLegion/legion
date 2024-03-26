@@ -1,3 +1,6 @@
+**Important:** Regent static control replication (SCR, called SPMD
+below) is deprecated and will be removed in a future release.
+
 SPMD is an advanced programming feature of Regent which enables scalability
 out to large numbers of nodes. SPMD-style programs can be generated
 automatically by the Regent compiler. This is an advanced optimization that is
