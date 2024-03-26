@@ -7835,6 +7835,8 @@ namespace Legion {
           delete lefts;
           lefts = NULL;
         }
+        else
+          lefts->tighten_valid_mask();
         to_delete.clear();
         for (typename FieldMaskSet<EqKDNode<DIM,T> >::iterator
               it = rights->begin(); it != rights->end(); it++)
@@ -7858,6 +7860,8 @@ namespace Legion {
           delete rights;
           rights = NULL;
         }
+        else
+          rights->tighten_valid_mask();
       }
     }
 
