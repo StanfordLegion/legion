@@ -8560,8 +8560,12 @@ namespace Legion {
               delete child_previous_below;
               child_previous_below = NULL;
             }
+            else
+              child_previous_below->tighten_valid_mask();
             return;
           }
+          else
+            child_previous_below->tighten_valid_mask();
         }
       }
       else
