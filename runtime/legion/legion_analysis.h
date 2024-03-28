@@ -3691,7 +3691,8 @@ namespace Legion {
                           std::vector<RtEvent> &applied_events,
                           const bool invalidate_overlap,
                           const bool record_invalidate,
-                          const bool filter_invalidations);
+                          const bool filter_invalidations,
+                          const bool need_dst_lock = true);
       void clone_to_remote(DistributedID target, AddressSpaceID target_space,
                     IndexSpaceExpression *target_expr, 
                     IndexSpaceExpression *overlap, FieldMask mask,
