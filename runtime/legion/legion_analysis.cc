@@ -19045,6 +19045,87 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    RtEvent EquivalenceSet::find_virtual_initialize_expressions(
+        IndexSpaceExpression *expr, FieldMask mask,
+        FieldMaskSet<IndexSpaceExpression> *target,
+        AddressSpaceID target_space, RtUserEvent done_event)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock eq(eq_lock);
+      if (is_logical_owner())
+      {
+        FieldMaskSet<IndexSpaceExpression> result;
+        if (!partial_invalidations.empty() &&
+            !(partial_invalidations.get_valid_mask() * mask))
+        {
+          for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+                partial_invalidations.begin(); it !=
+                partial_invalidations.end(); it++)
+          {
+            const FieldMask overlap = mask & it->second;
+            if (!overlap)
+              continue;
+            IndexSpaceExpression *diff_expr = 
+              runtime->forest->subtract_index_spaces(expr, it->first);
+            if (!diff_expr->is_empty())
+              result.insert(diff_expr, overlap);
+            mask -= overlap;
+            if (!mask)
+              break;
+          }
+        }
+        if (!!mask)
+          result.insert(expr, mask);
+        if (target_space != local_space)
+        {
+#ifdef DEBUG_LEGION
+          assert(done_event.exists());
+#endif
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(target);
+            rez.serialize<size_t>(result.size());
+            for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+                  result.begin(); it != result.end(); it++)
+            {
+              it->first->pack_expression(rez, target_space);
+              rez.serialize(it->second);
+            }
+            rez.serialize(done_event);
+          }
+          runtime->send_equivalence_set_virtual_init_response(
+            target_space, rez);
+        }
+        else
+        {
+          target->swap(result);
+          if (done_event.exists())
+            Runtime::trigger_event(done_event);
+        }
+      }
+      else
+      {
+        if (!done_event.exists())
+          done_event = Runtime::create_rt_user_event();
+        // Forward this on to the owner node
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          expr->pack_expression(rez, logical_owner_space);
+          rez.serialize(mask);
+          rez.serialize(target);
+          rez.serialize(target_space);
+          rez.serialize(done_event);
+        }
+        runtime->send_equivalence_set_virtual_init_request(
+            logical_owner_space, rez);
+      }
+      return done_event;
+    }
+
+    //--------------------------------------------------------------------------
     void EquivalenceSet::update_tracing_read_only_view(InstanceView *view,
                                                     IndexSpaceExpression *expr,
                                                     const FieldMask &view_mask)
@@ -21292,6 +21373,54 @@ namespace Legion {
         Runtime::trigger_event(done_event, Runtime::merge_events(ready_events));
       else
         Runtime::trigger_event(done_event);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void EquivalenceSet::handle_virtual_init_request(
+                  Deserializer &derez, Runtime *runtime, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      RtEvent ready;
+      EquivalenceSet *set = runtime->find_or_request_equivalence_set(did,ready);
+      IndexSpaceExpression *expr = 
+        IndexSpaceExpression::unpack_expression(derez, runtime->forest, source);
+      FieldMask mask;
+      derez.deserialize(mask);
+      FieldMaskSet<IndexSpaceExpression> *target;
+      derez.deserialize(target);
+      AddressSpaceID target_space;
+      derez.deserialize(target_space);
+      RtUserEvent done_event;
+      derez.deserialize(done_event);
+      ready.wait();
+      set->find_virtual_initialize_expressions(expr, mask, target,
+          target_space, done_event);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void EquivalenceSet::handle_virtual_init_response(
+                  Deserializer &derez, Runtime *runtime, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      FieldMaskSet<IndexSpaceExpression> *target;
+      derez.deserialize(target);
+      size_t num_exprs;
+      derez.deserialize(num_exprs);
+      for (unsigned idx = 0; idx < num_exprs; idx++)
+      {
+        IndexSpaceExpression *expr =
+          IndexSpaceExpression::unpack_expression(derez,runtime->forest,source);
+        FieldMask mask;
+        derez.deserialize(mask);
+        target->insert(expr, mask);
+      }
+      RtUserEvent done_event;
+      derez.deserialize(done_event);
+      Runtime::trigger_event(done_event);
     }
 
     /////////////////////////////////////////////////////////////
