@@ -8462,12 +8462,11 @@ namespace Legion {
                                              IndexSpaceExpression *expr,
                                              const bool expr_covers,
                                              const FieldMask &mask,
-                                             std::set<RtEvent> &deferral_events,
                                              std::set<RtEvent> &applied_events,
                                              const bool already_deferred)
     //--------------------------------------------------------------------------
     {
-      set->find_valid_instances(*this, expr, expr_covers, mask, deferral_events, 
+      set->find_valid_instances(*this, expr, expr_covers, mask,
                                 applied_events, already_deferred);
       // No migration check for reading
       return false;
@@ -8672,12 +8671,11 @@ namespace Legion {
                                              IndexSpaceExpression *expr,
                                              const bool expr_covers,
                                              const FieldMask &mask,
-                                             std::set<RtEvent> &deferral_events,
                                              std::set<RtEvent> &applied_events,
                                              const bool already_deferred)
     //--------------------------------------------------------------------------
     {
-      set->find_invalid_instances(*this, expr, expr_covers,mask,deferral_events,
+      set->find_invalid_instances(*this, expr, expr_covers, mask,
                                   applied_events, already_deferred);
       // No migration check for reading
       return false;
@@ -8900,12 +8898,11 @@ namespace Legion {
                                              IndexSpaceExpression *expr,
                                              const bool expr_covers,
                                              const FieldMask &mask,
-                                             std::set<RtEvent> &deferral_events,
                                              std::set<RtEvent> &applied_events,
                                              const bool already_deferred)
     //--------------------------------------------------------------------------
     {
-      set->find_antivalid_instances(*this,expr,expr_covers,mask,deferral_events,
+      set->find_antivalid_instances(*this, expr, expr_covers, mask,
                                     applied_events, already_deferred);
       // No migration check for reading
       return false;
@@ -9165,12 +9162,11 @@ namespace Legion {
                                           IndexSpaceExpression *expr,
                                           const bool expr_covers,
                                           const FieldMask &mask,
-                                          std::set<RtEvent> &deferral_events,
                                           std::set<RtEvent> &applied_events,
                                           const bool already_deferred)
     //--------------------------------------------------------------------------
     {
-      set->update_set(*this, expr, expr_covers, mask, deferral_events, 
+      set->update_set(*this, expr, expr_covers, mask,
                       applied_events, already_deferred);
       // Perform a check for migration
       return true;
@@ -9586,12 +9582,11 @@ namespace Legion {
                                            IndexSpaceExpression *expr,
                                            const bool expr_covers,
                                            const FieldMask &mask,
-                                           std::set<RtEvent> &deferral_events,
                                            std::set<RtEvent> &applied_events,
                                            const bool already_deferred)
     //--------------------------------------------------------------------------
     {
-      set->acquire_restrictions(*this, expr, expr_covers, mask, deferral_events,
+      set->acquire_restrictions(*this, expr, expr_covers, mask,
                                 applied_events, already_deferred);
       // Perform a check for migration after this
       return true;
@@ -9822,12 +9817,11 @@ namespace Legion {
                                            IndexSpaceExpression *expr,
                                            const bool expr_covers,
                                            const FieldMask &mask,
-                                           std::set<RtEvent> &deferral_events,
                                            std::set<RtEvent> &applied_events,
                                            const bool already_deferred)
     //--------------------------------------------------------------------------
     {
-      set->release_restrictions(*this, expr, expr_covers, mask, deferral_events,
+      set->release_restrictions(*this, expr, expr_covers, mask,
                                 applied_events, already_deferred);
       // Perform a check for migration after this
       return true;
@@ -10218,12 +10212,11 @@ namespace Legion {
                                              IndexSpaceExpression *expr,
                                              const bool expr_covers,
                                              const FieldMask &mask,
-                                             std::set<RtEvent> &deferral_events,
                                              std::set<RtEvent> &applied_events,
                                              const bool already_deferred)
     //--------------------------------------------------------------------------
     {
-      set->issue_across_copies(*this, mask, expr, expr_covers, deferral_events,
+      set->issue_across_copies(*this, mask, expr, expr_covers,
                                applied_events, already_deferred);
       // Perform a check for migration after this
       return true;
@@ -10734,12 +10727,11 @@ namespace Legion {
                                              IndexSpaceExpression *expr,
                                              const bool expr_covers,
                                              const FieldMask &mask,
-                                             std::set<RtEvent> &deferral_events,
                                              std::set<RtEvent> &applied_events,
                                              const bool already_deferred)
     //--------------------------------------------------------------------------
     {
-      set->overwrite_set(*this, expr, expr_covers, mask, deferral_events, 
+      set->overwrite_set(*this, expr, expr_covers, mask,
                          applied_events, already_deferred);
       // Perform a check for migration after this
       return true;
@@ -11099,12 +11091,11 @@ namespace Legion {
                                           IndexSpaceExpression *expr,
                                           const bool expr_covers,
                                           const FieldMask &mask,
-                                          std::set<RtEvent> &deferral_events,
                                           std::set<RtEvent> &applied_events,
                                           const bool already_deferred)
     //--------------------------------------------------------------------------
     {
-      set->filter_set(*this, expr, expr_covers, mask, deferral_events, 
+      set->filter_set(*this, expr, expr_covers, mask,
                       applied_events, already_deferred);
       // Perform a check for migration after this
       return true;
@@ -11292,13 +11283,12 @@ namespace Legion {
                                          IndexSpaceExpression *expr,
                                          const bool expr_covers,
                                          const FieldMask &mask,
-                                         std::set<RtEvent> &deferral_events,
                                          std::set<RtEvent> &applied_events,
                                          const bool already_deferred)
     //--------------------------------------------------------------------------
     {
       std::vector<RtEvent> applied;
-      set->clone_set(*this, expr, expr_covers, mask, deferral_events,
+      set->clone_set(*this, expr, expr_covers, mask,
                      applied, already_deferred);
       if (!applied.empty())
         applied_events.insert(applied.begin(), applied.end());
@@ -12556,7 +12546,7 @@ namespace Legion {
               runtime->forest->subtract_index_spaces(expr, it->first);
             if (!remainder->is_empty() && analysis.perform_analysis(this, 
                   remainder, false/*expr covers*/, overlap, 
-                  deferral_events, applied_events, already_deferred))
+                  applied_events, already_deferred))
                 check_migration = true;
             invalid_mask -= overlap;
             if (!invalid_mask)
@@ -12564,8 +12554,8 @@ namespace Legion {
           }
         }
       }
-      if (!!traversal_mask && analysis.perform_analysis(this, expr, expr_covers,
-            traversal_mask, deferral_events, applied_events, already_deferred))
+      if (!!traversal_mask && analysis.perform_analysis(this, expr,
+            expr_covers, traversal_mask, applied_events, already_deferred))
         check_migration = true;
       if (check_migration)
         check_for_migration(analysis, applied_events); 
@@ -12576,7 +12566,6 @@ namespace Legion {
                                              IndexSpaceExpression *expr,
                                              const bool expr_covers, 
                                              const FieldMask &user_mask,
-                                             std::set<RtEvent> &deferral_events,
                                              std::set<RtEvent> &applied_events,
                                              const bool already_deferred)
     //--------------------------------------------------------------------------
@@ -12709,7 +12698,6 @@ namespace Legion {
                                     IndexSpaceExpression *expr,
                                     const bool expr_covers, 
                                     const FieldMask &user_mask,
-                                    std::set<RtEvent> &deferral_events,
                                     std::set<RtEvent> &applied_events,
                                     const bool already_deferred)
     //--------------------------------------------------------------------------
@@ -13072,7 +13060,6 @@ namespace Legion {
                                             IndexSpaceExpression *expr,
                                             const bool expr_covers, 
                                             const FieldMask &user_mask,
-                                            std::set<RtEvent> &deferral_events,
                                             std::set<RtEvent> &applied_events,
                                             const bool already_deferred)
     //--------------------------------------------------------------------------
@@ -13320,7 +13307,6 @@ namespace Legion {
                                     IndexSpaceExpression *expr,
                                     const bool expr_covers,
                                     FieldMask user_mask,
-                                    std::set<RtEvent> &deferral_events,
                                     std::set<RtEvent> &applied_events,
                                     const bool already_deferred/*=false*/)
     //--------------------------------------------------------------------------
@@ -16774,7 +16760,6 @@ namespace Legion {
                                              IndexSpaceExpression *expr,
                                              const bool expr_covers, 
                                              const FieldMask &acquire_mask,
-                                             std::set<RtEvent> &deferral_events,
                                              std::set<RtEvent> &applied_events,
                                              const bool already_deferred)
     //--------------------------------------------------------------------------
@@ -16969,7 +16954,6 @@ namespace Legion {
                                              IndexSpaceExpression *expr,
                                              const bool expr_covers, 
                                              const FieldMask &release_mask,
-                                             std::set<RtEvent> &deferral_events,
                                              std::set<RtEvent> &applied_events,
                                              const bool already_deferred)
     //--------------------------------------------------------------------------
@@ -18101,7 +18085,6 @@ namespace Legion {
                                              const FieldMask &src_mask, 
                                              IndexSpaceExpression *expr,
                                              const bool expr_covers,
-                                             std::set<RtEvent> &deferral_events,
                                              std::set<RtEvent> &applied_events,
                                              const bool already_deferred)
     //--------------------------------------------------------------------------
@@ -18243,7 +18226,6 @@ namespace Legion {
                                        IndexSpaceExpression *expr, 
                                        const bool expr_covers, 
                                        const FieldMask &overwrite_mask,
-                                       std::set<RtEvent> &deferral_events,
                                        std::set<RtEvent> &applied_events,
                                        const bool already_deferred)
     //--------------------------------------------------------------------------
@@ -18628,7 +18610,6 @@ namespace Legion {
                                     IndexSpaceExpression *expr, 
                                     const bool expr_covers, 
                                     const FieldMask &filter_mask, 
-                                    std::set<RtEvent> &deferral_events,
                                     std::set<RtEvent> &applied_events,
                                     const bool already_deferred)
     //--------------------------------------------------------------------------
@@ -19017,7 +18998,6 @@ namespace Legion {
                                    IndexSpaceExpression *expr, 
                                    const bool expr_covers, 
                                    const FieldMask &clone_mask, 
-                                   std::set<RtEvent> &deferral_events,
                                    std::vector<RtEvent> &applied_events,
                                    const bool already_deferred)
     //--------------------------------------------------------------------------
