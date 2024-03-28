@@ -472,8 +472,7 @@ def run_test_external1(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, 
     # Fast Direct Solver
     # Contact: Chao Chen <cchen10@stanford.edu>
     solver_dir = os.path.join(tmp_dir, 'fastSolver2')
-    # clone_github('Charles-Chao-Chen', 'fastSolver2', solver_dir, tmp_dir)
-    clone_github('elliottslaughter', 'fastSolver2', solver_dir, tmp_dir, branch='modernize-legion')
+    clone_github('Charles-Chao-Chen', 'fastSolver2', solver_dir, tmp_dir)
     solver = [[os.path.join(solver_dir, 'spmd_driver/solver'),
         ['-machine', '1', '-core', '8', '-mtxlvl', '6', '-ll:cpu', '8', '-ll:csize', '1024']]]
     run_cxx(solver, flags, launcher, root_dir, None, env, thread_count, timelimit)
@@ -481,7 +480,7 @@ def run_test_external1(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, 
     # Parallel Research Kernels: Stencil
     # Contact: Wonchan Lee <wonchan@cs.stanford.edu>
     prk_dir = os.path.join(tmp_dir, 'prk')
-    clone_github('lightsighter', 'PRK', prk_dir, tmp_dir)
+    clone_github('magnatelee', 'PRK', prk_dir, tmp_dir)
     # This uses a custom Makefile that requires additional
     # configuration. Rather than go to that trouble it's easier to
     # just use a copy of the standard Makefile template.
@@ -583,20 +582,6 @@ def run_test_external2(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, 
 def run_test_private(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit):
     flags = ['-logfile', 'out_%.log']
 
-    # MiniAero
-    # Contact: Wonchan Lee <wonchan@cs.stanford.edu>
-    #miniaero_dir = os.path.join(tmp_dir, 'miniaero-spmd')
-    #cmd(['git', 'clone', '-b', 'spmd_flattened_superblocks',
-    #     'git@github.com:magnatelee/miniaero-spmd.git', miniaero_dir])
-    #cmd([make_exe, '-C', miniaero_dir, '-j', str(thread_count)], env=env,
-    #    cwd=miniaero_dir)
-    #for test in ['3D_Sod', '3D_Sod_2nd_Order'
-    #             # These tests take a long time so skip them by default.
-    #             # , 'FlatPlate', 'Ramp'
-    #            ]:
-    #    test_dir = os.path.join(miniaero_dir, 'tests', test)
-    #    cmd([os.path.join(test_dir, 'test.sh')], env=env, cwd=test_dir, timelimit=timelimit)
-
     # PENNANT
     # Contact: Galen Shipman <gshipman@lanl.gov>
     pennant_dir = os.path.join(tmp_dir, 'pennant')
@@ -608,7 +593,7 @@ def run_test_private(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, ti
         ('OUTFILE', 'pennant'),
         ('GEN_SRC', ' '.join(glob.glob(os.path.join(pennant_dir, 'src/*.cc')))),
         ('CXXFLAGS', (env['CXXFLAGS'] if 'CXXFLAGS' in env else '') +
-         ' -std=c++11 -Wno-sign-compare -Wno-unknown-pragmas -Wno-unused-variable' +
+         ' -Wno-sign-compare -Wno-unknown-pragmas -Wno-unused-variable' +
          ' -D__STDC_FORMAT_MACROS -DDISABLE_BARRIER_MIGRATION'),
         ('WARN_AS_ERROR', '0'),
     ])
