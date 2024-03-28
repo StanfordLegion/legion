@@ -2122,7 +2122,6 @@ namespace Legion {
                                     IndexSpaceExpression *expr,
                                     const bool expr_covers,
                                     const FieldMask &mask,
-                                    std::set<RtEvent> &deferral_events,
                                     std::set<RtEvent> &applied_events,
                                     const bool already_deferred = false) = 0;
       virtual RtEvent perform_remote(RtEvent precondition, 
@@ -2383,7 +2382,6 @@ namespace Legion {
                                     IndexSpaceExpression *expr,
                                     const bool expr_covers,
                                     const FieldMask &mask,
-                                    std::set<RtEvent> &deferral_events,
                                     std::set<RtEvent> &applied_events,
                                     const bool already_deferred = false);
       virtual RtEvent perform_remote(RtEvent precondition,
@@ -2427,7 +2425,6 @@ namespace Legion {
                                     IndexSpaceExpression *expr,
                                     const bool expr_covers,
                                     const FieldMask &mask,
-                                    std::set<RtEvent> &deferral_events,
                                     std::set<RtEvent> &applied_events,
                                     const bool already_deferred = false);
       virtual RtEvent perform_remote(RtEvent precondition,
@@ -2470,7 +2467,6 @@ namespace Legion {
                                     IndexSpaceExpression *expr,
                                     const bool expr_covers,
                                     const FieldMask &mask,
-                                    std::set<RtEvent> &deferral_events,
                                     std::set<RtEvent> &applied_events,
                                     const bool already_deferred = false);
       virtual RtEvent perform_remote(RtEvent precondition,
@@ -2525,7 +2521,6 @@ namespace Legion {
                                     IndexSpaceExpression *expr,
                                     const bool expr_covers,
                                     const FieldMask &mask,
-                                    std::set<RtEvent> &deferral_events,
                                     std::set<RtEvent> &applied_events,
                                     const bool already_deferred = false);
       virtual RtEvent perform_remote(RtEvent precondition, 
@@ -2593,7 +2588,6 @@ namespace Legion {
                                     IndexSpaceExpression *expr,
                                     const bool expr_covers,
                                     const FieldMask &mask,
-                                    std::set<RtEvent> &deferral_events,
                                     std::set<RtEvent> &applied_events,
                                     const bool already_deferred = false);
       virtual RtEvent perform_remote(RtEvent precondition, 
@@ -2636,7 +2630,6 @@ namespace Legion {
                                     IndexSpaceExpression *expr,
                                     const bool expr_covers,
                                     const FieldMask &mask,
-                                    std::set<RtEvent> &deferral_events,
                                     std::set<RtEvent> &applied_events,
                                     const bool already_deferred = false);
       virtual RtEvent perform_remote(RtEvent precondition,
@@ -2708,7 +2701,6 @@ namespace Legion {
                                     IndexSpaceExpression *expr,
                                     const bool expr_covers,
                                     const FieldMask &mask,
-                                    std::set<RtEvent> &deferral_events,
                                     std::set<RtEvent> &applied_events,
                                     const bool already_deferred = false);
       virtual RtEvent perform_remote(RtEvent precondition,
@@ -2828,7 +2820,6 @@ namespace Legion {
                                     IndexSpaceExpression *expr,
                                     const bool expr_covers,
                                     const FieldMask &mask,
-                                    std::set<RtEvent> &deferral_events,
                                     std::set<RtEvent> &applied_events,
                                     const bool already_deferred = false);
       virtual RtEvent perform_remote(RtEvent precondition, 
@@ -2895,7 +2886,6 @@ namespace Legion {
                                     IndexSpaceExpression *expr,
                                     const bool expr_covers,
                                     const FieldMask &mask,
-                                    std::set<RtEvent> &deferral_events,
                                     std::set<RtEvent> &applied_events,
                                     const bool already_deferred = false);
       virtual RtEvent perform_remote(RtEvent precondition, 
@@ -2931,7 +2921,6 @@ namespace Legion {
                                     IndexSpaceExpression *expr,
                                     const bool expr_covers,
                                     const FieldMask &mask,
-                                    std::set<RtEvent> &deferral_events,
                                     std::set<RtEvent> &applied_events,
                                     const bool already_deferred = false);
       virtual RtEvent perform_remote(RtEvent precondition, 
@@ -3392,67 +3381,61 @@ namespace Legion {
                                 IndexSpaceExpression *expr,
                                 const bool expr_covers, 
                                 const FieldMask &user_mask,
-                                std::set<RtEvent> &deferral_events,
                                 std::set<RtEvent> &applied_events,
                                 const bool already_deferred = false);
       void find_invalid_instances(InvalidInstAnalysis &analysis,
                                 IndexSpaceExpression *expr,
                                 const bool expr_covers, 
                                 const FieldMask &user_mask,
-                                std::set<RtEvent> &deferral_events,
                                 std::set<RtEvent> &applied_events,
                                 const bool already_deferred = false);
       void find_antivalid_instances(AntivalidInstAnalysis &analysis,
                                 IndexSpaceExpression *expr,
                                 const bool expr_covers, 
                                 const FieldMask &user_mask,
-                                std::set<RtEvent> &deferral_events,
                                 std::set<RtEvent> &applied_events,
                                 const bool already_deferred = false);
       void update_set(UpdateAnalysis &analysis, IndexSpaceExpression *expr,
                       const bool expr_covers, FieldMask user_mask,
-                      std::set<RtEvent> &deferral_events,
                       std::set<RtEvent> &applied_events,
                       const bool already_deferred = false);
       void acquire_restrictions(AcquireAnalysis &analysis, 
                                 IndexSpaceExpression *expr,
                                 const bool expr_covers, 
                                 const FieldMask &acquire_mask,
-                                std::set<RtEvent> &deferral_events,
                                 std::set<RtEvent> &applied_events,
                                 const bool already_deferred = false);
       void release_restrictions(ReleaseAnalysis &analysis,
                                 IndexSpaceExpression *expr,
                                 const bool expr_covers, 
                                 const FieldMask &release_mask,
-                                std::set<RtEvent> &deferral_events,
                                 std::set<RtEvent> &applied_events,
                                 const bool already_deferred = false);
       void issue_across_copies(CopyAcrossAnalysis &analysis,
                                const FieldMask &src_mask, 
                                IndexSpaceExpression *expr,
                                const bool expr_covers,
-                               std::set<RtEvent> &deferral_events,
                                std::set<RtEvent> &applied_events,
                                const bool already_deferred = false);
       void overwrite_set(OverwriteAnalysis &analysis, 
                          IndexSpaceExpression *expr, const bool expr_covers,
                          const FieldMask &overwrite_mask,
-                         std::set<RtEvent> &deferral_events,
                          std::set<RtEvent> &applied_events,
                          const bool already_deferred = false);
       void filter_set(FilterAnalysis &analysis, 
                       IndexSpaceExpression *expr, const bool expr_covers,
                       const FieldMask &filter_mask, 
-                      std::set<RtEvent> &deferral_events,
                       std::set<RtEvent> &applied_events,
                       const bool already_deferred = false);
       void clone_set(CloneAnalysis &analysis,
                      IndexSpaceExpression *expr, const bool expr_covers,
                      const FieldMask &clone_mask,
-                     std::set<RtEvent> &deferral_events,
                      std::vector<RtEvent> &applied_events,
                      const bool already_deferred = false);
+      RtEvent find_virtual_initialize_expressions(IndexSpaceExpression *expr,
+          FieldMask mask, FieldMaskSet<IndexSpaceExpression> *target,
+          AddressSpaceID target_space, 
+          RtUserEvent done_event = RtUserEvent::NO_RT_USER_EVENT);
     public:
       void initialize_collective_references(unsigned local_valid_refs);
       void remove_read_only_guard(CopyFillGuard *guard);
@@ -3790,6 +3773,10 @@ namespace Legion {
                                          AddressSpaceID source);
       static void handle_capture_response(Deserializer &derez, Runtime *runtime,
                                           AddressSpaceID source);
+      static void handle_virtual_init_request(Deserializer &derez,
+                                    Runtime *runtime, AddressSpaceID source);
+      static void handle_virtual_init_response(Deserializer &derez,
+                                    Runtime *runtime, AddressSpaceID source);
     public:
       // Note this context refers to the context from which the views are
       // created in. Normally this is the same as the context in which the

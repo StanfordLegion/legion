@@ -361,7 +361,7 @@ ifeq ($(strip $(USE_LLVM)),1)
   REALM_CC_FLAGS += -DREALM_USE_LLVM
 
   # NOTE: do not use these for all source files - just the ones that include llvm include files
-  LLVM_CXXFLAGS ?= -std=c++11 -I$(shell $(LLVM_CONFIG) --includedir)
+  LLVM_CXXFLAGS ?= -I$(shell $(LLVM_CONFIG) --includedir)
 
   # realm can be configured to allow LLVM library linkage to be optional
   #  (i.e. a per-application choice)
@@ -915,17 +915,17 @@ CC_FLAGS        += -Werror
 FC_FLAGS	+= -Werror
 endif
 
-# Check for a minimum C++ version and if none is specified then set it to c++11
+# Check for a minimum C++ version and if none is specified then set it to c++17
 ifneq ($(findstring -std=c++,$(CC_FLAGS)),-std=c++)
-ifeq ($(shell $(CXX) -x c++ -std=c++11 -c /dev/null -o /dev/null 2> /dev/null; echo $$?),0)
-CC_FLAGS += -std=c++11
+ifeq ($(shell $(CXX) -x c++ -std=c++17 -c /dev/null -o /dev/null 2> /dev/null; echo $$?),0)
+CC_FLAGS += -std=c++17
 else ifeq ($(findstring nvc++,$(CXX)),nvc++)
 # nvc++ is dumb and will give you an error if you try to overwrite the input
 # file with the output file and so errors at our test above, we'll just assume
-# that all versions of nvc++ will support c++11 for now
-CC_FLAGS += -std=c++11
+# that all versions of nvc++ will support c++17 for now
+CC_FLAGS += -std=c++17
 else
-$(error Legion requires a C++ compiler that supports at least C++11)
+$(error Legion requires a C++ compiler that supports at least C++17)
 endif
 endif
 

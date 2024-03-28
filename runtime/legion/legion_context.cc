@@ -623,9 +623,11 @@ namespace Legion {
     {
       std::map<PhysicalInstance,LgEvent>::iterator finder =
         task_local_instances.find(instance);
-#ifdef DEBUG_LEGION
-      assert(finder != task_local_instances.end());
-#endif
+      if (finder == task_local_instances.end())
+        REPORT_LEGION_ERROR(ERROR_DEFERRED_BUFFER_DOUBLE_DELETE,
+            "Detected double deletion of deferred buffer " IDFMT
+            "in parent task %s (UID %lld).",
+            instance.id, get_task_name(), get_unique_id())
       task_local_instances.erase(finder);
       MemoryManager *manager = 
         runtime->find_memory_manager(instance.get_location());
@@ -10852,10 +10854,24 @@ namespace Legion {
 #endif
           const FieldMaskSet<EquivalenceSet> &eq_sets =
             version_infos[idx1].get_equivalence_sets();
-          for (FieldMaskSet<EquivalenceSet>::const_iterator it =
-                eq_sets.begin(); it != eq_sets.end(); it++)
-            it->first->set_expr->initialize_equivalence_set_kd_tree(
-                tree, it->first, it->second, local_shard, true/*current*/);
+          for (FieldMaskSet<EquivalenceSet>::const_iterator eit =
+                eq_sets.begin(); eit != eq_sets.end(); eit++)
+          {
+            // We need to find the precise set of points that this
+            // equivalence set is valid for on each of the fields
+            FieldMaskSet<IndexSpaceExpression> init_exprs;
+            IndexSpaceExpression *init_expr =
+              runtime->forest->intersect_index_spaces(
+                  eit->first->set_expr, region_node->row_source);
+            RtEvent init_ready =
+              eit->first->find_virtual_initialize_expressions(
+                  init_expr, eit->second, &init_exprs, runtime->address_space);
+            init_ready.wait();
+            for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+                  init_exprs.begin(); it != init_exprs.end(); it++)
+              it->first->initialize_equivalence_set_kd_tree(
+                  tree, eit->first, it->second, local_shard, true/*current*/);
+          }
           // In this case we also tell the region tree that this is
           // already refined so that no read or reduce refinements can
           // be performed in this context
