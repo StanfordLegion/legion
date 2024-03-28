@@ -110,7 +110,8 @@ cache: &global_cache
   CXXFLAGS: "-D_FORTIFY_SOURCE=2 -D_GLIBCXX_ASSERTIONS"
   CXX_STANDARD: "17"
 .cxx17_precise: &cxx17_precise
-  CXXFLAGS: "-fp-model=precise" # Intel compilers turn on fast math by default, so we have to shut that off
+  # Intel compilers turn on some overly aggressive optimizations by default
+  CXXFLAGS: "-fp-model=precise -no-ansi-alias"
   CXX_STANDARD: "17"
 .cxx20_normal: &cxx20_normal
   CXXFLAGS: ""
