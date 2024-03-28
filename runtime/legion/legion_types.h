@@ -975,6 +975,8 @@ namespace Legion {
       SEND_EQUIVALENCE_SET_REMOTE_FILTERS,
       SEND_EQUIVALENCE_SET_REMOTE_CLONES,
       SEND_EQUIVALENCE_SET_REMOTE_INSTANCES,
+      SEND_EQUIVALENCE_SET_VIRTUAL_INIT_REQUEST,
+      SEND_EQUIVALENCE_SET_VIRTUAL_INIT_RESPONSE,
       SEND_INSTANCE_REQUEST,
       SEND_INSTANCE_RESPONSE,
       SEND_EXTERNAL_CREATE_REQUEST,
@@ -1299,6 +1301,8 @@ namespace Legion {
         "Send Equivalence Set Remote Filters",                        \
         "Send Equivalence Set Remote Clones",                         \
         "Send Equivalence Set Remote Instances",                      \
+        "Send Equivalence Set Virtual Initialization Request",        \
+        "Send Equivalence Set Virtual Initialization Response",       \
         "Send Instance Request",                                      \
         "Send Instance Response",                                     \
         "Send External Create Request",                               \

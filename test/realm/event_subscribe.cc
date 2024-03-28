@@ -17,6 +17,7 @@
 
 #include <realm.h>
 #include <realm/cmdline.h>
+#include <realm/id.h>
 
 #include "osdep.h"
 
@@ -29,17 +30,29 @@ enum {
 
 Logger log_app("app");
 
+struct WaiterTaskArgs {
+  UserEvent e;
+  int expected_result; // 0: not triggered, 1: triggered
+};
+
 void waiter_task(const void *args, size_t arglen,
 		 const void *userdata, size_t userlen, Processor p)
 {
-  UserEvent e = *reinterpret_cast<const UserEvent *>(args);
+  WaiterTaskArgs task_args = *reinterpret_cast<const WaiterTaskArgs *>(args);
+  Event e = task_args.e;
+  int expected_result = task_args.expected_result;
 
   log_app.info() << "waiter task: proc=" << p << " event=" << e;
 
   if(e.has_triggered()) {
-    log_app.debug() << "event already triggered - nothing to do!";
+    log_app.info() << "event already triggered - nothing to do!" << e;
+    assert(expected_result == 1);
     return;
   }
+
+  // e is a remote event and we do not reuse the gen_event of e, so e's later
+  //  generation should not be subscribed, thus, has_triggered should return false
+  assert(expected_result == 0);
 
   // the event was triggered by the spawner, but we should NOT see it
   //  no matter how long we wait
@@ -78,6 +91,11 @@ void top_level_task(const void *args, size_t arglen,
   
   Machine::ProcessorQuery pq(Machine::get_machine());
   pq.only_kind(p.kind());
+
+  UserEvent start = UserEvent::create_user_event();
+  std::vector<UserEvent> begin;
+  std::vector<Event> done;
+
   for(Machine::ProcessorQuery::iterator it = pq.begin(); it != pq.end(); ++it) {
     // we need a UserEvent that has been triggered to give to the task, but
     //  we need to make sure that the task's own completion event isn't a later
@@ -85,18 +103,27 @@ void top_level_task(const void *args, size_t arglen,
 
     // create two user events
     UserEvent e1 = UserEvent::create_user_event();
-    UserEvent e2 = UserEvent::create_user_event();
+    WaiterTaskArgs args;
+    args.e = e1;
+    if(p.address_space() == it->address_space()) {
+      args.expected_result = 1;
+    } else {
+      args.expected_result = 0;
+    }
 
     // pass the first to the child task and use the second as a precondition
-    Event e3 = (*it).spawn(WAITER_TASK, &e1, sizeof(e1), e2);
+    Event e2 = (*it).spawn(WAITER_TASK, &args, sizeof(WaiterTaskArgs), start);
+    begin.push_back(e1);
+    done.push_back(e2);
 
-    // now trigger both user events (the passed one before the precondition)
-    //  so the child task can run and expect to see the triggered event
-    e1.trigger();
-    e2.trigger();
-    
-    e3.wait();
+    log_app.info() << "event e1:" << e1 << ", e2:" << e2 << " are created on p:" << p;
   }
+
+  for(UserEvent &e : begin) {
+    e.trigger();
+  }
+  start.trigger();
+  Event::merge_events(done).wait();
 
   log_app.info() << "completed successfully";
   
