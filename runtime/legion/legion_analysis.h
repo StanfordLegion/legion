@@ -3453,6 +3453,10 @@ namespace Legion {
                      std::set<RtEvent> &deferral_events,
                      std::vector<RtEvent> &applied_events,
                      const bool already_deferred = false);
+      RtEvent find_virtual_initialize_expressions(IndexSpaceExpression *expr,
+          FieldMask mask, FieldMaskSet<IndexSpaceExpression> *target,
+          AddressSpaceID target_space, 
+          RtUserEvent done_event = RtUserEvent::NO_RT_USER_EVENT);
     public:
       void initialize_collective_references(unsigned local_valid_refs);
       void remove_read_only_guard(CopyFillGuard *guard);
@@ -3790,6 +3794,10 @@ namespace Legion {
                                          AddressSpaceID source);
       static void handle_capture_response(Deserializer &derez, Runtime *runtime,
                                           AddressSpaceID source);
+      static void handle_virtual_init_request(Deserializer &derez,
+                                    Runtime *runtime, AddressSpaceID source);
+      static void handle_virtual_init_response(Deserializer &derez,
+                                    Runtime *runtime, AddressSpaceID source);
     public:
       // Note this context refers to the context from which the views are
       // created in. Normally this is the same as the context in which the
