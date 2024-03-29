@@ -55,7 +55,14 @@
 #endif
 
 // Macros for disabling and re-enabling deprecated warnings
-#if defined(__GNUC__)
+#if defined(__PGIC__)
+// PGI has to go first because it also responds to GCC defines
+#define LEGION_DISABLE_DEPRECATED_WARNINGS \
+  _Pragma("warning (push)") \
+  _Pragma("diag_suppress 1445")
+#define LEGION_REENABLE_DEPRECATED_WARNINGS \
+  _Pragma("warning (pop)")
+#elif defined(__GNUC__)
 #define LEGION_DISABLE_DEPRECATED_WARNINGS \
   _Pragma("GCC diagnostic push") \
   _Pragma("GCC diagnostic ignored \"-Wdeprecated-declarations\"")
@@ -67,12 +74,6 @@
   _Pragma("clang diagnostic ignored \"-Wdeprecated-declarations\"")
 #define LEGION_REENABLE_DEPRECATED_WARNINGS \
   _Pragma("clang diagnostic pop")
-#elif defined(__PGIC__)
-#define LEGION_DISABLE_DEPRECATED_WARNINGS \
-  _Pragma("warning (push)") \
-  _Pragma("diag_suppress 1445")
-#define LEGION_REENABLE_DEPRECATED_WARNINGS \
-  _Pragma("warning (pop)")
 #elif defined(__INTEL_COMPILER) || defined(__INTEL_LLVM_COMPILER)
 #define LEGION_DISABLE_DEPRECATED_WARNINGS \
   _Pragma("warning push") \
@@ -974,6 +975,8 @@ namespace Legion {
       SEND_EQUIVALENCE_SET_REMOTE_FILTERS,
       SEND_EQUIVALENCE_SET_REMOTE_CLONES,
       SEND_EQUIVALENCE_SET_REMOTE_INSTANCES,
+      SEND_EQUIVALENCE_SET_VIRTUAL_INIT_REQUEST,
+      SEND_EQUIVALENCE_SET_VIRTUAL_INIT_RESPONSE,
       SEND_INSTANCE_REQUEST,
       SEND_INSTANCE_RESPONSE,
       SEND_EXTERNAL_CREATE_REQUEST,
@@ -1298,6 +1301,8 @@ namespace Legion {
         "Send Equivalence Set Remote Filters",                        \
         "Send Equivalence Set Remote Clones",                         \
         "Send Equivalence Set Remote Instances",                      \
+        "Send Equivalence Set Virtual Initialization Request",        \
+        "Send Equivalence Set Virtual Initialization Response",       \
         "Send Instance Request",                                      \
         "Send Instance Response",                                     \
         "Send External Create Request",                               \
