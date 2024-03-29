@@ -571,11 +571,16 @@ before_script:
       if [[ "$USE_CCACHE" -eq 1 ]]; then
         ccache --show-stats
       fi
-  retry:
-    max: 0
-    when:
-      - runner_system_failure
-      - unknown_failure
+  artifacts:
+    name: "$CI_JOB_NAME"
+    when: always
+    paths:
+      - language/test_output/
+  # retry:
+  #   max: 0
+  #   when:
+  #     - runner_system_failure
+  #     - unknown_failure
 
 # Some additional tests are only run on certain configurations.
 .external_tests: &external_tests
