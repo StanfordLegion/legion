@@ -3378,6 +3378,8 @@ namespace Legion {
                                                   Serializer &rez);
       void send_remote_context_collective_rendezvous(AddressSpaceID target,
                                                      Serializer &rez);
+      void send_remote_context_refine_equivalence_sets(AddressSpaceID target,
+                                                       Serializer &rez);
       void send_compute_equivalence_sets_request(AddressSpaceID target, 
                                                  Serializer &rez);
       void send_compute_equivalence_sets_response(AddressSpaceID target,
@@ -3429,14 +3431,8 @@ namespace Legion {
                                                   Serializer &rez);
       void send_equivalence_set_remote_filters(AddressSpaceID target,
                                                Serializer &rez);
-      void send_equivalence_set_remote_clones(AddressSpaceID target,
-                                              Serializer &rez);
       void send_equivalence_set_remote_instances(AddressSpaceID target,
                                                  Serializer &rez);
-      void send_equivalence_set_virtual_init_request(AddressSpaceID target,
-                                                     Serializer &rez);
-      void send_equivalence_set_virtual_init_response(AddressSpaceID target,
-                                                      Serializer &rez);
       void send_instance_request(AddressSpaceID target, Serializer &rez);
       void send_instance_response(AddressSpaceID target, Serializer &rez);
       void send_external_create_request(AddressSpaceID target, Serializer &rez);
@@ -3753,6 +3749,8 @@ namespace Legion {
                                                       AddressSpaceID source);
       void handle_remote_context_find_collective_view_response(
                                                       Deserializer &derez);
+      void handle_remote_context_refine_equivalence_sets(
+                                                      Deserializer &derez);
       void handle_compute_equivalence_sets_request(Deserializer &derez, 
                                                    AddressSpaceID source);
       void handle_compute_equivalence_sets_response(Deserializer &derez);
@@ -3799,13 +3797,7 @@ namespace Legion {
                                                     AddressSpaceID source);
       void handle_equivalence_set_remote_filters(Deserializer &derez,
                                                  AddressSpaceID source);
-      void handle_equivalence_set_remote_clones(Deserializer &derez,
-                                                AddressSpaceID source);
       void handle_equivalence_set_remote_instances(Deserializer &derez);
-      void handle_equivalence_set_virtual_init_request(Deserializer &derez,
-                                                       AddressSpaceID source);
-      void handle_equivalence_set_virtual_init_response(Deserializer &derez,
-                                                        AddressSpaceID source);
       void handle_instance_request(Deserializer &derez, AddressSpaceID source);
       void handle_instance_response(Deserializer &derez,AddressSpaceID source);
       void handle_external_create_request(Deserializer &derez,
@@ -4072,7 +4064,6 @@ namespace Legion {
       DeletionOp*           get_available_deletion_op(void);
       MergeCloseOp*         get_available_merge_close_op(void);
       PostCloseOp*          get_available_post_close_op(void);
-      VirtualCloseOp*       get_available_virtual_close_op(void);
       RefinementOp*         get_available_refinement_op(void);
       ResetOp*              get_available_reset_op(void);
       DynamicCollectiveOp*  get_available_dynamic_collective_op(void);
@@ -4108,7 +4099,6 @@ namespace Legion {
       ReplIndividualTask*   get_available_repl_individual_task(void);
       ReplIndexTask*        get_available_repl_index_task(void);
       ReplMergeCloseOp*     get_available_repl_merge_close_op(void);
-      ReplVirtualCloseOp*   get_available_repl_virtual_close_op(void);
       ReplRefinementOp*     get_available_repl_refinement_op(void);
       ReplResetOp*          get_available_repl_reset_op(void);
       ReplFillOp*           get_available_repl_fill_op(void);
@@ -4151,7 +4141,6 @@ namespace Legion {
       void free_deletion_op(DeletionOp *op);
       void free_merge_close_op(MergeCloseOp *op); 
       void free_post_close_op(PostCloseOp *op);
-      void free_virtual_close_op(VirtualCloseOp *op);
       void free_refinement_op(RefinementOp *op);
       void free_reset_op(ResetOp *op);
       void free_dynamic_collective_op(DynamicCollectiveOp *op);
@@ -4187,7 +4176,6 @@ namespace Legion {
       void free_repl_individual_task(ReplIndividualTask *task);
       void free_repl_index_task(ReplIndexTask *task);
       void free_repl_merge_close_op(ReplMergeCloseOp *op);
-      void free_repl_virtual_close_op(ReplVirtualCloseOp *op);
       void free_repl_refinement_op(ReplRefinementOp *op);
       void free_repl_reset_op(ReplResetOp *op);
       void free_repl_fill_op(ReplFillOp *op);
@@ -4599,7 +4587,6 @@ namespace Legion {
       std::deque<DeletionOp*>           available_deletion_ops;
       std::deque<MergeCloseOp*>         available_merge_close_ops;
       std::deque<PostCloseOp*>          available_post_close_ops;
-      std::deque<VirtualCloseOp*>       available_virtual_close_ops;
       std::deque<RefinementOp*>         available_refinement_ops;
       std::deque<ResetOp*>              available_reset_ops;
       std::deque<DynamicCollectiveOp*>  available_dynamic_collective_ops;
@@ -4635,7 +4622,6 @@ namespace Legion {
       std::deque<ReplIndividualTask*>   available_repl_individual_tasks;
       std::deque<ReplIndexTask*>        available_repl_index_tasks;
       std::deque<ReplMergeCloseOp*>     available_repl_merge_close_ops;
-      std::deque<ReplVirtualCloseOp*>   available_repl_virtual_close_ops;
       std::deque<ReplRefinementOp*>     available_repl_refinement_ops;
       std::deque<ReplResetOp*>          available_repl_reset_ops;
       std::deque<ReplFillOp*>           available_repl_fill_ops;
@@ -6122,6 +6108,8 @@ namespace Legion {
           break;
         case SEND_REMOTE_CONTEXT_FIND_COLLECTIVE_VIEW_RESPONSE:
           break;
+        case SEND_REMOTE_CONTEXT_REFINE_EQUIVALENCE_SETS:
+          break;
         case SEND_COMPUTE_EQUIVALENCE_SETS_REQUEST:
           break;
         case SEND_COMPUTE_EQUIVALENCE_SETS_RESPONSE:
@@ -6178,13 +6166,7 @@ namespace Legion {
           return THROUGHPUT_VIRTUAL_CHANNEL;
         case SEND_EQUIVALENCE_SET_REMOTE_FILTERS:
           return THROUGHPUT_VIRTUAL_CHANNEL;
-        case SEND_EQUIVALENCE_SET_REMOTE_CLONES:
-          return THROUGHPUT_VIRTUAL_CHANNEL;
         case SEND_EQUIVALENCE_SET_REMOTE_INSTANCES:
-          break;
-        case SEND_EQUIVALENCE_SET_VIRTUAL_INIT_REQUEST:
-          break;
-        case SEND_EQUIVALENCE_SET_VIRTUAL_INIT_RESPONSE:
           break;
         case SEND_INSTANCE_REQUEST:
           break;

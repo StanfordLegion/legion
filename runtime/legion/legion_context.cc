@@ -2209,6 +2209,11 @@ namespace Legion {
       assert(std::binary_search(target_spaces.begin(), target_spaces.end(),
                                 creation_target_space));
 #endif
+      // If this is virtual mapped, then continue up to the parent
+      if ((req_index < virtual_mapped.size()) && virtual_mapped[req_index])
+        return find_parent_context()->compute_equivalence_sets(
+            parent_req_indexes[req_index], targets, target_spaces,
+            creation_target_space, expr, mask);
       // Find the equivalence set tree for this region requirement
       LocalLock *tree_lock = NULL;
       EqKDTree *tree = find_equivalence_set_kd_tree(req_index, tree_lock);
@@ -2230,14 +2235,14 @@ namespace Legion {
 #endif
       const CollectiveMapping target_mapping(target_spaces, 
                           runtime->legion_collective_radix); 
-      return report_equivalence_sets(target_mapping, targets, 
+      return report_equivalence_sets(req_index, target_mapping, targets, 
           creation_target_space, mask, new_target_references, eq_sets, 
           new_subscriptions, to_create, creation_rects, creation_srcs,
           1/*expected responses*/, pending_sets);
     }
 
     //--------------------------------------------------------------------------
-    RtEvent InnerContext::report_equivalence_sets(
+    RtEvent InnerContext::report_equivalence_sets(unsigned req_index,
           const CollectiveMapping &target_mapping, 
           const std::vector<EqSetTracker*> &targets,
           const AddressSpaceID creation_target_space, const FieldMask &mask,
@@ -2280,6 +2285,7 @@ namespace Legion {
             target_mapping.get_parent(origin_space, creation_child);
         }
       }
+      InnerContext *outermost = find_parent_physical_context(req_index);
       for (std::vector<AddressSpaceID>::const_iterator cit =
             children.begin(); cit != children.end(); cit++)
       {
@@ -2288,7 +2294,7 @@ namespace Legion {
         Serializer rez;
         {
           RezCheck z(rez);
-          pack_inner_context(rez);
+          outermost->pack_inner_context(rez);
           rez.serialize(runtime->address_space);
           target_mapping.pack(rez);
           for (unsigned idx = 0; idx < targets.size(); idx++)
@@ -2363,7 +2369,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(target_index < targets.size());
 #endif
-        targets[target_index]->record_equivalence_sets(this,
+        targets[target_index]->record_equivalence_sets(outermost,
             mask, eq_sets, to_create, creation_rects, creation_srcs,
             new_subscriptions, new_target_references[target_index], local_space,
             expected_responses, ready_events, target_mapping, targets, 
@@ -2627,6 +2633,9 @@ namespace Legion {
                               EquivalenceSet *set, const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(virtual_mapped.size() <= req_index);
+#endif
       // Be very careful, you can't use find_equivalence_set_kd_tree here
       // because the tree will not be marked ready until after all the 
       // output equivalence sets have registered themselves, so it's up
@@ -3041,12 +3050,20 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void InnerContext::refine_equivalence_sets(unsigned req_index,
                         IndexSpaceNode *node, const FieldMask &refinement_mask,
-                        std::vector<RtEvent> &applied_events, bool sharded)
+                        std::vector<RtEvent> &applied_events, bool sharded,
+                        bool first, const CollectiveMapping *mapping)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(!sharded);
 #endif
+      if ((req_index < virtual_mapped.size()) && virtual_mapped[req_index])
+      {
+        find_parent_context()->refine_equivalence_sets(
+            parent_req_indexes[req_index], node, refinement_mask,
+            applied_events, sharded, false/*first*/, mapping);
+        return;
+      }
       LocalLock *tree_lock = NULL;
       EqKDTree *tree = find_equivalence_set_kd_tree(req_index, tree_lock);
       node->invalidate_equivalence_set_kd_tree(tree, tree_lock, refinement_mask,
@@ -3313,26 +3330,6 @@ namespace Legion {
       assert(finder != created_requirements.end());
 #endif
       return finder->second.region;
-    }
-
-    //--------------------------------------------------------------------------
-    bool InnerContext::nonexclusive_virtual_mapping(unsigned index)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(regions.size() == virtual_mapped.size());
-      assert(regions.size() == parent_req_indexes.size());
-#endif
-      // There is a very strange case here for virtual mappings
-      // More comments on this when we initialize the region tree contexts
-      // With read-write privileges on a virtual mapping, we can do
-      // copy-in/copy-out of the equivalence set meta-data so we can make
-      // our own local equivalence sets and do refinements on them, but for
-      // other privileges we can't so we need to share equivalence sets with
-      // other contexts and not make our own refinements. We detect this case
-      // here and prevent the logical analysis from ever making a refinement
-      return ((index < virtual_mapped.size()) && virtual_mapped[index] && 
-              !IS_WRITE(regions[index]));
     }
 
     //--------------------------------------------------------------------------
@@ -10477,13 +10474,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    VirtualCloseOp* InnerContext::get_virtual_close_op(void)
-    //--------------------------------------------------------------------------
-    {
-      return runtime->get_available_virtual_close_op();
-    }
-
-    //--------------------------------------------------------------------------
     void InnerContext::pack_inner_context(Serializer &rez) const
     //--------------------------------------------------------------------------
     {
@@ -10822,6 +10812,21 @@ namespace Legion {
         if (no_access_regions[idx1])
           continue;
         const RegionRequirement &req = clone_requirements[idx1];
+        if (virtual_mapped[idx1])
+        {
+          // If we're read-only or reduce-only we disallow refinements
+          if (!IS_WRITE(req))
+          {
+            // In this case we also tell the region tree that this is
+            // already refined so that no read or reduce refinements can
+            // be performed in this context
+            RegionNode *region_node = runtime->forest->get_node(req.region);
+            const FieldMask user_mask =
+              region_node->column_source->get_field_mask(req.privilege_fields);
+            region_node->initialize_no_refine_fields(tree_context, user_mask);
+          }
+          continue;
+        }
         const RegionUsage usage(req);
 #ifdef DEBUG_LEGION
         assert(req.handle_type == LEGION_SINGULAR_PROJECTION);
@@ -10834,130 +10839,65 @@ namespace Legion {
         equivalence_set_trees.emplace(idx1, EqKDRoot(tree));
         const FieldMask user_mask = 
           region_node->column_source->get_field_mask(req.privilege_fields);
-        // For virtual mappings, there are two approaches here
-        // 1. For read-write privileges we can do copy-in/copy-out
-        // on the equivalence sets since we know that we're the 
-        // only one that is going to be mutating them, this will
-        // allow us to do things like refinements for them
-        // 2. For any other kind of privilege, we need to make sure
-        // that we see updates from other tasks potentially running
-        // and mapping in parallel on the same equivalence sets, so
-        // we aren't going to make our own equivalence set
-        if (virtual_mapped[idx1] && !IS_WRITE(usage))
+        EquivalenceSet *eq_set = create_initial_equivalence_set(idx1, req); 
+        const InstanceSet &sources = physical_instances[idx1];
+#ifdef DEBUG_LEGION
+        assert(!sources.empty());
+#endif
+        // Find or make views for each of our instances and then 
+        // add initial users for each of them
+        std::vector<IndividualView*> corresponding(sources.size());
+        // Build our set of corresponding views
+        for (unsigned idx2 = 0; idx2 < sources.size(); idx2++)
         {
-          // Handle the case where we have a virtual mapping for a
-          // non-write privilege and therefore we're just going to
-          // seed our state with the equivalence sets and not allow
-          // them to ever be refined in this context
+          const InstanceRef &src_ref = sources[idx2];
+          PhysicalManager *manager = src_ref.get_physical_manager();
+          const FieldMask &view_mask = src_ref.get_valid_fields();
 #ifdef DEBUG_LEGION
-          assert(idx1 < version_infos.size());
+          assert(!(view_mask - user_mask)); // should be dominated
 #endif
-          const FieldMaskSet<EquivalenceSet> &eq_sets =
-            version_infos[idx1].get_equivalence_sets();
-          for (FieldMaskSet<EquivalenceSet>::const_iterator eit =
-                eq_sets.begin(); eit != eq_sets.end(); eit++)
+          // Check to see if the view exists yet or not
+          std::map<PhysicalManager*,IndividualView*>::const_iterator 
+            finder = top_views.find(manager);
+          if (finder == top_views.end())
           {
-            // We need to find the precise set of points that this
-            // equivalence set is valid for on each of the fields
-            FieldMaskSet<IndexSpaceExpression> init_exprs;
-            IndexSpaceExpression *init_expr =
-              runtime->forest->intersect_index_spaces(
-                  eit->first->set_expr, region_node->row_source);
-            RtEvent init_ready =
-              eit->first->find_virtual_initialize_expressions(
-                  init_expr, eit->second, &init_exprs, runtime->address_space);
-            init_ready.wait();
-            for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
-                  init_exprs.begin(); it != init_exprs.end(); it++)
-              it->first->initialize_equivalence_set_kd_tree(
-                  tree, eit->first, it->second, local_shard, true/*current*/);
+            IndividualView *new_view =
+              create_instance_top_view(manager, runtime->address_space);
+            top_views[manager] = new_view;
+            corresponding[idx2] = new_view;
+            // Record the initial user for the instance
+            new_view->add_initial_user(unmap_events[idx1], usage, view_mask,
+                                region_node->row_source, context_uid, idx1);
           }
-          // In this case we also tell the region tree that this is
-          // already refined so that no read or reduce refinements can
-          // be performed in this context
-          region_node->initialize_refined_fields(tree_context, user_mask); 
-          continue;
+          else
+          {
+            corresponding[idx2] = finder->second;
+            // Record the initial user for the instance
+            finder->second->add_initial_user(unmap_events[idx1], usage,
+                 view_mask, region_node->row_source, context_uid, idx1);
+          }
         }
-        // Only need to initialize the context if this is
-        // not a leaf and it wasn't virtual mapped
-        if (!virtual_mapped[idx1])
+        // Only need to do the initialization if we're the logical owner
+        if (eq_set->is_logical_owner())
         {
-          EquivalenceSet *eq_set = create_initial_equivalence_set(idx1, req); 
-          const InstanceSet &sources = physical_instances[idx1];
-#ifdef DEBUG_LEGION
-          assert(!sources.empty());
-#endif
-          // Find or make views for each of our instances and then 
-          // add initial users for each of them
-          std::vector<IndividualView*> corresponding(sources.size());
-          // Build our set of corresponding views
-          for (unsigned idx2 = 0; idx2 < sources.size(); idx2++)
-          {
-            const InstanceRef &src_ref = sources[idx2];
-            PhysicalManager *manager = src_ref.get_physical_manager();
-            const FieldMask &view_mask = src_ref.get_valid_fields();
-#ifdef DEBUG_LEGION
-            assert(!(view_mask - user_mask)); // should be dominated
-#endif
-            // Check to see if the view exists yet or not
-            std::map<PhysicalManager*,IndividualView*>::const_iterator 
-              finder = top_views.find(manager);
-            if (finder == top_views.end())
-            {
-              IndividualView *new_view =
-                create_instance_top_view(manager, runtime->address_space);
-              top_views[manager] = new_view;
-              corresponding[idx2] = new_view;
-              // Record the initial user for the instance
-              new_view->add_initial_user(unmap_events[idx1], usage, view_mask,
-                                  region_node->row_source, context_uid, idx1);
-            }
-            else
-            {
-              corresponding[idx2] = finder->second;
-              // Record the initial user for the instance
-              finder->second->add_initial_user(unmap_events[idx1], usage,
-                   view_mask, region_node->row_source, context_uid, idx1);
-            }
-          }
-          // Only need to do the initialization if we're the logical owner
-          if (eq_set->is_logical_owner())
-          {
-            // The parent region requirement is restricted if it is
-            // simultaneous or it is reduce-only. Simultaneous is 
-            // restricted because of normal Legion coherence semantics.
-            // Reduce-only is restricted because we don't issue close
-            // operations at the end of a context for reduce-only cases
-            // right now so by making it restricted things are eagerly
-            // flushed out to the parent task's instance.
-            const bool restricted = 
-              IS_SIMULT(regions[idx1]) || IS_REDUCE(regions[idx1]);
-            eq_set->initialize_set(usage, user_mask, restricted, sources,
-                                   corresponding);
-          }
-          region_node->row_source->initialize_equivalence_set_kd_tree(tree,
-              eq_set, user_mask, local_shard, false/*current*/);
-          // Each equivalence set here comes with a reference that we
-          // need to remove after we've registered it
-          if (eq_set->remove_base_gc_ref(CONTEXT_REF))
-            assert(false); // should never hit this
+          // The parent region requirement is restricted if it is
+          // simultaneous or it is reduce-only. Simultaneous is 
+          // restricted because of normal Legion coherence semantics.
+          // Reduce-only is restricted because we don't issue close
+          // operations at the end of a context for reduce-only cases
+          // right now so by making it restricted things are eagerly
+          // flushed out to the parent task's instance.
+          const bool restricted = 
+            IS_SIMULT(regions[idx1]) || IS_REDUCE(regions[idx1]);
+          eq_set->initialize_set(usage, user_mask, restricted, sources,
+                                 corresponding);
         }
-        else
-        {
-#ifdef DEBUG_LEGION
-          assert(IS_WRITE(usage));
-          assert(idx1 < version_infos.size());
-#endif
-          // virtual mapping case, just clone all the equivalence sets
-          // into our tree but put them in the previous so we'll copy 
-          // from them as we make refinements
-          const FieldMaskSet<EquivalenceSet> &eq_sets = 
-            version_infos[idx1].get_equivalence_sets();
-          for (FieldMaskSet<EquivalenceSet>::const_iterator it =
-                eq_sets.begin(); it != eq_sets.end(); it++)
-            it->first->set_expr->initialize_equivalence_set_kd_tree(
-                tree, it->first, it->second, local_shard, false/*current*/);
-        }
+        region_node->row_source->initialize_equivalence_set_kd_tree(tree,
+            eq_set, user_mask, local_shard, false/*current*/);
+        // Each equivalence set here comes with a reference that we
+        // need to remove after we've registered it
+        if (eq_set->remove_base_gc_ref(CONTEXT_REF))
+          assert(false); // should never hit this
       }
     }
 
@@ -10994,10 +10934,12 @@ namespace Legion {
             regions[idx], false/*filter specific fields*/);
         std::map<unsigned,EqKDRoot>::iterator finder = 
           equivalence_set_trees.find(idx);
+#ifdef DEBUG_LEGION
+        // Should not have any equivalence set trees for virtual mappings
+        assert(!virtual_mapped[idx] || (finder == equivalence_set_trees.end()));
+#endif
         if (finder == equivalence_set_trees.end())
           continue;
-        // State is copied out by the virtual close ops if this is a
-        // virtual mapped region so we invalidate like normal now
         const FieldMask close_mask = 
           node->column_source->get_field_mask(regions[idx].privilege_fields);
         std::vector<RtEvent> applied_events;
@@ -12141,36 +12083,20 @@ namespace Legion {
       // we deal with that case below
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
-        if (!virtual_mapped[idx])
-        {
-          // We also don't need to close up read-only instances
-          // or reduction-only instances (because they are restricted)
-          // so all changes have already been propagated
-          if (!IS_WRITE(regions[idx]))
-            continue;
+        if (virtual_mapped[idx])
+          continue;
+        // We also don't need to close up read-only instances
+        // or reduction-only instances (because they are restricted)
+        // so all changes have already been propagated
+        if (!IS_WRITE(regions[idx]))
+          continue;
 #ifdef DEBUG_LEGION
-          assert(!physical_instances[idx].empty());
+        assert(!physical_instances[idx].empty());
 #endif
-          PostCloseOp *close_op = 
-            runtime->get_available_post_close_op();
-          close_op->initialize(this, idx, physical_instances[idx]);
-          add_to_dependence_queue(close_op);
-        }
-        else if (IS_WRITE(regions[idx]))
-        {
-          // Make a virtual close op to close up the instance
-          // This will clone out the equivalence sets to our 
-          // enclosing set of equivalence sets. Note we only
-          // do this for read-write privileges where we know
-          // that no one else can be modifying the enclosing
-          // sets at the same time. For other privileges we're
-          // already using the original set without any local
-          // refinements so we don't need to do the copy out
-          VirtualCloseOp *close_op = get_virtual_close_op(); 
-          close_op->initialize(this, idx, regions[idx],
-              &(owner_task->get_version_info(idx)));
-          add_to_dependence_queue(close_op);
-        }
+        PostCloseOp *close_op = 
+          runtime->get_available_post_close_op();
+        close_op->initialize(this, idx, physical_instances[idx]);
+        add_to_dependence_queue(close_op);
       }
       // Check to see if we have any unordered operations that we need to inject
       progress_unordered_operations(true/*end task*/);
@@ -12763,17 +12689,6 @@ namespace Legion {
     {
       assert(false);
       return RtEvent::NO_RT_EVENT;
-    }
-
-    //--------------------------------------------------------------------------
-    InnerContext* TopLevelContext::find_outermost_local_context(
-                                                         InnerContext *previous)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(previous != NULL);
-#endif
-      return previous;
     }
 
     //--------------------------------------------------------------------------
@@ -20805,13 +20720,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    VirtualCloseOp* ReplicateContext::get_virtual_close_op(void)
-    //--------------------------------------------------------------------------
-    {
-      return runtime->get_available_repl_virtual_close_op();
-    }
-
-    //--------------------------------------------------------------------------
     void ReplicateContext::pack_task_context(Serializer &rez) const
     //--------------------------------------------------------------------------
     {
@@ -22093,6 +22001,11 @@ namespace Legion {
       assert(std::binary_search(target_spaces.begin(), target_spaces.end(),
                                 creation_target_space));
 #endif
+      // If this is virtual mapped, then continue up to the parent
+      if ((req_index < virtual_mapped.size()) && virtual_mapped[req_index])
+        return find_parent_context()->compute_equivalence_sets(
+            parent_req_indexes[req_index], targets, target_spaces,
+            creation_target_space, expr, mask);
       // Find the equivalence set tree for this region requirement
       LocalLock *tree_lock = NULL;
       EqKDTree *tree = find_equivalence_set_kd_tree(req_index, tree_lock);
@@ -22144,7 +22057,7 @@ namespace Legion {
       }
       const CollectiveMapping target_mapping(target_spaces,
                           runtime->legion_collective_radix);
-      return report_equivalence_sets(target_mapping, targets,
+      return report_equivalence_sets(req_index, target_mapping, targets,
           creation_target_space, mask, new_target_references, eq_sets,
           new_subscriptions, to_create, creation_rects, creation_srcs,
           remote_shard_rects.size() + 1, pending_sets);
@@ -22156,6 +22069,9 @@ namespace Legion {
         EquivalenceSet *set, const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(virtual_mapped.size() <= req_index);
+#endif
       LocalLock *tree_lock = NULL;
       EqKDTree *tree = find_or_create_output_set_kd_tree(req_index, tree_lock); 
       FieldMaskSet<EqKDTree> new_subscriptions;
@@ -22211,10 +22127,31 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void ReplicateContext::refine_equivalence_sets(unsigned req_index,
                         IndexSpaceNode *node, const FieldMask &refinement_mask,
-                        std::vector<RtEvent> &applied_events, bool sharded)
+                        std::vector<RtEvent> &applied_events, bool sharded,
+                        bool first, const CollectiveMapping *mapping)
     //--------------------------------------------------------------------------
     {
-      if (sharded)
+#ifdef DEBUG_LEGION
+      assert(!sharded || first);
+#endif
+      if ((req_index < virtual_mapped.size()) && virtual_mapped[req_index])
+      {
+        if (!first)
+          find_parent_context()->refine_equivalence_sets(
+              parent_req_indexes[req_index], node, refinement_mask,
+              applied_events, false/*sharded*/, false/*first*/, mapping);
+        else if (sharded)
+          find_parent_context()->refine_equivalence_sets(
+              parent_req_indexes[req_index], node, refinement_mask,
+              applied_events, false/*sharded*/, false/*first*/);
+        else if (shard_manager->is_first_local_shard(owner_shard))
+          find_parent_context()->refine_equivalence_sets(
+              parent_req_indexes[req_index], node, refinement_mask,
+              applied_events, false/*sharded*/, false/*first*/,
+              shard_manager->collective_mapping);
+        return;
+      }
+      if (sharded || !first)
       {
         LocalLock *tree_lock = NULL;
         EqKDTree *tree = find_equivalence_set_kd_tree(req_index, tree_lock);
@@ -22227,6 +22164,17 @@ namespace Legion {
               sit = remote_shard_rects.begin();
               sit != remote_shard_rects.end(); sit++)
         {
+          // If there is a collective mapping and it already contains the
+          // address space of the node where the target shard is then we 
+          // don't need to send that message as it will be handled by the
+          // call done on that node
+          if (mapping != NULL)
+          {
+            AddressSpace target = shard_manager->get_shard_space(sit->first);
+            if ((target != local_space) && (mapping->contains(target) ||
+                  (local_space != mapping->find_nearest(target))))
+              continue;
+          }
           const RtUserEvent refined_event = Runtime::create_rt_user_event();
           Serializer rez;
           rez.serialize(shard_manager->did);
@@ -22331,8 +22279,8 @@ namespace Legion {
       // Now we can send the responses
       const CollectiveMapping target_mapping(target_spaces,
                           runtime->legion_collective_radix);
-      RtEvent ready = report_equivalence_sets(target_mapping, targets,
-          creation_target_space, mask, new_target_references, eq_sets,
+      RtEvent ready = report_equivalence_sets(req_index, target_mapping,
+          targets, creation_target_space, mask, new_target_references, eq_sets,
           new_subscriptions, to_create, creation_rects, creation_srcs,
           expected_responses, pending_sets);
       Runtime::trigger_event(ready_event, ready);
@@ -22899,6 +22847,11 @@ namespace Legion {
       assert(!top_level_context);
       assert(targets.size() == target_spaces.size());
 #endif
+      // If this is virtual mapped, then continue up to the parent
+      if ((req_index < virtual_mapped.size()) && virtual_mapped[req_index])
+        return find_parent_context()->compute_equivalence_sets(
+            parent_req_indexes[req_index], targets, target_spaces,
+            creation_target_space, expr, mask);
       RtUserEvent ready_event = Runtime::create_rt_user_event();
       // Send off a request to the owner node to handle it
       Serializer rez;
@@ -22928,6 +22881,9 @@ namespace Legion {
                               EquivalenceSet *set, const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(virtual_mapped.size() <= req_index);
+#endif
       const RtUserEvent recorded = Runtime::create_rt_user_event();
       Serializer rez;
       {
@@ -23046,6 +23002,41 @@ namespace Legion {
                                                                 rez);
       ready = to_trigger;
       return result;
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteContext::refine_equivalence_sets(unsigned req_index,
+                        IndexSpaceNode *node, const FieldMask &refinement_mask,
+                        std::vector<RtEvent> &applied_events, bool sharded,
+                        bool first, const CollectiveMapping *mapping)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!sharded);
+#endif
+      if ((req_index < virtual_mapped.size()) && virtual_mapped[req_index])
+      {
+        find_parent_context()->refine_equivalence_sets(
+            parent_req_indexes[req_index], node, refinement_mask,
+            applied_events, sharded, false/*first*/, mapping);
+        return;
+      }
+      if ((mapping == NULL) || (!mapping->contains(owner_space) &&
+            (local_space == mapping->find_nearest(owner_space))))
+      {
+        const RtUserEvent done = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize(req_index);
+          rez.serialize(node->handle);
+          rez.serialize(refinement_mask);
+          rez.serialize(done);
+        }
+        runtime->send_remote_context_refine_equivalence_sets(owner_space, rez);
+        applied_events.push_back(done);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -23426,6 +23417,32 @@ namespace Legion {
       assert(to_trigger.exists());
 #endif
       Runtime::trigger_event(to_trigger);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void RemoteContext::handle_refine_equivalence_sets(
+                                          Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID context_did;
+      derez.deserialize(context_did);
+      InnerContext *local = runtime->find_or_request_inner_context(context_did);
+      unsigned req_index;
+      derez.deserialize(req_index);
+      IndexSpace handle;
+      derez.deserialize(handle);
+      IndexSpaceNode *node = runtime->forest->get_node(handle);
+      FieldMask mask;
+      derez.deserialize(mask);
+      RtUserEvent done;
+      derez.deserialize(done);
+      std::vector<RtEvent> applied_events;
+      local->refine_equivalence_sets(req_index, node, mask, applied_events);
+      if (!applied_events.empty())
+        Runtime::trigger_event(done, Runtime::merge_events(applied_events));
+      else
+        Runtime::trigger_event(done);
     }
 
     //--------------------------------------------------------------------------

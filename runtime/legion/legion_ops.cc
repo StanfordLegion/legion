@@ -2681,13 +2681,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool Operation::is_parent_nonexclusive_virtual_mapping(unsigned index)
-    //--------------------------------------------------------------------------
-    {
-      return parent_ctx->nonexclusive_virtual_mapping(find_parent_index(index));
-    }
-
-    //--------------------------------------------------------------------------
     InnerContext* Operation::find_physical_context(unsigned index)
     //--------------------------------------------------------------------------
     {
@@ -3884,7 +3877,6 @@ namespace Legion {
     template class CollectiveVersioning<AcquireOp>;
     template class CollectiveVersioning<ReleaseOp>;
     template class CollectiveVersioning<DiscardOp>;
-    template class CollectiveVersioning<VirtualCloseOp>;
     template class CollectiveVersioning<DependentPartitionOp>;
     template class CollectiveVersioning<DeletionOp>;
     template class CollectiveVersioning<TaskOp>;
@@ -11766,156 +11758,6 @@ namespace Legion {
         rez.serialize(response);
         applied_events.insert(response);
       }
-    }
-
-    /////////////////////////////////////////////////////////////
-    // Virtual Close Operation 
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    VirtualCloseOp::VirtualCloseOp(Runtime *rt)
-      : CloseOp(rt)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    VirtualCloseOp::VirtualCloseOp(const VirtualCloseOp &rhs) 
-      : CloseOp(NULL)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    VirtualCloseOp::~VirtualCloseOp(void)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    VirtualCloseOp& VirtualCloseOp::operator=(const VirtualCloseOp &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    void VirtualCloseOp::initialize(InnerContext *ctx, unsigned index,
-                                    const RegionRequirement &req,
-                                    const VersionInfo *target)
-    //--------------------------------------------------------------------------
-    {
-      initialize_close(ctx, req);
-      parent_idx = index;
-      localize_region_requirement(requirement);
-#ifdef DEBUG_LEGION
-      assert(target_version_info == NULL);
-#endif
-      target_version_info = target;
-      if (runtime->legion_spy_enabled)
-      {
-        perform_logging(ctx->owner_task, index, false/*merge*/);
-        log_virtual_mapping(0/*idx*/, requirement);
-      }
-    }
-    
-    //--------------------------------------------------------------------------
-    void VirtualCloseOp::activate(void)
-    //--------------------------------------------------------------------------
-    {
-      CloseOp::activate();
-      target_version_info = NULL;
-    }
-
-    //--------------------------------------------------------------------------
-    void VirtualCloseOp::deactivate(bool freeop)
-    //--------------------------------------------------------------------------
-    {
-      CloseOp::deactivate(false/*free*/);
-      source_version_info.clear();
-      if (freeop)
-        runtime->free_virtual_close_op(this);
-    }
-
-    //--------------------------------------------------------------------------
-    const char* VirtualCloseOp::get_logging_name(void) const
-    //--------------------------------------------------------------------------
-    {
-      return op_names[VIRTUAL_CLOSE_OP_KIND];
-    }
-
-    //--------------------------------------------------------------------------
-    Operation::OpKind VirtualCloseOp::get_operation_kind(void) const
-    //--------------------------------------------------------------------------
-    {
-      return VIRTUAL_CLOSE_OP_KIND;
-    }
-
-    //--------------------------------------------------------------------------
-    void VirtualCloseOp::trigger_dependence_analysis(void)
-    //--------------------------------------------------------------------------
-    {
-      // Just doing the dependence analysis will precipitate any
-      // close operations necessary for the virtual close op to
-      // do its job, so it needs to do nothing else
-      analyze_region_requirements();
-    }
-
-    //--------------------------------------------------------------------------
-    void VirtualCloseOp::trigger_ready(void)
-    //--------------------------------------------------------------------------
-    {
-      std::set<RtEvent> preconditions;
-      runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
-                                                   requirement, 
-                                                   source_version_info,
-                                                   preconditions);
-      if (!preconditions.empty())
-        enqueue_ready_operation(Runtime::merge_events(preconditions));
-      else
-        enqueue_ready_operation();
-    }
-
-    //--------------------------------------------------------------------------
-    void VirtualCloseOp::trigger_mapping(void)
-    //--------------------------------------------------------------------------
-    {
-      // Copy all the equivalence set information back out to the
-      // enclosing context now that we are done with this task
-      FieldMaskSet<EquivalenceSet> sources;
-      source_version_info.swap(sources);
-      IndexSpaceExpression *expr = 
-        runtime->forest->get_node(requirement.region.get_index_space()); 
-      CloneAnalysis *analysis = new CloneAnalysis(runtime, expr, 
-          parent_ctx->owner_task, parent_idx, std::move(sources));
-      analysis->add_reference();
-      
-      const RtEvent traversal_done = analysis->perform_traversal(
-          RtEvent::NO_RT_EVENT, *target_version_info, map_applied_conditions);
-      if (traversal_done.exists() || analysis->has_remote_sets())
-        analysis->perform_remote(traversal_done, map_applied_conditions);
-      if (analysis->remove_reference())
-        delete analysis;
-
-      if (!map_applied_conditions.empty())
-        complete_mapping(Runtime::merge_events(map_applied_conditions));
-      else
-        complete_mapping();
-      complete_execution();
-    }
-
-    //--------------------------------------------------------------------------
-    unsigned VirtualCloseOp::find_parent_index(unsigned idx)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(idx == 0);
-#endif
-      return parent_idx;
     }
 
     /////////////////////////////////////////////////////////////

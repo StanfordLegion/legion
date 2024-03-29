@@ -945,6 +945,7 @@ namespace Legion {
       SEND_REMOTE_CONTEXT_PHYSICAL_RESPONSE,
       SEND_REMOTE_CONTEXT_FIND_COLLECTIVE_VIEW_REQUEST,
       SEND_REMOTE_CONTEXT_FIND_COLLECTIVE_VIEW_RESPONSE,
+      SEND_REMOTE_CONTEXT_REFINE_EQUIVALENCE_SETS,
       SEND_COMPUTE_EQUIVALENCE_SETS_REQUEST,
       SEND_COMPUTE_EQUIVALENCE_SETS_RESPONSE,
       SEND_COMPUTE_EQUIVALENCE_SETS_PENDING,
@@ -973,10 +974,7 @@ namespace Legion {
       SEND_EQUIVALENCE_SET_REMOTE_COPIES_ACROSS,
       SEND_EQUIVALENCE_SET_REMOTE_OVERWRITES,
       SEND_EQUIVALENCE_SET_REMOTE_FILTERS,
-      SEND_EQUIVALENCE_SET_REMOTE_CLONES,
       SEND_EQUIVALENCE_SET_REMOTE_INSTANCES,
-      SEND_EQUIVALENCE_SET_VIRTUAL_INIT_REQUEST,
-      SEND_EQUIVALENCE_SET_VIRTUAL_INIT_RESPONSE,
       SEND_INSTANCE_REQUEST,
       SEND_INSTANCE_RESPONSE,
       SEND_EXTERNAL_CREATE_REQUEST,
@@ -1271,6 +1269,7 @@ namespace Legion {
         "Send Remote Context Physical Response",                      \
         "Send Remote Context Find Collective View Request",           \
         "Send Remote Context Find Collective View Response",          \
+        "Send Remote Context Refine Equivalence Sets",                \
         "Send Compute Equivalence Sets Request",                      \
         "Send Compute Equivalence Sets Response",                     \
         "Send Compute Equivalence Sets Pending",                      \
@@ -1299,10 +1298,7 @@ namespace Legion {
         "Send Equivalence Set Remote Copies Across",                  \
         "Send Equivalence Set Remote Overwrites",                     \
         "Send Equivalence Set Remote Filters",                        \
-        "Send Equivalence Set Remote Clones",                         \
         "Send Equivalence Set Remote Instances",                      \
-        "Send Equivalence Set Virtual Initialization Request",        \
-        "Send Equivalence Set Virtual Initialization Response",       \
         "Send Instance Request",                                      \
         "Send Instance Response",                                     \
         "Send External Create Request",                               \
@@ -2084,7 +2080,6 @@ namespace Legion {
     class CloseOp;
     class MergeCloseOp;
     class PostCloseOp;
-    class VirtualCloseOp;
     class RefinementOp;
     class ResetOp;
     class AcquireOp;
@@ -2289,7 +2284,6 @@ namespace Legion {
     class ReplIndividualTask;
     class ReplIndexTask;
     class ReplMergeCloseOp;
-    class ReplVirtualCloseOp;
     class ReplRefinementOp;
     class ReplResetOp;
     class ReplFillOp;
@@ -2425,7 +2419,6 @@ namespace Legion {
     friend class Internal::CloseOp;                         \
     friend class Internal::MergeCloseOp;                    \
     friend class Internal::PostCloseOp;                     \
-    friend class Internal::VirtualCloseOp;                  \
     friend class Internal::RefinementOp;                    \
     friend class Internal::ResetOp;                         \
     friend class Internal::AcquireOp;                       \

@@ -3536,7 +3536,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionRefinementTracker::initialize_already_refined(void)
+    void RegionRefinementTracker::initialize_no_refine(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -4110,7 +4110,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PartitionRefinementTracker::initialize_already_refined(void)
+    void PartitionRefinementTracker::initialize_no_refine(void)
     //--------------------------------------------------------------------------
     {
       assert(false); // this should never be called
@@ -4906,7 +4906,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LogicalState::initialize_refined_fields(const FieldMask &mask)
+    void LogicalState::initialize_no_refine_fields(const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -4914,7 +4914,7 @@ namespace Legion {
       assert(mask * refinement_trackers.get_valid_mask());
 #endif
       RefinementTracker *new_tracker = owner->create_refinement_tracker();
-      new_tracker->initialize_already_refined();
+      new_tracker->initialize_no_refine();
       refinement_trackers.insert(new_tracker, mask);
     }
 
@@ -11238,176 +11238,6 @@ namespace Legion {
       const RtEvent traversal_done = deferral_events.empty() ?
         RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
       if (traversal_done.exists() || analysis->has_remote_sets())     
-        analysis->perform_remote(traversal_done, applied_events);
-      // Now we can trigger our applied event
-      if (!applied_events.empty())
-        Runtime::trigger_event(applied, Runtime::merge_events(applied_events));
-      else
-        Runtime::trigger_event(applied);
-      if (analysis->remove_reference())
-        delete analysis;
-    }
-
-    /////////////////////////////////////////////////////////////
-    // Clone Analysis
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    CloneAnalysis::CloneAnalysis(Runtime *rt, IndexSpaceExpression *expr,
-               Operation *op, unsigned idx, FieldMaskSet<EquivalenceSet> &&srcs)
-      : PhysicalAnalysis(rt, op, idx, expr, true/*on heap*/, false/*immutable*/,
-                         true/*exclusive*/), sources(std::move(srcs))
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    CloneAnalysis::CloneAnalysis(Runtime *rt, AddressSpaceID src,
-                                 AddressSpaceID prev,IndexSpaceExpression *expr,
-                                 Operation *op, unsigned idx,
-                                 FieldMaskSet<EquivalenceSet> &&srcs)
-      : PhysicalAnalysis(rt, src, prev, op, idx, expr, true/*on heap*/),
-        sources(std::move(srcs))
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    CloneAnalysis::~CloneAnalysis(void)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    bool CloneAnalysis::perform_analysis(EquivalenceSet *set,
-                                         IndexSpaceExpression *expr,
-                                         const bool expr_covers,
-                                         const FieldMask &mask,
-                                         std::set<RtEvent> &applied_events,
-                                         const bool already_deferred)
-    //--------------------------------------------------------------------------
-    {
-      std::vector<RtEvent> applied;
-      set->clone_set(*this, expr, expr_covers, mask,
-                     applied, already_deferred);
-      if (!applied.empty())
-        applied_events.insert(applied.begin(), applied.end());
-      // No check for migration after this
-      return false;
-    }
-
-    //--------------------------------------------------------------------------
-    RtEvent CloneAnalysis::perform_remote(RtEvent perform_precondition,
-                                          std::set<RtEvent> &applied_events,
-                                          const bool already_deferred)
-    //--------------------------------------------------------------------------
-    {
-      if (perform_precondition.exists() && 
-          !perform_precondition.has_triggered())
-        return defer_remote(perform_precondition, applied_events);
-      // If there are no sets we're done
-      if (remote_sets.empty())
-        return RtEvent::NO_RT_EVENT;
-      for (LegionMap<AddressSpaceID,
-                     FieldMaskSet<EquivalenceSet> >::const_iterator 
-            rit = remote_sets.begin(); rit != remote_sets.end(); rit++)
-      {
-#ifdef DEBUG_LEGION
-        assert(!rit->second.empty());
-#endif
-        const AddressSpace target = rit->first;
-        const RtUserEvent applied = Runtime::create_rt_user_event();
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(original_source);
-          rez.serialize<size_t>(rit->second.size());
-          for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
-                rit->second.begin(); it != rit->second.end(); it++)
-          {
-            rez.serialize(it->first->did);
-            rez.serialize(it->second);
-          }
-          analysis_expr->pack_expression(rez, target);
-          op->pack_remote_operation(rez, target, applied_events);
-          rez.serialize(index);
-          rez.serialize<size_t>(sources.size());
-          for (FieldMaskSet<EquivalenceSet>::const_iterator it =
-                sources.begin(); it != sources.end(); it++)
-          {
-            rez.serialize(it->first->did);
-            rez.serialize(it->second);
-          }
-          rez.serialize(applied);
-        }
-        runtime->send_equivalence_set_remote_clones(target, rez);
-        applied_events.insert(applied);
-      }
-      return RtEvent::NO_RT_EVENT;
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void CloneAnalysis::handle_remote_clones(Deserializer &derez,
-                                      Runtime *runtime, AddressSpaceID previous)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      AddressSpaceID original_source;
-      derez.deserialize(original_source);
-      size_t num_eq_sets;
-      derez.deserialize(num_eq_sets);
-      std::set<RtEvent> ready_events;
-      std::vector<EquivalenceSet*> eq_sets(num_eq_sets, NULL);
-      LegionVector<FieldMask> eq_masks(num_eq_sets);
-      for (unsigned idx = 0; idx < num_eq_sets; idx++)
-      {
-        DistributedID did;
-        derez.deserialize(did);
-        RtEvent ready;
-        eq_sets[idx] = runtime->find_or_request_equivalence_set(did, ready); 
-        if (ready.exists())
-          ready_events.insert(ready);
-        derez.deserialize(eq_masks[idx]);
-      }
-      IndexSpaceExpression *expr =
-        IndexSpaceExpression::unpack_expression(derez,runtime->forest,previous);
-      RemoteOp *op = RemoteOp::unpack_remote_operation(derez, runtime);
-      unsigned index;
-      derez.deserialize(index);
-      size_t num_sources;
-      derez.deserialize(num_sources);
-      FieldMaskSet<EquivalenceSet> sources;
-      for (unsigned idx = 0; idx < num_sources; idx++)
-      {
-        DistributedID did;
-        derez.deserialize(did);
-        RtEvent ready;
-        EquivalenceSet *set = 
-          runtime->find_or_request_equivalence_set(did, ready); 
-        if (ready.exists())
-          ready_events.insert(ready);
-        FieldMask mask;
-        derez.deserialize(mask);
-        sources.insert(set, mask);
-      }
-      RtUserEvent applied;
-      derez.deserialize(applied);
-
-      // This takes ownership of the operation
-      CloneAnalysis *analysis = new CloneAnalysis(runtime, original_source,
-                            previous, expr, op, index, std::move(sources));
-      analysis->add_reference();
-      std::set<RtEvent> deferral_events, applied_events;
-      // Make sure that all our pointers are ready
-      RtEvent ready_event;
-      if (!ready_events.empty())
-        ready_event = Runtime::merge_events(ready_events);
-      for (unsigned idx = 0; idx < eq_sets.size(); idx++)
-        analysis->analyze(eq_sets[idx], eq_masks[idx], deferral_events, 
-                          applied_events, ready_event);
-      const RtEvent traversal_done = deferral_events.empty() ?
-        RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
-      if (traversal_done.exists() || analysis->has_remote_sets())
         analysis->perform_remote(traversal_done, applied_events);
       // Now we can trigger our applied event
       if (!applied_events.empty())
@@ -18994,123 +18824,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void EquivalenceSet::clone_set(CloneAnalysis &analysis, 
-                                   IndexSpaceExpression *expr, 
-                                   const bool expr_covers, 
-                                   const FieldMask &clone_mask, 
-                                   std::vector<RtEvent> &applied_events,
-                                   const bool already_deferred)
-    //--------------------------------------------------------------------------
-    {
-      // Already holding the eq_lock from EquivalenceSet::analyze method
-      for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
-            analysis.sources.begin(); it != analysis.sources.end(); it++)
-      {
-        // Skip cloning to ourselves
-        if (it->first == this)
-          continue;
-        // Check that the fields overlap 
-        const FieldMask overlap = clone_mask & it->second;
-        if (!overlap)
-          continue;
-        // Check that the expressions overlap
-        IndexSpaceExpression *overlap_expr = 
-          runtime->forest->intersect_index_spaces(expr, it->first->set_expr);
-        if (overlap_expr->is_empty())
-          continue;
-        // Very tricky locking semantics here: we don't need to release the
-        // eq_lock that we're holding because we know that the equivalence 
-        // sets we're cloning from are from the a context further down the
-        // task tree and therefore we'll never be asked to copy the other
-        // direction at this phase of the program
-        it->first->clone_to_local(this, overlap, overlap_expr, applied_events,
-            false/*invalidate overlap*/, false/*record invalidate*/,
-            false/*filter invalidations*/, false/*need dst lock*/);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    RtEvent EquivalenceSet::find_virtual_initialize_expressions(
-        IndexSpaceExpression *expr, FieldMask mask,
-        FieldMaskSet<IndexSpaceExpression> *target,
-        AddressSpaceID target_space, RtUserEvent done_event)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock eq(eq_lock);
-      if (is_logical_owner())
-      {
-        FieldMaskSet<IndexSpaceExpression> result;
-        if (!partial_invalidations.empty() &&
-            !(partial_invalidations.get_valid_mask() * mask))
-        {
-          for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
-                partial_invalidations.begin(); it !=
-                partial_invalidations.end(); it++)
-          {
-            const FieldMask overlap = mask & it->second;
-            if (!overlap)
-              continue;
-            IndexSpaceExpression *diff_expr = 
-              runtime->forest->subtract_index_spaces(expr, it->first);
-            if (!diff_expr->is_empty())
-              result.insert(diff_expr, overlap);
-            mask -= overlap;
-            if (!mask)
-              break;
-          }
-        }
-        if (!!mask)
-          result.insert(expr, mask);
-        if (target_space != local_space)
-        {
-#ifdef DEBUG_LEGION
-          assert(done_event.exists());
-#endif
-          Serializer rez;
-          {
-            RezCheck z(rez);
-            rez.serialize(target);
-            rez.serialize<size_t>(result.size());
-            for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
-                  result.begin(); it != result.end(); it++)
-            {
-              it->first->pack_expression(rez, target_space);
-              rez.serialize(it->second);
-            }
-            rez.serialize(done_event);
-          }
-          runtime->send_equivalence_set_virtual_init_response(
-            target_space, rez);
-        }
-        else
-        {
-          target->swap(result);
-          if (done_event.exists())
-            Runtime::trigger_event(done_event);
-        }
-      }
-      else
-      {
-        if (!done_event.exists())
-          done_event = Runtime::create_rt_user_event();
-        // Forward this on to the owner node
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(did);
-          expr->pack_expression(rez, logical_owner_space);
-          rez.serialize(mask);
-          rez.serialize(target);
-          rez.serialize(target_space);
-          rez.serialize(done_event);
-        }
-        runtime->send_equivalence_set_virtual_init_request(
-            logical_owner_space, rez);
-      }
-      return done_event;
-    }
-
-    //--------------------------------------------------------------------------
     void EquivalenceSet::update_tracing_read_only_view(InstanceView *view,
                                                     IndexSpaceExpression *expr,
                                                     const FieldMask &view_mask)
@@ -21375,54 +21088,6 @@ namespace Legion {
         Runtime::trigger_event(done_event);
     }
 
-    //--------------------------------------------------------------------------
-    /*static*/ void EquivalenceSet::handle_virtual_init_request(
-                  Deserializer &derez, Runtime *runtime, AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      DistributedID did;
-      derez.deserialize(did);
-      RtEvent ready;
-      EquivalenceSet *set = runtime->find_or_request_equivalence_set(did,ready);
-      IndexSpaceExpression *expr = 
-        IndexSpaceExpression::unpack_expression(derez, runtime->forest, source);
-      FieldMask mask;
-      derez.deserialize(mask);
-      FieldMaskSet<IndexSpaceExpression> *target;
-      derez.deserialize(target);
-      AddressSpaceID target_space;
-      derez.deserialize(target_space);
-      RtUserEvent done_event;
-      derez.deserialize(done_event);
-      ready.wait();
-      set->find_virtual_initialize_expressions(expr, mask, target,
-          target_space, done_event);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void EquivalenceSet::handle_virtual_init_response(
-                  Deserializer &derez, Runtime *runtime, AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      FieldMaskSet<IndexSpaceExpression> *target;
-      derez.deserialize(target);
-      size_t num_exprs;
-      derez.deserialize(num_exprs);
-      for (unsigned idx = 0; idx < num_exprs; idx++)
-      {
-        IndexSpaceExpression *expr =
-          IndexSpaceExpression::unpack_expression(derez,runtime->forest,source);
-        FieldMask mask;
-        derez.deserialize(mask);
-        target->insert(expr, mask);
-      }
-      RtUserEvent done_event;
-      derez.deserialize(done_event);
-      Runtime::trigger_event(done_event);
-    }
-
     /////////////////////////////////////////////////////////////
     // Equivalence Set Tracker
     /////////////////////////////////////////////////////////////
@@ -22638,8 +22303,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void EqSetTracker::finalize_equivalence_sets(RtUserEvent done_event,
-        InnerContext *context, Runtime *runtime, unsigned parent_req_index,
-        IndexSpaceExpression *expr, UniqueID opid)
+        InnerContext *enclosing, InnerContext *outermost, Runtime *runtime,
+        unsigned parent_req_index, IndexSpaceExpression *expr, UniqueID opid)
     //--------------------------------------------------------------------------
     {
       {
@@ -22772,14 +22437,14 @@ namespace Legion {
           // the same time and therefore the rendezvous is no longer safe
           std::vector<EqSetTracker*> targets(1, this);
           std::vector<AddressSpaceID> target_spaces(1, runtime->address_space);
-          const RtEvent ready = context->compute_equivalence_sets(
+          const RtEvent ready = enclosing->compute_equivalence_sets(
               parent_req_index, targets, target_spaces, runtime->address_space,
               expr, invalidated);
           if (ready.exists() && !ready.has_triggered())
           {
             // Launch task to finalize the sets once they are ready
             LgFinalizeEqSetsArgs args(this, done_event, opid,
-                context, parent_req_index, expr);
+                enclosing, outermost, parent_req_index, expr);
             runtime->issue_runtime_meta_task(args, 
                                LG_LATENCY_DEFERRED_PRIORITY, ready);
             // We did the continuation for this so there's nothing
@@ -23641,13 +23306,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     EqSetTracker::LgFinalizeEqSetsArgs::LgFinalizeEqSetsArgs(EqSetTracker *t,
-        RtUserEvent c, UniqueID uid, InnerContext *ctx, unsigned index,
-        IndexSpaceExpression *e)
+        RtUserEvent c, UniqueID uid, InnerContext *enclose, InnerContext *outer,
+        unsigned index, IndexSpaceExpression *e)
       : LgTaskArgs<LgFinalizeEqSetsArgs>(uid), tracker(t), compute(c),
-        context(ctx), expr(e), parent_req_index(index)
+        enclosing(enclose), outermost(outer), expr(e), parent_req_index(index)
     //--------------------------------------------------------------------------
     {
-      context->add_base_gc_ref(META_TASK_REF);
+      enclosing->add_base_gc_ref(META_TASK_REF);
+      outermost->add_base_gc_ref(META_TASK_REF);
       expr->add_base_expression_reference(META_TASK_REF);
     }
 
@@ -23658,10 +23324,12 @@ namespace Legion {
     {
       const LgFinalizeEqSetsArgs *fargs = (const LgFinalizeEqSetsArgs*)args;
       fargs->tracker->finalize_equivalence_sets(fargs->compute,
-          fargs->context, runtime, fargs->parent_req_index, fargs->expr,
-          fargs->provenance);
-      if (fargs->context->remove_base_gc_ref(META_TASK_REF))
-        delete fargs->context;
+          fargs->enclosing, fargs->outermost, runtime, fargs->parent_req_index,
+          fargs->expr, fargs->provenance);
+      if (fargs->enclosing->remove_base_gc_ref(META_TASK_REF))
+        delete fargs->enclosing;
+      if (fargs->outermost->remove_base_gc_ref(META_TASK_REF))
+        delete fargs->outermost;
       if (fargs->expr->remove_base_expression_reference(META_TASK_REF))
         delete fargs->expr;
     }
@@ -23684,7 +23352,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void VersionManager::perform_versioning_analysis(InnerContext *context,
+    void VersionManager::perform_versioning_analysis(InnerContext *outermost,
                  VersionInfo *version_info, RegionNode *region_node,
                  const FieldMask &version_mask, Operation *op, unsigned index,
                  unsigned parent_req_index, std::set<RtEvent> &ready_events,
@@ -23709,13 +23377,14 @@ namespace Legion {
         const DistributedID did = runtime->get_available_distributed_id();
         EquivalenceSet *set = new EquivalenceSet(runtime, did,
             runtime->address_space/*logical owner*/, region_node->row_source,
-            region_node->handle.get_tree_id(), context, true/*register*/);
+            region_node->handle.get_tree_id(), outermost, true/*register*/);
         version_info->record_equivalence_set(set, version_mask);
         // Launch a meta-task to register this equivalence set with
         // EqKDTree once the index space domain is ready
         RtUserEvent done_event = Runtime::create_rt_user_event();
+        // Always register with the operation's immediate enclosing context
         FinalizeOutputEquivalenceSetArgs args(this, op->get_unique_op_id(),
-            context, parent_req_index, set, done_event);
+            op->get_context(), parent_req_index, set, done_event);
         runtime->issue_runtime_meta_task(args, LG_LATENCY_DEFERRED_PRIORITY,
             region_node->row_source->get_ready_event());
         *output_region_ready = done_event;
@@ -23829,9 +23498,10 @@ namespace Legion {
           // that we are on the right node to perform it
           std::vector<EqSetTracker*> targets(1, this);
           std::vector<AddressSpaceID> target_spaces(1, runtime->address_space);
-          ready = context->compute_equivalence_sets(parent_req_index, targets,
-              target_spaces, runtime->address_space, region_node->row_source,
-              remaining_mask);
+          // Always start this computation at the operation's immediate context
+          ready = op->get_context()->compute_equivalence_sets(parent_req_index,
+              targets, target_spaces, runtime->address_space, 
+              region_node->row_source, remaining_mask);
         }
         else
           ready = op->perform_collective_versioning_analysis(index, 
@@ -23840,15 +23510,15 @@ namespace Legion {
         {
           // Launch task to finalize the sets once they are ready
           LgFinalizeEqSetsArgs args(this, compute_event, 
-              op->get_unique_op_id(), context, parent_req_index,
-              region_node->row_source);
+              op->get_unique_op_id(), op->get_context(), outermost,
+              parent_req_index, region_node->row_source);
           runtime->issue_runtime_meta_task(args, 
                              LG_LATENCY_DEFERRED_PRIORITY, ready);
         }
         else
-          finalize_equivalence_sets(compute_event, context, runtime,
-              parent_req_index, region_node->row_source, 
-              op->get_unique_op_id());
+          finalize_equivalence_sets(compute_event, op->get_context(),
+              outermost, runtime, parent_req_index,
+              region_node->row_source, op->get_unique_op_id());
       }
       else if (collective_rendezvous)
       {
@@ -23863,7 +23533,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RtEvent VersionManager::finalize_output_equivalence_set(EquivalenceSet *set,
-                                                      InnerContext *context,
+                                                      InnerContext *enclosing,
                                                       unsigned parent_req_index)
     //--------------------------------------------------------------------------
     {
@@ -23877,7 +23547,7 @@ namespace Legion {
 #endif
         set_mask = finder->second;
       }
-      return context->record_output_equivalence_set(this,
+      return enclosing->record_output_equivalence_set(this,
           runtime->address_space, parent_req_index, set, set_mask);
     } 
 
