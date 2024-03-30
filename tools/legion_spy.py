@@ -4772,6 +4772,8 @@ class DataflowTraverser(object):
         self.reduction_epochs = list()
         # list[dicts[src,copy]] of the applied reductions for each epoch
         self.dataflow_reductions = list()
+        # The reduction epoch depth
+        self.reduction_depth = -1
         # list[list[inst]]
         self.reduction_stack = list()
         # Mapping of accumulated reduction instances from source
@@ -4909,13 +4911,34 @@ class DataflowTraverser(object):
             # Copy from a reduction instance
             dst = copy.dsts[dst_index]
             if dst is self.dataflow_stack[-1]:
+                # Should be the right kind of reduction copy
+                assert copy.redops[dst_index] == src.redop
+                # Increment our reduction epoch depth
+                self.reduction_depth += 1
+                # Check to see if we need a new reduction epoch for this depth
+                if len(self.reduction_epochs) <= self.reduction_depth:
+                    self.reduction_epochs.append(src.redop)
+                    self.dataflow_reductions.append(dict())
+                # The reduction operator at this depth better match
+                # If they don't then that means that we have unordered 
+                # reduction epochs and that is not allowed
+                if src.redop != self.reduction_epochs[self.reduction_depth]:
+                    self.failed_analysis = True
+                    print("ERROR: Detected unordered reduction copy "+str(copy)+
+                          "for op "+self.error_str+" which is reducing with redop "+
+                          str(src.redop)+" but is missing dependences on prior "+
+                          "reduction copies using reduction operator "+
+                          str(self.reduction_epochs[self.reduction_depth]))
+                    if self.op.state.eq_graph_on_error:
+                        self.op.state.dump_eq_graph(self.src_key, self.dst_key)
+                    if self.op.state.assert_on_error:
+                        assert False
+                    return False
                 # We're branching off the dataflow path
                 self.dataflow_traversal.append(True)
                 # See if we found the dataflow path
                 if dst in self.state.previous_instances:
                     self.found_previous_dataflow_path = True
-                # Should be the right kind of reduction copy
-                assert copy.redops[dst_index] == src.redop
                 # Start a new reduction stack
                 new_stack = list()
                 new_stack.append(src)
@@ -4956,27 +4979,15 @@ class DataflowTraverser(object):
             if dst is self.dataflow_stack[-1]:
                 # This is an applied reduction
                 assert src.redop == copy.redops[dst_index]
-                # Start a new reduction epoch if we're a different redop
-                if len(self.reduction_epochs) == 0 or self.reduction_epochs[-1] != src.redop:
-                    self.reduction_epochs.append(src.redop)
-                    self.dataflow_reductions.append(dict())
-                # TODO: One thing we're not checking here is the case where
-                # we have multiple reduction operators being applied to the
-                # same destination instance in the right order. Depending on
-                # the order in which we traverse the nodes, we might by chance
-                # do them in the right order to look like things were ordered
-                # but we're not actually checking that the "earlier"
-                # reduction copy post-dominated the "later" reduction copy.
-                # We might just have happened to apply them in the right order.
-                # This might be non-deterministic depending on Python hashing :(
-                
+                # We should be at our reduction epoch depth
+                assert src.redop == self.reduction_epochs[self.reduction_depth]
                 # Now we can record any observed reductions to the dataflow path
                 if src in self.accumulated_reductions[-1]:
                     for inst,reduction in iteritems(self.accumulated_reductions[-1][src]):
-                        if inst in self.dataflow_reductions[-1]:
+                        if inst in self.dataflow_reductions[self.reduction_depth]:
                             self.failed_analysis = True
                             print("ERROR: Duplicate application of reduction data from "+
-                                str(inst)+"via copies "+str(self.dataflow_reductions[-1][inst])+
+                                str(inst)+"via copies "+str(self.dataflow_reductions[self.reduction_depth][inst])+
                                 " and "+str(reduction)+" for op "+self.error_str)
                             if self.op.state.eq_graph_on_error:
                                 self.op.state.dump_eq_graph(self.src_key, self.dst_key)
@@ -4984,14 +4995,22 @@ class DataflowTraverser(object):
                                 assert False
                             break
                         else:
-                            self.dataflow_reductions[-1][inst] = reduction
+                            if inst in self.dataflow_reduction[self.reduction_depth]:
+                                assert self.dataflow_reduction[self.reduction_depth][inst] is reduction
+                            else:
+                                self.dataflow_reductions[self.reduction_depth][inst] = reduction
                 else:
-                    # We just read from this source instance so record it
-                    self.dataflow_reductions[-1][src] = copy
+                    if src in self.dataflow_reductions[self.reduction_depth]:
+                        assert self.dataflow_reductions[self.reduction_depth][src] is copy
+                    else:
+                        # We just read from this source instance so record it
+                        self.dataflow_reductions[self.reduction_depth][src] = copy
                 # Pop our entries off the stacks
                 self.reduction_stack.pop()
                 self.accumulated_reductions.pop()
                 self.dataflow_traversal.pop()
+                # Decrement our reduction depth
+                self.reduction_depth -= 1 
             elif self.dataflow_traversal.pop():
                 # This is a copy between reduction instances
                 # Check to see if this is reduction or a write
@@ -5078,8 +5097,6 @@ class DataflowTraverser(object):
         dst = fill.dsts[dst_index]
         if dst.redop == 0:
             # Fill to a normal instance
-            # Never do dataflow traversals through normal fills
-            self.dataflow_traversal.append(False)
             if self.state.pending_fill:
                 if self.state.pending_reductions:
                     self.found_previous_dataflow_path = True
@@ -5088,6 +5105,8 @@ class DataflowTraverser(object):
                 # No need to traverse after we found the dataflow path
                 self.perform_fill_analysis(fill, dst)
                 return False
+            # Never do dataflow traversals through normal fills
+            self.dataflow_traversal.append(False)
         else:
             # Fill to a reduction instance
             # Check to see if it is on the dataflow path
@@ -5315,7 +5334,7 @@ class DataflowTraverser(object):
         if self.state.pending_reductions and not self.found_dataflow_path:
             # We can check these either front-to-back or back-to-front
             # We do back-to-front for efficiency
-            for src in reversed(self.state.pending_reductions):
+            for src in self.state.pending_reductions:
                 if not self.reduction_epochs or src not in self.dataflow_reductions[-1]:
                     print("ERROR: Missing reduction from field "+str(self.dst_field)+
                             " of instance "+str(src)+" of region requirement "+
