@@ -12020,6 +12020,10 @@ namespace Legion {
       }
       else // implicit task
         realm_done_event = effects;
+      // Check to see if we have any unordered operations that we need to inject
+      // This has to be done before we do any deletions to make sure that all
+      // these unordered operations are actually issued before deletions
+      progress_unordered_operations(true/*end task*/);
       // See if we have any local regions or fields that need to be deallocated
       std::vector<LogicalRegion> local_regions_to_delete;
       std::map<FieldSpace,std::set<FieldID> > local_fields_to_delete;
@@ -12171,9 +12175,7 @@ namespace Legion {
               &(owner_task->get_version_info(idx)));
           add_to_dependence_queue(close_op);
         }
-      }
-      // Check to see if we have any unordered operations that we need to inject
-      progress_unordered_operations(true/*end task*/);
+      } 
       // At this point we should have grabbed any references to these
       // physical regions so we can clear them at this point
       physical_regions.clear();
