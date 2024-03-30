@@ -15368,20 +15368,29 @@ namespace Legion {
       // Only need to do this if we have ops, if we didn't have ops then
       // it's impossible for anyone else to have them all too
       const size_t total_shards = manager->total_shards;
-      find_ready_ops(total_shards, index_space_counts,
-                     index_space_deletions, ready_ops);
-      find_ready_ops(total_shards, index_partition_counts,
-                     index_partition_deletions, ready_ops);
-      find_ready_ops(total_shards, field_space_counts,
-                     field_space_deletions, ready_ops);
-      find_ready_ops(total_shards, field_counts,
-                     field_deletions, ready_ops);
-      find_ready_ops(total_shards, logical_region_counts,
-                     logical_region_deletions, ready_ops);
+      // The order in which we add these operations is actually important
+      // We need to do them in the order in which they might actually depend
+      // on themselves based on how they were issued
+      // Do detach operations first since they should preced all deletions
       find_ready_ops(total_shards, region_detach_counts,
                      region_detachments, ready_ops);
       find_ready_ops(total_shards, partition_detach_counts,
                      partition_detachments, ready_ops);
+      // Next do field deletions since they should precede deletions of
+      // logical regions and field spaces
+      find_ready_ops(total_shards, field_counts,
+                     field_deletions, ready_ops);
+      // Then do logical region deletions which should precede field
+      // space deletions
+      find_ready_ops(total_shards, logical_region_counts,
+                     logical_region_deletions, ready_ops);
+      find_ready_ops(total_shards, field_space_counts,
+                     field_space_deletions, ready_ops);
+      // Do index partition deletions before index space deletions
+      find_ready_ops(total_shards, index_partition_counts,
+                     index_partition_deletions, ready_ops);
+      find_ready_ops(total_shards, index_space_counts,
+                     index_space_deletions, ready_ops);
     }
 
     /////////////////////////////////////////////////////////////

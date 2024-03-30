@@ -5839,11 +5839,11 @@ namespace Legion {
           effects = reduction_instance_precondition;
         if (!deterministic_redop)
         {
+          AutoLock o_lock(op_lock);
           const ApEvent done = reduction_instance.load()->reduce_from(instance,
               this, redop, reduction_op, false/*exclusive*/, effects);
           if (done.exists())
           {
-            AutoLock o_lock(op_lock);
             reduction_fold_effects.push_back(done);
             return false;
           }
