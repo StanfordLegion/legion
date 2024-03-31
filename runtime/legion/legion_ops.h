@@ -267,8 +267,6 @@ namespace Legion {
         DELETION_OP_KIND,
         MERGE_CLOSE_OP_KIND,
         POST_CLOSE_OP_KIND,
-        VIRTUAL_CLOSE_OP_KIND,
-        RETURN_CLOSE_OP_KIND,
         REFINEMENT_OP_KIND,
         RESET_OP_KIND,
         ACQUIRE_OP_KIND,
@@ -306,8 +304,6 @@ namespace Legion {
         "Deletion",                 \
         "Merge Close",              \
         "Post Close",               \
-        "Virtual Close",            \
-        "Return Close",             \
         "Refinement",               \
         "Reset",                    \
         "Acquire",                  \
@@ -670,8 +666,6 @@ namespace Legion {
       void notify_regions_verified(const std::set<unsigned> &regions,
                                    GenerationID gen);
     public:
-      // Help for seeing if the parent region is non-exclusively virtual mapped
-      bool is_parent_nonexclusive_virtual_mapping(unsigned index);
       // Help for finding the contexts for an operation
       InnerContext* find_physical_context(unsigned index);
     public:
@@ -2251,41 +2245,6 @@ namespace Legion {
       int                                          profiling_priority;
       std::atomic<int>                 outstanding_profiling_requests;
       std::atomic<int>                 outstanding_profiling_reported;
-    };
-
-    /**
-     * \class VirtualCloseOp
-     * Virtual close operations are issued by the runtime for
-     * closing up virtual mappings to a composite instance
-     * that can then be propagated back to the enclosing
-     * parent task.
-     */
-    class VirtualCloseOp : public CloseOp {
-    public:
-      VirtualCloseOp(Runtime *runtime);
-      VirtualCloseOp(const VirtualCloseOp &rhs);
-      virtual ~VirtualCloseOp(void);
-    public:
-      VirtualCloseOp& operator=(const VirtualCloseOp &rhs);
-    public:
-      void initialize(InnerContext *ctx, unsigned index,
-                      const RegionRequirement &req,
-                      const VersionInfo *targets);
-    public:
-      virtual void activate(void);
-      virtual void deactivate(bool free = true);
-      virtual const char* get_logging_name(void) const;
-      virtual OpKind get_operation_kind(void) const;
-    public:
-      virtual void trigger_dependence_analysis(void);
-      virtual void trigger_ready(void);
-      virtual void trigger_mapping(void);
-      virtual unsigned find_parent_index(unsigned idx);
-    protected:
-      VersionInfo source_version_info;
-      const VersionInfo *target_version_info;
-      std::set<RtEvent> map_applied_conditions;
-      unsigned parent_idx;
     };
 
     /**

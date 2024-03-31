@@ -1191,7 +1191,7 @@ namespace Legion {
       virtual PartitionRefinementTracker* as_partition_tracker(void)
         { return NULL; }
       virtual RefinementTracker* clone(void) const = 0;
-      virtual void initialize_already_refined(void) = 0;
+      virtual void initialize_no_refine(void) = 0;
       virtual bool update_child(RegionTreeNode *child, 
                                 const RegionUsage &usage,
                                 bool &allow_refinement) = 0;
@@ -1245,7 +1245,7 @@ namespace Legion {
     public:
       virtual RegionRefinementTracker* as_region_tracker(void) { return this; }
       virtual RefinementTracker* clone(void) const;
-      virtual void initialize_already_refined(void);
+      virtual void initialize_no_refine(void);
       virtual bool update_child(RegionTreeNode *child, 
                                 const RegionUsage &usage,
                                 bool &allow_refinement);
@@ -1299,7 +1299,7 @@ namespace Legion {
       virtual PartitionRefinementTracker* as_partition_tracker(void)
         { return this; }
       virtual RefinementTracker* clone(void) const;
-      virtual void initialize_already_refined(void);
+      virtual void initialize_no_refine(void);
       virtual bool update_child(RegionTreeNode *child, 
                                 const RegionUsage &usage,
                                 bool &allow_refinement);
@@ -1372,7 +1372,7 @@ namespace Legion {
       void sanity_check(void) const;
 #endif
     public:
-      void initialize_refined_fields(const FieldMask &mask);
+      void initialize_no_refine_fields(const FieldMask &mask);
       void update_refinement_child(ContextID ctx, RegionTreeNode *child,
                                    const RegionUsage &usage,
                                    FieldMask &refinement_mask);
@@ -2900,40 +2900,6 @@ namespace Legion {
     };
 
     /**
-     * \class CloneAnalysis
-     * For cloning into an equivalence set from a set of other equivalence
-     * sets. This usually is done by VirtualCloseOps.
-     */
-    class CloneAnalysis : public PhysicalAnalysis,
-                          public LegionHeapify<CloneAnalysis> {
-    public:
-      CloneAnalysis(Runtime *rt, IndexSpaceExpression *expr, Operation *op,
-                    unsigned index, FieldMaskSet<EquivalenceSet> &&sources);
-      CloneAnalysis(Runtime *rt, AddressSpaceID src, AddressSpaceID prev,
-                    IndexSpaceExpression *expr, Operation *op,
-                    unsigned index, FieldMaskSet<EquivalenceSet> &&sources);
-      CloneAnalysis(const CloneAnalysis &rhs) = delete;
-      virtual ~CloneAnalysis(void);
-    public:
-      CloneAnalysis& operator=(const CloneAnalysis &rhs) = delete;
-    public:
-      virtual bool perform_analysis(EquivalenceSet *set,
-                                    IndexSpaceExpression *expr,
-                                    const bool expr_covers,
-                                    const FieldMask &mask,
-                                    std::set<RtEvent> &applied_events,
-                                    const bool already_deferred = false);
-      virtual RtEvent perform_remote(RtEvent precondition, 
-                                     std::set<RtEvent> &applied_events,
-                                     const bool already_deferred = false);
-    public:
-      static void handle_remote_clones(Deserializer &derez, Runtime *rt,
-                                       AddressSpaceID previous);
-    public:
-      const FieldMaskSet<EquivalenceSet> sources;
-    };
-
-    /**
      * \class CollectiveRefinementTree
      * This class provides a base class for performing analyses inside of
      * an equivalence set that might have to deal with aliased names for
@@ -3123,12 +3089,14 @@ namespace Legion {
         static const LgTaskID TASK_ID = LG_FINALIZE_EQ_SETS_TASK_ID;
       public:
         LgFinalizeEqSetsArgs(EqSetTracker *t, RtUserEvent c, UniqueID uid,
-                             InnerContext *ctx, unsigned parent_req_index,
+                             InnerContext *enclosing, InnerContext *outermost,
+                             unsigned parent_req_index,
                              IndexSpaceExpression *expr);
       public:
         EqSetTracker *const tracker;
         const RtUserEvent compute;
-        InnerContext *const context;
+        InnerContext *const enclosing;
+        InnerContext *const outermost;
         IndexSpaceExpression *const expr;
         const unsigned parent_req_index;
       };
@@ -3230,8 +3198,8 @@ namespace Legion {
           const FieldMask &mask, Runtime *runtime, bool filter_invalidations,
           std::map<EquivalenceSet*,LegionList<SourceState> > &creation_sources);
       void finalize_equivalence_sets(RtUserEvent compute_event,
-          InnerContext *context, Runtime *runtime, unsigned parent_req_index,
-          IndexSpaceExpression *expr, UniqueID opid);
+          InnerContext *enclosing, InnerContext *outermost, Runtime *runtime,
+          unsigned parent_req_index, IndexSpaceExpression *expr, UniqueID opid);
       void record_equivalence_sets(VersionInfo *version_info,
                                    const FieldMask &mask) const;
       void find_cancellations(const FieldMask &mask,
@@ -3427,15 +3395,6 @@ namespace Legion {
                       const FieldMask &filter_mask, 
                       std::set<RtEvent> &applied_events,
                       const bool already_deferred = false);
-      void clone_set(CloneAnalysis &analysis,
-                     IndexSpaceExpression *expr, const bool expr_covers,
-                     const FieldMask &clone_mask,
-                     std::vector<RtEvent> &applied_events,
-                     const bool already_deferred = false);
-      RtEvent find_virtual_initialize_expressions(IndexSpaceExpression *expr,
-          FieldMask mask, FieldMaskSet<IndexSpaceExpression> *target,
-          AddressSpaceID target_space, 
-          RtUserEvent done_event = RtUserEvent::NO_RT_USER_EVENT);
     public:
       void initialize_collective_references(unsigned local_valid_refs);
       void remove_read_only_guard(CopyFillGuard *guard);
@@ -3774,10 +3733,6 @@ namespace Legion {
                                          AddressSpaceID source);
       static void handle_capture_response(Deserializer &derez, Runtime *runtime,
                                           AddressSpaceID source);
-      static void handle_virtual_init_request(Deserializer &derez,
-                                    Runtime *runtime, AddressSpaceID source);
-      static void handle_virtual_init_response(Deserializer &derez,
-                                    Runtime *runtime, AddressSpaceID source);
     public:
       // Note this context refers to the context from which the views are
       // created in. Normally this is the same as the context in which the
@@ -3909,7 +3864,7 @@ namespace Legion {
       inline const FieldMask& get_version_mask(void) const
         { return equivalence_sets.get_valid_mask(); }
     public:
-      void perform_versioning_analysis(InnerContext *parent_ctx,
+      void perform_versioning_analysis(InnerContext *outermost,
                                        VersionInfo *version_info,
                                        RegionNode *region_node,
                                        const FieldMask &version_mask,
@@ -3919,7 +3874,7 @@ namespace Legion {
                                        RtEvent *output_region_ready,
                                        bool collective_rendezvous);
       RtEvent finalize_output_equivalence_set(EquivalenceSet *set,
-                                       InnerContext *context,
+                                       InnerContext *enclosing,
                                        unsigned parent_req_index);
     public:
       virtual void add_subscription_reference(unsigned count = 1);

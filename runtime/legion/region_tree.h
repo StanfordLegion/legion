@@ -4547,7 +4547,7 @@ namespace Legion {
       void add_child(PartitionNode *child);
       void remove_child(const LegionColor p);
       void add_tracker(PartitionTracker *tracker);
-      void initialize_refined_fields(ContextID ctx, const FieldMask &m);
+      void initialize_no_refine_fields(ContextID ctx, const FieldMask &m);
     public:
       virtual unsigned get_depth(void) const;
       virtual LegionColor get_color(void) const;

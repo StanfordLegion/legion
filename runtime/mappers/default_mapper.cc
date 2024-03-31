@@ -1308,46 +1308,9 @@ namespace Legion {
         }
         if (!has_relaxed_coherence)
         {
-          std::vector<unsigned> reduction_indexes;
           for (unsigned idx = 0; idx < task.regions.size(); idx++)
-          {
-            // As long as this isn't a reduction-only region requirement
-            // we will do a virtual mapping, for reduction-only instances
-            // we will actually make a physical instance because the runtime
-            // doesn't allow virtual mappings for reduction-only privileges
-            if (task.regions[idx].privilege == LEGION_REDUCE)
-              reduction_indexes.push_back(idx);
-            else
-              output.chosen_instances[idx].push_back(
+            output.chosen_instances[idx].push_back(
                   PhysicalInstance::get_virtual_instance());
-          }
-          if (!reduction_indexes.empty())
-          {
-            const TaskLayoutConstraintSet &layout_constraints =
-                runtime->find_task_layout_constraints(ctx,
-                                      task.task_id, output.chosen_variant);
-            for (std::vector<unsigned>::const_iterator it =
-                  reduction_indexes.begin(); it !=
-                  reduction_indexes.end(); it++)
-            {
-              MemoryConstraint mem_constraint =
-                find_memory_constraint(ctx, task, output.chosen_variant, *it);
-              Memory target_memory = default_policy_select_target_memory(ctx,
-                                                         target_proc,
-                                                         task.regions[*it],
-                                                         mem_constraint);
-              std::set<FieldID> copy = task.regions[*it].privilege_fields;
-              size_t footprint;
-              if (!default_create_custom_instances(ctx, target_proc,
-                  target_memory, task.regions[*it], *it, copy,
-                  layout_constraints, false/*needs constraint check*/,
-                  output.chosen_instances[*it], &footprint))
-              {
-                default_report_failed_instance_creation(task, *it,
-                      target_proc, target_memory, footprint);
-              }
-            }
-          }
           return;
         }
       }
