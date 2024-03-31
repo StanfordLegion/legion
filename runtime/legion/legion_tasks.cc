@@ -3172,14 +3172,6 @@ namespace Legion {
                           "or a single composite instance is supported.",
                           "map_task", mapper->get_mapper_name(), idx, 
                           get_task_name(), get_unique_id())
-          if (IS_REDUCE(regions[idx]))
-            REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
-                          "Invalid mapper output from invocation of '%s' on "
-                          "mapper %s. Illegal composite mapping requested on "
-                          "region requirement %d of task %s (UID %lld) which "
-                          "has only reduction privileges.", 
-                          "map_task", mapper->get_mapper_name(), idx, 
-                          get_task_name(), get_unique_id())
           if (!IS_EXCLUSIVE(regions[idx]))
             REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                           "Invalid mapper output from invocation of '%s' on "
@@ -5847,11 +5839,11 @@ namespace Legion {
           effects = reduction_instance_precondition;
         if (!deterministic_redop)
         {
+          AutoLock o_lock(op_lock);
           const ApEvent done = reduction_instance.load()->reduce_from(instance,
               this, redop, reduction_op, false/*exclusive*/, effects);
           if (done.exists())
           {
-            AutoLock o_lock(op_lock);
             reduction_fold_effects.push_back(done);
             return false;
           }

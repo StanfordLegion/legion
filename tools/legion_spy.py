@@ -9243,7 +9243,8 @@ class Task(object):
                     assert field.fid in mappings
                     inst = mappings[field.fid]
                     if inst.is_virtual():
-                        assert not add_restrictions # Better not be virtual if restricted
+                        # Better not be virtual if restricted unless reduce
+                        assert not add_restrictions or (req.priv == REDUCE) 
                         continue
                     req.logical_node.initialize_verification_state(depth, field, inst,
                                                                    add_restrictions)

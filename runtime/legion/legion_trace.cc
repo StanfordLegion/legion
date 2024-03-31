@@ -3994,19 +3994,21 @@ namespace Legion {
       }
       std::vector<EqSetTracker*> targets(1, this);
       std::vector<AddressSpaceID> target_spaces(1, space);
+      InnerContext *outermost = 
+        context->find_parent_physical_context(parent_req_index);
       RtEvent ready = context->compute_equivalence_sets(parent_req_index,
           targets, target_spaces, space, condition_expr, invalid_mask);
       if (ready.exists() && !ready.has_triggered())
       {
         // Launch a meta-task to finalize this trace condition set
         LgFinalizeEqSetsArgs args(this, compute_event, opid,
-            context, parent_req_index, condition_expr);
+            context, outermost, parent_req_index, condition_expr);
         return forest->runtime->issue_runtime_meta_task(args, 
                         LG_LATENCY_DEFERRED_PRIORITY, ready);
       }
       else
-        finalize_equivalence_sets(compute_event, context, forest->runtime,
-            parent_req_index, condition_expr, opid);
+        finalize_equivalence_sets(compute_event, context, outermost,
+            forest->runtime, parent_req_index, condition_expr, opid);
       return compute_event;
     }
 

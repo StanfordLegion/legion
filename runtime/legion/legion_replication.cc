@@ -2032,107 +2032,6 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
-    // Repl Virtual Close Op 
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    ReplVirtualCloseOp::ReplVirtualCloseOp(Runtime *rt)
-      : ReplCollectiveVersioning<CollectiveVersioning<VirtualCloseOp> >(rt)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    ReplVirtualCloseOp::~ReplVirtualCloseOp(void)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplVirtualCloseOp::activate(void)
-    //--------------------------------------------------------------------------
-    {
-      ReplCollectiveVersioning<
-        CollectiveVersioning<VirtualCloseOp> >::activate();
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplVirtualCloseOp::deactivate(bool free)
-    //--------------------------------------------------------------------------
-    {
-      ReplCollectiveVersioning<
-        CollectiveVersioning<VirtualCloseOp> >::deactivate(false/*free*/);
-      if (free)
-        runtime->free_repl_virtual_close_op(this);
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplVirtualCloseOp::trigger_dependence_analysis(void)
-    //--------------------------------------------------------------------------
-    {
-      create_collective_rendezvous(0/*requirement index*/);
-      VirtualCloseOp::trigger_dependence_analysis();
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplVirtualCloseOp::trigger_ready(void)
-    //--------------------------------------------------------------------------
-    {
-      std::set<RtEvent> preconditions;
-      runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
-                                                   requirement,
-                                                   source_version_info,
-                                                   preconditions,
-                                                   NULL/*output region*/,
-                                                   true/*rendezvous*/);
-      if (!preconditions.empty())
-        enqueue_ready_operation(Runtime::merge_events(preconditions));
-      else
-        enqueue_ready_operation(); 
-    }
-
-    //--------------------------------------------------------------------------
-    bool ReplVirtualCloseOp::perform_collective_analysis(
-                                 CollectiveMapping *&mapping, bool &first_local)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
-#endif
-      mapping = &(repl_ctx->shard_manager->get_collective_mapping()); 
-      mapping->add_reference();
-      first_local = is_collective_first_local_shard();
-      return true;
-    }
-
-    //--------------------------------------------------------------------------
-    RtEvent ReplVirtualCloseOp::perform_collective_versioning_analysis(
-        unsigned index, LogicalRegion handle, EqSetTracker *tracker,
-        const FieldMask &mask, unsigned parent_req_index)
-    //--------------------------------------------------------------------------
-    {
-      return rendezvous_collective_versioning_analysis(index, handle, tracker,
-          runtime->address_space, mask, parent_req_index);
-    }
-
-    //--------------------------------------------------------------------------
-    bool ReplVirtualCloseOp::is_collective_first_local_shard(void) const
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
-#endif
-      return repl_ctx->shard_manager->is_first_local_shard(
-          repl_ctx->owner_shard);
-    }
-
-    /////////////////////////////////////////////////////////////
     // Repl Refinement Op 
     /////////////////////////////////////////////////////////////
 
@@ -15469,20 +15368,29 @@ namespace Legion {
       // Only need to do this if we have ops, if we didn't have ops then
       // it's impossible for anyone else to have them all too
       const size_t total_shards = manager->total_shards;
-      find_ready_ops(total_shards, index_space_counts,
-                     index_space_deletions, ready_ops);
-      find_ready_ops(total_shards, index_partition_counts,
-                     index_partition_deletions, ready_ops);
-      find_ready_ops(total_shards, field_space_counts,
-                     field_space_deletions, ready_ops);
-      find_ready_ops(total_shards, field_counts,
-                     field_deletions, ready_ops);
-      find_ready_ops(total_shards, logical_region_counts,
-                     logical_region_deletions, ready_ops);
+      // The order in which we add these operations is actually important
+      // We need to do them in the order in which they might actually depend
+      // on themselves based on how they were issued
+      // Do detach operations first since they should preced all deletions
       find_ready_ops(total_shards, region_detach_counts,
                      region_detachments, ready_ops);
       find_ready_ops(total_shards, partition_detach_counts,
                      partition_detachments, ready_ops);
+      // Next do field deletions since they should precede deletions of
+      // logical regions and field spaces
+      find_ready_ops(total_shards, field_counts,
+                     field_deletions, ready_ops);
+      // Then do logical region deletions which should precede field
+      // space deletions
+      find_ready_ops(total_shards, logical_region_counts,
+                     logical_region_deletions, ready_ops);
+      find_ready_ops(total_shards, field_space_counts,
+                     field_space_deletions, ready_ops);
+      // Do index partition deletions before index space deletions
+      find_ready_ops(total_shards, index_partition_counts,
+                     index_partition_deletions, ready_ops);
+      find_ready_ops(total_shards, index_space_counts,
+                     index_space_deletions, ready_ops);
     }
 
     /////////////////////////////////////////////////////////////
