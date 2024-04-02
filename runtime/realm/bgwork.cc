@@ -259,13 +259,13 @@ namespace Realm {
   void BackgroundWorkManager::configure_from_cmdline(std::vector<std::string>& cmdline)
   {
     CommandLineParser cp;
-    cp.add_option_int("-ll:bgwork", cfg.generic_workers.val)
-      .add_option_int("-ll:bgnuma", cfg.per_numa_workers.val)
-      .add_option_int("-ll:bgworkpin", cfg.pin_generic.val)
-      .add_option_int("-ll:bgnumapin", cfg.pin_numa.val)
-      .add_option_int("-ll:bgstack", cfg.worker_stacksize_in_kb.val)
-      .add_option_int("-ll:bgspin", cfg.worker_spin_interval.val)
-      .add_option_int("-ll:bgslice", cfg.work_item_timeslice.val);
+    cp.add_option_int("-ll:bgwork", cfg.generic_workers)
+        .add_option_int("-ll:bgnuma", cfg.per_numa_workers)
+        .add_option_int("-ll:bgworkpin", cfg.pin_generic)
+        .add_option_int("-ll:bgnumapin", cfg.pin_numa)
+        .add_option_int("-ll:bgstack", cfg.worker_stacksize_in_kb)
+        .add_option_int("-ll:bgspin", cfg.worker_spin_interval)
+        .add_option_int("-ll:bgslice", cfg.work_item_timeslice);
 
     bool ok = cp.parse_command_line(cmdline);
     assert(ok);
@@ -291,8 +291,8 @@ namespace Realm {
 	    ++it) {
 	  const NumaNodeCpuInfo& ci = it->second;
 	  // filter out any numa domains with insufficient core counts
-	  int cores_needed = cfg.pin_numa ? cfg.per_numa_workers.val : 1;
-	  if(ci.cores_available < cores_needed)
+          int cores_needed = cfg.pin_numa ? cfg.per_numa_workers : 1;
+          if(ci.cores_available < cores_needed)
 	    continue;
 
 	  for(unsigned i = 0; i < cfg.per_numa_workers; i++)
