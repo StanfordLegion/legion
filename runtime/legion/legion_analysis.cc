@@ -21692,6 +21692,7 @@ namespace Legion {
       compute_field_sets(universe_mask, create_now_rectangles, rectangle_sets);
       FieldMaskSet<EquivalenceSet> created_sets;
       IndexSpaceExpression *tracker_expr = get_tracker_expression();
+      const ReferenceSource ref_kind = get_reference_source_kind();
       for (LegionList<FieldSet<Domain> >::iterator rit =
             rectangle_sets.begin(); rit != rectangle_sets.end(); rit++)
       {
@@ -21766,7 +21767,7 @@ namespace Legion {
               get_region_tree_id(), context, true/*register*/, mapping,
               (target_mapping.size() > 1));
           if (created_sets.insert(set, rit->set_mask))
-            set->add_base_gc_ref(VERSION_MANAGER_REF);
+            set->add_base_gc_ref(ref_kind);
           set_created = true;
         }
         // Clone any meta-data from the source equivalence sets to
@@ -21932,7 +21933,7 @@ namespace Legion {
           // which should never lead to the deletion of the set
           // since we should already be holding a reference
           if (!created_equivalence_sets->insert(it->first, it->second) &&
-              it->first->remove_base_gc_ref(VERSION_MANAGER_REF))
+              it->first->remove_base_gc_ref(ref_kind))
             assert(false); // should never actaully delete the object
         }
       }
@@ -21956,6 +21957,7 @@ namespace Legion {
         destination_volume += it->get_volume();
       std::vector<EquivalenceSet*> to_remove;
       const AddressSpaceID local_space = runtime->address_space;
+      const ReferenceSource ref_kind = get_reference_source_kind();
       for (FieldMaskSet<EquivalenceSet>::iterator eit =
             unique_sources.begin(); eit != unique_sources.end(); eit++)
       {
@@ -22095,7 +22097,7 @@ namespace Legion {
                 create_now.erase(local_finder);
             }
             if (created_sets.insert(eit->first, overlap))
-              eit->first->add_base_gc_ref(VERSION_MANAGER_REF);
+              eit->first->add_base_gc_ref(ref_kind);
             dest.set_mask -= overlap;
             sit->set_mask -= overlap;
             if (!sit->set_mask)
@@ -22137,6 +22139,7 @@ namespace Legion {
       // Need the lock since the equivalence set data structure might 
       // change at the same time that we're iterating over it
       // We're just reading though so we don't need exclusive access
+      const ReferenceSource ref_kind = get_reference_source_kind();
       AutoLock t_lock(tracker_lock,1,false/*exclusive*/);
       for (FieldMaskSet<EquivalenceSet>::const_iterator it =
             equivalence_sets.begin(); it != equivalence_sets.end(); it++)
@@ -22157,7 +22160,7 @@ namespace Legion {
           // Found one, add it to the pending sets and add a reference
           // if its the first time we're reusing it
           if (created_sets.insert(it->first, mask))
-            it->first->add_base_gc_ref(VERSION_MANAGER_REF);
+            it->first->add_base_gc_ref(ref_kind);
           return it->first;
         }
       }
@@ -22307,6 +22310,7 @@ namespace Legion {
         unsigned parent_req_index, IndexSpaceExpression *expr, UniqueID opid)
     //--------------------------------------------------------------------------
     {
+      const ReferenceSource ref_kind = get_reference_source_kind();
       {
         AutoLock t_lock(tracker_lock);
 #ifdef DEBUG_LEGION
@@ -22382,7 +22386,7 @@ namespace Legion {
               for (FieldMaskSet<EquivalenceSet>::const_iterator it =
                     created_equivalence_sets->begin(); it !=
                     created_equivalence_sets->end(); it++)
-                if (it->first->remove_base_gc_ref(VERSION_MANAGER_REF))
+                if (it->first->remove_base_gc_ref(ref_kind))
                   delete it->first;
               delete created_equivalence_sets;
               created_equivalence_sets = NULL;
@@ -22404,7 +22408,7 @@ namespace Legion {
                       to_delete.begin(); it != to_delete.end(); it++)
                 {
                   created_equivalence_sets->erase(*it);
-                  if ((*it)->remove_base_gc_ref(VERSION_MANAGER_REF))
+                  if ((*it)->remove_base_gc_ref(ref_kind))
                     delete (*it);
                 }
               }
@@ -22466,7 +22470,7 @@ namespace Legion {
                   pending_equivalence_sets->begin(); it !=
                   pending_equivalence_sets->end(); it++)
               if (equivalence_sets.insert(it->first, it->second))
-                it->first->add_base_gc_ref(VERSION_MANAGER_REF);
+                it->first->add_base_gc_ref(ref_kind);
             delete pending_equivalence_sets;
             pending_equivalence_sets = NULL;
           }
@@ -22482,7 +22486,7 @@ namespace Legion {
               if (!overlap)
                 continue;
               if (equivalence_sets.insert(it->first, overlap))
-                it->first->add_base_gc_ref(VERSION_MANAGER_REF);
+                it->first->add_base_gc_ref(ref_kind);
               it.filter(overlap);
               if (!it->second)
                 to_delete.push_back(it->first);
@@ -22511,7 +22515,7 @@ namespace Legion {
                   created_equivalence_sets->begin(); it !=
                   created_equivalence_sets->end(); it++)
               if (!equivalence_sets.insert(it->first, it->second) &&
-                  it->first->remove_base_gc_ref(VERSION_MANAGER_REF))
+                  it->first->remove_base_gc_ref(ref_kind))
                 assert(false); // should never delete the object
             delete created_equivalence_sets;
             created_equivalence_sets = NULL;
@@ -22533,7 +22537,7 @@ namespace Legion {
                 // our reference to or deduplicate the reference if
                 // the set already exists in the equivalence_sets
                 if (!equivalence_sets.insert(it->first, it->second) &&
-                    it->first->remove_base_gc_ref(VERSION_MANAGER_REF))
+                    it->first->remove_base_gc_ref(ref_kind))
                   assert(false); // should never delete the object
                 to_delete.push_back(it->first);
               }
@@ -22542,7 +22546,7 @@ namespace Legion {
                 // Just moving over some of the fields which means
                 // we need to add a reference if this is the first
                 if (equivalence_sets.insert(it->first, overlap))
-                  it->first->add_base_gc_ref(VERSION_MANAGER_REF);
+                  it->first->add_base_gc_ref(ref_kind);
                 it.filter(overlap);
               }
             }
@@ -23393,7 +23397,7 @@ namespace Legion {
         assert(version_mask * equivalence_sets.get_valid_mask());
 #endif
         if (equivalence_sets.insert(set, version_mask))
-          set->add_base_gc_ref(VERSION_MANAGER_REF);
+          set->add_base_gc_ref(get_reference_source_kind());
         return;
       }
       // If we don't have equivalence classes for this region yet we 
