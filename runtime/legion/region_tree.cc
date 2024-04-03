@@ -1633,15 +1633,12 @@ namespace Legion {
       {
         FieldMask unopened_mask = user_mask;
         FieldMask refinement_mask;
-        // Only check for refinements if we're not a parent of a 
-        // non-exlcuisve virtual mapping
-        // We also disallow refinements for operations that are part of
+        // We disallow refinements for operations that are part of
         // a must epoch launch because refinements are too hard to 
         // implement correctly in that case
         // We also don't try to update refinements if we're doing a reset
         // operation since that is an internal kind of operation
-        if (!op->is_parent_nonexclusive_virtual_mapping(idx) &&
-            (op->get_must_epoch_op() == NULL) &&
+        if ((op->get_must_epoch_op() == NULL) &&
             (op->get_operation_kind() != Operation::RESET_OP_KIND))
           refinement_mask = user_mask;
         FieldMaskSet<RefinementOp> refinements;
@@ -1690,7 +1687,7 @@ namespace Legion {
       DETAILED_PROFILER(runtime, REGION_TREE_VERSIONING_ANALYSIS_CALL);
       if (IS_NO_ACCESS(req))
         return;
-      InnerContext *context = op->get_context();
+      InnerContext *context = op->find_physical_context(index);
       ContextID ctx = context->get_physical_tree_context(); 
 #ifdef DEBUG_LEGION
       assert((req.handle_type == LEGION_SINGULAR_PROJECTION) || 
@@ -17038,7 +17035,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionNode::initialize_refined_fields(ContextID ctx,
+    void RegionNode::initialize_no_refine_fields(ContextID ctx,
                                                const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
@@ -17046,7 +17043,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       state.sanity_check();
 #endif
-      state.initialize_refined_fields(mask);
+      state.initialize_no_refine_fields(mask);
     }
 
     //--------------------------------------------------------------------------

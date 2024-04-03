@@ -2079,33 +2079,6 @@ namespace Legion {
     };
 
     /**
-     * \class ReplVirtualCloseOp
-     * A virtual close operation is aware that it is being
-     * executed in a control replicated context
-     */
-    class ReplVirtualCloseOp :
-      public ReplCollectiveVersioning<CollectiveVersioning<VirtualCloseOp> > {
-    public:
-      ReplVirtualCloseOp(Runtime *runtime);
-      ReplVirtualCloseOp(const ReplVirtualCloseOp &rhs) = delete;
-      virtual ~ReplVirtualCloseOp(void);
-    public:
-      ReplVirtualCloseOp& operator=(const ReplVirtualCloseOp &rhs) = delete;
-    public:
-      virtual void activate(void);
-      virtual void deactivate(bool free = true);
-    public:
-      virtual void trigger_dependence_analysis(void);
-      virtual void trigger_ready(void);
-      virtual bool perform_collective_analysis(CollectiveMapping *&mapping,
-                                               bool &first_local);
-      virtual RtEvent perform_collective_versioning_analysis(unsigned index,
-                       LogicalRegion handle, EqSetTracker *tracker,
-                       const FieldMask &mask, unsigned parent_req_index);
-      virtual bool is_collective_first_local_shard(void) const;
-    };
-
-    /**
      * \class ReplRefinementOp
      * A refinement operation that is aware that it is being
      * executed in a control replication context.

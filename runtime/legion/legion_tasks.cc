@@ -2559,12 +2559,8 @@ namespace Legion {
           else
           {
             // Remote but still need to map
-            if (is_replicable())
-            {
-              if (replicate_task())
-                return;
-              replicate = false;
-            }
+            if (is_replicable() && replicate_task())
+              return;
             const RtEvent done_mapping = perform_mapping();
             if (done_mapping.exists() && !done_mapping.has_triggered())
               defer_launch_task(done_mapping);
@@ -2609,12 +2605,8 @@ namespace Legion {
             if (distribute_task())
             {
               // Still local so try mapping and launching
-              if (is_replicable())
-              {
-                if (replicate_task())
-                  return;
-                replicate = false;
-              }
+              if (is_replicable() && replicate_task())
+                return;
               const RtEvent done_mapping = perform_mapping();
               if (!done_mapping.exists() || done_mapping.has_triggered())
                 launch_task();
@@ -3178,14 +3170,6 @@ namespace Legion {
                           "concrete instances for region requirement %d of "
                           "task %s (ID %lld). Only full concrete instances "
                           "or a single composite instance is supported.",
-                          "map_task", mapper->get_mapper_name(), idx, 
-                          get_task_name(), get_unique_id())
-          if (IS_REDUCE(regions[idx]))
-            REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
-                          "Invalid mapper output from invocation of '%s' on "
-                          "mapper %s. Illegal composite mapping requested on "
-                          "region requirement %d of task %s (UID %lld) which "
-                          "has only reduction privileges.", 
                           "map_task", mapper->get_mapper_name(), idx, 
                           get_task_name(), get_unique_id())
           if (!IS_EXCLUSIVE(regions[idx]))
@@ -3765,6 +3749,7 @@ namespace Legion {
             "the Legion developers list or opening a github issue. The "
             "mapper call to replicate_task is being elided.",
             get_task_name(), get_unique_id(), mapper->get_mapper_name())
+        replicate = false;
         return false;
       }
       Mapper::ReplicateTaskInput input;
@@ -3773,8 +3758,24 @@ namespace Legion {
       mapper->invoke_replicate_task(this, input, output);
       // If we don't have more than one target processor then we're not
       // actually going to replicate this task
-      if (output.target_processors.size() <= 1)
+      if (output.target_processors.empty())
+      {
+        replicate = false;
         return false;
+      }
+      else if (output.target_processors.size() == 1)
+      {
+        REPORT_LEGION_WARNING(LEGION_WARNING_IGNORED_REPLICATION,
+            "Mapper %s requested to replicate task %s (UID %lld) but "
+            "only reqeuested one shard to be made. Since one shard does "
+            "not actually constitute replication, Legion is ignoring this "
+            "request and the task will be mapped like normal. If the "
+            "mapper intended to not perform replication it should return "
+            "an empty vector of target processors for 'replicate_task'.",
+            mapper->get_mapper_name(), get_task_name(), get_unique_id())
+        replicate = false;
+        return false;
+      }
       VariantImpl *var_impl = NULL;
       if (output.leaf_variants.empty())
       {
@@ -3853,7 +3854,9 @@ namespace Legion {
       if (!runtime->unsafe_mapper)
       {
         // Check that all the processors exist
+        bool has_local = false;
         for (unsigned idx = 0; idx < output.target_processors.size(); idx++)
+        {
           if (!output.target_processors[idx].exists())
             REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                         "Invalid mapper output from invocation of '%s' "
@@ -3863,6 +3866,20 @@ namespace Legion {
                         "target_processors must exist.", "replicate_task",
                          mapper->get_mapper_name(),
                          get_task_name(), get_unique_id())
+          else if (!has_local && (runtime->address_space ==
+                output.target_processors[idx].address_space()))
+            has_local = true;
+        }
+        if (!has_local)
+          REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+              "Invalid mapper output from invocation of '%s' on mapper %s. "
+              "Mapper did not provide a local processor when replicating "
+              "task %s (UID %lld). At last one shard of a replicated task "
+              "must be present on the node where the task is being mapped "
+              "to remain consistent with the semantics of 'map_task' which "
+              "would require this anyway even if the task were not replicated.",
+              "replicate_task", mapper->get_mapper_name(), get_task_name(),
+              get_unique_id())
         // Check that the chosen variant works with all the targets processors
         if (output.leaf_variants.empty())
         {
@@ -4075,7 +4092,7 @@ namespace Legion {
       }
       // Construct the collective mapping
       std::vector<AddressSpaceID> spaces(output.target_processors.size()+1);
-      for (unsigned idx = 0; idx < spaces.size(); idx++)
+      for (unsigned idx = 0; idx < output.target_processors.size(); idx++)
         spaces[idx] = output.target_processors[idx].address_space();
       // Make sure we include our local space too
       spaces.back() = runtime->address_space;
@@ -5847,11 +5864,11 @@ namespace Legion {
           effects = reduction_instance_precondition;
         if (!deterministic_redop)
         {
+          AutoLock o_lock(op_lock);
           const ApEvent done = reduction_instance.load()->reduce_from(instance,
               this, redop, reduction_op, false/*exclusive*/, effects);
           if (done.exists())
           {
-            AutoLock o_lock(op_lock);
             reduction_fold_effects.push_back(done);
             return false;
           }
@@ -8411,10 +8428,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Have to launch a task to do this in case they need to rendezvous
-      const RtUserEvent shard_mapped = Runtime::create_rt_user_event();
-      DeferMappingArgs args(this, NULL, shard_mapped,
-          0/*invocation count*/, NULL/*performed*/, NULL/*effects*/);
-      runtime->issue_runtime_meta_task(args, LG_THROUGHPUT_DEFERRED_PRIORITY);
+      const RtEvent shard_mapped = defer_perform_mapping(RtEvent::NO_RT_EVENT,
+          NULL/*must epoch*/, NULL/*prior args*/, 0/*invocation count*/);
       // Then defer the launching of the shard when the mapping is done
       defer_launch_task(shard_mapped);
     }
@@ -11434,6 +11449,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       // Should never get duplicate invocations here
       assert(args == NULL);
+      assert(!is_replicable());
+      assert(is_origin_mapped());
 #endif
       // Check to see if we already enumerated all the points, if
       // not then do so now
@@ -11497,6 +11514,11 @@ namespace Legion {
       for (unsigned idx = 0; idx < num_points; idx++)
       {
         PointTask *point = points[idx];
+        // See if we're going to replicate this point task
+        // Note you can do this inline here because if we do replicate
+        // the point task then all the shards will map in parallel
+        if (point->is_replicable() && point->replicate_task())
+          continue;
         // Now that we support collective instance creation, we need to 
         // enable all the point tasks to be mapping in parallel with
         // each other in case they need to synchronize to create 

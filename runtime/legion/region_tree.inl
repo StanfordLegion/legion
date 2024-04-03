@@ -3885,6 +3885,7 @@ namespace Legion {
       {
         const DomainPoint color = 
           partition->color_space->delinearize_color_to_point(*itr);
+        ApEvent child_ready;
         Realm::IndexSpace<DIM,T> child_space;
         if (future_map_domain.contains(color))
         {
@@ -3910,11 +3911,12 @@ namespace Legion {
               context->runtime->profiler->add_partition_request(requests,
                                               op, DEP_PART_INTERSECTIONS);
             Realm::IndexSpace<DIM,T> result;
-            ApEvent ready(Realm::IndexSpace<DIM,T>::compute_intersection(
-                parent_space, child_space, result, requests, parent_ready));
+            child_ready = ApEvent(
+                Realm::IndexSpace<DIM,T>::compute_intersection(
+                  parent_space, child_space, result, requests, parent_ready));
             child_space = result;
-            if (ready.exists())
-              result_events.insert(ready);
+            if (child_ready.exists())
+              result_events.insert(child_ready);
           }
         }
         else
@@ -3922,7 +3924,7 @@ namespace Legion {
         IndexSpaceNodeT<DIM,T> *child = 
             static_cast<IndexSpaceNodeT<DIM,T>*>(
                 partition->get_child(*itr));
-        if (child->set_realm_index_space(child_space, ApEvent::NO_AP_EVENT))
+        if (child->set_realm_index_space(child_space, child_ready))
           delete child;
       }
       if (result_events.empty())
@@ -7026,8 +7028,12 @@ namespace Legion {
             // below because they have been refined. If they're all previous
             // below and we're trying to make equivalence sets here then we
             // can skip traversing below since we'll be able to coarsen
+            FieldMask to_coarsen;
             if (!!all_previous_below && (rect == this->bounds))
-              remaining -= all_previous_below;
+            {
+              to_coarsen = remaining & all_previous_below;
+              remaining -= to_coarsen;
+            }
             if ((lefts != NULL) && !(remaining * lefts->get_valid_mask()))
             {
               FieldMask right_mask;
@@ -7066,8 +7072,8 @@ namespace Legion {
               }
             }
             // Re-introduce the fields we want to try to refine here
-            if (!!all_previous_below && (rect == this->bounds))
-              remaining |= (all_previous_below & mask);
+            if (!!to_coarsen)
+              remaining |= to_coarsen;
             if (!!remaining)
             {
               // if we still have remaining fields, then we're going to 
@@ -7567,7 +7573,7 @@ namespace Legion {
                 const FieldMask overlap = mask & it->second;
                 if (!overlap)
                   continue;
-                it->first->record_pending_equivalence_set(set, mask);
+                it->first->record_pending_equivalence_set(set, overlap);
               }
             }
           }
@@ -7833,6 +7839,8 @@ namespace Legion {
           delete lefts;
           lefts = NULL;
         }
+        else
+          lefts->tighten_valid_mask();
         to_delete.clear();
         for (typename FieldMaskSet<EqKDNode<DIM,T> >::iterator
               it = rights->begin(); it != rights->end(); it++)
@@ -7856,6 +7864,8 @@ namespace Legion {
           delete rights;
           rights = NULL;
         }
+        else
+          rights->tighten_valid_mask();
       }
     }
 
@@ -8399,7 +8409,14 @@ namespace Legion {
             // to mutate those equivalence sets leading to races. To
             // avoid this we'll check to see if we have any current
             // equivalence sets
-            refine_node(rect, current_mask, true/*refine current*/);
+            if (lefts != NULL)
+            {
+              FieldMask refine = current_mask - lefts->get_valid_mask();
+              if (!!refine)
+                refine_node(rect, refine, true/*refine current*/);
+            }
+            else
+              refine_node(rect, current_mask, true/*refine current*/);
           }
         }
       }
@@ -8543,8 +8560,12 @@ namespace Legion {
               delete child_previous_below;
               child_previous_below = NULL;
             }
+            else
+              child_previous_below->tighten_valid_mask();
             return;
           }
+          else
+            child_previous_below->tighten_valid_mask();
         }
       }
       else

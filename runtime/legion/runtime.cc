@@ -3348,7 +3348,11 @@ namespace Legion {
 #endif
 #ifdef DEBUG_LEGION
         // Should only be reducing to instances that this future instance owns
-        assert(own_instance);
+        // Might also happen if we have an "external" (not really external but
+        // made-using-malloc instance) that is bigger than the copy and we 
+        // make an intermediate instance to handle that.
+        assert(own_instance ||
+            (own_dst && external_allocation && (redop->sizeof_rhs < size)));
 #endif
         std::vector<Realm::CopySrcDstField> srcs(1);
         std::vector<Realm::CopySrcDstField> dsts(1);
@@ -13125,6 +13129,11 @@ namespace Legion {
                                                                     derez);
               break;
             }
+          case SEND_REMOTE_CONTEXT_REFINE_EQUIVALENCE_SETS:
+            {
+              runtime->handle_remote_context_refine_equivalence_sets(derez);
+              break;
+            }
           case SEND_COMPUTE_EQUIVALENCE_SETS_REQUEST: 
             {
               runtime->handle_compute_equivalence_sets_request(derez,
@@ -13280,12 +13289,6 @@ namespace Legion {
             {
               runtime->handle_equivalence_set_remote_filters(derez,
                                               remote_address_space);
-              break;
-            }
-          case SEND_EQUIVALENCE_SET_REMOTE_CLONES:
-            {
-              runtime->handle_equivalence_set_remote_clones(derez,
-                                            remote_address_space);
               break;
             }
           case SEND_EQUIVALENCE_SET_REMOTE_INSTANCES:
@@ -17198,7 +17201,6 @@ namespace Legion {
       free_available(available_deletion_ops);
       free_available(available_merge_close_ops);
       free_available(available_post_close_ops);
-      free_available(available_virtual_close_ops);
       free_available(available_refinement_ops);
       free_available(available_reset_ops);
       free_available(available_dynamic_collective_ops);
@@ -17228,7 +17230,6 @@ namespace Legion {
       free_available(available_repl_individual_tasks);
       free_available(available_repl_index_tasks);
       free_available(available_repl_merge_close_ops);
-      free_available(available_repl_virtual_close_ops);
       free_available(available_repl_refinement_ops);
       free_available(available_repl_reset_ops);
       free_available(available_repl_fill_ops);
@@ -23136,6 +23137,15 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
+    void Runtime::send_remote_context_refine_equivalence_sets(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(
+          SEND_REMOTE_CONTEXT_REFINE_EQUIVALENCE_SETS, rez, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_compute_equivalence_sets_request(AddressSpaceID target,
                                                         Serializer &rez)
     //--------------------------------------------------------------------------
@@ -23385,15 +23395,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(SEND_EQUIVALENCE_SET_REMOTE_FILTERS,
-                                                            rez, true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_equivalence_set_remote_clones(AddressSpaceID target,
-                                                     Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(SEND_EQUIVALENCE_SET_REMOTE_CLONES,
                                                             rez, true/*flush*/);
     }
 
@@ -25577,6 +25578,14 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
+    void Runtime::handle_remote_context_refine_equivalence_sets(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      RemoteContext::handle_refine_equivalence_sets(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::handle_compute_equivalence_sets_request(Deserializer &derez,
                                                           AddressSpaceID source)
     //--------------------------------------------------------------------------
@@ -25789,14 +25798,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       FilterAnalysis::handle_remote_filters(derez, this, source);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_equivalence_set_remote_clones(Deserializer &derez,
-                                                       AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      CloneAnalysis::handle_remote_clones(derez, this, source);
     }
 
     //--------------------------------------------------------------------------
@@ -27866,13 +27867,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    VirtualCloseOp* Runtime::get_available_virtual_close_op(void)
-    //--------------------------------------------------------------------------
-    {
-      return get_available(virtual_close_op_lock, available_virtual_close_ops);
-    }
-
-    //--------------------------------------------------------------------------
     RefinementOp* Runtime::get_available_refinement_op(void)
     //--------------------------------------------------------------------------
     {
@@ -28132,14 +28126,6 @@ namespace Legion {
       return get_available(merge_close_op_lock, available_repl_merge_close_ops);
     }
 
-    //--------------------------------------------------------------------------
-    ReplVirtualCloseOp* Runtime::get_available_repl_virtual_close_op(void)
-    //-------------------------------------------------------------------------- 
-    {
-      return get_available(virtual_close_op_lock,
-                available_repl_virtual_close_ops);
-    }
-    
     //--------------------------------------------------------------------------
     ReplRefinementOp* Runtime::get_available_repl_refinement_op(void)
     //-------------------------------------------------------------------------- 
@@ -28478,14 +28464,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::free_virtual_close_op(VirtualCloseOp *op)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock v_lock(virtual_close_op_lock);
-      release_operation<false>(available_virtual_close_ops, op);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::free_refinement_op(RefinementOp *op)
     //--------------------------------------------------------------------------
     {
@@ -28723,14 +28701,6 @@ namespace Legion {
     {
       AutoLock m_lock(merge_close_op_lock);
       release_operation<false>(available_repl_merge_close_ops, op);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::free_repl_virtual_close_op(ReplVirtualCloseOp *op)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock v_lock(virtual_close_op_lock);
-      release_operation<false>(available_repl_virtual_close_ops, op);
     }
 
     //--------------------------------------------------------------------------

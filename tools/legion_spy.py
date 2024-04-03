@@ -9218,7 +9218,8 @@ class Task(object):
                     assert field.fid in mappings
                     inst = mappings[field.fid]
                     if inst.is_virtual():
-                        assert not add_restrictions # Better not be virtual if restricted
+                        # Better not be virtual if restricted unless reduce
+                        assert not add_restrictions or (req.priv == REDUCE) 
                         continue
                     req.logical_node.initialize_verification_state(depth, field, inst,
                                                                    add_restrictions)
@@ -12597,9 +12598,8 @@ def parse_legion_spy_line(line, state):
         op = state.get_operation(int(m.group('uid')))
         op.set_op_kind(DELETION_OP_KIND)
         op.set_name("Deletion Op")
-        if int(m.group('unordered')) == 0:
-            context = state.get_task(int(m.group('ctx')))
-            op.set_context(context)
+        context = state.get_task(int(m.group('ctx')))
+        op.set_context(context)
         return True
     m = attach_pat.match(line)
     if m is not None:
@@ -12615,9 +12615,8 @@ def parse_legion_spy_line(line, state):
         op = state.get_operation(int(m.group('uid')))
         op.set_op_kind(DETACH_OP_KIND)
         op.set_name("Detach Op")
-        if int(m.group('unordered')) == 0:
-            context = state.get_task(int(m.group('ctx')))
-            op.set_context(context)
+        context = state.get_task(int(m.group('ctx')))
+        op.set_context(context)
         return True
     m = dynamic_collective_pat.match(line)
     if m is not None:

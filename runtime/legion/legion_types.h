@@ -55,7 +55,14 @@
 #endif
 
 // Macros for disabling and re-enabling deprecated warnings
-#if defined(__GNUC__)
+#if defined(__PGIC__)
+// PGI has to go first because it also responds to GCC defines
+#define LEGION_DISABLE_DEPRECATED_WARNINGS \
+  _Pragma("warning (push)") \
+  _Pragma("diag_suppress 1445")
+#define LEGION_REENABLE_DEPRECATED_WARNINGS \
+  _Pragma("warning (pop)")
+#elif defined(__GNUC__)
 #define LEGION_DISABLE_DEPRECATED_WARNINGS \
   _Pragma("GCC diagnostic push") \
   _Pragma("GCC diagnostic ignored \"-Wdeprecated-declarations\"")
@@ -67,12 +74,6 @@
   _Pragma("clang diagnostic ignored \"-Wdeprecated-declarations\"")
 #define LEGION_REENABLE_DEPRECATED_WARNINGS \
   _Pragma("clang diagnostic pop")
-#elif defined(__PGIC__)
-#define LEGION_DISABLE_DEPRECATED_WARNINGS \
-  _Pragma("warning (push)") \
-  _Pragma("diag_suppress 1445")
-#define LEGION_REENABLE_DEPRECATED_WARNINGS \
-  _Pragma("warning (pop)")
 #elif defined(__INTEL_COMPILER) || defined(__INTEL_LLVM_COMPILER)
 #define LEGION_DISABLE_DEPRECATED_WARNINGS \
   _Pragma("warning push") \
@@ -941,6 +942,7 @@ namespace Legion {
       SEND_REMOTE_CONTEXT_PHYSICAL_RESPONSE,
       SEND_REMOTE_CONTEXT_FIND_COLLECTIVE_VIEW_REQUEST,
       SEND_REMOTE_CONTEXT_FIND_COLLECTIVE_VIEW_RESPONSE,
+      SEND_REMOTE_CONTEXT_REFINE_EQUIVALENCE_SETS,
       SEND_COMPUTE_EQUIVALENCE_SETS_REQUEST,
       SEND_COMPUTE_EQUIVALENCE_SETS_RESPONSE,
       SEND_COMPUTE_EQUIVALENCE_SETS_PENDING,
@@ -969,7 +971,6 @@ namespace Legion {
       SEND_EQUIVALENCE_SET_REMOTE_COPIES_ACROSS,
       SEND_EQUIVALENCE_SET_REMOTE_OVERWRITES,
       SEND_EQUIVALENCE_SET_REMOTE_FILTERS,
-      SEND_EQUIVALENCE_SET_REMOTE_CLONES,
       SEND_EQUIVALENCE_SET_REMOTE_INSTANCES,
       SEND_INSTANCE_REQUEST,
       SEND_INSTANCE_RESPONSE,
@@ -1267,6 +1268,7 @@ namespace Legion {
         "Send Remote Context Physical Response",                      \
         "Send Remote Context Find Collective View Request",           \
         "Send Remote Context Find Collective View Response",          \
+        "Send Remote Context Refine Equivalence Sets",                \
         "Send Compute Equivalence Sets Request",                      \
         "Send Compute Equivalence Sets Response",                     \
         "Send Compute Equivalence Sets Pending",                      \
@@ -1295,7 +1297,6 @@ namespace Legion {
         "Send Equivalence Set Remote Copies Across",                  \
         "Send Equivalence Set Remote Overwrites",                     \
         "Send Equivalence Set Remote Filters",                        \
-        "Send Equivalence Set Remote Clones",                         \
         "Send Equivalence Set Remote Instances",                      \
         "Send Instance Request",                                      \
         "Send Instance Response",                                     \
@@ -2079,7 +2080,6 @@ namespace Legion {
     class CloseOp;
     class MergeCloseOp;
     class PostCloseOp;
-    class VirtualCloseOp;
     class RefinementOp;
     class ResetOp;
     class AcquireOp;
@@ -2282,7 +2282,6 @@ namespace Legion {
     class ReplIndividualTask;
     class ReplIndexTask;
     class ReplMergeCloseOp;
-    class ReplVirtualCloseOp;
     class ReplRefinementOp;
     class ReplResetOp;
     class ReplFillOp;
@@ -2416,7 +2415,6 @@ namespace Legion {
     friend class Internal::CloseOp;                         \
     friend class Internal::MergeCloseOp;                    \
     friend class Internal::PostCloseOp;                     \
-    friend class Internal::VirtualCloseOp;                  \
     friend class Internal::RefinementOp;                    \
     friend class Internal::ResetOp;                         \
     friend class Internal::AcquireOp;                       \
