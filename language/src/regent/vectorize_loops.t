@@ -96,7 +96,7 @@ elseif VEC_ARCH == "x86" then
   binary_intrinsic_names[vector(double, 4)] = "llvm.x86.avx.%s.pd.256"
 elseif VEC_ARCH == "arm" then
   -- TODO: support the ARM NEON instruction set
-  local vectorize = {}
+  local vectorize_loops = {}
   function vectorize_loops.entry(node)
     print("WARNING: vectorization is not yet supported on ARM CPUs")
     return node
