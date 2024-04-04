@@ -55,14 +55,14 @@ prep:
     - .gitlab/prep_script.sh
   tags:
     - shell
-    - crusher
+    - frontier
 
 legion:
   <<: [*tests]
   stage: test
   tags:
     - slurm
-    - crusher
+    - frontier
   variables:
     <<: [*legion]
 
@@ -71,7 +71,7 @@ legion_cmake:
   stage: test
   tags:
     - slurm
-    - crusher
+    - frontier
   variables:
     <<: [*legion, *cmake, *ctest]
 
@@ -80,7 +80,7 @@ regent:
   stage: test
   tags:
     - slurm
-    - crusher
+    - frontier
   variables:
     <<: [*regent]
 
@@ -89,7 +89,7 @@ regent_cmake:
   stage: test
   tags:
     - slurm
-    - crusher
+    - frontier
   variables:
     <<: [*regent, *cmake]
 
@@ -99,4 +99,4 @@ clean:
     - rm -rf ${EXTERNAL_WORKDIR}*
   tags:
     - shell
-    - crusher
+    - frontier
