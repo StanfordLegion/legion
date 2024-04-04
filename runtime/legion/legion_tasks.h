@@ -322,10 +322,10 @@ namespace Legion {
     class RemoteTaskOp : public ExternalTask, public RemoteOp {
     public:
       RemoteTaskOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
-      RemoteTaskOp(const RemoteTaskOp &rhs);
+      RemoteTaskOp(const RemoteTaskOp &rhs) = delete;
       virtual ~RemoteTaskOp(void);
     public:
-      RemoteTaskOp& operator=(const RemoteTaskOp &rhs);
+      RemoteTaskOp& operator=(const RemoteTaskOp &rhs) = delete;
     public:
       virtual UniqueID get_unique_id(void) const;
       virtual uint64_t get_context_index(void) const;
