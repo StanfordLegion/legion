@@ -1242,6 +1242,7 @@ INSTALL_HEADERS += realm/cuda/cuda_redop.h \
 endif
 ifeq ($(strip $(USE_HIP)),1)
 INSTALL_HEADERS += hip_cuda_compat/hip_cuda.h \
+                   realm/hip/hiphijack_api.h \
                    realm/hip/hip_redop.h
 endif
 ifeq ($(strip $(USE_HALF)),1)
