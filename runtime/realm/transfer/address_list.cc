@@ -34,7 +34,9 @@ namespace Realm {
     : total_bytes(0)
     , write_pointer(0)
     , read_pointer(0)
-  {}
+  {
+    memset(data, 0, MAX_ENTRIES * sizeof(size_t));
+  }
 
   size_t *AddressList::begin_nd_entry(int max_dim)
   {
