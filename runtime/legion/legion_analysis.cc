@@ -16988,13 +16988,16 @@ namespace Legion {
                 analysis.target_views[idx].begin(); it != 
                 analysis.target_views[idx].end(); it++)
           {
+            const FieldMask overlap = release_mask & it->second;
+            if (!overlap)
+              continue;
             // Record this as a restricted instance
-            record_restriction(expr, expr_covers, it->second, it->first);
+            record_restriction(expr, expr_covers, overlap, it->first);
             // Update the tracing postconditions now that we've recorded
             // any copies as part of the trace
             if (tracing_postconditions != NULL)
               tracing_postconditions->invalidate_all_but(it->first, expr,
-                                                         it->second);
+                                                         overlap);
           }
         }
         // Now generate the copies for any updates to the restricted instances
