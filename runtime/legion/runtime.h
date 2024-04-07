@@ -3337,6 +3337,8 @@ namespace Legion {
                                                        Serializer &rez);
       void send_control_replicate_trace_update(AddressSpaceID target,
                                                Serializer &rez);
+      void send_control_replicate_find_trace_local_sets(AddressSpaceID target,
+                                                        Serializer &rez);
       void send_control_replicate_implicit_rendezvous(AddressSpaceID target,
                                                       Serializer &rez);
       void send_control_replicate_find_collective_view(AddressSpaceID target,
@@ -3385,6 +3387,12 @@ namespace Legion {
                                                      Serializer &rez);
       void send_remote_context_refine_equivalence_sets(AddressSpaceID target,
                                                        Serializer &rez);
+      void send_remote_context_find_trace_local_sets_request(
+                                                  AddressSpaceID target,
+                                                  Serializer &rez);
+      void send_remote_context_find_trace_local_sets_response(
+                                                  AddressSpaceID target,
+                                                  Serializer &rez); 
       void send_compute_equivalence_sets_request(AddressSpaceID target, 
                                                  Serializer &rez);
       void send_compute_equivalence_sets_response(AddressSpaceID target,
@@ -3756,6 +3764,10 @@ namespace Legion {
                                                       Deserializer &derez);
       void handle_remote_context_refine_equivalence_sets(
                                                       Deserializer &derez);
+      void handle_remote_context_find_trace_local_sets_request(
+          Deserializer &derez, AddressSpaceID source);
+      void handle_remote_context_find_trace_local_sets_response(
+          Deserializer &derez);
       void handle_compute_equivalence_sets_request(Deserializer &derez, 
                                                    AddressSpaceID source);
       void handle_compute_equivalence_sets_response(Deserializer &derez);
@@ -3859,6 +3871,8 @@ namespace Legion {
                                                         Deserializer &derez);
       void handle_control_replicate_trace_update(Deserializer &derez,
                                                  AddressSpaceID source);
+      void handle_control_replicate_find_trace_local_sets(Deserializer &derez,
+                                                    AddressSpaceID source);
       void handle_control_replicate_implicit_rendezvous(Deserializer &derez);
       void handle_control_replicate_find_collective_view(Deserializer &derez);
       void handle_library_mapper_request(Deserializer &derez,
@@ -6054,6 +6068,8 @@ namespace Legion {
           break;
         case SEND_REPL_TRACE_UPDATE:
           break;
+        case SEND_REPL_FIND_TRACE_SETS:
+          break;
         case SEND_REPL_IMPLICIT_RENDEZVOUS:
           break;
         case SEND_REPL_FIND_COLLECTIVE_VIEW:
@@ -6103,6 +6119,10 @@ namespace Legion {
         case SEND_REMOTE_CONTEXT_FIND_COLLECTIVE_VIEW_RESPONSE:
           break;
         case SEND_REMOTE_CONTEXT_REFINE_EQUIVALENCE_SETS:
+          break;
+        case SEND_REMOTE_CONTEXT_FIND_TRACE_LOCAL_SETS_REQUEST:
+          break;
+        case SEND_REMOTE_CONTEXT_FIND_TRACE_LOCAL_SETS_RESPONSE:
           break;
         case SEND_COMPUTE_EQUIVALENCE_SETS_REQUEST:
           break;

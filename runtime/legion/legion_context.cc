@@ -2940,24 +2940,7 @@ namespace Legion {
         tree_lock = finder->second.lock;
         return finder->second.tree;
       }
-    }
-
-    //--------------------------------------------------------------------------
-    void InnerContext::find_trace_local_sets(unsigned req_index,
-        const FieldMask &mask, std::map<EquivalenceSet*,unsigned> &current_sets)
-    //--------------------------------------------------------------------------
-    {
-      // Find the equivalence set tree for this region requirement
-      LocalLock *tree_lock = NULL;
-      EqKDTree *tree = find_equivalence_set_kd_tree(req_index, tree_lock);
-      const ShardID local_shard = get_shard_id();
-      // Need non-exclusive access to the tree for reading
-      // Technically this shouldn't be necessary since we're in a mapping
-      // fence when we run this function, but we put it here just so that
-      // nobody gets confused
-      AutoLock t_lock(*tree_lock,1,false/*exclusive*/);
-      tree->find_trace_local_sets(req_index, local_shard, mask, current_sets);
-    }
+    } 
 
     //--------------------------------------------------------------------------
     EqKDTree* InnerContext::find_or_create_output_set_kd_tree(
@@ -3075,6 +3058,28 @@ namespace Legion {
       EqKDTree *tree = find_equivalence_set_kd_tree(req_index, tree_lock);
       node->invalidate_equivalence_set_kd_tree(tree, tree_lock, refinement_mask,
                             applied_events, true/*move to previous*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::find_trace_local_sets(unsigned req_index,
+        const FieldMask &mask, std::map<EquivalenceSet*,unsigned> &current_sets,
+        IndexSpaceNode *node, const CollectiveMapping *mapping)
+    //--------------------------------------------------------------------------
+    {
+      if (node == NULL)
+        node = runtime->forest->get_node(
+            regions[req_index].region.get_index_space());
+      if ((req_index < virtual_mapped.size()) && virtual_mapped[req_index])
+      {
+        find_trace_local_sets(parent_req_indexes[req_index], mask,
+            current_sets, node, mapping);
+        return;
+      }
+      // Find the equivalence set tree for this region requirement
+      LocalLock *tree_lock = NULL;
+      EqKDTree *tree = find_equivalence_set_kd_tree(req_index, tree_lock);
+      node->find_trace_local_sets_kd_tree(tree, tree_lock, mask, req_index,
+                                          get_shard_id(), current_sets);
     }
 
     //--------------------------------------------------------------------------
@@ -22229,6 +22234,119 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ReplicateContext::find_trace_local_sets(unsigned req_index,
+        const FieldMask &mask, std::map<EquivalenceSet*,unsigned> &current_sets,
+        IndexSpaceNode *node, const CollectiveMapping *mapping)
+    //--------------------------------------------------------------------------
+    {
+      const bool first = (node == NULL);
+      if (first)
+        node = runtime->forest->get_node(
+            regions[req_index].region.get_index_space());
+      if ((req_index < virtual_mapped.size()) && virtual_mapped[req_index])
+      {
+        if (!first)
+          find_parent_context()->find_trace_local_sets(
+              parent_req_indexes[req_index], mask, current_sets,
+              node, mapping);
+        else if (shard_manager->is_first_local_shard(owner_shard))
+          find_parent_context()->find_trace_local_sets(
+              parent_req_indexes[req_index], mask, current_sets,
+              node, shard_manager->collective_mapping);
+        return;
+      }
+      if (!first)
+      {
+        LocalLock *tree_lock = NULL;
+        EqKDTree *tree = find_equivalence_set_kd_tree(req_index, tree_lock);
+        LegionMap<ShardID,FieldMask> remote_shards;
+        node->find_shard_trace_local_sets_kd_tree(tree, tree_lock, mask,
+            req_index, current_sets, remote_shards, owner_shard->shard_id);
+        if (!remote_shards.empty())
+        {
+          // Need a lock for coordinating access to the target 
+          LocalLock current_set_lock;
+          std::vector<RtEvent> ready_events;
+          // If there are any remote then send them to the target shard
+          for (LegionMap<ShardID,FieldMask>::const_iterator it =
+                remote_shards.begin(); it != remote_shards.end(); it++)
+          {
+            // If there is a collective mapping and it already contains the
+            // address space of the node where the target shard is then we 
+            // don't need to send that message as it will be handled by the
+            // call done on that node
+            if (mapping != NULL)
+            {
+              AddressSpace target = shard_manager->get_shard_space(it->first);
+              if ((target != local_space) && (mapping->contains(target) ||
+                    (local_space != mapping->find_nearest(target))))
+                continue;
+            }
+            const RtUserEvent ready_event = Runtime::create_rt_user_event();
+            Serializer rez;
+            rez.serialize(shard_manager->did);
+            rez.serialize(it->first);
+            rez.serialize(req_index);
+            rez.serialize(it->second);
+            rez.serialize(node->handle);
+            rez.serialize(&current_sets);
+            rez.serialize(&current_set_lock);
+            rez.serialize(ready_event);
+            shard_manager->send_find_trace_local_sets(it->first, rez);
+            ready_events.push_back(ready_event);
+          }
+          Runtime::merge_events(ready_events).wait();
+        }
+      }
+      else
+        InnerContext::find_trace_local_sets(req_index, mask, current_sets,
+                                            node, mapping);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::handle_find_trace_local_sets(Deserializer &derez,
+                                                        AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      unsigned req_index;
+      derez.deserialize(req_index);
+      FieldMask mask;
+      derez.deserialize(mask);
+      IndexSpace handle;
+      derez.deserialize(handle);
+      IndexSpaceNode *node = runtime->forest->get_node(handle);
+      LocalLock *tree_lock = NULL;
+      EqKDTree *tree = find_equivalence_set_kd_tree(req_index, tree_lock);
+      std::map<EquivalenceSet*,unsigned> local_sets;
+      node->find_trace_local_sets_kd_tree(tree, tree_lock, mask, req_index,
+                                          get_shard_id(), local_sets);
+      std::map<EquivalenceSet*,unsigned> *target;
+      derez.deserialize(target);
+      LocalLock *target_lock;
+      derez.deserialize(target_lock);
+      RtUserEvent done;
+      derez.deserialize(done);
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(target);
+        rez.serialize(target_lock);
+        rez.serialize(req_index);
+        rez.serialize<size_t>(local_sets.size());
+        for (std::map<EquivalenceSet*,unsigned>::const_iterator it =
+              local_sets.begin(); it != local_sets.end(); it++)
+        {
+#ifdef DEBUG_LEGION
+          assert(req_index == it->second);
+#endif
+          rez.serialize(it->first->did);
+        }
+        rez.serialize(done);
+      }
+      runtime->send_remote_context_find_trace_local_sets_response(source, rez);
+    }
+
+    //--------------------------------------------------------------------------
     void ReplicateContext::handle_refine_equivalence_sets(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
@@ -23098,6 +23216,44 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void RemoteContext::find_trace_local_sets(unsigned req_index,
+        const FieldMask &mask, std::map<EquivalenceSet*,unsigned> &current_sets,
+        IndexSpaceNode *node, const CollectiveMapping *mapping)
+    //--------------------------------------------------------------------------
+    {
+      if (node == NULL)
+        node = runtime->forest->get_node(
+            regions[req_index].region.get_index_space());
+      if ((req_index < virtual_mapped.size()) && virtual_mapped[req_index])
+      {
+        find_parent_context()->find_trace_local_sets(req_index, mask,
+            current_sets, node, mapping);
+        return;
+      }
+      if ((mapping == NULL) || (!mapping->contains(owner_space) &&
+            (local_space == mapping->find_nearest(owner_space))))
+      {
+        const RtUserEvent done = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize(req_index);
+          rez.serialize(mask);
+          if (node == NULL)
+            rez.serialize(IndexSpace::NO_SPACE);
+          else
+            rez.serialize(node->handle);
+          rez.serialize(&current_sets);
+          rez.serialize(done);
+        }
+        runtime->send_remote_context_find_trace_local_sets_request(
+            owner_space, rez);
+        done.wait();
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void RemoteContext::invalidate_region_tree_contexts(
                        const bool is_top_level_task, std::set<RtEvent> &applied,
                        const ShardMapping *mapping, ShardID source_shard)
@@ -23499,6 +23655,108 @@ namespace Legion {
       local->refine_equivalence_sets(req_index, node, mask, applied_events);
       if (!applied_events.empty())
         Runtime::trigger_event(done, Runtime::merge_events(applied_events));
+      else
+        Runtime::trigger_event(done);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void RemoteContext::handle_find_trace_local_sets_request(
+        Deserializer &derez, Runtime *runtime, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID context_did;
+      derez.deserialize(context_did);
+      InnerContext *local = runtime->find_or_request_inner_context(context_did);
+      unsigned req_index;
+      derez.deserialize(req_index);
+      FieldMask mask;
+      derez.deserialize(mask);
+      IndexSpace handle;
+      derez.deserialize(handle);
+      IndexSpaceNode *node = NULL;
+      if (handle.exists())
+        node = runtime->forest->get_node(handle);
+      std::map<EquivalenceSet*,unsigned> current_sets;
+      local->find_trace_local_sets(req_index, mask, current_sets, node);
+      std::map<EquivalenceSet*,unsigned> *target;
+      derez.deserialize(target);
+      RtUserEvent done;
+      derez.deserialize(done);
+      if (!current_sets.empty())
+      {
+        Serializer rez;
+        {
+          RezCheck z2(rez);
+          rez.serialize(target);
+          rez.serialize<LocalLock*>(NULL);
+          rez.serialize(req_index);
+          rez.serialize<size_t>(current_sets.size());
+          for (std::map<EquivalenceSet*,unsigned>::const_iterator it =
+                current_sets.begin(); it != current_sets.end(); it++)
+          {
+#ifdef DEBUG_LEGION
+            assert(req_index == it->second);
+#endif
+            rez.serialize(it->first->did);
+          }
+          rez.serialize(done);
+        }
+        runtime->send_remote_context_find_trace_local_sets_response(
+            source, rez);
+      }
+      else
+        Runtime::trigger_event(done);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void RemoteContext::handle_find_trace_local_sets_response(
+        Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      std::map<EquivalenceSet*,unsigned> *target;
+      derez.deserialize(target);
+      LocalLock *target_lock;
+      derez.deserialize(target_lock);
+      unsigned req_index;
+      derez.deserialize(req_index);
+      size_t num_sets;
+      derez.deserialize(num_sets);
+      std::vector<RtEvent> ready_events;
+      if (target_lock != NULL)
+      {
+        AutoLock t_lock(*target_lock);
+        for (unsigned idx = 0; idx < num_sets; idx++)
+        {
+          DistributedID did;
+          derez.deserialize(did);
+          RtEvent ready;
+          EquivalenceSet *set =
+            runtime->find_or_request_equivalence_set(did, ready);
+          target->emplace(std::make_pair(set, req_index));
+          if (ready.exists())
+            ready_events.push_back(ready);
+        }
+      }
+      else
+      {
+        for (unsigned idx = 0; idx < num_sets; idx++)
+        {
+          DistributedID did;
+          derez.deserialize(did);
+          RtEvent ready;
+          EquivalenceSet *set =
+            runtime->find_or_request_equivalence_set(did, ready);
+          target->emplace(std::make_pair(set, req_index));
+          if (ready.exists())
+            ready_events.push_back(ready);
+        }
+      }
+      RtUserEvent done;
+      derez.deserialize(done);
+      if (!ready_events.empty())
+        Runtime::trigger_event(done, Runtime::merge_events(ready_events));
       else
         Runtime::trigger_event(done);
     }

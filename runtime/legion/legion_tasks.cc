@@ -8505,6 +8505,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ShardTask::handle_find_trace_local_sets(Deserializer &derez, 
+                                                 AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      get_replicate_context()->handle_find_trace_local_sets(derez, source);
+    }
+
+    //--------------------------------------------------------------------------
     ApBarrier ShardTask::handle_find_trace_shard_event(size_t template_index,
                                             ApEvent event, ShardID remote_shard)
     //--------------------------------------------------------------------------

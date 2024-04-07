@@ -918,6 +918,7 @@ namespace Legion {
       SEND_REPL_TRACE_FRONTIER_REQUEST,
       SEND_REPL_TRACE_FRONTIER_RESPONSE,
       SEND_REPL_TRACE_UPDATE,
+      SEND_REPL_FIND_TRACE_SETS,
       SEND_REPL_IMPLICIT_RENDEZVOUS,
       SEND_REPL_FIND_COLLECTIVE_VIEW,
       SEND_MAPPER_MESSAGE,
@@ -943,6 +944,8 @@ namespace Legion {
       SEND_REMOTE_CONTEXT_FIND_COLLECTIVE_VIEW_REQUEST,
       SEND_REMOTE_CONTEXT_FIND_COLLECTIVE_VIEW_RESPONSE,
       SEND_REMOTE_CONTEXT_REFINE_EQUIVALENCE_SETS,
+      SEND_REMOTE_CONTEXT_FIND_TRACE_LOCAL_SETS_REQUEST,
+      SEND_REMOTE_CONTEXT_FIND_TRACE_LOCAL_SETS_RESPONSE,
       SEND_COMPUTE_EQUIVALENCE_SETS_REQUEST,
       SEND_COMPUTE_EQUIVALENCE_SETS_RESPONSE,
       SEND_COMPUTE_EQUIVALENCE_SETS_PENDING,
@@ -1244,6 +1247,7 @@ namespace Legion {
         "Send Replicate Trace Frontier Request",                      \
         "Send Replicate Trace Frontier Response",                     \
         "Send Replicate Trace Update",                                \
+        "Send Replicate Find Trace Local Sets",                       \
         "Send Replicate Implicit Rendezvous",                         \
         "Send Replicate Find or Create Collective View",              \
         "Send Mapper Message",                                        \
@@ -1269,6 +1273,8 @@ namespace Legion {
         "Send Remote Context Find Collective View Request",           \
         "Send Remote Context Find Collective View Response",          \
         "Send Remote Context Refine Equivalence Sets",                \
+        "Send Remote Context Find Trace Local Sets Request",          \
+        "Send Remote Context Find Trace Local Sets Response",         \
         "Send Compute Equivalence Sets Request",                      \
         "Send Compute Equivalence Sets Response",                     \
         "Send Compute Equivalence Sets Pending",                      \

@@ -3440,6 +3440,9 @@ namespace Legion {
                           ApBarrier result, RtUserEvent done_event);
       void send_trace_update(ShardID target, Serializer &rez);
       void handle_trace_update(Deserializer &derez, AddressSpaceID source); 
+      void send_find_trace_local_sets(ShardID target, Serializer &rez);
+      void handle_find_trace_local_sets(Deserializer &derez, 
+                                        AddressSpaceID source);
     public:
       ShardID find_collective_owner(RegionTreeID tid) const;
       void send_find_or_create_collective_view(ShardID target, Serializer &rez);
@@ -3476,6 +3479,8 @@ namespace Legion {
       static void handle_trace_frontier_response(Deserializer &derez);
       static void handle_trace_update(Deserializer &derez, Runtime *rt,
                                       AddressSpaceID source);
+      static void handle_find_trace_local_sets(Deserializer &derez,
+          Runtime *runtime, AddressSpaceID source);
       static void handle_find_collective_view(Deserializer &derez, Runtime *rt);
     public:
       ShardingFunction* find_sharding_function(ShardingID sid, 

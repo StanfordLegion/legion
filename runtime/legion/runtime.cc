@@ -12993,6 +12993,12 @@ namespace Legion {
                                                     remote_address_space);
               break;
             }
+          case SEND_REPL_FIND_TRACE_SETS:
+            {
+              runtime->handle_control_replicate_find_trace_local_sets(derez,
+                                                  remote_address_space);
+              break;
+            }
           case SEND_REPL_IMPLICIT_RENDEZVOUS:
             {
               runtime->handle_control_replicate_implicit_rendezvous(derez);
@@ -13132,6 +13138,18 @@ namespace Legion {
           case SEND_REMOTE_CONTEXT_REFINE_EQUIVALENCE_SETS:
             {
               runtime->handle_remote_context_refine_equivalence_sets(derez);
+              break;
+            }
+          case SEND_REMOTE_CONTEXT_FIND_TRACE_LOCAL_SETS_REQUEST:
+            {
+              runtime->handle_remote_context_find_trace_local_sets_request(
+                  derez, remote_address_space);
+              break;
+            }
+          case SEND_REMOTE_CONTEXT_FIND_TRACE_LOCAL_SETS_RESPONSE:
+            {
+              runtime->handle_remote_context_find_trace_local_sets_response(
+                  derez);
               break;
             }
           case SEND_COMPUTE_EQUIVALENCE_SETS_REQUEST: 
@@ -22929,6 +22947,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_control_replicate_find_trace_local_sets(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(SEND_REPL_FIND_TRACE_SETS,
+                                                rez, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_control_replicate_implicit_rendezvous(
                                          AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
@@ -23143,6 +23170,26 @@ namespace Legion {
     {
       find_messenger(target)->send_message(
           SEND_REMOTE_CONTEXT_REFINE_EQUIVALENCE_SETS, rez, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_remote_context_find_trace_local_sets_request(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(
+          SEND_REMOTE_CONTEXT_FIND_TRACE_LOCAL_SETS_REQUEST,
+          rez, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_remote_context_find_trace_local_sets_response(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(
+          SEND_REMOTE_CONTEXT_FIND_TRACE_LOCAL_SETS_RESPONSE,
+          rez, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -25322,6 +25369,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::handle_control_replicate_find_trace_local_sets(
+        Deserializer &derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      ShardManager::handle_find_trace_local_sets(derez, this, source);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::handle_control_replicate_implicit_rendezvous(
                                                             Deserializer &derez)
     //--------------------------------------------------------------------------
@@ -25583,6 +25638,22 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       RemoteContext::handle_refine_equivalence_sets(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_remote_context_find_trace_local_sets_request(
+        Deserializer &derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      RemoteContext::handle_find_trace_local_sets_request(derez, this, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_remote_context_find_trace_local_sets_response(
+        Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      RemoteContext::handle_find_trace_local_sets_response(derez, this);
     }
 
     //--------------------------------------------------------------------------
