@@ -3067,8 +3067,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (node == NULL)
-        node = runtime->forest->get_node(
-            regions[req_index].region.get_index_space());
+      {
+        LogicalRegion region = find_logical_region(req_index);
+        node = runtime->forest->get_node(region.get_index_space());
+      }
       if ((req_index < virtual_mapped.size()) && virtual_mapped[req_index])
       {
         find_trace_local_sets(parent_req_indexes[req_index], mask,
@@ -22241,8 +22243,10 @@ namespace Legion {
     {
       const bool first = (node == NULL);
       if (first)
-        node = runtime->forest->get_node(
-            regions[req_index].region.get_index_space());
+      {
+        LogicalRegion region = find_logical_region(req_index);
+        node = runtime->forest->get_node(region.get_index_space());
+      }
       if ((req_index < virtual_mapped.size()) && virtual_mapped[req_index])
       {
         if (!first)
@@ -23221,11 +23225,11 @@ namespace Legion {
         IndexSpaceNode *node, const CollectiveMapping *mapping)
     //--------------------------------------------------------------------------
     {
-      if (node == NULL)
-        node = runtime->forest->get_node(
-            regions[req_index].region.get_index_space());
       if ((req_index < virtual_mapped.size()) && virtual_mapped[req_index])
       {
+        if (node == NULL)
+          node = runtime->forest->get_node(
+              regions[req_index].region.get_index_space());
         find_parent_context()->find_trace_local_sets(req_index, mask,
             current_sets, node, mapping);
         return;
