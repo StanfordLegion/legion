@@ -15224,7 +15224,7 @@ namespace Legion {
 #endif
           // Releases are a bit strange, we actually want to invalidate
           // all the current valid instances since we're making them all
-          // restricted so their are no partial unrestricted cases
+          // restricted so there are no partial unrestricted cases
           filter_valid_instances(expr, expr_covers, user_mask);
         }
         else if (!!restricted_mask)
@@ -16691,8 +16691,11 @@ namespace Legion {
             }
             for (std::vector<InstanceView*>::const_iterator it =
                   to_erase.begin(); it != to_erase.end(); it++)
+            {
+              eit->second.erase(*it);
               if ((*it)->remove_nested_valid_ref(did))
                 delete (*it);
+            }
             if (!eit->second.empty())
               eit->second.tighten_valid_mask();
             else
@@ -16988,13 +16991,16 @@ namespace Legion {
                 analysis.target_views[idx].begin(); it != 
                 analysis.target_views[idx].end(); it++)
           {
+            const FieldMask overlap = release_mask & it->second;
+            if (!overlap)
+              continue;
             // Record this as a restricted instance
-            record_restriction(expr, expr_covers, it->second, it->first);
+            record_restriction(expr, expr_covers, overlap, it->first);
             // Update the tracing postconditions now that we've recorded
             // any copies as part of the trace
             if (tracing_postconditions != NULL)
               tracing_postconditions->invalidate_all_but(it->first, expr,
-                                                         it->second);
+                                                         overlap);
           }
         }
         // Now generate the copies for any updates to the restricted instances
@@ -17060,9 +17066,11 @@ namespace Legion {
             eit->second.erase(finder);
             if (eit->second.empty())
               to_delete.push_back(eit->first);
+            else
+              eit->second.filter_valid_mask(overlap);
           }
           else
-            eit->second.tighten_valid_mask();
+            eit->second.filter_valid_mask(overlap);
         }
         // Add in the new sets
         if (!to_union.empty())
@@ -18579,7 +18587,11 @@ namespace Legion {
               rit->second.erase(finder);
               if (rit->second.empty())
                 to_delete.push_back(rit->first);
+              else
+                rit->second.filter_valid_mask(overlap);
             }
+            else
+              rit->second.filter_valid_mask(overlap);
           }
           for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
                 to_add.begin(); it != to_add.end(); it++)
