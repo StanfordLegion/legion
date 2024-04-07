@@ -120,7 +120,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     CloseCheckReduction::CloseCheckValue::CloseCheckValue(Operation *op,
                           RtBarrier bar, RegionTreeNode *node, bool read)
-      : operation_index(op->get_ctx_index()), barrier(bar),
+      : operation_index(op->get_context_index()), barrier(bar),
         is_region(node->is_region()), read_only(read)
     //--------------------------------------------------------------------------
     {
