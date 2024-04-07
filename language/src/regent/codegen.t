@@ -9020,7 +9020,7 @@ function codegen.stat_for_list(cx, node)
       local args = data.filter(function(arg) return reductions[arg] == nil end, symbols)
       local shared_mem_size = gpuhelper.compute_reduction_buffer_size(cuda_cx, node, reductions)
       local device_ptrs, device_ptrs_map, host_ptrs_map, host_preamble, buffer_cleanups =
-        gpuhelper.generate_reduction_preamble(cuda_cx, reductions)
+        gpuhelper.generate_reduction_preamble(cuda_cx, node, reductions)
       local kernel_preamble, kernel_postamble =
         gpuhelper.generate_reduction_kernel(cuda_cx, reductions, device_ptrs_map)
       local host_postamble =
@@ -9029,15 +9029,15 @@ function codegen.stat_for_list(cx, node)
       args:insertall(counts)
       args:insertall(device_ptrs)
 
-      local need_spiil = gpuhelper.check_arguments_need_spill(args)
+      local need_spill = gpuhelper.check_arguments_need_spill(args)
 
       local kernel_param_pack = empty_quote
       local kernel_param_unpack = empty_quote
       local spill_cleanup = empty_quote
-      if need_spiil then
+      if need_spill then
         local arg = nil
         kernel_param_pack, kernel_param_unpack, spill_cleanup, arg =
-          gpuhelper.generate_argument_spill(args)
+          gpuhelper.generate_argument_spill(node, args)
         args = terralib.newlist({arg})
       else
         -- Sort arguments in descending order of sizes to avoid misalignment

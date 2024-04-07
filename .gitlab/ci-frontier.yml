@@ -11,8 +11,9 @@ variables:
   CXXFLAGS: "-std=c++17"
   CXX_STANDARD: "17"
 
+  OLCF_SERVICE_ACCOUNT: ums036_auser
   SCHEDULER_PARAMETERS: "-A UMS036 -t 2:00:00 -N 2 -n 2 -c 56 -p batch"
-  EXTERNAL_WORKDIR: /lustre/orion/proj-shared/csc335/ci/${CI_PIPELINE_ID}
+  EXTERNAL_WORKDIR: /lustre/orion/proj-shared/ums036/ci/${CI_PIPELINE_ID}
   GIT_SUBMODULE_STRATEGY: recursive
 
   THREADS: 16 # for parallel build
@@ -55,14 +56,14 @@ prep:
     - .gitlab/prep_script.sh
   tags:
     - shell
-    - crusher
+    - frontier
 
 legion:
   <<: [*tests]
   stage: test
   tags:
     - slurm
-    - crusher
+    - frontier
   variables:
     <<: [*legion]
 
@@ -71,7 +72,7 @@ legion_cmake:
   stage: test
   tags:
     - slurm
-    - crusher
+    - frontier
   variables:
     <<: [*legion, *cmake, *ctest]
 
@@ -80,7 +81,7 @@ regent:
   stage: test
   tags:
     - slurm
-    - crusher
+    - frontier
   variables:
     <<: [*regent]
 
@@ -89,7 +90,7 @@ regent_cmake:
   stage: test
   tags:
     - slurm
-    - crusher
+    - frontier
   variables:
     <<: [*regent, *cmake]
 
@@ -99,4 +100,4 @@ clean:
     - rm -rf ${EXTERNAL_WORKDIR}*
   tags:
     - shell
-    - crusher
+    - frontier
