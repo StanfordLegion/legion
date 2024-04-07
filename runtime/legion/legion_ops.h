@@ -716,7 +716,7 @@ namespace Legion {
       Runtime *const runtime;
     protected:
       mutable LocalLock op_lock;
-      GenerationID gen;
+      std::atomic<GenerationID> gen;
       UniqueID unique_op_id;
       // The issue index of this operation in the context
       uint64_t context_index;
@@ -3433,10 +3433,10 @@ namespace Legion {
       };
     public:
       DependentPartitionOp(Runtime *rt);
-      DependentPartitionOp(const DependentPartitionOp &rhs);
+      DependentPartitionOp(const DependentPartitionOp &rhs) = delete;
       virtual ~DependentPartitionOp(void);
     public:
-      DependentPartitionOp& operator=(const DependentPartitionOp &rhs);
+      DependentPartitionOp& operator=(const DependentPartitionOp &rhs) = delete;
     public:
       void initialize_by_field(InnerContext *ctx, IndexPartition pid,
                                LogicalRegion handle, LogicalRegion parent,
@@ -3599,10 +3599,10 @@ namespace Legion {
     class PointDepPartOp : public DependentPartitionOp, public ProjectionPoint {
     public:
       PointDepPartOp(Runtime *rt);
-      PointDepPartOp(const PointDepPartOp &rhs);
+      PointDepPartOp(const PointDepPartOp &rhs) = delete;
       virtual ~PointDepPartOp(void);
     public:
-      PointDepPartOp& operator=(const PointDepPartOp &rhs);
+      PointDepPartOp& operator=(const PointDepPartOp &rhs) = delete;
     public:
       void initialize(DependentPartitionOp *owner, const DomainPoint &point);
       void launch(void);
@@ -4403,10 +4403,10 @@ namespace Legion {
       };
     public:
       RemoteOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
-      RemoteOp(const RemoteOp &rhs);
+      RemoteOp(const RemoteOp &rhs) = delete;
       virtual ~RemoteOp(void);
     public:
-      RemoteOp& operator=(const RemoteOp &rhs);
+      RemoteOp& operator=(const RemoteOp &rhs) = delete;
     public:
       virtual void unpack(Deserializer &derez) = 0;
     public:
@@ -4473,10 +4473,10 @@ namespace Legion {
                         public LegionHeapify<RemoteMapOp> {
     public:
       RemoteMapOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
-      RemoteMapOp(const RemoteMapOp &rhs);
+      RemoteMapOp(const RemoteMapOp &rhs) = delete;
       virtual ~RemoteMapOp(void);
     public:
-      RemoteMapOp& operator=(const RemoteMapOp &rhs); 
+      RemoteMapOp& operator=(const RemoteMapOp &rhs) = delete; 
     public:
       virtual UniqueID get_unique_id(void) const;
       virtual uint64_t get_context_index(void) const;
@@ -4505,10 +4505,10 @@ namespace Legion {
                          public LegionHeapify<RemoteCopyOp> {
     public:
       RemoteCopyOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
-      RemoteCopyOp(const RemoteCopyOp &rhs);
+      RemoteCopyOp(const RemoteCopyOp &rhs) = delete;
       virtual ~RemoteCopyOp(void);
     public:
-      RemoteCopyOp& operator=(const RemoteCopyOp &rhs);
+      RemoteCopyOp& operator=(const RemoteCopyOp &rhs) = delete;
     public:
       virtual UniqueID get_unique_id(void) const;
       virtual uint64_t get_context_index(void) const;
@@ -4537,10 +4537,10 @@ namespace Legion {
                           public LegionHeapify<RemoteCloseOp> {
     public:
       RemoteCloseOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
-      RemoteCloseOp(const RemoteCloseOp &rhs);
+      RemoteCloseOp(const RemoteCloseOp &rhs) = delete;
       virtual ~RemoteCloseOp(void);
     public:
-      RemoteCloseOp& operator=(const RemoteCloseOp &rhs);
+      RemoteCloseOp& operator=(const RemoteCloseOp &rhs) = delete;
     public:
       virtual UniqueID get_unique_id(void) const;
       virtual uint64_t get_context_index(void) const;
@@ -4569,10 +4569,10 @@ namespace Legion {
                             public LegionHeapify<RemoteAcquireOp> {
     public:
       RemoteAcquireOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
-      RemoteAcquireOp(const RemoteAcquireOp &rhs);
+      RemoteAcquireOp(const RemoteAcquireOp &rhs) = delete;
       virtual ~RemoteAcquireOp(void);
     public:
-      RemoteAcquireOp& operator=(const RemoteAcquireOp &rhs);
+      RemoteAcquireOp& operator=(const RemoteAcquireOp &rhs) = delete;
     public:
       virtual UniqueID get_unique_id(void) const;
       virtual uint64_t get_context_index(void) const;
@@ -4597,10 +4597,10 @@ namespace Legion {
                             public LegionHeapify<RemoteReleaseOp> {
     public:
       RemoteReleaseOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
-      RemoteReleaseOp(const RemoteReleaseOp &rhs);
+      RemoteReleaseOp(const RemoteReleaseOp &rhs) = delete;
       virtual ~RemoteReleaseOp(void);
     public:
-      RemoteReleaseOp& operator=(const RemoteReleaseOp &rhs);
+      RemoteReleaseOp& operator=(const RemoteReleaseOp &rhs) = delete;
     public:
       virtual UniqueID get_unique_id(void) const;
       virtual uint64_t get_context_index(void) const;
@@ -4629,10 +4629,10 @@ namespace Legion {
                          public LegionHeapify<RemoteFillOp> {
     public:
       RemoteFillOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
-      RemoteFillOp(const RemoteFillOp &rhs);
+      RemoteFillOp(const RemoteFillOp &rhs) = delete;
       virtual ~RemoteFillOp(void);
     public:
-      RemoteFillOp& operator=(const RemoteFillOp &rhs);
+      RemoteFillOp& operator=(const RemoteFillOp &rhs) = delete;
     public:
       virtual UniqueID get_unique_id(void) const;
       virtual uint64_t get_context_index(void) const;
@@ -4683,10 +4683,10 @@ namespace Legion {
                               public LegionHeapify<RemotePartitionOp> {
     public:
       RemotePartitionOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
-      RemotePartitionOp(const RemotePartitionOp &rhs);
+      RemotePartitionOp(const RemotePartitionOp &rhs) = delete;
       virtual ~RemotePartitionOp(void);
     public:
-      RemotePartitionOp& operator=(const RemotePartitionOp &rhs);
+      RemotePartitionOp& operator=(const RemotePartitionOp &rhs) = delete;
     public:
       virtual UniqueID get_unique_id(void) const;
       virtual uint64_t get_context_index(void) const;
@@ -4718,10 +4718,10 @@ namespace Legion {
                            public LegionHeapify<RemoteAttachOp> {
     public:
       RemoteAttachOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
-      RemoteAttachOp(const RemoteAttachOp &rhs);
+      RemoteAttachOp(const RemoteAttachOp &rhs) = delete;
       virtual ~RemoteAttachOp(void);
     public:
-      RemoteAttachOp& operator=(const RemoteAttachOp &rhs);
+      RemoteAttachOp& operator=(const RemoteAttachOp &rhs) = delete;
     public:
       virtual UniqueID get_unique_id(void) const;
       virtual uint64_t get_context_index(void) const;
@@ -4744,10 +4744,10 @@ namespace Legion {
                            public LegionHeapify<RemoteDetachOp> {
     public:
       RemoteDetachOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
-      RemoteDetachOp(const RemoteDetachOp &rhs);
+      RemoteDetachOp(const RemoteDetachOp &rhs) = delete;
       virtual ~RemoteDetachOp(void);
     public:
-      RemoteDetachOp& operator=(const RemoteDetachOp &rhs);
+      RemoteDetachOp& operator=(const RemoteDetachOp &rhs) = delete;
     public:
       virtual UniqueID get_unique_id(void) const;
       virtual uint64_t get_context_index(void) const;
@@ -4774,10 +4774,10 @@ namespace Legion {
                              public LegionHeapify<RemoteDeletionOp> {
     public:
       RemoteDeletionOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
-      RemoteDeletionOp(const RemoteDeletionOp &rhs);
+      RemoteDeletionOp(const RemoteDeletionOp &rhs) = delete;
       virtual ~RemoteDeletionOp(void);
     public:
-      RemoteDeletionOp& operator=(const RemoteDeletionOp &rhs);
+      RemoteDeletionOp& operator=(const RemoteDeletionOp &rhs) = delete;
     public:
       virtual UniqueID get_unique_id(void) const;
       virtual uint64_t get_context_index(void) const;
