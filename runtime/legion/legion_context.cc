@@ -3073,8 +3073,8 @@ namespace Legion {
       }
       if ((req_index < virtual_mapped.size()) && virtual_mapped[req_index])
       {
-        find_trace_local_sets(parent_req_indexes[req_index], mask,
-            current_sets, node, mapping);
+        find_parent_context()->find_trace_local_sets(
+            parent_req_indexes[req_index], mask, current_sets, node, mapping);
         return;
       }
       // Find the equivalence set tree for this region requirement
