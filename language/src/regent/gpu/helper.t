@@ -239,8 +239,8 @@ function gpuhelper.generate_reduction_preamble(cx, node, reductions)
                          "__h_buffer_" .. red_var.displayname)
     local device_bufsize = sizeof(red_var.type) * GLOBAL_RED_BUFFER
     local host_bufsize = sizeof(red_var.type)
-    log_gpu:info("%s: Generating deferred buffer for reduction %s of size %s on device", get_provenance(node), device_buffer, device_size)
-    log_gpu:info("%s: Generating deferred buffer for reduction %s of size %s on host", get_provenance(node), host_buffer, host_size)
+    log_gpu:info("%s: Generating deferred buffer for reduction %s of size %s on device", get_provenance(node), device_buffer, device_bufsize)
+    log_gpu:info("%s: Generating deferred buffer for reduction %s of size %s on host", get_provenance(node), host_buffer, host_bufsize)
     local init_kernel = gpuhelper.generate_buffer_init_kernel(red_var.type, red_op)
     local init_args = terralib.newlist({device_ptr})
     preamble:insert(quote
