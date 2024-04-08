@@ -105,6 +105,13 @@ typedef enum RealmStatus_t
   // To comply with other C libraries, we use 0 for success, negative numbers for errors
   REALM_SUCCESS = 0,
   REALM_ERROR = -1,
+  REALM_ARGUMENT_ERROR_WITH_EXTRA_FLAGS =
+      -1000, // this is a soft error, the caller will expect to receive correct results
+  REALM_ARGUMENT_ERROR_UNKNOWN_INTEGER = -1001,
+  REALM_ARGUMENT_ERROR_UNKNOWN_INTEGER_UNIT = -1002,
+  REALM_ARGUMENT_ERROR_MISSING_INPUT = -1003,
+  REALM_ARGUMENT_ERROR_OUTPUT_STRING_TOO_SHORT = -1004,
+  REALM_ARGUMENT_ERROR_METHOD_RETURN_FALSE = -1005
 } RealmStatus;
 
 #ifdef __cplusplus

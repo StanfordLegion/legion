@@ -36,16 +36,22 @@ RUN pip3 install --upgrade 'pip>=22,<23' && \
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --default-toolchain 1.74.1 -y
 
 # install a bunch of flavors of CUDA
+RUN wget -nv https://developer.download.nvidia.com/compute/cuda/12.3.2/local_installers/cuda_12.3.2_545.23.08_linux.run && \
+    bash ./cuda_12.3.2_545.23.08_linux.run --toolkit --silent && \
+    rm ./cuda_12.3.2_545.23.08_linux.run
 RUN wget -nv https://developer.download.nvidia.com/compute/cuda/12.1.1/local_installers/cuda_12.1.1_530.30.02_linux.run && \
     bash ./cuda_12.1.1_530.30.02_linux.run --toolkit --silent && \
-    rm ./cuda_12.1.1_530.30.02_linux.run && \
-    wget -nv https://developer.download.nvidia.com/compute/cuda/11.7.0/local_installers/cuda_11.7.0_515.43.04_linux.run && \
+    rm ./cuda_12.1.1_530.30.02_linux.run
+RUN wget -nv https://developer.download.nvidia.com/compute/cuda/11.7.0/local_installers/cuda_11.7.0_515.43.04_linux.run && \
     bash ./cuda_11.7.0_515.43.04_linux.run --toolkit --silent && \
-    rm ./cuda_11.7.0_515.43.04_linux.run && \
-    wget -nv https://developer.download.nvidia.com/compute/cuda/11.2.0/local_installers/cuda_11.2.0_460.27.04_linux.run && \
+    rm ./cuda_11.7.0_515.43.04_linux.run
+RUN wget -nv https://developer.download.nvidia.com/compute/cuda/11.3.1/local_installers/cuda_11.3.1_465.19.01_linux.run && \
+    bash ./cuda_11.3.1_465.19.01_linux.run --toolkit --silent && \
+    rm ./cuda_11.3.1_465.19.01_linux.run
+RUN wget -nv https://developer.download.nvidia.com/compute/cuda/11.2.0/local_installers/cuda_11.2.0_460.27.04_linux.run && \
     bash ./cuda_11.2.0_460.27.04_linux.run --toolkit --silent && \
-    rm ./cuda_11.2.0_460.27.04_linux.run && \
-    rm /usr/local/cuda
+    rm ./cuda_11.2.0_460.27.04_linux.run
+RUN rm /usr/local/cuda
 
 # install gitlab-runner
 RUN wget -O /tmp/gitlab-runner-script.deb.sh https://packages.gitlab.com/install/repositories/runner/gitlab-runner/script.deb.sh && \

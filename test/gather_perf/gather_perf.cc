@@ -1240,6 +1240,9 @@ public:
   {
     // only the top-level task should end up here
     assert(task.task_id == TOP_LEVEL_TASK_ID);
+    // don't replicate if there is just one shard
+    if (procs.size() <= 1)
+      return;
 
     std::vector<VariantID> valid_variants;
     runtime->find_valid_variants(ctx, task.task_id, valid_variants, procs[0].kind());
