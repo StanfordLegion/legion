@@ -4378,11 +4378,9 @@ namespace Legion {
                                  FieldMask &unopened_field_mask,
                                  FieldMask &refinement_mask,
                                  LogicalAnalysis &logical_analysis,
-                                 FieldMaskSet<RefinementOp> &refinements,
+                                 FieldMaskSet<RefinementOp,
+                                  UNTRACKED_ALLOC,true> &refinements,
                                  const bool root_node);
-      void register_local_user(LogicalState &state,
-                               LogicalUser &user,
-                               const FieldMask &user_mask);
       void add_open_field_state(LogicalState &state,
                                 const LogicalUser &user,
                                 const FieldMask &open_mask,
