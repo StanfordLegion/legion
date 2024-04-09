@@ -147,7 +147,7 @@ terra main()
     "sub_task", "sub_task",
     execution_constraints, layout_constraints,
     c.legion_task_config_options_t {
-      leaf = false, inner = false, idempotent = false},
+      leaf = true, inner = false, idempotent = false},
     nil, 0)
   c.legion_runtime_set_top_level_task_id(TID_TOP_LEVEL_TASK)
   [args.argv_setup]
