@@ -573,6 +573,7 @@ namespace Realm {
       AutoLock<> al(allocator_mutex);
 
       if(!pending_allocs.empty() || !pending_releases.empty()) {
+        std::cout << "PENDING WORK" << std::endl;
         return AllocationResult::ALLOC_INSTANT_FAILURE;
       }
 
