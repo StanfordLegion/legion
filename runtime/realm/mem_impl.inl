@@ -222,7 +222,7 @@ namespace Realm {
       return true;
     }
 
-    // walk free ranges and just takw the first that fits
+    // walk free ranges and just take the first that fits
     unsigned idx = ranges[SENTINEL].next_free;
     while(idx != SENTINEL) {
       Range *r = &ranges[idx];
