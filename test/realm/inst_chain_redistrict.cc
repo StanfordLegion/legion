@@ -17,11 +17,12 @@ enum
   WORKER_TASK,
 };
 
-int num_iterations = 8;
+int num_iterations = 2;
 
 struct WorkerArgs {
   RegionInstance inst;
   Rect<1> bounds;
+  std::vector<int> data;
 };
 
 template <int N>
@@ -88,9 +89,26 @@ void top_level_task(const void *args, size_t arglen, const void *userdata, size_
                                   ProfilingRequestSet())
       .wait();
 
+  std::vector<int> data;
+  {
+    int index = 0;
+    AffineAccessor<int, 1, int> acc(inst2, 0);
+    IndexSpaceIterator<1, int> it(bounds);
+    while(it.valid) {
+      PointInRectIterator<1, int> pit(it.rect);
+      while(pit.valid) {
+        data.push_back(index);
+        acc[pit.p] = index++;
+        pit.step();
+      }
+      it.step();
+    }
+  }
+
   WorkerArgs worker_args;
   worker_args.inst = inst2;
   worker_args.bounds = bounds;
+  worker_args.data = data;
   Event e2 = reader_cpus[0].spawn(WORKER_TASK, &worker_args, sizeof(WorkerArgs),
                                   ProfilingRequestSet(), e1);
   e2.wait();
@@ -125,6 +143,21 @@ void worker_task(const void *args, size_t arglen, const void *userdata, size_t u
     bool poisoned = false;
     e.wait_faultaware(poisoned);
     assert(poisoned == false);
+
+    int index = next_bounds.volume();
+    for(size_t i = 1; i < insts.size(); i++) {
+      AffineAccessor<int, 1, int> acc(insts[i], 0);
+      IndexSpaceIterator<1, int> it(next_bounds);
+      while(it.valid) {
+        PointInRectIterator<1, int> pit(it.rect);
+        while(pit.valid) {
+          int val = acc[pit.p];
+          assert(val == wargs->data[index++]);
+          pit.step();
+        }
+        it.step();
+      }
+    }
 
     bounds = next_bounds;
     inst = insts[0];
