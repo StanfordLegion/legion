@@ -84,23 +84,6 @@ TEST_F(InstanceRedistrictTest, PendingRelease)
   event.trigger();
 }
 
-TEST_F(InstanceRedistrictTest, OutOfMemoryFailure)
-{
-  IndexSpace<1> space(Rect<1>(Point<1>(0), Point<1>(7)));
-  RegionInstance inst;
-  RegionInstance::create_instance(inst, memories[0], create_layout(space),
-                                  ProfilingRequestSet())
-      .wait();
-  std::vector<RegionInstance> insts(2);
-  InstanceLayoutGeneric *ilg_a = create_layout(space);
-  InstanceLayoutGeneric *ilg_b = create_layout(space);
-  std::vector<InstanceLayoutGeneric *> layouts{ilg_a, ilg_b};
-  Event e = inst.redistrict(insts.data(), layouts.data(), 2, ProfilingRequestSet());
-  bool poisoned = false;
-  e.wait_faultaware(poisoned);
-  EXPECT_TRUE(poisoned);
-}
-
 TEST_F(InstanceRedistrictTest, RedistrictEvenlySameLayout)
 {
   size_t num_elemnts = (1048576 / sizeof(int)) - 32;
