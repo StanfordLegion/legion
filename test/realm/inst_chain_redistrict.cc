@@ -73,18 +73,30 @@ void top_level_task(const void *args, size_t arglen, const void *userdata, size_
 
   std::vector<size_t> field_sizes(1, 4);
 
-  RegionInstance inst;
-  RegionInstance::create_instance(inst, memories[0], bounds, field_sizes, 0 /*SOA*/,
-                                  ProfilingRequestSet());
-  assert(inst.exists());
-  Event e1 = inst.fetch_metadata(reader_cpus[0]);
+  RegionInstance inst1;
+  RegionInstance::create_instance(inst1, memories[0], bounds, field_sizes, 0 /*SOA*/,
+                                  ProfilingRequestSet())
+      .wait();
+  assert(inst1.exists());
+  Event e1 = inst1.fetch_metadata(reader_cpus[0]);
+
+  UserEvent destroy_event = UserEvent::create_user_event();
+  inst1.destroy(destroy_event);
+
+  RegionInstance inst2;
+  RegionInstance::create_instance(inst2, memories[0], bounds, field_sizes, 0,
+                                  ProfilingRequestSet())
+      .wait();
 
   WorkerArgs worker_args;
-  worker_args.inst = inst;
+  worker_args.inst = inst2;
   worker_args.bounds = bounds;
   Event e2 = reader_cpus[0].spawn(WORKER_TASK, &worker_args, sizeof(WorkerArgs),
-                                       ProfilingRequestSet(), e1);
+                                  ProfilingRequestSet(), e1);
   e2.wait();
+
+  destroy_event.trigger();
+  inst2.destroy();
 
   usleep(100000);
 }

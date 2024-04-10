@@ -572,12 +572,17 @@ namespace Realm {
     {
       AutoLock<> al(allocator_mutex);
 
-      if(!pending_allocs.empty() || !pending_releases.empty()) {
-        return AllocationResult::ALLOC_INSTANT_FAILURE;
+      for(const PendingAlloc &alloc : pending_allocs) {
+        if(alloc.inst == old_inst) {
+          return AllocationResult::ALLOC_INSTANT_FAILURE;
+        }
       }
 
-      //assert(pending_allocs.empty());
-      //assert(pending_releases.empty());
+      for(const PendingRelease &release : pending_releases) {
+        if(release.inst == old_inst) {
+          return AllocationResult::ALLOC_INSTANT_FAILURE;
+        }
+      }
 
       size_t num_insts = new_insts.size();
       std::vector<RegionInstance> tags(num_insts);
