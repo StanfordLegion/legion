@@ -440,7 +440,7 @@ namespace Realm {
 
     Event RegionInstance::redistrict(RegionInstance *instances,
                                      InstanceLayoutGeneric **layouts, size_t num_layouts,
-                                     const ProfilingRequestSet* prs, Event wait_on)
+                                     const ProfilingRequestSet *prs, Event wait_on)
     {
       MemoryImpl *mem_impl = get_runtime()->get_memory_impl(*this);
       RegionInstanceImpl *inst_impl = mem_impl->get_instance(*this);

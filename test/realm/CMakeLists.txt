@@ -53,6 +53,7 @@ list(APPEND REALM_TESTS
   multiaffine
   machine_config
   rsrv_acquire_poisoned
+  inst_chain_redistrict
   )
 
 if(Legion_USE_CUDA)

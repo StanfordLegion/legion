@@ -159,7 +159,8 @@ void worker_task(const void *args, size_t arglen, const void *userdata, size_t u
       UserEvent event = UserEvent::create_user_event();
       CopyProfResult result;
       result.done = event;
-      prs[i].add_request(p, PROF_TASK, &result, sizeof(CopyProfResult))
+      prs[i]
+          .add_request(p, PROF_TASK, &result, sizeof(CopyProfResult))
           .add_measurement<ProfilingMeasurements::InstanceTimeline>();
     }
 
