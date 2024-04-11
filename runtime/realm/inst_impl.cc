@@ -435,12 +435,12 @@ namespace Realm {
     {
       MemoryImpl *mem_impl = get_runtime()->get_memory_impl(*this);
       RegionInstanceImpl *inst_impl = mem_impl->get_instance(*this);
-      return inst_impl->redistrict(&instance, &layout, 1, prs, wait_on);
+      return inst_impl->redistrict(&instance, &layout, 1, &prs, wait_on);
     }
 
     Event RegionInstance::redistrict(RegionInstance *instances,
                                      InstanceLayoutGeneric **layouts, size_t num_layouts,
-                                     const ProfilingRequestSet &prs, Event wait_on)
+                                     const ProfilingRequestSet* prs, Event wait_on)
     {
       MemoryImpl *mem_impl = get_runtime()->get_memory_impl(*this);
       RegionInstanceImpl *inst_impl = mem_impl->get_instance(*this);
@@ -954,7 +954,7 @@ namespace Realm {
     Event RegionInstanceImpl::redistrict(RegionInstance *instances,
                                          InstanceLayoutGeneric **layouts,
                                          size_t num_layouts,
-                                         const ProfilingRequestSet &prs, Event wait_on)
+                                         const ProfilingRequestSet *prs, Event wait_on)
     {
       assert(num_layouts > 0 || (layouts == nullptr && instances == nullptr));
 
@@ -985,6 +985,19 @@ namespace Realm {
         return event;
       }
 
+      for(size_t i = 0; i < num_layouts; i++) {
+        if(!prs[i].empty()) {
+
+          insts[i]->requests = prs[i];
+          insts[i]->measurements.import_requests(insts[i]->requests);
+          if(insts[i]
+                 ->measurements
+                 .wants_measurement<ProfilingMeasurements::InstanceTimeline>()) {
+            insts[i]->timeline.record_create_time();
+          }
+        }
+      }
+
       size_t offset = 0;
       for(size_t i = 0; i < num_layouts; i++) {
         assert(insts[i]);
@@ -998,6 +1011,16 @@ namespace Realm {
           send_metadata(early_reqs);
         }
         offset += layouts[i]->bytes_used;
+      }
+
+      for(size_t i = 0; i < num_layouts; i++) {
+        if(insts[i]
+               ->measurements
+               .wants_measurement<ProfilingMeasurements::InstanceTimeline>()) {
+          insts[i]->timeline.record_ready_time();
+          insts[i]->measurements.add_measurement(insts[i]->timeline);
+          insts[i]->measurements.send_responses(insts[i]->requests);
+        }
       }
 
       return Event::NO_EVENT;

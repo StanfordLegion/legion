@@ -15,6 +15,7 @@ enum
 {
   TOP_LEVEL_TASK = Processor::TASK_ID_FIRST_AVAILABLE + 0,
   WORKER_TASK,
+  PROF_TASK,
 };
 
 int num_iterations = 2;
@@ -24,6 +25,21 @@ struct WorkerArgs {
   Rect<1> bounds;
   std::vector<int> data;
 };
+
+struct CopyProfResult {
+  long long *nanoseconds;
+  unsigned int *num_hops;
+  UserEvent done;
+};
+
+void copy_profiling_task(const void *args, size_t arglen, const void *userdata,
+                         size_t userlen, Processor p)
+{
+  // TODO(apryakhin): fill-i:n
+  // ProfilingResponse resp(args, arglen);
+  // assert(resp.user_data_size() == sizeof(CopyProfResult));
+  // const CopyProfResult *result = static_cast<const CopyProfResult *>(resp.user_data());
+}
 
 template <int N>
 InstanceLayoutGeneric *create_layout(Rect<N> bounds)
@@ -138,7 +154,16 @@ void worker_task(const void *args, size_t arglen, const void *userdata, size_t u
     InstanceLayoutGeneric *ilg_b = create_layout(next_bounds);
     std::vector<InstanceLayoutGeneric *> layouts{ilg_a, ilg_b};
 
-    Event e = inst.redistrict(insts.data(), layouts.data(), 2, ProfilingRequestSet());
+    std::vector<ProfilingRequestSet> prs(2);
+    for(int i = 0; i < 2; i++) {
+      UserEvent event = UserEvent::create_user_event();
+      CopyProfResult result;
+      result.done = event;
+      prs[i].add_request(p, PROF_TASK, &result, sizeof(CopyProfResult))
+          .add_measurement<ProfilingMeasurements::InstanceTimeline>();
+    }
+
+    Event e = inst.redistrict(insts.data(), layouts.data(), 2, prs.data());
 
     bool poisoned = false;
     e.wait_faultaware(poisoned);
@@ -182,19 +207,17 @@ int main(int argc, char **argv)
   rt.register_task(TOP_LEVEL_TASK, top_level_task);
   rt.register_task(WORKER_TASK, worker_task);
 
+  Processor::register_task_by_kind(Processor::LOC_PROC, false /*!global*/, PROF_TASK,
+                                   CodeDescriptor(copy_profiling_task),
+                                   ProfilingRequestSet(), 0, 0)
+      .wait();
+
   Processor p = Machine::ProcessorQuery(Machine::get_machine())
                     .only_kind(Processor::LOC_PROC)
                     .first();
   assert(p.exists());
-
-  // collective launch of a single task - everybody gets the same finish event
   Event e = rt.collective_spawn(p, TOP_LEVEL_TASK, 0, 0);
-
-  // request shutdown once that task is complete
   rt.shutdown(e);
-
-  // now sleep this thread until that shutdown actually happens
   rt.wait_for_shutdown();
-
   return 0;
 }

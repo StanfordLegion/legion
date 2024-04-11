@@ -57,8 +57,7 @@ TEST_F(InstanceRedistrictTest, EmptyLayouts)
   RegionInstance::create_instance(inst, memories[0], create_layout(space),
                                   ProfilingRequestSet())
       .wait();
-  std::vector<RegionInstance> insts(2);
-  Event e = inst.redistrict(nullptr, nullptr, 0, ProfilingRequestSet());
+  Event e = inst.redistrict(nullptr, nullptr, 0, nullptr);
   bool poisoned = false;
   e.wait_faultaware(poisoned);
   EXPECT_TRUE(poisoned);
@@ -77,7 +76,8 @@ TEST_F(InstanceRedistrictTest, PendingRelease)
   InstanceLayoutGeneric *ilg_a = create_layout(space);
   InstanceLayoutGeneric *ilg_b = create_layout(space);
   std::vector<InstanceLayoutGeneric *> layouts{ilg_a, ilg_b};
-  Event e = inst.redistrict(insts.data(), layouts.data(), 2, ProfilingRequestSet());
+  std::vector<ProfilingRequestSet> prs(2);
+  Event e = inst.redistrict(insts.data(), layouts.data(), 2, prs.data());
   bool poisoned = false;
   e.wait_faultaware(poisoned);
   EXPECT_TRUE(poisoned);
