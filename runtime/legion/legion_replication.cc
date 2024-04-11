@@ -16887,13 +16887,23 @@ namespace Legion {
     {
       if (!ready)
         double_latency = true;
-      all_timeouts.reserve(timeouts.size());
-      for (std::vector<LogicalUser*>::const_iterator it =
-            timeouts.begin(); it != timeouts.end(); it++)
-        all_timeouts.emplace_back(
-            std::make_pair((*it)->ctx_index, (*it)->internal_idx));
-      std::sort(all_timeouts.begin(), all_timeouts.end());
-      timeout_users.swap(timeouts);
+      if (!timeouts.empty())
+      {
+        all_timeouts.reserve(timeouts.size());
+        for (std::vector<LogicalUser*>::const_iterator it =
+              timeouts.begin(); it != timeouts.end(); it++)
+          all_timeouts.emplace_back(
+              std::make_pair((*it)->ctx_index, (*it)->internal_idx));
+        std::sort(all_timeouts.begin(), all_timeouts.end());
+        // Now uniquify in case there are duplicates since we might have
+        // multiple logical users for different requirements of the same
+        // operation, but if the operation is committed then we know that they
+        // all will have been committed so we don't need to track them all
+        std::vector<std::pair<size_t,unsigned> >::iterator end =
+          std::unique(all_timeouts.begin(), all_timeouts.end());
+        all_timeouts.resize(std::distance(all_timeouts.begin(),end));
+        timeout_users.swap(timeouts);
+      }
       perform_collective_async();
     }
 
