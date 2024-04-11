@@ -169,17 +169,16 @@ namespace Realm {
     }
 
     unsigned del_idx = it->second;
-    Range *del_r = &ranges[del_idx];
+    Range &del_r = ranges[del_idx];
 
-    if((del_r->last - del_r->first) < alloc_size) {
+    if((del_r.last - del_r.first) < alloc_size) {
       return false;
     }
 
-    unsigned next_idx = del_r->next;
-    unsigned prev_idx = del_r->prev;
+    unsigned next_idx = del_r.next;
+    unsigned prev_idx = del_r.prev;
 
     Range *prev = &ranges[prev_idx];
-
     for(size_t i = 0; i < n; i++) {
 
       size_t start = prev_idx > 0 ? prev->first : 0;
@@ -193,6 +192,8 @@ namespace Realm {
       }
 
       unsigned new_idx = alloc_range(prev->last, prev->last + sizes[i] + offset);
+      prev = &ranges[prev_idx];
+
       Range *new_prev = &ranges[new_idx];
 
       new_prev->prev = prev_idx;
