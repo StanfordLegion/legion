@@ -52,7 +52,7 @@ else
 include $(LG_RT_DIR)/runtime.mk
 endif
 
-TESTS := serializing test_profiling ctxswitch barrier_reduce taskreg memspeed idcheck inst_reuse transpose
+TESTS := serializing test_profiling ctxswitch barrier_reduce taskreg memspeed idcheck inst_reuse transpose concurrent_memspeed
 TESTS += version_check
 TESTS += proc_group
 TESTS += deppart
