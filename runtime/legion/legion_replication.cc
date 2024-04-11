@@ -16890,7 +16890,8 @@ namespace Legion {
       all_timeouts.reserve(timeouts.size());
       for (std::vector<LogicalUser*>::const_iterator it =
             timeouts.begin(); it != timeouts.end(); it++)
-        all_timeouts.emplace_back(std::make_pair((*it)->ctx_index, (*it)->idx));
+        all_timeouts.emplace_back(
+            std::make_pair((*it)->ctx_index, (*it)->internal_idx));
       std::sort(all_timeouts.begin(), all_timeouts.end());
       timeout_users.swap(timeouts);
       perform_collective_async();
@@ -16907,7 +16908,8 @@ namespace Legion {
         for (std::vector<LogicalUser*>::iterator it =
               timeout_users.begin(); it != timeout_users.end(); /*nothing*/)
         {
-          const std::pair<size_t,unsigned> key((*it)->ctx_index, (*it)->idx);
+          const std::pair<size_t,unsigned> key((*it)->ctx_index,
+                                               (*it)->internal_idx);
           if (std::binary_search(all_timeouts.begin(), all_timeouts.end(), key))
           {
             to_delete.push_back(*it);
