@@ -44,7 +44,7 @@ void top_level_task(const void *args, size_t arglen, const void *userdata, size_
 {
   std::map<NodeID, Memory> memories;
   Machine::MemoryQuery mq(Machine::get_machine());
-  mq.only_kind( Memory::SYSTEM_MEM );
+  mq.only_kind(Memory::SYSTEM_MEM);
   for(Machine::MemoryQuery::iterator it = mq.begin(); it != mq.end(); ++it) {
     Memory memory = *it;
     NodeID owner = ID(*it).memory_owner_node();

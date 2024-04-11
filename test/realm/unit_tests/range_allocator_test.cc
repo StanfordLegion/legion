@@ -19,7 +19,6 @@ TEST(RangeAllocatorTestsWithParams, SplitRangeEmpty)
   EXPECT_FALSE(range_alloc.split_range(1, tags, sizes, alignment));
 }
 
-
 TEST(RangeAllocatorTestsWithParams, SplitRangeIvalidID)
 {
   BasicRangeAllocator<size_t, int> range_alloc;

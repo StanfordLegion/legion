@@ -1084,7 +1084,7 @@ namespace Realm {
 	  // special case: if we're the oldest pending item (and we're not
 	  //  poisoned), we unclog things in the order we planned
 	  if(it->inst == inst) {
-	   if(!pending_allocs.empty())
+	    if(!pending_allocs.empty())
 	      release_allocator.deallocate(it->inst->me);
 
 	    // catch up the current state
