@@ -55,10 +55,10 @@ void top_level_task(const void *args, size_t arglen, const void *userdata, size_
 
   std::vector<Processor> reader_cpus, cpus;
   Machine machine = Machine::get_machine();
-  for(const std::pair<NodeID, Memory> &memory : memories) {
+  for(size_t i = 0; i < memories.size(); i++) {
     Machine::ProcessorQuery pq = Machine::ProcessorQuery(machine)
                                      .only_kind(Processor::LOC_PROC)
-                                     .same_address_space_as(memory.second);
+                                     .same_address_space_as(memories[i]);
     for(Machine::ProcessorQuery::iterator it = pq.begin(); it; it++) {
       reader_cpus.push_back(*it);
       break;
