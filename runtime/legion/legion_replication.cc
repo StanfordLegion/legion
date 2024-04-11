@@ -16593,7 +16593,16 @@ namespace Legion {
         derez.deserialize<bool>(poisoned);
         if (poisoned)
           concurrent_poisoned = true;
-        total_points += points;
+        if (!participating)
+        {
+#ifdef DEBUG_LEGION
+          assert(stage == -1);
+          assert(points == expected_points);
+#endif
+          total_points = points;
+        }
+        else
+          total_points += points;
 #ifdef DEBUG_LEGION
         assert(total_points <= expected_points);
 #endif
