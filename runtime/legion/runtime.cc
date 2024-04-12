@@ -2863,15 +2863,20 @@ namespace Legion {
         {
           // Pack our local visible copy by value so that the subscriber
           // will have it's own local copy of the data
-          FutureInstanceTracker &tracker = instances[local_visible_memory];
-          if (!tracker.instance->pack_instance(rez, tracker.ready_event,
-                                               false/*move ownership*/))
+          std::map<Memory,FutureInstanceTracker>::iterator finder =
+            local_visible_memory.exists() ?
+              instances.find(local_visible_memory) : instances.begin();
+#ifdef DEBUG_LEGION
+          assert(finder != instances.end());
+#endif
+          if (!finder->second.instance->pack_instance(rez,
+                finder->second.ready_event, false/*move ownership*/))
           {
             // Couldn't pack this by value so we need to pack up events
-            rez.serialize(tracker.ready_event);
+            rez.serialize(finder->second.ready_event);
             const ApUserEvent read_done = Runtime::create_ap_user_event(NULL);
             rez.serialize(read_done);
-            tracker.read_events.push_back(read_done);
+            finder->second.read_events.push_back(read_done);
           }
         }
       }
