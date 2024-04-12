@@ -987,7 +987,6 @@ namespace Realm {
 
       for(size_t i = 0; i < num_layouts; i++) {
         if(!prs[i].empty()) {
-
           insts[i]->requests = prs[i];
           insts[i]->measurements.import_requests(insts[i]->requests);
           if(insts[i]
@@ -1007,6 +1006,9 @@ namespace Realm {
         insts[i]->metadata.inst_offset = metadata.inst_offset + offset;
         NodeSet early_reqs;
         insts[i]->metadata.mark_valid(early_reqs);
+
+        insts[i]->metadata.need_alloc_result = false;
+
         if(!early_reqs.empty()) {
           send_metadata(early_reqs);
         }
@@ -1018,8 +1020,7 @@ namespace Realm {
                ->measurements
                .wants_measurement<ProfilingMeasurements::InstanceTimeline>()) {
           insts[i]->timeline.record_ready_time();
-          insts[i]->measurements.add_measurement(insts[i]->timeline);
-          //insts[i]->measurements.send_responses(insts[i]->requests);
+          insts[i]->measurements.send_responses(insts[i]->requests);
         }
       }
 
