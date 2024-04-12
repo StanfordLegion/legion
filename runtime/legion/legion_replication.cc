@@ -17103,7 +17103,16 @@ namespace Legion {
         derez.deserialize<bool>(poisoned);
         if (poisoned)
           concurrent_poisoned = true;
-        total_points += points;
+        if (!participating)
+        {
+#ifdef DEBUG_LEGION
+          assert(stage == -1);
+          assert(points == expected_points);
+#endif
+          total_points = points;
+        }
+        else
+          total_points += points;
 #ifdef DEBUG_LEGION
         assert(total_points <= expected_points);
 #endif
@@ -17397,12 +17406,23 @@ namespace Legion {
     {
       if (!ready)
         double_latency = true;
-      all_timeouts.reserve(timeouts.size());
-      for (std::vector<LogicalUser*>::const_iterator it =
-            timeouts.begin(); it != timeouts.end(); it++)
-        all_timeouts.emplace_back(std::make_pair((*it)->ctx_index, (*it)->idx));
-      std::sort(all_timeouts.begin(), all_timeouts.end());
-      timeout_users.swap(timeouts);
+      if (!timeouts.empty())
+      {
+        all_timeouts.reserve(timeouts.size());
+        for (std::vector<LogicalUser*>::const_iterator it =
+              timeouts.begin(); it != timeouts.end(); it++)
+          all_timeouts.emplace_back(
+              std::make_pair((*it)->ctx_index, (*it)->internal_idx));
+        std::sort(all_timeouts.begin(), all_timeouts.end());
+        // Now uniquify in case there are duplicates since we might have
+        // multiple logical users for different requirements of the same
+        // operation, but if the operation is committed then we know that they
+        // all will have been committed so we don't need to track them all
+        std::vector<std::pair<size_t,unsigned> >::iterator end =
+          std::unique(all_timeouts.begin(), all_timeouts.end());
+        all_timeouts.resize(std::distance(all_timeouts.begin(),end));
+        timeout_users.swap(timeouts);
+      }
       perform_collective_async();
     }
 
@@ -17417,7 +17437,8 @@ namespace Legion {
         for (std::vector<LogicalUser*>::iterator it =
               timeout_users.begin(); it != timeout_users.end(); /*nothing*/)
         {
-          const std::pair<size_t,unsigned> key((*it)->ctx_index, (*it)->idx);
+          const std::pair<size_t,unsigned> key((*it)->ctx_index,
+                                               (*it)->internal_idx);
           if (std::binary_search(all_timeouts.begin(), all_timeouts.end(), key))
           {
             to_delete.push_back(*it);

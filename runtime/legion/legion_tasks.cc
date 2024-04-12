@@ -4670,11 +4670,11 @@ namespace Legion {
       }
 
       // STEP 2: Set up the task's context
+      std::vector<ApUserEvent> unmap_events(regions.size());
       {
         const bool is_leaf_variant = variant->is_leaf();
         execution_context = create_execution_context(variant, 
             wait_on_events, inline_task, is_leaf_variant);
-        std::vector<ApUserEvent> unmap_events(regions.size());
         std::vector<RegionRequirement> clone_requirements(regions.size());
         // Make physical regions for each our region requirements
         for (unsigned idx = 0; idx < regions.size(); idx++)
@@ -4929,6 +4929,13 @@ namespace Legion {
           MispredicationTaskArgs::TASK_ID].fetch_sub(1);
 #endif
       }
+#ifdef LEGION_SPY
+      // Chain the start event into the unmap events so Legion Spy can see
+      // the dependences between child operations the start of the parent task
+      for (unsigned idx = 0; idx < unmap_events.size(); idx++)
+        if (unmap_events[idx].exists())
+          LegionSpy::log_event_dependence(start_condition, unmap_events[idx]);
+#endif
     }
 
     //--------------------------------------------------------------------------

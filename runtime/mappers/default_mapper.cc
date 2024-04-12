@@ -921,6 +921,8 @@ namespace Legion {
         }
         result.is_inner = runtime->is_inner_variant(ctx, task.task_id,
                                                     result.variant);
+        result.is_leaf = runtime->is_leaf_variant(ctx, task.task_id,
+                                                    result.variant);
         result.is_replicable = 
             runtime->is_replicable_variant(ctx, task.task_id, result.variant);
         if (result.is_inner)
@@ -1277,6 +1279,8 @@ namespace Legion {
           chosen.tight_bound = true;
           chosen.is_inner =
             runtime->is_inner_variant(ctx, task.task_id, input.shard_variant);
+          chosen.is_leaf =
+            runtime->is_leaf_variant(ctx, task.task_id, input.shard_variant);
           chosen.is_replicable = true;
           preferred_variants.emplace(std::make_pair(key, chosen));
         }
@@ -1405,14 +1409,23 @@ namespace Legion {
                                                          mem_constraint);
         if (task.regions[idx].privilege == LEGION_REDUCE)
         {
-          size_t footprint;
-          if (!default_create_custom_instances(ctx, target_proc,
-                  target_memory, task.regions[idx], idx, missing_fields[idx],
-                  layout_constraints, needs_field_constraint_check,
-                  output.chosen_instances[idx], &footprint))
+          // Only leaf tasks should map their reduction regions to instances
+          if (chosen.is_leaf)
           {
-            default_report_failed_instance_creation(task, idx,
-                  target_proc, target_memory, footprint);
+            size_t footprint;
+            if (!default_create_custom_instances(ctx, target_proc,
+                    target_memory, task.regions[idx], idx, missing_fields[idx],
+                    layout_constraints, needs_field_constraint_check,
+                    output.chosen_instances[idx], &footprint))
+            {
+              default_report_failed_instance_creation(task, idx,
+                    target_proc, target_memory, footprint);
+            }
+          }
+          else
+          {
+            PhysicalInstance virt_inst = PhysicalInstance::get_virtual_instance();
+            output.chosen_instances[idx].push_back(virt_inst);
           }
           continue;
         }

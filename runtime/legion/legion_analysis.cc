@@ -5205,6 +5205,64 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void LogicalState::filter_previous_epoch_users(const FieldMask &field_mask)
+    //--------------------------------------------------------------------------
+    {
+      std::vector<LogicalUser*> to_delete;
+      for (OrderedFieldMaskUsers::iterator it = prev_epoch_users.begin();
+            it != prev_epoch_users.end(); it++)
+      {
+        it.filter(field_mask);
+        if (!it->second)
+          to_delete.push_back(it->first);
+      }
+      for (std::vector<LogicalUser*>::const_iterator it =
+            to_delete.begin(); it != to_delete.end(); it++)
+      {
+        prev_epoch_users.erase(*it);
+        if ((*it)->remove_reference())
+          delete (*it);
+      }
+      prev_epoch_users.filter_valid_mask(field_mask);
+    }
+
+    //--------------------------------------------------------------------------
+    void LogicalState::register_local_user(LogicalUser &user,
+                                           const FieldMask &user_mask)
+    //--------------------------------------------------------------------------
+    {
+      if (curr_epoch_users.insert(&user, user_mask))
+        user.add_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    void LogicalState::filter_current_epoch_users(const FieldMask &field_mask)
+    //--------------------------------------------------------------------------
+    {
+      std::vector<LogicalUser*> to_delete;
+      for (OrderedFieldMaskUsers::iterator it = curr_epoch_users.begin();
+            it != curr_epoch_users.end(); it++)
+      {
+        const FieldMask local_dom = it->second & field_mask;
+        if (!local_dom)
+          continue;
+        if (prev_epoch_users.insert(it->first, local_dom))
+          it->first->add_reference();
+        it.filter(local_dom);
+        if (!it->second)
+          to_delete.push_back(it->first);
+      }
+      for (std::vector<LogicalUser*>::const_iterator it =
+            to_delete.begin(); it != to_delete.end(); it++)
+      {
+        curr_epoch_users.erase(*it);
+        if ((*it)->remove_reference())
+          delete (*it);
+      }
+      curr_epoch_users.filter_valid_mask(field_mask);
+    }
+
+    //--------------------------------------------------------------------------
     void LogicalState::filter_timeout_users(LogicalAnalysis &analysis)
     //--------------------------------------------------------------------------
     {
@@ -5252,6 +5310,8 @@ namespace Legion {
                                            timeout_exchange))
         total_timeout_check_iterations *= 2;
       remaining_timeout_check_iterations = total_timeout_check_iterations;
+      bool tighten_current = false;
+      bool tighten_previous = false;
       for (std::vector<LogicalUser*>::const_iterator it = 
             to_delete.begin(); it != to_delete.end(); it++)
       {
@@ -5263,16 +5323,22 @@ namespace Legion {
         {
           curr_epoch_users.erase(finder);
           references_to_remove++;
+          tighten_current = true;
         }
         finder = prev_epoch_users.find(*it);
         if (finder != prev_epoch_users.end())
         {
           prev_epoch_users.erase(finder);
           references_to_remove++;
+          tighten_previous = true;
         }
         if ((*it)->remove_reference(references_to_remove))
           delete (*it);
       }
+      if (tighten_current)
+        curr_epoch_users.tighten_valid_mask();
+      if (tighten_previous)
+        prev_epoch_users.tighten_valid_mask();
 #endif
     }
 
@@ -5803,7 +5869,7 @@ namespace Legion {
                                             unsigned parent_req_index,
                                             RegionTreeNode *refinement_node,
                                             const FieldMask &refinement_mask,
-                                            FieldMaskSet<RefinementOp> &pending)
+                                            OrderedRefinements &pending)
     //--------------------------------------------------------------------------
     {
       // Ignore any requests for refinements for output region requirmeents
@@ -5890,7 +5956,7 @@ namespace Legion {
       LogicalState &state = node->get_logical_state(
                 context->get_logical_tree_context());
       // This will take ownership of the user
-      node->register_local_user(state, *user, internal_mask);
+      state.register_local_user(*user, internal_mask);
       // Record a dependence on the internal operation for ourself
       op->register_region_dependence(internal_op->get_internal_index(),
           internal_op, internal_op->get_generation(), 0/*internal idx*/,
@@ -15416,7 +15482,7 @@ namespace Legion {
 #endif
           // Releases are a bit strange, we actually want to invalidate
           // all the current valid instances since we're making them all
-          // restricted so their are no partial unrestricted cases
+          // restricted so there are no partial unrestricted cases
           filter_valid_instances(expr, expr_covers, user_mask);
         }
         else if (!!restricted_mask)
@@ -16887,8 +16953,11 @@ namespace Legion {
             }
             for (std::vector<InstanceView*>::const_iterator it =
                   to_erase.begin(); it != to_erase.end(); it++)
+            {
+              eit->second.erase(*it);
               if ((*it)->remove_nested_valid_ref(did))
                 delete (*it);
+            }
             if (!eit->second.empty())
               eit->second.tighten_valid_mask();
             else
@@ -17184,13 +17253,16 @@ namespace Legion {
                 analysis.target_views[idx].begin(); it != 
                 analysis.target_views[idx].end(); it++)
           {
+            const FieldMask overlap = release_mask & it->second;
+            if (!overlap)
+              continue;
             // Record this as a restricted instance
-            record_restriction(expr, expr_covers, it->second, it->first);
+            record_restriction(expr, expr_covers, overlap, it->first);
             // Update the tracing postconditions now that we've recorded
             // any copies as part of the trace
             if (tracing_postconditions != NULL)
               tracing_postconditions->invalidate_all_but(it->first, expr,
-                                                         it->second);
+                                                         overlap);
           }
         }
         // Now generate the copies for any updates to the restricted instances
@@ -17256,9 +17328,11 @@ namespace Legion {
             eit->second.erase(finder);
             if (eit->second.empty())
               to_delete.push_back(eit->first);
+            else
+              eit->second.filter_valid_mask(overlap);
           }
           else
-            eit->second.tighten_valid_mask();
+            eit->second.filter_valid_mask(overlap);
         }
         // Add in the new sets
         if (!to_union.empty())
@@ -18779,7 +18853,11 @@ namespace Legion {
               rit->second.erase(finder);
               if (rit->second.empty())
                 to_delete.push_back(rit->first);
+              else
+                rit->second.filter_valid_mask(overlap);
             }
+            else
+              rit->second.filter_valid_mask(overlap);
           }
           for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
                 to_add.begin(); it != to_add.end(); it++)

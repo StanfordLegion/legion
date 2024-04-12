@@ -103,7 +103,7 @@ namespace Legion {
       const GenerationID gen;
       ProjectionSummary *const shard_proj;
 #ifdef LEGION_SPY
-      UniqueID uid;
+      const UniqueID uid;
 #endif
     };
 
@@ -1390,6 +1390,9 @@ namespace Legion {
                                          RegionTreeNode *previous_child,
                                          LogicalRegion privilege_root,
                                          LogicalAnalysis &logical_analysis);
+      void register_local_user(LogicalUser &user, const FieldMask &mask);
+      void filter_current_epoch_users(const FieldMask &field_mask);
+      void filter_previous_epoch_users(const FieldMask &field_mask);
       void filter_timeout_users(LogicalAnalysis &logical_analysis);
       void promote_next_child(RegionTreeNode *child, FieldMask mask);
     public:
@@ -1472,12 +1475,14 @@ namespace Legion {
     public:
       LogicalAnalysis& operator=(const LogicalAnalysis &rhs) = delete;
     public:
+      typedef FieldMaskSet<RefinementOp,UNTRACKED_ALLOC,true/*ordered*/>
+        OrderedRefinements;
       void record_pending_refinement(LogicalRegion privilege,
                                      unsigned req_index,
                                      unsigned parent_req_index,
                                      RegionTreeNode *refinement_node,
                                      const FieldMask &refinement_mask,
-                                     FieldMaskSet<RefinementOp> &refinements);
+                                     OrderedRefinements &refinements);
     public:
       // Record a prior operation that we need to depend on with a 
       // close operation to group together dependences
@@ -1501,9 +1506,7 @@ namespace Legion {
       // all shards will iterate over them in the same order for 
       // control replication cases, we do this by sorting them based
       // on their unique IDs which are monotonically increasing so we
-      // know that they will be in order across shards too
-      typedef FieldMaskSet<RefinementOp,UNTRACKED_ALLOC,true/*ordered*/>
-        OrderedRefinements;
+      // know that they will be in order across shards too 
       OrderedRefinements pending_refinements;
       std::map<RegionTreeNode*,MergeCloseOp*> pending_closes;
     };
