@@ -19,7 +19,7 @@ local data = require("common/data")
 
 local config = {}
 
-local expect_vars = terralib.newlist({"TERRA_PATH", "INCLUDE_PATH", "LG_RT_DIR", "USE_CMAKE", "USE_RDIR"})
+local expect_vars = terralib.newlist({"TERRA_PATH", "INCLUDE_PATH", "LG_RT_DIR", "USE_CMAKE"})
 if os.getenv("USE_CMAKE") == "1" then
   expect_vars:insert("CMAKE_BUILD_DIR")
 end
@@ -88,12 +88,6 @@ local default_options = {
   ["legion-inner"] = true,
   ["legion-idempotent"] = true,
   ["legion-replicable"] = legion_replicable_env == '1' or legion_replicable_env == nil,
-
-  -- Dataflow optimization flags:
-  ["flow"] = os.getenv('USE_RDIR') == '1' or false,
-  ["flow-spmd"] = false,
-  ["flow-spmd-shardsize"] = 1,
-  ["flow-old-iteration-order"] = 0,
 
   -- Experimental auto-parallelization flags:
   ["parallelize"] = true,
@@ -180,11 +174,6 @@ local function check_consistency(options, args)
   if options["gpu-offline"] == 1 and options["gpu-arch"] == "unspecified" then
     print("conflicting command line arguments: requested -fgpu-offline 1 but -fgpu-arch is unspecified")
     assert(false)
-  end
-
-  if options["flow-spmd"] then
-    print("WARNING: -fflow-spmd is deprecated, and will be removed in a future release.")
-    print("Please migrate to Legion control replication.")
   end
 
   return options, args

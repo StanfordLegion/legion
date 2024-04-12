@@ -12,11 +12,6 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- runs-with:
--- [["-fflow", "0"]]
-
--- FIXME: RDIR emits the same variable declaration twice for cp0[0]
-
 import "regent"
 
 task main()

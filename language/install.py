@@ -80,41 +80,6 @@ def dump_json_config(filename, value):
     with open(filename, 'w') as f:
         return json.dump(value, f)
 
-prompt_text = '''
-RDIR is an optional compiler plugin for Regent which provides support
-for dataflow optimizations (most notably control replication). RDIR
-support is opt-in because RDIR's license is different from that of
-Regent (thus this prompt). Specifically:
-
-  * portions of RDIR are licensed under BSD
-  * other portions of RDIR are dual-licensed under BSD and Apache
-
-(Regent itself is licensed entirely under Apache.)
-
-You may choose to use RDIR automatically (select "auto" below),
-manually, or not at all. Your preference will be saved. You can change
-your mind at any time by re-running this script with the "--rdir"
-parameter.
-'''
-
-def install_rdir(rdir, legion_dir, regent_dir):
-    config_filename = os.path.join(regent_dir, '.rdir.json')
-    if rdir is None:
-        rdir = load_json_config(config_filename)
-        if rdir is None: rdir = 'prompt'
-
-    if rdir == 'prompt':
-        print(prompt_text)
-        while rdir not in ['auto', 'manual', 'never']:
-            rdir = _input('Enable RDIR? (auto/manual/never) ')
-    assert rdir in ['auto', 'manual', 'skip', 'never']
-
-    if rdir == 'auto':
-        git_submodule_update(legion_dir)
-
-    if rdir != 'skip':
-        dump_json_config(config_filename, rdir)
-
 def build_terra(terra_dir, terra_branch, use_cmake, cmake_exe, thread_count, llvm):
     build_dir = os.path.join(terra_dir, 'build')
     release_dir = os.path.join(terra_dir, 'release')
@@ -137,7 +102,7 @@ def build_terra(terra_dir, terra_branch, use_cmake, cmake_exe, thread_count, llv
             if llvm_config is not None:
                 llvm_cmakedir = subprocess.check_output([llvm_config, '--cmakedir']).decode('utf-8').strip()
             subprocess.check_call(
-                [cmake_exe, '..', '-DCMAKE_INSTALL_PREFIX=%s' % release_dir] + (
+                [cmake_exe, '..', '-DCMAKE_BUILD_TYPE=Debug', '-DCMAKE_INSTALL_PREFIX=%s' % release_dir] + (
                     ['-DLLVM_HINTS=%s' % llvm_cmakedir] if llvm_cmakedir is not None else []),
                 cwd=build_dir)
         subprocess.check_call(
@@ -410,7 +375,7 @@ def get_legion_install_prefix(legion_install_prefix, regent_dir, default=None):
     return legion_install_prefix
 
 def install(gasnet=False, cuda=False, hip=False, openmp=False, python=False, llvm=False, hdf=False,
-            spy=False, conduit=None, cmake=None, rdir=None,
+            spy=False, conduit=None, cmake=None,
             cmake_exe=None, cmake_build_dir=None,
             legion_install_prefix=None,
             terra_url=None, terra_branch=None, terra_use_cmake=None, external_terra_dir=None,
@@ -450,8 +415,6 @@ def install(gasnet=False, cuda=False, hip=False, openmp=False, python=False, llv
     runtime_dir = os.path.join(legion_dir, 'runtime')
     if 'LG_RT_DIR' in os.environ:
         runtime_dir = os.path.realpath(os.environ['LG_RT_DIR'])
-
-    install_rdir(rdir, legion_dir, regent_dir)
 
     terra_dir = os.path.join(regent_dir, 'terra')
     install_terra(terra_dir, terra_url, terra_branch, terra_use_cmake, cmake_exe,
@@ -549,10 +512,6 @@ def driver():
     parser.add_argument(
         '--legion-install-prefix', dest='legion_install_prefix', metavar='DIR', required=False,
         help='Do NOT build Legion. Just use the specified installation.')
-    parser.add_argument(
-        '--rdir', dest='rdir', required=False,
-        choices=['prompt', 'auto', 'manual', 'skip', 'never'], default=None,
-        help='Enable RDIR compiler plugin.')
     parser.add_argument(
         '--clean', dest='clean_first', action='store_true', required=False,
         default=None,

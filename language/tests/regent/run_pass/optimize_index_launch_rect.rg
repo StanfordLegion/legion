@@ -12,11 +12,6 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- runs-with:
--- [["-fflow", "0"]]
-
--- FIXME: This test is broken by RDIR.
-
 import "regent"
 
 -- This tests a fix for bug #558.
@@ -44,6 +39,7 @@ where reads writes(r), reads(s)
 do
 end
 
+__demand(__replicable)
 task main()
   var r = region(ispace(int3d,{Np,Np,Np}),Fields)
   var s = region(ispace(int2d,{Np,Np}),Fields)

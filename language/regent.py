@@ -57,14 +57,6 @@ hip_cub_include_dir = os.path.join(hip_cub_dir, 'include') if hip_cub_dir is not
 # Thrust only needs to be manually located with HIP, where we need an older version to work around a bug.
 thrust_dir = os.environ.get('THRUST_PATH')
 
-# Find RDIR.
-if 'USE_RDIR' in os.environ:
-    use_rdir = os.environ['USE_RDIR']
-else:
-    rdir_config_filename = os.path.join(regent_dir, '.rdir.json')
-    rdir = load_json_config(rdir_config_filename)
-    use_rdir = '1' if rdir in ['auto', 'manual'] else '0'
-
 # Detect use of CMake.
 if 'USE_CMAKE' in os.environ:
     cmake = os.environ['USE_CMAKE'] == '1'
@@ -144,7 +136,6 @@ def regent(args, env={}, cwd=None, **kwargs):
           if first_arg is not None and os.path.exists(first_arg) else []) +
         [os.path.join(regent_dir, 'src', '?.t'),
          os.path.join(regent_dir, 'src', '?.rg'),
-         os.path.join(regent_dir, 'src', 'rdir', 'plugin', 'src', '?.t'),
          os.path.join(terra_dir, 'tests', 'lib', '?.t'),
          os.path.join(terra_dir, 'release', 'include', '?.t'),
          os.path.join(bindings_dir, '?.t')])
@@ -162,7 +153,6 @@ def regent(args, env={}, cwd=None, **kwargs):
         'LG_RT_DIR': runtime_dir,
         'USE_CMAKE': '1' if cmake else '0',
         'CMAKE_BUILD_DIR': cmake_build_dir,
-        'USE_RDIR': use_rdir,
     }
 
     if legion_install_prefix is not None:
