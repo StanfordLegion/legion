@@ -104,6 +104,7 @@ namespace Realm {
   AddressListCursor::AddressListCursor()
     : addrlist(0)
     , partial(false)
+    , partial_dim(0)
   {
     for(int i = 0; i < MAX_DIM; i++)
       pos[i] = 0;
