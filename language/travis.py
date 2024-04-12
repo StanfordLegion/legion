@@ -55,7 +55,7 @@ def test(root_dir, install_only, debug, max_dim, short, no_pretty,
     out_dir_flag = ['--output=%s' % os.path.join(root_dir, 'test_output')]
 
     subprocess.check_call(
-        [sys.executable, './install.py] + install_threads + terra + build + debug_flag,
+        [sys.executable, './install.py'] + install_threads + terra + build + debug_flag,
         env = env,
         cwd = root_dir)
     if not install_only:
