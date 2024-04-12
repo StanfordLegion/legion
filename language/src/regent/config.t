@@ -127,6 +127,9 @@ local default_options = {
   ["incr-comp"] = os.getenv('REGENT_INCREMENTAL') == '1' or false, -- incremental compilation
   ["opt-compile-time"] = true, -- compile time optimization
 
+  -- Deprecated flags, for backwards compatibility only
+  ["flow"] = config.UNSPECIFIED,
+
   -- Need this here to make the logger happy.
   ["log"] = "",
 }
@@ -174,6 +177,15 @@ local function check_consistency(options, args)
   if options["gpu-offline"] == 1 and options["gpu-arch"] == "unspecified" then
     print("conflicting command line arguments: requested -fgpu-offline 1 but -fgpu-arch is unspecified")
     assert(false)
+  end
+
+  if options["flow"] ~= config.UNSPECIFIED then
+    if options["flow"] >= 1 then
+      print("-fflow " .. tostring(options["flow"]) .. " is no longer supported")
+      assert(false)
+    else
+      print("WARNING: -fflow " .. tostring(options["flow"]) .. " has been permanently removed and is no longer required")
+    end
   end
 
   return options, args
