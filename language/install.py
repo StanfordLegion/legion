@@ -102,7 +102,7 @@ def build_terra(terra_dir, terra_branch, use_cmake, cmake_exe, thread_count, llv
             if llvm_config is not None:
                 llvm_cmakedir = subprocess.check_output([llvm_config, '--cmakedir']).decode('utf-8').strip()
             subprocess.check_call(
-                [cmake_exe, '..', '-DCMAKE_BUILD_TYPE=Debug', '-DCMAKE_INSTALL_PREFIX=%s' % release_dir] + (
+                [cmake_exe, '..', '-DCMAKE_INSTALL_PREFIX=%s' % release_dir] + (
                     ['-DLLVM_HINTS=%s' % llvm_cmakedir] if llvm_cmakedir is not None else []),
                 cwd=build_dir)
         subprocess.check_call(
