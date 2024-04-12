@@ -1019,7 +1019,7 @@ namespace Realm {
                .wants_measurement<ProfilingMeasurements::InstanceTimeline>()) {
           insts[i]->timeline.record_ready_time();
           insts[i]->measurements.add_measurement(insts[i]->timeline);
-          insts[i]->measurements.send_responses(insts[i]->requests);
+          //insts[i]->measurements.send_responses(insts[i]->requests);
         }
       }
 
