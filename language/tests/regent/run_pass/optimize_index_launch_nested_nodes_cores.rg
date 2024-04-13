@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 -- runs-with:
--- [["-fflow", "0", "-foverride-demand-index-launch", "1"]]
+-- [["-foverride-demand-index-launch", "1"]]
 
 -- Test index launches with cross-products in a semi-realistic scenario with
 -- nodes, cores and ghost cells.

@@ -308,7 +308,7 @@ before_script:
     fi
     if [[ "$REALM_NETWORKS" != "" ]]; then
       # OpenMPI:
-      # export LAUNCHER="mpirun -n 2 -x TERRA_PATH -x INCLUDE_PATH -x LD_LIBRARY_PATH -x LG_RT_DIR -x USE_RDIR"
+      # export LAUNCHER="mpirun -n 2 -x TERRA_PATH -x INCLUDE_PATH -x LD_LIBRARY_PATH -x LG_RT_DIR"
       # MPICH:
       export LAUNCHER="mpirun -n 2"
       export MPICH_CXX=${CXX}

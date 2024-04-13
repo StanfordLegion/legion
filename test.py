@@ -1002,7 +1002,7 @@ def report_mode(debug, max_dim, launcher,
                 use_hdf, use_fortran, use_spy, use_prof,
                 use_bounds_checks, use_privilege_checks, use_complex,
                 use_shared_objects,
-                use_gcov, use_cmake, use_rdir, use_nvtx, use_libdw, cxx_standard):
+                use_gcov, use_cmake, use_nvtx, use_libdw, cxx_standard):
     print()
     print('#'*60)
     print('### Test Suite Configuration')
@@ -1043,7 +1043,6 @@ def report_mode(debug, max_dim, launcher,
     print('###   * Shared Obj: %s' % use_shared_objects)
     print('###   * Gcov:       %s' % use_gcov)
     print('###   * CMake:      %s' % use_cmake)
-    print('###   * RDIR:       %s' % use_rdir)
     print('###   * NVTX:       %s' % use_nvtx)
     print('###   * LIBDW:      %s' % use_libdw)
     print('###   * Max DIM:    %s' % max_dim)
@@ -1116,7 +1115,6 @@ def run_tests(test_modules=None,
     use_complex = feature_enabled('complex', True)
     use_gcov = feature_enabled('gcov', False)
     use_cmake = feature_enabled('cmake', False)
-    use_rdir = feature_enabled('rdir', True)
     use_nvtx = feature_enabled('nvtx', False)
     use_libdw = feature_enabled('libdw', False, prefix='REALM_BACKTRACE_USE_')
     use_shared_objects = feature_enabled('shared', False,
@@ -1172,7 +1170,7 @@ def run_tests(test_modules=None,
                 use_hdf, use_fortran, use_spy, use_prof,
                 use_bounds_checks, use_privilege_checks, use_complex,
                 use_shared_objects,
-                use_gcov, use_cmake, use_rdir, use_nvtx, use_libdw, cxx_standard)
+                use_gcov, use_cmake, use_nvtx, use_libdw, cxx_standard)
 
     if not tmp_dir:
         tmp_dir = tempfile.mkdtemp(dir=root_dir)
@@ -1214,7 +1212,6 @@ def run_tests(test_modules=None,
         ('USE_COMPLEX', '1' if use_complex else '0'),
         ('SHARED_OBJECTS', '1' if use_shared_objects else '0'),
         ('TEST_GCOV', '1' if use_gcov else '0'),
-        ('USE_RDIR', '1' if use_rdir else '0'),
         ('USE_NVTX', '1' if use_nvtx else '0'),
         ('REALM_BACKTRACE_USE_LIBDW', '1' if use_libdw else '0'),
         ('MAX_DIM', str(max_dim)),
@@ -1386,7 +1383,7 @@ def driver():
         choices=MultipleChoiceList('gasnet', 'cuda', 'hip', 'openmp', 'kokkos',
                                    'python', 'llvm', 'hdf', 'fortran', 'spy', 'prof',
                                    'bounds', 'privilege', 'complex',
-                                   'gcov', 'cmake', 'rdir', 'nvtx'),
+                                   'gcov', 'cmake', 'nvtx'),
         type=lambda s: s.split(','),
         default=None,
         help='Build Legion with features (also via USE_*).')

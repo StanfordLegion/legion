@@ -53,18 +53,9 @@ def test(root_dir, install_only, debug, max_dim, short, no_pretty,
     no_pretty_flag = ['--no-pretty'] if no_pretty else []
     inner_flag = ['--extra=-flegion-inner', '--extra=0'] if 'DISABLE_INNER' in env else []
     out_dir_flag = ['--output=%s' % os.path.join(root_dir, 'test_output')]
-    if 'USE_RDIR' in env:
-        regent_dir = os.path.dirname(os.path.realpath(__file__))
-        rdir_config = os.path.join(regent_dir, '.rdir.json')
-        if env['USE_RDIR'] == '1' and not os.path.exists(rdir_config):
-            rdir = 'auto'
-        else:
-            rdir = 'skip'
-    else:
-        rdir = 'auto'
 
     subprocess.check_call(
-        [sys.executable, './install.py', '--rdir=%s' % rdir] + install_threads + terra + build + debug_flag,
+        [sys.executable, './install.py'] + install_threads + terra + build + debug_flag,
         env = env,
         cwd = root_dir)
     if not install_only:

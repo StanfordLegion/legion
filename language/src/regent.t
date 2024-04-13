@@ -89,7 +89,6 @@ local language = {
     "__raw",
     "__replicable",
     "__runtime",
-    "__spmd",
     "__task",
     "__trace",
     "__unroll",

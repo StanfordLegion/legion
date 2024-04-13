@@ -12,12 +12,6 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- runs-with:
--- [
---   ["-ll:cpu", "4", "-fflow-spmd", "1"],
---   ["-ll:cpu", "2", "-fflow-spmd", "1", "-fflow-spmd-shardsize", "2"]
--- ]
-
 import "regent"
 
 -- This tests the SPMD optimization of the compiler with:
@@ -64,7 +58,6 @@ task main()
   var tinit = 0
   var tfinal = 3
 
-  __demand(__spmd)
   for t = tinit, tfinal do
     for i = 0, 3 do
       inc(p[i], 1)
