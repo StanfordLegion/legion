@@ -203,7 +203,6 @@ cache: &global_cache
 .kokkos: &kokkos
   USE_KOKKOS: "1"
   KOKKOS_TAG: "4.0.01"
-  KOKKOS_CUDA_ARCH: "PASCAL60"
   KKERNELS_BRANCH: "4.0.01"
 
 .prof: &prof
@@ -377,8 +376,6 @@ before_script:
       fi
       if [[ "$USE_CUDA" -eq 1 ]]; then
         KOKKOS_CMAKE_OPTS="$KOKKOS_CMAKE_OPTS -DKokkos_ENABLE_CUDA=ON -DKokkos_ENABLE_CUDA_LAMBDA=ON -DKokkos_ENABLE_CUDA_UVM=OFF"
-        # Pick a base CUDA architecture to enable
-        KOKKOS_CMAKE_OPTS="$KOKKOS_CMAKE_OPTS -DKokkos_ARCH_${KOKKOS_CUDA_ARCH}=ON"
         # Force Kokkos build to always use the nvcc wrapper (even for clang)
         # This allows kokkos to build SASS and PTX in a forward compatible way,
         # allowing older toolkits to work on newer GPUs in CI
