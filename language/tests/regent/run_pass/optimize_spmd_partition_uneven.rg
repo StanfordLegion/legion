@@ -12,18 +12,13 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- runs-with:
--- [
---   ["-ll:cpu", "4", "-fflow-spmd", "1"],
---   ["-ll:cpu", "2", "-fflow-spmd", "1", "-fflow-spmd-shardsize", "2"]
--- ]
-
 import "regent"
 
 -- This tests the SPMD optimization of the compiler with:
 --   * partitions with different parent regions
 
 local c = regentlib.c
+local format = require("std/format")
 
 struct t {
   a : int,
@@ -62,6 +57,7 @@ where reads(r.c), reads writes(r.b) do
   end
 end
 
+__demand(__replicable)
 task main()
   var r = region(ispace(ptr, 4), t)
   var x0 = dynamic_cast(ptr(t, r), 0)
@@ -110,7 +106,7 @@ task main()
   end
 
   for x in r do
-    c.printf("x %d %d %d\n", x.a, x.b, x.c)
+    format.println("x {} {} {}", x.a, x.b, x.c)
   end
 
   var pieces = 4
@@ -119,7 +115,6 @@ task main()
     inc_ba(p[i])
   end
 
-  __demand(__spmd)
   for t = 0, 3 do
     for i = 0, pieces do
       avg_ac(p[i], q[i])
@@ -154,7 +149,7 @@ task main()
   end
 
   for x in r do
-    c.printf("x %d %d %d\n", x.a, x.b, x.c)
+    format.println("x {} {} {}", x.a, x.b, x.c)
   end
 
   regentlib.assert(x0.a ==  9550, "test failed")

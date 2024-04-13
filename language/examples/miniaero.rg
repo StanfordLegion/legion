@@ -3396,7 +3396,6 @@ task toplevel()
 
   var ts_start = c.legion_get_current_time_in_micros()
   var ts_end = ts_start
-  __demand(__spmd)
   for time_it = 0, max_its do
 
     if time_it == prune then

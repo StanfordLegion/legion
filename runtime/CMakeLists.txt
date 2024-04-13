@@ -913,15 +913,25 @@ if(Legion_USE_CUDA)
   set_target_cuda_warnings_and_errors(LegionRuntime WARN_AS_ERROR ${Legion_BUILD_WARN_AS_ERROR})
 
   if(Legion_REDOP_COMPLEX)
-    # Thrust is required for complex reductions; let cmake find it.
-    # By including Thrust before the CUDA headers we make sure the Thrust installation
-    # we pass to cmake will take priority against whatever version is bundled with CUDA.
-    find_package(Thrust CONFIG)
-    # If we can't find a standalone Thrust then don't do anything and just let the build
-    # pick up the version that comes bundled with CUDA.
-    if(Thrust_FOUND)
-      thrust_create_target(Thrust)
-      target_link_libraries(LegionRuntime PUBLIC Thrust)
+    # libcudacxx is required for complex reductions; let cmake find it.
+    # By including this before the CUDA headers we make sure the libcudacxx
+    # installation we pass to cmake will take priority against whatever version
+    # is bundled with CUDA.
+    find_package(libcudacxx CONFIG)
+    if(libcudacxx_FOUND)
+      if(${LIBCUDACXX_VERSION} VERSION_LESS "1.8.0")
+        # cuda::std::complex started working properly in libcudacxx 1.8.0
+        message(FATAL_ERROR "Legion_REDOP_COMPLEX requires libcudacxx >= 1.8.0 (found ${LIBCUDACXX_VERSION})")
+      endif()
+      target_link_libraries(LegionRuntime PUBLIC libcudacxx::libcudacxx)
+    else()
+      # If we can't find a standalone libcudacxx then don't do anything and just
+      # let the build pick up the version that comes bundled with CUDA. But make
+      # sure CUDA is recent enough to include a libcudacxx with a working
+      # implementation of cuda::std::complex.
+      if(${CUDAToolkit_VERSION} VERSION_LESS "11.7")
+        message(FATAL_ERROR "Legion_REDOP_COMPLEX requires CUDA >= 11.7 (found ${CUDAToolkit_VERSION}) or libcudacxx >= 1.8.0")
+      endif()
     endif()
     # complex reduction ops bring in a public dependency on cuda headers
     target_link_libraries(LegionRuntime PUBLIC CUDA::toolkit)
@@ -982,6 +992,7 @@ set_target_properties(LegionRuntime PROPERTIES POSITION_INDEPENDENT_CODE ON)
 set_target_properties(LegionRuntime PROPERTIES OUTPUT_NAME "legion${INSTALL_SUFFIX}")
 set_target_properties(LegionRuntime PROPERTIES SOVERSION ${SOVERSION})
 if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  target_link_libraries(LegionRuntime PUBLIC atomic)
   set_property(TARGET LegionRuntime APPEND PROPERTY BUILD_RPATH "\$ORIGIN")
   set_property(TARGET LegionRuntime APPEND PROPERTY INSTALL_RPATH "\$ORIGIN")
 elseif (CMAKE_SYSTEM_NAME STREQUAL "Darwin")

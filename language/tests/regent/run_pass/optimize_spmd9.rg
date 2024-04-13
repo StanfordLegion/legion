@@ -12,18 +12,13 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- runs-with:
--- [
---   ["-ll:cpu", "4", "-fflow-spmd", "1"],
---   ["-ll:cpu", "2", "-fflow-spmd", "1", "-fflow-spmd-shardsize", "2"]
--- ]
-
 import "regent"
 
 -- This tests the SPMD optimization of the compiler with:
 --   * references to the original loop bounds in the task launch
 
 local c = regentlib.c
+local format = require("std/format")
 
 task mul(r : region(int), y : int)
 where reads(r), writes(r) do
@@ -32,6 +27,7 @@ where reads(r), writes(r) do
   end
 end
 
+__demand(__replicable)
 task main()
   var r = region(ispace(ptr, 4), int)
   var x0 = dynamic_cast(ptr(int, r), 0)
@@ -52,12 +48,11 @@ task main()
   end
 
   for x in r do
-    c.printf("x %d %d\n", int(x), @x)
+    format.println("x {} {}", int(x), @x)
   end
 
   var tinit, tfinal = 0, 1
 
-  __demand(__spmd)
   for t = tinit, tfinal do
     for i = 0, 4 do
       mul(p[i], i + 2)
@@ -65,7 +60,7 @@ task main()
   end
 
   for x in r do
-    c.printf("x %d %d\n", int(x), @x)
+    format.println("x {} {}", int(x), @x)
   end
 
   regentlib.assert(@x0 == 2, "test failed")

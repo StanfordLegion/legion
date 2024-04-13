@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 -- runs-with:
--- [["-fflow", "0", "-findex-launch-dynamic", "0"]]
+-- [["-findex-launch-dynamic", "0"]]
 
 -- fails-with:
 -- optimize_index_launch_projection1.rg:46: loop optimization failed: argument 2 interferes with argument 1

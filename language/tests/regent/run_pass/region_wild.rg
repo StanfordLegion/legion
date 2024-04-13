@@ -12,11 +12,6 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- runs-with:
--- [["-fflow", "0"]]
-
--- FIXME: Causes cycles on in RDIR
-
 import "regent"
 
 fspace node(ghost : region(node(wild, wild)),

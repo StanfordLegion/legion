@@ -12376,13 +12376,13 @@ namespace Legion {
           {
             total_valid_instances.insert(view, view_mask);
             view->add_nested_valid_ref(did);
-            // Check if this is a collective view we need to track
-            if (view->is_collective_view() && collective_instances.insert(
-                  view->as_collective_view(), view_mask))
-              view->add_nested_resource_ref(did);
           }
           else
             finder.merge(view_mask);
+          // Check if this is a collective view we need to track
+          if (view->is_collective_view() && collective_instances.insert(
+                view->as_collective_view(), view_mask))
+            view->add_nested_resource_ref(did);
           // If this is restricted then record it
           if (restricted)
             record_restriction(set_expr, true/*covers*/, view_mask, view);
@@ -14418,14 +14418,12 @@ namespace Legion {
                 target_insts.begin(); it != target_insts.end(); it++)
           {
             if (total_valid_instances.insert(it->first, it->second))
-            {
               it->first->add_nested_valid_ref(did);
-              // Check if this is a collective view we need to track
-              if (it->first->is_collective_view() &&
-                  collective_instances.insert(it->first->as_collective_view(),
-                                              it->second))
-                it->first->add_nested_resource_ref(did);
-            }
+            // Check if this is a collective view we need to track
+            if (it->first->is_collective_view() &&
+                collective_instances.insert(it->first->as_collective_view(),
+                                            it->second))
+              it->first->add_nested_resource_ref(did);
             // Check to see if there are any copies of this to filter
             // from the partially valid instances
             ViewExprMaskSets::iterator finder =
@@ -14487,14 +14485,12 @@ namespace Legion {
               continue;
             // Add it to the set
             if (total_valid_instances.insert(it->first, valid_mask))
-            {
               it->first->add_nested_valid_ref(did);
-              // Check if this is a collective view we need to track
-              if (it->first->is_collective_view() &&
-                  collective_instances.insert(it->first->as_collective_view(),
-                                              valid_mask))
-                it->first->add_nested_resource_ref(did);
-            }
+            // Check if this is a collective view we need to track
+            if (it->first->is_collective_view() &&
+                collective_instances.insert(it->first->as_collective_view(),
+                                            valid_mask))
+              it->first->add_nested_resource_ref(did);
             // Check to see if there are any copies of this to filter
             // from the partially valid instances
             ViewExprMaskSets::iterator finder = 
@@ -14802,12 +14798,12 @@ namespace Legion {
         partial_valid_instances[target].insert(expr, valid_mask);
         target->add_nested_valid_ref(did);
         expr->add_nested_expression_reference(did);
-        // Check to see if this is a collective view we need to record
-        if (target->is_collective_view() &&
-            collective_instances.insert(target->as_collective_view(),
-                                        valid_mask))
-          target->add_nested_resource_ref(did);
       }
+      // Check to see if this is a collective view we need to record
+      if (target->is_collective_view() &&
+          collective_instances.insert(target->as_collective_view(),
+                                      valid_mask))
+        target->add_nested_resource_ref(did);
       return need_rebuild;
     }
 
