@@ -91,7 +91,7 @@ TEST_P(AddressListTestsWithParams, CommitMax1DEntries)
   EXPECT_EQ(addrcursor.remaining(dim - 1), bytes);
   EXPECT_EQ(addrcursor.get_dim(), dim);
 
-  EXPECT_EQ(addrcursor.get_offset(), 8);
+  EXPECT_EQ(addrcursor.get_offset(), 0);
 
   addrcursor.advance(dim - 1, stride);
   EXPECT_EQ(addrcursor.remaining(dim - 1), bytes - stride);
