@@ -125,6 +125,7 @@ To get started with Legion, you'll need:
       * Note: Python 3.8 or newer is required for `tools/legion_prof.py`
   * *Optional*: Rust 1.74 or newer (used for Rust profiler)
   * *Optional*: CUDA 10.0 or newer (for NVIDIA GPUs)
+  * *Optional*: CUDA 11.7 or newer if using Legion's built-in complex reduction operators
   * *Optional*: [GASNet](https://gasnet.lbl.gov/) (for networking, see
      [installation instructions](http://legion.stanford.edu/gasnet/))
   * *Optional*: LLVM 7-14 (for dynamic code generation)
