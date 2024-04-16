@@ -572,6 +572,7 @@ namespace Realm {
     {
       AutoLock<> al(allocator_mutex);
 
+#ifdef DEBUG_REALM
       for(const PendingAlloc &alloc : pending_allocs) {
         if(alloc.inst == old_inst) {
           return AllocationResult::ALLOC_INSTANT_FAILURE;
@@ -583,6 +584,7 @@ namespace Realm {
           return AllocationResult::ALLOC_INSTANT_FAILURE;
         }
       }
+#endif
 
       size_t num_insts = new_insts.size();
       std::vector<RegionInstance> tags(num_insts);

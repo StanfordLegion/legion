@@ -63,6 +63,7 @@ TEST_F(InstanceRedistrictTest, EmptyLayouts)
   EXPECT_TRUE(poisoned);
 }
 
+#ifdef DEBUG_REALM
 TEST_F(InstanceRedistrictTest, PendingRelease)
 {
   IndexSpace<1> space(Rect<1>(Point<1>(0), Point<1>(7)));
@@ -83,3 +84,4 @@ TEST_F(InstanceRedistrictTest, PendingRelease)
   EXPECT_TRUE(poisoned);
   event.trigger();
 }
+#endif
