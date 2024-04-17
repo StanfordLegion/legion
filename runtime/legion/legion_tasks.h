@@ -576,8 +576,11 @@ namespace Legion {
       // It does NOT encapsulate the 'effects_complete' of this task
       // Only the actual operation completion event captures that
       ApUserEvent                           single_task_termination;
-      // An event describing the fence event for concurrent execution
-      ApEvent                               concurrent_fence_event;
+      // For concurrent index space tasks, this event will represent when
+      // all the point tasks have actually mapped, which is a necessary 
+      // precondition for any of the point tasks in the concurrent index
+      // space task to start running
+      ApEvent                               concurrent_mapped_event;
       // Event recording when all "effects" are complete
       // Structure recording when all "effects" are complete
       // The effects of the task include the following:
@@ -705,6 +708,8 @@ namespace Legion {
     public:
       // Return true if it is safe to delete the future
       bool fold_reduction_future(FutureInstance *instance, ApEvent effects);
+      void report_concurrent_mapping_failure(Processor processor,
+          const DomainPoint &one, const DomainPoint &two) const;
     protected:
       std::list<SliceTask*> slices;
       bool sliced;
@@ -740,8 +745,8 @@ namespace Legion {
       // on the same node but moved it to a different processor
       bool first_mapping;
     protected:
-      RtUserEvent concurrent_verified;
-      std::map<DomainPoint,Processor> concurrent_processors;
+      ApUserEvent concurrent_mapped;
+      std::map<Processor,DomainPoint> concurrent_processors;
       uint64_t concurrent_lamport_clock;
       VariantID concurrent_variant;
       bool concurrent_poisoned;
@@ -1284,8 +1289,10 @@ namespace Legion {
       virtual FutureMap create_future_map(TaskContext *ctx,
                     IndexSpace launch_space, IndexSpace shard_space);
       // Also virtual for control replication override
-      virtual RtEvent verify_concurrent_execution(const DomainPoint &point,
-                                                  Processor target);
+      virtual ApEvent rendezvous_concurrent_mapped(
+          const DomainPoint &point, Processor target);
+      virtual ApEvent rendezvous_concurrent_mapped(
+          std::vector<std::pair<Processor,DomainPoint> > &targets);
       virtual void concurrent_allreduce(SliceTask *slice,
           AddressSpaceID slice_space, size_t points, uint64_t lamport_clock,
           VariantID vid, bool poisoned);
@@ -1463,8 +1470,8 @@ namespace Legion {
           const DomainPoint &color, const DomainPoint &extent);
       void record_output_registered(RtEvent registered,
                                     std::set<RtEvent> &applied_events);
-      RtEvent verify_concurrent_execution(const DomainPoint &point,
-                                          Processor target);
+      ApEvent rendezvous_concurrent_mapped(const DomainPoint &point,
+                                           Processor target);
       void concurrent_allreduce(PointTask *point, ProcessorManager *manager,
           uint64_t lamport_clock, VariantID vid, bool poisoned);
       void finish_concurrent_allreduce(uint64_t lamport_clock, bool poisoned,
@@ -1536,7 +1543,7 @@ namespace Legion {
                                        Runtime *runtime, AddressSpaceID source);
       static void handle_collective_versioning_rendezvous(Deserializer &derez,
                                                           Runtime *runtime);
-      static void handle_verify_concurrent_execution(Deserializer &derez);
+      static void handle_rendezvous_concurrent_mapped(Deserializer &derez);
       static void handle_concurrent_allreduce_request(Deserializer &derez,
                                                       AddressSpaceID source);
       static void handle_concurrent_allreduce_response(Deserializer &derez);

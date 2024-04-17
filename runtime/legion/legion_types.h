@@ -824,7 +824,7 @@ namespace Legion {
       SLICE_REMOTE_MAPPED,
       SLICE_REMOTE_COMPLETE,
       SLICE_REMOTE_COMMIT,
-      SLICE_VERIFY_CONCURRENT_EXECUTION,
+      SLICE_RENDEZVOUS_CONCURRENT_MAPPED,
       SLICE_CONCURRENT_ALLREDUCE_REQUEST,
       SLICE_CONCURRENT_ALLREDUCE_RESPONSE,
       SLICE_FIND_INTRA_DEP,
@@ -1071,7 +1071,7 @@ namespace Legion {
       SEND_CONTROL_REPLICATION_CREATE_FILL_VIEW,
       SEND_CONTROL_REPLICATION_VERSIONING_RENDEZVOUS,
       SEND_CONTROL_REPLICATION_VIEW_RENDEZVOUS,
-      SEND_CONTROL_REPLICATION_CONCURRENT_EXECUTION_VALIDATION,
+      SEND_CONTROL_REPLICATION_CONCURRENT_MAPPING_RENDEZVOUS,
       SEND_CONTROL_REPLICATION_CONCURRENT_ALLREDUCE,
       SEND_CONTROL_REPLICATION_PROJECTION_TREE_EXCHANGE,
       SEND_CONTROL_REPLICATION_TIMEOUT_MATCH_EXCHANGE,
@@ -1153,7 +1153,7 @@ namespace Legion {
         "Slice Remote Mapped",                                        \
         "Slice Remote Complete",                                      \
         "Slice Remote Commit",                                        \
-        "Slice Verify Concurrent Execution",                          \
+        "Slice Rendezvous Concurrent Mapped",                         \
         "Slice Concurrent Allreduce Request",                         \
         "Slice Concurrent Allreduce Response",                        \
         "Slice Find Intra-Space Dependence",                          \
@@ -1400,7 +1400,7 @@ namespace Legion {
         "Control Replication Collective Create Fill View",            \
         "Control Replication Collective Versioning Rendezvous",       \
         "Control Replication Collective View Rendezvous",             \
-        "Control Replication Collective Concurrent Execution Validation",\
+        "Control Replication Collective Concurrent Mapping Rendezvous",\
         "Control Replication Collective Concurrent Allreduce",        \
         "Control Replication Collective Projection Tree Exchange",    \
         "Control Replication Collective Timeout Match Exchange",      \
