@@ -990,7 +990,7 @@ namespace Legion {
       collective_check_id = 0;
       slice_sharding_output = false;
       output_bar = RtBarrier::NO_RT_BARRIER;
-      concurrent_validator = NULL;
+      concurrent_mapping_rendezvous = NULL;
       concurrent_exchange = NULL;
 #ifdef DEBUG_LEGION
       sharding_collective = NULL;
@@ -1012,8 +1012,8 @@ namespace Legion {
         delete broadcast_collective;
       if (output_size_collective != NULL)
         delete output_size_collective;
-      if (concurrent_validator != NULL)
-        delete concurrent_validator;
+      if (concurrent_mapping_rendezvous != NULL)
+        delete concurrent_mapping_rendezvous;
       if (concurrent_exchange != NULL)
         delete concurrent_exchange;
 #ifdef DEBUG_LEGION
@@ -1236,11 +1236,11 @@ namespace Legion {
         }
         if (concurrent_task)
         {
+          concurrent_mapping_rendezvous->perform_rendezvous(
+              concurrent_processors, ApUserEvent::NO_AP_USER_EVENT);
           concurrent_exchange->exchange(concurrent_slices,
               concurrent_lamport_clock, concurrent_poisoned,
               concurrent_task_barrier, concurrent_variant, 0/*points*/);
-          if (concurrent_validator != NULL)
-            concurrent_validator->perform_validation(concurrent_processors);
         }
         if (redop > 0)
           finish_index_task_reduction();
@@ -1302,6 +1302,9 @@ namespace Legion {
 #endif
         impl->set_sharding_function(sharding_function);
       }
+      // We know all the points are going to be issues so no need for this
+      if (concurrent_mapping_rendezvous != NULL)
+        concurrent_mapping_rendezvous->elide_collective();
       // If it's empty we're done, otherwise we do the replay
       if (!internal_space.exists())
       {
@@ -1316,8 +1319,6 @@ namespace Legion {
           concurrent_exchange->exchange(concurrent_slices,
               concurrent_lamport_clock, concurrent_poisoned,
               concurrent_task_barrier, concurrent_variant, 0/*points*/);
-          if (concurrent_validator != NULL)
-            concurrent_validator->elide_collective();
         }
         // We have no local points, so we can just trigger
         if (serdez_redop_fns == NULL)
@@ -1613,15 +1614,14 @@ namespace Legion {
         collective_check_id = ctx->get_next_collective_index(COLLECTIVE_LOC_76);
       if (concurrent_task)
       {
+        const size_t expected_points = launch_space->get_volume();
         concurrent_exchange = new ConcurrentAllreduce(COLLECTIVE_LOC_79, ctx,
-            launch_space->get_volume());
+            expected_points);
         complete_preconditions.insert(concurrent_exchange->get_done_event());
-        if (!runtime->unsafe_mapper)
-        {
-          concurrent_validator = new ConcurrentExecutionValidator(this,
-              COLLECTIVE_LOC_104, ctx, 0/*owner shard*/);
-          complete_preconditions.insert(concurrent_validator->get_done_event());
-        }
+        concurrent_mapping_rendezvous = new ConcurrentMappingRendezvous(this,
+              COLLECTIVE_LOC_104, ctx, 0/*owner shard*/, expected_points);
+        complete_preconditions.insert(
+            concurrent_mapping_rendezvous->get_done_event());
       }
     } 
 
@@ -1660,29 +1660,82 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    RtEvent ReplIndexTask::verify_concurrent_execution(const DomainPoint &point,
-                                                       Processor target)
+    ApEvent ReplIndexTask::rendezvous_concurrent_mapped(
+                                     const DomainPoint &point, Processor target)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(concurrent_task);
-      assert(concurrent_validator != NULL);
+      assert(concurrent_mapping_rendezvous != NULL);
 #endif
       bool done = false;
+      ApUserEvent mapped;
       {
         AutoLock o_lock(op_lock);
+        if (concurrent_processors.empty())
+        {
 #ifdef DEBUG_LEGION
-        assert(concurrent_processors.find(point) == 
-                concurrent_processors.end());
+          assert(!concurrent_mapped.exists());
+#endif
+          concurrent_mapped = Runtime::create_ap_user_event(NULL);
+        }
+        mapped = concurrent_mapped;
+        std::map<Processor,DomainPoint>::const_iterator finder =
+          concurrent_processors.find(target);
+        if (finder != concurrent_processors.end())
+          report_concurrent_mapping_failure(target, point, finder->second);
+#ifdef DEBUG_LEGION
         assert(concurrent_processors.size() < total_points);
 #endif
-        concurrent_processors[point] = target;
+        concurrent_processors[target] = point;
         done = (concurrent_processors.size() == total_points);
       }
-      const RtEvent result = concurrent_validator->get_done_event();
       if (done)
-        concurrent_validator->perform_validation(concurrent_processors);
-      return result;
+        concurrent_mapping_rendezvous->perform_rendezvous(
+            concurrent_processors, mapped);
+      return mapped;
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent ReplIndexTask::rendezvous_concurrent_mapped(
+                         std::vector<std::pair<Processor,DomainPoint> > &points)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(concurrent_task);
+      assert(concurrent_mapping_rendezvous != NULL);
+#endif
+      bool done = false;
+      ApUserEvent mapped;
+      {
+        AutoLock o_lock(op_lock);
+        if (concurrent_processors.empty())
+        {
+#ifdef DEBUG_LEGION
+          assert(!concurrent_mapped.exists());
+#endif
+          concurrent_mapped = Runtime::create_ap_user_event(NULL);
+        }
+        mapped = concurrent_mapped;
+        for (std::vector<std::pair<Processor,DomainPoint> >::iterator it =
+              points.begin(); it != points.end(); it++)
+        {
+          std::map<Processor,DomainPoint>::const_iterator finder =
+            concurrent_processors.find(it->first);
+          if (finder != concurrent_processors.end())
+            report_concurrent_mapping_failure(it->first,
+                it->second, finder->second);
+          concurrent_processors.emplace(*it);
+        }
+#ifdef DEBUG_LEGION
+        assert(concurrent_processors.size() <= total_points);
+#endif
+        done = (concurrent_processors.size() == total_points);
+      }
+      if (done)
+        concurrent_mapping_rendezvous->perform_rendezvous(
+            concurrent_processors, mapped);
+      return mapped;
     }
 
     //--------------------------------------------------------------------------
@@ -16455,81 +16508,88 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    ConcurrentExecutionValidator::ConcurrentExecutionValidator(
+    ConcurrentMappingRendezvous::ConcurrentMappingRendezvous(
         ReplIndexTask *own, CollectiveIndexLocation loc,
-        ReplicateContext *ctx, ShardID target)
-      : GatherCollective(loc, ctx, target), owner(own)
+        ReplicateContext *ctx, ShardID target, size_t points)
+      : GatherCollective(loc, ctx, target), owner(own), expected_points(points)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    void ConcurrentExecutionValidator::pack_collective(Serializer &rez) const
+    void ConcurrentMappingRendezvous::pack_collective(Serializer &rez) const
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(all_mapped_event.exists() != concurrent_processors.empty());
+#endif
       rez.serialize<size_t>(concurrent_processors.size());
-      for (std::map<DomainPoint,Processor>::const_iterator it =
+      for (std::map<Processor,DomainPoint>::const_iterator it =
             concurrent_processors.begin(); it != 
             concurrent_processors.end(); it++)
       {
         rez.serialize(it->first);
         rez.serialize(it->second);
       }
+      rez.serialize(all_mapped_event);
     }
 
     //--------------------------------------------------------------------------
-    void ConcurrentExecutionValidator::unpack_collective(Deserializer &derez)
+    void ConcurrentMappingRendezvous::unpack_collective(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       size_t num_points;
       derez.deserialize(num_points);
       for (unsigned idx = 0; idx < num_points; idx++)
       {
+        Processor proc;
+        derez.deserialize(proc);
         DomainPoint point;
         derez.deserialize(point);
-#ifdef DEBUG_LEGION
-        assert(concurrent_processors.find(point) == 
-            concurrent_processors.end());
-#endif
-        derez.deserialize(concurrent_processors[point]);
+        std::map<Processor,DomainPoint>::const_iterator finder =
+          concurrent_processors.find(proc);
+        if (finder != concurrent_processors.end())
+          owner->report_concurrent_mapping_failure(proc, point, finder->second);
+        concurrent_processors[proc] = point;
       }
-    }
-
-    //--------------------------------------------------------------------------
-    RtEvent ConcurrentExecutionValidator::post_gather(void)
-    //--------------------------------------------------------------------------
-    {
-      std::map<Processor,DomainPoint> inverted;
-      for (std::map<DomainPoint,Processor>::const_iterator it =
-            concurrent_processors.begin(); it != 
-            concurrent_processors.end(); it++)
+      ApUserEvent upstream;
+      derez.deserialize(upstream);
+      if (upstream.exists())
       {
-        std::map<Processor,DomainPoint>::const_iterator finder = 
-          inverted.find(it->second);
-        if (finder != inverted.end())
-        {
-          MapperManager *mapper = 
-            owner->runtime->find_mapper(owner->current_proc, owner->map_id);
-          // TODO: update this error message to name the bad points
-          REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
-              "Mapper %s performed illegal mapping of concurrent index "
-              "space task %s (UID %lld) by mapping multiple points to "
-              "the same processor " IDFMT ". All point tasks must be "
-              "mapped to different processors for concurrent execution "
-              "of index space tasks.", mapper->get_mapper_name(),
-              owner->get_task_name(), owner->get_unique_id(), it->second.id)
-        }
-        inverted[it->second] = it->first;
+        if (!all_mapped_event.exists())
+          all_mapped_event = Runtime::create_ap_user_event(NULL);
+        Runtime::trigger_event(NULL, upstream, all_mapped_event);
       }
-      return GatherCollective::post_gather();
+#ifdef DEBUG_LEGION
+      assert(concurrent_processors.size() <= expected_points);
+#endif
+      if (concurrent_processors.size() == expected_points)
+      {
+#ifdef DEBUG_LEGION
+        assert(all_mapped_event.exists());
+#endif
+        Runtime::trigger_event(NULL, all_mapped_event);
+        all_mapped_event = ApUserEvent::NO_AP_USER_EVENT;
+        concurrent_processors.clear();
+      }
     }
 
     //--------------------------------------------------------------------------
-    void ConcurrentExecutionValidator::perform_validation(
-                                    std::map<DomainPoint,Processor> &processors)
+    void ConcurrentMappingRendezvous::perform_rendezvous(
+            std::map<Processor,DomainPoint> &processors, ApUserEvent all_mapped)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(all_mapped.exists() != processors.empty());
+#endif
       concurrent_processors.swap(processors);
+      all_mapped_event = all_mapped;
+      if (concurrent_processors.size() == expected_points)
+      {
+        Runtime::trigger_event(NULL, all_mapped_event);
+        all_mapped_event = ApUserEvent::NO_AP_USER_EVENT;
+        concurrent_processors.clear();
+      }
       perform_collective_async();
     }
 
