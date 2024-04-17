@@ -5354,7 +5354,7 @@ namespace Realm {
         assert(datalen > sizeof(local_hostname));
         gethostname(local_hostname, sizeof(local_hostname));
         if((strncmp(local_hostname, static_cast<const char *>(data),
-                    sizeof(local_hostname)) != 0) ||
+                    sizeof(local_hostname)) != 0) &&
            (args.hostid != gethostid())) {
           log_cudaipc.info() << "Sender " << sender
                              << " is not an ipc-capable node, skipping import";
