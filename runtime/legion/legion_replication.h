@@ -1481,28 +1481,31 @@ namespace Legion {
     };
 
     /**
-     * \class ConcurrentExecutionValidator
+     * \class ConcurrentMappingRendezvous
      * This collective helps to validate the safety of the execution of
      * concurrent index space task launches to ensure that all the point
      * tasks have been mapped to different processors.
      */
-    class ConcurrentExecutionValidator : public GatherCollective {
+    class ConcurrentMappingRendezvous : public GatherCollective {
     public:
-      ConcurrentExecutionValidator(ReplIndexTask *owner,
-          CollectiveIndexLocation loc, ReplicateContext *ctx, ShardID target);
-      virtual ~ConcurrentExecutionValidator(void) { }
+      ConcurrentMappingRendezvous(ReplIndexTask *owner,
+          CollectiveIndexLocation loc, ReplicateContext *ctx,
+          ShardID target, size_t expected_points);
+      virtual ~ConcurrentMappingRendezvous(void) { }
     public:
       virtual MessageKind get_message_kind(void) const
-        { return SEND_CONTROL_REPLICATION_CONCURRENT_EXECUTION_VALIDATION; }
+        { return SEND_CONTROL_REPLICATION_CONCURRENT_MAPPING_RENDEZVOUS; }
       virtual void pack_collective(Serializer &rez) const;
       virtual void unpack_collective(Deserializer &derez);
-      virtual RtEvent post_gather(void);
     public:
-      void perform_validation(std::map<DomainPoint,Processor> &processors);
+      void perform_rendezvous(std::map<Processor,DomainPoint> &processors,
+                              ApUserEvent all_mapped_event);
     public:
       ReplIndexTask *const owner;
+      const size_t expected_points;
     protected:
-      std::map<DomainPoint,Processor> concurrent_processors;
+      std::map<Processor,DomainPoint> concurrent_processors;
+      ApUserEvent all_mapped_event;
     };
     
     /**
@@ -1979,8 +1982,10 @@ namespace Legion {
       void set_sharding_function(ShardingID functor,ShardingFunction *function);
       virtual FutureMap create_future_map(TaskContext *ctx,
                     IndexSpace launch_space, IndexSpace shard_space);
-      virtual RtEvent verify_concurrent_execution(const DomainPoint &point,
-                                                  Processor target);
+      virtual ApEvent rendezvous_concurrent_mapped(
+          const DomainPoint &point, Processor target);
+      virtual ApEvent rendezvous_concurrent_mapped(
+          std::vector<std::pair<Processor,DomainPoint> > &targets);
       virtual void concurrent_allreduce(SliceTask *slice,
           AddressSpaceID slice_space, size_t points, uint64_t lamport_clock,
           VariantID vid, bool poisoned);
@@ -2015,7 +2020,7 @@ namespace Legion {
       std::set<std::pair<DomainPoint,ShardID> > unique_intra_space_deps;
     protected:
       // For setting up concurrent execution
-      ConcurrentExecutionValidator *concurrent_validator;
+      ConcurrentMappingRendezvous *concurrent_mapping_rendezvous;
       ConcurrentAllreduce *concurrent_exchange;
 #ifdef DEBUG_LEGION
     public:

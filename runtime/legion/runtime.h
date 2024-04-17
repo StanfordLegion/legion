@@ -3173,8 +3173,8 @@ namespace Legion {
       void send_slice_remote_mapped(Processor target, Serializer &rez);
       void send_slice_remote_complete(Processor target, Serializer &rez);
       void send_slice_remote_commit(Processor target, Serializer &rez);
-      void send_slice_verify_concurrent_execution(Processor target,
-                                                  Serializer &rez);
+      void send_slice_rendezvous_concurrent_mapped(Processor target,
+                                                   Serializer &rez);
       void send_slice_concurrent_allreduce_request(Processor target,
                                                    Serializer &rez);
       void send_slice_concurrent_allreduce_response(AddressSpaceID target,
@@ -3597,7 +3597,7 @@ namespace Legion {
                                       AddressSpaceID source);
       void handle_slice_remote_complete(Deserializer &derez);
       void handle_slice_remote_commit(Deserializer &derez);
-      void handle_slice_verify_concurrent_execution(Deserializer &derez);
+      void handle_slice_rendezvous_concurrent_mapped(Deserializer &derez);
       void handle_slice_concurrent_allreduce_request(Deserializer &derez,
                                                      AddressSpaceID source);
       void handle_slice_concurrent_allreduce_response(Deserializer &derez);
@@ -5857,7 +5857,7 @@ namespace Legion {
           return TASK_VIRTUAL_CHANNEL;
         case SLICE_REMOTE_COMMIT:
           return TASK_VIRTUAL_CHANNEL;
-        case SLICE_VERIFY_CONCURRENT_EXECUTION:
+        case SLICE_RENDEZVOUS_CONCURRENT_MAPPED:
           break;
         case SLICE_CONCURRENT_ALLREDUCE_REQUEST:
           break;
@@ -6326,7 +6326,7 @@ namespace Legion {
         case SEND_CONTROL_REPLICATION_CREATE_FILL_VIEW:
         case SEND_CONTROL_REPLICATION_VERSIONING_RENDEZVOUS:
         case SEND_CONTROL_REPLICATION_VIEW_RENDEZVOUS:
-        case SEND_CONTROL_REPLICATION_CONCURRENT_EXECUTION_VALIDATION:
+        case SEND_CONTROL_REPLICATION_CONCURRENT_MAPPING_RENDEZVOUS:
         case SEND_CONTROL_REPLICATION_CONCURRENT_ALLREDUCE:
         case SEND_CONTROL_REPLICATION_PROJECTION_TREE_EXCHANGE:
         case SEND_CONTROL_REPLICATION_TIMEOUT_MATCH_EXCHANGE:
