@@ -2356,9 +2356,7 @@ namespace Legion {
       // no need to copy the control replication map
       this->selected_variant  = rhs->selected_variant;
       this->task_priority     = rhs->task_priority;
-      this->shard_manager     = rhs->shard_manager;
-      if (this->shard_manager != NULL)
-        this->shard_manager->add_base_gc_ref(SINGLE_TASK_REF);
+      // DON'T CLONE THE SHARD MANAGER! (will be set by the caller)
       // For now don't copy anything else below here
       // In the future we may need to copy the profiling requests
     }
@@ -7918,7 +7916,7 @@ namespace Legion {
       stealable = false;
       replicate = false;
       shard_manager = manager;
-      shard_manager->add_base_gc_ref(SINGLE_TASK_REF);
+      shard_manager->add_base_resource_ref(SINGLE_TASK_REF);
       selected_variant = variant;
       shard_barrier = shard_manager->get_shard_task_barrier();
       // If we have any region requirements then they are all collective
@@ -7950,7 +7948,7 @@ namespace Legion {
       replicate = false;
       parent_ctx = parent;
       shard_manager = manager;
-      shard_manager->add_base_gc_ref(SINGLE_TASK_REF);
+      shard_manager->add_base_resource_ref(SINGLE_TASK_REF);
       selected_variant = variant;
       shard_barrier = shard_manager->get_shard_task_barrier();
       // If we have any region requirements then they are all collective
@@ -7990,7 +7988,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Set our shard manager to NULL since we are not supposed to delete it
-      if (shard_manager->remove_base_gc_ref(SINGLE_TASK_REF))
+      if (shard_manager->remove_base_resource_ref(SINGLE_TASK_REF))
         delete shard_manager;
       shard_manager = NULL;
       SingleTask::deactivate(false/*free*/);

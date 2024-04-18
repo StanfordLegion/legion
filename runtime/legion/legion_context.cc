@@ -7271,6 +7271,8 @@ namespace Legion {
         if (it->is_mapped())
           it->impl->unmap_region();
       }
+      if (!external)
+        inline_regions.clear();
     }
 
     //--------------------------------------------------------------------------
