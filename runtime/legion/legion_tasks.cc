@@ -2457,7 +2457,15 @@ namespace Legion {
         derez.deserialize(num_future_memories);
         future_memories.resize(num_future_memories);
         for (unsigned idx = 0; idx < num_future_memories; idx++)
+        {
           derez.deserialize(future_memories[idx]);
+          const RtEvent future_mapped =
+            futures[idx].impl->request_application_instance(
+                future_memories[idx], this, unique_op_id,
+                future_memories[idx].address_space());
+          if (future_mapped.exists())
+            ready_events.insert(future_mapped);
+        }
         size_t num_task_requests;
         derez.deserialize(num_task_requests);
         if (num_task_requests > 0)
@@ -3470,7 +3478,6 @@ namespace Legion {
 #ifdef LEGION_SPY
       LegionSpy::log_replay_operation(unique_op_id);
 #endif
-      tpl->register_operation(this);
       tpl->get_mapper_output(this, selected_variant, task_priority,
           perform_postmap, target_processors, future_memories,
           physical_instances);
@@ -4119,12 +4126,10 @@ namespace Legion {
       // Check to see if we need to make a remote trace recorder
       if (is_remote() && is_recording() && (remote_trace_recorder == NULL))
       {
-        const RtUserEvent remote_applied = Runtime::create_rt_user_event();
         remote_trace_recorder = new RemoteTraceRecorder(runtime,
-            orig_proc.address_space(), runtime->address_space, 
-            get_trace_local_id(), tpl, remote_applied);
+            orig_proc.address_space(), get_trace_local_id(), tpl,
+            0/*did*/, 0/*tid*/, map_applied_conditions);
         remote_trace_recorder->add_recorder_reference();
-        map_applied_conditions.insert(remote_applied);
 #ifdef DEBUG_LEGION
         assert(!single_task_termination.exists());
 #endif
@@ -4345,11 +4350,6 @@ namespace Legion {
         RtEvent record_replay_precondition;
         if (!map_applied_conditions.empty())
         {
-          // If we have a remote trace recorder, make sure we don't
-          // accidentally include ourselves in the preconditions for
-          // ourself which will cause a recording deadlock
-          if (remote_trace_recorder != NULL)
-            map_applied_conditions.erase(remote_trace_recorder->applied_event);
           record_replay_precondition =
             Runtime::merge_events(map_applied_conditions);
           map_applied_conditions.clear();
@@ -4537,7 +4537,7 @@ namespace Legion {
         }
         log_mapping_decision(idx, regions[idx], result, true/*postmapping*/);
         // TODO: Implement physical tracing for postmapped regions
-        if (is_memoizing())
+        if (is_recording())
           assert(false);
         // Register this with a no-event so that the instance can
         // be used as soon as it is valid from the copy to it
@@ -6191,9 +6191,6 @@ namespace Legion {
     void IndividualTask::perform_base_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(memo_state != MEMO_REQ);
-#endif
       if (runtime->check_privileges && 
           !is_top_level_task() && !local_function)
         perform_privilege_checks();
@@ -7123,6 +7120,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       slice_owner->record_point_mapped(mapped_event);
+      tpl->register_operation(this);
       SingleTask::trigger_replay();
     }
 
@@ -8524,6 +8522,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ShardTask::handle_find_trace_local_sets(Deserializer &derez, 
+                                                 AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      get_replicate_context()->handle_find_trace_local_sets(derez, source);
+    }
+
+    //--------------------------------------------------------------------------
     ApBarrier ShardTask::handle_find_trace_shard_event(size_t template_index,
                                             ApEvent event, ShardID remote_shard)
     //--------------------------------------------------------------------------
@@ -9552,9 +9558,6 @@ namespace Legion {
     void IndexTask::perform_base_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(memo_state != MEMO_REQ);
-#endif 
       if (runtime->check_privileges)
         perform_privilege_checks();
       // To be correct with the new scheduler we also have to 
@@ -10920,7 +10923,6 @@ namespace Legion {
 #ifdef LEGION_SPY
       LegionSpy::log_replay_operation(unique_op_id);
 #endif
-      tpl->register_operation(this);
       // If we're going to be doing an output reduction do that now
       if (redop > 0)
       {

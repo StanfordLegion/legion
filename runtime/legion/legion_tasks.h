@@ -1137,6 +1137,8 @@ namespace Legion {
       void handle_created_region_contexts(Deserializer &derez,
                                           std::set<RtEvent> &applied);
       void handle_trace_update(Deserializer &derez, AddressSpaceID source);
+      void handle_find_trace_local_sets(Deserializer &derez,
+                                        AddressSpaceID source);
       ApBarrier handle_find_trace_shard_event(size_t temp_index, ApEvent event,
                                               ShardID remote_shard);
       ApBarrier handle_find_trace_shard_frontier(size_t temp_index, ApEvent event,

@@ -148,7 +148,7 @@ namespace Legion {
     struct LogicalTraceInfo {
     public:
       LogicalTraceInfo(Operation *op, unsigned idx,
-                       const RegionRequirement &r);
+          const RegionRequirement &r, const FieldMask &mask);
     public:
       LogicalTrace *const trace;
       const unsigned req_idx;
@@ -206,8 +206,7 @@ namespace Legion {
       virtual bool is_recording(void) const = 0;
       virtual void add_recorder_reference(void) = 0;
       virtual bool remove_recorder_reference(void) = 0;
-      virtual void pack_recorder(Serializer &rez, 
-                                 std::set<RtEvent> &applied) = 0; 
+      virtual void pack_recorder(Serializer &rez) = 0;
     public:
       virtual void record_completion_event(ApEvent lhs,
                              unsigned op_kind, const TraceLocalID &tlid) = 0;
@@ -355,9 +354,10 @@ namespace Legion {
         REMOTE_TRACE_BARRIER_ARRIVAL,
       };
     public:
-      RemoteTraceRecorder(Runtime *rt, AddressSpaceID origin,AddressSpace local,
+      RemoteTraceRecorder(Runtime *rt, AddressSpaceID origin,
                           const TraceLocalID &tlid, PhysicalTemplate *tpl, 
-                          RtUserEvent applied_event);
+                          DistributedID repl_did, TraceID tid,
+                          std::set<RtEvent> &applied_events);
       RemoteTraceRecorder(const RemoteTraceRecorder &rhs) = delete;
       virtual ~RemoteTraceRecorder(void);
     public:
@@ -366,8 +366,7 @@ namespace Legion {
       virtual bool is_recording(void) const { return true; }
       virtual void add_recorder_reference(void);
       virtual bool remove_recorder_reference(void);
-      virtual void pack_recorder(Serializer &rez, 
-                                 std::set<RtEvent> &applied);
+      virtual void pack_recorder(Serializer &rez); 
     public:
       virtual void record_completion_event(ApEvent lhs, unsigned op_kind,
                                            const TraceLocalID &tlid);
@@ -480,8 +479,9 @@ namespace Legion {
       virtual void record_future_allreduce(const TraceLocalID &tlid,
           const std::vector<Memory> &target_memories, size_t future_size);
     public:
-      static RemoteTraceRecorder* unpack_remote_recorder(Deserializer &derez,
-                                    Runtime *runtime, const TraceLocalID &tlid);
+      static PhysicalTraceRecorder* unpack_remote_recorder(Deserializer &derez,
+                                    Runtime *runtime, const TraceLocalID &tlid,
+                                    std::set<RtEvent> &applied_events);
       static void handle_remote_update(Deserializer &derez, 
                   Runtime *runtime, AddressSpaceID source);
       static void handle_remote_response(Deserializer &derez);
@@ -491,12 +491,12 @@ namespace Legion {
     public:
       Runtime *const runtime;
       const AddressSpaceID origin_space;
-      const AddressSpaceID local_space;
       PhysicalTemplate *const remote_tpl;
-      const RtUserEvent applied_event;
+      const DistributedID repl_did;
+      const TraceID trace_id;
     protected:
       mutable LocalLock applied_lock;
-      std::set<RtEvent> applied_events;
+      std::set<RtEvent> &applied_events;
     };
 
     /**
@@ -765,9 +765,9 @@ namespace Legion {
                           RegionNode *node, Operation *op,
                           std::set<RtEvent> &applied) const;
     public:
-      void pack_trace_info(Serializer &rez, std::set<RtEvent> &applied) const;
+      void pack_trace_info(Serializer &rez) const;
       static PhysicalTraceInfo unpack_trace_info(Deserializer &derez,
-                                                 Runtime *runtime);
+          Runtime *runtime, std::set<RtEvent> &applied_events);
     private:
       inline void sanity_check(void) const
         {
@@ -2298,7 +2298,8 @@ namespace Legion {
     public:
       RemoteCollectiveAnalysis(size_t ctx_index, unsigned req_index,
                                IndexSpaceID match_space, RemoteOp *op,
-                               Deserializer &derez, Runtime *runtime);
+                               Deserializer &derez, Runtime *runtime,
+                               std::set<RtEvent> &applied_events);
       virtual ~RemoteCollectiveAnalysis(void);
       virtual size_t get_context_index(void) const { return context_index; }
       virtual unsigned get_requirement_index(void) const
@@ -2311,7 +2312,7 @@ namespace Legion {
       virtual bool remove_analysis_reference(void) 
         { return remove_reference(); }
       static RemoteCollectiveAnalysis* unpack(Deserializer &derez,
-                                              Runtime *runtime);
+          Runtime *runtime, std::set<RtEvent> &applied_events);
     public:
       const size_t context_index;
       const unsigned requirement_index;
@@ -3367,7 +3368,7 @@ namespace Legion {
                                 std::set<RtEvent> &applied_events,
                                 const bool already_deferred = false);
       void update_set(UpdateAnalysis &analysis, IndexSpaceExpression *expr,
-                      const bool expr_covers, FieldMask user_mask,
+                      const bool expr_covers, const FieldMask &user_mask,
                       std::set<RtEvent> &applied_events,
                       const bool already_deferred = false);
       void acquire_restrictions(AcquireAnalysis &analysis, 
@@ -3443,12 +3444,19 @@ namespace Legion {
       void update_tracing_reduction_views(InstanceView *src_view,
                                    InstanceView *dst_view,
                                    IndexSpaceExpression *expr,
-                                   const FieldMask &copy_mask);
-      RtEvent capture_trace_conditions(TraceConditionSet *target,
-                                       AddressSpaceID target_space,
-                                       IndexSpaceExpression *expr,
-                                       const FieldMask &mask,
-                                       RtUserEvent ready_event);
+                                   const FieldMask &copy_mask,
+                                   bool across);
+      // Invalidate restricted views that shouldn't be postconditions
+      void invalidate_tracing_restricted_views(
+                  const FieldMaskSet<InstanceView> &restricted_views,
+                  IndexSpaceExpression *expr, FieldMask &restricted_mask);
+      RtEvent capture_trace_conditions(PhysicalTemplate *target,
+                                   AddressSpaceID target_space,
+                                   unsigned parent_req_index,
+                                   std::atomic<unsigned> *result,
+                                   RtUserEvent ready_event =
+                                    RtUserEvent::NO_RT_USER_EVENT);
+      AddressSpaceID select_collective_trace_capture_space(void);
     protected:
       void defer_analysis(AutoTryLock &eq, PhysicalAnalysis &analysis,
                           const FieldMask &mask,

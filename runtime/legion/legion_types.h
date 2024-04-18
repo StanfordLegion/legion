@@ -455,8 +455,6 @@ namespace Legion {
       LG_FREE_EAGER_INSTANCE_TASK_ID,
       LG_MALLOC_INSTANCE_TASK_ID,
       LG_FREE_INSTANCE_TASK_ID,
-      LG_DEFER_TRACE_PRECONDITION_TASK_ID,
-      LG_DEFER_TRACE_POSTCONDITION_TASK_ID,
       LG_DEFER_TRACE_UPDATE_TASK_ID,
       LG_FINALIZE_OUTPUT_ID,
       LG_DEFER_DELETE_FUTURE_INSTANCE_TASK_ID,
@@ -568,8 +566,6 @@ namespace Legion {
         "Free Eager Instance",                                    \
         "Malloc Instance",                                        \
         "Free Instance",                                          \
-        "Defer Trace Precondition Test",                          \
-        "Defer Trace Postcondition Test",                         \
         "Defer Trace Update",                                     \
         "Finalize Output Region Instance",                        \
         "Defer Delete Future Instance",                           \
@@ -918,9 +914,11 @@ namespace Legion {
       SEND_REPL_CREATED_REGIONS,
       SEND_REPL_TRACE_EVENT_REQUEST,
       SEND_REPL_TRACE_EVENT_RESPONSE,
+      SEND_REPL_TRACE_EVENT_TRIGGER,
       SEND_REPL_TRACE_FRONTIER_REQUEST,
       SEND_REPL_TRACE_FRONTIER_RESPONSE,
       SEND_REPL_TRACE_UPDATE,
+      SEND_REPL_FIND_TRACE_SETS,
       SEND_REPL_IMPLICIT_RENDEZVOUS,
       SEND_REPL_FIND_COLLECTIVE_VIEW,
       SEND_MAPPER_MESSAGE,
@@ -946,6 +944,8 @@ namespace Legion {
       SEND_REMOTE_CONTEXT_FIND_COLLECTIVE_VIEW_REQUEST,
       SEND_REMOTE_CONTEXT_FIND_COLLECTIVE_VIEW_RESPONSE,
       SEND_REMOTE_CONTEXT_REFINE_EQUIVALENCE_SETS,
+      SEND_REMOTE_CONTEXT_FIND_TRACE_LOCAL_SETS_REQUEST,
+      SEND_REMOTE_CONTEXT_FIND_TRACE_LOCAL_SETS_RESPONSE,
       SEND_COMPUTE_EQUIVALENCE_SETS_REQUEST,
       SEND_COMPUTE_EQUIVALENCE_SETS_RESPONSE,
       SEND_COMPUTE_EQUIVALENCE_SETS_PENDING,
@@ -1078,6 +1078,7 @@ namespace Legion {
       SEND_CONTROL_REPLICATION_MASK_EXCHANGE,
       SEND_CONTROL_REPLICATION_PREDICATE_EXCHANGE,
       SEND_CONTROL_REPLICATION_CROSS_PRODUCT_EXCHANGE,
+      SEND_CONTROL_REPLICATION_TRACING_SET_DEDUPLICATION,
       SEND_CONTROL_REPLICATION_SLOW_BARRIER,
       SEND_SHUTDOWN_NOTIFICATION,
       SEND_SHUTDOWN_RESPONSE,
@@ -1242,9 +1243,11 @@ namespace Legion {
         "Send Replicate Created Regions Return",                      \
         "Send Replicate Trace Event Request",                         \
         "Send Replicate Trace Event Response",                        \
+        "Send Replicate Trace Event Trigger",                         \
         "Send Replicate Trace Frontier Request",                      \
         "Send Replicate Trace Frontier Response",                     \
         "Send Replicate Trace Update",                                \
+        "Send Replicate Find Trace Local Sets",                       \
         "Send Replicate Implicit Rendezvous",                         \
         "Send Replicate Find or Create Collective View",              \
         "Send Mapper Message",                                        \
@@ -1270,6 +1273,8 @@ namespace Legion {
         "Send Remote Context Find Collective View Request",           \
         "Send Remote Context Find Collective View Response",          \
         "Send Remote Context Refine Equivalence Sets",                \
+        "Send Remote Context Find Trace Local Sets Request",          \
+        "Send Remote Context Find Trace Local Sets Response",         \
         "Send Compute Equivalence Sets Request",                      \
         "Send Compute Equivalence Sets Response",                     \
         "Send Compute Equivalence Sets Pending",                      \
@@ -1402,6 +1407,7 @@ namespace Legion {
         "Control Replication Collective Mask Exchange",               \
         "Control Replication Collective Predicate Exchange",          \
         "Control Replication Collective Cross Product Exchange",      \
+        "Control Replication Collective Tracing Set Deduplication",   \
         "Control Replication Collective Slow Barrier",                \
         "Send Shutdown Notification",                                 \
         "Send Shutdown Response",                                     \
@@ -1961,7 +1967,7 @@ namespace Legion {
       COLLECTIVE_LOC_64 = 64,
       COLLECTIVE_LOC_65 = 65,
       COLLECTIVE_LOC_66 = 66,
-      //COLLECTIVE_LOC_67 = 67,
+      COLLECTIVE_LOC_67 = 67,
       //COLLECTIVE_LOC_68 = 68,
       //COLLECTIVE_LOC_69 = 69,
       COLLECTIVE_LOC_70 = 70,
@@ -2146,11 +2152,9 @@ namespace Legion {
 
     // legion_trace.h
     class LogicalTrace;
-    class TraceCaptureOp;
-    class TraceCompleteOp;
-    class TraceReplayOp;
     class TraceBeginOp;
-    class TraceSummaryOp;
+    class TraceRecurrentOp;
+    class TraceCompleteOp;
     class PhysicalTrace;
     class TraceViewSet;
     class TraceConditionSet;
@@ -2307,11 +2311,9 @@ namespace Legion {
     class ReplAcquireOp;
     class ReplReleaseOp;
     class ReplTraceOp;
-    class ReplTraceCaptureOp;
-    class ReplTraceCompleteOp;
-    class ReplTraceReplayOp;
     class ReplTraceBeginOp;
-    class ReplTraceSummaryOp;
+    class ReplTraceRecurrentOp;
+    class ReplTraceCompleteOp;
     class ShardMapping;
     class CollectiveMapping;
     class ShardManager;
@@ -2446,7 +2448,7 @@ namespace Legion {
     friend class Internal::TimingOp;                        \
     friend class Internal::TunableOp;                       \
     friend class Internal::AllReduceOp;                     \
-    friend class Internal::TraceSummaryOp;                  \
+    friend class Internal::TraceRecurrentOp;                \
     friend class Internal::ExternalMappable;                \
     friend class Internal::ExternalTask;                    \
     friend class Internal::TaskOp;                          \

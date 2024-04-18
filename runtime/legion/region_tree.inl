@@ -5247,6 +5247,43 @@ namespace Legion {
         typed_tree->invalidate_shard_tree_remote(itr.rect, mask,
             context->runtime, invalidated, remote_shard_rects, local_shard);
     }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    void IndexSpaceNodeT<DIM,T>::find_trace_local_sets_kd_tree(EqKDTree *tree,
+        LocalLock *tree_lock, const FieldMask &mask, unsigned req_index,
+        ShardID local_shard, std::map<EquivalenceSet*,unsigned> &current_sets)
+    //--------------------------------------------------------------------------
+    {
+      DomainT<DIM,T> realm_index_space;
+      get_realm_index_space(realm_index_space, true/*tight*/);
+      EqKDTreeT<DIM,T> *typed_tree = tree->as_eq_kd_tree<DIM,T>();
+      // Need non-exclusive access to the tree for non-invalidations
+      AutoLock t_lock(*tree_lock,1,false/*exclusive*/);
+      for (Realm::IndexSpaceIterator<DIM,T> itr(realm_index_space);
+            itr.valid; itr.step())
+        typed_tree->find_trace_local_sets(itr.rect, mask, req_index,
+                                          local_shard, current_sets);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    void IndexSpaceNodeT<DIM,T>::find_shard_trace_local_sets_kd_tree(
+        EqKDTree *tree, LocalLock *tree_lock, const FieldMask &mask,
+        unsigned req_index, std::map<EquivalenceSet*,unsigned> &current_sets,
+        LegionMap<ShardID,FieldMask> &remote_shards, ShardID local_shard)
+    //--------------------------------------------------------------------------
+    {
+      DomainT<DIM,T> realm_index_space;
+      get_realm_index_space(realm_index_space, true/*tight*/);
+      EqKDTreeT<DIM,T> *typed_tree = tree->as_eq_kd_tree<DIM,T>();
+      // Need non-exclusive access to the tree for non-invalidations
+      AutoLock t_lock(*tree_lock,1,false/*exclusive*/);
+      for (Realm::IndexSpaceIterator<DIM,T> itr(realm_index_space);
+            itr.valid; itr.step())
+        typed_tree->find_shard_trace_local_sets(itr.rect, mask, req_index,
+            current_sets, remote_shards, local_shard);
+    }
     
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
@@ -8626,6 +8663,101 @@ namespace Legion {
       return overlap.pop_count();
     }
 
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    void EqKDNode<DIM,T>::find_trace_local_sets(const Rect<DIM,T> &rect,
+        const FieldMask &mask, unsigned req_index, ShardID local_shard,
+        std::map<EquivalenceSet*,unsigned> &local_sets) const
+    //--------------------------------------------------------------------------
+    {
+      if (this->bounds.empty())
+        return;
+#ifdef DEBUG_LEGION
+      assert(this->bounds.contains(rect));
+#endif
+      FieldMaskSet<EqKDNode<DIM,T> > to_traverse;
+      {
+        FieldMask remaining = mask;
+        AutoLock n_lock(node_lock,1,false/*exclusive*/);
+        if ((current_sets != NULL) &&
+            !(remaining * current_sets->get_valid_mask()))
+        {
+          for (typename FieldMaskSet<EquivalenceSet>::const_iterator it =
+                current_sets->begin(); it != current_sets->end(); it++)
+          {
+            if (mask * it->second)
+              continue;
+            local_sets[it->first] = req_index;
+          }
+          remaining -= current_sets->get_valid_mask();
+          if (!remaining)
+            return;
+        }
+        if ((previous_sets != NULL) &&
+            !(remaining * previous_sets->get_valid_mask()))
+        {
+          for (typename FieldMaskSet<EquivalenceSet>::const_iterator it =
+                previous_sets->begin(); it != previous_sets->end(); it++)
+          {
+            if (mask * it->second)
+              continue;
+            local_sets[it->first] = req_index;
+          }
+          remaining -= previous_sets->get_valid_mask();
+          if (!remaining)
+            return;
+        }
+        if ((lefts != NULL) && !(lefts->get_valid_mask() * remaining))
+        {
+#ifdef DEBUG_LEGION
+          assert(rights != NULL);
+          assert(!(rights->get_valid_mask() * remaining));
+#endif
+          for (typename FieldMaskSet<EqKDNode<DIM,T> >::const_iterator it =
+                lefts->begin(); it != lefts->end(); it++)
+          {
+            const FieldMask overlap = remaining & it->second;
+            if (!overlap)
+              continue;
+            if (!it->first->bounds.overlaps(rect))
+              continue;
+            to_traverse.insert(it->first, overlap);
+          }
+          for (typename FieldMaskSet<EqKDNode<DIM,T> >::const_iterator it =
+                rights->begin(); it != rights->end(); it++)
+          {
+            const FieldMask overlap = remaining & it->second;
+            if (!overlap)
+              continue;
+            if (!it->first->bounds.overlaps(rect))
+              continue;
+            to_traverse.insert(it->first, overlap);
+          }
+        }
+      }
+      for (typename FieldMaskSet<EqKDNode<DIM,T> >::const_iterator it =
+            to_traverse.begin(); it != to_traverse.end(); it++)
+      {
+        const Rect<DIM,T> overlap = it->first->bounds.intersection(rect);
+#ifdef DEBUG_LEGION
+        assert(!overlap.empty());
+#endif
+        it->first->find_trace_local_sets(overlap, it->second, req_index,
+                                         local_shard, local_sets);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    void EqKDNode<DIM,T>::find_shard_trace_local_sets(const Rect<DIM,T> &rect,
+        const FieldMask &mask, unsigned req_index,
+        std::map<EquivalenceSet*,unsigned> &current_sets,
+        LegionMap<ShardID,FieldMask> &remote_shards, ShardID local_shard)
+    //--------------------------------------------------------------------------
+    {
+      find_trace_local_sets(rect, mask, req_index, local_shard, current_sets);
+    }
+
     /////////////////////////////////////////////////////////////
     // Equivalence Set KD Sparse
     /////////////////////////////////////////////////////////////
@@ -8844,6 +8976,38 @@ namespace Legion {
       // should never be called on sparse nodes since they don't track
       assert(false);
       return 0;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    void EqKDSparse<DIM,T>::find_trace_local_sets(const Rect<DIM,T> &rect,
+        const FieldMask &mask, unsigned req_index, ShardID local_shard,
+        std::map<EquivalenceSet*,unsigned> &current_sets) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(this->bounds.contains(rect));
+#endif
+      for (typename std::vector<EqKDTreeT<DIM,T>*>::const_iterator it =
+            children.begin(); it != children.end(); it++)
+      {
+        const Rect<DIM,T> overlap = (*it)->bounds.intersection(rect);
+        if (overlap.empty())
+          continue;
+        (*it)->find_trace_local_sets(overlap, mask, req_index, local_shard,
+                                     current_sets);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    void EqKDSparse<DIM,T>::find_shard_trace_local_sets(const Rect<DIM,T> &rect,
+        const FieldMask &mask, unsigned req_index,
+        std::map<EquivalenceSet*,unsigned> &current_sets,
+        LegionMap<ShardID,FieldMask> &remote_shards, ShardID local_shard)
+    //--------------------------------------------------------------------------
+    {
+      find_trace_local_sets(rect, mask, req_index, local_shard, current_sets);
     }
 
     /////////////////////////////////////////////////////////////
@@ -9344,6 +9508,105 @@ namespace Legion {
       // should never be called on sharded nodes since they don't track
       assert(false);
       return 0;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    void EqKDSharded<DIM,T>::find_trace_local_sets(const Rect<DIM,T> &rect,
+        const FieldMask &mask, unsigned req_index, ShardID local_shard,
+        std::map<EquivalenceSet*,unsigned> &local_sets) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(lower <= local_shard);
+      assert(local_shard <= upper);
+#endif
+      EqKDTreeT<DIM,T> *next = right.load();
+      // Check to see if we've reached the bottom
+      if (next == NULL)
+      {
+        // No refinement yet, see if we need to make one
+        if ((lower == upper) || (get_total_volume() <= MIN_SPLIT_SIZE))
+        {
+          // No more refinements, see if the local shard is the lower shard
+          // and if it is whether we have a node to traverse
+          if (lower == local_shard)
+          {
+            EqKDTreeT<DIM,T> *local = left.load();
+            if (local != NULL)
+              local->find_trace_local_sets(rect, mask, req_index,
+                                           local_shard, local_sets);
+          }
+        }
+        // Else no need to create the refinement if it doesn't exist yet
+        return;
+      }
+#ifdef DEBUG_LEGION
+      assert(next != NULL);
+      assert(lower != upper);
+#endif
+      // We only need to traverse down the child that has our local shard
+      ShardID diff = upper - lower;
+      ShardID mid = lower + (diff  / 2);
+      if (local_shard <= mid)
+        next = left.load();
+      const Rect<DIM,T> next_overlap = next->bounds.intersection(rect);
+      if (!next_overlap.empty())
+        next->find_trace_local_sets(next_overlap, mask, req_index, 
+                                    local_shard, local_sets);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    void EqKDSharded<DIM,T>::find_shard_trace_local_sets(
+        const Rect<DIM,T> &rect, const FieldMask &mask, unsigned req_index,
+        std::map<EquivalenceSet*,unsigned> &local_sets,
+        LegionMap<ShardID,FieldMask> &remote_shards, ShardID local_shard)
+    //--------------------------------------------------------------------------
+    {
+      EqKDTreeT<DIM,T> *next = right.load();
+      // Check to see if we've reached the bottom
+      if (next == NULL)
+      {
+        // No refinement yet, see if we need to make one
+        if ((lower == upper) || (get_total_volume() <= MIN_SPLIT_SIZE))
+        {
+          // No more refinements, see if the local shard is the lower shard
+          // and we can make a local node or node
+          if (lower == local_shard)
+          {
+            EqKDTreeT<DIM,T> *local = left.load();
+            if (local == NULL)
+              local = refine_local();
+            local->find_shard_trace_local_sets(rect, mask, req_index,
+                local_sets, remote_shards, local_shard);
+          }
+          else
+            remote_shards[lower] |= mask;
+          // We're done
+          return;
+        }
+        else // Create the refinement
+        {
+          refine_node();
+          next = right.load();
+        }
+      }
+#ifdef DEBUG_LEGION
+      assert(next != NULL);
+#endif
+      const Rect<DIM,T> right_overlap = next->bounds.intersection(rect);
+      if (!right_overlap.empty())
+        next->find_shard_trace_local_sets(right_overlap, mask, req_index,
+            local_sets, remote_shards, local_shard);
+      next = left.load();
+#ifdef DEBUG_LEGION
+      assert(next != NULL);
+#endif
+      const Rect<DIM,T> left_overlap = next->bounds.intersection(rect);
+      if (!left_overlap.empty())
+        next->find_shard_trace_local_sets(left_overlap, mask, req_index,
+            local_sets, remote_shards, local_shard);
     }
 
     /////////////////////////////////////////////////////////////

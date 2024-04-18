@@ -7360,8 +7360,6 @@ class Operation(object):
         return True
 
     def perform_logical_analysis(self, init_fields, perform_checks):
-        if self.replayed and perform_checks:
-            return True
         # We need a context to do this
         assert self.context is not None
         # If this operation was predicated false, then there is nothing to do
@@ -7405,10 +7403,6 @@ class Operation(object):
 
     def perform_op_logical_verification(self, logical_op, previous_deps):
         if not self.predicate_result:
-            return True
-        # TODO: Remove this once we actually replay logical analysis correctly 
-        # under all tracing cases
-        if self.replayed or not self.predicate_result:
             return True
         # We need a context to do this
         assert logical_op.context is not None
