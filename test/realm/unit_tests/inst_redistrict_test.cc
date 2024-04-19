@@ -60,7 +60,7 @@ TEST_F(InstanceRedistrictTest, EmptyLayouts)
   Event e = inst.redistrict(nullptr, nullptr, 0, nullptr);
   bool poisoned = false;
   e.wait_faultaware(poisoned);
-  EXPECT_TRUE(poisoned);
+  EXPECT_FALSE(poisoned);
 }
 
 #ifdef DEBUG_REALM

@@ -956,13 +956,8 @@ namespace Realm {
                                          size_t num_layouts,
                                          const ProfilingRequestSet *prs, Event wait_on)
     {
-      assert(num_layouts > 0 || (layouts == nullptr && instances == nullptr));
-
-      Event event = GenEventImpl::create_genevent()->current_event();
-
-      if(num_layouts == 0) {
-        GenEventImpl::trigger(event, /*poisoned=*/true);
-        return event;
+      if(num_layouts == 0 || layouts == nullptr || instances == nullptr) {
+        return Event::NO_EVENT;
       }
 
       std::vector<RegionInstanceImpl *> insts(num_layouts);
@@ -976,6 +971,8 @@ namespace Realm {
         insts[i] = m_impl->new_instance();
         insts[i]->metadata.layout = layouts[i];
       }
+
+      Event event = GenEventImpl::create_genevent()->current_event();
 
       // Attempt to reuse allocated range of existing instance
       MemoryImpl::AllocationResult alloc_status =
