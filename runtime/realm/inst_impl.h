@@ -29,7 +29,6 @@
 #include "realm/event_impl.h"
 #include "realm/profiling.h"
 #include "realm/mem_impl.h"
-#include <vector>
 
 namespace Realm {
 

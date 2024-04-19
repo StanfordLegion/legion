@@ -977,7 +977,8 @@ namespace Realm {
         insts[i]->metadata.layout = layouts[i];
       }
 
-      auto alloc_status = m_impl->reuse_allocated_range(this, insts);
+      MemoryImpl::AllocationResult alloc_status =
+          m_impl->reuse_allocated_range(this, insts);
       if(alloc_status != MemoryImpl::ALLOC_INSTANT_SUCCESS) {
         for(size_t i = 0; i < num_layouts; i++) {
           insts[i]->recycle_instance();
