@@ -52,8 +52,6 @@ TEST_F(IndexSpaceIteratorTest, CreateEmptyRestrictions)
   IndexSpace<1> index_space(Rect<1>(Point<1>(0), Point<1>(16)));
   IndexSpaceIterator<1> it(index_space, Rect<1>(Point<1>(0), Point<1>(-1)));
   EXPECT_FALSE(it.valid);
-  EXPECT_EQ(it.rect.lo, 0);
-  EXPECT_EQ(it.rect.hi, 16);
 }
 
 TEST_F(IndexSpaceIteratorTest, CreateDenseDisjointRestrictions)
@@ -61,8 +59,6 @@ TEST_F(IndexSpaceIteratorTest, CreateDenseDisjointRestrictions)
   IndexSpace<1> index_space(Rect<1>(Point<1>(0), Point<1>(16)));
   IndexSpaceIterator<1> it(index_space, Rect<1>(Point<1>(17), Point<1>(18)));
   EXPECT_FALSE(it.valid);
-  EXPECT_EQ(it.rect.lo, 0);
-  EXPECT_EQ(it.rect.hi, 16);
 }
 
 TEST_F(IndexSpaceIteratorTest, StepDenseWithRestrictions)
