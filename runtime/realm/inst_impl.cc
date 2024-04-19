@@ -977,9 +977,11 @@ namespace Realm {
         insts[i]->metadata.layout = layouts[i];
       }
 
+      // Attempt to reuse allocated range of existing instance
       MemoryImpl::AllocationResult alloc_status =
           m_impl->reuse_allocated_range(this, insts);
       if(alloc_status != MemoryImpl::ALLOC_INSTANT_SUCCESS) {
+        // On failure, just recycle back the instance ids
         for(size_t i = 0; i < num_layouts; i++) {
           insts[i]->recycle_instance();
         }
@@ -999,6 +1001,7 @@ namespace Realm {
         }
       }
 
+      // We managed to reuse the allocated instance, now set metadata.
       size_t offset = 0;
       for(size_t i = 0; i < num_layouts; i++) {
         assert(insts[i]);
@@ -1017,12 +1020,13 @@ namespace Realm {
         offset += layouts[i]->bytes_used;
       }
 
+      timeline.record_delete_time();
+
       for(size_t i = 0; i < num_layouts; i++) {
         if(insts[i]
                ->measurements
                .wants_measurement<ProfilingMeasurements::InstanceTimeline>()) {
           insts[i]->timeline.record_ready_time();
-          insts[i]->measurements.send_responses(insts[i]->requests);
         }
       }
 
