@@ -972,8 +972,6 @@ namespace Realm {
         insts[i]->metadata.layout = layouts[i];
       }
 
-      Event event = GenEventImpl::create_genevent()->current_event();
-
       // Attempt to reuse allocated range of existing instance
       MemoryImpl::AllocationResult alloc_status =
           m_impl->reuse_allocated_range(this, insts);
@@ -982,6 +980,7 @@ namespace Realm {
         for(size_t i = 0; i < num_layouts; i++) {
           insts[i]->recycle_instance();
         }
+        Event event = GenEventImpl::create_genevent()->current_event();
         GenEventImpl::trigger(event, /*poisoned=*/true);
         return event;
       }
