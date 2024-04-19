@@ -1,5 +1,6 @@
 #include "realm.h"
 #include "realm/id.h"
+#include "realm/cmdline.h"
 #include "realm/network.h"
 
 #include <deque>
@@ -19,6 +20,7 @@ enum
 };
 
 int num_iterations = 2;
+bool needs_oom = false;
 
 struct WorkerArgs {
   RegionInstance inst;
@@ -144,7 +146,7 @@ void worker_task(const void *args, size_t arglen, const void *userdata, size_t u
   for(int i = 0; i < num_iterations; i++) {
     Rect<1> next_bounds;
     next_bounds.lo[0] = 0;
-    next_bounds.hi[0] = bounds.hi[0] / 2;
+    next_bounds.hi[0] = needs_oom ? bounds.hi[0] : bounds.hi[0] / 2;
 
     log_app.info() << "redistrict bounds:" << bounds << " next_bounds:" << next_bounds
                    << " inst:" << inst;
@@ -168,6 +170,10 @@ void worker_task(const void *args, size_t arglen, const void *userdata, size_t u
 
     bool poisoned = false;
     e.wait_faultaware(poisoned);
+    if(needs_oom) {
+      assert(poisoned);
+      return;
+    }
     assert(poisoned == false);
 
     int index = next_bounds.volume();
@@ -204,6 +210,12 @@ int main(int argc, char **argv)
       continue;
     }
   }
+
+  CommandLineParser cp;
+  cp.add_option_int("-i", num_iterations);
+  cp.add_option_int("-needs_oom", needs_oom);
+  bool ok = cp.parse_command_line(argc, const_cast<const char **>(argv));
+  assert(ok);
 
   rt.register_task(TOP_LEVEL_TASK, top_level_task);
   rt.register_task(WORKER_TASK, worker_task);
