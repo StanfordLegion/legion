@@ -964,8 +964,7 @@ namespace Realm {
       MemoryImpl *m_impl = get_runtime()->get_memory_impl(memory);
 
       // TODO(apryakhin): Handle redistricting from non-owner node
-      NodeID target = ID(m_impl->me).memory_owner_node();
-      assert(target == Network::my_node_id);
+      assert(NodeID(ID(me).instance_owner_node()) == Network::my_node_id);
 
       for(size_t i = 0; i < num_layouts; i++) {
         insts[i] = m_impl->new_instance();
@@ -1016,8 +1015,6 @@ namespace Realm {
         offset += layouts[i]->bytes_used;
       }
 
-      timeline.record_delete_time();
-
       for(size_t i = 0; i < num_layouts; i++) {
         if(insts[i]
                ->measurements
@@ -1025,6 +1022,8 @@ namespace Realm {
           insts[i]->timeline.record_ready_time();
         }
       }
+
+      notify_deallocation();
 
       return Event::NO_EVENT;
     }

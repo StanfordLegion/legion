@@ -132,7 +132,6 @@ void top_level_task(const void *args, size_t arglen, const void *userdata, size_
   e2.wait();
 
   destroy_event.trigger();
-  inst2.destroy();
 
   usleep(100000);
 }
