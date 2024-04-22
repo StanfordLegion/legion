@@ -549,8 +549,8 @@ namespace Realm {
       // figure out the largest iteration-consistent subrectangle that fits in
       //  the current piece
       Rect<N, T> target_subrect;
-      have_rect = next_target_subrect(layout_piece->bounds, cur_rect, cur_point,
-                                      target_subrect, dim_order);
+      have_rect = compute_target_subrect(layout_piece->bounds, cur_rect, cur_point,
+                                         target_subrect, dim_order);
 
       log_dma.debug() << "step: cur_rect=" << cur_rect
                       << " layout_bounds=" << layout_piece->bounds
