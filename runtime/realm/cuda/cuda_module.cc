@@ -4695,7 +4695,13 @@ namespace Realm {
 
         if(config->cfg_min_avail_mem > 0) {
           size_t total_mem, avail_mem;
-          CHECK_CU(CUDA_DRIVER_FNPTR(cuMemGetInfo)(&avail_mem, &total_mem));
+          {
+            CHECK_CU(CUDA_DRIVER_FNPTR(cuCtxPushCurrent)(context));
+            CHECK_CU(CUDA_DRIVER_FNPTR(cuMemGetInfo)(&avail_mem, &total_mem));
+            CUcontext popped;
+            CHECK_CU(CUDA_DRIVER_FNPTR(cuCtxPopCurrent)(&popped));
+            assert(popped == context);
+          }
           if(avail_mem < config->cfg_min_avail_mem) {
             log_gpu.info() << "GPU " << gpu_info[idx]->device
                            << " does not have enough available memory (" << avail_mem
