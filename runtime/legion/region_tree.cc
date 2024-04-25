@@ -5144,14 +5144,14 @@ namespace Legion {
       if (runtime->legion_spy_enabled && (LEGION_NAME_SEMANTIC_TAG == tag))
       {
         const char *ptr = NULL;
-        static_assert(sizeof(buffer) == sizeof(ptr), "Fuck c++");
+        static_assert(sizeof(buffer) == sizeof(ptr));
         memcpy(&ptr, &buffer, sizeof(ptr));
         LegionSpy::log_index_space_name(handle.id, ptr);
       }
       if (runtime->profiler && (LEGION_NAME_SEMANTIC_TAG == tag))
       {
         const char *ptr = NULL;
-        static_assert(sizeof(buffer) == sizeof(ptr), "Fuck c++");
+        static_assert(sizeof(buffer) == sizeof(ptr));
         memcpy(&ptr, &buffer, sizeof(ptr));
 	runtime->profiler->record_index_space(handle.id, ptr);
       }
@@ -5172,14 +5172,14 @@ namespace Legion {
       if (runtime->legion_spy_enabled && (LEGION_NAME_SEMANTIC_TAG == tag))
       {
         const char *ptr = NULL;
-        static_assert(sizeof(buffer) == sizeof(ptr), "Fuck c++");
+        static_assert(sizeof(buffer) == sizeof(ptr));
         memcpy(&ptr, &buffer, sizeof(ptr));
         LegionSpy::log_index_partition_name(handle.id, ptr);
       }
       if (runtime->profiler && (LEGION_NAME_SEMANTIC_TAG == tag))
       {
         const char *ptr = NULL;
-        static_assert(sizeof(buffer) == sizeof(ptr), "Fuck c++");
+        static_assert(sizeof(buffer) == sizeof(ptr));
         memcpy(&ptr, &buffer, sizeof(ptr));
 	runtime->profiler->record_index_part(handle.id, ptr);
       }
@@ -5200,14 +5200,14 @@ namespace Legion {
       if (runtime->legion_spy_enabled && (LEGION_NAME_SEMANTIC_TAG == tag))
       {
         const char *ptr = NULL;
-        static_assert(sizeof(buffer) == sizeof(ptr), "Fuck c++");
+        static_assert(sizeof(buffer) == sizeof(ptr));
         memcpy(&ptr, &buffer, sizeof(ptr));
         LegionSpy::log_field_space_name(handle.id, ptr);
       }
       if (runtime->profiler && (LEGION_NAME_SEMANTIC_TAG == tag))
       {
         const char *ptr = NULL;
-        static_assert(sizeof(buffer) == sizeof(ptr), "Fuck c++");
+        static_assert(sizeof(buffer) == sizeof(ptr));
         memcpy(&ptr, &buffer, sizeof(ptr));
 	runtime->profiler->record_field_space(handle.id, ptr);
       }
@@ -5229,14 +5229,14 @@ namespace Legion {
       if (runtime->legion_spy_enabled && (LEGION_NAME_SEMANTIC_TAG == tag))
       {
         const char *ptr = NULL;
-        static_assert(sizeof(buf) == sizeof(ptr), "Fuck c++");
+        static_assert(sizeof(buf) == sizeof(ptr));
         memcpy(&ptr, &buf, sizeof(ptr));
         LegionSpy::log_field_name(handle.id, fid, ptr);
       }
       if (runtime->profiler && (LEGION_NAME_SEMANTIC_TAG == tag))
       {
         const char *ptr = NULL;
-        static_assert(sizeof(buf) == sizeof(ptr), "Fuck c++");
+        static_assert(sizeof(buf) == sizeof(ptr));
         memcpy(&ptr, &buf, sizeof(ptr));
 	runtime->profiler->record_field(handle.id, fid, size, ptr); 
       }
@@ -5257,7 +5257,7 @@ namespace Legion {
       if (runtime->legion_spy_enabled && (LEGION_NAME_SEMANTIC_TAG == tag))
       {
         const char *ptr = NULL;
-        static_assert(sizeof(buffer) == sizeof(ptr), "Fuck c++");
+        static_assert(sizeof(buffer) == sizeof(ptr));
         memcpy(&ptr, &buffer, sizeof(ptr));
         LegionSpy::log_logical_region_name(handle.index_space.id,
             handle.field_space.id, handle.tree_id, ptr);
@@ -5265,7 +5265,7 @@ namespace Legion {
       if (runtime->profiler && (LEGION_NAME_SEMANTIC_TAG == tag))
       {
         const char *ptr = NULL;
-        static_assert(sizeof(buffer) == sizeof(ptr), "Fuck c++");
+        static_assert(sizeof(buffer) == sizeof(ptr));
         memcpy(&ptr, &buffer, sizeof(ptr));
 	runtime->profiler->record_logical_region(handle.index_space.id,
             handle.field_space.id, handle.tree_id, ptr);
@@ -5287,7 +5287,7 @@ namespace Legion {
       if (runtime->legion_spy_enabled && (LEGION_NAME_SEMANTIC_TAG == tag))
       {
         const char *ptr = NULL;
-        static_assert(sizeof(buffer) == sizeof(ptr), "Fuck c++");
+        static_assert(sizeof(buffer) == sizeof(ptr));
         memcpy(&ptr, &buffer, sizeof(ptr));
         LegionSpy::log_logical_partition_name(handle.index_partition.id,
             handle.field_space.id, handle.tree_id, ptr);

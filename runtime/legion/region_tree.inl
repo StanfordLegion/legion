@@ -1145,7 +1145,7 @@ namespace Legion {
       assert(tag == type_tag);
 #endif
       Realm::IndexSpace<DIM,T> *space = NULL;
-      static_assert(sizeof(space) == sizeof(result), "Fuck c++");
+      static_assert(sizeof(space) == sizeof(result));
       memcpy(&space, &result, sizeof(space));
       return get_realm_index_space(*space, need_tight_result);
     }
@@ -2497,7 +2497,7 @@ namespace Legion {
       assert(type_tag == handle.get_type_tag());
 #endif
       Realm::IndexSpace<DIM,T> *space = NULL;
-      static_assert(sizeof(space) == sizeof(result), "Fuck c++");
+      static_assert(sizeof(space) == sizeof(result));
       memcpy(&space, &result, sizeof(space));
       return get_realm_index_space(*space, need_tight_result);
     }

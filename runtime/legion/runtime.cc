@@ -14454,7 +14454,7 @@ namespace Legion {
               dummy_size, true/*can fail*/, false/*wait until*/))
         {
           const char *result = NULL;
-          static_assert(sizeof(result) == sizeof(ptr), "Fuck c++");
+          static_assert(sizeof(result) == sizeof(ptr));
           memcpy(&result, &ptr, sizeof(result));
           return result;
         }
@@ -14468,8 +14468,7 @@ namespace Legion {
         if (finder != semantic_infos.end())
         {
           const char *result = NULL;
-          static_assert(sizeof(result) == 
-              sizeof(finder->second.buffer), "Fuck c++");
+          static_assert(sizeof(result) == sizeof(finder->second.buffer));
           memcpy(&result, &finder->second.buffer, sizeof(result)); 
           return result;
         }

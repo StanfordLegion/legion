@@ -5225,7 +5225,7 @@ namespace Legion {
       // Fuck C++
       const std::set<ApEvent> *legion_events = &events;
       const std::set<Realm::Event> *realm_events;
-      static_assert(sizeof(legion_events) == sizeof(realm_events), "Fuck C++");
+      static_assert(sizeof(legion_events) == sizeof(realm_events));
       memcpy(&realm_events, &legion_events, sizeof(legion_events));
       ApEvent result(Realm::Event::merge_events(*realm_events));
 #ifdef LEGION_DISABLE_EVENT_PRUNING
@@ -5283,7 +5283,7 @@ namespace Legion {
       // Fuck C++
       const std::vector<ApEvent> *legion_events = &events;
       const std::vector<Realm::Event> *realm_events;
-      static_assert(sizeof(legion_events) == sizeof(realm_events), "Fuck C++");
+      static_assert(sizeof(legion_events) == sizeof(realm_events));
       memcpy(&realm_events, &legion_events, sizeof(legion_events));
       ApEvent result(Realm::Event::merge_events(*realm_events));
 #ifdef LEGION_DISABLE_EVENT_PRUNING 
@@ -5348,7 +5348,7 @@ namespace Legion {
       // Fuck C++
       const std::set<RtEvent> *legion_events = &events;
       const std::set<Realm::Event> *realm_events;
-      static_assert(sizeof(legion_events) == sizeof(realm_events), "Fuck C++");
+      static_assert(sizeof(legion_events) == sizeof(realm_events));
       memcpy(&realm_events, &legion_events, sizeof(legion_events));
       // No logging for runtime operations currently
       return RtEvent(Realm::Event::merge_events(*realm_events));
@@ -5368,7 +5368,7 @@ namespace Legion {
       // Fuck C++
       const std::vector<RtEvent> *legion_events = &events;
       const std::vector<Realm::Event> *realm_events;
-      static_assert(sizeof(legion_events) == sizeof(realm_events), "Fuck C++");
+      static_assert(sizeof(legion_events) == sizeof(realm_events));
       memcpy(&realm_events, &legion_events, sizeof(legion_events));
       // No logging for runtime operations currently
       return RtEvent(Realm::Event::merge_events(*realm_events));
@@ -5561,7 +5561,7 @@ namespace Legion {
     {
       const std::set<ApEvent> *ptr = &events;
       const std::set<Realm::Event> *realm_events = NULL;
-      static_assert(sizeof(realm_events) == sizeof(ptr), "Fuck c++");
+      static_assert(sizeof(realm_events) == sizeof(ptr));
       memcpy(&realm_events, &ptr, sizeof(realm_events));
       return RtEvent(Realm::Event::merge_events_ignorefaults(*realm_events));
     }

@@ -89,7 +89,7 @@ namespace Legion {
       void record_instance_name(PhysicalInstance inst, LgEvent name);
       virtual LgEvent find_instance_name(PhysicalInstance inst) const;
     private:
-      static_assert(ENTRIES > 0, "Must be positive");
+      static_assert(ENTRIES > 0);
       // Optimize for the common case of there being one or two entries
       PhysicalInstance instances[ENTRIES];
       LgEvent names[ENTRIES];
