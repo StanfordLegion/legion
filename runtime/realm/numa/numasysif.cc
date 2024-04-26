@@ -64,6 +64,8 @@ namespace {
 
 namespace Realm {
 
+  extern Logger log_numa;
+
   // as soon as we get more than one real version of these, split them out into
   //  separate files
 
@@ -150,8 +152,7 @@ namespace Realm {
       if((ret != 0) || !mask_nonempty(nmask, detected_node_count)) {
 	// this really shouldn't fail, since we made the same call above in
 	//  numasysif_numa_available()
-	fprintf(stderr, "mems_allowed: ret=%d errno=%d mask=%08lx count=%d\n",
-		ret, errno, *(unsigned long *)nmask, detected_node_count);
+	log_numa.error() << "mems_allowed: ret=" << ret << " errno=" << errno << " mask=" << std::hex << nmask << std::dec << " count=" << detected_node_count;
 	return false;
       }
     }
@@ -164,7 +165,7 @@ namespace Realm {
 	snprintf(fname, sizeof fname, "/sys/devices/system/node/node%d/meminfo", i);
 	FILE *f = fopen(fname, "r");
 	if(!f) {
-	  fprintf(stderr, "can't read '%s': %s\n", fname, strerror(errno));
+	  log_numa.error() << "can't read '" << fname << "': ", strerror(errno);
 	  continue;
 	}
 	char line[256];
@@ -175,7 +176,7 @@ namespace Realm {
 	  errno = 0;
 	  long long sz = strtoll(s+9, (char **)&endptr, 10);
 	  if((errno != 0) || strcmp(endptr, " kB\n")) {
-	    fprintf(stderr, "ill-formed line: '%s' '%s'\n", s, endptr);
+	    log_numa.error() << "ill-formed line: '" << s << "' '" << endptr << "'";
 	    continue;
 	  }
 	  // success - add this to the list and stop reading
@@ -206,7 +207,7 @@ namespace Realm {
     if(only_available) {
       int ret = sched_getaffinity(0, sizeof(avail_cpus), &avail_cpus);
       if(ret != 0) {
-	fprintf(stderr, "sched_getaffinity failed: %s\n", strerror(errno));
+	log_numa.error() << "sched_getaffinity failed: " << strerror(errno);
 	return false;
       }
     } else
@@ -216,7 +217,7 @@ namespace Realm {
     std::map<int, int> cpu_counts;
     DIR *cpudir = opendir("/sys/devices/system/cpu");
     if(!cpudir) {
-      fprintf(stderr, "couldn't read /sys/devices/system/cpu: %s\n", strerror(errno));
+      log_numa.error() << "couldn't read /sys/devices/system/cpu: " << strerror(errno);
       return false;
     }
     struct dirent *de;
@@ -230,7 +231,7 @@ namespace Realm {
 	snprintf(path2, sizeof path2, "/sys/devices/system/cpu/%.16s", de->d_name);
 	DIR *d2 = opendir(path2);
 	if(!d2) {
-	  fprintf(stderr, "couldn't read '%s': %s\n", path2, strerror(errno));
+	  log_numa.error() << "couldn't read '" << path2 << "': " << strerror(errno);
 	  continue;
 	}
 	struct dirent *de2;
@@ -292,7 +293,7 @@ namespace Realm {
             ++it)
           it->second = index++;
       } else {
-	fprintf(stderr, "can't read directory '/sys/devices/system/node': %s\n", strerror(errno));
+	log_numa.error() << "can't read directory '/sys/devices/system/node': " << strerror(errno);
         // add a dummy entry so we're not empty any more
         saved_node2index[-1] = -1;
         // and now give up because we don't know what index 'node2' maps to
@@ -322,7 +323,7 @@ namespace Realm {
       snprintf(fname, sizeof fname, "/sys/devices/system/node/node%d/distance", node1);
       FILE *f = fopen(fname, "r");
       if(!f) {
-	fprintf(stderr, "can't read '%s': %s\n", fname, strerror(errno));
+	log_numa.error() << "can't read '" << fname << "': " << strerror(errno);
 	saved_distances[node1].clear();
 	return -1;
       }
@@ -398,7 +399,7 @@ namespace Realm {
 #ifdef REALM_ON_LINUX
     int policy = MPOL_BIND;
     if((node < 0) || (node >= detected_node_count)) {
-      fprintf(stderr, "bind request for node out of range: %d\n", node);
+      log_numa.error() << "bind request for node out of range: " << node;
       return false;
     }
     unsigned char *nmask = (unsigned char *)alloca(detected_node_count >> 3);
@@ -410,7 +411,7 @@ namespace Realm {
 		    (const unsigned long *)nmask, detected_node_count,
 		    MPOL_MF_STRICT | MPOL_MF_MOVE);
     if(ret != 0) {
-      fprintf(stderr, "failed to bind memory for node %d: %s\n", node, strerror(errno));
+      log_numa.error() << "failed to bind memory for node " << node << ": " << strerror(errno);
       return false;
     }
 
@@ -418,7 +419,7 @@ namespace Realm {
     if(pin) {
       int ret = mlock(base, bytes);
       if(ret != 0) {
-	fprintf(stderr, "mlock failed for memory on node %d: %s\n", node, strerror(errno));
+	log_numa.error() << "mlock failed for memory on node " << node << ": " << strerror(errno);
 	return false;
       }
     }
