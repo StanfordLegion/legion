@@ -2956,7 +2956,6 @@ namespace Legion {
           REALM_PROCESSOR_KINDS(PROC_NAMES)
 #undef PROC_NAMES
         };
-        Context ctx = Runtime::get_context();
         REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
             "Unable to find associated %s memory for %s processor when "
             "performing an UntypedDeferredValue creation in task %s (UID %lld)",
