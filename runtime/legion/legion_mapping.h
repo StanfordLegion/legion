@@ -2550,10 +2550,8 @@ namespace Legion {
       template<typename T>
       void pack_tunable(const T &result, Mapper::SelectTunableOutput &output)
       {
-#if !defined(__GNUC__) || (__GNUC__ >= 5)
         static_assert(std::is_trivially_copyable<T>::value,
                       "tunable type must be trivially copyable");
-#endif  // !defined(__GNUC__) || (__GNUC__ >= 5)
         void *output_result = malloc(sizeof(T));
         memcpy(output_result, &result, sizeof(T));
         output.value = output_result;

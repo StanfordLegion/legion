@@ -1207,7 +1207,7 @@ namespace Legion {
         { \
           Rect<DIM,coord_t> rect = d; \
           Realm::PointInRectIterator<DIM,coord_t> rect_itr(rect); \
-          static_assert(sizeof(rect_itr) <= sizeof(rect_iterator), "very bad");\
+          static_assert(sizeof(rect_itr) <= sizeof(rect_iterator)); \
           rect_valid = rect_itr.valid; \
           if (rect_valid) { \
             is_valid = true; \
@@ -2049,14 +2049,14 @@ namespace Legion {
       inline const FT& operator*(void) const 
         { 
           FT *result = NULL;
-          static_assert(sizeof(result) == sizeof(ptr), "C++ is dumb");
+          static_assert(sizeof(result) == sizeof(ptr));
           memcpy(&result, &ptr, sizeof(result));
           return *result;
         }
       inline const FT* operator->(void) const
         { 
           FT *result = NULL;
-          static_assert(sizeof(result) == sizeof(ptr), "C++ is dumb");
+          static_assert(sizeof(result) == sizeof(ptr));
           memcpy(&result, &ptr, sizeof(result));
           return result;
         }
@@ -2064,7 +2064,7 @@ namespace Legion {
         { 
           FT *result = NULL;
           const uint8_t *ptr2 = ptr + rhs * stride;
-          static_assert(sizeof(result) == sizeof(ptr2), "C++ is dumb");
+          static_assert(sizeof(result) == sizeof(ptr2));
           memcpy(&result, &ptr2, sizeof(result));
           return *result;
         }
@@ -2118,14 +2118,14 @@ namespace Legion {
       inline const FT& operator*(void) const 
         { 
           FT *result = NULL;
-          static_assert(sizeof(result) == sizeof(ptr), "C++ is dumb");
+          static_assert(sizeof(result) == sizeof(ptr));
           memcpy(&result, &ptr, sizeof(result));
           return *result;
         }
       inline const FT* operator->(void) const
         { 
           FT *result = NULL;
-          static_assert(sizeof(result) == sizeof(ptr), "C++ is dumb");
+          static_assert(sizeof(result) == sizeof(ptr));
           memcpy(&result, &ptr, sizeof(result));
           return result;
         }
@@ -2133,7 +2133,7 @@ namespace Legion {
         { 
           FT *result = NULL;
           const uint8_t *ptr2 = ptr - rhs * stride;
-          static_assert(sizeof(result) == sizeof(ptr2), "C++ is dumb");
+          static_assert(sizeof(result) == sizeof(ptr2));
           memcpy(&result, &ptr2, sizeof(result));
           return *result;
         }
@@ -2172,7 +2172,7 @@ namespace Legion {
     Span(const FT *b, size_t e, size_t s = sizeof(FT))
       : base(NULL), extent(e), stride(s)
       { 
-        static_assert(sizeof(base) == sizeof(b), "C++ is dumb");
+        static_assert(sizeof(base) == sizeof(b));
         memcpy(&base, &b, sizeof(base));
       }
   public:
@@ -2187,7 +2187,7 @@ namespace Legion {
     inline const FT& front(void) const 
       { 
         FT *result = NULL;
-        static_assert(sizeof(result) == sizeof(base), "C++ is dumb");
+        static_assert(sizeof(result) == sizeof(base));
         memcpy(&result, &base, sizeof(result));
         return *result;
       }
@@ -2195,7 +2195,7 @@ namespace Legion {
       {
         FT *result = NULL;
         const uint8_t *ptr = base + (extent-1)*stride;
-        static_assert(sizeof(result) == sizeof(ptr), "C++ is dumb");
+        static_assert(sizeof(result) == sizeof(ptr));
         memcpy(&result, &ptr, sizeof(result));
         return *result;
       }
@@ -2203,14 +2203,14 @@ namespace Legion {
       { 
         FT *result = NULL;
         const uint8_t *ptr = base + index * stride;
-        static_assert(sizeof(result) == sizeof(ptr), "C++ is dumb");
+        static_assert(sizeof(result) == sizeof(ptr));
         memcpy(&result, &ptr, sizeof(result));
         return *result;
       }
     inline const FT* data(void) const
       {
         FT *result = NULL;
-        static_assert(sizeof(result) == sizeof(base), "C++ is dumb");
+        static_assert(sizeof(result) == sizeof(base));
         memcpy(&result, &base, sizeof(result));
         return result;
       }

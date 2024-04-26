@@ -27,10 +27,6 @@ namespace Legion {
     };
 
     // Make sure all the handle types are trivially copyable.
-
-    // Note: GCC 4.9 breaks even with C++11, so for now peg this on
-    // C++14 until we deprecate GCC 4.9 support.
-#if !defined(__GNUC__) || (__GNUC__ >= 5)
     static_assert(std::is_trivially_copyable<IndexSpace>::value,
                   "IndexSpace is not trivially copyable");
     static_assert(std::is_trivially_copyable<IndexPartition>::value,
@@ -52,7 +48,6 @@ namespace Legion {
                   "LogicalPartitionT is not trivially copyable");
     LEGION_FOREACH_N(DIMFUNC)
 #undef DIMFUNC
-#endif
 
     const LogicalRegion LogicalRegion::NO_REGION = LogicalRegion();
     const LogicalPartition LogicalPartition::NO_PART = LogicalPartition();  
@@ -6909,7 +6904,7 @@ namespace Legion {
       const void* dummy_ptr; size_t dummy_size;
       Runtime::retrieve_semantic_information(task_id, LEGION_NAME_SEMANTIC_TAG,
                                          dummy_ptr, dummy_size, false, false);
-      static_assert(sizeof(dummy_ptr) == sizeof(result), "Fuck c++");
+      static_assert(sizeof(dummy_ptr) == sizeof(result));
       memcpy(&result, &dummy_ptr, sizeof(result));
     }
 
@@ -6920,7 +6915,7 @@ namespace Legion {
       const void* dummy_ptr; size_t dummy_size;
       Runtime::retrieve_semantic_information(handle,
           LEGION_NAME_SEMANTIC_TAG, dummy_ptr, dummy_size, false, false);
-      static_assert(sizeof(dummy_ptr) == sizeof(result), "Fuck c++");
+      static_assert(sizeof(dummy_ptr) == sizeof(result));
       memcpy(&result, &dummy_ptr, sizeof(result));
     }
 
@@ -6931,7 +6926,7 @@ namespace Legion {
       const void* dummy_ptr; size_t dummy_size;
       Runtime::retrieve_semantic_information(handle,
           LEGION_NAME_SEMANTIC_TAG, dummy_ptr, dummy_size, false, false);
-      static_assert(sizeof(dummy_ptr) == sizeof(result), "Fuck c++");
+      static_assert(sizeof(dummy_ptr) == sizeof(result));
       memcpy(&result, &dummy_ptr, sizeof(result));
     }
 
@@ -6942,7 +6937,7 @@ namespace Legion {
       const void* dummy_ptr; size_t dummy_size;
       Runtime::retrieve_semantic_information(handle,
           LEGION_NAME_SEMANTIC_TAG, dummy_ptr, dummy_size, false, false);
-      static_assert(sizeof(dummy_ptr) == sizeof(result), "Fuck c++");
+      static_assert(sizeof(dummy_ptr) == sizeof(result));
       memcpy(&result, &dummy_ptr, sizeof(result));
     }
 
@@ -6955,7 +6950,7 @@ namespace Legion {
       const void* dummy_ptr; size_t dummy_size;
       Runtime::retrieve_semantic_information(handle, fid,
           LEGION_NAME_SEMANTIC_TAG, dummy_ptr, dummy_size, false, false);
-      static_assert(sizeof(dummy_ptr) == sizeof(result), "Fuck c++");
+      static_assert(sizeof(dummy_ptr) == sizeof(result));
       memcpy(&result, &dummy_ptr, sizeof(result));
     }
 
@@ -6967,7 +6962,7 @@ namespace Legion {
       const void* dummy_ptr; size_t dummy_size;
       Runtime::retrieve_semantic_information(handle,
           LEGION_NAME_SEMANTIC_TAG, dummy_ptr, dummy_size, false, false);
-      static_assert(sizeof(dummy_ptr) == sizeof(result), "Fuck c++");
+      static_assert(sizeof(dummy_ptr) == sizeof(result));
       memcpy(&result, &dummy_ptr, sizeof(result));
     }
 
@@ -6979,7 +6974,7 @@ namespace Legion {
       const void* dummy_ptr; size_t dummy_size;
       Runtime::retrieve_semantic_information(part,
           LEGION_NAME_SEMANTIC_TAG, dummy_ptr, dummy_size, false, false);
-      static_assert(sizeof(dummy_ptr) == sizeof(result), "Fuck c++");
+      static_assert(sizeof(dummy_ptr) == sizeof(result));
       memcpy(&result, &dummy_ptr, sizeof(result));
     }
 
