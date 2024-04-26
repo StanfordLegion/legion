@@ -44,20 +44,64 @@ namespace Legion {
      * size_t legion_buffer_size(void)
      * void legion_serialize(void *buffer)
      * void legion_deserialize(const void *buffer)
+     *(optional) void legion_buffer_finalize(const void *buffer)
      */
     class LegionSerialization {
     public:
       // A helper method for getting access to the runtime's
       // end_task method with private access
       static inline void end_helper(Context ctx,
-          const void *result, size_t result_size, bool owned)
+          const void *result, size_t result_size)
       {
-        Runtime::legion_task_postamble(ctx, result, result_size, owned);
+        Runtime::legion_task_postamble(ctx, result, result_size,false/*owned*/);
+      }
+      static inline void end_helper(Context ctx,
+          const void *result, size_t result_size,
+          const Realm::ExternalInstanceResource &resource,
+          void (*freefunc)(const Realm::ExternalInstanceResource&))
+      {
+        Runtime::legion_task_postamble(ctx, result, result_size, true/*owned*/,
+                                       resource, freefunc);
       }
       static inline Future from_value_helper(
-          const void *value, size_t value_size, bool owned)
+          const void *value, size_t value_size)
       {
-        return Future::from_untyped_pointer(value, value_size, owned);
+        return Future::from_untyped_pointer(value, value_size, false/*owned*/);
+      }
+      static inline Future from_value_helper(
+          const void *value, size_t value_size,
+          const Realm::ExternalInstanceResource &resource,
+          void (*freefunc)(const Realm::ExternalInstanceResource&))
+      {
+        return Future::from_value(value, value_size, true/*owned*/,
+                                  resource, freefunc);
+      }
+      static void free_func(const Realm::ExternalInstanceResource &res)
+      {
+#ifdef DEBUG_LEGION
+        const Realm::ExternalMemoryResource *resource =
+          dynamic_cast<const Realm::ExternalMemoryResource*>(&res);
+        assert(resource != NULL);
+#else
+        const Realm::ExternalMemoryResource *resource =
+          static_cast<const Realm::ExternalMemoryResource*>(&res);
+#endif
+        free((void*)resource->base);
+      }
+      template<void (*FINALIZE)(const void *buffer)>
+      static void free_func_wrapper(const Realm::ExternalInstanceResource &res)
+      {
+#ifdef DEBUG_LEGION
+        const Realm::ExternalMemoryResource *resource =
+          dynamic_cast<const Realm::ExternalMemoryResource*>(&res);
+        assert(resource != NULL);
+#else
+        const Realm::ExternalMemoryResource *resource =
+          static_cast<const Realm::ExternalMemoryResource*>(&res);
+#endif
+        void *buffer = (void*)resource->base;
+        (*FINALIZE)(buffer);
+        free(buffer);
       }
 
       // WARNING: There are two levels of SFINAE (substitution failure is 
@@ -67,7 +111,7 @@ namespace Legion {
       // a 'legion_serialize' method there are also 'legion_buffer_size'
       // and 'legion_deserialize' methods.
       
-      template<typename T, bool HAS_SERIALIZE>
+      template<typename T, bool HAS_SERIALIZE, bool HAS_FINALIZE>
       struct NonPODSerializer {
         static inline void end_task(Context ctx, T *result)
         {
@@ -76,18 +120,57 @@ namespace Legion {
           {
             void *buffer = malloc(buffer_size);
             result->legion_serialize(buffer);
-            end_helper(ctx, buffer, buffer_size, true/*owned*/);
-            // No need to free the buffer, the Legion runtime owns it now
+            Realm::ExternalMemoryResource resource(buffer, buffer_size);
+            end_helper(ctx, buffer, buffer_size, resource, free_func);
           }
           else
-            end_helper(ctx, NULL, 0, false/*owned*/);
+            end_helper(ctx, NULL, 0);
         }
         static inline Future from_value(const T *value)
         {
           size_t buffer_size = value->legion_buffer_size();
           void *buffer = malloc(buffer_size);
           value->legion_serialize(buffer);
-          return from_value_helper(buffer, buffer_size, true/*owned*/);
+          Realm::ExternalMemoryResource resource(buffer, buffer_size);
+          return from_value_helper(buffer, buffer_size, resource, free_func);
+        }
+        static inline T unpack(const Future &f, bool silence_warnings,
+                               const char *warning_string)
+        {
+          size_t size = 0;
+          const void *result = f.get_buffer(Memory::SYSTEM_MEM, &size,
+                false/*check size*/, silence_warnings, warning_string);
+          T derez;
+          derez.legion_deserialize(result);
+          return derez;
+        }
+      };
+
+      // Specialization for the case where we have a finalize method
+      template<typename T>
+      struct NonPODSerializer<T,true,true> { 
+        static inline void end_task(Context ctx, T *result)
+        {
+          size_t buffer_size = result->legion_buffer_size();
+          if (buffer_size > 0)
+          {
+            void *buffer = malloc(buffer_size);
+            result->legion_serialize(buffer);
+            Realm::ExternalMemoryResource resource(buffer, buffer_size);
+            end_helper(ctx, buffer, buffer_size,
+                resource, free_func_wrapper<T::legion_buffer_finalize>);
+          }
+          else
+            end_helper(ctx, NULL, 0);
+        }
+        static inline Future from_value(const T *value)
+        {
+          size_t buffer_size = value->legion_buffer_size();
+          void *buffer = malloc(buffer_size);
+          value->legion_serialize(buffer);
+          Realm::ExternalMemoryResource resource(buffer, buffer_size);
+          return from_value_helper(buffer, buffer_size,
+              resource, free_func_wrapper<T::legion_buffer_finalize>);
         }
         static inline T unpack(const Future &f, bool silence_warnings,
                                const char *warning_string)
@@ -102,8 +185,8 @@ namespace Legion {
       };
 
       // Further specialization for deferred reductions
-      template<typename REDOP, bool EXCLUSIVE>
-      struct NonPODSerializer<DeferredReduction<REDOP,EXCLUSIVE>,false> {
+      template<typename REDOP, bool EXCLUSIVE, bool FINAL>
+      struct NonPODSerializer<DeferredReduction<REDOP,EXCLUSIVE>,false,FINAL> {
         static inline void end_task(Context ctx,
                                     DeferredReduction<REDOP,EXCLUSIVE> *result)
         {
@@ -118,7 +201,7 @@ namespace Legion {
           // Should never be called
           assert(false);
           return from_value_helper((const void*)value,
-            sizeof(DeferredReduction<REDOP,EXCLUSIVE>), false/*owned*/);
+            sizeof(DeferredReduction<REDOP,EXCLUSIVE>));
         }
         static inline DeferredReduction<REDOP,EXCLUSIVE> 
           unpack(const Future &f, bool silence_warnings, const char *warning)
@@ -133,8 +216,8 @@ namespace Legion {
       };
 
       // Further specialization to see if this a deferred value
-      template<typename T>
-      struct NonPODSerializer<DeferredValue<T>,false> {
+      template<typename T, bool FINAL>
+      struct NonPODSerializer<DeferredValue<T>,false,FINAL> {
         static inline void end_task(Context ctx,
                                     DeferredValue<T> *result)
         {
@@ -148,7 +231,7 @@ namespace Legion {
           // Should never be called
           assert(false);
           return from_value_helper((const void*)value,
-                                   sizeof(DeferredValue<T>), false/*owned*/);
+                                   sizeof(DeferredValue<T>));
         }
         static inline DeferredValue<T> unpack(const Future &f,
             bool silence_warnings, const char *warning_string)
@@ -162,16 +245,15 @@ namespace Legion {
         }
       }; 
       
-      template<typename T>
-      struct NonPODSerializer<T,false> {
+      template<typename T, bool FINAL>
+      struct NonPODSerializer<T,false,FINAL> {
         static inline void end_task(Context ctx, T *result)
         {
-          end_helper(ctx, (void*)result, sizeof(T), false/*owned*/);
+          end_helper(ctx, (void*)result, sizeof(T));
         }
         static inline Future from_value(const T *value)
         {
-          return from_value_helper((const void*)value,
-                                   sizeof(T), false/*owned*/);
+          return from_value_helper((const void*)value, sizeof(T));
         }
         static inline T unpack(const Future &f, bool silence_warnings,
                                const char *warning_string)
@@ -198,22 +280,36 @@ namespace Legion {
           sizeof(test<T>(nullptr, nullptr, nullptr)) == sizeof(yes);
       };
 
+      template <typename T>
+      struct IsFinalizeType {
+        typedef char yes; typedef long no;
+
+        template <typename C>
+        static yes test(decltype(&C::legion_buffer_finalize));
+        template <typename C> static no test(...);
+
+        static constexpr bool value = sizeof(test<T>(nullptr)) == sizeof(yes);
+      };
+
       template<typename T, bool IS_STRUCT>
       struct StructHandler {
         static inline void end_task(Context ctx, T *result)
         {
           // Otherwise this is a struct, so see if it has serialization methods
-          NonPODSerializer<T,IsSerdezType<T>::value>::end_task(ctx, result);
+          NonPODSerializer<T,IsSerdezType<T>::value,
+            IsFinalizeType<T>::value>::end_task(ctx, result);
         }
         static inline Future from_value(const T *value)
         {
-          return NonPODSerializer<T,IsSerdezType<T>::value>::from_value(value);
+          return NonPODSerializer<T,IsSerdezType<T>::value,
+                 IsFinalizeType<T>::value>::from_value(value);
         }
         static inline T unpack(const Future &f, bool silence_warnings,
                                const char *warning_string)
         {
-          return NonPODSerializer<T,IsSerdezType<T>::value>::unpack(f,
-                                    silence_warnings, warning_string); 
+          return NonPODSerializer<T,IsSerdezType<T>::value,
+                  IsFinalizeType<T>::value>::unpack(
+                      f, silence_warnings, warning_string); 
         }
       };
       // False case of template specialization
@@ -221,12 +317,11 @@ namespace Legion {
       struct StructHandler<T,false> {
         static inline void end_task(Context ctx, T *result)
         {
-          end_helper(ctx, (void*)result, sizeof(T), false/*owned*/);
+          end_helper(ctx, (void*)result, sizeof(T));
         }
         static inline Future from_value(const T *value)
         {
-          return from_value_helper((const void*)value, 
-                                   sizeof(T), false/*owned*/);
+          return from_value_helper((const void*)value, sizeof(T));
         }
         static inline T unpack(const Future &f, bool silence_warnings,
                                const char *warning_string)
