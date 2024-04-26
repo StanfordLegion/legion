@@ -2528,7 +2528,7 @@ namespace Realm {
         {
           AutoGPUContext agc(gpu);
           // TODO: handle large alignments?
-          ret = hipMalloc(&base, size);
+          ret = hipMalloc(&base, bytes);
           if((ret != hipSuccess) && (ret != hipErrorOutOfMemory))
             REPORT_HIP_ERROR("hipMalloc", ret);
         }
