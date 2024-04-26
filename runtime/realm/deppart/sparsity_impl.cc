@@ -235,7 +235,11 @@ namespace Realm {
 
   SparsityMapImplWrapper::~SparsityMapImplWrapper(void)
   {
+    AutoLock<> al(mutex);
     if(map_impl.load() != 0) {
+      if(references > 0) {
+        assert(0);
+      }
       (*map_deleter)(map_impl.load());
     }
   }
@@ -251,25 +255,23 @@ namespace Realm {
   void SparsityMapImplWrapper::add_references(unsigned count)
   {
     AutoLock<> al(mutex);
-    if(map_impl.load() != 0) {
-      references += count;
-    }
+    references += count;
   }
 
   void SparsityMapImplWrapper::remove_references(unsigned count)
   {
     AutoLock<> al(mutex);
-    if(map_impl.load() == 0) {
-      return;
-    }
-
     if(references > 0) {
       references -= std::min(references, count);
+    } else {
+      assert(0);
     }
 
     if(references == 0) {
 #ifdef REALM_SPARSITY_DELETES
-      (*map_deleter)(map_impl.load());
+      if(map_impl.load() == 0) {
+        (*map_deleter)(map_impl.load());
+      }
 
       NodeID owner_node = ID(me).sparsity_creator_node();
       assert(owner_node == Network::my_node_id);

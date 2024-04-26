@@ -107,8 +107,12 @@ namespace Realm {
   }
 
   template <int N, typename T, int N2, typename T2>
-  ImageMicroOp<N,T,N2,T2>::~ImageMicroOp(void)
-  {}
+  ImageMicroOp<N, T, N2, T2>::~ImageMicroOp(void)
+  {
+    for(SparsityMap<N, T> sparsity : sparsity_outputs) {
+      sparsity.remove_references();
+    }
+  }
 
   template <int N, typename T, int N2, typename T2>
   void ImageMicroOp<N,T,N2,T2>::add_sparsity_output(IndexSpace<N2,T2> _source,
@@ -116,6 +120,7 @@ namespace Realm {
   {
     sources.push_back(_source);
     sparsity_outputs.push_back(_sparsity);
+    sparsity_outputs.back().add_references();
   }
 
   template <int N, typename T, int N2, typename T2>
@@ -126,6 +131,7 @@ namespace Realm {
     sources.push_back(_source);
     diff_rhss.push_back(_diff_rhs);
     sparsity_outputs.push_back(_sparsity);
+    sparsity_outputs.back().add_references();
   }
 
   template <int N, typename T, int N2, typename T2>
@@ -408,6 +414,9 @@ namespace Realm {
 	       (s >> approx_output_index) &&
 	       (s >> approx_output_op));
     assert(ok);
+    for(SparsityMap<N, T> sparsity : sparsity_outputs) {
+      sparsity.add_references();
+    }
     (void)ok;
   }
 
@@ -431,7 +440,11 @@ namespace Realm {
 
   template <int N, typename T, int N2, typename T2>
   ImageOperation<N,T,N2,T2>::~ImageOperation(void)
-  {}
+  {
+    for (SparsityMap<N, T> sparsity : images) {
+      sparsity.remove_references();
+    }
+  }
 
   template <int N, typename T, int N2, typename T2>
   IndexSpace<N,T> ImageOperation<N,T,N2,T2>::add_source(const IndexSpace<N2,T2>& source)
@@ -457,9 +470,11 @@ namespace Realm {
 
     SparsityMap<N,T> sparsity = get_runtime()->get_available_sparsity_impl(target_node)->me.convert<SparsityMap<N,T> >();
     image.sparsity = sparsity;
+    image.sparsity.add_references();
 
     sources.push_back(source);
     images.push_back(sparsity);
+    images.back().add_references();
 
     return image;
   }
