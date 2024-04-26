@@ -310,6 +310,7 @@ namespace Legion {
         UniqueID uid;
         RtUserEvent alloc_ready;
         ApUserEvent inst_ready;
+        RtEvent safe_inst_ready;
         std::set<AddressSpaceID> can_fail_remote_requests;
         bool eager;
       };
@@ -322,6 +323,7 @@ namespace Legion {
       public:
         FutureInstance *const instance;
         const ApEvent ready_event;
+        RtEvent safe_ready_event;
         ApUserEvent remote_postcondition;
         std::vector<ApEvent> read_events;
       };
@@ -346,6 +348,8 @@ namespace Legion {
     public:
       // Finalize the future before everything shuts down
       void prepare_for_shutdown(void);
+      RtEvent get_ready_event(void) const;
+      ApEvent get_complete_event(void);
       // Wait without subscribing to the payload
       void wait(bool silence_warnings, const char *warning_string);
       const void* get_buffer(Processor proc, Memory::Kind memory,
@@ -370,8 +374,10 @@ namespace Legion {
                        size_t known_upper_bound_size = SIZE_MAX);
       ApEvent find_application_instance_ready(Memory target, SingleTask *task);
       RtEvent request_runtime_instance(Operation *op, bool eager);
+      RtEvent find_runtime_instance_ready(void);
       const void *find_runtime_buffer(TaskContext *ctx, size_t &expected_size);
-      ApEvent copy_to(FutureInstance *target, Operation *op);
+      ApEvent copy_to(FutureInstance *target, Operation *op,
+                      ApEvent precondition);
       ApEvent reduce_to(FutureInstance *target, AllReduceOp *op,
                         const ReductionOpID redop_id, const ReductionOp *redop,
                         bool exclusive, ApEvent precondition);
@@ -380,18 +386,17 @@ namespace Legion {
                     bool internal = false);
       size_t get_untyped_size(void);
       const void *get_metadata(size_t *metasize);
-      ApEvent get_ready_event(bool need_lock = true);
       // A special function for predicates to peek
       // at the boolean value of a future if it is set
       // Must have called request internal buffer first and event must trigger
       bool get_boolean_value(TaskContext *ctx);
     public:
       // This will simply save the value of the future
-      void set_result(ApEvent complete, FutureInstance *instance, 
-                      void *metadata = NULL, size_t metasize = 0);
+      void set_result(ApEvent complete, FutureInstance *instance = NULL, 
+                      const void *metadata = NULL, size_t metasize = 0);
       void set_results(ApEvent complete,
                       const std::vector<FutureInstance*> &instances,
-                      void *metadata = NULL, size_t metasize = 0);
+                      const void *metadata = NULL, size_t metasize = 0);
       void set_result(ApEvent complete, FutureFunctor *callback_functor,
                       bool own, Processor functor_proc);
       void set_result(FutureImpl *previous, Operation *op);
@@ -401,6 +406,7 @@ namespace Legion {
       void set_local(const void *value, size_t size, bool own = false);
       // This will save the value of the future locally
       void unpack_future_result(Deserializer &derez);
+      void save_metadata(const void *meta, size_t size);
       // Reset the future in case we need to restart the
       // computation for resiliency reasons
       bool reset_future(void);
@@ -573,7 +579,8 @@ namespace Legion {
     public:
       FutureInstance& operator=(const FutureInstance &rhs) = delete;
     public:
-      ApEvent initialize(const ReductionOp *redop, Operation *op);
+      ApEvent initialize(const ReductionOp *redop, Operation *op,
+                         ApEvent precondition);
       ApEvent copy_from(FutureInstance *source, Operation *op,
                         ApEvent precondition);
       ApEvent reduce_from(FutureInstance *source, Operation *op,
@@ -654,13 +661,12 @@ namespace Legion {
                     CollectiveMapping *mapping = NULL);
       FutureMapImpl(TaskContext *ctx, Runtime *rt, IndexSpaceNode *domain,
                     DistributedID did, uint64_t future_coordinate,
-                    ApEvent completion, Provenance *provenance,
-                    bool register_now = true, 
+                    Provenance *provenance, bool register_now = true, 
                     CollectiveMapping *mapping = NULL); // remote
       FutureMapImpl(TaskContext *ctx, Operation *op, uint64_t future_coordinate,
                     GenerationID gen, int depth, UniqueID uid,
                     IndexSpaceNode *domain, Runtime *rt, DistributedID did,
-                    ApEvent completion, Provenance *provenance);
+                    Provenance *provenance);
       FutureMapImpl(const FutureMapImpl &rhs) = delete;
       virtual ~FutureMapImpl(void);
     public:
@@ -711,7 +717,6 @@ namespace Legion {
       const uint64_t future_coordinate;
       Provenance *const provenance;
       IndexSpaceNode *const future_map_domain;
-      const ApEvent completion_event;
     protected:
       mutable LocalLock future_map_lock;
       std::map<DomainPoint,FutureImpl*> futures;
@@ -774,7 +779,7 @@ namespace Legion {
       ReplFutureMapImpl(TaskContext *ctx, ShardManager *man, Runtime *rt,
                         IndexSpaceNode *domain, IndexSpaceNode *shard_domain,
                         DistributedID did, uint64_t index,
-                        ApEvent completion, Provenance *provenance,
+                        Provenance *provenance,
                         CollectiveMapping *collective_mapping);
       ReplFutureMapImpl(const ReplFutureMapImpl &rhs) = delete;
       virtual ~ReplFutureMapImpl(void);
@@ -2608,14 +2613,13 @@ namespace Legion {
         static const LgTaskID TASK_ID = LG_MAPPER_TASK_ID;
       public:
         MapperTaskArgs(FutureImpl *f, MapperID mid, Processor p,
-                       ApEvent ae, TopLevelContext *c)
+                       TopLevelContext *c)
           : LgTaskArgs<MapperTaskArgs>(implicit_provenance),
-            future(f), map_id(mid), proc(p), event(ae), ctx(c) { }
+            future(f), map_id(mid), proc(p), ctx(c) { }
       public:
         FutureImpl *const future;
         const MapperID map_id;
         const Processor proc;
-        const ApEvent event;
         TopLevelContext *const ctx;
       }; 
     public:
@@ -3477,8 +3481,6 @@ namespace Legion {
       void send_replicate_rendezvous_virtual_mappings(AddressSpaceID target,
                                                       Serializer &rez);
       void send_replicate_post_mapped(AddressSpaceID target, Serializer &rez);
-      void send_replicate_post_execution(AddressSpaceID target,
-                                         Serializer &rez);
       void send_replicate_trigger_complete(AddressSpaceID target, 
                                            Serializer &rez);
       void send_replicate_trigger_commit(AddressSpaceID target,
@@ -3847,7 +3849,6 @@ namespace Legion {
       void handle_replicate_collective_mapping(Deserializer &derez);
       void handle_replicate_virtual_rendezvous(Deserializer &derez);
       void handle_replicate_post_mapped(Deserializer &derez);
-      void handle_replicate_post_execution(Deserializer &derez);
       void handle_replicate_trigger_complete(Deserializer &derez);
       void handle_replicate_trigger_commit(Deserializer &derez);
       void handle_control_replicate_rendezvous_message(Deserializer &derez);
@@ -4035,7 +4036,7 @@ namespace Legion {
                                         CollectiveMapping *mapping = NULL);
       FutureMapImpl* find_or_create_future_map(DistributedID did, 
                           TaskContext *ctx, uint64_t coord, IndexSpace domain,
-                          ApEvent completion, Provenance *provenance);
+                          Provenance *provenance);
       IndexSpace find_or_create_index_slice_space(const Domain &launch_domain,
                                     TypeTag type_tag, Provenance *provenance);
     public:
@@ -6241,8 +6242,6 @@ namespace Legion {
         case SEND_REPLICATE_VIRTUAL_RENDEZVOUS:
           break;
         case SEND_REPLICATE_POST_MAPPED:
-          break;
-        case SEND_REPLICATE_POST_EXECUTION:
           break;
         case SEND_REPLICATE_TRIGGER_COMPLETE:
           break;

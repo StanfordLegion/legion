@@ -368,17 +368,15 @@ namespace Legion {
     // Enumeration of Legion runtime tasks
     enum LgTaskID {
       LG_SCHEDULER_ID,
-      LG_POST_END_ID,
       LG_TRIGGER_READY_ID,
       LG_TRIGGER_EXECUTION_ID,
-      LG_TRIGGER_RESOLUTION_ID,
       LG_TRIGGER_COMMIT_ID,
       LG_DEFERRED_EXECUTION_ID,
       LG_DEFERRED_COMPLETION_ID,
       LG_DEFERRED_COMMIT_ID,
       LG_PRE_PIPELINE_ID,
       LG_TRIGGER_DEPENDENCE_ID,
-      LG_TRIGGER_COMPLETION_ID,
+      LG_DEFERRED_MAPPED_ID,
       LG_TRIGGER_OP_ID,
       LG_TRIGGER_TASK_ID,
       LG_DEFER_MAPPER_SCHEDULER_TASK_ID,
@@ -394,7 +392,7 @@ namespace Legion {
       LG_TOP_FINISH_TASK_ID,
       LG_MAPPER_TASK_ID,
       LG_DISJOINTNESS_TASK_ID,
-      LG_ISSUE_FRAME_TASK_ID,
+      LG_DEFER_TIMING_MEASUREMENT_TASK_ID,
       LG_TASK_IMPL_SEMANTIC_INFO_REQ_TASK_ID,
       LG_INDEX_SPACE_SEMANTIC_INFO_REQ_TASK_ID,
       LG_INDEX_PART_SEMANTIC_INFO_REQ_TASK_ID,
@@ -415,6 +413,7 @@ namespace Legion {
       LG_DEFERRED_LAUNCH_TASK_ID,
       LG_MISPREDICATION_TASK_ID,
       LG_DEFER_TRIGGER_TASK_COMPLETE_TASK_ID,
+      LG_DEFER_TRIGGER_CHILDREN_COMMIT_TASK_ID,
       LG_ORDER_CONCURRENT_LAUNCH_TASK_ID,
       LG_DEFER_MATERIALIZED_VIEW_TASK_ID,
       LG_DEFER_REDUCTION_VIEW_TASK_ID,
@@ -461,7 +460,6 @@ namespace Legion {
       LG_FREE_EXTERNAL_TASK_ID,
       LG_DEFER_CONSENSUS_MATCH_TASK_ID,
       LG_DEFER_COLLECTIVE_TASK_ID,
-      LG_DEFER_RECORD_COMPLETE_REPLAY_TASK_ID,
       LG_DEFER_ISSUE_FILL_TASK_ID,
       LG_DEFER_MUST_EPOCH_RETURN_TASK_ID,
       LG_YIELD_TASK_ID,
@@ -479,17 +477,15 @@ namespace Legion {
 #define LG_TASK_DESCRIPTIONS(name)                               \
       const char *name[LG_LAST_TASK_ID] = {                      \
         "Scheduler",                                              \
-        "Post-Task Execution",                                    \
         "Trigger Ready",                                          \
         "Trigger Execution",                                      \
-        "Trigger Resolution",                                     \
         "Trigger Commit",                                         \
         "Deferred Execution",                                     \
         "Deferred Completion",                                    \
         "Deferred Commit",                                        \
         "Prepipeline Stage",                                      \
         "Logical Dependence Analysis",                            \
-        "Trigger Completion",                                     \
+        "Deferred Mapped",                                        \
         "Trigger Operation Mapping",                              \
         "Trigger Task Mapping",                                   \
         "Defer Mapper Scheduler",                                 \
@@ -505,7 +501,7 @@ namespace Legion {
         "Top Finish",                                             \
         "Mapper Task",                                            \
         "Disjointness Test",                                      \
-        "Issue Frame",                                            \
+        "Defer Timing Measurement",                               \
         "Task Impl Semantic Request",                             \
         "Index Space Semantic Request",                           \
         "Index Partition Semantic Request",                       \
@@ -526,6 +522,7 @@ namespace Legion {
         "Deferred Task Launch",                                   \
         "Handle Mapping Mispredication",                          \
         "Defer Trigger Task Complete",                            \
+        "Defer Trigger Children Commit",                          \
         "Order Concurrent Launch",                                \
         "Defer Materialized View Registration",                   \
         "Defer Reduction View Registration",                      \
@@ -572,7 +569,6 @@ namespace Legion {
         "Free External Allocation",                               \
         "Defer Consensus Match",                                  \
         "Defer Collective Async",                                 \
-        "Defer Record Complete Replay",                           \
         "Defer Issue Fill",                                       \
         "Defer Must Epoch Return Resources",                      \
         "Yield",                                                  \
@@ -1004,7 +1000,6 @@ namespace Legion {
       SEND_REPLICATE_COLLECTIVE_MAPPING,
       SEND_REPLICATE_VIRTUAL_RENDEZVOUS,
       SEND_REPLICATE_POST_MAPPED,
-      SEND_REPLICATE_POST_EXECUTION,
       SEND_REPLICATE_TRIGGER_COMPLETE,
       SEND_REPLICATE_TRIGGER_COMMIT,
       SEND_CONTROL_REPLICATE_RENDEZVOUS_MESSAGE,
@@ -1333,7 +1328,6 @@ namespace Legion {
         "Send Replication Collective Mapping",                        \
         "Send Replication Virtual Mapping Rendezvous",                \
         "Send Replication Post Mapped",                               \
-        "Send Replication Post Execution",                            \
         "Send Replication Trigger Complete",                          \
         "Send Replication Trigger Commit",                            \
         "Send Control Replication Rendezvous Message",                \

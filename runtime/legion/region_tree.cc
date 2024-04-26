@@ -16567,8 +16567,6 @@ namespace Legion {
       // also keep track of the fields that we observe.  We'll use this
       // at the end when computing the final dominator mask.
       FieldMask observed_mask; 
-      const bool validates_local = arrived && (!proj_info.is_projecting() || 
-                                proj_info.is_complete_projection(this, user));
       if (!(check_mask * prev_users.get_valid_mask()))
       {
         bool tighten = false;
@@ -16598,7 +16596,6 @@ namespace Legion {
               observed_mask |= overlap;
             const DependenceType dtype = 
               check_dependence_type<true>(prev.usage, user.usage);
-            bool validate = validates_local;
             switch (dtype)
             {
               case LEGION_NO_DEPENDENCE:
@@ -16610,13 +16607,6 @@ namespace Legion {
               case LEGION_ANTI_DEPENDENCE:
               case LEGION_ATOMIC_DEPENDENCE:
               case LEGION_SIMULTANEOUS_DEPENDENCE:
-                {
-                  // Mark that these kinds of dependences are not allowed
-                  // to validate region inputs
-                  validate = false;
-                  // No break so we register dependences just like
-                  // a true dependence
-                }
               case LEGION_TRUE_DEPENDENCE:
                 {
                   // If we can validate a region record which of our
@@ -16624,7 +16614,7 @@ namespace Legion {
                   // just register a normal dependence
                   user.op->register_region_dependence(user.idx, prev.op,
                                                       prev.gen, prev.idx,
-                                                      dtype, validate, overlap);
+                                                      dtype, overlap);
 #ifdef LEGION_SPY
                   LegionSpy::log_mapping_dependence(
                       user.op->get_context()->get_unique_id(),
