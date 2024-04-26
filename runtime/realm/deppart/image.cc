@@ -109,8 +109,8 @@ namespace Realm {
   template <int N, typename T, int N2, typename T2>
   ImageMicroOp<N, T, N2, T2>::~ImageMicroOp(void)
   {
-    for(SparsityMap<N, T> sparsity : sparsity_outputs) {
-      sparsity.remove_references();
+    for(size_t i = 0; i < sparsity_outputs.size(); i++) {
+      sparsity_outputs[i].remove_references();
     }
   }
 
@@ -414,8 +414,8 @@ namespace Realm {
 	       (s >> approx_output_index) &&
 	       (s >> approx_output_op));
     assert(ok);
-    for(SparsityMap<N, T> sparsity : sparsity_outputs) {
-      sparsity.add_references();
+    for(size_t i = 0; i < sparsity_outputs.size(); i++) {
+      sparsity_outputs[i].add_references();
     }
     (void)ok;
   }
@@ -441,8 +441,8 @@ namespace Realm {
   template <int N, typename T, int N2, typename T2>
   ImageOperation<N,T,N2,T2>::~ImageOperation(void)
   {
-    for (SparsityMap<N, T> sparsity : images) {
-      sparsity.remove_references();
+    for(size_t i = 0; i < images.size(); i++) {
+      images[i].remove_references();
     }
   }
 

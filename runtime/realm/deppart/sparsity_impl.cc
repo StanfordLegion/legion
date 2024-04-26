@@ -29,6 +29,7 @@ namespace Realm {
   extern Logger log_part;
   extern Logger log_dpops;
 
+  static const bool FATAL_ON_FAILURE = true;
 #define REALM_SPARSITY_DELETES
 
   ////////////////////////////////////////////////////////////////////////
@@ -238,7 +239,7 @@ namespace Realm {
     AutoLock<> al(mutex);
     if(map_impl.load() != 0) {
       if(references > 0) {
-        assert(0);
+        assert(FATAL_ON_FAILURE);
       }
       (*map_deleter)(map_impl.load());
     }
@@ -264,7 +265,7 @@ namespace Realm {
     if(references > 0) {
       references -= std::min(references, count);
     } else {
-      assert(0);
+      assert(FATAL_ON_FAILURE);
     }
 
     if(references == 0) {

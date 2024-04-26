@@ -1,19 +1,11 @@
 #include <time.h>
 
 #include <cassert>
-#include <climits>
-#include <cmath>
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
 
 #include "realm/cmdline.h"
-#include "philox.h"
 #include "realm.h"
 #include "realm/id.h"
 #include "realm/network.h"
-#include "realm/nodeset.h"
-#include "realm/threads.h"
 #include "osdep.h"
 
 using namespace Realm;
