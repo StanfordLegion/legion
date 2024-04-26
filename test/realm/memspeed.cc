@@ -510,6 +510,18 @@ void top_level_task(const void *args, size_t arglen,
 	double bw = (1.0 * elements * TestConfig::copy_fields * sizeof(void *) /
 		     (total_full_copy_time - total_short_copy_time));
 
+        // verify the copy only need one hop if src and dst are on the same node.
+        if(inst1.address_space() == inst2.address_space()) {
+          if(num_hops_full != 1) {
+            log_app.error() << "Error: the full copy from " << inst1 << " to " << inst2
+                            << " takes more than one hop, num_hops=" << num_hops_full;
+          }
+          if(num_hops_short != 1) {
+            log_app.error() << "Error: the short copy from " << inst1 << " to " << inst2
+                            << " takes more than one hop, num_hops=" << num_hops_full;
+          }
+        }
+
         if(TestConfig::sparse_chunk == 0) {
           log_app.info() << "copy " << m1 << " -> " << m2 << ": bw:" << bw
                          << " lat:" << latency << ", num_hops_full_copy:" << num_hops_full

@@ -1392,6 +1392,7 @@ typedef enum legion_error_t {
   LEGION_WARNING_WRITE_PRIVILEGE_COLLECTIVE = 1116,
   LEGION_WARNING_UNSUPPORTED_REPLICATION = 1117,
   LEGION_WARNING_UNUSED_CONCURRENCY = 1118,
+  LEGION_WARNING_IGNORED_REPLICATION = 1119,
   
   
   LEGION_FATAL_MUST_EPOCH_NOADDRESS = 2000,
@@ -1452,7 +1453,7 @@ typedef enum legion_privilege_mode_t
 } legion_privilege_mode_t;
 
 #ifdef __cplusplus
-static_assert(sizeof(legion_privilege_mode_t) == sizeof(unsigned), "");
+static_assert(sizeof(legion_privilege_mode_t) == sizeof(unsigned));
 #endif
 
 typedef enum legion_allocate_mode_t {

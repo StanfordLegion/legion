@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 -- runs-with:
--- [["-ffuture", "1"], ["-ffuture", "0"], ["-findex-launch", "0"], ["-fflow", "0"]]
+-- [["-ffuture", "1"], ["-ffuture", "0"], ["-findex-launch", "0"]]
 
 import "regent"
 
@@ -80,39 +80,34 @@ do
   end
 end
 
--- FIXME: Dataflow analysis currently can't handle aliased regions
--- with no common ancestor.
-
-if not regentlib.config["flow"] then
-  task with_partitions(r0 : region(ispace(int1d), int),
-                       p0_disjoint : partition(disjoint, r0, ispace(int1d)),
-                       r1 : region(ispace(int1d), int),
-                       p1_disjoint : partition(disjoint, r1, ispace(int1d)),
-                       n : int)
-  where reads writes(r0, r1) do
-    -- not optimized: projectable argument is (statically) interfering
-    for i = 0, n do
-      g2(p0_disjoint[i], p1_disjoint[i])
-    end
-
-    -- not optimized: projectable argument is (statically) interfering
-    for i = 0, n do
-      h2b(p0_disjoint[i], p1_disjoint[i])
-    end
-
-    -- optimized: projectable argument is non-interfering
-    __demand(__index_launch)
-    for i = 0, n do
-      h2(p0_disjoint[i], p1_disjoint[i])
-    end
-
-    -- optimized: projectable argument is non-interfering
-    __demand(__index_launch)
-    for i = 0, n do
-      g(p0_disjoint[i])
-    end
+task with_partitions(r0 : region(ispace(int1d), int),
+                     p0_disjoint : partition(disjoint, r0, ispace(int1d)),
+                     r1 : region(ispace(int1d), int),
+                     p1_disjoint : partition(disjoint, r1, ispace(int1d)),
+                     n : int)
+where reads writes(r0, r1) do
+  -- not optimized: projectable argument is (statically) interfering
+  for i = 0, n do
+    g2(p0_disjoint[i], p1_disjoint[i])
   end
-end -- not flow
+
+  -- not optimized: projectable argument is (statically) interfering
+  for i = 0, n do
+    h2b(p0_disjoint[i], p1_disjoint[i])
+  end
+
+  -- optimized: projectable argument is non-interfering
+  __demand(__index_launch)
+  for i = 0, n do
+    h2(p0_disjoint[i], p1_disjoint[i])
+  end
+
+  -- optimized: projectable argument is non-interfering
+  __demand(__index_launch)
+  for i = 0, n do
+    g(p0_disjoint[i])
+  end
+end
 
 task main()
   var n = 5
@@ -280,12 +275,6 @@ task main()
     check(p1_disjoint[i], 12345)
   end
 
-  rescape
-    if not regentlib.config["flow"] then
-      remit rquote
-        with_partitions(r0, p0_disjoint, r1, p1_disjoint, n)
-      end
-    end
-  end
+  with_partitions(r0, p0_disjoint, r1, p1_disjoint, n)
 end
 regentlib.start(main)

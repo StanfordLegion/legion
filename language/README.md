@@ -39,7 +39,7 @@ export CMAKE_PREFIX_PATH="$CMAKE_PREFIX_PATH:$PWD/clang+llvm-13.0.0-x86_64-apple
 
 # environment variables needed to build/run Regent
 export SDKROOT="$(xcrun --sdk macosx --show-sdk-path)"
-export CXXFLAGS="-std=c++11"
+export CXXFLAGS="-std=c++17"
 
 # download and build Regent
 git clone -b master https://github.com/StanfordLegion/legion.git
@@ -64,7 +64,7 @@ Regent requires:
 Regent also has a number of transitive dependencies via Legion:
 
   * Linux, macOS, or another Unix
-  * A C++ 11 or newer compiler (GCC, Clang, Intel, or PGI) and GNU Make
+  * A C++ 17 or newer compiler (GCC, Clang, Intel, or PGI) and GNU Make
   * *Optional*: CUDA 10.0 or newer (for NVIDIA GPUs)
   * *Optional*: [GASNet](https://gasnet.lbl.gov/) (for networking)
   * *Optional*: HDF5 (for file I/O)

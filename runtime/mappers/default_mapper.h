@@ -93,12 +93,13 @@ namespace Legion {
       public:
         VariantInfo(void)
           : variant(0), tight_bound(false), 
-            is_inner(false), is_replicable(false) { }
+            is_inner(false), is_leaf(false), is_replicable(false) { }
       public:
         VariantID            variant;
         Processor::Kind      proc_kind;
         bool                 tight_bound;
         bool                 is_inner;
+        bool                 is_leaf;
         bool                 is_replicable;
       };
       enum CachedMappingPolicy

@@ -15,9 +15,7 @@
 -- runs-with:
 -- [
 --  ["-ll:cpu", "3", "-fbounds-checks", "1",
---   "-fparallelize-dop", "9", "-fflow-spmd", "1", "-fflow-spmd-shardsize", "3"],
---  ["-ll:cpu", "4", "-fflow-spmd", "1"],
---  ["-ll:cpu", "4", "-fflow-spmd", "1", "-fflow-spmd-shardsize", "2"]
+--   "-fparallelize-dop", "9"]
 -- ]
 
 import "regent"
@@ -149,7 +147,6 @@ task test(size : int)
   var sum : double = 0
   var cnt = 0
   var steps = 10
-  __demand(__spmd)
   while cnt < steps do
     stencil1(primary_region, interior_region)
     sum += stencil3(primary_region)

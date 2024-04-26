@@ -773,7 +773,7 @@ impl StateDataSource {
 
             let first_index = points.partition_point(|p| {
                 let stop: ts::Timestamp = cont.entry(p.entry).time_range().stop.unwrap().into();
-                stop < tile_id.0.start
+                ts::Timestamp(stop.0.saturating_sub(1)) < tile_id.0.start
             });
             let last_index = points[first_index..].partition_point(|p| {
                 let start: ts::Timestamp = cont.entry(p.entry).time_range().start.unwrap().into();

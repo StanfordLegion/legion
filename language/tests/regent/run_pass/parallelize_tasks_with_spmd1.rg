@@ -15,10 +15,7 @@
 import "regent"
 
 -- [
---  ["-ll:cpu", "4", "-fparallelize-dop", "4",
---   "-fflow-spmd", "1", "-fflow-spmd-shardsize", "2"],
---  ["-ll:cpu", "4", "-fbounds-checks", "1",
---   "-fparallelize-dop", "9", "-fflow-spmd", "1", "-fflow-spmd-shardsize", "3"]
+--  ["-ll:cpu", "4", "-fbounds-checks", "1", "-fparallelize-dop", "9"]
 -- ]
 
 -- This code has not been optimized and is not high performance.
@@ -54,7 +51,6 @@ task test(n : int)
   fill(x, 1.0)
   fill(y, 0.0)
 
-  __demand(__spmd)
   do
     for idx = 1, 5 do
       saxpy(x, y, 0.5)

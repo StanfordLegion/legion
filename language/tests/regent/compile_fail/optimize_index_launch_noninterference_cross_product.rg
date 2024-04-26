@@ -12,11 +12,8 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- runs-with:
--- [["-fflow", "0"]]
-
 -- fails-with:
--- optimize_index_launch_noninterference_cross_product.rg:37: loop optimization failed: argument 2 interferes with argument 1
+-- optimize_index_launch_noninterference_cross_product.rg:34: loop optimization failed: argument 2 interferes with argument 1
 
 import "regent"
 

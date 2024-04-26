@@ -109,7 +109,7 @@ namespace UCP {
       int prog_itr_max{16};
       int rdesc_rel_max{16};
       bool mpool_leakcheck{false};
-      bool crc_check{false};
+      bool crc_check{true};
       bool hbuf_malloc{false};
       bool pbuf_malloc{false};
       bool use_wakeup{false};

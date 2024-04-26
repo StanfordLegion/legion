@@ -12,16 +12,12 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- runs-with:
--- [
---   ["-ll:cpu", "4", "-fflow-spmd", "1"],
---   ["-ll:cpu", "2", "-fflow-spmd", "1", "-fflow-spmd-shardsize", "2"]
--- ]
-
 import "regent"
 
 -- This tests the SPMD optimization of the compiler with:
 --   * keeping multiple partitions up-to-date
+
+local format = require("std/format")
 
 fspace st {
   x : int,
@@ -42,6 +38,7 @@ where reads(r.x, s.x, t.x, u.x), writes(r.y) do
   end
 end
 
+__demand(__replicable)
 task main()
   var cs = ispace(int1d, 3)
   var r = region(ispace(ptr, 5), st)
@@ -62,7 +59,6 @@ task main()
     e.y = int(e)
   end
 
-  __demand(__spmd)
   do
     for i = 0, 3 do
       for c in cs do
@@ -75,7 +71,7 @@ task main()
   end
 
   for e in r do
-    regentlib.c.printf("e %d: %d %d\n", e, e.x, e.y)
+    format.println("e {}: {} {}", int(e), e.x, e.y)
   end
 
   regentlib.assert(e0.x == 211, "test failed")

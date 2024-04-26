@@ -12,9 +12,6 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- runs-with:
--- [ ["-fflow", "0"] ]
-
 -- This test showcases various forms of region projections used for
 -- launching field polymorphic tasks.
 

@@ -1595,12 +1595,11 @@ namespace Legion {
       RegionTreePath path;
       initialize_path(child_node, parent_node->row_source, path);
 
-      LogicalTraceInfo trace_info(op, idx, req); 
-      // If we've already replayed the analysis we don't need to do it
-      if (trace_info.skip_analysis)
-        return;
       FieldMask user_mask = 
         parent_node->column_source->get_field_mask(req.privilege_fields);
+      LogicalTraceInfo trace_info(op, idx, req, user_mask);
+      if (trace_info.skip_analysis)
+        return;
       // Then compute the logical user
       ProjectionSummary *shard_proj = NULL;
       if (proj_info.is_sharding() && proj_info.is_projecting())
@@ -1634,18 +1633,15 @@ namespace Legion {
       {
         FieldMask unopened_mask = user_mask;
         FieldMask refinement_mask;
-        // Only check for refinements if we're not a parent of a 
-        // non-exlcuisve virtual mapping
-        // We also disallow refinements for operations that are part of
+        // We disallow refinements for operations that are part of
         // a must epoch launch because refinements are too hard to 
         // implement correctly in that case
         // We also don't try to update refinements if we're doing a reset
         // operation since that is an internal kind of operation
-        if (!op->is_parent_nonexclusive_virtual_mapping(idx) &&
-            (op->get_must_epoch_op() == NULL) &&
+        if ((op->get_must_epoch_op() == NULL) &&
             (op->get_operation_kind() != Operation::RESET_OP_KIND))
           refinement_mask = user_mask;
-        FieldMaskSet<RefinementOp> refinements;
+        FieldMaskSet<RefinementOp,UNTRACKED_ALLOC,true> refinements;
         parent_node->register_logical_user(req.parent, *user, path,
              trace_info, proj_info, user_mask, unopened_mask,
              refinement_mask, logical_analysis, refinements, true/*root*/);
@@ -1691,7 +1687,7 @@ namespace Legion {
       DETAILED_PROFILER(runtime, REGION_TREE_VERSIONING_ANALYSIS_CALL);
       if (IS_NO_ACCESS(req))
         return;
-      InnerContext *context = op->get_context();
+      InnerContext *context = op->find_physical_context(index);
       ContextID ctx = context->get_physical_tree_context(); 
 #ifdef DEBUG_LEGION
       assert((req.handle_type == LEGION_SINGULAR_PROJECTION) || 
@@ -5148,14 +5144,14 @@ namespace Legion {
       if (runtime->legion_spy_enabled && (LEGION_NAME_SEMANTIC_TAG == tag))
       {
         const char *ptr = NULL;
-        static_assert(sizeof(buffer) == sizeof(ptr), "Fuck c++");
+        static_assert(sizeof(buffer) == sizeof(ptr));
         memcpy(&ptr, &buffer, sizeof(ptr));
         LegionSpy::log_index_space_name(handle.id, ptr);
       }
       if (runtime->profiler && (LEGION_NAME_SEMANTIC_TAG == tag))
       {
         const char *ptr = NULL;
-        static_assert(sizeof(buffer) == sizeof(ptr), "Fuck c++");
+        static_assert(sizeof(buffer) == sizeof(ptr));
         memcpy(&ptr, &buffer, sizeof(ptr));
 	runtime->profiler->record_index_space(handle.id, ptr);
       }
@@ -5176,14 +5172,14 @@ namespace Legion {
       if (runtime->legion_spy_enabled && (LEGION_NAME_SEMANTIC_TAG == tag))
       {
         const char *ptr = NULL;
-        static_assert(sizeof(buffer) == sizeof(ptr), "Fuck c++");
+        static_assert(sizeof(buffer) == sizeof(ptr));
         memcpy(&ptr, &buffer, sizeof(ptr));
         LegionSpy::log_index_partition_name(handle.id, ptr);
       }
       if (runtime->profiler && (LEGION_NAME_SEMANTIC_TAG == tag))
       {
         const char *ptr = NULL;
-        static_assert(sizeof(buffer) == sizeof(ptr), "Fuck c++");
+        static_assert(sizeof(buffer) == sizeof(ptr));
         memcpy(&ptr, &buffer, sizeof(ptr));
 	runtime->profiler->record_index_part(handle.id, ptr);
       }
@@ -5204,14 +5200,14 @@ namespace Legion {
       if (runtime->legion_spy_enabled && (LEGION_NAME_SEMANTIC_TAG == tag))
       {
         const char *ptr = NULL;
-        static_assert(sizeof(buffer) == sizeof(ptr), "Fuck c++");
+        static_assert(sizeof(buffer) == sizeof(ptr));
         memcpy(&ptr, &buffer, sizeof(ptr));
         LegionSpy::log_field_space_name(handle.id, ptr);
       }
       if (runtime->profiler && (LEGION_NAME_SEMANTIC_TAG == tag))
       {
         const char *ptr = NULL;
-        static_assert(sizeof(buffer) == sizeof(ptr), "Fuck c++");
+        static_assert(sizeof(buffer) == sizeof(ptr));
         memcpy(&ptr, &buffer, sizeof(ptr));
 	runtime->profiler->record_field_space(handle.id, ptr);
       }
@@ -5233,14 +5229,14 @@ namespace Legion {
       if (runtime->legion_spy_enabled && (LEGION_NAME_SEMANTIC_TAG == tag))
       {
         const char *ptr = NULL;
-        static_assert(sizeof(buf) == sizeof(ptr), "Fuck c++");
+        static_assert(sizeof(buf) == sizeof(ptr));
         memcpy(&ptr, &buf, sizeof(ptr));
         LegionSpy::log_field_name(handle.id, fid, ptr);
       }
       if (runtime->profiler && (LEGION_NAME_SEMANTIC_TAG == tag))
       {
         const char *ptr = NULL;
-        static_assert(sizeof(buf) == sizeof(ptr), "Fuck c++");
+        static_assert(sizeof(buf) == sizeof(ptr));
         memcpy(&ptr, &buf, sizeof(ptr));
 	runtime->profiler->record_field(handle.id, fid, size, ptr); 
       }
@@ -5261,7 +5257,7 @@ namespace Legion {
       if (runtime->legion_spy_enabled && (LEGION_NAME_SEMANTIC_TAG == tag))
       {
         const char *ptr = NULL;
-        static_assert(sizeof(buffer) == sizeof(ptr), "Fuck c++");
+        static_assert(sizeof(buffer) == sizeof(ptr));
         memcpy(&ptr, &buffer, sizeof(ptr));
         LegionSpy::log_logical_region_name(handle.index_space.id,
             handle.field_space.id, handle.tree_id, ptr);
@@ -5269,7 +5265,7 @@ namespace Legion {
       if (runtime->profiler && (LEGION_NAME_SEMANTIC_TAG == tag))
       {
         const char *ptr = NULL;
-        static_assert(sizeof(buffer) == sizeof(ptr), "Fuck c++");
+        static_assert(sizeof(buffer) == sizeof(ptr));
         memcpy(&ptr, &buffer, sizeof(ptr));
 	runtime->profiler->record_logical_region(handle.index_space.id,
             handle.field_space.id, handle.tree_id, ptr);
@@ -5291,7 +5287,7 @@ namespace Legion {
       if (runtime->legion_spy_enabled && (LEGION_NAME_SEMANTIC_TAG == tag))
       {
         const char *ptr = NULL;
-        static_assert(sizeof(buffer) == sizeof(ptr), "Fuck c++");
+        static_assert(sizeof(buffer) == sizeof(ptr));
         memcpy(&ptr, &buffer, sizeof(ptr));
         LegionSpy::log_logical_partition_name(handle.index_partition.id,
             handle.field_space.id, handle.tree_id, ptr);
@@ -15976,7 +15972,8 @@ namespace Legion {
                                        FieldMask &unopened_field_mask,
                                        FieldMask &refinement_mask,
                                        LogicalAnalysis &logical_analysis,
-                                       FieldMaskSet<RefinementOp> &refinements,
+                                       FieldMaskSet<RefinementOp,
+                                        UNTRACKED_ALLOC,true> &refinements,
                                        const bool root_node)
     //--------------------------------------------------------------------------
     {
@@ -16026,14 +16023,14 @@ namespace Legion {
           // Mask off all the dominated fields from the previous set
           // of epoch users and remove any previous epoch users
           // that were totally dominated
-          filter_prev_epoch_users(state, dominator_mask); 
+          state.filter_previous_epoch_users(dominator_mask); 
           // Mask off all dominated fields from current epoch users and move
           // them to prev epoch users.  If all fields masked off, then remove
           // them from the list of current epoch users.
-          filter_curr_epoch_users(state, dominator_mask);
+          state.filter_current_epoch_users(dominator_mask);
         }
         // If we've arrived add ourselves as a user
-        register_local_user(state, user, user_mask);
+        state.register_local_user(user, user_mask);
         // If we still have a refinement mask then we record that we should
         // do a refinement operation from this node before the operation
         if (!!refinement_mask)
@@ -16100,8 +16097,8 @@ namespace Legion {
                                                 nullptr,
                                                 IndexSpace::NO_SPACE);
         const RegionUsage ref_usage(LEGION_READ_WRITE, LEGION_EXCLUSIVE, 0);
-        for (FieldMaskSet<RefinementOp>::const_iterator it =
-              refinements.begin(); it != refinements.end(); it++)
+        for (FieldMaskSet<RefinementOp,UNTRACKED_ALLOC,true>::const_iterator
+              it = refinements.begin(); it != refinements.end(); it++)
         {
           const LogicalUser refinement_user(it->first, 0/*index*/, ref_usage);
           // Recording refinement dependences will record dependences on 
@@ -16149,16 +16146,6 @@ namespace Legion {
     {
       LogicalState &state = get_logical_state(ctx);
       state.invalidate_refinements(ctx, invalidation_mask);
-    }
-
-    //--------------------------------------------------------------------------
-    void RegionTreeNode::register_local_user(LogicalState &state,
-                                             LogicalUser &user,
-                                             const FieldMask &user_mask)
-    //--------------------------------------------------------------------------
-    {
-      if (state.curr_epoch_users.insert(&user, user_mask))
-        user.add_reference();
     }
 
     //--------------------------------------------------------------------------
@@ -16520,57 +16507,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeNode::filter_prev_epoch_users(LogicalState &state,
-                                                 const FieldMask &field_mask)
-    //--------------------------------------------------------------------------
-    {
-      std::vector<LogicalUser*> to_delete;
-      for (OrderedFieldMaskUsers::iterator it =
-            state.prev_epoch_users.begin(); it !=
-            state.prev_epoch_users.end(); it++)
-      {
-        it.filter(field_mask);
-        if (!it->second)
-          to_delete.push_back(it->first);
-      }
-      for (std::vector<LogicalUser*>::const_iterator it =
-            to_delete.begin(); it != to_delete.end(); it++)
-      {
-        state.prev_epoch_users.erase(*it);
-        if ((*it)->remove_reference())
-          delete (*it);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void RegionTreeNode::filter_curr_epoch_users(LogicalState &state,
-                                                 const FieldMask &field_mask)
-    //--------------------------------------------------------------------------
-    {
-      std::vector<LogicalUser*> to_delete;
-      for (OrderedFieldMaskUsers::iterator it =
-            state.curr_epoch_users.begin(); it !=
-            state.curr_epoch_users.end(); it++)
-      {
-        const FieldMask local_dom = it->second & field_mask;
-        if (!local_dom)
-          continue;
-        if (state.prev_epoch_users.insert(it->first, local_dom))
-          it->first->add_reference();
-        it.filter(local_dom);
-        if (!it->second)
-          to_delete.push_back(it->first);
-      }
-      for (std::vector<LogicalUser*>::const_iterator it =
-            to_delete.begin(); it != to_delete.end(); it++)
-      {
-        state.curr_epoch_users.erase(*it);
-        if ((*it)->remove_reference())
-          delete (*it);
-      }
-    }
-
-    //--------------------------------------------------------------------------
     void RegionTreeNode::report_uninitialized_usage(Operation *op, unsigned idx,
          const RegionUsage usage, const FieldMask &uninit, RtUserEvent reported)
     //--------------------------------------------------------------------------
@@ -16635,6 +16571,7 @@ namespace Legion {
                                 proj_info.is_complete_projection(this, user));
       if (!(check_mask * prev_users.get_valid_mask()))
       {
+        bool tighten = false;
         std::vector<LogicalUser*> to_delete;
         for (OrderedFieldMaskUsers::iterator it =
               prev_users.begin(); it != prev_users.end(); it++)
@@ -16738,15 +16675,9 @@ namespace Legion {
                     logical_analysis.record_close_dependence(root,
                                   user.idx, this, &prev, overlap);
                     it.filter(overlap);
+                    tighten = true;
                     if (!it->second)
-                    {
                       to_delete.push_back(it->first);
-                      // If we're already going to be deleting this
-                      // then we continue to avoid adding this to the
-                      // timeouts data structure and potentially
-                      // creating a double deletion
-                      continue;
-                    }
                   }
                   break;
                 }
@@ -16764,8 +16695,9 @@ namespace Legion {
             if ((*it)->remove_reference())
               delete (*it);
           }
-          prev_users.tighten_valid_mask();
         }
+        if (tighten)
+          prev_users.tighten_valid_mask();
       }
       // The result of this computation is the dominator mask.
       // It's only sound to say that we dominate fields that
@@ -17039,7 +16971,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionNode::initialize_refined_fields(ContextID ctx,
+    void RegionNode::initialize_no_refine_fields(ContextID ctx,
                                                const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
@@ -17047,7 +16979,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       state.sanity_check();
 #endif
-      state.initialize_refined_fields(mask);
+      state.initialize_no_refine_fields(mask);
     }
 
     //--------------------------------------------------------------------------

@@ -12,11 +12,6 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- FIXME: This test breaks RDIR as RDIR cannot handle complex while conditions
-
--- runs-with:
--- [ ["-fflow", "0" ] ]
-
 import "regent"
 
 local c = regentlib.c

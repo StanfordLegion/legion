@@ -117,7 +117,7 @@ local function unreachable(node)
 end
 
 local permitted_for_num_annotations = terralib.newlist({
-  "constant_time_launch", "index_launch", "spmd", "trace", "vectorize"})
+  "constant_time_launch", "index_launch", "trace", "vectorize"})
 
 local node_allow_annotations = {
   -- Expressions:
@@ -202,12 +202,12 @@ local node_allow_annotations = {
   -- Statements:
   [ast.typed.stat.If]        = allow({"predicate"}),
   [ast.typed.stat.Elseif]    = deny_all,
-  [ast.typed.stat.While]     = allow({"predicate", "spmd", "trace"}),
+  [ast.typed.stat.While]     = allow({"predicate", "trace"}),
   [ast.typed.stat.ForNum]    = allow(permitted_for_num_annotations),
-  [ast.typed.stat.ForList]   = allow_if_task({"constant_time_launch", "index_launch", "openmp", "spmd", "trace", "vectorize"}, "cuda"),
-  [ast.typed.stat.Repeat]    = allow({"spmd", "trace"}),
+  [ast.typed.stat.ForList]   = allow_if_task({"constant_time_launch", "index_launch", "openmp", "trace", "vectorize"}, "cuda"),
+  [ast.typed.stat.Repeat]    = allow({"trace"}),
   [ast.typed.stat.MustEpoch] = deny_all,
-  [ast.typed.stat.Block]     = allow({"spmd", "trace"}),
+  [ast.typed.stat.Block]     = allow({"trace"}),
 
   [ast.typed.stat.Var]             = deny_all,
   [ast.typed.stat.VarUnpack]       = deny_all,

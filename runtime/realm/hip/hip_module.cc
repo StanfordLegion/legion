@@ -3762,86 +3762,96 @@ namespace Realm {
       assert(m->config == nullptr);
       m->config = config;
 
-      // if we know gpus have been requested, correct loading of libraries
-      //  and driver initialization are required
+      // // check if gpus have been requested
       bool init_required = ((m->config->cfg_num_gpus > 0) || !m->config->cfg_gpu_idxs.empty());
 
-      // before we do anything, make sure there's a HIP driver and GPUs to talk to
+      // check if hip can be initialized
+      if(hip_init_code != hipSuccess && init_required) {
+        // failure to initialize the driver is a fatal error if we know gpus
+        //  have been requested
+        log_gpu.warning() << "gpus requested, but hipInit returned " << hip_init_code;
+        init_required = false;
+      }
+
+      // do not create the module if previous steps are failed
+      if(!init_required) {
+#if HIP_VERBOSE_ERROR_MSG == 1
+        const char *err_name, *err_str;
+        err_name = hipGetErrorName(hip_init_code);
+        err_str = hipGetErrorString(hip_init_code);
+        log_gpu.info() << "hip module is not loaded, cuInit(0) returned:" << err_name
+                       << " (" << err_str << ")";
+#else
+        log_gpu.info() << "hip module is not loaded, cuInit(0) returned:"
+                       << hip_init_code;
+#endif
+        delete m;
+        return nullptr;
+      }
+
+      // create GPUInfo
       std::vector<GPUInfo *> infos;
       {
-        if(hip_init_code != hipSuccess) {
-          // failure to initialize the driver is a fatal error if we know gpus
-          //  have been requested
-          if(init_required) {
-            log_gpu.fatal() << "gpus requested, but hipInit returned " << hip_init_code;
-            abort();
-          } else if(hip_init_code == hipErrorNoDevice) {
-            log_gpu.info() << "hipInit reports no devices found";
-          } else if(hip_init_code != hipSuccess) {
-            log_gpu.warning() << "hip returned " << hip_init_code << " - module not loaded";
-            delete m;
-            return 0;
-          }
-        } else {
-      	  for(int i = 0; i < config->res_num_gpus; i++) {
-      	    GPUInfo *info = new GPUInfo;
+        for(int i = 0; i < config->res_num_gpus; i++) {
+          GPUInfo *info = new GPUInfo;
 
-      	    info->index = i;
-      	    info->device = i;
-            hipDeviceProp_t dev_prop;
-            CHECK_HIP( hipGetDeviceProperties(&dev_prop, info->device) );
-            memcpy(info->name, dev_prop.name, GPUInfo::MAX_NAME_LEN);
-            info->major = dev_prop.major;
-            info->minor = dev_prop.minor;
-            info->totalGlobalMem = dev_prop.totalGlobalMem;
+          info->index = i;
+          info->device = i;
+          hipDeviceProp_t dev_prop;
+          CHECK_HIP(hipGetDeviceProperties(&dev_prop, info->device));
+          memcpy(info->name, dev_prop.name, GPUInfo::MAX_NAME_LEN);
+          info->major = dev_prop.major;
+          info->minor = dev_prop.minor;
+          info->totalGlobalMem = dev_prop.totalGlobalMem;
 #ifdef REALM_USE_HIP_HIJACK
-            // We only need the rest of these properties for the hijack
-#define GET_DEVICE_PROP(member, name)					\
-            do {								\
-              int tmp;								\
-              CHECK_HIP( hipDeviceGetAttribute(&tmp, hipDeviceAttribute##name, info->device) ); \
-              info->member = tmp;						\
-            } while(0)
-            // SCREW TEXTURES AND SURFACES FOR NOW!
-            GET_DEVICE_PROP(sharedMemPerBlock, MaxSharedMemoryPerBlock);
-            GET_DEVICE_PROP(regsPerBlock, MaxRegistersPerBlock);
-            GET_DEVICE_PROP(warpSize, WarpSize);
-            // GET_DEVICE_PROP(memPitch, MAX_PITCH);
-            GET_DEVICE_PROP(maxThreadsPerBlock, MaxThreadsPerBlock);
-            GET_DEVICE_PROP(maxThreadsDim[0], MaxBlockDimX);
-            GET_DEVICE_PROP(maxThreadsDim[1], MaxBlockDimY);
-            GET_DEVICE_PROP(maxThreadsDim[2], MaxBlockDimZ);
-            GET_DEVICE_PROP(maxGridSize[0], MaxGridDimX);
-            GET_DEVICE_PROP(maxGridSize[1], MaxGridDimY);
-            GET_DEVICE_PROP(maxGridSize[2], MaxGridDimZ);
-            GET_DEVICE_PROP(clockRate, ClockRate);
-            GET_DEVICE_PROP(totalConstMem, TotalConstantMemory);
-            // GET_DEVICE_PROP(deviceOverlap, GPU_OVERLAP);
-            GET_DEVICE_PROP(multiProcessorCount, MultiprocessorCount );
-            // GET_DEVICE_PROP(kernelExecTimeoutEnabled, KERNEL_EXEC_TIMEOUT);
-            // GET_DEVICE_PROP(integrated, INTEGRATED);
-            // GET_DEVICE_PROP(canMapHostMemory, CAN_MAP_HOST_MEMORY);
-            GET_DEVICE_PROP(computeMode, ComputeMode);
-            GET_DEVICE_PROP(concurrentKernels, ConcurrentKernels);
-            // GET_DEVICE_PROP(ECCEnabled, ECC_ENABLED);
-            GET_DEVICE_PROP(pciBusID, PciBusId);
-            GET_DEVICE_PROP(pciDeviceID, PciDeviceId);
-            // GET_DEVICE_PROP(pciDomainID, PCI_DOMAIN_ID);
-            // GET_DEVICE_PROP(tccDriver, TCC_DRIVER);
-            // GET_DEVICE_PROP(asyncEngineCount, ASYNC_ENGINE_COUNT);
-            // GET_DEVICE_PROP(unifiedAddressing, UNIFIED_ADDRESSING);
-            GET_DEVICE_PROP(memoryClockRate, MemoryClockRate);
-            GET_DEVICE_PROP(memoryBusWidth, MemoryBusWidth);
-            GET_DEVICE_PROP(l2CacheSize, L2CacheSize);
-            GET_DEVICE_PROP(maxThreadsPerMultiProcessor, MaxThreadsPerMultiProcessor);
-            // GET_DEVICE_PROP(streamPrioritiesSupported, STREAM_PRIORITIES_SUPPORTED);
-            // GET_DEVICE_PROP(globalL1CacheSupported, GLOBAL_L1_CACHE_SUPPORTED);
-            // GET_DEVICE_PROP(localL1CacheSupported, LOCAL_L1_CACHE_SUPPORTED);
-            GET_DEVICE_PROP(maxSharedMemoryPerMultiProcessor, MaxSharedMemoryPerMultiprocessor);
-            // GET_DEVICE_PROP(regsPerMultiprocessor, MAX_REGISTERS_PER_MULTIPROCESSOR);
-            // GET_DEVICE_PROP(managedMemory, MANAGED_MEMORY);
-            GET_DEVICE_PROP(isMultiGpuBoard, IsMultiGpuBoard);
-            // GET_DEVICE_PROP(multiGpuBoardGroupID, MULTI_GPU_BOARD_GROUP_ID);
+          // We only need the rest of these properties for the hijack
+#define GET_DEVICE_PROP(member, name)                                                    \
+  do {                                                                                   \
+    int tmp;                                                                             \
+    CHECK_HIP(hipDeviceGetAttribute(&tmp, hipDeviceAttribute##name, info->device));      \
+    info->member = tmp;                                                                  \
+  } while(0)
+          // SCREW TEXTURES AND SURFACES FOR NOW!
+          GET_DEVICE_PROP(sharedMemPerBlock, MaxSharedMemoryPerBlock);
+          GET_DEVICE_PROP(regsPerBlock, MaxRegistersPerBlock);
+          GET_DEVICE_PROP(warpSize, WarpSize);
+          // GET_DEVICE_PROP(memPitch, MAX_PITCH);
+          GET_DEVICE_PROP(maxThreadsPerBlock, MaxThreadsPerBlock);
+          GET_DEVICE_PROP(maxThreadsDim[0], MaxBlockDimX);
+          GET_DEVICE_PROP(maxThreadsDim[1], MaxBlockDimY);
+          GET_DEVICE_PROP(maxThreadsDim[2], MaxBlockDimZ);
+          GET_DEVICE_PROP(maxGridSize[0], MaxGridDimX);
+          GET_DEVICE_PROP(maxGridSize[1], MaxGridDimY);
+          GET_DEVICE_PROP(maxGridSize[2], MaxGridDimZ);
+          GET_DEVICE_PROP(clockRate, ClockRate);
+          GET_DEVICE_PROP(totalConstMem, TotalConstantMemory);
+          // GET_DEVICE_PROP(deviceOverlap, GPU_OVERLAP);
+          GET_DEVICE_PROP(multiProcessorCount, MultiprocessorCount);
+          // GET_DEVICE_PROP(kernelExecTimeoutEnabled, KERNEL_EXEC_TIMEOUT);
+          // GET_DEVICE_PROP(integrated, INTEGRATED);
+          // GET_DEVICE_PROP(canMapHostMemory, CAN_MAP_HOST_MEMORY);
+          GET_DEVICE_PROP(computeMode, ComputeMode);
+          GET_DEVICE_PROP(concurrentKernels, ConcurrentKernels);
+          // GET_DEVICE_PROP(ECCEnabled, ECC_ENABLED);
+          GET_DEVICE_PROP(pciBusID, PciBusId);
+          GET_DEVICE_PROP(pciDeviceID, PciDeviceId);
+          // GET_DEVICE_PROP(pciDomainID, PCI_DOMAIN_ID);
+          // GET_DEVICE_PROP(tccDriver, TCC_DRIVER);
+          // GET_DEVICE_PROP(asyncEngineCount, ASYNC_ENGINE_COUNT);
+          // GET_DEVICE_PROP(unifiedAddressing, UNIFIED_ADDRESSING);
+          GET_DEVICE_PROP(memoryClockRate, MemoryClockRate);
+          GET_DEVICE_PROP(memoryBusWidth, MemoryBusWidth);
+          GET_DEVICE_PROP(l2CacheSize, L2CacheSize);
+          GET_DEVICE_PROP(maxThreadsPerMultiProcessor, MaxThreadsPerMultiProcessor);
+          // GET_DEVICE_PROP(streamPrioritiesSupported, STREAM_PRIORITIES_SUPPORTED);
+          // GET_DEVICE_PROP(globalL1CacheSupported, GLOBAL_L1_CACHE_SUPPORTED);
+          // GET_DEVICE_PROP(localL1CacheSupported, LOCAL_L1_CACHE_SUPPORTED);
+          GET_DEVICE_PROP(maxSharedMemoryPerMultiProcessor,
+                          MaxSharedMemoryPerMultiprocessor);
+          // GET_DEVICE_PROP(regsPerMultiprocessor, MAX_REGISTERS_PER_MULTIPROCESSOR);
+          // GET_DEVICE_PROP(managedMemory, MANAGED_MEMORY);
+          GET_DEVICE_PROP(isMultiGpuBoard, IsMultiGpuBoard);
+          // GET_DEVICE_PROP(multiGpuBoardGroupID, MULTI_GPU_BOARD_GROUP_ID);
 // #if CUDA_VERSION >= 8000
 //             GET_DEVICE_PROP(singleToDoublePrecisionPerfRatio, SINGLE_TO_DOUBLE_PRECISION_PERF_RATIO);
 //             GET_DEVICE_PROP(pageableMemoryAccess, PAGEABLE_MEMORY_ACCESS);
@@ -3864,37 +3874,33 @@ namespace Realm {
 // #endif
 #undef GET_DEVICE_PROP
 #endif // REALM_USE_HIP_HIJACK
-      	    log_gpu.info() << "GPU #" << i << ": " << info->name << " ("
-      	     		   << info->major << '.' << info->minor
-      			   << ") " << (info->totalGlobalMem >> 20) << " MB";
+          log_gpu.info() << "GPU #" << i << ": " << info->name << " (" << info->major
+                         << '.' << info->minor << ") " << (info->totalGlobalMem >> 20)
+                         << " MB";
 
-            infos.push_back(info);
-          }
+          infos.push_back(info);
         }
 
-      	if(infos.empty()) {
-      	  log_gpu.warning() << "no HIP-capable GPUs found - module not loaded";
-      	  return 0;
-      	}
+        if(infos.empty()) {
+          log_gpu.warning() << "no HIP-capable GPUs found - module not loaded";
+          return 0;
+        }
 
-      	// query peer-to-peer access (all pairs)
-      	for(std::vector<GPUInfo *>::iterator it1 = infos.begin();
-      	    it1 != infos.end();
-      	    it1++)
-      	  for(std::vector<GPUInfo *>::iterator it2 = infos.begin();
-      	      it2 != infos.end();
-      	      it2++)
-      	    if(it1 != it2) {
-      	      int can_access;
-      	      CHECK_HIP( hipDeviceCanAccessPeer(&can_access,
-      					      (*it1)->device,
-      					      (*it2)->device) );
-      	      if(can_access) {
-            		log_gpu.info() << "p2p access from device " << (*it1)->index
-            			       << " to device " << (*it2)->index;
-            		(*it1)->peers.insert((*it2)->device);
-      	      }
-      	    } else {
+        // query peer-to-peer access (all pairs)
+        for(std::vector<GPUInfo *>::iterator it1 = infos.begin(); it1 != infos.end();
+            it1++)
+          for(std::vector<GPUInfo *>::iterator it2 = infos.begin(); it2 != infos.end();
+              it2++)
+            if(it1 != it2) {
+              int can_access;
+              CHECK_HIP(
+                  hipDeviceCanAccessPeer(&can_access, (*it1)->device, (*it2)->device));
+              if(can_access) {
+                log_gpu.info() << "p2p access from device " << (*it1)->index
+                               << " to device " << (*it2)->index;
+                (*it1)->peers.insert((*it2)->device);
+              }
+            } else {
               // two contexts on the same device can always "peer to peer"
               (*it1)->peers.insert((*it2)->device);
             }

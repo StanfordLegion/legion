@@ -1,5 +1,5 @@
 # Regent + Legion with CUDA
-FROM nvidia/cuda:12.1.0-base-ubuntu20.04
+FROM nvidia/cuda:12.4.1-base-ubuntu20.04
 MAINTAINER Sean Treichler <sean@nvidia.com>
 RUN dpkg --add-architecture i386 && \
     apt-get update -qq && \
@@ -14,9 +14,11 @@ RUN dpkg --add-architecture i386 && \
     apt-get install -qq \
       build-essential git time wget \
       libpython3-dev python3-pip pypy3 \
-      g++-9 \
-      gfortran-9 \
-      gcc-multilib g++-multilib \
+      g++-9 g++-10 g++-11 \
+      gfortran-9 gfortran-10 gfortran-11 \
+      gcc-9-multilib g++-9-multilib \
+      gcc-10-multilib g++-10-multilib \
+      gcc-11-multilib g++-11-multilib \
       clang-10 libclang-10-dev llvm-10-dev \
       clang-12 libclang-12-dev llvm-12-dev libomp-12-dev\
       cmake \
@@ -36,16 +38,25 @@ RUN pip3 install --upgrade 'pip>=22,<23' && \
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --default-toolchain 1.74.1 -y
 
 # install a bunch of flavors of CUDA
+RUN wget -nv https://developer.download.nvidia.com/compute/cuda/12.4.1/local_installers/cuda_12.4.1_550.54.15_linux.run && \
+    bash ./cuda_12.4.1_550.54.15_linux.run --toolkit --silent --override && \
+    rm ./cuda_12.4.1_550.54.15_linux.run
+RUN wget -nv https://developer.download.nvidia.com/compute/cuda/12.3.2/local_installers/cuda_12.3.2_545.23.08_linux.run && \
+    bash ./cuda_12.3.2_545.23.08_linux.run --toolkit --silent --override && \
+    rm ./cuda_12.3.2_545.23.08_linux.run
 RUN wget -nv https://developer.download.nvidia.com/compute/cuda/12.1.1/local_installers/cuda_12.1.1_530.30.02_linux.run && \
-    bash ./cuda_12.1.1_530.30.02_linux.run --toolkit --silent && \
-    rm ./cuda_12.1.1_530.30.02_linux.run && \
-    wget -nv https://developer.download.nvidia.com/compute/cuda/11.7.0/local_installers/cuda_11.7.0_515.43.04_linux.run && \
-    bash ./cuda_11.7.0_515.43.04_linux.run --toolkit --silent && \
-    rm ./cuda_11.7.0_515.43.04_linux.run && \
-    wget -nv https://developer.download.nvidia.com/compute/cuda/11.2.0/local_installers/cuda_11.2.0_460.27.04_linux.run && \
-    bash ./cuda_11.2.0_460.27.04_linux.run --toolkit --silent && \
-    rm ./cuda_11.2.0_460.27.04_linux.run && \
-    rm /usr/local/cuda
+    bash ./cuda_12.1.1_530.30.02_linux.run --toolkit --silent --override && \
+    rm ./cuda_12.1.1_530.30.02_linux.run
+RUN wget -nv https://developer.download.nvidia.com/compute/cuda/11.7.0/local_installers/cuda_11.7.0_515.43.04_linux.run && \
+    bash ./cuda_11.7.0_515.43.04_linux.run --toolkit --silent --override && \
+    rm ./cuda_11.7.0_515.43.04_linux.run
+RUN wget -nv https://developer.download.nvidia.com/compute/cuda/11.3.1/local_installers/cuda_11.3.1_465.19.01_linux.run && \
+    bash ./cuda_11.3.1_465.19.01_linux.run --toolkit --silent --override && \
+    rm ./cuda_11.3.1_465.19.01_linux.run
+RUN wget -nv https://developer.download.nvidia.com/compute/cuda/11.2.0/local_installers/cuda_11.2.0_460.27.04_linux.run && \
+    bash ./cuda_11.2.0_460.27.04_linux.run --toolkit --silent --override && \
+    rm ./cuda_11.2.0_460.27.04_linux.run
+RUN rm /usr/local/cuda
 
 # install gitlab-runner
 RUN wget -O /tmp/gitlab-runner-script.deb.sh https://packages.gitlab.com/install/repositories/runner/gitlab-runner/script.deb.sh && \

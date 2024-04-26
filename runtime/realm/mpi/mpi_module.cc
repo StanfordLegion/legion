@@ -823,7 +823,7 @@ namespace Realm {
     sizes[0] = lengths[0];
     for(size_t i = 1; i < offsets.size(); i++) {
       sizes[i] = static_cast<int>(lengths[i]);
-      offsets[i] = offsets[i - 1] + static_cast<int>(lengths[i]);
+      offsets[i] = offsets[i - 1] + static_cast<int>(lengths[i - 1]);
       total += lengths[i];
     }
     vals_out.resize(total);
