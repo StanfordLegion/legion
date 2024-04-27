@@ -1217,7 +1217,8 @@ namespace Legion {
       prepipelined_event = RtUserEvent::NO_RT_USER_EVENT;
       mapped_event = RtUserEvent::NO_RT_USER_EVENT;
       execution_fence_event = ApEvent::NO_AP_EVENT;
-      completion_event = ApUserEvent::NO_AP_USER_EVENT;
+      completion_event.pending = ApUserEvent::NO_AP_USER_EVENT;
+      completion_set = false;
       commit_event = RtUserEvent::NO_RT_USER_EVENT;
       trace = NULL;
       tracing = false;
@@ -1999,38 +2000,42 @@ namespace Legion {
           (op_kind != DEPENDENT_PARTITION_OP_KIND) &&
           (op_kind != ATTACH_OP_KIND) && (op_kind != DETACH_OP_KIND))
       {
-        if (completion_event.exists())
-          Runtime::trigger_event(NULL, completion_event, effects_done);
-        LegionSpy::log_operation_events(unique_op_id, effects_done,
-                                        completion_event);
-      }
-      else
+#ifdef DEBUG_LEGION
+        assert(!completion_set);
 #endif
-      {
-        // At this point we're completed so there should be no more effects
-        // arriving and we can read the completion_effects with the lock
-        if (completion_event.exists())
-        {
-          if (!completion_effects.empty())
-            Runtime::trigger_event(NULL, completion_event, effects_done);
-          else
-            Runtime::trigger_event(NULL, completion_event);
-        }
+        if (!completion_event.pending.exists())
+          completion_event.pending = Runtime::create_ap_user_event(NULL);
+        LegionSpy::log_operation_events(unique_op_id, effects_done,
+                                        completion_event.pending);
       }
+#endif
       return effects_done;
     }
 
     //--------------------------------------------------------------------------
-    void Operation::complete_operation(ApEvent effects)
+    void Operation::complete_operation(ApEvent effects, bool first_invocation)
     //--------------------------------------------------------------------------
     {
-      if (effects.exists())
+      if (effects.exists() && first_invocation)
       {
+        {
+          AutoLock o_lock(op_lock);
+#ifdef DEBUG_LEGION
+          assert(!completion_set);
+#endif
+          if (completion_event.pending.exists())
+          {
+            ApUserEvent to_trigger = completion_event.pending;
+            Runtime::trigger_event(NULL, to_trigger, effects);
+            completion_event.effects = to_trigger;
+          }
+          else
+            completion_event.effects = effects;
+          completion_set = true;
+        }
         parent_ctx->add_to_deferred_completion_queue(this,effects,track_parent);
         return;
       }
-      else if (track_parent)
-        parent_ctx->register_child_complete(this);
       bool do_commit = false;
       std::vector<Operation*> to_notify;
       {
@@ -2041,6 +2046,18 @@ namespace Legion {
         assert(!completed);
 #endif
         completed = true;
+        if (!completion_set)
+        {
+          if (completion_event.pending.exists())
+          {
+            ApUserEvent to_trigger = completion_event.pending;
+            Runtime::trigger_event(NULL, to_trigger, effects);
+            completion_event.effects = to_trigger;
+          }
+          else
+            completion_event.effects = effects;
+          completion_set = true;
+        }
         // Check to see if we need to trigger commit
         if (runtime->resilient_mode)
         {
@@ -2089,11 +2106,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock o_lock(op_lock);
-      if (mapped && executed)
-        return Runtime::merge_events(NULL, completion_effects);
-      else if (!completion_event.exists())
-        completion_event = Runtime::create_ap_user_event(NULL);
-      return completion_event;
+      if (!completion_set)
+      {
+        if (!completion_event.pending.exists())
+          completion_event.pending = Runtime::create_ap_user_event(NULL);
+        return completion_event.pending;
+      }
+      else
+        return completion_event.effects;
     }
 
     //--------------------------------------------------------------------------
@@ -2101,9 +2121,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock o_lock(op_lock);
-#ifdef DEBUG_LEGION
-      assert(!mapped);
-#endif
+      if (mapped)
+        return RtEvent::NO_RT_EVENT;
       if (!mapped_event.exists())
         mapped_event = Runtime::create_rt_user_event();
       return mapped_event;
@@ -2266,8 +2285,15 @@ namespace Legion {
       // This will also add any necessary dependences
       if ((trace != NULL) && !is_tracing_fence())
         trace_local_id = trace->register_operation(this, gen);
-      // See if we have any fence dependences
-      parent_ctx->register_implicit_dependences(this);
+      if (tracing)
+      {
+        // Temporarily disable tracing while recording implicit dependences
+        tracing = false;
+        parent_ctx->register_implicit_dependences(this);
+        tracing = true;
+      }
+      else // See if we have any fence dependences
+        parent_ctx->register_implicit_dependences(this);
     }
 
     //--------------------------------------------------------------------------
@@ -2399,10 +2425,11 @@ namespace Legion {
           // Check to see if we've already recorded this dependence
           std::map<Operation*,GenerationID>::const_iterator finder = 
             outgoing.find(op);
-          if (finder == outgoing.end())
+          if ((finder == outgoing.end()) || (finder->second != op_gen))
           {
             outgoing[op] = op_gen;
-            dependences.fetch_add(1);
+            if (!mapped)
+              dependences.fetch_add(1);
             // If we're a hardened operation then have the operation
             // tell us when it is complete so we know our data is good
             if (hardened)
@@ -4460,7 +4487,7 @@ namespace Legion {
       requirement = launcher.requirement;
       const ApUserEvent term_event = Runtime::create_ap_user_event(NULL);
       region = PhysicalRegion(new PhysicalRegionImpl(requirement,
-            mapped_event, ready_event, term_event, true/*mapped*/, ctx,
+            get_mapped_event(), ready_event, term_event, true/*mapped*/, ctx,
             map_id, tag, false/*leaf*/, false/*virtual mapped*/,
             true/*collective for replication*/, runtime));
       termination_event = term_event;
@@ -5400,9 +5427,7 @@ namespace Legion {
         static_cast<const OpProfilingResponse*>(base);
       // Check to see if we are done mapping, if not then we need to defer
       // this until we are done mapping so we know how many reports to expect
-      if (!mapped_event.has_triggered())
       {
-        // Take the lock and see if we lost the race
         AutoLock o_lock(op_lock);
         if (!mapped_event.has_triggered())
         {
@@ -8027,9 +8052,7 @@ namespace Legion {
         static_cast<const OpProfilingResponse*>(base);
       // Check to see if we are done mapping, if not then we need to defer
       // this until we are done mapping so we know how many
-      if (!mapped_event.has_triggered())
       {
-        // Take the lock and see if we lost the race
         AutoLock o_lock(op_lock);
         if (!mapped_event.has_triggered())
         {
@@ -9714,12 +9737,9 @@ namespace Legion {
               tpl->record_execution_fence(get_trace_local_id());
             parent_ctx->perform_execution_fence_analysis(this,
                 execution_preconditions);
-            ApEvent fence_event;
-            if (!execution_preconditions.empty())
-              fence_event = Runtime::merge_events(NULL,execution_preconditions);
-            parent_ctx->update_current_execution_fence(this, fence_event);
-            // We can always trigger the completion event when these are done
-            record_completion_effect(fence_event);
+            record_completion_effects(execution_preconditions);
+            parent_ctx->update_current_execution_fence(this, 
+                get_completion_event());
             break;
           }
         default:
@@ -10320,7 +10340,7 @@ namespace Legion {
       // will be deleted at a finite time in the future
       const std::vector<FieldID> field_vec(1,fid);
       runtime->forest->free_field_indexes(handle, field_vec,
-                                          mapped_event, non_owner_shard);
+          get_mapped_event(), non_owner_shard);
       if (runtime->legion_spy_enabled)
         LegionSpy::log_deletion_operation(parent_ctx->get_unique_id(),
                                           unique_op_id, unordered);
@@ -10356,7 +10376,7 @@ namespace Legion {
       // will be deleted at a finite time in the future
       const std::vector<FieldID> field_vec(to_free.begin(), to_free.end());
       runtime->forest->free_field_indexes(handle, field_vec,
-                                          mapped_event, non_owner_shard);
+          get_mapped_event(), non_owner_shard);
       // If we are unordered do this analysis here since we are not going
       // to go through the normal logical dependence analysis stage
       if (skip_dependence_analysis)
@@ -11440,9 +11460,7 @@ namespace Legion {
         static_cast<const OpProfilingResponse*>(base);
       // Check to see if we are done mapping, if not then we need to defer
       // this until we are done mapping so we know how many
-      if (!mapped_event.has_triggered())
       {
-        // Take the lock and see if we lost the race
         AutoLock o_lock(op_lock);
         if (!mapped_event.has_triggered())
         {
@@ -12598,9 +12616,7 @@ namespace Legion {
         static_cast<const OpProfilingResponse*>(base);
       // Check to see if we are done mapping, if not then we need to defer
       // this until we are done mapping so we know how many reports to expect
-      if (!mapped_event.has_triggered())
       {
-        // Take the lock and see if we lost the race
         AutoLock o_lock(op_lock);
         if (!mapped_event.has_triggered())
         {
@@ -13448,9 +13464,7 @@ namespace Legion {
         static_cast<const OpProfilingResponse*>(base);
       // Check to see if we are done mapping, if not then we need to defer
       // this until we are done mapping so we know how many reports to expect
-      if (!mapped_event.has_triggered())
       {
-        // Take the lock and see if we lost the race
         AutoLock o_lock(op_lock);
         if (!mapped_event.has_triggered())
         {
@@ -14563,7 +14577,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Record how many mapping dependences we expect to be notified of
-      remaining_mapping_dependences.store(
+      remaining_mapping_dependences.fetch_add(
           indiv_tasks.size() + index_tasks.size());
       // For every one of our sub-operations, add an additional mapping 
       // dependence.  When our sub-operations map, they will trigger these
@@ -17486,9 +17500,7 @@ namespace Legion {
         static_cast<const OpProfilingResponse*>(base);
       // Check to see if we are done mapping, if not then we need to defer
       // this until we are done mapping so we know how many reports to expect
-      if (!mapped_event.has_triggered())
       {
-        // Take the lock and see if we lost the race
         AutoLock o_lock(op_lock);
         if (!mapped_event.has_triggered())
         {
@@ -19905,7 +19917,7 @@ namespace Legion {
       // for cases where uses actually want to map it
       requirement.privilege = LEGION_READ_WRITE;
       region = PhysicalRegion(new PhysicalRegionImpl(requirement,
-        mapped_event, get_completion_event(), ApUserEvent::NO_AP_USER_EVENT, 
+        get_mapped_event(), get_completion_event(),ApUserEvent::NO_AP_USER_EVENT,
         false/*mapped*/, ctx, 0/*map id*/, 0/*tag*/, false/*leaf*/, 
         false/*virtual mapped*/, launcher.collective, runtime)); 
       // Restore privileges back to write-discard
@@ -21085,7 +21097,8 @@ namespace Legion {
       // for cases where uses actually want to map it
       requirement.privilege = LEGION_READ_WRITE;
       region = PhysicalRegion(new PhysicalRegionImpl(requirement,
-            mapped_event, get_completion_event(), ApUserEvent::NO_AP_USER_EVENT,
+            get_mapped_event(), get_completion_event(), 
+            ApUserEvent::NO_AP_USER_EVENT,
             false/*mapped*/, ctx, 0/*map id*/, 0/*tag*/, false/*leaf*/, 
             false/*virtual mapped*/, false/*collective*/, runtime)); 
       // Restore privileges back to write-discard
@@ -22037,7 +22050,7 @@ namespace Legion {
       }
       else
         perform_measurement();
-      FenceOp::trigger_complete(complete);
+      complete_operation(complete);
     } 
 
     //--------------------------------------------------------------------------

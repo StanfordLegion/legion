@@ -1615,7 +1615,10 @@ namespace Legion {
         shard_proj = destination->compute_projection_summary(op, idx, req,
                                               logical_analysis, proj_info);
       }
-      LogicalUser *user = new LogicalUser(op, idx, RegionUsage(req),shard_proj);
+      LogicalUser *user = new LogicalUser(op, idx, RegionUsage(req),
+          shard_proj, (op->get_must_epoch_op() == NULL) ? UINT_MAX :
+          op->get_must_epoch_op()->find_operation_index(
+            op, op->get_generation()));
       user->add_reference();
 #ifdef DEBUG_LEGION
       InnerContext *context = op->get_context();

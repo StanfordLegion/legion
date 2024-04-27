@@ -3433,7 +3433,10 @@ namespace Legion {
             variant_impl->has_return_type_size, map_applied_conditions);
       }
       if (!single_task_termination.exists())
+      {
         single_task_termination = Runtime::create_ap_user_event(NULL);
+        record_completion_effect(single_task_termination);
+      }
       set_origin_mapped(true); // it's like this was origin mapped
 #ifdef DEBUG_LEGION
       // should only be replaying leaf tasks currently
@@ -4934,9 +4937,7 @@ namespace Legion {
       {
         // Check to see if we are done mapping, if not then we need to defer
         // this until we are done mapping so we know how many
-        if (!mapped_event.has_triggered())
         {
-          // Take the lock and see if we lost the race
           AutoLock o_lock(op_lock);
           if (!mapped_event.has_triggered())
           {
@@ -6222,7 +6223,7 @@ namespace Legion {
         {
           RezCheck z(rez);
           rez.serialize<SingleTask*>(orig_task);
-          rez.serialize(mapped_event);
+          rez.serialize(get_mapped_event());
         }
         runtime->send_individual_remote_mapped(orig_proc, rez);
       }
@@ -6239,7 +6240,7 @@ namespace Legion {
         // we call replicate task and it goes off and does stuff
         SingleTask *original = orig_task;
         const Processor orig = orig_proc;
-        const RtEvent event = mapped_event;
+        const RtEvent event = get_mapped_event();
         const bool result = SingleTask::replicate_task();
         if (result)
         {
@@ -6380,12 +6381,12 @@ namespace Legion {
         Serializer rez;
         pack_remote_complete(rez, effects);
         runtime->send_individual_remote_complete(orig_proc,rez);
-        complete_operation();
+        complete_operation(effects);
       }
       else if (must_epoch != NULL)
       {
         must_epoch->notify_subop_complete(this, effects);
-        complete_operation();
+        complete_operation(effects);
       }
       else
         complete_operation(effects);
@@ -6647,7 +6648,7 @@ namespace Legion {
           {
             RezCheck z2(rez);
             rez.serialize<SingleTask*>(orig_task);
-            rez.serialize(mapped_event);
+            rez.serialize(get_mapped_event());
           }
           runtime->send_individual_remote_mapped(orig_proc, rez);
         }
@@ -6922,7 +6923,7 @@ namespace Legion {
     void PointTask::trigger_replay(void)
     //--------------------------------------------------------------------------
     {
-      slice_owner->record_point_mapped(mapped_event);
+      slice_owner->record_point_mapped(get_mapped_event());
       tpl->register_operation(this);
       SingleTask::trigger_replay();
     }
@@ -7114,7 +7115,7 @@ namespace Legion {
       const RtEvent deferred = map_all_regions(must_epoch_owner, args);
       if (deferred.exists())
         return deferred;
-      slice_owner->record_point_mapped(mapped_event);
+      slice_owner->record_point_mapped(get_mapped_event());
       return RtEvent::NO_RT_EVENT;
     }
 
@@ -7125,7 +7126,7 @@ namespace Legion {
       // Pull this onto the stack since it is unsafe to read it after we
       // call the base class method
       SliceTask *owner = slice_owner;
-      const RtEvent event = mapped_event;
+      const RtEvent event = get_mapped_event();
       const bool result = SingleTask::replicate_task();
       if (result)
         owner->record_point_mapped(event);
@@ -7230,7 +7231,7 @@ namespace Legion {
       slice_owner->record_point_complete(effects);
       if (execution_context != NULL)
         execution_context->invalidate_logical_context();
-      complete_operation();
+      complete_operation(effects);
     }
 
     //--------------------------------------------------------------------------
@@ -7305,13 +7306,13 @@ namespace Legion {
         {
           RezCheck z2(rez);
           rez.serialize<SingleTask*>(orig_task);
-          rez.serialize(mapped_event);
+          rez.serialize(get_mapped_event());
         }
         runtime->send_individual_remote_mapped(orig_proc, rez);
       }
       else
         complete_mapping();
-      slice_owner->record_point_mapped(mapped_event);
+      slice_owner->record_point_mapped(get_mapped_event());
       if (runtime->profiler != NULL)
         runtime->profiler->register_operation(this);
       return false;
@@ -7853,7 +7854,7 @@ namespace Legion {
       const RtEvent deferred = map_all_regions(must_epoch_owner, args);
       if (deferred.exists())
         return deferred;
-      shard_manager->handle_post_mapped(true/*local*/, mapped_event);
+      shard_manager->handle_post_mapped(true/*local*/, get_mapped_event());
       return RtEvent::NO_RT_EVENT;
     }
 
@@ -7979,7 +7980,7 @@ namespace Legion {
           profiling_reported.exists())
         Runtime::trigger_event(profiling_reported);
       shard_manager->trigger_task_complete(true/*local*/, effects);
-      complete_operation();
+      complete_operation(effects);
     }
 
     //--------------------------------------------------------------------------
@@ -8339,7 +8340,7 @@ namespace Legion {
       map_id = mid;
       orig_proc = proxy;
       current_proc = proxy;
-      shard_manager->handle_post_mapped(true/*local*/, mapped_event);
+      shard_manager->handle_post_mapped(true/*local*/, get_mapped_event());
     }
 
     //--------------------------------------------------------------------------
@@ -9770,37 +9771,6 @@ namespace Legion {
       // Set the future if we actually ran the task or we speculated
       if ((redop > 0) && (predication_state != PREDICATED_FALSE_STATE))
       {
-#ifdef DEBUG_LEGION
-        assert(!reduction_instances.empty());
-        assert(reduction_instance == reduction_instances.front());
-        assert(reduction_fold_effects.empty());
-#endif
-        // Now do the copy out from the reduction_instance to any other
-        // target futures that we have, we'll do this with a broadcast tree
-        if (reduction_instances.size() > 1)
-        {
-          std::vector<ApEvent> reduction_instances_ready(
-              reduction_instances.size(), reduction_instance_precondition);
-          // Do the copy from 0 to 1 first
-          reduction_instances_ready[1] = reduction_instances[1]->copy_from(
-              reduction_instance, this, reduction_instances_ready[0]);
-          for (unsigned idx = 1; idx < reduction_instances.size(); idx++)
-          {
-            if (reduction_instances.size() <= (2*idx))
-              break;
-            reduction_instances_ready[2*idx] =
-              reduction_instances[2*idx]->copy_from(reduction_instances[idx],
-                this, reduction_instances_ready[idx]);
-            if (reduction_instances.size() <= (2*idx+1))
-              break;
-            reduction_instances_ready[2*idx+1] =
-             reduction_instances[2*idx+1]->copy_from(reduction_instances[idx],
-               this, reduction_instances_ready[idx]);
-          }
-          record_completion_effects(reduction_instances_ready);
-        }
-        else
-          record_completion_effect(reduction_instance_precondition);
         reduction_future.impl->set_results(effects,
             reduction_instances, reduction_metadata, reduction_metasize);
         // Clear this since we no longer own the buffer
@@ -9810,7 +9780,7 @@ namespace Legion {
       if (must_epoch != NULL)
       {
         must_epoch->notify_subop_complete(this, effects);
-        complete_operation();
+        complete_operation(effects);
       } 
       else
         complete_operation(effects);
@@ -10037,9 +10007,7 @@ namespace Legion {
             static_cast<const OpProfilingResponse*>(base);
       // Check to see if we are done mapping, if not then we need to defer
       // this until we are done mapping so we know how many
-      if (!mapped_event.has_triggered())
       {
-        // Take the lock and see if we lost the race
         AutoLock o_lock(op_lock);
         if (!mapped_event.has_triggered())
         {
@@ -10233,7 +10201,7 @@ namespace Legion {
       if (need_trigger)
       {
         // If we are reducing to a single value we need to finish that now
-        if (redop > 0)
+        if ((redop > 0) && (predication_state != PREDICATED_FALSE_STATE))
         {
 #ifdef DEBUG_LEGION
           assert((serdez_redop_fns != NULL) || !reduction_instances.empty());
@@ -10346,6 +10314,37 @@ namespace Legion {
         else
           complete_mapping();
       } 
+#ifdef DEBUG_LEGION
+      assert(!reduction_instances.empty());
+      assert(reduction_instance == reduction_instances.front());
+      assert(reduction_fold_effects.empty());
+#endif
+      // Now do the copy out from the reduction_instance to any other
+      // target futures that we have, we'll do this with a broadcast tree
+      if (reduction_instances.size() > 1)
+      {
+        std::vector<ApEvent> reduction_instances_ready(
+            reduction_instances.size(), reduction_instance_precondition);
+        // Do the copy from 0 to 1 first
+        reduction_instances_ready[1] = reduction_instances[1]->copy_from(
+            reduction_instance, this, reduction_instances_ready[0]);
+        for (unsigned idx = 1; idx < reduction_instances.size(); idx++)
+        {
+          if (reduction_instances.size() <= (2*idx))
+            break;
+          reduction_instances_ready[2*idx] =
+            reduction_instances[2*idx]->copy_from(reduction_instances[idx],
+              this, reduction_instances_ready[idx]);
+          if (reduction_instances.size() <= (2*idx+1))
+            break;
+          reduction_instances_ready[2*idx+1] =
+           reduction_instances[2*idx+1]->copy_from(reduction_instances[idx],
+             this, reduction_instances_ready[idx]);
+        }
+        record_completion_effects(reduction_instances_ready);
+      }
+      else
+        record_completion_effect(reduction_instance_precondition);
     }
 
     //--------------------------------------------------------------------------

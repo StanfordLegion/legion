@@ -5583,6 +5583,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
+      assert(execution_fence_barrier.exists());
+#endif
+      Runtime::phase_barrier_arrive(execution_fence_barrier, 
+                                    1/*count*/, complete);
+#ifdef DEBUG_LEGION
       ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
       assert(repl_ctx != NULL);
 #else
@@ -5600,7 +5605,7 @@ namespace Legion {
         measured = runtime->issue_runtime_meta_task(args,
             LG_LATENCY_DEFERRED_PRIORITY,
             Runtime::protect_event(execution_fence_barrier));
-      ReplFenceOp::trigger_complete(complete);
+      complete_operation(execution_fence_barrier);
     }
 
     //--------------------------------------------------------------------------
@@ -6139,8 +6144,9 @@ namespace Legion {
       {
         case MAPPING_FENCE:
           {
+            // Still need to get a callback if we're going to be replaying
             if (is_recording())
-              trace_info.record_complete_replay(map_applied_conditions);
+              trace_info.record_complete_replay(map_applied_conditions);      
             break;
           }
         case EXECUTION_FENCE:
@@ -6149,14 +6155,9 @@ namespace Legion {
               tpl->record_execution_fence(get_trace_local_id());
             parent_ctx->perform_execution_fence_analysis(this,
                 execution_preconditions);
-            if (!execution_preconditions.empty())
-              Runtime::phase_barrier_arrive(execution_fence_barrier, 1/*count*/,
-                  Runtime::merge_events(NULL, execution_preconditions));
-            else
-              Runtime::phase_barrier_arrive(execution_fence_barrier,1/*count*/);
+            record_completion_effects(execution_preconditions);
             parent_ctx->update_current_execution_fence(this, 
-                execution_fence_barrier);
-            record_completion_effect(execution_fence_barrier);
+                get_completion_event());
             break;
           }
         default:
@@ -6186,7 +6187,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplFenceOp::complete_replay(ApEvent complete_event)
+    void ReplFenceOp::trigger_complete(ApEvent complete)
     //--------------------------------------------------------------------------
     {
       if (fence_kind == EXECUTION_FENCE)
@@ -6195,11 +6196,11 @@ namespace Legion {
         assert(execution_fence_barrier.exists());
 #endif
         Runtime::phase_barrier_arrive(execution_fence_barrier, 
-                                      1/*count*/, complete_event);
-        FenceOp::complete_replay(execution_fence_barrier);
+                                      1/*count*/, complete);
+        FenceOp::trigger_complete(execution_fence_barrier);
       }
       else
-        FenceOp::complete_replay(complete_event);
+        FenceOp::trigger_complete(complete);
     }
 
     /////////////////////////////////////////////////////////////

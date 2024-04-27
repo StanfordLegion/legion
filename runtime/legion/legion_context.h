@@ -735,12 +735,14 @@ namespace Legion {
       struct ReorderBufferEntry {
       public:
         inline ReorderBufferEntry(Operation *op, size_t index)
-          : operation(op), operation_index(index), complete(false) { }
+          : operation(op), operation_index(index), 
+            complete(false), child_complete(false) { }
       public:
         Operation *operation;
         uint64_t operation_index;
         ApEvent complete_event;
         bool complete;
+        bool child_complete;
       };
     public:
       // Prepipeline stages need to hold a reference since the

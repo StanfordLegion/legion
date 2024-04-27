@@ -8625,7 +8625,7 @@ namespace Legion {
       {
         (*it)->set_execution_fence_event(current_execution_fence_event);
 #ifdef LEGION_SPY
-        (*it)->find_completion_effects(previous_completion_events);
+        previous_completion_events.insert((*it)->get_completion_event());
         // Periodically merge these to keep this data structure from exploding
         // when we have a long-running task, although don't do this for fence
         // operations in case we have to prune ourselves out of the set
@@ -8983,7 +8983,7 @@ namespace Legion {
         if (!it->effects.has_triggered_faultaware(poisoned) || poisoned)
           assert(false);
         implicit_provenance = it->op->get_unique_op_id();
-        it->op->complete_operation();
+        it->op->complete_operation(it->effects, false/*first*/);
       }
       if (next != NULL)
       {
@@ -9012,7 +9012,7 @@ namespace Legion {
         assert(!reorder_buffer.empty());
 #endif
         ReorderBufferEntry &next = reorder_buffer.front();
-        if (!next.complete || 
+        if (!next.child_complete ||
             ((idx > 0) && (next.operation_index == previous_index)))
         {
           outstanding_commit_task = false;
@@ -9214,7 +9214,11 @@ namespace Legion {
     {
       AutoLock child_lock(child_op_lock);
       ReorderBufferEntry &entry = find_rob_entry(op);
+#ifdef DEBUG_LEGION
+      assert(!entry.child_complete);
+#endif
       entry.complete = true;
+      entry.child_complete = true;
       // See if we're at the front of the ROB and need to start the commit
       // process for this operation
       if (!outstanding_commit_task &&
@@ -9229,7 +9233,7 @@ namespace Legion {
       if (!task_executed)
       {
         if (entry.complete_event.exists())
-          cummulative_child_completion_events.insert(entry.complete_event);
+          cummulative_child_completion_events.push_back(entry.complete_event);
         // Make sure this vector doesn't grow too large for long-running tasks
         constexpr size_t MAX_SIZE = 32;
         if (cummulative_child_completion_events.size() == MAX_SIZE)
@@ -9711,25 +9715,22 @@ namespace Legion {
       if (current_mapping_fence != NULL)
       {
 #ifdef LEGION_SPY
-        if (current_mapping_fence_event.exists())
+        if (current_fence_uid > 0)
         {
-          if (current_fence_uid > 0)
+          unsigned num_regions = op->get_region_count();
+          if (num_regions > 0)
           {
-            unsigned num_regions = op->get_region_count();
-            if (num_regions > 0)
+            for (unsigned idx = 0; idx < num_regions; idx++)
             {
-              for (unsigned idx = 0; idx < num_regions; idx++)
-              {
-                LegionSpy::log_mapping_dependence(
-                    get_unique_id(), current_fence_uid, 0,
-                    op->get_unique_op_id(), idx, TRUE_DEPENDENCE);
-              }
-            }
-            else
               LegionSpy::log_mapping_dependence(
                   get_unique_id(), current_fence_uid, 0,
-                  op->get_unique_op_id(), 0, TRUE_DEPENDENCE);
+                  op->get_unique_op_id(), idx, TRUE_DEPENDENCE);
+            }
           }
+          else
+            LegionSpy::log_mapping_dependence(
+                get_unique_id(), current_fence_uid, 0,
+                op->get_unique_op_id(), 0, TRUE_DEPENDENCE);
         }
         // Have to record this operation in case there is a fence later
         ops_since_last_fence.push_back(op->get_unique_op_id());
@@ -9742,6 +9743,10 @@ namespace Legion {
           current_mapping_fence = NULL;
 #endif
       }
+#ifdef LEGION_SPY
+      else
+        ops_since_last_fence.push_back(op->get_unique_op_id());
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -9757,6 +9762,7 @@ namespace Legion {
         // so that we do not run into trouble when running with Legion Spy.
         assert((op_kind == Operation::FENCE_OP_KIND) || 
                (op_kind == Operation::FRAME_OP_KIND) || 
+               (op_kind == Operation::TIMING_OP_KIND) ||
                (op_kind == Operation::DELETION_OP_KIND) ||
                (op_kind == Operation::TRACE_BEGIN_OP_KIND) ||
                (op_kind == Operation::TRACE_RECURRENT_OP_KIND) ||
@@ -9795,21 +9801,18 @@ namespace Legion {
       }
 #ifdef LEGION_SPY
       // Record a dependence on the previous fence
-      if (mapping)
+      if (current_fence_uid > 0)
+        LegionSpy::log_mapping_dependence(get_unique_id(), current_fence_uid,
+            0/*index*/, op->get_unique_op_id(), 0/*index*/, TRUE_DEPENDENCE);
+      for (std::deque<UniqueID>::const_iterator it = 
+            ops_since_last_fence.begin(); it != 
+            ops_since_last_fence.end(); it++)
       {
-        if (current_fence_uid > 0)
-          LegionSpy::log_mapping_dependence(get_unique_id(), current_fence_uid,
-              0/*index*/, op->get_unique_op_id(), 0/*index*/, TRUE_DEPENDENCE);
-        for (std::deque<UniqueID>::const_iterator it = 
-              ops_since_last_fence.begin(); it != 
-              ops_since_last_fence.end(); it++)
-        {
-          // Skip ourselves if we are here
-          if ((*it) == op->get_unique_op_id())
-            continue;
-          LegionSpy::log_mapping_dependence(get_unique_id(), *it, 0/*index*/,
-              op->get_unique_op_id(), 0/*index*/, TRUE_DEPENDENCE); 
-        }
+        // Skip ourselves if we are here
+        if ((*it) == op->get_unique_op_id())
+          continue;
+        LegionSpy::log_mapping_dependence(get_unique_id(), *it, 0/*index*/,
+            op->get_unique_op_id(), 0/*index*/, TRUE_DEPENDENCE); 
       }
 #endif
     }
@@ -9828,6 +9831,7 @@ namespace Legion {
         // so that we do not run into trouble when running with Legion Spy.
         assert((op_kind == Operation::FENCE_OP_KIND) || 
                (op_kind == Operation::FRAME_OP_KIND) || 
+               (op_kind == Operation::TIMING_OP_KIND) ||
                (op_kind == Operation::TRACE_BEGIN_OP_KIND) ||
                (op_kind == Operation::TRACE_RECURRENT_OP_KIND) ||
                (op_kind == Operation::TRACE_COMPLETE_OP_KIND));
@@ -11881,7 +11885,6 @@ namespace Legion {
     void InnerContext::post_end_task(void)
     //--------------------------------------------------------------------------
     {
-      owner_task->record_inner_termination(realm_done_event);
       // If we weren't a leaf task, compute the conditions for being mapped
       // which is that all of our children are now mapped
       // Also test for whether we need to trigger any of our child
@@ -11889,15 +11892,20 @@ namespace Legion {
       // are done executing
       bool need_commit = false;
       std::vector<RtEvent> preconditions;
-      std::vector<ApEvent> child_completion_events;
+      std::vector<ApEvent> completion_events;
       {
         AutoLock child_lock(child_op_lock);
         // Only need to do this for executing and executed children
         // We know that any complete children are done
         for (std::deque<ReorderBufferEntry>::const_iterator it =
               reorder_buffer.begin(); it != reorder_buffer.end(); it++)
-          if (!it->complete)
-            preconditions.push_back(it->operation->get_mapped_event());
+        {
+          if (it->complete)
+            continue;
+          RtEvent mapped = it->operation->get_mapped_event();
+          if (mapped.exists())
+            preconditions.push_back(mapped);
+        }
 #ifdef DEBUG_LEGION
         assert(!task_executed);
 #endif
@@ -11905,7 +11913,7 @@ namespace Legion {
         // can mark that we are done executing
         task_executed = true;
 #ifdef LEGION_SPY
-        child_completion_events.insert(child_completion_events.end(),
+        completion_events.insert(completion_events.end(),
             cummulative_child_completion_events.begin(),
             cummulative_child_completion_events.end());
         cummulative_child_completion_events.clear();
@@ -11915,16 +11923,22 @@ namespace Legion {
           for (std::deque<ReorderBufferEntry>::const_iterator it =
                 reorder_buffer.begin(); it != reorder_buffer.end(); it++)
             if (!it->complete)
-              child_completion_events.push_back(
+              completion_events.push_back(
                   it->operation->get_completion_event());
             else if (it->complete_event.exists())
-              child_completion_events.push_back(it->complete_event);
+              completion_events.push_back(it->complete_event);
         }
         else
           need_commit = true;
       }
-      if (!child_completion_events.empty())
-        owner_task->record_completion_effects(child_completion_events);
+      if (!completion_events.empty())
+      {
+        completion_events.push_back(realm_done_event);
+        owner_task->record_inner_termination(
+            Runtime::merge_events(NULL, completion_events));
+      }
+      else
+        owner_task->record_inner_termination(realm_done_event);
       if (!preconditions.empty())
         owner_task->handle_post_mapped(Runtime::merge_events(preconditions));
       else

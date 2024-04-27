@@ -567,7 +567,8 @@ namespace Legion {
       // Indicate that we are completing this operation
       // which will also verify any regions for our producers
       // You should probably never set first_invocation yourself
-      void complete_operation(ApEvent effects = ApEvent::NO_AP_EVENT);
+      void complete_operation(ApEvent effects = ApEvent::NO_AP_EVENT,
+                              bool first_invocation = true);
       // Indicate that we are committing this operation
       void commit_operation(bool do_deactivate,
                             RtEvent wait_on = RtEvent::NO_RT_EVENT);
@@ -755,13 +756,18 @@ namespace Legion {
       // Our must epoch if we have one
       MustEpochOp *must_epoch; 
     private:
-      // The completion event for this operation
-      ApUserEvent completion_event;
+      // Provenance information for this operation
+      Provenance *provenance;
       // Track the completion events for this operation in case someone
       // decides that they are going to ask for it later
       std::set<ApEvent> completion_effects;
-      // Provenance information for this operation
-      Provenance *provenance;
+      // The completion event for this operation
+      union CompletionEvent {
+        CompletionEvent(void) : effects(ApEvent::NO_AP_EVENT) { }
+        ApEvent effects;
+        ApUserEvent pending;
+      } completion_event;
+      bool completion_set;
     };
 
     /**
@@ -2826,7 +2832,6 @@ namespace Legion {
       void notify_subop_commit(Operation *op, RtEvent precondition);
     public:
       RtUserEvent find_slice_versioning_event(UniqueID slice_id, bool &first);
-    protected:
       int find_operation_index(Operation *op, GenerationID generation);
       TaskOp* find_task_by_index(int index);
     protected:
