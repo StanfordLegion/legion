@@ -2933,7 +2933,9 @@ namespace Legion {
     {
       Machine machine = Realm::Machine::get_machine();
       Machine::MemoryQuery finder(machine);
-      const Processor exec_proc = Processor::get_executing_processor();
+      Runtime *runtime = Runtime::get_runtime();
+      Context ctx = Runtime::get_context();
+      const Processor exec_proc = runtime->get_executing_processor(ctx);
       finder.best_affinity_to(exec_proc);
       finder.only_kind(memkind);
       if (finder.count() == 0)
@@ -2954,7 +2956,6 @@ namespace Legion {
           REALM_PROCESSOR_KINDS(PROC_NAMES)
 #undef PROC_NAMES
         };
-        Context ctx = Runtime::get_context();
         REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
             "Unable to find associated %s memory for %s processor when "
             "performing an UntypedDeferredValue creation in task %s (UID %lld)",
@@ -2972,7 +2973,6 @@ namespace Legion {
         Realm::InstanceLayoutGeneric::choose_instance_layout(bounds, 
             constraints, dim_order);
       layout->alignment_reqd = alignment;
-      Runtime *runtime = Runtime::get_runtime();
       instance = runtime->create_task_local_instance(memory, layout);
       if (initial_value != NULL)
       {
