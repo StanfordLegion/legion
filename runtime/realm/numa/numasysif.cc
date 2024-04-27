@@ -154,8 +154,10 @@ namespace Realm {
       if((ret != 0) || !mask_nonempty(nmask, detected_node_count)) {
 	// this really shouldn't fail, since we made the same call above in
 	//  numasysif_numa_available()
-	log_numa.error() << "mems_allowed: ret=" << ret << " errno=" << errno << " mask=" << std::hex << nmask << std::dec << " count=" << detected_node_count;
-	return false;
+        log_numa.error() << "mems_allowed: ret=" << ret << " errno=" << errno
+                         << " mask=" << std::hex << nmask << std::dec
+                         << " count=" << detected_node_count;
+        return false;
       }
     }
 
@@ -167,29 +169,30 @@ namespace Realm {
 	snprintf(fname, sizeof fname, "/sys/devices/system/node/node%d/meminfo", i);
 	FILE *f = fopen(fname, "r");
 	if(!f) {
-	  log_numa.error() << "can't read '" << fname << "': ", strerror(errno);
-	  continue;
-	}
-	char line[256];
-	while(fgets(line, 256, f)) {
-	  const char *s = strstr(line, "MemFree");
-	  if(!s) continue;
-	  const char *endptr;
-	  errno = 0;
-	  long long sz = strtoll(s+9, (char **)&endptr, 10);
-	  if((errno != 0) || strcmp(endptr, " kB\n")) {
-	    log_numa.error() << "ill-formed line: '" << s << "' '" << endptr << "'";
-	    continue;
-	  }
-	  // success - add this to the list and stop reading
-	  NumaNodeMemInfo& mi = info[i];
-	  mi.node_id = i;
-	  mi.bytes_available = (sz << 10);
-	  break;
-	}
-	// if we get all the way through the file without finding the size,
-	//   we just don't add anything to the info
-	fclose(f);
+          log_numa.error() << "can't read '" << fname << "': ", strerror(errno);
+          continue;
+        }
+        char line[256];
+        while(fgets(line, 256, f)) {
+          const char *s = strstr(line, "MemFree");
+          if(!s)
+            continue;
+          const char *endptr;
+          errno = 0;
+          long long sz = strtoll(s + 9, (char **)&endptr, 10);
+          if((errno != 0) || strcmp(endptr, " kB\n")) {
+            log_numa.error() << "ill-formed line: '" << s << "' '" << endptr << "'";
+            continue;
+          }
+          // success - add this to the list and stop reading
+          NumaNodeMemInfo &mi = info[i];
+          mi.node_id = i;
+          mi.bytes_available = (sz << 10);
+          break;
+        }
+        // if we get all the way through the file without finding the size,
+        //   we just don't add anything to the info
+        fclose(f);
       }
 
     // as long as we got at least one valid node, assume we're successful
@@ -209,8 +212,8 @@ namespace Realm {
     if(only_available) {
       int ret = sched_getaffinity(0, sizeof(avail_cpus), &avail_cpus);
       if(ret != 0) {
-	log_numa.error() << "sched_getaffinity failed: " << strerror(errno);
-	return false;
+        log_numa.error() << "sched_getaffinity failed: " << strerror(errno);
+        return false;
       }
     } else
       CPU_ZERO(&avail_cpus);
@@ -233,17 +236,17 @@ namespace Realm {
 	snprintf(path2, sizeof path2, "/sys/devices/system/cpu/%.16s", de->d_name);
 	DIR *d2 = opendir(path2);
 	if(!d2) {
-	  log_numa.error() << "couldn't read '" << path2 << "': " << strerror(errno);
-	  continue;
-	}
-	struct dirent *de2;
-	while((de2 = readdir(d2)) != 0)
-	  if(!strncmp(de2->d_name, "node", 4)) {
-	    int node_index = atoi(de2->d_name + 4);
-	    cpu_counts[node_index]++;
-	    break;
-	  }
-	closedir(d2);
+          log_numa.error() << "couldn't read '" << path2 << "': " << strerror(errno);
+          continue;
+        }
+        struct dirent *de2;
+        while((de2 = readdir(d2)) != 0)
+          if(!strncmp(de2->d_name, "node", 4)) {
+            int node_index = atoi(de2->d_name + 4);
+            cpu_counts[node_index]++;
+            break;
+          }
+        closedir(d2);
       }
 
     // any matches is "success"
@@ -295,7 +298,8 @@ namespace Realm {
             ++it)
           it->second = index++;
       } else {
-	log_numa.error() << "can't read directory '/sys/devices/system/node': " << strerror(errno);
+        log_numa.error() << "can't read directory '/sys/devices/system/node': "
+                         << strerror(errno);
         // add a dummy entry so we're not empty any more
         saved_node2index[-1] = -1;
         // and now give up because we don't know what index 'node2' maps to
@@ -325,9 +329,9 @@ namespace Realm {
       snprintf(fname, sizeof fname, "/sys/devices/system/node/node%d/distance", node1);
       FILE *f = fopen(fname, "r");
       if(!f) {
-	log_numa.error() << "can't read '" << fname << "': " << strerror(errno);
-	saved_distances[node1].clear();
-	return -1;
+        log_numa.error() << "can't read '" << fname << "': " << strerror(errno);
+        saved_distances[node1].clear();
+        return -1;
       }
       char line[256];
       if(fgets(line, 256, f)) {
@@ -413,7 +417,8 @@ namespace Realm {
 		    (const unsigned long *)nmask, detected_node_count,
 		    MPOL_MF_STRICT | MPOL_MF_MOVE);
     if(ret != 0) {
-      log_numa.error() << "failed to bind memory for node " << node << ": " << strerror(errno);
+      log_numa.error() << "failed to bind memory for node " << node << ": "
+                       << strerror(errno);
       return false;
     }
 
@@ -421,8 +426,9 @@ namespace Realm {
     if(pin) {
       int ret = mlock(base, bytes);
       if(ret != 0) {
-	log_numa.error() << "mlock failed for memory on node " << node << ": " << strerror(errno);
-	return false;
+        log_numa.error() << "mlock failed for memory on node " << node << ": "
+                         << strerror(errno);
+        return false;
       }
     }
 
