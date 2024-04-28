@@ -1070,9 +1070,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Make sure that we've subscribed
-      subscribe().wait();
+      const RtEvent subscribed = subscribe();
       // Wait to make sure that the future is complete first
       wait(silence_warnings, warning_string);
+      // Do this wait after everything is ready for pipelining of communication
+      subscribed.wait();
       ApEvent inst_ready;
       FutureInstance *instance = find_or_create_instance(memory,
           (implicit_context != NULL) ? implicit_context->owner_task : NULL,

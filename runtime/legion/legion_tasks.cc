@@ -5128,10 +5128,10 @@ namespace Legion {
     void SingleTask::record_inner_termination(ApEvent termination_event)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(single_task_termination.exists());
-#endif
-      Runtime::trigger_event(NULL, single_task_termination, termination_event);
+      if (single_task_termination.exists())
+        Runtime::trigger_event(NULL, single_task_termination,termination_event);
+      else // happens with implicit top-level tasks
+        record_completion_effect(termination_event);
     }
 
     //--------------------------------------------------------------------------
@@ -10489,7 +10489,6 @@ namespace Legion {
       const RtEvent resources_returned = (must_epoch == NULL) ?
         ResourceTracker::unpack_resources_return(derez, parent_ctx) :
         ResourceTracker::unpack_resources_return(derez, must_epoch);
-      return_slice_commit(points, commit_precondition);
       if (resources_returned.exists())
       {
         if (commit_precondition.exists())
