@@ -1417,6 +1417,7 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
+      virtual void trigger_complete(ApEvent complete);
       virtual void trigger_commit(void);
       virtual void report_interfering_requirements(unsigned idx1,unsigned idx2);
       virtual RtEvent exchange_indirect_records(
@@ -1646,7 +1647,6 @@ namespace Legion {
     public:
       // From MemoizableOp
       virtual void trigger_replay(void);
-      virtual void complete_replay(ApEvent postcondition);
     public:
       virtual size_t get_collective_points(void) const;
     public:
@@ -1673,8 +1673,6 @@ namespace Legion {
         RtUserEvent dst_ready;
       };
       std::vector<IndirectionExchange>                   collective_exchanges;
-      std::vector<ApEvent>                               replay_postconditions;
-      unsigned                                           points_replayed;
       std::atomic<unsigned>                              points_completed;
       unsigned                                           points_committed;
       bool                                       collective_src_indirect_points;
@@ -1713,7 +1711,6 @@ namespace Legion {
       virtual void trigger_ready(void);
       virtual void trigger_replay(void);
       // trigger_mapping same as base class
-      virtual void complete_replay(ApEvent postcondition);
       virtual void trigger_complete(ApEvent effects);
       virtual void trigger_commit(void);
       virtual RtEvent exchange_indirect_records(
@@ -1942,13 +1939,11 @@ namespace Legion {
                                       const bool unordered,
                                       FieldAllocatorImpl *allocator,
                                       Provenance *provenance,
-                                      const bool non_owner_shard,
-                                      const bool skip_dep_analysis = false);
+                                      const bool non_owner_shard);
       void initialize_logical_region_deletion(InnerContext *ctx, 
                                       LogicalRegion handle, 
                                       const bool unordered,
-                                      Provenance *provenance,
-                                      const bool skip_dep_analysis = false);
+                                      Provenance *provenance);
     public:
       virtual void activate(void);
       virtual void deactivate(bool free = true);
@@ -2326,6 +2321,7 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
+      virtual void trigger_complete(ApEvent complete);
     public:
       virtual void predicate_false(void);
     public:
@@ -2436,6 +2432,7 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
+      virtual void trigger_complete(ApEvent complete);
     public:
       virtual void predicate_false(void);
     public:
@@ -3719,7 +3716,6 @@ namespace Legion {
     public:
       // From MemoizableOp
       virtual void trigger_replay(void);
-      virtual void complete_replay(ApEvent postcondition);
     public:
       virtual size_t get_collective_points(void) const;
       virtual IndexSpaceNode* get_shard_points(void) const 
@@ -3734,8 +3730,6 @@ namespace Legion {
       IndexSpaceNode*               launch_space;
     protected:
       std::vector<PointFillOp*>     points;
-      std::vector<ApEvent>          replay_postconditions;
-      unsigned                      points_replayed;
       std::atomic<unsigned>         points_completed;
       unsigned                      points_committed;
       bool                          commit_request;
@@ -3765,7 +3759,6 @@ namespace Legion {
       virtual void trigger_ready(void);
       virtual void trigger_replay(void);
       // trigger_mapping same as base class
-      virtual void complete_replay(ApEvent postcondition);
       virtual void trigger_complete(ApEvent effect);
       virtual void trigger_commit(void);
       virtual FillView* get_fill_view(void) const;
@@ -4192,14 +4185,11 @@ namespace Legion {
       virtual bool invalidates_physical_trace_template(bool &exec_fence) const
         { return false; }
     public:
-      virtual void trigger_dependence_analysis(void);
-      virtual void trigger_mapping(void);
       virtual void trigger_complete(ApEvent complete); 
       virtual void trigger_commit(void);
       virtual void perform_measurement(void);
     protected:
       TimingMeasurement measurement;
-      std::set<Future> preconditions;
       RtEvent measured;
     };
 

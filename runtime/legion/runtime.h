@@ -348,8 +348,8 @@ namespace Legion {
     public:
       // Finalize the future before everything shuts down
       void prepare_for_shutdown(void);
-      RtEvent get_ready_event(void) const;
       ApEvent get_complete_event(void);
+      bool is_ready(bool subscribe);
       // Wait without subscribing to the payload
       void wait(bool silence_warnings, const char *warning_string);
       const void* get_buffer(Processor proc, Memory::Kind memory,
@@ -791,8 +791,6 @@ namespace Legion {
       virtual Future get_future(const DomainPoint &point,
                                 bool internal, RtEvent *wait_on = NULL);
       virtual void get_all_futures(std::map<DomainPoint,FutureImpl*> &futures);
-      virtual void wait_all_results(bool silence_warnings = true,
-                                    const char *warning_string = NULL);
     public:
       // Will return NULL if it does not exist
       virtual void get_shard_local_futures(ShardID shard,

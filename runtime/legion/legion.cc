@@ -2398,7 +2398,7 @@ namespace Legion {
     {
       if ((impl == NULL) || (Internal::implicit_context != impl->context))
         return true;
-      return impl->get_ready_event().has_triggered();
+      return impl->is_ready(subscribe);
     }
 
     //--------------------------------------------------------------------------

@@ -518,6 +518,8 @@ namespace Legion {
       virtual void end_trace(TraceID tid, bool deprecated,
                              Provenance *provenance) = 0;
       virtual void record_blocking_call(uint64_t future_coordinate) = 0;
+      virtual void wait_on_future(FutureImpl *future, RtEvent ready) = 0;
+      virtual void wait_on_future_map(FutureMapImpl *map, RtEvent ready) = 0;
     public:
       virtual void issue_frame(FrameOp *frame) = 0;
       virtual void finish_frame(FrameOp *frame) = 0;
@@ -1610,6 +1612,8 @@ namespace Legion {
       virtual void end_trace(TraceID tid, bool deprecated,
                              Provenance *provenance);
       virtual void record_blocking_call(uint64_t future_coordinate);
+      virtual void wait_on_future(FutureImpl *future, RtEvent ready);
+      virtual void wait_on_future_map(FutureMapImpl *map, RtEvent ready);
     public:
       virtual void issue_frame(FrameOp *frame);
       virtual void finish_frame(FrameOp *frame);
@@ -2273,6 +2277,7 @@ namespace Legion {
         REPLICATE_EXECUTE_INDEX_SPACE,
         REPLICATE_REDUCE_FUTURE_MAP,
         REPLICATE_CONSTRUCT_FUTURE_MAP,
+        REPLICATE_FUTURE_WAIT,
         REPLICATE_FUTURE_MAP_GET_ALL_FUTURES,
         REPLICATE_FUTURE_MAP_WAIT_ALL_FUTURES,
         REPLICATE_MAP_REGION,
@@ -2887,6 +2892,8 @@ namespace Legion {
           Provenance *provenance);
       virtual void end_trace(TraceID tid, bool deprecated,
                              Provenance *provenance);
+      virtual void wait_on_future(FutureImpl *future, RtEvent ready);
+      virtual void wait_on_future_map(FutureMapImpl *map, RtEvent ready);
       virtual void end_task(const void *res, size_t res_size, bool owned,
                       PhysicalInstance inst, FutureFunctor *callback_future,
                       const Realm::ExternalInstanceResource *resource,
@@ -3028,8 +3035,8 @@ namespace Legion {
         { return deletion_execution_barrier.next(this); }
       inline ApBarrier get_next_detach_effects_barrier(void)
         { return detach_effects_barrier.next(this); }
-      inline RtBarrier get_next_future_map_wait_barrier(void)
-        { return future_map_wait_barrier.next(this); }
+      inline RtBarrier get_next_future_wait_barrier(void)
+        { return future_wait_barrier.next(this); }
       inline RtBarrier get_next_dependent_partition_mapping_barrier(void)
         { return dependent_partition_mapping_barrier.next(this); }
       inline ApBarrier get_next_dependent_partition_execution_barrier(void)
@@ -3236,7 +3243,7 @@ namespace Legion {
       RtReplBar dependent_partition_mapping_barrier;
       ApLogicalBar dependent_partition_execution_barrier;
       RtReplBar semantic_attach_barrier;
-      RtReplBar future_map_wait_barrier;
+      RtReplBar future_wait_barrier;
       RtReplBar inorder_barrier;
       RtReplBar output_regions_barrier;
 #ifdef DEBUG_LEGION_COLLECTIVES
@@ -3897,6 +3904,8 @@ namespace Legion {
       virtual void end_trace(TraceID tid, bool deprecated,
                              Provenance *provenance);
       virtual void record_blocking_call(uint64_t future_coordinate);
+      virtual void wait_on_future(FutureImpl *future, RtEvent ready);
+      virtual void wait_on_future_map(FutureMapImpl *map, RtEvent ready);
     public:
       virtual void issue_frame(FrameOp *frame);
       virtual void finish_frame(FrameOp *frame);

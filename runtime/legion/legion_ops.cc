@@ -7079,21 +7079,7 @@ namespace Legion {
                               scatter_targets.empty() ? NULL : &scatter_targets,
                               physical_trace_info, map_applied_conditions,
                               output.compute_preimages);
-      }
-      // Chain all the unlock and barrier arrivals off of the
-      // copy complete event
-      if (!arrive_barriers.empty())
-      {
-        for (std::vector<PhaseBarrier>::iterator it = 
-              arrive_barriers.begin(); it != arrive_barriers.end(); it++)
-        {
-          if (runtime->legion_spy_enabled)
-            LegionSpy::log_phase_barrier_arrival(unique_op_id, 
-                                                 it->phase_barrier);
-          Runtime::phase_barrier_arrive(it->phase_barrier, 1/*count*/,
-                                        get_completion_event());    
-        }
-      }
+      } 
       if (is_recording())
         trace_info.record_complete_replay(map_applied_conditions);
       // Mark that we completed mapping
@@ -7259,6 +7245,27 @@ namespace Legion {
       if (dargs->scatter_targets != NULL)
         delete dargs->scatter_targets;
       dargs->remove_recorder_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    void CopyOp::trigger_complete(ApEvent complete)
+    //--------------------------------------------------------------------------
+    {
+      // Chain all the unlock and barrier arrivals off of the
+      // complete event
+      if (!arrive_barriers.empty())
+      {
+        for (std::vector<PhaseBarrier>::iterator it = 
+              arrive_barriers.begin(); it != arrive_barriers.end(); it++)
+        {
+          if (runtime->legion_spy_enabled)
+            LegionSpy::log_phase_barrier_arrival(unique_op_id, 
+                                                 it->phase_barrier);
+          Runtime::phase_barrier_arrive(it->phase_barrier, 1/*count*/,
+                                        complete);
+        }
+      }
+      complete_operation(complete);
     }
 
     //--------------------------------------------------------------------------
@@ -7800,20 +7807,6 @@ namespace Legion {
     void CopyOp::complete_replay(ApEvent copy_complete_event)
     //--------------------------------------------------------------------------
     {
-      // Chain all the unlock and barrier arrivals off of the
-      // copy complete event
-      if (!arrive_barriers.empty())
-      {
-        for (std::vector<PhaseBarrier>::iterator it = 
-              arrive_barriers.begin(); it != arrive_barriers.end(); it++)
-        {
-          if (runtime->legion_spy_enabled)
-            LegionSpy::log_phase_barrier_arrival(unique_op_id, 
-                                                 it->phase_barrier);
-          Runtime::phase_barrier_arrive(it->phase_barrier, 1/*count*/,
-                                        copy_complete_event);
-        }
-      }
       // Handle the case for marking when the copy completes
       record_completion_effect(copy_complete_event);
       complete_execution();
@@ -8380,7 +8373,6 @@ namespace Legion {
       index_domain = Domain::NO_DOMAIN;
       sharding_space = IndexSpace::NO_SPACE;
       launch_space = NULL;
-      points_replayed = 0;
       points_completed.store(0);
       points_committed = 0;
       commit_request = false;
@@ -8397,7 +8389,6 @@ namespace Legion {
         (*it)->deactivate();
       points.clear();
       collective_exchanges.clear();
-      replay_postconditions.clear();
       commit_preconditions.clear();
       interfering_requirements.clear();
       intra_space_dependences.clear();
@@ -8674,27 +8665,6 @@ namespace Legion {
         points[idx]->trigger_replay();
       }
       complete_mapping(Runtime::merge_events(mapped_preconditions));
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexCopyOp::complete_replay(ApEvent postcondition)
-    //--------------------------------------------------------------------------
-    {
-      {
-        AutoLock o_lock(op_lock);
-        if (postcondition.exists())
-          replay_postconditions.push_back(postcondition);
-#ifdef DEBUG_LEGION
-        assert(points_replayed < points.size());
-#endif
-        if (++points_replayed < points.size())
-          return;
-      }
-      if (!replay_postconditions.empty())
-        CopyOp::complete_replay(
-            Runtime::merge_events(NULL, replay_postconditions));
-      else
-        CopyOp::complete_replay(ApEvent::NO_AP_EVENT);
     }
 
     //--------------------------------------------------------------------------
@@ -9391,14 +9361,6 @@ namespace Legion {
       memo_state = MEMO_REPLAY;
       tpl->register_operation(this);
       CopyOp::trigger_replay();
-    }
-
-    //--------------------------------------------------------------------------
-    void PointCopyOp::complete_replay(ApEvent complete)
-    //--------------------------------------------------------------------------
-    {
-      owner->complete_replay(complete);
-      complete_execution();
     }
 
     //--------------------------------------------------------------------------
@@ -10351,8 +10313,7 @@ namespace Legion {
                             FieldSpace handle, const std::set<FieldID> &to_free,
                             const bool unordered, FieldAllocatorImpl *impl,
                             Provenance *provenance,
-                            const bool non_owner_shard, 
-                            const bool skip_dependence_analysis)
+                            const bool non_owner_shard) 
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -10377,43 +10338,23 @@ namespace Legion {
       const std::vector<FieldID> field_vec(to_free.begin(), to_free.end());
       runtime->forest->free_field_indexes(handle, field_vec,
           get_mapped_event(), non_owner_shard);
-      // If we are unordered do this analysis here since we are not going
-      // to go through the normal logical dependence analysis stage
-      if (skip_dependence_analysis)
-        parent_ctx->analyze_destroy_fields(field_space, free_fields,
-            deletion_requirements, parent_req_indexes, global_fields, 
-            local_fields, local_field_indexes, deletion_req_indexes);
       if (runtime->legion_spy_enabled)
-      {
         LegionSpy::log_deletion_operation(parent_ctx->get_unique_id(),
                                           unique_op_id, unordered);
-        if (skip_dependence_analysis)
-          log_deletion_requirements();
-      }
     }
 
     //--------------------------------------------------------------------------
     void DeletionOp::initialize_logical_region_deletion(InnerContext *ctx,
                                      LogicalRegion handle, const bool unordered,
-                                     Provenance *provenance,
-                                     const bool skip_dependence_analysis)
+                                     Provenance *provenance)
     //--------------------------------------------------------------------------
     {
       initialize_operation(ctx, provenance);
       kind = LOGICAL_REGION_DELETION;
       logical_region = handle; 
-      // If we're unordered then do this analysis here since we won't go
-      // through the normal logical dependence analysis stage
-      if (skip_dependence_analysis)
-        parent_ctx->analyze_destroy_logical_region(logical_region,
-            deletion_requirements, parent_req_indexes, returnable_privileges);
       if (runtime->legion_spy_enabled)
-      {
         LegionSpy::log_deletion_operation(parent_ctx->get_unique_id(),
                                           unique_op_id, unordered);
-        if (skip_dependence_analysis)
-          log_deletion_requirements();
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -12221,19 +12162,7 @@ namespace Legion {
         LegionSpy::log_operation_events(unique_op_id, acquire_complete,
                                         acquire_post);
 #endif
-      // Chain any arrival barriers
-      if (!arrive_barriers.empty())
-      {
-        for (std::vector<PhaseBarrier>::iterator it = 
-              arrive_barriers.begin(); it != arrive_barriers.end(); it++)
-        {
-          if (runtime->legion_spy_enabled)
-            LegionSpy::log_phase_barrier_arrival(unique_op_id, 
-                                                 it->phase_barrier);
-          Runtime::phase_barrier_arrive(it->phase_barrier, 1/*count*/,
-                                        get_completion_event());
-        }
-      }
+      
       // Remove profiling our guard and trigger the profiling event if necessary
       if ((outstanding_profiling_requests.fetch_sub(1) == 1) &&
           profiling_reported.exists())
@@ -12249,6 +12178,26 @@ namespace Legion {
                                                           acquired_instances);
       complete_mapping(finalize_complete_mapping(mapping_applied));
       complete_execution();
+    }
+
+    //--------------------------------------------------------------------------
+    void AcquireOp::trigger_complete(ApEvent complete)
+    //--------------------------------------------------------------------------
+    {
+      // Chain any arrival barriers
+      if (!arrive_barriers.empty())
+      {
+        for (std::vector<PhaseBarrier>::iterator it = 
+              arrive_barriers.begin(); it != arrive_barriers.end(); it++)
+        {
+          if (runtime->legion_spy_enabled)
+            LegionSpy::log_phase_barrier_arrival(unique_op_id, 
+                                                 it->phase_barrier);
+          Runtime::phase_barrier_arrive(it->phase_barrier, 1/*count*/,
+                                        complete);
+        }
+      }
+      complete_operation(complete);
     }
 
     //--------------------------------------------------------------------------
@@ -13038,19 +12987,7 @@ namespace Legion {
         LegionSpy::log_operation_events(unique_op_id, release_complete,
                                         release_post);
 #endif
-      // Chain any arrival barriers
-      if (!arrive_barriers.empty())
-      {
-        for (std::vector<PhaseBarrier>::const_iterator it = 
-              arrive_barriers.begin(); it != arrive_barriers.end(); it++)
-        {
-          if (runtime->legion_spy_enabled)
-            LegionSpy::log_phase_barrier_arrival(unique_op_id, 
-                                                 it->phase_barrier);
-          Runtime::phase_barrier_arrive(it->phase_barrier, 1/*count*/,
-                                        get_completion_event());
-        }
-      }
+      
       // Remove profiling our guard and trigger the profiling event if necessary
       if ((outstanding_profiling_requests.fetch_sub(1) == 1) &&
           profiling_reported.exists())
@@ -13066,6 +13003,26 @@ namespace Legion {
                                                           acquired_instances);
       complete_mapping(finalize_complete_mapping(mapping_applied));
       complete_execution();
+    }
+
+    //--------------------------------------------------------------------------
+    void ReleaseOp::trigger_complete(ApEvent complete)
+    //--------------------------------------------------------------------------
+    {
+      // Chain any arrival barriers
+      if (!arrive_barriers.empty())
+      {
+        for (std::vector<PhaseBarrier>::const_iterator it = 
+              arrive_barriers.begin(); it != arrive_barriers.end(); it++)
+        {
+          if (runtime->legion_spy_enabled)
+            LegionSpy::log_phase_barrier_arrival(unique_op_id, 
+                                                 it->phase_barrier);
+          Runtime::phase_barrier_arrive(it->phase_barrier, 1/*count*/,
+                                        complete);
+        }
+      }
+      complete_operation(complete);
     }
 
     //--------------------------------------------------------------------------
@@ -18375,19 +18332,6 @@ namespace Legion {
               Runtime::merge_events(map_applied_conditions)));
       else
         complete_mapping(finalize_complete_mapping(RtEvent::NO_RT_EVENT));
-      // See if we have any arrivals to trigger
-      if (!arrive_barriers.empty())
-      {
-        for (std::vector<PhaseBarrier>::const_iterator it = 
-              arrive_barriers.begin(); it != arrive_barriers.end(); it++)
-        {
-          if (runtime->legion_spy_enabled)
-            LegionSpy::log_phase_barrier_arrival(unique_op_id, 
-                                                 it->phase_barrier);
-          Runtime::phase_barrier_arrive(it->phase_barrier, 1/*count*/,
-                                        get_completion_event());
-        }
-      }
       if (set_view)
       {
         const RtEvent future_ready_event =
@@ -18416,6 +18360,17 @@ namespace Legion {
         if (fill_view->set_value(value, value_size))
           delete fill_view;
       }
+      complete_execution();
+    }
+
+    //--------------------------------------------------------------------------
+    void FillOp::trigger_complete(ApEvent complete)
+    //--------------------------------------------------------------------------
+    {
+      // Now that we've mapped we can remove the reference on our fill_view
+      if ((fill_view != NULL) && 
+          fill_view->remove_base_valid_ref(MAPPING_ACQUIRE_REF))
+        delete fill_view;
       // See if we have any arrivals to trigger
       if (!arrive_barriers.empty())
       {
@@ -18426,21 +18381,10 @@ namespace Legion {
             LegionSpy::log_phase_barrier_arrival(unique_op_id, 
                                                  it->phase_barrier);
           Runtime::phase_barrier_arrive(it->phase_barrier, 1/*count*/,
-                                        get_completion_event());
+                                        complete);
         }
       }
-      complete_execution();
-    }
-
-    //--------------------------------------------------------------------------
-    void FillOp::trigger_complete(ApEvent effects)
-    //--------------------------------------------------------------------------
-    {
-      // Now that we've mapped we can remove the reference on our fill_view
-      if ((fill_view != NULL) && 
-          fill_view->remove_base_valid_ref(MAPPING_ACQUIRE_REF))
-        delete fill_view;
-      complete_operation(effects);
+      complete_operation(complete);
     }
     
     //--------------------------------------------------------------------------
@@ -18640,20 +18584,6 @@ namespace Legion {
     void FillOp::complete_replay(ApEvent fill_complete_event)
     //--------------------------------------------------------------------------
     {
-      // Chain all the unlock and barrier arrivals off of the
-      // copy complete event
-      if (!arrive_barriers.empty())
-      {
-        for (std::vector<PhaseBarrier>::iterator it = 
-              arrive_barriers.begin(); it != arrive_barriers.end(); it++)
-        {
-          if (runtime->legion_spy_enabled)
-            LegionSpy::log_phase_barrier_arrival(unique_op_id, 
-                                                 it->phase_barrier);
-          Runtime::phase_barrier_arrive(it->phase_barrier, 1/*count*/,
-                                        fill_complete_event);
-        }
-      }
       record_completion_effect(fill_complete_event);
       complete_execution();
     }
@@ -18788,7 +18718,6 @@ namespace Legion {
       index_domain = Domain::NO_DOMAIN;
       sharding_space = IndexSpace::NO_SPACE;
       launch_space = NULL;
-      points_replayed = 0;
       points_completed.store(0);
       points_committed = 0;
       commit_request = false;
@@ -18804,7 +18733,6 @@ namespace Legion {
             it != points.end(); it++)
         (*it)->deactivate();
       points.clear();
-      replay_postconditions.clear();
       if (remove_launch_space_reference(launch_space))
         delete launch_space;
       // Return the operation to the runtime
@@ -18949,27 +18877,6 @@ namespace Legion {
         points[idx]->trigger_replay();
       }
       complete_mapping(Runtime::merge_events(mapped_preconditions));
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexFillOp::complete_replay(ApEvent postcondition)
-    //--------------------------------------------------------------------------
-    {
-      {
-        AutoLock o_lock(op_lock);
-        if (postcondition.exists())
-          replay_postconditions.push_back(postcondition);
-#ifdef DEBUG_LEGION
-        assert(points_replayed < points.size());
-#endif
-        if (++points_replayed < points.size())
-          return;
-      }
-      if (!replay_postconditions.empty())
-        FillOp::complete_replay(
-            Runtime::merge_events(NULL, replay_postconditions));
-      else
-        FillOp::complete_replay(ApEvent::NO_AP_EVENT);
     }
 
     //--------------------------------------------------------------------------
@@ -19339,14 +19246,6 @@ namespace Legion {
       memo_state = MEMO_REPLAY;
       tpl->register_operation(this);
       FillOp::trigger_replay();
-    }
-
-    //--------------------------------------------------------------------------
-    void PointFillOp::complete_replay(ApEvent complete)
-    //--------------------------------------------------------------------------
-    {
-      owner->complete_replay(complete);
-      complete_execution();
     }
 
     //--------------------------------------------------------------------------
@@ -21966,23 +21865,8 @@ namespace Legion {
       Future f = FenceOp::initialize(ctx, EXECUTION_FENCE,
           true/*need future*/, provenance);
       measurement = launcher.measurement;
-      // Only allow non-empty futures 
-      if (!launcher.preconditions.empty())
-      {
-        for (std::set<Future>::const_iterator it =
-              launcher.preconditions.begin(); it != 
-              launcher.preconditions.end(); it++)
-          if (it->impl != NULL)
-            preconditions.insert(*it);
-      }
       if (runtime->legion_spy_enabled)
-      {
         LegionSpy::log_timing_operation(ctx->get_unique_id(), unique_op_id);
-        for (std::set<Future>::const_iterator it = preconditions.begin();
-              it != preconditions.end(); it++)
-          if (it->impl != NULL)
-            LegionSpy::log_future_use(unique_op_id, it->impl->did);
-      }
       return f;
     }
 
@@ -21999,7 +21883,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       FenceOp::deactivate(false/*free*/);
-      preconditions.clear();
       if (freeop)
         runtime->free_timing_op(this);
     }
@@ -22016,26 +21899,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return TIMING_OP_KIND;
-    }
-
-    //--------------------------------------------------------------------------
-    void TimingOp::trigger_dependence_analysis(void)
-    //--------------------------------------------------------------------------
-    {
-      for (std::set<Future>::const_iterator it = preconditions.begin();
-            it != preconditions.end(); it++)
-        it->impl->register_dependence(this);
-      FenceOp::trigger_dependence_analysis();
-    }
-
-    //--------------------------------------------------------------------------
-    void TimingOp::trigger_mapping(void)
-    //--------------------------------------------------------------------------
-    {
-      for (std::set<Future>::const_iterator it =
-            preconditions.begin(); it != preconditions.end(); it++)
-        record_completion_effect(it->impl->get_complete_event());
-      FenceOp::trigger_mapping();
     }
 
     //--------------------------------------------------------------------------

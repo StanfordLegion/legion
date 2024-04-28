@@ -4725,7 +4725,6 @@ namespace Legion {
                          instances, &remote_targets, &deppart_results);
         }
       }
-      complete_execution();
     }
 
     //--------------------------------------------------------------------------
@@ -5500,23 +5499,8 @@ namespace Legion {
       Future f = FenceOp::initialize(ctx, EXECUTION_FENCE,
           true/*need future*/, provenance);
       measurement = launcher.measurement;
-      // Only allow non-empty futures 
-      if (!launcher.preconditions.empty())
-      {
-        for (std::set<Future>::const_iterator it =
-              launcher.preconditions.begin(); it != 
-              launcher.preconditions.end(); it++)
-          if (it->impl != NULL)
-            preconditions.insert(*it);
-      }
       if (runtime->legion_spy_enabled)
-      {
         LegionSpy::log_timing_operation(ctx->get_unique_id(), unique_op_id);
-        for (std::set<Future>::const_iterator it = preconditions.begin();
-              it != preconditions.end(); it++)
-          if (it->impl != NULL)
-            LegionSpy::log_future_use(unique_op_id, it->impl->did);
-      }
       return f;
     }
 
@@ -5534,7 +5518,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       ReplFenceOp::deactivate(false/*freeop*/);
-      preconditions.clear();
       if (timing_collective != NULL)
       {
         delete timing_collective;
@@ -5556,26 +5539,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return TIMING_OP_KIND;
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplTimingOp::trigger_dependence_analysis(void)
-    //--------------------------------------------------------------------------
-    {
-      for (std::set<Future>::const_iterator it = preconditions.begin();
-            it != preconditions.end(); it++)
-        it->impl->register_dependence(this);
-      ReplFenceOp::trigger_dependence_analysis();
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplTimingOp::trigger_mapping(void)
-    //--------------------------------------------------------------------------
-    {
-      for (std::set<Future>::const_iterator it =
-            preconditions.begin(); it != preconditions.end(); it++)
-        record_completion_effect(it->impl->get_complete_event());
-      ReplFenceOp::trigger_mapping();
     }
 
     //--------------------------------------------------------------------------

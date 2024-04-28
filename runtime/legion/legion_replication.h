@@ -2645,8 +2645,6 @@ namespace Legion {
       virtual bool invalidates_physical_trace_template(bool &exec_fence) const
         { return false; }
     public:
-      virtual void trigger_dependence_analysis(void);
-      virtual void trigger_mapping(void);
       virtual void trigger_complete(ApEvent complete); 
       virtual void trigger_commit(void);
       virtual void perform_measurement(void);
@@ -2655,7 +2653,6 @@ namespace Legion {
         { timing_collective = collective; }
     protected:
       TimingMeasurement measurement;
-      std::set<Future> preconditions;
       RtEvent measured;
       ValueBroadcast<long long> *timing_collective;
     };

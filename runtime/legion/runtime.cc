@@ -972,26 +972,23 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent FutureImpl::get_ready_event(void) const
+    bool FutureImpl::is_ready(bool do_subscribe)
     //--------------------------------------------------------------------------
     {
-      // We only need to wait for the commit opertion for this future if we're
-      // outside of the task tree or at the same level as the depth of the 
-      // context that produced the future (note this handles control
-      // replication correctly as well since all the shards will appear to 
-      // be at the same depth). It should be impossible to have a depth above
-      // the level where the future was created because futures cannot 
-      // escape back up the task tree
+      if (do_subscribe)
+        subscribe();
       if (producer_op == NULL)
-        return RtEvent::NO_RT_EVENT;
+        return true;
       const int context_depth = (implicit_context == NULL) ? producer_depth :
         implicit_context->get_depth();
 #ifdef DEBUG_LEGION
       assert(producer_depth <= context_depth);
 #endif
       if (producer_depth < context_depth)
-        return RtEvent::NO_RT_EVENT;
-      return producer_op->get_commit_event(op_gen);
+        return true;
+      // This is not fully accurate since we might still need to wait across
+      // the shards for control replication but it is close enough
+      return producer_op->get_commit_event(op_gen).has_triggered();
     }
 
     //--------------------------------------------------------------------------
@@ -1011,16 +1008,25 @@ namespace Legion {
              implicit_context->get_unique_id(),
              (warning_string == NULL) ? "" : warning_string)
       }
-      if ((context != NULL) && (context == implicit_context))
-        context->record_blocking_call(coordinate.context_index);
-      // This may look really bad that we're waiting for the producer
-      // operation to finish running, but that is absolutely necessary
-      // to make sure all the region tree changes are captured and 
-      // propagated back up to the parent task which cannot happen until
-      // we know the operation is not going to be restarted. This is why
-      // it is so bad to wait on futures and we strongly discourage it.
-      get_ready_event().wait();
       mark_sampled();
+      // We only need to wait for the commit opertion for this future if we're
+      // outside of the task tree or at the same level as the depth of the 
+      // context that produced the future (note this handles control
+      // replication correctly as well since all the shards will appear to 
+      // be at the same depth). It should be impossible to have a depth above
+      // the level where the future was created because futures cannot 
+      // escape back up the task tree
+      if (producer_op == NULL)
+        return;
+      const int context_depth = (implicit_context == NULL) ? producer_depth :
+        implicit_context->get_depth();
+#ifdef DEBUG_LEGION
+      assert(producer_depth <= context_depth);
+#endif
+      if (producer_depth < context_depth)
+        return;
+      context->record_blocking_call(coordinate.context_index);
+      context->wait_on_future(this, producer_op->get_commit_event(op_gen));
     }
     
     //--------------------------------------------------------------------------
@@ -1063,6 +1069,8 @@ namespace Legion {
            bool check_extent, bool silence_warnings, const char *warning_string)
     //--------------------------------------------------------------------------
     {
+      // Make sure that we've subscribed
+      subscribe().wait();
       // Wait to make sure that the future is complete first
       wait(silence_warnings, warning_string);
       ApEvent inst_ready;
@@ -4147,10 +4155,8 @@ namespace Legion {
             context->get_unique_id(),
             (warning_string == NULL) ? "" : warning_string)
       context->record_blocking_call(future_coordinate);
-      // Future maps cannot escape their context so we should always wait on
-      // the commit event for the producer operation
       if (op != NULL)
-        op->get_commit_event(op_gen).wait();
+        context->wait_on_future_map(this, op->get_commit_event(op_gen));
     }
 
     //--------------------------------------------------------------------------
@@ -4834,50 +4840,6 @@ namespace Legion {
       }
       // No need for the lock now that we know that we have all of them
       others = futures;
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplFutureMapImpl::wait_all_results(bool silence_warnings,
-                                             const char *warning_string)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(implicit_context != NULL);
-      assert(implicit_context == context);
-      ReplicateContext *repl_ctx =
-        dynamic_cast<ReplicateContext*>(implicit_context);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx =
-        static_cast<ReplicateContext*>(implicit_context);
-#endif
-      if (runtime->runtime_warnings && !silence_warnings && 
-          (context != NULL) && !context->is_leaf_context())
-        REPORT_LEGION_WARNING(LEGION_WARNING_WAITING_ALL_FUTURES, 
-            "Waiting for all futures in a future map in "
-            "non-leaf task %s (UID %lld) is a violation of Legion's deferred "
-            "execution model best practices. You may notice a severe "
-            "performance degredation. Warning string: %s", 
-            context->get_task_name(), context->get_unique_id(),
-            (warning_string == NULL) ? "" : warning_string)
-      context->record_blocking_call(future_coordinate);
-      for (int i = 0; runtime->safe_control_replication && (i < 2); i++)
-      {
-        ReplicateContext::HashVerifier hasher(repl_ctx, 
-            runtime->safe_control_replication > 1, i > 0);
-        hasher.hash(
-            ReplicateContext::REPLICATE_FUTURE_MAP_WAIT_ALL_FUTURES, __func__);
-        repl_ctx->hash_future_map(hasher, FutureMap(this), "future map");
-        if (hasher.verify(__func__))
-          break;
-      }
-      if (op != NULL)
-      {
-        const RtBarrier wait_bar = repl_ctx->get_next_future_map_wait_barrier();
-        Runtime::phase_barrier_arrive(wait_bar, 1/*count*/,
-            op->get_commit_event(op_gen));
-        wait_bar.wait();
-      }
     }
 
     //--------------------------------------------------------------------------

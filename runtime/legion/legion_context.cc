@@ -1626,8 +1626,7 @@ namespace Legion {
         {
           DeletionOp *op = runtime->get_available_deletion_op();
           op->initialize_logical_region_deletion(this, it->region,
-              true/*unordered*/, it->provenance,
-              true/*skip dependence analysis*/);
+              true/*unordered*/, it->provenance);
           if (!add_to_dependence_queue(op, NULL/*deps*/, true/*unordered*/))
           {
             // We're past the execution of the parent task so we need
@@ -1713,7 +1712,7 @@ namespace Legion {
             create_field_allocator(it->first.first, true/*unordered*/);
           op->initialize_field_deletions(this, it->first.first, it->second, 
              true/*unordered*/, allocator, it->first.second,
-             false/*non owner shard*/, true/*skip dependence analysis*/);
+             false/*non owner shard*/);
           if (!add_to_dependence_queue(op, NULL/*deps*/, true/*unordered*/))
           {
             // We're past the execution of the parent task so we need
@@ -10079,6 +10078,26 @@ namespace Legion {
         else
           current_trace->record_blocking_call();
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::wait_on_future(FutureImpl *future, RtEvent ready)
+    //--------------------------------------------------------------------------
+    {
+      // This may look really bad that we're waiting for the producer
+      // operation to commit, but that is absolutely necessary
+      // to make sure all the region tree changes are captured and 
+      // propagated back up to the parent task which cannot happen until
+      // we know the operation is not going to be restarted. This is why
+      // it is so bad to wait on futures and we strongly discourage it.
+      ready.wait();
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::wait_on_future_map(FutureMapImpl *map, RtEvent ready)
+    //--------------------------------------------------------------------------
+    {
+      ready.wait();
     }
 
     //--------------------------------------------------------------------------
@@ -19788,6 +19807,41 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ReplicateContext::wait_on_future(FutureImpl *future, RtEvent ready)
+    //--------------------------------------------------------------------------
+    {
+      for (int i = 0; runtime->safe_control_replication && (i < 2); i++)
+      {
+        HashVerifier hasher(this, runtime->safe_control_replication > 1, i > 0);
+        hasher.hash(REPLICATE_FUTURE_WAIT, __func__);
+        hash_future(hasher, runtime->safe_control_replication, 
+            Future(future), "future");
+        if (hasher.verify(__func__))
+          break;
+      }
+      const RtBarrier wait_bar = get_next_future_wait_barrier();
+      Runtime::phase_barrier_arrive(wait_bar, 1/*count*/, ready);
+      wait_bar.wait();
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::wait_on_future_map(FutureMapImpl *map, RtEvent ready)
+    //--------------------------------------------------------------------------
+    {
+      for (int i = 0; runtime->safe_control_replication && (i < 2); i++)
+      {
+        HashVerifier hasher(this, runtime->safe_control_replication > 1, i > 0);
+        hasher.hash(REPLICATE_FUTURE_MAP_WAIT_ALL_FUTURES, __func__);
+        hash_future_map(hasher, FutureMap(map), "future map");
+        if (hasher.verify(__func__))
+          break;
+      }
+      const RtBarrier wait_bar = get_next_future_wait_barrier();
+      Runtime::phase_barrier_arrive(wait_bar, 1/*count*/, ready);
+      wait_bar.wait();
+    }
+
+    //--------------------------------------------------------------------------
     void ReplicateContext::end_task(const void *res, size_t res_size,bool owned,
                                 PhysicalInstance deferred_result_instance,
                                 FutureFunctor *callback_functor,
@@ -21116,8 +21170,7 @@ namespace Legion {
         {
           ReplDeletionOp *op = runtime->get_available_repl_deletion_op();
           op->initialize_logical_region_deletion(this, it->region, 
-              true/*unordered*/, it->provenance,
-              true/*skip dependence analysis*/);
+              true/*unordered*/, it->provenance);
           op->initialize_replication(this,
                             shard_manager->is_first_local_shard(owner_shard),
                             &ready_barrier,&mapped_barrier,&execution_barrier);
@@ -21180,7 +21233,7 @@ namespace Legion {
             create_field_allocator(it->first.first, true/*unordered*/);
           op->initialize_field_deletions(this, it->first.first, it->second, 
               true/*unordered*/, allocator, it->first.second, 
-              (owner_shard->shard_id != 0), true/*skip dependence analysis*/);
+              (owner_shard->shard_id != 0));
           op->initialize_replication(this,
                             shard_manager->is_first_local_shard(owner_shard),
                             &ready_barrier,&mapped_barrier,&execution_barrier);
@@ -24918,6 +24971,20 @@ namespace Legion {
     void LeafContext::record_blocking_call(uint64_t future_coordinate)
     //--------------------------------------------------------------------------
     {
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::wait_on_future(FutureImpl *future, RtEvent ready)
+    //--------------------------------------------------------------------------
+    {
+      ready.wait();
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::wait_on_future_map(FutureMapImpl *map, RtEvent ready)
+    //--------------------------------------------------------------------------
+    {
+      ready.wait();
     }
 
     //--------------------------------------------------------------------------
