@@ -5560,7 +5560,7 @@ namespace Legion {
       // Shard 0 will handle the timing operation
       if (repl_ctx->owner_shard->shard_id > 0)
       {
-        const RtEvent ready = timing_collective->get_done_event();
+        const RtEvent ready = timing_collective->perform_collective_wait();
         measured = runtime->issue_runtime_meta_task(args,
           LG_LATENCY_DEFERRED_PRIORITY, ready);
       }

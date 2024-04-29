@@ -9837,15 +9837,6 @@ namespace Legion {
         }
         commit_preconditions.insert(profiling_reported);
       }
-      // If we have an origin-mapped slices then we need to check to see
-      // if we're waiting on any profiling reports from them
-      if (!origin_mapped_slices.empty())
-      {
-        for (std::set<SliceTask*>::const_iterator it = 
-              origin_mapped_slices.begin(); it != 
-              origin_mapped_slices.end(); it++)
-          (*it)->find_commit_preconditions(commit_preconditions);
-      }
       if (must_epoch != NULL)
       {
         RtEvent commit_precondition;
@@ -12417,16 +12408,6 @@ namespace Legion {
     {
       for (unsigned idx = 0; idx < points.size(); idx++)
         points[idx]->complete_replay(instance_ready_event);
-    }
-
-    //--------------------------------------------------------------------------
-    void SliceTask::find_commit_preconditions(std::set<RtEvent> &preconditions)
-    //--------------------------------------------------------------------------
-    {
-      // Get the commit events for all our point tasks
-      for (std::vector<PointTask*>::const_iterator it = 
-            points.begin(); it != points.end(); it++)
-        preconditions.insert((*it)->get_commit_event());
     }
 
     //--------------------------------------------------------------------------

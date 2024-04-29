@@ -4142,7 +4142,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(is_owner());
       assert(implicit_context != NULL);
       assert(implicit_context == context);
 #endif

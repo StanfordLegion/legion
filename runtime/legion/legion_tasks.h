@@ -1419,7 +1419,6 @@ namespace Legion {
       void check_target_processors(void) const;
       void update_target_processor(void);
       void expand_replay_slices(std::list<SliceTask*> &slices);
-      void find_commit_preconditions(std::set<RtEvent> &preconditions);
     protected:
       virtual void trigger_task_commit(void);
     public:
