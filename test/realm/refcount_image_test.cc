@@ -3,14 +3,13 @@
 #include <cassert>
 
 #include "realm/cmdline.h"
+#include "realm/runtime.h"
 #include "realm.h"
 #include "realm/id.h"
 #include "realm/network.h"
 #include "osdep.h"
 
 using namespace Realm;
-
-#define REALM_SPARSITY_DELETES
 
 Logger log_app("app");
 
@@ -101,7 +100,7 @@ void main_task(const void *args, size_t arglen, const void *userdata, size_t use
                           .same_address_space_as(*it)
                           .begin();
 
-    if((Network::max_node_id > 1 && TestConfig::remote_create) &&
+    if((TestConfig::remote_create) &&
        NodeID(ID(*it).memory_owner_node()) ==
            NodeID(ID(ptr_data[0].inst).instance_owner_node())) {
       continue;
@@ -115,6 +114,7 @@ void main_task(const void *args, size_t arglen, const void *userdata, size_t use
     args.parent = parent;
     Event e = proc.spawn(NODE_TASK, &args, sizeof(args));
     events.push_back(e);
+
   }
 
   Event::merge_events(events).wait();
@@ -136,6 +136,9 @@ int main(int argc, char **argv)
   Processor::register_task_by_kind(Processor::LOC_PROC, /*!global=*/false, NODE_TASK,
                                    CodeDescriptor(node_task), ProfilingRequestSet(), 0, 0)
       .wait();
+
+  ModuleConfig *core = Runtime::get_runtime().get_module_config("core");
+  assert(core->set_property("enable_sparsity_refcount", 1));
 
   Processor p = Machine::ProcessorQuery(Machine::get_machine())
                     .only_kind(Processor::LOC_PROC)

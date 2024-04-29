@@ -248,6 +248,9 @@ namespace Realm {
       // resources
       int res_num_cpus = 0;
       size_t res_sysmem_size = 0;
+
+      //sparstiy maps
+      bool enable_sparsity_refcount = 0;
     };
 
     class CoreModule : public Module {

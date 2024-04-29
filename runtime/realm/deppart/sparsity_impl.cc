@@ -29,9 +29,6 @@ namespace Realm {
   extern Logger log_part;
   extern Logger log_dpops;
 
-  static const bool FATAL_ON_FAILURE = true;
-#define REALM_SPARSITY_DELETES
-
   ////////////////////////////////////////////////////////////////////////
   //
   // class SparsityMapRefCounter
@@ -232,15 +229,16 @@ namespace Realm {
     , type_tag(0)
     , map_impl(0)
     , references(0)
-  {}
+  {
+    assert(get_runtime()->get_module_config("core")->get_property(
+        "enable_sparsity_refcount", need_refcount));
+  }
 
   SparsityMapImplWrapper::~SparsityMapImplWrapper(void)
   {
     AutoLock<> al(mutex);
     if(map_impl.load() != 0) {
-      if(references > 0) {
-        assert(FATAL_ON_FAILURE);
-      }
+      assert(!need_refcount || references == 0);
       (*map_deleter)(map_impl.load());
     }
   }
@@ -255,22 +253,26 @@ namespace Realm {
 
   void SparsityMapImplWrapper::add_references(unsigned count)
   {
+    if(!need_refcount)
+      return;
     AutoLock<> al(mutex);
     references += count;
   }
 
   void SparsityMapImplWrapper::remove_references(unsigned count)
   {
+    if(!need_refcount)
+      return;
     AutoLock<> al(mutex);
+
+    assert(references > 0);
+
     if(references > 0) {
       references -= std::min(references, count);
-    } else {
-      assert(FATAL_ON_FAILURE);
     }
 
     if(references == 0) {
-#ifdef REALM_SPARSITY_DELETES
-      if(map_impl.load() == 0) {
+      if(map_impl.load() != 0) {
         (*map_deleter)(map_impl.load());
       }
 
@@ -281,7 +283,6 @@ namespace Realm {
 
       map_impl.store(0);
       type_tag.store(0);
-#endif
     }
   }
 

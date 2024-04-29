@@ -199,6 +199,8 @@ namespace Realm {
     atomic<void *> map_impl;  // actual implementation
     unsigned references;
 
+    bool need_refcount;
+
     Mutex mutex;
 
     // need a type-erased deleter
