@@ -4312,9 +4312,14 @@ namespace Legion {
                  PartitionKind part_kind, Color color, const char *prov)
     //--------------------------------------------------------------------------
     {
-      Internal::AutoProvenance provenance(prov);
-      return ctx->create_partition_by_domain(parent, domains, color_space,
-                      perform_intersections, part_kind, color, provenance);
+      // Convert this into a future map and call that version of this method
+      std::map<DomainPoint,Future> futures;
+      for (std::map<DomainPoint,Domain>::const_iterator it =
+            domains.begin(); it != domains.end(); it++)
+        futures[it->first] = Future::from_value(it->second);
+      FutureMap fm = construct_future_map(ctx, color_space, futures);
+      return create_partition_by_domain(ctx, parent, fm, color_space,
+          perform_intersections, part_kind, color, prov);
     }
 
     //--------------------------------------------------------------------------
