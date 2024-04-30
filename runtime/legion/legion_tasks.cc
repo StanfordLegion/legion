@@ -4834,8 +4834,12 @@ namespace Legion {
           wait_on_events.insert(task_launch_event);
           task_launch_event = Runtime::merge_events(NULL, wait_on_events);
         }
+        // Protect the single task termination from the poison
+        if (chain_task_termination.exists())
+          Runtime::trigger_event(NULL, chain_task_termination,
+              Runtime::ignorefaults(task_launch_event));
       }
-      if (chain_task_termination.exists())
+      else if (chain_task_termination.exists())
         Runtime::trigger_event(NULL, chain_task_termination, task_launch_event);
       // Finally if this is a predicated task and we have a speculative
       // guard then we need to launch a meta task to handle the case
@@ -8027,7 +8031,7 @@ namespace Legion {
       if ((instance != NULL) && (instance->size > 0))
         check_future_return_bounds(instance);
       if (shard_manager->handle_future(effects, instance, metadata, metasize)
-          && (instance != NULL) && instance->defer_deletion(effects))
+          && (instance != NULL) && !instance->defer_deletion(effects))
         delete instance;
     }
 
