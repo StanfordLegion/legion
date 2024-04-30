@@ -412,7 +412,6 @@ namespace Legion {
       LG_FINALIZE_OUTPUT_TREE_TASK_ID,
       LG_DEFERRED_LAUNCH_TASK_ID,
       LG_MISPREDICATION_TASK_ID,
-      LG_DEFER_TRIGGER_TASK_COMPLETE_TASK_ID,
       LG_DEFER_TRIGGER_CHILDREN_COMMIT_TASK_ID,
       LG_ORDER_CONCURRENT_LAUNCH_TASK_ID,
       LG_DEFER_MATERIALIZED_VIEW_TASK_ID,
@@ -521,7 +520,6 @@ namespace Legion {
         "Finalize Output Regions Eq KD Tree",                     \
         "Deferred Task Launch",                                   \
         "Handle Mapping Mispredication",                          \
-        "Defer Trigger Task Complete",                            \
         "Defer Trigger Children Commit",                          \
         "Order Concurrent Launch",                                \
         "Defer Materialized View Registration",                   \
@@ -999,6 +997,7 @@ namespace Legion {
       SEND_REPLICATE_COLLECTIVE_VERSIONING,
       SEND_REPLICATE_COLLECTIVE_MAPPING,
       SEND_REPLICATE_VIRTUAL_RENDEZVOUS,
+      SEND_REPLICATE_STARTUP_COMPLETE,
       SEND_REPLICATE_POST_MAPPED,
       SEND_REPLICATE_TRIGGER_COMPLETE,
       SEND_REPLICATE_TRIGGER_COMMIT,
@@ -1327,6 +1326,7 @@ namespace Legion {
         "Send Replication Collective Versioning",                     \
         "Send Replication Collective Mapping",                        \
         "Send Replication Virtual Mapping Rendezvous",                \
+        "Send Replication Startup Complete",                          \
         "Send Replication Post Mapped",                               \
         "Send Replication Trigger Complete",                          \
         "Send Replication Trigger Commit",                            \

@@ -3269,7 +3269,6 @@ namespace Legion {
                    std::vector<DomainPoint> &&sorted_points,
                    std::vector<ShardID> &&shard_lookup,
                    SingleTask *original = NULL,
-                   RtBarrier shard_task_bar = RtBarrier::NO_RT_BARRIER,
                    RtBarrier callback_bar = RtBarrier::NO_RT_BARRIER);
       ShardManager(const ShardManager &rhs) = delete;
       ~ShardManager(void);
@@ -3278,8 +3277,6 @@ namespace Legion {
     public:
       void notify_local(void);
     public:
-      inline RtBarrier get_shard_task_barrier(void) const
-        { return shard_task_barrier; }
       inline ShardMapping& get_mapping(void) const
         { return *address_spaces; }
       inline CollectiveMapping& get_collective_mapping(void) const
@@ -3385,10 +3382,11 @@ namespace Legion {
                                     void *data, size_t size);
       void barrier_shard_local(uint64_t context_index, size_t exchange_index);
     public:
+      RtEvent complete_startup_initialization(bool local = true);
       void handle_post_mapped(bool local, RtEvent precondition);
       bool handle_future(ApEvent effects, FutureInstance *instance,
                          const void *metadata, size_t metasize);
-      void trigger_task_complete(bool local, ApEvent effects_done);
+      ApEvent trigger_task_complete(bool local, ApEvent effects_done);
       void trigger_task_commit(bool local, RtEvent precondition);
     public:
       void send_collective_message(MessageKind message, ShardID target, 
@@ -3462,6 +3460,7 @@ namespace Legion {
       static void handle_collective_versioning(Deserializer &derez,Runtime *rt);
       static void handle_collective_mapping(Deserializer &derez, Runtime *rt);
       static void handle_virtual_rendezvous(Deserializer &derez, Runtime *rt);
+      static void handle_startup_complete(Deserializer &derez, Runtime *rt);
       static void handle_post_mapped(Deserializer &derez, Runtime *rt);
       static void handle_trigger_complete(Deserializer &derez, Runtime *rt);
       static void handle_trigger_commit(Deserializer &derez, Runtime *rt);
@@ -3522,14 +3521,17 @@ namespace Legion {
       ShardMapping*                    address_spaces;
       std::vector<ShardTask*>          local_shards;
     protected:
-      // There are four kinds of signals that come back from 
+      // There are five kinds of signals that come back from 
       // the execution of the shards:
+      // - startup complete
       // - mapping complete
       // - future result
       // - task complete
       // - task commit
+      RtUserEvent startup_complete;
       // The owner applies these to the original task object only
       // after they have occurred for all the shards
+      unsigned    local_startup_complete, remote_startup_complete;
       unsigned    local_mapping_complete, remote_mapping_complete;
       unsigned    trigger_local_complete, trigger_remote_complete;
       unsigned    trigger_local_commit,   trigger_remote_commit;
@@ -3537,8 +3539,7 @@ namespace Legion {
       size_t      future_size;
       std::set<RtEvent> mapping_preconditions;
     protected:
-      // These barriers only are needed for control replicated tasks
-      RtBarrier shard_task_barrier;
+      // This barrier is only needed for control replicated tasks
       RtBarrier callback_barrier;
     protected:
       std::map<ShardingID,ShardingFunction*> sharding_functions;
@@ -3586,6 +3587,7 @@ namespace Legion {
       std::map<DistributedID,std::pair<FillView*,size_t> > 
                                         created_fill_views;
       // ApEvents describing the completion of each shard
+      ApUserEvent all_shards_complete;
       std::set<ApEvent> shard_effects;
       std::set<RtEvent> commit_preconditions;
 #ifdef LEGION_USE_LIBDL

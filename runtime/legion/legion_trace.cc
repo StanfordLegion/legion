@@ -4430,7 +4430,7 @@ namespace Legion {
       // Scan backwards until we find the previous execution fence (if any)
       // Skip the most recent one as that is going to be our term event
       std::set<unsigned> preconditions;
-      for (int idx = events.size() - 2; idx > 0; idx--)
+      for (int idx = events.size() - 1; idx > 0; idx--)
       {
         if (events[idx].exists())
           preconditions.insert(idx);

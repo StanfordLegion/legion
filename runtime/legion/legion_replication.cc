@@ -8418,12 +8418,7 @@ namespace Legion {
           complete_mapping(Runtime::merge_events(map_applied_conditions));
         else
           complete_mapping();
-        if (!execution_preconditions.empty())
-          Runtime::phase_barrier_arrive(execution_fence_barrier, 1/*count*/,
-              Runtime::merge_events(NULL, execution_preconditions));
-        else
-          Runtime::phase_barrier_arrive(execution_fence_barrier, 1/*count*/);
-        record_completion_effect(execution_fence_barrier);
+        record_completion_effects(execution_preconditions);
         complete_execution();
       }
       else
@@ -8883,12 +8878,7 @@ namespace Legion {
           complete_mapping(Runtime::merge_events(map_applied_conditions));
         else
           complete_mapping();
-        if (!execution_preconditions.empty())
-          Runtime::phase_barrier_arrive(execution_fence_barrier, 1/*count*/,
-              Runtime::merge_events(NULL, execution_preconditions));
-        else
-          Runtime::phase_barrier_arrive(execution_fence_barrier, 1/*count*/);
-        record_completion_effect(execution_fence_barrier);
+        record_completion_effects(execution_preconditions);
         complete_execution();
       }
       else
@@ -9120,12 +9110,7 @@ namespace Legion {
           complete_mapping(Runtime::merge_events(map_applied_conditions));
         else
           complete_mapping();
-        if (!execution_preconditions.empty())
-          Runtime::phase_barrier_arrive(execution_fence_barrier, 1/*count*/,
-              Runtime::merge_events(NULL, execution_preconditions));
-        else
-          Runtime::phase_barrier_arrive(execution_fence_barrier, 1/*count*/);
-        record_completion_effect(execution_fence_barrier);
+        record_completion_effects(execution_preconditions);
         complete_execution();
       }
       else
@@ -9252,7 +9237,7 @@ namespace Legion {
                                std::vector<DomainPoint> &&sorted,
                                std::vector<ShardID> &&lookup,
                                SingleTask *original/*= NULL*/, 
-                               RtBarrier task_bar, RtBarrier call_bar)
+                               RtBarrier call_bar)
       : CollectiveViewCreator<CollectiveHelperOp>(rt, 
           LEGION_DISTRIBUTED_HELP_ENCODE(id, SHARD_MANAGER_DC), true, mapping),
         shard_points(shards), sorted_points(sorted), shard_lookup(lookup), 
@@ -9261,12 +9246,13 @@ namespace Legion {
         remote_constituents((mapping == NULL) ? 0 : 
             mapping->count_children(owner_space, local_space)),
         top_level_task(top), isomorphic_points(iso), control_replicated(cr),
-        address_spaces(NULL), local_mapping_complete(0),
+        address_spaces(NULL), local_startup_complete(0),
+        remote_startup_complete(0), local_mapping_complete(0),
         remote_mapping_complete(0), trigger_local_complete(0),
         trigger_remote_complete(0), trigger_local_commit(0),
         trigger_remote_commit(0), semantic_attach_counter(0),
         future_size(std::numeric_limits<size_t>::max()),
-        shard_task_barrier(task_bar), callback_barrier(call_bar),
+        callback_barrier(call_bar),
         attach_deduplication(NULL), virtual_mapping_rendezvous(NULL)
     //--------------------------------------------------------------------------
     {
@@ -9279,13 +9265,10 @@ namespace Legion {
       if (is_owner())
       {
 #ifdef DEBUG_LEGION
-        assert(!shard_task_barrier.exists());
         assert(!callback_barrier.exists());
 #endif
         if (control_replicated)
         {
-          shard_task_barrier =
-            RtBarrier(Realm::Barrier::create_barrier(total_shards));
           callback_barrier =
             RtBarrier(Realm::Barrier::create_barrier(
                 (collective_mapping == NULL) ? 1 : collective_mapping->size()));
@@ -9294,7 +9277,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       else
       {
-        assert(shard_task_barrier.exists() == control_replicated);
         assert(callback_barrier.exists() == control_replicated);
       }
 #endif
@@ -9319,10 +9301,7 @@ namespace Legion {
       sharding_functions.clear();
       // Finally unregister ourselves with the runtime
       if (is_owner() && control_replicated)
-      {
-        shard_task_barrier.destroy_barrier();
         callback_barrier.destroy_barrier();
-      }
       if ((address_spaces != NULL) && address_spaces->remove_reference())
         delete address_spaces;
 #ifdef DEBUG_LEGION
@@ -9461,7 +9440,6 @@ namespace Legion {
       }
       rez.serialize<bool>(top_level_task);
       rez.serialize<bool>(control_replicated);
-      rez.serialize(shard_task_barrier);
       rez.serialize(callback_barrier);
       collective_mapping->pack(rez);
 #ifdef DEBUG_LEGION
@@ -10437,6 +10415,53 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    RtEvent ShardManager::complete_startup_initialization(bool local)
+    //--------------------------------------------------------------------------
+    {
+      RtEvent result;
+      bool notify = false;
+      {
+        AutoLock m_lock(manager_lock);
+        if (local)
+        {
+          local_startup_complete++;
+#ifdef DEBUG_LEGION
+          assert(local_startup_complete <= local_constituents);
+#endif
+        }
+        else
+        {
+          remote_startup_complete++;
+#ifdef DEBUG_LEGION
+          assert(remote_startup_complete <= remote_constituents);
+#endif
+        }
+        if (!startup_complete.exists())
+          startup_complete = Runtime::create_rt_user_event();
+        result = startup_complete;
+        notify = (local_startup_complete == local_constituents) &&
+                 (remote_startup_complete == remote_constituents);
+      }
+      if (notify)
+      {
+#ifdef DEBUG_LEGION
+        assert(startup_complete.exists());
+#endif
+        if (!is_owner())
+        {
+          Serializer rez;
+          rez.serialize(did);
+          rez.serialize(startup_complete);
+          runtime->send_replicate_startup_complete(
+            collective_mapping->get_parent(owner_space, local_space), rez);
+        }
+        else
+          Runtime::trigger_event(startup_complete);
+      }
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     void ShardManager::handle_post_mapped(bool local, RtEvent precondition)
     //--------------------------------------------------------------------------
     {
@@ -10518,7 +10543,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ShardManager::trigger_task_complete(bool local, ApEvent effects) 
+    ApEvent ShardManager::trigger_task_complete(bool local, ApEvent effects) 
     //--------------------------------------------------------------------------
     {
       bool notify = false;
@@ -10540,6 +10565,14 @@ namespace Legion {
         }
         if (effects.exists())
           shard_effects.insert(effects);
+        if (control_replicated)
+        {
+          // If we're control replicated we'll entangle all the effects so
+          // no shard is considered done until they are all done
+          if (!all_shards_complete.exists())
+            all_shards_complete = Runtime::create_ap_user_event(NULL);
+          effects = all_shards_complete;
+        }
         notify = (trigger_local_complete == local_constituents) &&
                  (trigger_remote_complete == remote_constituents);
       }
@@ -10553,6 +10586,7 @@ namespace Legion {
           Serializer rez;
           rez.serialize(did);
           rez.serialize(all_shard_effects);
+          rez.serialize(all_shards_complete);
           runtime->send_replicate_trigger_complete(
               collective_mapping->get_parent(owner_space, local_space), rez);
         }
@@ -10563,9 +10597,12 @@ namespace Legion {
 #endif
           if (all_shard_effects.exists())
             original_task->record_completion_effect(all_shard_effects);
+          if (all_shards_complete.exists())
+            Runtime::trigger_event(NULL, all_shards_complete,all_shard_effects);
           original_task->complete_execution();
         }
       }
+      return effects;
     }
 
     //--------------------------------------------------------------------------
@@ -10616,15 +10653,7 @@ namespace Legion {
           RtEvent commit_precondition;
           if (!commit_preconditions.empty())
             commit_precondition = Runtime::merge_events(commit_preconditions);
-          if (commit_precondition.exists() && 
-              !commit_precondition.has_triggered())
-          {
-            SingleTask::DeferTriggerChildrenCommitArgs args(original_task);
-            runtime->issue_runtime_meta_task(args,
-              LG_LATENCY_DEFERRED_PRIORITY, commit_precondition);
-          }
-          else
-            original_task->trigger_children_committed();
+          original_task->trigger_children_committed(commit_precondition);
         }
       }
     }
@@ -11750,8 +11779,7 @@ namespace Legion {
       bool top_level_task, control_replicated;
       derez.deserialize(top_level_task);
       derez.deserialize(control_replicated);
-      RtBarrier shard_task_barrier, callback_barrier;
-      derez.deserialize(shard_task_barrier);
+      RtBarrier callback_barrier;
       derez.deserialize(callback_barrier);
       size_t num_spaces;
       derez.deserialize(num_spaces);
@@ -11772,7 +11800,7 @@ namespace Legion {
                 isomorphic_points, control_replicated, shard_domain,
                 std::move(shard_points), std::move(sorted_points),
                 std::move(shard_lookup), NULL/*original*/,
-                shard_task_barrier, callback_barrier);
+                callback_barrier);
       bool explicit_distribution;
       derez.deserialize<bool>(explicit_distribution);
       if (explicit_distribution)
@@ -11900,6 +11928,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    /*static*/ void ShardManager::handle_startup_complete(
+                                          Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DistributedID repl_id;
+      derez.deserialize(repl_id);
+      RtUserEvent to_trigger;
+      derez.deserialize(to_trigger);
+      ShardManager *manager = runtime->find_shard_manager(repl_id);
+      Runtime::trigger_event(to_trigger,
+          manager->complete_startup_initialization(false/*local*/));
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ void ShardManager::handle_post_mapped(
                                           Deserializer &derez, Runtime *runtime)
     //--------------------------------------------------------------------------
@@ -11921,8 +11963,13 @@ namespace Legion {
       derez.deserialize(repl_id);
       ApEvent all_shards_done;
       derez.deserialize(all_shards_done);
+      ApUserEvent all_shards_complete;
+      derez.deserialize(all_shards_complete);
       ShardManager *manager = runtime->find_shard_manager(repl_id);
-      manager->trigger_task_complete(false/*local*/, all_shards_done);
+      ApEvent complete = 
+        manager->trigger_task_complete(false/*local*/, all_shards_done);
+      if (all_shards_complete.exists())
+        Runtime::trigger_event(NULL, all_shards_complete, complete);
     }
 
     //--------------------------------------------------------------------------

@@ -1945,9 +1945,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TaskOp::trigger_children_committed(void)
+    void TaskOp::trigger_children_committed(RtEvent precondition)
     //--------------------------------------------------------------------------
     {
+      if (precondition.exists() && !precondition.has_triggered())
+      {
+        DeferTriggerChildrenCommitArgs args(this);
+        runtime->issue_runtime_meta_task(args, LG_LATENCY_DEFERRED_PRIORITY, 
+            precondition);
+        return;
+      }
       bool task_commit = false;
       {
         AutoLock o_lock(op_lock);
@@ -1984,6 +1991,15 @@ namespace Legion {
       LegionSpy::log_requirement_fields(uid, idx, req.privilege_fields);
       if (proj)
         LegionSpy::log_requirement_projection(uid, idx, req.projection);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void TaskOp::handle_deferred_children_commit(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DeferTriggerChildrenCommitArgs *targs =
+        (const DeferTriggerChildrenCommitArgs*)args;
+      targs->task->trigger_children_committed();
     }
 
     ///////////////////////////////////////////////////////////// 
@@ -5132,26 +5148,7 @@ namespace Legion {
         Runtime::trigger_event(NULL, single_task_termination,termination_event);
       else // happens with implicit top-level tasks
         record_completion_effect(termination_event);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void SingleTask::handle_deferred_task_complete(const void *args)
-    //--------------------------------------------------------------------------
-    {
-      const DeferTriggerTaskCompleteArgs *targs =
-        (const DeferTriggerTaskCompleteArgs*)args;
-      targs->task->trigger_complete(targs->effects);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void SingleTask::handle_deferred_children_commit(
-                                                               const void *args)
-    //--------------------------------------------------------------------------
-    {
-      const DeferTriggerChildrenCommitArgs *targs =
-        (const DeferTriggerChildrenCommitArgs*)args;
-      targs->task->trigger_children_committed();
-    }
+    } 
 
     //--------------------------------------------------------------------------
     /*static*/ void SingleTask::order_concurrent_task_launch(const void *args)
@@ -7681,7 +7678,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ShardTask::ShardTask(Runtime *rt, SingleTask *source, InnerContext *parent,
         ShardManager *manager, ShardID id, Processor proc, VariantID variant)
-      : SingleTask(rt), shard_id(id), all_shards_complete(false)
+      : SingleTask(rt), shard_id(id)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -7698,7 +7695,6 @@ namespace Legion {
       shard_manager = manager;
       shard_manager->add_base_resource_ref(SINGLE_TASK_REF);
       selected_variant = variant;
-      shard_barrier = shard_manager->get_shard_task_barrier();
       // If we have any region requirements then they are all collective
       check_collective_regions.resize(regions.size());
       for (unsigned idx = 0; idx < regions.size(); idx++)
@@ -7713,7 +7709,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ShardTask::ShardTask(Runtime *rt, InnerContext *parent, Deserializer &derez,
         ShardManager *manager, ShardID id, Processor proc, VariantID variant)
-      : SingleTask(rt), shard_id(id), all_shards_complete(false)
+      : SingleTask(rt), shard_id(id)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -7729,7 +7725,6 @@ namespace Legion {
       shard_manager = manager;
       shard_manager->add_base_resource_ref(SINGLE_TASK_REF);
       selected_variant = variant;
-      shard_barrier = shard_manager->get_shard_task_barrier();
       // If we have any region requirements then they are all collective
       check_collective_regions.resize(regions.size());
       for (unsigned idx = 0; idx < regions.size(); idx++)
@@ -7950,26 +7945,6 @@ namespace Legion {
     void ShardTask::trigger_complete(ApEvent effects)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(shard_barrier.exists() == shard_manager->control_replicated);
-#endif
-      // We need to ensure that each shard has gotten this call to ensure that
-      // all the child operations are done and have propagated all their context
-      // information back to us before we go about invalidating our contexts
-      if (!all_shards_complete && shard_manager->control_replicated)
-      {
-        Runtime::phase_barrier_arrive(shard_barrier, 1/*false*/);
-        const RtEvent shards_complete = shard_barrier;
-        Runtime::advance_barrier(shard_barrier);
-        all_shards_complete = true;
-        if (!shards_complete.has_triggered())
-        {
-          DeferTriggerTaskCompleteArgs args(this, effects);
-          runtime->issue_runtime_meta_task(args,
-              LG_LATENCY_DEFERRED_PRIORITY, shards_complete);
-          return;
-        }
-      }
       // Invalidate the logical context so child operations that still have
       // mapping references can begin committing
       if (execution_context != NULL)
@@ -7979,8 +7954,8 @@ namespace Legion {
       if ((outstanding_profiling_requests.fetch_sub(1) == 1) &&
           profiling_reported.exists())
         Runtime::trigger_event(profiling_reported);
-      shard_manager->trigger_task_complete(true/*local*/, effects);
-      complete_operation(effects);
+      complete_operation(
+          shard_manager->trigger_task_complete(true/*local*/, effects));
     }
 
     //--------------------------------------------------------------------------
@@ -8004,15 +7979,7 @@ namespace Legion {
       commit_operation(false/*deactivate*/);
       // Lastly invoke the method on the shard manager, this could
       // delete us so it has to be last
-      if (shard_manager->control_replicated)
-      {
-        // Make sure all the shards commit together for control replication
-        Runtime::phase_barrier_arrive(shard_barrier, 1/*false*/, 
-            commit_precondition);
-        shard_manager->trigger_task_commit(true/*local*/, shard_barrier);
-      }
-      else
-        shard_manager->trigger_task_commit(true/*local*/, commit_precondition);
+      shard_manager->trigger_task_commit(true/*local*/, commit_precondition);
     }
 
     //--------------------------------------------------------------------------
@@ -8142,8 +8109,9 @@ namespace Legion {
         execution_context = repl_ctx;
         // Make sure that none of the shards start until all the replicate
         // contexts have been made across all the shards
-        RtEvent ready = complete_startup_initialization();
-        launch_events.insert(ApEvent(ready));
+        RtEvent ready = shard_manager->complete_startup_initialization();
+        if (ready.exists())
+          launch_events.insert(ApEvent(ready));
       }
       else
       {
@@ -8165,30 +8133,10 @@ namespace Legion {
       // Save the execution context early since we'll need it
       execution_context = repl_ctx;
       // Wait until all the other shards are ready too
-      const RtEvent wait_on = complete_startup_initialization();
+      const RtEvent wait_on = shard_manager->complete_startup_initialization();
       if (!wait_on.has_triggered())
         wait_on.wait();
       return repl_ctx;
-    }
-
-    //--------------------------------------------------------------------------
-    RtEvent ShardTask::complete_startup_initialization(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(shard_manager->control_replicated == shard_barrier.exists());
-#endif
-      // We only do this for control replicated tasks
-      if (shard_manager->control_replicated)
-      {
-        Runtime::phase_barrier_arrive(shard_barrier, 1/*count*/);
-        const RtEvent result = shard_barrier;
-        // Advance this for when we get to completion
-        Runtime::advance_barrier(shard_barrier);
-        return result;
-      }
-      else
-        return RtEvent::NO_RT_EVENT;
     }
 
     //--------------------------------------------------------------------------

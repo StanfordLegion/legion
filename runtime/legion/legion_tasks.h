@@ -130,6 +130,17 @@ namespace Legion {
     public:
       TaskOp *const proxy_this;
     };
+    struct DeferTriggerChildrenCommitArgs :
+        public LgTaskArgs<DeferTriggerChildrenCommitArgs> {
+      public:
+        static const LgTaskID TASK_ID =LG_DEFER_TRIGGER_CHILDREN_COMMIT_TASK_ID;
+      public:
+        DeferTriggerChildrenCommitArgs(TaskOp *t)
+          : LgTaskArgs<DeferTriggerChildrenCommitArgs>(t->get_unique_op_id()),
+            task(t) { }
+      public:
+        TaskOp *const task;
+      };
     public:
       TaskOp(Runtime *rt);
       virtual ~TaskOp(void);
@@ -260,12 +271,14 @@ namespace Legion {
       // These methods get called once the task has executed
       // and all the children have either mapped, completed,
       // or committed.
-      void trigger_children_committed(void);
+      void trigger_children_committed(RtEvent pre = RtEvent::NO_RT_EVENT);
     protected:
       // Tasks have two requirements to commit:
       // - all commit dependences must be satisfied (trigger_commit)
       // - all children must commit (children_committed)
       virtual void trigger_task_commit(void) = 0;
+    public:
+      static void handle_deferred_children_commit(const void *args);
     protected:
       TaskRequirements                          logical_regions;
       // Region requirements to check for collective behavior
@@ -362,30 +375,7 @@ namespace Legion {
             task(t) { }
       public:
         SingleTask *const task;
-      };
-      struct DeferTriggerTaskCompleteArgs :
-        public LgTaskArgs<DeferTriggerTaskCompleteArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_DEFER_TRIGGER_TASK_COMPLETE_TASK_ID;
-      public:
-        DeferTriggerTaskCompleteArgs(SingleTask *t, ApEvent e)
-          : LgTaskArgs<DeferTriggerTaskCompleteArgs>(t->get_unique_op_id()),
-            task(t), effects(e) { }
-      public:
-        SingleTask *const task;
-        const ApEvent effects;
-      };
-      struct DeferTriggerChildrenCommitArgs :
-        public LgTaskArgs<DeferTriggerChildrenCommitArgs> {
-      public:
-        static const LgTaskID TASK_ID =LG_DEFER_TRIGGER_CHILDREN_COMMIT_TASK_ID;
-      public:
-        DeferTriggerChildrenCommitArgs(SingleTask *t)
-          : LgTaskArgs<DeferTriggerChildrenCommitArgs>(t->get_unique_op_id()),
-            task(t) { }
-      public:
-        SingleTask *const task;
-      };
+      }; 
       struct OrderConcurrentLaunchArgs : 
         public LgTaskArgs<OrderConcurrentLaunchArgs> { 
       public:
@@ -545,8 +535,6 @@ namespace Legion {
       virtual TaskContext* create_execution_context(VariantImpl *v,
           std::set<ApEvent> &launch_events, bool inline_task, bool leaf_task);
     public:
-      static void handle_deferred_task_complete(const void *args);
-      static void handle_deferred_children_commit(const void *args);
       static void order_concurrent_task_launch(const void *args);
     protected:
       // Boolean for each region saying if it is virtual mapped
@@ -1122,12 +1110,8 @@ namespace Legion {
       ReplicateContext* get_replicate_context(void) const;
     public:
       void initialize_implicit_task(TaskID tid, MapperID mid, Processor proxy);
-      RtEvent complete_startup_initialization(void);
     public:
       const ShardID shard_id;
-    protected:
-      RtBarrier shard_barrier;
-      bool all_shards_complete;
     };
 
     /**

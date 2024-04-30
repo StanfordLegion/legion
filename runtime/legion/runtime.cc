@@ -1469,7 +1469,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock f_lock(future_lock);
-      if (future_size == 0)
+      if (future_size_set && (future_size == 0))
         return RtEvent::NO_RT_EVENT;
       if (local_visible_memory.exists())
       {
@@ -1490,7 +1490,7 @@ namespace Legion {
         for (std::map<Memory,PendingInstance>::iterator it =
               pending_instances.begin(); it != pending_instances.end(); it++)
         {
-          if (!it->second.instance->is_meta_visible)
+          if (!FutureInstance::check_meta_visible(it->first))
             continue;
           if (!it->second.inst_ready.exists())
             it->second.inst_ready = Runtime::create_ap_user_event(NULL);
@@ -13496,6 +13496,11 @@ namespace Legion {
               runtime->handle_replicate_virtual_rendezvous(derez);
               break;
             }
+          case SEND_REPLICATE_STARTUP_COMPLETE:
+            {
+              runtime->handle_replicate_startup_complete(derez);
+              break;
+            }
           case SEND_REPLICATE_POST_MAPPED:
             {
               runtime->handle_replicate_post_mapped(derez);
@@ -23709,6 +23714,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_replicate_startup_complete(AddressSpaceID target, 
+                                                  Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(SEND_REPLICATE_STARTUP_COMPLETE,
+                                                    rez, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_replicate_post_mapped(AddressSpaceID target, 
                                              Serializer &rez)
     //--------------------------------------------------------------------------
@@ -26142,6 +26156,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       ShardManager::handle_virtual_rendezvous(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_replicate_startup_complete(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      ShardManager::handle_startup_complete(derez, this);
     }
 
     //--------------------------------------------------------------------------
@@ -32513,14 +32534,9 @@ namespace Legion {
             targs->task->handle_mispredication();
             break;
           }
-        case LG_DEFER_TRIGGER_TASK_COMPLETE_TASK_ID:
-          {
-            SingleTask::handle_deferred_task_complete(args);
-            break;
-          }
         case LG_DEFER_TRIGGER_CHILDREN_COMMIT_TASK_ID:
           {
-            SingleTask::handle_deferred_children_commit(args);
+            TaskOp::handle_deferred_children_commit(args);
             break;
           }
         case LG_ORDER_CONCURRENT_LAUNCH_TASK_ID:
