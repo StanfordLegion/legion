@@ -10227,6 +10227,7 @@ namespace Legion {
 #endif
       dependences = deps;
       has_preconditions = true;
+      create_deletion_requirements();
     }
 
     //--------------------------------------------------------------------------
@@ -10410,21 +10411,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DeletionOp::trigger_dependence_analysis(void)
+    void DeletionOp::create_deletion_requirements(void)
     //--------------------------------------------------------------------------
     {
-      if (has_preconditions)
-      {
-        for (std::map<Operation*,GenerationID>::const_iterator dit = 
-              dependences.begin(); dit != dependences.end(); dit++)
-          register_dependence(dit->first, dit->second);
-        // We still need to perform the invalidations in this path as well
-        const ContextID ctx = parent_ctx->get_logical_tree_context();
-        for (unsigned idx = 0; idx < deletion_requirements.size(); idx++)
-          runtime->forest->invalidate_current_context(ctx,
-              deletion_requirements[idx], (kind == FIELD_DELETION));
-        return;
-      }
       switch (kind)
       {
         // These cases do not need any kind of analysis to construct
@@ -10454,13 +10443,31 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(deletion_requirements.size() == parent_req_indexes.size());
 #endif
+    }
+
+    //--------------------------------------------------------------------------
+    void DeletionOp::trigger_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+      if (has_preconditions)
+      {
+        for (std::map<Operation*,GenerationID>::const_iterator dit = 
+              dependences.begin(); dit != dependences.end(); dit++)
+          register_dependence(dit->first, dit->second);
+        // We still need to perform the invalidations in this path as well
+        const ContextID ctx = parent_ctx->get_logical_tree_context();
+        for (unsigned idx = 0; idx < deletion_requirements.size(); idx++)
+          runtime->forest->invalidate_current_context(ctx,
+              deletion_requirements[idx], (kind == FIELD_DELETION));
+        return;
+      }
+      create_deletion_requirements();
       // Even though we're going to do a full fence analysis after this,
       // we still need to do this call so we register ourselves in the 
       // region tree to serve as mapping dependences on things that might
       // use these data structures in the case of recycling, e.g. in the
       // case that we recycle a field index
       analyze_region_requirements();
-
       // Now we can invalidate the context since all internal operations
       // have been recorded in the tree
       const ContextID ctx = parent_ctx->get_logical_tree_context();

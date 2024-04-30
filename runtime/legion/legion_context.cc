@@ -10797,7 +10797,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       std::map<LogicalRegion,EqKDTree*> return_regions;
-      const FieldMask all_ones_mask(LEGION_FIELD_MASK_FIELD_ALL_ONES);
       for (std::map<unsigned,RegionRequirement>::const_iterator it = 
             created_requirements.begin(); it != 
             created_requirements.end(); it++)
@@ -10806,36 +10805,28 @@ namespace Legion {
         assert(returnable_privileges.find(it->first) !=
                 returnable_privileges.end());
 #endif
-        RegionNode *node = runtime->forest->get_node(it->second.region);
-        // See if we're a returnable privilege or not
         std::map<unsigned,EqKDRoot>::iterator finder = 
           equivalence_set_trees.find(it->first);
+        if (finder == equivalence_set_trees.end())
+          continue;
+        // See if we're a returnable privilege or not
         if (returnable_privileges[it->first] && !is_top)
         {
 #ifdef DEBUG_LEGION
           assert(return_regions.find(it->second.region) == 
                   return_regions.end());
 #endif
-          if (finder != equivalence_set_trees.end())
-          {
-            finder->second.tree->add_reference();
-            return_regions[it->second.region] = finder->second.tree;
-            equivalence_set_trees.erase(finder);
-          }
+          finder->second.tree->add_reference();
+          return_regions[it->second.region] = finder->second.tree;
+          equivalence_set_trees.erase(finder);
         }
-        else if (finder != equivalence_set_trees.end())
+        else
         {
-          // Not returning so invalidate the full thing
+          // Not returning so just remove it which will delete the tree
 #ifdef DEBUG_LEGION
           assert(return_regions.find(it->second.region) == 
                   return_regions.end());
 #endif
-          std::vector<RtEvent> applied;
-          node->row_source->invalidate_equivalence_set_kd_tree(
-                finder->second.tree, finder->second.lock,
-                all_ones_mask, applied, false/*move to previous*/);
-          if (!applied.empty())
-            applied_events.insert(applied.begin(), applied.end());
           equivalence_set_trees.erase(finder);
         }
       }

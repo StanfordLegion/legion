@@ -3823,13 +3823,9 @@ namespace Legion {
       if ((kind == LOGICAL_REGION_DELETION) || (kind == FIELD_DELETION))
       {
         ready_barrier = repl_ctx->get_next_deletion_ready_barrier();
-        // Only field deletions need a mapping barrier for downward facing
-        // dependences in other shards
+        mapping_barrier = repl_ctx->get_next_deletion_mapping_barrier();
         if (kind == FIELD_DELETION)
-        {
-          mapping_barrier = repl_ctx->get_next_deletion_mapping_barrier();
           create_collective_rendezvous(0/*requirement index*/);
-        }
       }
       // All deletion kinds need an execution barrier
       commit_barrier = repl_ctx->get_next_deletion_execution_barrier();
@@ -4060,13 +4056,8 @@ namespace Legion {
         {
           ready_barrier = *ready_bar;
           Runtime::advance_barrier(*ready_bar);
-          // Only field deletions need a mapping barrier for downward facing
-          // dependences in other shards
-          if (kind == FIELD_DELETION)
-          {
-            mapping_barrier = *mapping_bar;
-            Runtime::advance_barrier(*mapping_bar);
-          }
+          mapping_barrier = *mapping_bar;
+          Runtime::advance_barrier(*mapping_bar);
         }
         // All deletion kinds need an execution barrier
         commit_barrier = *commit_bar;
@@ -8412,6 +8403,11 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(fence_kind == EXECUTION_FENCE);
 #endif
+        // Perform the normal execution fence analysis
+        parent_ctx->perform_execution_fence_analysis(this,
+                execution_preconditions);
+        parent_ctx->update_current_execution_fence(this, 
+                get_completion_event());
         // Now we wrap up the fence, we already did the mapping fence
         // during the trigger ready stage of the pipeline
         if (!map_applied_conditions.empty())
@@ -8872,6 +8868,11 @@ namespace Legion {
             map_applied_conditions, execution_preconditions);
         // Tell the parent context whether we are replaying
         parent_ctx->record_physical_trace_replay(mapped_event, replaying);
+        // Do the normal physical fence analysis
+        parent_ctx->perform_execution_fence_analysis(this,
+                execution_preconditions);
+        parent_ctx->update_current_execution_fence(this, 
+                get_completion_event());
         // Now we wrap up the fence, we already did the mapping fence
         // during the trigger ready stage of the pipeline
         if (!map_applied_conditions.empty())
@@ -9104,6 +9105,11 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(fence_kind == EXECUTION_FENCE);
 #endif
+        // Perform the normal dexecution fence analysis
+        parent_ctx->perform_execution_fence_analysis(this,
+                execution_preconditions);
+        parent_ctx->update_current_execution_fence(this, 
+                get_completion_event());
         // Now we wrap up the fence, we already did the mapping fence
         // during the trigger ready stage of the pipeline
         if (!map_applied_conditions.empty())

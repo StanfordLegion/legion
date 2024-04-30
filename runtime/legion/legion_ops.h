@@ -1954,6 +1954,7 @@ namespace Legion {
       virtual const RegionRequirement &get_requirement(unsigned idx) const
         { return deletion_requirements[idx]; }
     protected:
+      void create_deletion_requirements(void);
       void log_deletion_requirements(void);
     public:
       virtual void trigger_dependence_analysis(void);
