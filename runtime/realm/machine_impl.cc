@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -36,6 +36,8 @@ TYPE_IS_SERIALIZABLE(Realm::Memory);
 TYPE_IS_SERIALIZABLE(Realm::Memory::Kind);
 TYPE_IS_SERIALIZABLE(Realm::Channel::SupportedPath);
 TYPE_IS_SERIALIZABLE(Realm::XferDesKind);
+TYPE_IS_SERIALIZABLE(Realm::Machine::ProcessorMemoryAffinity);
+TYPE_IS_SERIALIZABLE(Realm::Machine::ProcessInfo);
 
 namespace Realm {
 
@@ -187,12 +189,17 @@ namespace Realm {
 
   MachineNodeInfo::MachineNodeInfo(int _node)
     : node(_node)
+    , process_info(nullptr)
   {}
 
   MachineNodeInfo::~MachineNodeInfo(void)
   {
     delete_map_contents(procs);
     delete_map_contents(mems);
+    // TODO: assert process_info is valid after adding machine announcement
+    if(process_info) {
+      delete process_info;
+    }
   }
 
   bool MachineNodeInfo::add_processor(Processor p)
@@ -263,6 +270,17 @@ namespace Realm {
     return changed;
   }
 
+  bool MachineNodeInfo::add_process_info(const Machine::ProcessInfo &proc_info)
+  {
+    if(!process_info) {
+      process_info = new Machine::ProcessInfo();
+      *process_info = proc_info;
+      return true;
+    } else {
+      return false;
+    }
+  }
+
   void MachineNodeInfo::update_kind_maps()
   {
     proc_by_kind.clear();
@@ -296,54 +314,62 @@ namespace Realm {
 
     void Machine::get_all_memories(std::set<Memory>& mset) const
     {
-      return ((MachineImpl *)impl)->get_all_memories(mset);
+      return (static_cast<MachineImpl *>(impl))->get_all_memories(mset);
     }
     
     void Machine::get_all_processors(std::set<Processor>& pset) const
     {
-      return ((MachineImpl *)impl)->get_all_processors(pset);
+      return (static_cast<MachineImpl *>(impl))->get_all_processors(pset);
     }
 
     void Machine::get_local_processors(std::set<Processor>& pset) const
     {
-      return ((MachineImpl *)impl)->get_local_processors(pset);
+      return (static_cast<MachineImpl *>(impl))->get_local_processors(pset);
     }
 
     void Machine::get_local_processors_by_kind(std::set<Processor>& pset,
 					       Processor::Kind kind) const
     {
-      return ((MachineImpl *)impl)->get_local_processors_by_kind(pset, kind);
+      return (static_cast<MachineImpl *>(impl))->get_local_processors_by_kind(pset, kind);
     }
 
     // Return the set of memories visible from a processor
     void Machine::get_visible_memories(Processor p, std::set<Memory>& mset,
 				       bool local_only /*= true*/) const
     {
-      return ((MachineImpl *)impl)->get_visible_memories(p, mset, local_only);
+      return (static_cast<MachineImpl *>(impl))
+          ->get_visible_memories(p, mset, local_only);
     }
 
     // Return the set of memories visible from a memory
     void Machine::get_visible_memories(Memory m, std::set<Memory>& mset,
 				       bool local_only /*= true*/) const
     {
-      return ((MachineImpl *)impl)->get_visible_memories(m, mset, local_only);
+      return (static_cast<MachineImpl *>(impl))
+          ->get_visible_memories(m, mset, local_only);
     }
 
     // Return the set of processors which can all see a given memory
     void Machine::get_shared_processors(Memory m, std::set<Processor>& pset,
 					bool local_only /*= true*/) const
     {
-      return ((MachineImpl *)impl)->get_shared_processors(m, pset, local_only);
+      return (static_cast<MachineImpl *>(impl))
+          ->get_shared_processors(m, pset, local_only);
+    }
+
+    bool Machine::get_process_info(Processor p, ProcessInfo *info) const
+    {
+      return (static_cast<MachineImpl *>(impl))->get_process_info(p, info);
     }
 
     bool Machine::has_affinity(Processor p, Memory m, AffinityDetails *details /*= 0*/) const
     {
-      return ((MachineImpl *)impl)->has_affinity(p, m, details);
+      return (static_cast<MachineImpl *>(impl))->has_affinity(p, m, details);
     }
 
     bool Machine::has_affinity(Memory m1, Memory m2, AffinityDetails *details /*= 0*/) const
     {
-      return ((MachineImpl *)impl)->has_affinity(m1, m2, details);
+      return (static_cast<MachineImpl *>(impl))->has_affinity(m1, m2, details);
     }
 
     int Machine::get_proc_mem_affinity(std::vector<Machine::ProcessorMemoryAffinity>& result,
@@ -351,7 +377,8 @@ namespace Realm {
 				       Memory restrict_memory /*= Memory::NO_MEMORY*/,
 				       bool local_only /*= true*/) const
     {
-      return ((MachineImpl *)impl)->get_proc_mem_affinity(result, restrict_proc, restrict_memory, local_only);
+      return (static_cast<MachineImpl *>(impl))
+          ->get_proc_mem_affinity(result, restrict_proc, restrict_memory, local_only);
     }
 
     int Machine::get_mem_mem_affinity(std::vector<Machine::MemoryMemoryAffinity>& result,
@@ -359,17 +386,18 @@ namespace Realm {
 				      Memory restrict_mem2 /*= Memory::NO_MEMORY*/,
 				      bool local_only /*= true*/) const
     {
-      return ((MachineImpl *)impl)->get_mem_mem_affinity(result, restrict_mem1, restrict_mem2, local_only);
+      return (static_cast<MachineImpl *>(impl))
+          ->get_mem_mem_affinity(result, restrict_mem1, restrict_mem2, local_only);
     }
 
     void Machine::add_subscription(MachineUpdateSubscriber *subscriber)
     {
-      ((MachineImpl *)impl)->add_subscription(subscriber);
+      (static_cast<MachineImpl *>(impl))->add_subscription(subscriber);
     }
 
     void Machine::remove_subscription(MachineUpdateSubscriber *subscriber)
     {
-      ((MachineImpl *)impl)->remove_subscription(subscriber);
+      (static_cast<MachineImpl *>(impl))->remove_subscription(subscriber);
     }
 
 
@@ -460,212 +488,149 @@ namespace Realm {
 	}
 
 	switch(tag) {
-	case NODE_ANNOUNCE_PROC:
-	  {
-	    Processor p;
-	    Processor::Kind kind;
-	    int num_cores;
-	    ok = (ok &&
-		  (fbd >> p) &&
-		  (fbd >> kind) &&
-		  (fbd >> num_cores));
-	    if(ok) {
-	      assert(NodeID(ID(p).proc_owner_node()) == node_id);
-	      log_annc.debug() << "adding proc " << p << " (kind = " << kind
-			       << " num_cores = " << num_cores << ")";
-	      if(remote) {
-		RemoteProcessor *proc = new RemoteProcessor(p, kind, num_cores);
-                if(n.processors.size() <= ID(p).proc_proc_idx())
-                  n.processors.resize(ID(p).proc_proc_idx() + 1, 0);
-		n.processors[ID(p).proc_proc_idx()] = proc;
-	      }
-	    }
-	  }
-	  break;
+        case NODE_ANNOUNCE_PROC:
+        {
+          Processor p;
+          Processor::Kind kind;
+          int num_cores;
+          ok = (ok && (fbd >> p) && (fbd >> kind) && (fbd >> num_cores));
+          if(ok) {
+            assert(NodeID(ID(p).proc_owner_node()) == node_id);
+            log_annc.debug() << "adding proc " << p << " (kind = " << kind
+                             << " num_cores = " << num_cores << ")";
+            if(remote) {
+              RemoteProcessor *proc = new RemoteProcessor(p, kind, num_cores);
+              if(n.processors.size() <= ID(p).proc_proc_idx())
+                n.processors.resize(ID(p).proc_proc_idx() + 1, 0);
+              n.processors[ID(p).proc_proc_idx()] = proc;
+            }
+          }
+          break;
+        }
 
-	case NODE_ANNOUNCE_MEM:
-	  {
-	    Memory m;
-	    Memory::Kind kind;
-	    size_t size;
-	    bool has_rdma_info = false;
-	    ByteArray rdma_info;
-	    ok = (ok &&
-		  (fbd >> m) &&
-		  (fbd >> kind) &&
-		  (fbd >> size) &&
-		  (fbd >> has_rdma_info));
-	    if(has_rdma_info)
-	      ok = ok && (fbd >> rdma_info);
-	    if(ok) {
-	      assert(NodeID(ID(m).memory_owner_node()) == node_id);
-	      log_annc.debug() << "adding memory " << m << " (kind = " << kind
-			       << ", size = " << size << ", has_rdma = " << has_rdma_info << ")";
-	      if(remote) {
-		MemoryImpl *mem;
-		if(has_rdma_info) {
-		  mem = Network::get_network(node_id)->create_remote_memory(m,
-									    size,
-									    kind,
-									    rdma_info);
-		} else {
-		  mem = new RemoteMemory(m, size, kind);
-		}
-                if(n.memories.size() >= ID(m).memory_mem_idx())
-                  n.memories.resize(ID(m).memory_mem_idx() + 1, 0);
-		n.memories[ID(m).memory_mem_idx()] = mem;
+        case NODE_ANNOUNCE_MEM:
+        {
+          Memory m;
+          Memory::Kind kind;
+          size_t size;
+          bool has_rdma_info = false;
+          ByteArray rdma_info;
+          ok = (ok && (fbd >> m) && (fbd >> kind) && (fbd >> size) &&
+                (fbd >> has_rdma_info));
+          if(has_rdma_info)
+            ok = ok && (fbd >> rdma_info);
+          if(ok) {
+            assert(NodeID(ID(m).memory_owner_node()) == node_id);
+            log_annc.debug() << "adding memory " << m << " (kind = " << kind
+                             << ", size = " << size << ", has_rdma = " << has_rdma_info
+                             << ")";
+            if(remote) {
+              MemoryImpl *mem;
+              if(has_rdma_info) {
+                mem = Network::get_network(node_id)->create_remote_memory(m, size, kind,
+                                                                          rdma_info);
+              } else {
+                mem = new RemoteMemory(m, size, kind);
+              }
+              if(n.memories.size() >= ID(m).memory_mem_idx())
+                n.memories.resize(ID(m).memory_mem_idx() + 1, 0);
+              n.memories[ID(m).memory_mem_idx()] = mem;
 
 #ifndef REALM_SKIP_INTERNODE_AFFINITIES
 		{
 		  // manufacture affinities for remote writes
 		  // acceptable local sources: SYSTEM, Z_COPY, REGDMA (bonus)
 		  // acceptable remote targets: SYSTEM, Z_COPY, GPU_FB, DISK, HDF, FILE, REGDMA (bonus)
-		  int bw = 6;
-		  int latency = 1000;
 		  bool rem_send, rem_recv, rem_reg;
 		  if(!allows_internode_copies(kind,
 					      rem_send, rem_recv, rem_reg))
 		    continue;
-
-		  // iterate over local memories and check their kinds
-		  Node *mynode = &(get_runtime()->nodes[Network::my_node_id]);
-		  for(std::vector<MemoryImpl *>::const_iterator it = mynode->memories.begin();
-		      it != mynode->memories.end();
-		      ++it) {
-		    Machine::MemoryMemoryAffinity mma;
-		    mma.bandwidth = bw + (rem_reg ? 1 : 0);
-		    mma.latency = latency - (rem_reg ? 100 : 0);
-
-		    bool lcl_send, lcl_recv, lcl_reg;
-		    if(!allows_internode_copies((*it)->get_kind(),
-						lcl_send, lcl_recv, lcl_reg))
-		      continue;
-
-		    if(lcl_reg) {
-		      mma.bandwidth += 1;
-		      mma.latency -= 100;
-		    }
-
-		    if(lcl_send && rem_recv) {
-		      mma.m1 = (*it)->me;
-		      mma.m2 = m;
-		      log_annc.debug() << "adding inter-node affinity "
-				       << mma.m1 << " -> " << mma.m2
-				       << " (bw = " << mma.bandwidth << ", latency = " << mma.latency << ")";
-		      add_mem_mem_affinity(mma, true /*lock held*/);
-		      //mem_mem_affinities.push_back(mma);
-		    }
-		    if(rem_send && lcl_recv) {
-		      mma.m1 = m;
-		      mma.m2 = (*it)->me;
-		      log_annc.debug() << "adding inter-node affinity "
-				       << mma.m1 << " -> " << mma.m2
-				       << " (bw = " << mma.bandwidth << ", latency = " << mma.latency << ")";
-		      add_mem_mem_affinity(mma, true /*lock held*/);
-		      //mem_mem_affinities.push_back(mma);
-		    }
-		  }
 		}
 #endif
-	      }
-	    }
-	  }
-	  break;
+            }
+          }
+          break;
+        }
 
-	case NODE_ANNOUNCE_IB_MEM:
-	  {
-	    Memory m;
-	    Memory::Kind kind;
-	    size_t size;
-	    bool has_rdma_info = false;
-	    ByteArray rdma_info;
-	    ok = (ok &&
-		  (fbd >> m) &&
-		  (fbd >> kind) &&
-		  (fbd >> size) &&
-		  (fbd >> has_rdma_info));
-	    if(has_rdma_info)
-	      ok = ok && (fbd >> rdma_info);
-	    if(ok) {
-	      assert(NodeID(ID(m).memory_owner_node()) == node_id);
-	      log_annc.debug() << "adding ib memory " << m << " (kind = " << kind
-			       << ", size = " << size << ", has_rdma = " << has_rdma_info << ")";
-	      if(remote) {
-		IBMemory *ibmem;
-		if(has_rdma_info) {
-		  ibmem = Network::get_network(node_id)->create_remote_ib_memory(m,
-										 size,
-										 kind,
-										 rdma_info);
-		} else {
-		  ibmem = new IBMemory(m, size, MemoryImpl::MKIND_REMOTE, kind, 0, 0);
-		}
+        case NODE_ANNOUNCE_IB_MEM:
+        {
+          Memory m;
+          Memory::Kind kind;
+          size_t size;
+          bool has_rdma_info = false;
+          ByteArray rdma_info;
+          ok = (ok && (fbd >> m) && (fbd >> kind) && (fbd >> size) &&
+                (fbd >> has_rdma_info));
+          if(has_rdma_info)
+            ok = ok && (fbd >> rdma_info);
+          if(ok) {
+            assert(NodeID(ID(m).memory_owner_node()) == node_id);
+            log_annc.debug() << "adding ib memory " << m << " (kind = " << kind
+                             << ", size = " << size << ", has_rdma = " << has_rdma_info
+                             << ")";
+            if(remote) {
+              IBMemory *ibmem;
+              if(has_rdma_info) {
+                ibmem = Network::get_network(node_id)->create_remote_ib_memory(
+                    m, size, kind, rdma_info);
+              } else {
+                ibmem = new IBMemory(m, size, MemoryImpl::MKIND_REMOTE, kind, 0, 0);
+              }
 
-                if(n.ib_memories.size() >= ID(m).memory_mem_idx())
-                  n.ib_memories.resize(ID(m).memory_mem_idx() + 1, 0);
-		n.ib_memories[ID(m).memory_mem_idx()] = ibmem;
-	      }
-	    }
-	  }
-	  break;
+              if(n.ib_memories.size() >= ID(m).memory_mem_idx())
+                n.ib_memories.resize(ID(m).memory_mem_idx() + 1, 0);
+              n.ib_memories[ID(m).memory_mem_idx()] = ibmem;
+            }
+          }
+          break;
+        }
 
-	case NODE_ANNOUNCE_PMA:
-	  {
-	    Machine::ProcessorMemoryAffinity pma;
-	    ok = (ok &&
-		  (fbd >> pma.p) &&
-		  (fbd >> pma.m) &&
-		  (fbd >> pma.bandwidth) &&
-		  (fbd >> pma.latency));
-	    if(ok) {
-	      log_annc.debug() << "adding affinity " << pma.p << " -> " << pma.m
-			       << " (bw = " << pma.bandwidth << ", latency = " << pma.latency << ")";
+        case NODE_ANNOUNCE_PMA:
+        {
+          Machine::ProcessorMemoryAffinity pma;
+          ok = (ok && (fbd >> pma));
+          if(ok) {
+            log_annc.debug() << "adding affinity " << pma.p << " -> " << pma.m
+                             << " (bw = " << pma.bandwidth
+                             << ", latency = " << pma.latency << ")";
 
-	      add_proc_mem_affinity(pma, true /*lock held*/);
-	      //proc_mem_affinities.push_back(pma);
-	    }
-	  }
-	  break;
+            add_proc_mem_affinity(pma, true /*lock held*/);
+            // proc_mem_affinities.push_back(pma);
+          }
+          break;
+        }
 
-	case NODE_ANNOUNCE_MMA:
-	  {
-	    Machine::MemoryMemoryAffinity mma;
-	    ok = (ok &&
-		  (fbd >> mma.m1) &&
-		  (fbd >> mma.m2) &&
-		  (fbd >> mma.bandwidth) &&
-		  (fbd >> mma.latency));
-	    if(ok) {
-	      log_annc.debug() << "adding affinity " << mma.m1 << " <-> " << mma.m2
-			       << " (bw = " << mma.bandwidth << ", latency = " << mma.latency << ")";
+        case NODE_ANNOUNCE_DMA_CHANNEL:
+        {
+          RemoteChannelInfo *rci = RemoteChannelInfo::deserialize_new(fbd);
+          if(rci) {
+            RemoteChannel *rc = rci->create_remote_channel();
+            delete rci;
 
-	      add_mem_mem_affinity(mma, true /*lock held*/);
-	      //mem_mem_affinities.push_back(mma);
-	    }
-	  }
-	  break;
+            log_annc.debug() << "adding channel: " << *rc;
+            assert(rc->node == node_id);
+            if(remote)
+              get_runtime()->add_dma_channel(rc);
+            else
+              delete rc; // don't actually need it
+          }
+          break;
+        }
 
-	case NODE_ANNOUNCE_DMA_CHANNEL:
-	  {
-	    RemoteChannelInfo *rci = RemoteChannelInfo::deserialize_new(fbd);
-	    if(rci) {
-              RemoteChannel *rc = rci->create_remote_channel();
-              delete rci;
+        case NODE_ANNOUNCE_PROCESS_INFO:
+        {
+          Machine::ProcessInfo process_info;
+          ok = (ok && (fbd >> process_info));
+          if(ok) {
+            add_process_info(node_id, process_info, true);
+          }
+          break;
+        }
 
-	      log_annc.debug() << "adding channel: " << *rc;
-	      assert(rc->node == node_id);
-	      if(remote)
-		get_runtime()->add_dma_channel(rc);
-	      else
-		delete rc; // don't actually need it
-	    }
-	  }
-	  break;
-
-	default:
-	  log_annc.fatal() << "unknown tag: " << tag;
-	  assert(0);
-	}
+        default:
+          log_annc.fatal() << "unknown tag: " << tag;
+          assert(0);
+        }
       }
 
       assert(ok && (fbd.bytes_left() == 0));
@@ -880,6 +845,17 @@ namespace Realm {
 #endif
     }
 
+    bool MachineImpl::get_process_info(Processor p, Machine::ProcessInfo *info) const
+    {
+      MachineNodeInfo *node_info = get_nodeinfo(p);
+      if(!node_info) {
+        return false;
+      }
+      assert(node_info->process_info != nullptr);
+      *info = *(node_info->process_info);
+      return true;
+    }
+
     bool MachineImpl::has_affinity(Processor p, Memory m, Machine::AffinityDetails *details /*= 0*/) const
     {
       // TODO: consider using a reader/writer lock here instead
@@ -902,16 +878,22 @@ namespace Realm {
     {
       // TODO: consider using a reader/writer lock here instead
       AutoLock<> al(mutex);
-      for(std::vector<Machine::MemoryMemoryAffinity>::const_iterator it = mem_mem_affinities.begin();
-	  it != mem_mem_affinities.end();
-	  it++) {
-	if(it->m1 != m1) continue;
-	if(it->m2 != m2) continue;
-	if(details) {
-	  details->bandwidth = it->bandwidth;
-	  details->latency = it->latency;
-	}
-	return true;
+
+      MachineNodeInfo* nodeInfo = get_nodeinfo(m1);
+      if (nodeInfo == nullptr) {
+        return false;
+      }
+      MachineMemInfo* memInfo = nodeInfo->mems[m1];
+      if (memInfo == nullptr) {
+        return false;
+      }
+      std::map<Memory, Machine::MemoryMemoryAffinity *>::const_iterator it = memInfo->mmas_out.all.find(m2);
+      if (it != memInfo->mmas_out.all.end()) {
+        if (details != nullptr) {
+          details->bandwidth = it->second->bandwidth;
+          details->latency = it->second->latency;
+        }
+        return true;
       }
       return false;
     }
@@ -922,6 +904,7 @@ namespace Realm {
 					     bool local_only /*= true*/) const
     {
       int count = 0;
+      result.clear();
 
       {
 	// TODO: consider using a reader/writer lock here instead
@@ -1005,36 +988,14 @@ namespace Realm {
 					  Memory restrict_mem2 /*= Memory::NO_MEMORY*/,
 					  bool local_only /*= true*/) const
     {
-      // Handle the case for same memories
-      if (restrict_mem1.exists() && (restrict_mem1 == restrict_mem2))
-      {
-	Machine::MemoryMemoryAffinity affinity;
-        affinity.m1 = restrict_mem1;
-        affinity.m2 = restrict_mem1;
-        affinity.bandwidth = 100;
-        affinity.latency = 1;
-        result.push_back(affinity);
-        return 1;
-      }
+      // Clear the vector in case it has old data
+      result.clear();
 
       int count = 0;
 
       {
 	// TODO: consider using a reader/writer lock here instead
 	AutoLock<> al(mutex);
-#ifdef USE_OLD_AFFINITIES
-	for(std::vector<Machine::MemoryMemoryAffinity>::const_iterator it = mem_mem_affinities.begin();
-	    it != mem_mem_affinities.end();
-	    it++) {
-	  if(restrict_mem1.exists() && 
-	     ((*it).m1 != restrict_mem1)) continue;
-	  if(restrict_mem2.exists() && 
-	     ((*it).m2 != restrict_mem2)) continue;
-	  if(local_only && !is_local_affinity(*it)) continue;
-	  result.push_back(*it);
-	  count++;
-	}
-#else
 	if(restrict_mem1.exists()) {
 	  const MachineNodeInfo *nm1 = get_nodeinfo(restrict_mem1);
 	  if(!nm1) return 0;
@@ -1092,7 +1053,6 @@ namespace Realm {
 	      }
 	  }
 	}
-#endif
       }
 
       return count;
@@ -1125,33 +1085,6 @@ namespace Realm {
     if(!lock_held) mutex.unlock();
   }
 
-  void MachineImpl::add_mem_mem_affinity(const Machine::MemoryMemoryAffinity& mma,
-					 bool lock_held /*= false*/)
-  {
-    if(!lock_held) mutex.lock();
-
-    mem_mem_affinities.push_back(mma);
-
-    int m1p = ID(mma.m1).memory_owner_node();
-    int m2p = ID(mma.m2).memory_owner_node();
-    {
-      MachineNodeInfo *& ptr = nodeinfos[m1p];
-      if(!ptr) ptr = new MachineNodeInfo(m1p);
-      ptr->add_memory(mma.m1);
-      if(m1p == m2p)
-	ptr->add_memory(mma.m2);
-      ptr->add_mem_mem_affinity(mma);
-    }
-    if(m1p != m2p) {
-      MachineNodeInfo *& ptr = nodeinfos[m2p];
-      if(!ptr) ptr = new MachineNodeInfo(m2p);
-      ptr->add_memory(mma.m2);
-      ptr->add_mem_mem_affinity(mma);
-    }
-    invalidate_query_caches();
-    if(!lock_held) mutex.unlock();
-  }
-
     void MachineImpl::add_subscription(Machine::MachineUpdateSubscriber *subscriber)
     {
       AutoLock<> al(mutex);
@@ -1162,6 +1095,92 @@ namespace Realm {
     {
       AutoLock<> al(mutex);
       subscribers.erase(subscriber);
+    }
+
+    static bool get_memcpy_affinity(Machine::MemoryMemoryAffinity &affinity,
+                                    Realm::Memory src_mem,
+                                    Realm::Memory dst_mem) {
+      bool found_channel = false;
+      affinity.m1 = src_mem;
+      affinity.m2 = dst_mem;
+      affinity.bandwidth = 0;
+      affinity.latency = UINT_MAX;
+      Realm::Node &src_node =
+          get_runtime()->nodes[ID(src_mem).memory_owner_node()];
+      // Find the best channel to satisfy a basic copy and track it's bandwidth
+      // and latency.
+      for (Channel *channel : src_node.dma_channels) {
+        unsigned bandwidth, latency;
+        if (channel->supports_path(ChannelCopyInfo{src_mem, dst_mem}, 0, 0, 0,
+                                   1, nullptr, nullptr, nullptr, &bandwidth,
+                                   &latency) != 0) {
+          affinity.bandwidth = std::max(bandwidth, affinity.bandwidth);
+          affinity.latency = std::min(latency, affinity.latency);
+          found_channel = true;
+        }
+      }
+      return found_channel;
+    }
+
+    void MachineImpl::update_kind_maps(void)
+    {
+      for(std::pair<const int, Realm::MachineNodeInfo *> &node_info : nodeinfos) {
+        node_info.second->update_kind_maps();
+      }
+    }
+
+    void MachineImpl::enumerate_mem_mem_affinities(void) {
+      AutoLock<> al(mutex);
+      // This only enumerates the local-local, local-remote, and remote-local
+      // memory affinities to save on cache space
+      Realm::MachineNodeInfo *src_nodeInfo = nodeinfos[Network::my_node_id];
+      if (src_nodeInfo == nullptr) {
+        src_nodeInfo = new Realm::MachineNodeInfo(Network::my_node_id);
+        nodeinfos[Network::my_node_id] = src_nodeInfo;
+      }
+      for (MemoryImpl *src_mem : get_runtime()->nodes[Network::my_node_id].memories) {
+        src_nodeInfo->add_memory(src_mem->me);
+        Realm::MachineMemInfo *src_memInfo = src_nodeInfo->mems[src_mem->me];
+        for (Realm::NodeID dst_idx = 0; dst_idx <= Network::max_node_id; dst_idx++) {
+          Realm::MachineNodeInfo *dst_nodeInfo = nodeinfos[dst_idx];
+          if (dst_nodeInfo == nullptr) {
+            dst_nodeInfo = new Realm::MachineNodeInfo(dst_idx);
+            nodeinfos[dst_idx] = dst_nodeInfo;
+          }
+          for (MemoryImpl *dst_mem : get_runtime()->nodes[dst_idx].memories) {
+            Machine::MemoryMemoryAffinity affinity;
+            dst_nodeInfo->add_memory(dst_mem->me);
+            Realm::MachineMemInfo* dst_memInfo = dst_nodeInfo->mems[dst_mem->me];
+            // Add the in and out edges for both the source and destination meminfos
+            if (get_memcpy_affinity(affinity, src_mem->me, dst_mem->me)) {
+              src_memInfo->add_mem_mem_affinity(affinity);
+              dst_memInfo->add_mem_mem_affinity(affinity);
+            }
+            if (get_memcpy_affinity(affinity, dst_mem->me, src_mem->me)) {
+              src_memInfo->add_mem_mem_affinity(affinity);
+              dst_memInfo->add_mem_mem_affinity(affinity);
+            }
+          }
+        }
+      }
+      invalidate_query_caches();
+    }
+
+    void MachineImpl::add_process_info(int node_id,
+                                       const Machine::ProcessInfo &process_info,
+                                       bool lock_held /*= false*/)
+    {
+      if(!lock_held) {
+        mutex.lock();
+      }
+      MachineNodeInfo *&ptr = nodeinfos[node_id];
+      if(!ptr) {
+        ptr = new MachineNodeInfo(node_id);
+      }
+      assert(ptr->add_process_info(process_info));
+      if(!lock_held) {
+        mutex.unlock();
+      }
     }
 
     void MachineImpl::invalidate_query_caches()
@@ -2981,27 +3000,27 @@ namespace Realm {
 
       if(plist) {
         // if predicates is empty then increment count by size of plist
-        if (!predicates.size()) {
+        if(!predicates.size() && restricted_min_capacity == 0) {
           count =  count + plist->size();
         }
         // else iterate over all relevant memories on this node and match the predicates
-        else  {
-	std::map<Memory, MachineMemInfo *>::const_iterator it2 = plist->begin();
-	while(it2 != plist->end()) {
-          bool ok = ((restricted_min_capacity == 0) ||
-                     (it2->first.capacity() >= restricted_min_capacity));
-	  for(std::vector<MemoryQueryPredicate *>::const_iterator it3 = predicates.begin();
-	      ok && (it3 != predicates.end());
-	      it3++)
-	    ok = (*it3)->matches_predicate(machine, it2->first, it2->second);
-	  if(ok)
-	    count += 1;
+        else {
+          std::map<Memory, MachineMemInfo *>::const_iterator it2 = plist->begin();
+          while(it2 != plist->end()) {
+            bool ok = ((restricted_min_capacity == 0) ||
+                       (it2->first.capacity() >= restricted_min_capacity));
+            for(std::vector<MemoryQueryPredicate *>::const_iterator it3 =
+                    predicates.begin();
+                ok && (it3 != predicates.end()); it3++)
+              ok = (*it3)->matches_predicate(machine, it2->first, it2->second);
+            if(ok)
+              count += 1;
 
-	  // continue to next memory (if it exists)
-	  ++it2;
-	}
-	  }
-	  }
+            // continue to next memory (if it exists)
+            ++it2;
+          }
+        }
+      }
 
       // continue to the next node (if it exists)
       ++it;
@@ -3093,65 +3112,5 @@ namespace Realm {
 #endif
     return chosen;
   }
-
-
-
-  ////////////////////////////////////////////////////////////////////////
-  //
-  // class NodeAnnounceMessage
-  //
-
-  static atomic<int> announcements_received(0);
-  static atomic<int> announce_fragments_expected(0);
-
-  /*static*/ void NodeAnnounceMessage::handle_message(NodeID sender, const NodeAnnounceMessage &args,
-						      const void *data, size_t datalen)
-
-  {
-    log_annc.info() << "received fragment from " << sender
-                    << ": num_fragments=" << args.num_fragments;
-    
-    if(args.num_fragments > 0) {
-      // update the remaining fragment count and then mark that we've got
-      //  this sender's contribution
-      announce_fragments_expected.fetch_add(args.num_fragments);
-      announcements_received.fetch_add_acqrel(1);
-    }
-
-    get_machine()->parse_node_announce_data(sender,
-                                            data, datalen, true);
-
-    // this fragment has been handled
-    announce_fragments_expected.fetch_sub_acqrel(1);
-  }
-
-  /*static*/ void NodeAnnounceMessage::await_all_announcements(void)
-  {
-    // two steps:
-
-    // 1) wait until we've got the fragment-count-bearing message from every
-    //  other node
-    while(announcements_received.load() < Network::max_node_id) {
-      Thread::yield();
-      //do_some_polling();
-    }
-
-    // 2) then wait for the expected fragment count to drop to zero
-    while(announce_fragments_expected.load_acquire() > 0) {
-      Thread::yield();
-    }
-
-    log_annc.info("node %d has received all of its announcements", Network::my_node_id);
-
-    // 3) go ahead and build the by-kind maps in each node info
-    MachineImpl *impl = get_machine();
-    for(std::map<int, MachineNodeInfo *>::iterator it = impl->nodeinfos.begin();
-        it != impl->nodeinfos.end();
-        ++it)
-      it->second->update_kind_maps();
-  }
-  
-
-  ActiveMessageHandlerReg<NodeAnnounceMessage> node_announce_message;
 
 }; // namespace Realm

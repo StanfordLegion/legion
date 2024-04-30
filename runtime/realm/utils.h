@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,9 +27,37 @@
 #include <vector>
 #include <map>
 #include <cassert>
+#include <cstdint>
 #include <sstream>
 
+#if defined(REALM_ON_WINDOWS)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN 1
+#endif
+#include <windows.h>
+#endif
+
+// Define the intrinsic for yielding a core's resources temporarily in order to
+// relieve some pressure on the memory bus and give other threads a chance to
+// make some forward progress to unblock us.  This does *not* yield the thread
+// to the OS.
+#if defined(__SSE__)
+// Same as "pause", but is more compatible for older intel cpus
+#define REALM_SPIN_YIELD() asm volatile ("rep; nop":::)
+#elif defined(__aarch64__) || defined(__arm__)
+#define REALM_SPIN_YIELD() asm volatile ("yield" :::)
+#elif defined(__PPC64__) || defined(__PPC__)
+#define REALM_SPIN_YIELD() asm volatile ("yield" :::)
+#else
+#define REALM_SPIN_YIELD()
+#endif
+
 namespace Realm {
+
+  // TODO: actually use C++20 version if available
+  const size_t dynamic_extent = size_t(-1);
+
+  template <typename T, size_t Extent = dynamic_extent> class span;
     
   // helpers for deleting contents STL containers of pointers-to-things
 
@@ -103,23 +131,6 @@ namespace Realm {
   protected:
     shortstringbuf<32, 64> strbuf;
     std::ostream os;
-  };
-
-  // little helper class that defines a default value for a member variable
-  //  in the header rather than in the containing object's constructor
-  //  implementation
-  template <typename T, T _DEFAULT>
-  struct WithDefault {
-  public:
-    static const T DEFAULT_VALUE = _DEFAULT;
-
-    WithDefault(void) : val(_DEFAULT) {}
-    WithDefault(T _val) : val(_val) {}
-
-    operator T(void) const { return val; }
-    WithDefault<T,_DEFAULT>& operator=(T newval) { val = newval; return *this; }
-
-    T val;
   };
 
   // behaves like static_cast, but uses dynamic_cast+assert when DEBUG_REALM
@@ -239,13 +250,14 @@ namespace Realm {
   // helpers to pretty-print containers
 
   template <typename T>
-  class PrettyVector {
+  class REALM_INTERNAL_API_EXTERNAL_LINKAGE PrettyVector {
   public:
     explicit PrettyVector(const T *_data, size_t _size,
 			  const char *_delim = ", ",
 			  const char *_pfx = "[",
 			  const char *_sfx = "]");
-    explicit PrettyVector(const std::vector<T>& _v,
+    template<typename Container = std::vector<T> >
+    explicit PrettyVector(const Container& _v,
 			  const char *_delim = ", ",
 			  const char *_pfx = "[",
 			  const char *_sfx = "]");
@@ -306,11 +318,6 @@ namespace Realm {
 
   // TODO: get this from <variant> for c++17 and up?
   struct monostate {};
-
-  // TODO: actually use C++20 version if available
-  const size_t dynamic_extent = size_t(-1);
-
-  template <typename T, size_t Extent = dynamic_extent> class span;
 
   template <typename T>
   class span<T, dynamic_extent> {
@@ -388,6 +395,59 @@ namespace Realm {
   {
     obj->~T();
   }
+
+  // Provide support for a generic function realm_strerror that converts
+  // OS error codes back to strings in portable way across OSes
+  REALM_PUBLIC_API const char* realm_strerror(int err);
+
+  // Finds first-bit-set
+  unsigned ctz(uint64_t v);
+
+#ifdef REALM_ON_WINDOWS
+    typedef HANDLE OsHandle;
+    static const OsHandle INVALID_OS_HANDLE = 0;
+#else
+    typedef int OsHandle;
+    static const OsHandle INVALID_OS_HANDLE = -1;
+#endif
+
+    /// @brief Creates an ipc mailbox useful for sending and receiving other OSHandles
+    /// between ranks on the same physical node.
+    /// @param name Name of the mailbox that acts as the endpoint address for other ranks
+    /// to access
+    /// @return A valid OS handle it successful, Realm::INVALID_OS_HANDLE if not
+    OsHandle ipc_mailbox_create(const std::string &name);
+
+    /// @brief Send the \p handles and \p data given via the \p mailbox created by
+    /// ipc_mailbox_create to the receiving mailbox given by \p to
+    /// @param mailbox Mailbox created via ipc_mailbox_create
+    /// @param to Name of the mailbox to send to
+    /// @param handles OS handles to send to the receiver.  These will have different
+    /// "values" in the receiver, but will map to the same resource
+    /// @param data Bytes to send to receiver
+    /// @param data_sz Length of \p data to send to receiver
+    /// @return True if successful, false otherwise
+    bool ipc_mailbox_send(OsHandle mailbox, const std::string &to,
+                          const std::vector<OsHandle> &handles, const void *data,
+                          size_t data_sz);
+
+    /// @brief Receive in \p handles and \p data via the \p mailbox created by
+    /// ipc_mailbox_create from the sending mailbox given by \p from
+    /// @param mailbox Mailbox created via ipc_mailbox_create
+    /// @param from Name of the mailbox to receive from
+    /// @param[out] handles OS handles to receive from
+    /// @param[out] data Bytes recieved from
+    /// @param[out] data_sz Length of data in bytes received
+    /// @param max_data_sz Maximum length of \p data that can be received.  If the
+    /// incoming message is larger, this function will fail (return false)
+    /// @return True if successful, false otherwise
+    bool ipc_mailbox_recv(OsHandle mailbox, const std::string &from,
+                          std::vector<OsHandle> &handles, void *data, size_t &data_sz,
+                          size_t max_data_sz);
+
+    /// @brief Close the given OS handle.
+    /// @param handle
+    void close_handle(OsHandle handle);
 
 }; // namespace Realm
 

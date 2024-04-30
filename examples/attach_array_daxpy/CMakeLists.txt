@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------#
-# Copyright 2023 Los Alamos National Laboratory
+# Copyright 2024 Los Alamos National Laboratory
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -24,6 +24,8 @@ endif()
 
 add_executable(attach_array_daxpy attach_array_daxpy.cc)
 target_link_libraries(attach_array_daxpy Legion::Legion)
+target_compile_options(attach_array_daxpy PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
+
 if(Legion_ENABLE_TESTING)
-  add_test(NAME attach_array_daxpy COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:attach_array_daxpy> ${Legion_TEST_ARGS}) 
+  add_test(NAME attach_array_daxpy COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:attach_array_daxpy> ${Legion_TEST_ARGS})
 endif()

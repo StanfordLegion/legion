@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University
+/* Copyright 2024 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -141,7 +141,7 @@ void InitWiresTask::cpu_base_impl(const Task *task,
     // Pick a random node within our piece
     int in_index = int(erand48(xsubi) * nodes_per_piece);
     fa_wire_in_ptr[*itr] = Point<1>(task->index_point[0] * nodes_per_piece + in_index);
-    if ((100 * erand48(xsubi)) < pct_wire_in_piece)
+    if ((num_pieces == 1) || ((100 * erand48(xsubi)) < pct_wire_in_piece))
     {
       // Stay within our piece
       int out_index = int(erand48(xsubi) * nodes_per_piece);
@@ -266,27 +266,6 @@ void InitLocationTask::register_task(void)
 }
 
 #endif // !SEQUENTIAL_LOAD_CIRCUIT
-
-PointerLocation find_location(Point<1> ptr, const std::set<ptr_t> &private_nodes,
-                              const std::set<ptr_t> &shared_nodes, 
-                              const std::set<ptr_t> &ghost_nodes)
-{
-  if (private_nodes.find(ptr_t(ptr)) != private_nodes.end())
-  {
-    return PRIVATE_PTR;
-  }
-  else if (shared_nodes.find(ptr_t(ptr)) != shared_nodes.end())
-  {
-    return SHARED_PTR;
-  }
-  else if (ghost_nodes.find(ptr_t(ptr)) != ghost_nodes.end())
-  {
-    return GHOST_PTR;
-  }
-  // Should never make it here, if we do something bad happened
-  assert(false);
-  return PRIVATE_PTR;
-}
 
 template<typename T>
 static T random_element(const std::set<T> &set)

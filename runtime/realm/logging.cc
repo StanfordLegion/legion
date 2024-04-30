@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -196,40 +196,41 @@ namespace Realm {
   }
 
   template <>
-  bool convert_integer_cmdline_argument<Logger::LoggingLevel>(const std::string& s, Logger::LoggingLevel& target)
+  int convert_integer_cmdline_argument<Logger::LoggingLevel>(const std::string &s,
+                                                             Logger::LoggingLevel &target)
   {
     // match strings first
     if(s == "spew") {
       target = Logger::LEVEL_SPEW;
-      return true;
+      return REALM_SUCCESS;
     }
     if(s == "debug") {
       target = Logger::LEVEL_DEBUG;
-      return true;
+      return REALM_SUCCESS;
     }
     if(s == "info") {
       target = Logger::LEVEL_INFO;
-      return true;
+      return REALM_SUCCESS;
     }
     if(s == "print") {
       target = Logger::LEVEL_PRINT;
-      return true;
+      return REALM_SUCCESS;
     }
     if((s == "warning") || (s == "warn")) {
       target = Logger::LEVEL_WARNING;
-      return true;
+      return REALM_SUCCESS;
     }
     if(s == "error") {
       target = Logger::LEVEL_ERROR;
-      return true;
+      return REALM_SUCCESS;
     }
     if(s == "fatal") {
       target = Logger::LEVEL_FATAL;
-      return true;
+      return REALM_SUCCESS;
     }
     if(s == "none") {
       target = Logger::LEVEL_NONE;
-      return true;
+      return REALM_SUCCESS;
     }
 
     // try to decode an integer between LEVEL_SPEW and LEVEL_NONE
@@ -239,9 +240,10 @@ namespace Realm {
     if((errno == 0) && (*pos == 0) && 
        (v >= Logger::LEVEL_SPEW) && (v <= Logger::LEVEL_NONE)) {
       target = static_cast<Logger::LoggingLevel>(v);
-      return true;
-    } else 
-      return false;
+      return REALM_SUCCESS;
+    } else
+      // TODO: make a specific error code
+      return REALM_ERROR;
   }
 
   bool LoggerConfig::parse_level_argument(const std::string& s)
@@ -273,8 +275,8 @@ namespace Realm {
       Logger::LoggingLevel lvl = Logger::LEVEL_SPEW;
       const char *p2 = p1;
       while(*p2 && isalnum(*p2)) p2++;
-      if((!*p2 || (*p2 == ',')) &&
-         convert_integer_cmdline_argument(std::string(p1, p2-p1), lvl)) {
+      if((!*p2 || (*p2 == ',')) && convert_integer_cmdline_argument(
+                                       std::string(p1, p2 - p1), lvl) == REALM_SUCCESS) {
         if(catname.empty()) {
           if(lvl < Logger::REALM_LOGGING_MIN_LEVEL)
             fprintf(stderr, "WARNING: requested default logger level of %d is below compile-time minimum (%d) - not all logging output will be visible\n",
@@ -362,7 +364,7 @@ namespace Realm {
       } else {
         // replace % with node number
         char filename[256];
-        sprintf(filename, "%.*s%d%s",
+        snprintf(filename, sizeof filename, "%.*s%d%s",
                 (int)(pct - start), logname.c_str() + start, Network::my_node_id, logname.c_str() + pct + 1);
 
         f = fopen(filename, append ? "a" : "w");
@@ -636,7 +638,7 @@ namespace Realm {
       static const int MAXLEN = 4096;
        char msg[MAXLEN] = {0};
        if(messageID != RESERVED_LOGGER_MESSAGE_ID) {
-          sprintf(msg, "[%s %d] ", typeName, messageID);
+          snprintf(msg, MAXLEN, "[%s %d] ", typeName, messageID);
        }
        int prefixLength = strlen(msg);
       int full = prefixLength + vsnprintf(msg + prefixLength, MAXLEN - prefixLength, fmt, args);
@@ -650,8 +652,9 @@ namespace Realm {
             vsnprintf(full_msg, full+1, fmt, args);
          } else {
             const int MAX_LENGTH_MESSAGE_ID = 16;
-            full_msg = (char*)malloc(full+1+MAX_LENGTH_MESSAGE_ID+2);
-            sprintf(full_msg, "[%d] ", messageID);
+            int full_msg_size = full+1+MAX_LENGTH_MESSAGE_ID+2;
+            full_msg = (char*)malloc(full_msg_size);
+            snprintf(full_msg, full_msg_size, "[%d] ", messageID);
             vsnprintf(full_msg + strlen(full_msg), full+1, fmt, args);
          }
          get_stream() << full_msg;

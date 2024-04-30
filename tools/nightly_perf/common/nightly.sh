@@ -3,7 +3,7 @@
 set -e
 
 # Test suite configuration
-export CC_FLAGS="-std=c++98"
+export CC_FLAGS="-std=c++17"
 export DEBUG=0
 
 # Run perf test for each branch

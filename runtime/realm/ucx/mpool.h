@@ -1,5 +1,5 @@
 
-/* Copyright 2023 NVIDIA Corporation
+/* Copyright 2024 NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@
 
 #include <string>
 #include <climits>
+#include <cstdint>
 #include <unordered_map>
 
 /* A chunk looks like this:
@@ -40,27 +41,20 @@ using obj_cleanup_t   = void  (*)(void *obj, void *arg);
 
 class MPool {
 public:
-  struct InitParams {
-    size_t obj_size{0};
-    size_t alignment{1};
-    size_t alignment_offset{0};
-    size_t objs_per_chunk{1024};
-    size_t init_num_objs{1024};
-    size_t max_objs{UINT_MAX};
-    size_t max_chunk_size{UINT_MAX};
-    double expand_factor{1.5}; // new size = expand_factor * current size
-    std::string name;
-    bool leak_check{false};
-    chunk_alloc_t chunk_alloc{&MPool::malloc_wrapper};
-    chunk_release_t chunk_release{&MPool::free_wrapper};
-    obj_init_t obj_init{nullptr};
-    obj_cleanup_t obj_cleanup{nullptr};
-    void *chunk_alloc_arg{nullptr};
-    void *chunk_release_arg{nullptr};
-    void *obj_init_arg{nullptr};
-    void *obj_cleanup_arg{nullptr};
-  };
-  MPool(const InitParams &init_params);
+  MPool(std::string name_, bool leak_check_, size_t obj_size_,
+      size_t alignment_, size_t alignment_offset_,
+      size_t objs_per_chunk_ = 1024, size_t init_num_objs_ = 1024,
+      size_t max_objs_ = UINT_MAX, size_t max_chunk_size_ = UINT_MAX,
+      double expand_factor_ = 1.5, // new size = expand_factor * current size
+      chunk_alloc_t chunk_alloc_ = &MPool::malloc_wrapper,
+      void *chunk_alloc_arg_ = nullptr,
+      chunk_release_t chunk_release_ = &MPool::free_wrapper,
+      void *chunk_release_arg_ = nullptr,
+      obj_init_t obj_init_ = nullptr,
+      void *obj_init_arg_ = nullptr,
+      obj_cleanup_t obj_cleanup_ = nullptr,
+      void *obj_cleanup_arg_ = nullptr);
+
   MPool& operator=(const MPool&) = delete;
   MPool(const MPool&) = delete;
   ~MPool();
@@ -100,7 +94,25 @@ private:
   void *chunk_elems(const Chunk *chunk);
   Elem *chunk_ith_elem(const Chunk *chunk, size_t i);
 
-  InitParams init_params;
+  std::string name;
+  bool leak_check;
+  size_t obj_size;
+  size_t alignment;
+  size_t alignment_offset;
+  size_t objs_per_chunk;
+  size_t init_num_objs;
+  size_t max_objs;
+  size_t max_chunk_size;
+  double expand_factor; // new size = expand_factor * current size
+  chunk_alloc_t chunk_alloc;
+  void *chunk_alloc_arg;
+  chunk_release_t chunk_release;
+  void *chunk_release_arg;
+  obj_init_t obj_init;
+  void *obj_init_arg;
+  obj_cleanup_t obj_cleanup;
+  void *obj_cleanup_arg;
+
   size_t num_objs{0};
   size_t num_chunks{0};
   size_t obj_alloc_size;
@@ -110,27 +122,20 @@ private:
 
 class VMPool {
 public:
-  struct InitParams {
-    size_t max_obj_size{0};
-    size_t alignment{1};
-    size_t objs_per_chunk{128};
-    size_t init_num_objs{256};
-    size_t max_objs{UINT_MAX};
-    size_t max_chunk_size{UINT_MAX};
-    double expand_factor{1.5}; // new size = expand_factor * current size
-    std::string name;
-    bool leak_check{false};
-    chunk_alloc_t chunk_alloc{&MPool::malloc_wrapper};
-    chunk_release_t chunk_release{&MPool::free_wrapper};
-    obj_init_t obj_init{nullptr};
-    obj_cleanup_t obj_cleanup{nullptr};
-    void *chunk_alloc_arg{nullptr};
-    void *chunk_release_arg{nullptr};
-    void *obj_init_arg{nullptr};
-    void *obj_cleanup_arg{nullptr};
-  };
+  VMPool(std::string name_, bool leak_check_,
+      size_t max_obj_size_, size_t alignment_,
+      size_t objs_per_chunk_ = 128, size_t init_num_objs_ = 256,
+      size_t max_objs_ = UINT_MAX, size_t max_chunk_size_ = UINT_MAX,
+      double expand_factor_ = 1.5, // new size = expand_factor * current size
+      chunk_alloc_t chunk_alloc_ = &MPool::malloc_wrapper,
+      void *chunk_alloc_arg_ = nullptr,
+      chunk_release_t chunk_release_ = &MPool::free_wrapper,
+      void *chunk_release_arg_ = nullptr,
+      obj_init_t obj_init_ = nullptr,
+      void *obj_init_arg_ = nullptr,
+      obj_cleanup_t obj_cleanup_ = nullptr,
+      void *obj_cleanup_arg_ = nullptr);
 
-  VMPool(const InitParams &init_params);
   ~VMPool();
 
   void *get(size_t size);
@@ -143,11 +148,13 @@ private:
     uintptr_t parent_obj;
     // sub-allocation
   };
-  InitParams init_params;
-  size_t max_obj_size;
+
   static const size_t metadata_size{sizeof(Elem) + alignof(Elem)};
   uintptr_t obj_cached{0};
   uintptr_t addr_cached{0};
+  size_t max_obj_size;
+  size_t mpool_max_obj_size;
+  size_t alignment;
   MPool *mp;
   std::unordered_map<uintptr_t, size_t> objs_map;
 };

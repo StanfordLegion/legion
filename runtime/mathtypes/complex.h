@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,14 +25,21 @@
 #endif
 
 #include <cmath>
+#ifdef COMPLEX_HALF
+#include "mathtypes/half.h"
+#endif
 #if defined (LEGION_USE_CUDA)
 #if __CUDACC_VER_MAJOR__ == 9 && __CUDACC_VER_MINOR__ == 2
 #error "No complex number support for GPUs due to a Thrust bug in CUDA 9.2"
 #elif __CUDACC_VER_MAJOR__ == 10 && __CUDACC_VER_MINOR__ == 0
 #error "No complex number support for GPUs due to a Thrust bug in CUDA 10.0"
 #else
-#include <thrust/complex.h>
-#define COMPLEX_NAMESPACE thrust
+// The cuda_runtime.h is included here due to a bug in libcudacxx with 
+// cuda 12 (https://github.com/StanfordLegion/legion/issues/1469#)
+// TODO: remove it once the bug is fixed in the future release of cuda.
+#include <cuda_runtime.h>
+#include <cuda/std/complex>
+#define COMPLEX_NAMESPACE cuda::std
 #endif
 #elif defined(LEGION_USE_HIP)
 #include <thrust/complex.h>
@@ -40,9 +47,6 @@
 #else
 #include <complex>
 #define COMPLEX_NAMESPACE std
-#endif 
-#ifdef COMPLEX_HALF
-#include "mathtypes/half.h"
 #endif
 
 using COMPLEX_NAMESPACE::complex;
@@ -205,4 +209,3 @@ inline complex<__half> operator/(const complex<__half> &one, const complex<__hal
 #endif // COMPLEX_HALF
 
 #endif // complex_H__ 
-

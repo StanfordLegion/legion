@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------#
-# Copyright 2023 Stanford University
+# Copyright 2024 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -24,6 +24,7 @@ endif()
 
 add_executable(attach_file_mini attach_file_mini.cc)
 target_link_libraries(attach_file_mini Legion::Legion)
+target_compile_options(attach_file_mini PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
 if(Legion_ENABLE_TESTING)
   add_test(NAME attach_file_mini COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:attach_file_mini> ${Legion_TEST_ARGS})
 endif()

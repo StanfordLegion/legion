@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -120,31 +120,31 @@ namespace Realm {
 
   // level of indirection allows us to just specialize the string parsing part
   template <typename T>
-  bool convert_integer_cmdline_argument(const std::string& s, T& target);
+  int convert_integer_cmdline_argument(const std::string& s, T& target);
 
   template <>
   REALM_INTERNAL_API_EXTERNAL_LINKAGE
-  bool convert_integer_cmdline_argument<int>(const std::string& s, int& target);
+  int convert_integer_cmdline_argument<int>(const std::string& s, int& target);
 
   template <>
   REALM_INTERNAL_API_EXTERNAL_LINKAGE
-  bool convert_integer_cmdline_argument<unsigned int>(const std::string& s, unsigned int& target);
+  int convert_integer_cmdline_argument<unsigned int>(const std::string& s, unsigned int& target);
 
   template <>
   REALM_INTERNAL_API_EXTERNAL_LINKAGE
-  bool convert_integer_cmdline_argument<unsigned long>(const std::string& s, unsigned long& target);
+  int convert_integer_cmdline_argument<unsigned long>(const std::string& s, unsigned long& target);
 
   template <>
   REALM_INTERNAL_API_EXTERNAL_LINKAGE
-  bool convert_integer_cmdline_argument<long long>(const std::string& s, long long& target);
+  int convert_integer_cmdline_argument<long long>(const std::string& s, long long& target);
 
   template <>
   REALM_INTERNAL_API_EXTERNAL_LINKAGE
-  bool convert_integer_cmdline_argument<unsigned long long>(const std::string& s, unsigned long long& target);
+  int convert_integer_cmdline_argument<unsigned long long>(const std::string& s, unsigned long long& target);
 
   template <>
   REALM_INTERNAL_API_EXTERNAL_LINKAGE
-  bool convert_integer_cmdline_argument<bool>(const std::string& s, bool& target);
+  int convert_integer_cmdline_argument<bool>(const std::string& s, bool& target);
 
   template <typename T>
   IntegerCommandLineOption<T>::IntegerCommandLineOption(const std::string& _optname,
@@ -155,42 +155,44 @@ namespace Realm {
   {}
     
   template <typename T>
-  bool IntegerCommandLineOption<T>::parse_argument(std::vector<std::string>& cmdline,
+  int IntegerCommandLineOption<T>::parse_argument(std::vector<std::string>& cmdline,
 						   std::vector<std::string>::iterator& pos)
   {
     // requires an additional argument
-    if(pos == cmdline.end()) return false;
+    if(pos == cmdline.end()) return REALM_ARGUMENT_ERROR_MISSING_INPUT;
 
     // parse into a copy to avoid corrupting the value on failure
     T val;
-    if(convert_integer_cmdline_argument(*pos, val)) {
+    int status = convert_integer_cmdline_argument(*pos, val);
+    if(status == REALM_SUCCESS || status == REALM_ARGUMENT_ERROR_WITH_EXTRA_FLAGS) {
       target = val;
       if(keep) {
 	++pos;
       } else {
 	pos = cmdline.erase(pos);
       }
-      return true;
+      return REALM_SUCCESS;
     } else
-      return false;
+      return status;
   }
 
   template <typename T>
-  bool IntegerCommandLineOption<T>::parse_argument(int& pos, int argc,
+  int IntegerCommandLineOption<T>::parse_argument(int& pos, int argc,
 						   const char *argv[])
   {
     // requires an additional argument
-    if(pos >= argc) return false;
+    if(pos >= argc) return REALM_ARGUMENT_ERROR_MISSING_INPUT;
 
     // parse into a copy to avoid corrupting the value on failure
     T val;
-    if(convert_integer_cmdline_argument(argv[pos], val)) {
+    int status = convert_integer_cmdline_argument(argv[pos], val);
+    if(status == REALM_SUCCESS || status == REALM_ARGUMENT_ERROR_WITH_EXTRA_FLAGS) {
       target = val;
       // can't update this array - have to keep
       ++pos;
-      return true;
+      return REALM_SUCCESS;
     } else
-      return false;
+      return status;
   }
 
 
@@ -211,50 +213,52 @@ namespace Realm {
   {}
 
   REALM_INTERNAL_API_EXTERNAL_LINKAGE
-  bool convert_integer_units_cmdline_argument(const char *s,
+  int convert_integer_units_cmdline_argument(const char *s,
 					      char default_unit,
 					      bool binary,
 					      double &value);
   
   template <typename T>
-  bool IntegerUnitsCommandLineOption<T>::parse_argument(std::vector<std::string>& cmdline,
+  int IntegerUnitsCommandLineOption<T>::parse_argument(std::vector<std::string>& cmdline,
 							std::vector<std::string>::iterator& pos)
   {
     // requires an additional argument
-    if(pos == cmdline.end()) return false;
+    if(pos == cmdline.end()) return REALM_ARGUMENT_ERROR_MISSING_INPUT;
 
     // parse into a copy to avoid corrupting the value on failure
     double val;
-    if(convert_integer_units_cmdline_argument((*pos).c_str(),
-					      default_unit, binary, val)) {
+    int status = convert_integer_units_cmdline_argument((*pos).c_str(),
+					      default_unit, binary, val);
+    if(status == REALM_SUCCESS || status == REALM_ARGUMENT_ERROR_WITH_EXTRA_FLAGS) {
       target = val;
       if(keep) {
-	++pos;
+        ++pos;
       } else {
-	pos = cmdline.erase(pos);
+        pos = cmdline.erase(pos);
       }
-      return true;
+      return REALM_SUCCESS;
     } else
-      return false;
+      return status;
   }
 
   template <typename T>
-  bool IntegerUnitsCommandLineOption<T>::parse_argument(int& pos, int argc,
+  int IntegerUnitsCommandLineOption<T>::parse_argument(int& pos, int argc,
 							const char *argv[])
   {
     // requires an additional argument
-    if(pos >= argc) return false;
+    if(pos >= argc) return REALM_ARGUMENT_ERROR_MISSING_INPUT;
 
     // parse into a copy to avoid corrupting the value on failure
     double val;
-    if(convert_integer_units_cmdline_argument(argv[pos],
-					      default_unit, binary, val)) {
+    int status = convert_integer_units_cmdline_argument(argv[pos],
+					      default_unit, binary, val);
+    if(status == REALM_SUCCESS || status == REALM_ARGUMENT_ERROR_WITH_EXTRA_FLAGS) {
       target = val;
       // can't update this array - have to keep
       ++pos;
-      return true;
+      return REALM_SUCCESS;
     } else
-      return false;
+      return status;
   }
 
 
@@ -272,38 +276,38 @@ namespace Realm {
   {}
     
   template <typename T>
-  bool MethodCommandLineOption<T>::parse_argument(std::vector<std::string>& cmdline,
+  int MethodCommandLineOption<T>::parse_argument(std::vector<std::string>& cmdline,
 						  std::vector<std::string>::iterator& pos)
   {
     // requires an additional argument
-    if(pos == cmdline.end()) return false;
+    if(pos == cmdline.end()) return REALM_ARGUMENT_ERROR_MISSING_INPUT;
 
     // call method - true means it parsed ok
     if((target->*method)(*pos)) {
       if(keep) {
-	++pos;
+        ++pos;
       } else {
-	pos = cmdline.erase(pos);
+        pos = cmdline.erase(pos);
       }
-      return true;
+      return REALM_SUCCESS;
     } else
-      return false;
+      return REALM_ARGUMENT_ERROR_METHOD_RETURN_FALSE;
   }
 
   template <typename T>
-  bool MethodCommandLineOption<T>::parse_argument(int& pos, int argc,
+  int MethodCommandLineOption<T>::parse_argument(int& pos, int argc,
 						  const char *argv[])
   {
     // requires an additional argument
-    if(pos >= argc) return false;
+    if(pos >= argc) return REALM_ARGUMENT_ERROR_MISSING_INPUT;
 
     // call method - true means it parsed ok
     if((target->*method)(argv[pos])) {
       // can't update this array - have to keep
       ++pos;
-      return true;
+      return REALM_SUCCESS;
     } else
-      return false;
+      return REALM_ARGUMENT_ERROR_METHOD_RETURN_FALSE;
   }
 
 

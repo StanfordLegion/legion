@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -38,6 +38,9 @@ namespace Realm {
     static NetworkModule *create_network_module(RuntimeImpl *runtime,
 						int *argc, const char ***argv);
 
+    // Enumerates all the peers that the current node could potentially share memory with
+    virtual void get_shared_peers(NodeSet &shared_peers);
+
     // actual parsing of the command line should wait until here if at all
     //  possible
     virtual void parse_command_line(RuntimeImpl *runtime,
@@ -61,6 +64,8 @@ namespace Realm {
 			   const void *val_in, void *val_out, size_t bytes);
     virtual void gather(NodeID root,
 			const void *val_in, void *vals_out, size_t bytes);
+    virtual void allgatherv(const char *val_in, size_t bytes, std::vector<char> &vals_out,
+                            std::vector<size_t> &lengths);
 
     virtual size_t sample_messages_received_count(void);
     virtual bool check_for_quiescence(size_t sampled_receive_count);
@@ -81,16 +86,15 @@ namespace Realm {
 							  void *storage_base,
 							  size_t storage_size);
 
-    virtual ActiveMessageImpl *create_active_message_impl(NodeID target,
-							  unsigned short msgid,
-							  size_t header_size,
-							  size_t max_payload_size,
-							  const void *src_payload_addr,
-							  size_t src_payload_lines,
-							  size_t src_payload_line_stride,
-							  const RemoteAddress& dest_payload_addr,
-							  void *storage_base,
-							  size_t storage_size);
+    virtual ActiveMessageImpl *create_active_message_impl(
+        NodeID target, unsigned short msgid, size_t header_size, size_t max_payload_size,
+        const LocalAddress &src_payload_addr, size_t src_payload_lines,
+        size_t src_payload_line_stride, const RemoteAddress &dest_payload_addr,
+        void *storage_base, size_t storage_size);
+
+    virtual ActiveMessageImpl *create_active_message_impl(
+        NodeID target, unsigned short msgid, size_t header_size, size_t max_payload_size,
+        const RemoteAddress &dest_payload_addr, void *storage_base, size_t storage_size);
 
     virtual ActiveMessageImpl *create_active_message_impl(const NodeSet& targets,
 							  unsigned short msgid,
@@ -123,11 +127,11 @@ namespace Realm {
 					   bool with_congestion,
 					   size_t header_size);
     virtual size_t recommended_max_payload(NodeID target,
-					   const void *data, size_t bytes_per_line,
-					   size_t lines, size_t line_stride,
-					   const RemoteAddress& dest_payload_addr,
-					   bool with_congestion,
-					   size_t header_size);
+                                           const LocalAddress &src_payload_addr,
+                                           size_t bytes_per_line, size_t lines,
+                                           size_t line_stride,
+                                           const RemoteAddress &dest_payload_addr,
+                                           bool with_congestion, size_t header_size);
 
   protected:
     bool active_msg_worker_bgwork;

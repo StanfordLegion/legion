@@ -1,5 +1,5 @@
 
-/* Copyright 2023 NVIDIA Corporation
+/* Copyright 2024 NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,7 +19,7 @@
 #ifndef BOOTSTRAP_LOADER_H
 #define BOOTSTRAP_LOADER_H
 
-#include "bootstrap.h"
+#include "realm/ucx/bootstrap/bootstrap.h"
 
 namespace Realm {
 namespace UCP {

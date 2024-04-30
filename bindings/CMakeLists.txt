@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------#
-# Copyright 2023 Stanford University
+# Copyright 2024 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -19,9 +19,6 @@ cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
 if(NOT Legion_SOURCE_DIR)
   find_package(Legion REQUIRED)
 endif()
-
-# enable build warnings for all tutorials/examples/tests/etc.
-add_compile_options(${CXX_BUILD_WARNING_FLAGS})
 
 if(Legion_USE_Python)
   add_subdirectory(python)

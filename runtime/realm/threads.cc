@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -189,6 +189,56 @@ namespace Realm {
     }
   }
 
+  bool CoreReservation::set_affinity(int begin /* =-1 */, int end /* =-1 */)
+  {
+    if(allocation) {
+#ifdef HAVE_CPUSET
+      if(allocation->restrict_cpus == true) {
+        assert(end >= begin);
+        cpu_set_t cpu_set;
+        if(begin == -1 || end == -1) {
+          memcpy(&cpu_set, &(allocation->allowed_cpus), sizeof(cpu_set_t));
+        } else {
+          assert(begin >= 0 && end <= static_cast<int>(allocation->proc_ids.size() - 1));
+          CPU_ZERO(&cpu_set);
+          std::vector<int> proc_ids(allocation->proc_ids.size());
+          std::copy(allocation->proc_ids.begin(), allocation->proc_ids.end(),
+                    proc_ids.begin());
+          std::sort(proc_ids.begin(), proc_ids.end());
+          for(int i = begin; i <= end; i++) {
+            CPU_SET(proc_ids[i], &cpu_set);
+          }
+        }
+#ifdef REALM_ON_WINDOWS
+        HANDLE thread = GetCurrentThread();
+        int result = SetThreadAffinityMask(thread, cpu_set);
+        return (result == 0 ? false : true);
+#else
+        int result = sched_setaffinity(0, sizeof(cpu_set_t), &cpu_set);
+        return (result == 0 ? true : false);
+#endif
+      }
+#endif
+    }
+    log_thread.info("allocation is NULL or restrict_cpus is false");
+    return false;
+  }
+
+  std::ostream &operator<<(std::ostream &stream, const CoreReservation &core_resv)
+  {
+    if(core_resv.allocation) {
+      std::vector<int> proc_ids(core_resv.allocation->proc_ids.size());
+      std::copy(core_resv.allocation->proc_ids.begin(),
+                core_resv.allocation->proc_ids.end(), proc_ids.begin());
+      stream << "name:" << core_resv.name
+             << ", exclusive_ownership:" << core_resv.allocation->exclusive_ownership
+             << ", proc_ids:" << PrettyVector<int>(proc_ids);
+#ifdef HAVE_CPUSET
+      stream << ", restrict_cpus:" << core_resv.allocation->restrict_cpus;
+#endif
+    }
+    return stream;
+  }
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -917,8 +967,8 @@ namespace Realm {
     // TODO: actually use heap size
 
 #ifdef REALM_USE_ALTSTACK
-    // default altstack size is 64KB
-    altstack_size = 64 << 10;
+    // default altstack size is 256KB
+    altstack_size = 256 << 10;
     if(params.alt_stack_size != params.ALTSTACK_SIZE_DEFAULT)
       altstack_size = params.alt_stack_size;
     else if(rsrv.params.alt_stack_size != rsrv.params.ALTSTACK_SIZE_DEFAULT)
@@ -1725,110 +1775,119 @@ namespace Realm {
 #ifdef REALM_ON_LINUX
   static CoreMap *extract_core_map_from_linux_sys(bool hyperthread_sharing)
   {
-    cpu_set_t cset;
-    int ret = sched_getaffinity(0, sizeof(cset), &cset);
-    if(ret < 0) {
-      log_thread.warning() << "failed to get affinity info";
-      return 0;
-    }
-
-    DIR *nd = opendir("/sys/devices/system/node");
-    if(!nd) {
-      log_thread.warning() << "can't open /sys/devices/system/node";
-      return 0;
-    }
-
-    CoreMap *cm = new CoreMap;
+    CoreMap *cm = nullptr;
     // hyperthreading sets are cores with the same node ID and physical core ID
     //  they share ALU, FPU, and LDST units
     std::map<std::pair<int, int>, std::set<CoreMap::Proc *> > ht_sets;
 
-    // "thread_siblings" can be used to detect Bulldozer's core pairs that 
+    // "thread_siblings" can be used to detect Bulldozer's core pairs that
     //  share the same FPU (this will also catch hyperthreads, but that's ok)
     std::map<std::string, std::set<CoreMap::Proc *> > sibling_sets;
 
-    // look for entries named /sys/devices/system/node/node<N>
-    for(struct dirent *ne = readdir(nd); ne; ne = readdir(nd)) {
-      if(strncmp(ne->d_name, "node", 4)) continue;  // not a node directory
-      char *pos;
-      int node_id = strtol(ne->d_name + 4, &pos, 10);
-      if(pos && *pos) continue;  // doesn't match node[0-9]+
-	  
-      char per_node_path[1024];
-      sprintf(per_node_path, "/sys/devices/system/node/%s", ne->d_name);
-      DIR *cd = opendir(per_node_path);
-      if(!cd) {
-	log_thread.warning() << "can't open '" << per_node_path << "' - skipping";
-	continue;
-      }
-
-      // look for entries named /sys/devices/system/node/node<N>/cpu<N>
-      for(struct dirent *ce = readdir(cd); ce; ce = readdir(cd)) {
-	if(strncmp(ce->d_name, "cpu", 3)) continue; // definitely not a cpu
-	char *pos;
-	int cpu_id = strtol(ce->d_name + 3, &pos, 10);
-	if(pos && *pos) continue;  // doesn't match cpu[0-9]+
-	    
-	// is this a cpu we're allowed to use?
-	if(!CPU_ISSET(cpu_id, &cset)) {
-	  log_thread.info() << "cpu " << cpu_id << " not available - skipping";
-	  continue;
-	}
-
-	// figure out which physical core it is (i.e. detect hyperthreads)
-	char core_id_path[1024];
-	sprintf(core_id_path, "/sys/devices/system/node/%s/%s/topology/core_id", ne->d_name, ce->d_name);
-	FILE *f = fopen(core_id_path, "r");
-	if(!f) {
-	  log_thread.warning() << "can't read '" << core_id_path << "' - skipping";
-	  continue;
-	}
-	int core_id;
-	int count = fscanf(f, "%d", &core_id);
-	fclose(f);
-	if(count != 1) {
-	  log_thread.warning() << "can't find core id in '" << core_id_path << "' - skipping";
-	  continue;
-	}
-
-	CoreMap::Proc *p = new CoreMap::Proc;
-
-	p->id = cpu_id;
-	p->domain = node_id;
-	p->kernel_proc_ids.insert(cpu_id);
-
-	cm->all_procs[cpu_id] = p;
-	cm->by_domain[node_id][cpu_id] = p;
-
-	// add to HT sets to deal with in a bit
-	ht_sets[std::make_pair(node_id, core_id)].insert(p);
-
-	// read the sibling set, if we can - no need to parse it because we
-	//  expect symmetry across all cores in the same set
-	{
-	  char sibling_path[1024];
-	  sprintf(sibling_path, "/sys/devices/system/node/%s/%s/topology/thread_siblings_list", ne->d_name, ce->d_name);
-	  FILE *f = fopen(sibling_path, "r");
-	  if(f) {
-	    char line[256];
-	    if(fgets(line, 255, f)) {
-	      if(*line)
-		sibling_sets[line].insert(p);
-	    } else
-	      log_thread.warning() << "error reading '" << sibling_path << "' - no contents?";
-	    fclose(f);
-	  } else
-	    log_thread.warning() << "can't read '" << sibling_path << "' - skipping";
-	}
-      }
-      closedir(cd);
+    cpu_set_t cset;
+    int ret = sched_getaffinity(0, sizeof(cset), &cset);
+    if(ret < 0) {
+      log_thread.warning() << "failed to get affinity info";
+      return nullptr;
     }
-    closedir(nd);
+
+    DIR *cpu_dir = opendir("/sys/devices/system/cpu");
+    if(!cpu_dir) {
+      log_thread.warning() << "can't open /sys/devices/system/cpu";
+      return nullptr;
+    }
+
+    cm = new CoreMap;
+
+    // Read the CPU directory, which is always available, to discover the cpu topology
+    for(struct dirent *cpu_entry = readdir(cpu_dir); cpu_entry != nullptr;
+        cpu_entry = readdir(cpu_dir)) {
+      char path[384] = "";
+      char *pos = nullptr;
+      // Not a cpu directory
+      if(strncmp(cpu_entry->d_name, "cpu", 3) != 0)
+        continue;
+      int cpu_id = strtol(cpu_entry->d_name + 3, &pos, 10);
+      // Not of the format "cpu[0-9]+", some letters afterward
+      if(pos != nullptr && *pos != 0)
+        continue;
+      // Not an accessible cpu
+      if(!CPU_ISSET(cpu_id, &cset))
+        continue;
+
+      CoreMap::Proc *proc = new CoreMap::Proc;
+      // Assume numa node 0, until we find out different
+      proc->domain = 0;
+      proc->id = cpu_id;
+      proc->kernel_proc_ids.insert(cpu_id);
+      cm->all_procs[proc->id] = proc;
+      // Assume each core stands alone, until we find out different
+      int core_id = cpu_id;
+
+      snprintf(path, sizeof(path), "/sys/devices/system/cpu/%s", cpu_entry->d_name);
+      DIR *per_cpu_dir = opendir(path);
+      if(per_cpu_dir != nullptr) {
+        // Find the numa node id, which may not exist if the system doesn't support it
+        for(struct dirent *entry = readdir(per_cpu_dir); entry != nullptr;
+            entry = readdir(per_cpu_dir)) {
+          // Not a node directory
+          if(strncmp(entry->d_name, "node", 4) != 0)
+            continue;
+
+          int node_id = strtol(entry->d_name + 4, &pos, 10);
+          // Not of the format "cpu[0-9]+", some letters afterward
+          if(pos != nullptr && *pos != 0)
+            continue;
+
+          proc->domain = node_id;
+          break;
+        }
+        closedir(per_cpu_dir);
+      }
+      // Now that we have an updated domain, add this processor to the correct domain
+      cm->by_domain[proc->domain][cpu_id] = proc;
+
+#if !(defined(__arm__) || defined(__aarch64__))
+      // Read topology/core_id for physical core id to determine hyperthreading
+      // This isn't a good way to determine hyperthreading, as core_id is
+      // platform specific.  For example, for ARM, the core id represents the
+      // package id, and the cpus within the core run independently.  For now,
+      // ARM doesn't support hyper-threading, so skip this part
+      snprintf(path, sizeof(path), "/sys/devices/system/cpu/%s/topology/core_id",
+               cpu_entry->d_name);
+      FILE *core_id_file = fopen(path, "r");
+      if(core_id_file != nullptr) {
+        int count = fscanf(core_id_file, "%d", &core_id);
+        if(count != 1) {
+          log_thread.warning() << "Unable to parse physical core id from " << path;
+        }
+        fclose(core_id_file);
+      }
+#endif
+      ht_sets[std::make_pair(proc->domain, core_id)].insert(proc);
+
+      // Read the thread siblings file to discover hyper-threading cores
+      // Assume those that share the same total mask are siblings (no need to actually
+      // parse the masks)
+      snprintf(path, sizeof(path), "/sys/devices/system/cpu/%s/topology/thread_siblings",
+               cpu_entry->d_name);
+      FILE *thread_sibling_file = fopen(path, "r");
+      if(thread_sibling_file != nullptr) {
+        char sibling_mask[1024];
+        if(fgets(sibling_mask, sizeof(sibling_mask), thread_sibling_file) == nullptr) {
+          log_thread.warning() << "Unable to read sibling mask from " << path;
+        } else {
+          sibling_sets[sibling_mask].insert(proc);
+        }
+        fclose(thread_sibling_file);
+      }
+    }
+
+    closedir(cpu_dir);
 
     if(hyperthread_sharing) {
       update_core_sharing(ht_sets, true /*alu*/, true /*fpu*/, true /*ldst*/);
-      update_core_sharing(sibling_sets,
-			  false /*!alu*/, true /*fpu*/, false /*!ldst*/);
+      update_core_sharing(sibling_sets, false /*!alu*/, true /*fpu*/, false /*!ldst*/);
     }
 
     // all done!
@@ -1842,7 +1901,7 @@ namespace Realm {
   static bool get_bd_sibling_id(int cpu_id, int core_id,
 				std::set<int>& sibling_ids) {
     char str[1024];
-    sprintf(str, "/sys/devices/system/cpu/cpu%d/topology/thread_siblings", cpu_id);
+    snprintf(str, sizeof str, "/sys/devices/system/cpu/cpu%d/topology/thread_siblings", cpu_id);
     FILE *f = fopen(str, "r");
     if(!f) {
       log_thread.warning() << "can't read '" << str << "' - skipping";
@@ -1862,7 +1921,7 @@ namespace Realm {
       // don't filter siblings with the same core ID - this catches
       //  hyperthreads too
 #if 0
-      sprintf(str, "/sys/devices/system/cpu/cpu%d/topology/core_id", siblingid);
+      snprintf(str, sizeof str, "/sys/devices/system/cpu/cpu%d/topology/core_id", siblingid);
       f = fopen(str, "r");
       if(!f) {
 	log_thread.warning() << "can't read '" << str << "' - skipping";

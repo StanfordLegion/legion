@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------#
-# Copyright 2023 Kitware, Inc.
+# Copyright 2024 Kitware, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -20,10 +20,7 @@ if(NOT Legion_SOURCE_DIR)
   find_package(Legion REQUIRED)
 endif()
 
-# enable build warnings for all tutorials/examples/tests/etc.
-add_compile_options(${CXX_BUILD_WARNING_FLAGS})
-set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS} -std=c++${CMAKE_CXX_STANDARD})
-
+add_subdirectory(allreduce)
 add_subdirectory(attach_file)
 add_subdirectory(circuit)
 add_subdirectory(dynamic_registration)
@@ -41,18 +38,22 @@ add_subdirectory(inline_tasks)
 add_subdirectory(local_function_tasks)
 add_subdirectory(layout_constraints)
 add_subdirectory(provenance)
+add_subdirectory(tiling)
+add_subdirectory(padded_instances)
+add_subdirectory(implicit_top_task)
+add_subdirectory(future_map_transforms)
+add_subdirectory(collective_writes)
+add_subdirectory(concurrent_tasks)
+add_subdirectory(tree_collectives)
 
 if(Legion_MPI_INTEROP)
   add_subdirectory(mpi_interop)
-endif()
-
-# implicit_top_task doesn't work in master with multiple nodes
-if(NOT Legion_NETWORKS)
-  add_subdirectory(implicit_top_task)
+  add_subdirectory(mpi_with_ctrl_repl)
 endif()
 
 if(Legion_USE_CUDA)
   add_subdirectory(thrust_interop)
+  add_subdirectory(future_instance)
 endif()
 
 if(Legion_USE_Python)

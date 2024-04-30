@@ -1,4 +1,4 @@
-/* Copyright 2023 NVIDIA Corporation
+/* Copyright 2024 NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -976,7 +976,7 @@ void top_level_task(const Task *task,
     // use the interference matrix to define an over-approximation of the
     //  image that includes every index in a destination rank if any index
     //  is included in the image
-    MultiDomainColoring mdc;
+    std::map<DomainPoint,std::vector<Rect<1> > > mdc;
     
     for(Domain::DomainPointIterator dpi(runtime->get_index_space_domain(ctx,
 									is_interference));
@@ -987,14 +987,18 @@ void top_level_task(const Task *task,
       IndexSpace is_dst = runtime->get_index_subspace(ctx,
 						      lp_owned.get_index_partition(),
 						      dst);
-      mdc[src].insert(runtime->get_index_space_domain(ctx, is_dst));
+      DomainT<1> domain = runtime->get_index_space_domain(ctx, is_dst);
+      for (RectInDomainIterator<1> itr(domain); itr(); itr++)
+        mdc[src].push_back(*itr);
     }
 
-    IndexPartition ip = runtime->create_index_partition(ctx,
-							is_owned,
-							runtime->get_index_space_domain(ctx, is_pieces),
-							mdc,
-							false /*!disjoint*/);
+    std::map<DomainPoint,Domain> domain_map;
+    for (std::map<DomainPoint,std::vector<Rect<1> > >::const_iterator it =
+          mdc.begin(); it != mdc.end(); it++)
+      domain_map[it->first] = Domain(DomainT<1>(it->second));
+
+    IndexPartition ip = runtime->create_partition_by_domain(ctx, is_owned,
+                                                            domain_map, is_pieces);
     runtime->attach_name(ip, "ip_bloated");
     lp_owned_image_bloated = runtime->get_logical_partition(ctx, lr_owned, ip);
     runtime->attach_name(lp_owned_image_bloated, "lp_bloated");
@@ -1146,9 +1150,8 @@ public:
     // top level task should be replicated, if requested
     if(replicate && (task.task_id == TOP_LEVEL_TASK_ID))
       output.replicate = true;
-
-    // we're going to do all mapping from node 0
-    output.map_locally = true;
+    else // we're going to do all mapping from node 0
+      output.map_locally = true;
   }
 
   void select_tasks_to_map(const Mapping::MapperContext ctx,
@@ -1158,6 +1161,14 @@ public:
     // map 'em all
     output.map_tasks.insert(input.ready_tasks.begin(),
 			    input.ready_tasks.end());
+  }
+
+  void premap_task(const Mapping::MapperContext ctx,
+                   const Task& task,
+                   const PremapTaskInput& input,
+                   PremapTaskOutput& output)
+  {
+    // nothin' to do
   }
 
   void map_task(const Mapping::MapperContext ctx,
@@ -1171,7 +1182,13 @@ public:
     switch(task.task_id) {
     case TOP_LEVEL_TASK_ID:
       {
-	p = procs[0];
+        if (input.shard_processor.exists())
+        {
+          output.target_procs.resize(1, input.shard_processor);
+          output.chosen_variant = input.shard_variant;
+          return;
+        }
+        p = procs[0];
 	break;
       }
 
@@ -1216,26 +1233,22 @@ public:
     output.chosen_variant = valid_variants[0];
   }
 
-  void map_replicate_task(const Mapping::MapperContext ctx,
-			  const Task& task, const MapTaskInput& input,
-			  const MapTaskOutput& default_output,
-			  MapReplicateTaskOutput& output)
+  void replicate_task(const Mapping::MapperContext ctx,
+		      const Task& task,
+                      const ReplicateTaskInput& input,
+                            ReplicateTaskOutput& output)
   {
     // only the top-level task should end up here
     assert(task.task_id == TOP_LEVEL_TASK_ID);
-
-    // TODO: maybe need to keep a separate 'control_procs' list?
-    output.task_mappings.resize(procs.size(), default_output);
-    output.control_replication_map = procs;
+    // don't replicate if there is just one shard
+    if (procs.size() <= 1)
+      return;
 
     std::vector<VariantID> valid_variants;
     runtime->find_valid_variants(ctx, task.task_id, valid_variants, procs[0].kind());
     assert(!valid_variants.empty());
-
-    for(size_t i = 0; i < procs.size(); i++) {
-      output.task_mappings[i].target_procs.push_back(procs[i]);
-      output.task_mappings[i].chosen_variant = valid_variants[0];
-    }
+    output.chosen_variant = valid_variants[0];
+    output.target_processors = procs;
   }
 
   void configure_context(const Mapping::MapperContext ctx,
@@ -1352,7 +1365,7 @@ public:
     // let the runtime decide (this is just used for constructing large
     //  images for the O(1) and O(N) copies)
   }
-
+  using Mapping::NullMapper::select_sharding_functor;
   void select_sharding_functor(const Mapping::MapperContext ctx,
 			       const Task& task,
 			       const SelectShardingFunctorInput& input,

@@ -1,4 +1,4 @@
--- Copyright 2023 Stanford University
+-- Copyright 2024 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -19,11 +19,12 @@ local data = require("common/data")
 
 local config = {}
 
-local expect_vars = terralib.newlist({"TERRA_PATH", "INCLUDE_PATH", "LG_RT_DIR", "USE_CMAKE", "USE_RDIR"})
+local expect_vars = terralib.newlist({"TERRA_PATH", "INCLUDE_PATH", "LG_RT_DIR", "USE_CMAKE"})
 if os.getenv("USE_CMAKE") == "1" then
   expect_vars:insert("CMAKE_BUILD_DIR")
 end
-if os.execute("bash -c \"[ `uname` == 'Darwin' ]\"") == 0 then
+local ffi = require("ffi")
+if ffi.os == "OSX" then
   expect_vars:insert("DYLD_LIBRARY_PATH")
 else
   expect_vars:insert("LD_LIBRARY_PATH")
@@ -42,6 +43,8 @@ for _, expect_var in ipairs(expect_vars) do
 end
 
 config.UNSPECIFIED = -1
+
+local legion_replicable_env = os.getenv('REGENT_LEGION_REPLICABLE')
 
 local default_options = {
   -- Main user-facing correctness flags:
@@ -84,13 +87,7 @@ local default_options = {
   ["legion-leaf"] = true,
   ["legion-inner"] = true,
   ["legion-idempotent"] = true,
-  ["legion-replicable"] = true,
-
-  -- Dataflow optimization flags:
-  ["flow"] = os.getenv('USE_RDIR') == '1' or false,
-  ["flow-spmd"] = false,
-  ["flow-spmd-shardsize"] = 1,
-  ["flow-old-iteration-order"] = 0,
+  ["legion-replicable"] = legion_replicable_env == '1' or legion_replicable_env == nil,
 
   -- Experimental auto-parallelization flags:
   ["parallelize"] = true,
@@ -116,6 +113,7 @@ local default_options = {
   ["no-dynamic-branches-assert"] = false,
   ["override-demand-index-launch"] = false,
   ["index-launch-dynamic"] = true,
+  ["index-launch-licm"] = true,
   ["override-demand-openmp"] = false,
   ["override-demand-cuda"] = false,
   ["pretty"] = false,
@@ -128,6 +126,9 @@ local default_options = {
   ["jobs"] = "1",
   ["incr-comp"] = os.getenv('REGENT_INCREMENTAL') == '1' or false, -- incremental compilation
   ["opt-compile-time"] = true, -- compile time optimization
+
+  -- Deprecated flags, for backwards compatibility only
+  ["flow"] = config.UNSPECIFIED,
 
   -- Need this here to make the logger happy.
   ["log"] = "",
@@ -176,6 +177,15 @@ local function check_consistency(options, args)
   if options["gpu-offline"] == 1 and options["gpu-arch"] == "unspecified" then
     print("conflicting command line arguments: requested -fgpu-offline 1 but -fgpu-arch is unspecified")
     assert(false)
+  end
+
+  if options["flow"] ~= config.UNSPECIFIED then
+    if options["flow"] >= 1 then
+      print("-fflow " .. tostring(options["flow"]) .. " is no longer supported")
+      assert(false)
+    else
+      print("WARNING: -fflow " .. tostring(options["flow"]) .. " has been permanently removed and is no longer required")
+    end
   end
 
   return options, args

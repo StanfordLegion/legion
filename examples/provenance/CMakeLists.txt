@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------#
-# Copyright 2023 Los Alamos National Laboratory
+# Copyright 2024 Los Alamos National Laboratory
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -24,6 +24,7 @@ endif()
 
 add_executable(provenance provenance.cc)
 target_link_libraries(provenance Legion::Legion)
+target_compile_options(provenance PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
 if(Legion_ENABLE_TESTING)
   add_test(NAME provenance COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:provenance> ${Legion_TEST_ARGS})
 endif()

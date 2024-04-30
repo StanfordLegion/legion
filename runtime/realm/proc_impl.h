@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,11 +21,13 @@
 #include "realm/processor.h"
 #include "realm/id.h"
 
+#include "realm/atomics.h"
 #include "realm/network.h"
 #include "realm/operation.h"
 #include "realm/profiling.h"
 #include "realm/sampling.h"
 
+#include "realm/runtime_impl.h"
 #include "realm/event_impl.h"
 #include "realm/rsrv_impl.h"
 
@@ -77,33 +79,45 @@ namespace Realm {
       // runs an internal Realm operation on this processor
       virtual void add_internal_task(InternalTask *task);
 
+      GenEventImpl *create_genevent();
+      void free_genevent(GenEventImpl *);
+
     protected:
       friend class Task;
+
+      // Event free list cache variables
+      LocalEventTableAllocator::FreeList free_local_events;
 
       virtual void execute_task(Processor::TaskFuncID func_id,
 				const ByteArrayRef& task_args);
 
       struct DeferredSpawnCache {
-	static const size_t MAX_ENTRIES = 4;
-	Mutex mutex;
-	Event events[MAX_ENTRIES];
-	Task *tasks[MAX_ENTRIES];
-	int counts[MAX_ENTRIES];
+        static const size_t MAX_ENTRIES = 4;
+        Mutex mutex;
+        EventImpl *events[MAX_ENTRIES];
+        EventImpl::gen_t generations[MAX_ENTRIES];
+        Task *tasks[MAX_ENTRIES];
+        size_t counts[MAX_ENTRIES];
+        size_t ages[MAX_ENTRIES];
+        size_t current_age;
 
-	void clear()
-	{
-	  for(size_t i = 0; i < MAX_ENTRIES; i++) events[i] = Event::NO_EVENT;
-	  for(size_t i = 0; i < MAX_ENTRIES; i++) tasks[i] = 0;
-	  for(size_t i = 0; i < MAX_ENTRIES; i++) counts[i] = 0;
-	}
+        void clear() {
+          current_age = 0;
+          memset(events, 0, sizeof(events));
+          memset(tasks, 0, sizeof(tasks));
+          memset(counts, 0, sizeof(counts));
+          memset(ages, 0, sizeof(ages));
+          memset(generations, 0, sizeof(generations));
+        }
 
-	void flush()
-	{
-	  for(size_t i = 0; i < MAX_ENTRIES; i++)
-	    if(tasks[i])
-	      tasks[i]->remove_reference();
-	  clear();
-	}
+        void flush() {
+          for (size_t i = 0; i < MAX_ENTRIES; i++) {
+            if (tasks[i] != nullptr) {
+              tasks[i]->remove_reference();
+            }
+          }
+          clear();
+        }
       };
 
       // helper function for spawn implementations
@@ -378,7 +392,10 @@ namespace Realm {
 				 const void *data, size_t datalen);
     };
 
-
+    namespace ThreadLocal {
+      // Assume zero initialized
+      extern REALM_THREAD_LOCAL Processor current_processor;
+    }
 }; // namespace Realm
 
 #endif // ifndef REALM_PROC_IMPL_H

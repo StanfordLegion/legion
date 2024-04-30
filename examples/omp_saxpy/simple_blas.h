@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University
+/* Copyright 2024 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,12 +28,13 @@ class BlasArrayRef {
 public:
   static const FieldID DEFAULT_FID = 22;
 
-  BlasArrayRef(LogicalRegion _region, FieldID _fid = DEFAULT_FID);
+  BlasArrayRef(LogicalRegion _region, LogicalPartition _logical_partition, 
+               FieldID _fid = DEFAULT_FID);
   BlasArrayRef(const BlasArrayRef<T>& copy_from);
   ~BlasArrayRef(void);
 
   static BlasArrayRef<T> create(Runtime *runtime, Context ctx, IndexSpace is,
-				FieldID fid = DEFAULT_FID);
+                                IndexSpace cs, FieldID fid = DEFAULT_FID);
 
   void destroy(Runtime *runtime, Context ctx);
 
@@ -41,22 +42,24 @@ public:
 
   template <typename LT>
   void add_requirement(LT& launcher, PrivilegeMode mode,
-		       CoherenceProperty prop = EXCLUSIVE) const;
+                       CoherenceProperty prop = EXCLUSIVE,
+                       bool is_index_launcher = false) const;
 
 protected:
   LogicalRegion region;
+  LogicalPartition logical_partition;
+  IndexSpace color_space;
   FieldID fid;
 };
 
 template <typename T>
 void axpy(Runtime *runtime, Context ctx,
-	  T alpha, const BlasArrayRef<T>& x, BlasArrayRef<T> y,
-	  IndexPartition distpart = IndexPartition::NO_PART);
+          T alpha, const BlasArrayRef<T>& x, BlasArrayRef<T> y,
+          IndexSpace cs);
 
 template <typename T>
 T dot(Runtime *runtime, Context ctx,
-      const BlasArrayRef<T>& x, BlasArrayRef<T> y,
-      IndexPartition distpart = IndexPartition::NO_PART);
+      const BlasArrayRef<T>& x, BlasArrayRef<T> y);
 
 template <typename T>
 class BlasTaskImplementations {

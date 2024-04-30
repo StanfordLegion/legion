@@ -1,4 +1,4 @@
--- Copyright 2023 Stanford University
+-- Copyright 2024 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -15,19 +15,15 @@
 -- runs-with:
 -- [
 --   ["pennant.tests/sedovsmall/sedovsmall.pnt",
---    "-npieces", "1", "-seq_init", "1", "-par_init", "1", "-interior", "0",
---    "-fflow-spmd", "1", "-ftrace", "0"],
+--    "-npieces", "1", "-seq_init", "1", "-par_init", "1", "-interior", "0", "-ftrace", "0"],
 --   ["pennant.tests/sedov/sedov.pnt",
 --    "-npieces", "3", "-ll:cpu", "3", "-seq_init", "1", "-par_init", "1", "-interior", "0",
---    "-absolute", "2e-6", "-relative", "1e-8", "-relative_absolute", "1e-10",
---    "-fflow-spmd", "1", "-ftrace", "0"],
+--    "-absolute", "2e-6", "-relative", "1e-8", "-relative_absolute", "1e-10"],
 --   ["pennant.tests/leblanc/leblanc.pnt",
---    "-npieces", "2", "-ll:cpu", "2", "-seq_init", "1", "-par_init", "1", "-interior", "0",
---    "-fflow-spmd", "1"],
+--    "-npieces", "2", "-ll:cpu", "2", "-seq_init", "1", "-par_init", "1", "-interior", "0"],
 --   ["pennant.tests/sedov/sedov.pnt",
 --    "-npieces", "3", "-ll:cpu", "3", "-seq_init", "1", "-par_init", "1", "-interior", "0",
---    "-absolute", "2e-6", "-relative", "1e-8", "-relative_absolute", "1e-10",
---    "-fflow-spmd", "1", "-dm:memoize"]
+--    "-absolute", "2e-6", "-relative", "1e-8", "-relative_absolute", "1e-10", "-dm:memoize"]
 -- ]
 
 -- Inspired by https://github.com/losalamos/PENNANT
@@ -1742,7 +1738,6 @@ task toplevel()
   var dt = dtmax
   var dthydro = dtmax
 
-  __demand(__spmd)
   do
     -- Initialization
     for _ = 0, par_init do
@@ -1820,7 +1815,7 @@ task toplevel()
   var time_copy = time
 
   -- Main Simulation Loop
-  __demand(__spmd, __predicate, __trace)
+  __demand(__predicate, __trace)
   while continue_simulation(warmup, cycle, cstop, time, tstop) do
     -- if warmup and cycle > 0 then
     --   wait_for(dthydro)
@@ -1941,18 +1936,5 @@ toplevel:set_task_id(2)
 
 end -- not use_python_main
 
-if os.getenv('SAVEOBJ') == '1' then
-  local root_dir = arg[0]:match(".*/") or "./"
-  local out_dir = (os.getenv('OBJNAME') and os.getenv('OBJNAME'):match('.*/')) or root_dir
-  local link_flags = terralib.newlist({"-L" .. out_dir, "-lpennant", "-lm"})
-
-  if os.getenv('STANDALONE') == '1' then
-    os.execute('cp ' .. os.getenv('LG_RT_DIR') .. '/../bindings/regent/' ..
-        regentlib.binding_library .. ' ' .. out_dir)
-  end
-
-  local exe = os.getenv('OBJNAME') or "pennant"
-  regentlib.saveobj(toplevel, exe, "executable", cpennant.register_mappers, link_flags)
-else
-  regentlib.start(toplevel, cpennant.register_mappers)
-end
+local launcher = require("std/launcher")
+launcher.launch(toplevel, "pennant", cpennant.register_mappers, {"-lpennant", "-lm"})

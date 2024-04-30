@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -35,7 +35,6 @@
 
 #include <gasnet_coll.h>
 #include <gasnet_mk.h>
-
 namespace Realm {
 
   // defined in gasnetex_module.cc
@@ -3355,7 +3354,13 @@ namespace Realm {
     assert(ep_index == xmitsrcs.size());
     xmitsrcs.push_back(new XmitSrc(this, ep_index));
 
+    gex_System_SetVerboseErrors(1);
     gex_EP_BindSegment(ep, segment, 0 /*flags*/);
+    if(gex_EP_QuerySegment(ep) != segment) {
+      log_gex_bind.fatal() << "failed to bind segment";
+      abort();
+    }
+    gex_System_SetVerboseErrors(0);
 
     uintptr_t base_as_uint = reinterpret_cast<uintptr_t>(base);
     segments_by_addr.push_back({ base_as_uint, base_as_uint+size,
@@ -3420,6 +3425,28 @@ namespace Realm {
     xmitsrcs.clear();
   }
 
+  void GASNetEXInternal::get_shared_peers(Realm::NodeSet &shared_peers)
+  {
+    gex_RankInfo_t *neighbor_array = nullptr;
+    gex_Rank_t neighbor_array_size = 0;
+    gex_System_QueryNbrhdInfo(&neighbor_array, &neighbor_array_size, nullptr);
+    // if PSHM module is disabled, gex_System_QueryNbrhdInfo returns size one
+    // then fall back to use gex_System_QueryHostInfo
+    if(neighbor_array_size == 1) {
+      gex_System_QueryHostInfo(&neighbor_array, &neighbor_array_size, nullptr);
+    }
+    for(gex_Rank_t r = 0; r < neighbor_array_size; r++) {
+      if(static_cast<NodeID>(neighbor_array[r].gex_jobrank) != Network::my_node_id) {
+        shared_peers.add(neighbor_array[r].gex_jobrank);
+      }
+    }
+    if(Network::shared_peers.empty()) {
+      // if gasnet can't return any shared peers,
+      // then just assume all_peers are shareable
+      shared_peers = Network::all_peers;
+    }
+  }
+
   void GASNetEXInternal::barrier()
   {
     gex_Event_t done = gex_Coll_BarrierNB(prim_tm, 0);
@@ -3455,6 +3482,42 @@ namespace Realm {
 					      bytes, 0);
       gex_Event_Wait(done);
     }
+  }
+
+  void GASNetEXInternal::allgatherv(const char *val_in, size_t bytes,
+                                    std::vector<char> &vals_out,
+                                    std::vector<size_t> &lengths)
+  {
+    size_t total = 0;
+    std::vector<gex_Event_t> events(prim_size);
+    std::vector<int> sizes(Network::max_node_id + 1);
+
+    lengths.resize(Network::max_node_id + 1);
+
+    // Have everyone send each other their sizes
+    for(gex_Rank_t rank = 0; rank < prim_size; rank++) {
+      events[rank] =
+          gex_Coll_BroadcastNB(prim_tm, rank, &lengths[rank], &bytes, sizeof(bytes), 0);
+    }
+    // Wait for all these to complete, as we'll need their results
+    gex_Event_WaitAll(events.data(), events.size(), 0);
+
+    // Set up the receive buffer and describe the final buffer layout
+    for(size_t idx = 0; idx < sizes.size(); idx++) {
+      sizes[idx] = static_cast<int>(lengths[idx]);
+      total += lengths[idx];
+    }
+    vals_out.resize(total);
+
+    // Now perform the emulated all_gatherv by having each rank in turn broadcast their
+    // data, each of which gets placed in a specific offset within the buffer
+    char *buffer = vals_out.data();
+    for(gex_Rank_t rank = 0; rank < prim_size; rank++) {
+      events[rank] = gex_Coll_BroadcastNB(prim_tm, rank, buffer, val_in, sizes[rank], 0);
+      buffer += sizes[rank];
+    }
+
+    gex_Event_WaitAll(events.data(), events.size(), 0);
   }
 
   size_t GASNetEXInternal::sample_messages_received_count()

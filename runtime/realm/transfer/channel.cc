@@ -1,5 +1,5 @@
-/* Copyright 2023 Stanford University
- * Copyright 2023 Los Alamos National Laboratory
+/* Copyright 2024 Stanford University
+ * Copyright 2024 Los Alamos National Laboratory
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -656,256 +656,6 @@ namespace Realm {
       }
     }
 
-
-  ////////////////////////////////////////////////////////////////////////
-  //
-  // class AddressList
-  //
-
-  AddressList::AddressList()
-    : total_bytes(0)
-    , write_pointer(0)
-    , read_pointer(0)
-  {}
-
-  size_t *AddressList::begin_nd_entry(int max_dim)
-  {
-    size_t entries_needed = max_dim * 2;
-
-    size_t new_wp = write_pointer + entries_needed;
-    if(new_wp > MAX_ENTRIES) {
-      // have to wrap around
-      if(read_pointer <= entries_needed)
-	return 0;
-
-      // fill remaining entries with 0's so reader skips over them
-      while(write_pointer < MAX_ENTRIES)
-	data[write_pointer++] = 0;
-
-      write_pointer = 0;
-    } else {
-      // if the write pointer would cross over the read pointer, we have to wait
-      if((write_pointer < read_pointer) && (new_wp >= read_pointer))
-	return 0;
-
-      // special case: if the write pointer would wrap and read is at 0, that'd
-      //  be a collision too
-      if((new_wp == MAX_ENTRIES) && (read_pointer == 0))
-	return 0;
-    }
-
-    // all good - return a pointer to the first available entry
-    return (data + write_pointer);
-  }
-
-  void AddressList::commit_nd_entry(int act_dim, size_t bytes)
-  {
-    size_t entries_used = act_dim * 2;
-
-    write_pointer += entries_used;
-    if(write_pointer >= MAX_ENTRIES) {
-      assert(write_pointer == MAX_ENTRIES);
-      write_pointer = 0;
-    }
-
-    total_bytes += bytes;
-  }
-
-  size_t AddressList::bytes_pending() const
-  {
-    return total_bytes;
-  }
-
-  const size_t *AddressList::read_entry()
-  {
-    assert(total_bytes > 0);
-    if(read_pointer >= MAX_ENTRIES) {
-      assert(read_pointer == MAX_ENTRIES);
-      read_pointer = 0;
-    }
-    // skip trailing 0's
-    if(data[read_pointer] == 0)
-      read_pointer = 0;
-    return (data + read_pointer);
-  }
-	 
-
-  ////////////////////////////////////////////////////////////////////////
-  //
-  // class AddressListCursor
-  //
-
-  AddressListCursor::AddressListCursor()
-    : addrlist(0)
-    , partial(false)
-  {
-    for(int i = 0; i < MAX_DIM; i++)
-      pos[i] = 0;
-  }
-
-  void AddressListCursor::set_addrlist(AddressList *_addrlist)
-  {
-    addrlist = _addrlist;
-  }
-
-  int AddressListCursor::get_dim() const
-  {
-    assert(addrlist);
-    // with partial progress, we restrict ourselves to just the rest of that dim
-    if(partial) {
-      return (partial_dim + 1);
-    } else {
-      const size_t *entry = addrlist->read_entry();
-      int act_dim = (entry[0] & 15);
-      return act_dim;
-    }
-  }
-
-  uintptr_t AddressListCursor::get_offset() const
-  {
-    const size_t *entry = addrlist->read_entry();
-    int act_dim = (entry[0] & 15);
-    uintptr_t ofs = entry[1];
-    if(partial) {
-      for(int i = partial_dim; i < act_dim; i++)
-	if(i == 0) {
-	  // dim 0 is counted in bytes
-	  ofs += pos[0];
-	} else {
-	  // rest use the strides from the address list
-	  ofs += pos[i] * entry[1 + (2 * i)];
-	}
-    }
-    return ofs;
-  }
-
-  uintptr_t AddressListCursor::get_stride(int dim) const
-  {
-    const size_t *entry = addrlist->read_entry();
-    int act_dim = (entry[0] & 15);
-    assert((dim > 0) && (dim < act_dim));
-    return entry[2 * dim + 1];
-  }
-
-  size_t AddressListCursor::remaining(int dim) const
-  {
-    const size_t *entry = addrlist->read_entry();
-    int act_dim = (entry[0] & 15);
-    assert(dim < act_dim);
-    size_t r = entry[2 * dim];
-    if(dim == 0) r >>= 4;
-    if(partial) {
-      if(dim > partial_dim) r = 1;
-      if(dim == partial_dim) {
-	assert(r > pos[dim]);
-	r -= pos[dim];
-      }
-    }
-    return r;
-  }
-
-  void AddressListCursor::advance(int dim, size_t amount)
-  {
-    const size_t *entry = addrlist->read_entry();
-    int act_dim = (entry[0] & 15);
-    assert(dim < act_dim);
-    size_t r = entry[2 * dim];
-    if(dim == 0) r >>= 4;
-
-    size_t bytes = amount;
-    if(dim > 0) {
-#ifdef DEBUG_REALM
-      for(int i = 0; i < dim; i++)
-	assert(pos[i] == 0);
-#endif
-      bytes *= (entry[0] >> 4);
-      for(int i = 1; i < dim; i++)
-	bytes *= entry[2 * i];
-    }
-#ifdef DEBUG_REALM
-    assert(addrlist->total_bytes >= bytes);
-#endif
-    addrlist->total_bytes -= bytes;
-    
-    if(!partial) {
-      if((dim == (act_dim - 1)) && (amount == r)) {
-	// simple case - we consumed the whole thing
-	addrlist->read_pointer += 2 * act_dim;
-	return;
-      } else {
-	// record partial consumption
-	partial = true;
-	partial_dim = dim;
-	pos[partial_dim] = amount;
-      }
-    } else {
-      // update a partial consumption in progress
-      assert(dim <= partial_dim);
-      partial_dim = dim;
-      pos[partial_dim] += amount;
-    }
-
-    while(pos[partial_dim] == r) {
-      pos[partial_dim++] = 0;
-      if(partial_dim == act_dim) {
-	// all done
-	partial = false;
-	addrlist->read_pointer += 2 * act_dim;
-	break;
-      } else {
-	pos[partial_dim]++;  // carry into next dimension
-	r = entry[2 * partial_dim]; // no shift because partial_dim > 0
-      }
-    }
-  }
-
-  void AddressListCursor::skip_bytes(size_t bytes)
-  {
-    while(bytes > 0) {
-      int act_dim = get_dim();
-
-      if(act_dim == 0) {
-	assert(0);
-      } else {
-	size_t chunk = remaining(0);
-	if(chunk <= bytes) {
-	  int dim = 0;
-	  size_t count = chunk;
-	  while((dim + 1) < act_dim) {
-	    dim++;
-	    count = bytes / chunk;
-	    assert(count > 0);
-	    size_t r = remaining(dim + 1);
-	    if(count < r) {
-	      chunk *= count;
-	      break;
-	    } else {
-	      count = r;
-	      chunk *= count;
-	    }
-	  }
-	  advance(dim, count);
-	  bytes -= chunk;
-	} else {
-	  advance(0, bytes);
-	  return;
-	}
-      }
-    }
-  }
-
-  std::ostream& operator<<(std::ostream& os, const AddressListCursor& alc)
-  {
-    os << alc.remaining(0);
-    for(int i = 1; i < alc.get_dim(); i++)
-      os << 'x' << alc.remaining(i);
-    os << ',' << alc.get_offset();
-    for(int i = 1; i < alc.get_dim(); i++)
-      os << '+' << alc.get_stride(i);
-    return os;
-  }
-
-
   ////////////////////////////////////////////////////////////////////////
   //
   // class ControlPort::Encoder
@@ -1509,6 +1259,12 @@ namespace Realm {
 	bool flush = out_port->iter->get_addresses(out_port->addrlist,
                                                    out_nonaffine);
 	write_bytes_avail = out_port->addrlist.bytes_pending();
+        // TODO(apryakhin@): We add this to handle scatter when both
+        // indirection and source are coming from IB and this needs
+        // good testing.
+        if(out_port->indirect_port_idx >= 0 && write_bytes_avail) {
+          min_xfer_size = std::min(write_bytes_avail, min_xfer_size);
+        }
         if(flush) {
           if(write_bytes_avail > 0) {
             // ignore a nonaffine piece as we still have some affine bytes
@@ -3900,19 +3656,19 @@ namespace Realm {
 		  assert(ok);
 
 		  // now look at the input
-		  const void *src_buf = in_port->mem->get_direct_ptr(in_alc.get_offset(), icount);
-		  size_t src_1d_maxbytes = 0;
-		  if(in_dim > 0) {
-		    size_t rec_bytes = ActiveMessage<Write1DMessage>::recommended_max_payload(dst_node,
-											      src_buf, icount, 1, 0,
-											      dst_buf,
-											      true /*w/ congestion*/);
-		    src_1d_maxbytes = std::min({ dst_1d_maxbytes,
-					         icount,
-					         rec_bytes });
-		  }
+                  LocalAddress src_buf;
+                  ok = in_port->mem->get_local_addr(in_alc.get_offset(), src_buf);
+                  assert(ok);
+                  size_t src_1d_maxbytes = 0;
+                  if(in_dim > 0) {
+                    size_t rec_bytes =
+                        ActiveMessage<Write1DMessage>::recommended_max_payload(
+                            dst_node, src_buf, icount, 1, 0, dst_buf,
+                            true /*w/ congestion*/);
+                    src_1d_maxbytes = std::min({dst_1d_maxbytes, icount, rec_bytes});
+                  }
 
-		  size_t src_2d_maxbytes = 0;
+                  size_t src_2d_maxbytes = 0;
                   // TODO: permit if source memory is cpu-accessible?
 #ifdef ALLOW_RDMA_SOURCE_2D
 		  if(in_dim > 1) {
@@ -4428,7 +4184,7 @@ namespace Realm {
 	return paths;
       }
 	  
-      uint64_t Channel::supports_path(Memory src_mem, Memory dst_mem,
+      uint64_t Channel::supports_path(ChannelCopyInfo channel_copy_info,
                                       CustomSerdezID src_serdez_id,
                                       CustomSerdezID dst_serdez_id,
                                       ReductionOpID redop_id,
@@ -4439,7 +4195,9 @@ namespace Realm {
                                       unsigned *bw_ret /*= 0*/,
                                       unsigned *lat_ret /*= 0*/)
       {
-	for(std::vector<SupportedPath>::const_iterator it = paths.begin();
+        Memory src_mem = channel_copy_info.src_mem;
+        Memory dst_mem = channel_copy_info.dst_mem;
+        for(std::vector<SupportedPath>::const_iterator it = paths.begin();
 	    it != paths.end();
 	    ++it) {
 	  if(!it->serdez_allowed && ((src_serdez_id != 0) ||
@@ -4597,6 +4355,26 @@ namespace Realm {
 	}
 
 	return 0;
+      }
+
+      Memory Channel::suggest_ib_memories(Memory memory) const
+      {
+        Node &n = get_runtime()->nodes[node];
+        for(std::vector<IBMemory *>::const_iterator it = n.ib_memories.begin();
+            it != n.ib_memories.end(); ++it) {
+          switch((*it)->lowlevel_kind) {
+          case Memory::SYSTEM_MEM:
+          case Memory::REGDMA_MEM:
+          case Memory::SOCKET_MEM:
+          case Memory::Z_COPY_MEM:
+            return (*it)->me;
+          default:
+            break;
+          }
+        }
+        log_new_dma.fatal() << "no sysmem ib memory on node:" << node;
+        abort();
+        return Memory::NO_MEMORY;
       }
 
       // sometimes we need to return a reference to a SupportedPath that won't
@@ -5110,7 +4888,7 @@ namespace Realm {
 	return 0;
       }
 
-      uint64_t RemoteChannel::supports_path(Memory src_mem, Memory dst_mem,
+      uint64_t RemoteChannel::supports_path(ChannelCopyInfo channel_copy_info,
                                             CustomSerdezID src_serdez_id,
                                             CustomSerdezID dst_serdez_id,
                                             ReductionOpID redop_id,
@@ -5127,12 +4905,27 @@ namespace Realm {
 	  return 0;
 
 	// fall through to normal checks
-	return Channel::supports_path(src_mem, dst_mem,
+	return Channel::supports_path(channel_copy_info,
 				      src_serdez_id, dst_serdez_id, redop_id,
                                       total_bytes, src_frags, dst_frags,
 				      kind_ret, bw_ret, lat_ret);
       }
 
+
+
+  static void enumerate_remote_shared_mems(std::vector<Memory> &mems)
+  {
+    RuntimeImpl *runtime = get_runtime();
+    size_t idx = 0;
+    mems.resize(runtime->remote_shared_memory_mappings.size(), Memory::NO_MEMORY);
+    for(std::unordered_map<realm_id_t, SharedMemoryInfo>::iterator it =
+            runtime->remote_shared_memory_mappings.begin();
+        it != runtime->remote_shared_memory_mappings.end(); ++it) {
+      Memory m;
+      m.id = it->first;
+      mems[idx++] = m;
+    }
+  }
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -5145,20 +4938,28 @@ namespace Realm {
 							"memcpy channel")
       {
         //cbs = (MemcpyRequest**) calloc(max_nr, sizeof(MemcpyRequest*));
-	unsigned bw = 5000; // HACK - estimate at 5 GB/s
-	unsigned latency = 100; // HACK - estimate at 100ns
+        unsigned bw = 128000;         // HACK - estimate at 128 GB/s
+        unsigned latency = 100;       // HACK - estimate at 100ns
         unsigned frag_overhead = 100; // HACK - estimate at 100ns
 
         // all local cpu memories are valid sources and dests
         std::vector<Memory> local_cpu_mems;
         enumerate_local_cpu_memories(local_cpu_mems);
+        std::vector<Memory> remote_shared_mems;
+        enumerate_remote_shared_mems(remote_shared_mems);
 
         add_path(local_cpu_mems, local_cpu_mems,
                  bw, latency, frag_overhead, XFER_MEM_CPY)
           .set_max_dim(3)
           .allow_serdez();
 
-	xdq.add_to_manager(bgwork);
+        if (remote_shared_mems.size() > 0) {
+          add_path(local_cpu_mems, remote_shared_mems, bw, latency, frag_overhead,
+                   XFER_MEM_CPY)
+              .set_max_dim(3);
+        }
+
+        xdq.add_to_manager(bgwork);
       }
 
       MemcpyChannel::~MemcpyChannel()
@@ -5192,7 +4993,7 @@ namespace Realm {
       }
 
 
-      uint64_t MemcpyChannel::supports_path(Memory src_mem, Memory dst_mem,
+      uint64_t MemcpyChannel::supports_path(ChannelCopyInfo channel_copy_info,
                                             CustomSerdezID src_serdez_id,
                                             CustomSerdezID dst_serdez_id,
                                             ReductionOpID redop_id,
@@ -5209,7 +5010,7 @@ namespace Realm {
 	  return 0;
 
 	// fall through to normal checks
-	return Channel::supports_path(src_mem, dst_mem,
+	return Channel::supports_path(channel_copy_info,
 				      src_serdez_id, dst_serdez_id, redop_id,
                                       total_bytes, src_frags, dst_frags,
 				      kind_ret, bw_ret, lat_ret);
@@ -5716,10 +5517,18 @@ namespace Realm {
     // all local cpu memories are valid dests
     std::vector<Memory> local_cpu_mems;
     MemcpyChannel::enumerate_local_cpu_memories(local_cpu_mems);
+    std::vector<Memory> remote_shared_mems;
+    enumerate_remote_shared_mems(remote_shared_mems);
 
     add_path(Memory::NO_MEMORY, local_cpu_mems,
              bw, latency, frag_overhead, XFER_MEM_FILL)
       .set_max_dim(3);
+
+    if (remote_shared_mems.size() > 0) {
+      add_path(Memory::NO_MEMORY, remote_shared_mems,
+             bw, latency, frag_overhead, XFER_MEM_FILL)
+      .set_max_dim(3);
+    }
 
     xdq.add_to_manager(bgwork);
   }
@@ -5771,16 +5580,25 @@ namespace Realm {
     // all local cpu memories are valid sources and dests
     std::vector<Memory> local_cpu_mems;
     MemcpyChannel::enumerate_local_cpu_memories(local_cpu_mems);
+    std::vector<Memory> remote_shared_mems;
+    enumerate_remote_shared_mems(remote_shared_mems);
 
     add_path(local_cpu_mems, local_cpu_mems,
              bw, latency, frag_overhead, XFER_MEM_CPY)
       .set_max_dim(3)
       .allow_redops();
 
+    if (remote_shared_mems.size() > 0) {
+      add_path(local_cpu_mems, remote_shared_mems,
+              bw, latency, frag_overhead, XFER_MEM_CPY)
+        .set_max_dim(3)
+        .allow_redops();
+    }
+
     xdq.add_to_manager(bgwork);
   }
 
-  uint64_t MemreduceChannel::supports_path(Memory src_mem, Memory dst_mem,
+  uint64_t MemreduceChannel::supports_path(ChannelCopyInfo channel_copy_info,
                                            CustomSerdezID src_serdez_id,
                                            CustomSerdezID dst_serdez_id,
                                            ReductionOpID redop_id,
@@ -5796,7 +5614,7 @@ namespace Realm {
       return 0;
 
     // otherwise consult the normal supports_path logic
-    return Channel::supports_path(src_mem, dst_mem,
+    return Channel::supports_path(channel_copy_info,
                                   src_serdez_id, dst_serdez_id, redop_id,
                                   total_bytes, src_frags, dst_frags,
                                   kind_ret, bw_ret, lat_ret);
@@ -5952,6 +5770,9 @@ namespace Realm {
 
       long RemoteWriteChannel::submit(Request** requests, long nr)
       {
+        // should not be reached
+        assert(0);
+#if 0 // TODO: DELETE
         for (long i = 0; i < nr; i ++) {
           RemoteWriteRequest* req = (RemoteWriteRequest*) requests[i];
 	  XferDes::XferPort *in_port = &req->xd->input_ports[req->src_port_idx];
@@ -6011,9 +5832,11 @@ namespace Realm {
                                                       PAYLOAD_KEEPREG,
                                                       req->dst_buf);*/
         }
+#endif
         return nr;
       }
 
+#if 0 // TODO: DELETE
       /*static*/
       void XferDesRemoteWriteMessage::handle_message(NodeID sender,
 						     const XferDesRemoteWriteMessage &args,
@@ -6057,6 +5880,7 @@ namespace Realm {
         req->xd->notify_request_read_done(req);
         req->xd->notify_request_write_done(req);
       }
+#endif
 
       /*static*/ void XferDesDestroyMessage::handle_message(NodeID sender,
 							    const XferDesDestroyMessage &args,
@@ -6496,8 +6320,10 @@ namespace Realm {
 
 ActiveMessageHandlerReg<SimpleXferDesCreateMessage> simple_xfer_des_create_message_handler;
 ActiveMessageHandlerReg<NotifyXferDesCompleteMessage> notify_xfer_des_complete_handler;
+#if 0 // TODO: DELETE
 ActiveMessageHandlerReg<XferDesRemoteWriteMessage> xfer_des_remote_write_handler;
 ActiveMessageHandlerReg<XferDesRemoteWriteAckMessage> xfer_des_remote_write_ack_handler;
+#endif
 ActiveMessageHandlerReg<XferDesDestroyMessage> xfer_des_destroy_message_handler;
 ActiveMessageHandlerReg<UpdateBytesTotalMessage> update_bytes_total_message_handler;
 ActiveMessageHandlerReg<UpdateBytesWriteMessage> update_bytes_write_message_handler;

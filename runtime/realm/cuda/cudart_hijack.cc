@@ -26,6 +26,7 @@ namespace Realm {
   namespace Cuda {
 
     extern Logger log_cudart;
+    extern Logger log_gpu;
 
     static GPUProcessor *get_gpu_or_die(const char *funcname)
     {
@@ -215,8 +216,8 @@ extern "C" {
   REALM_PUBLIC_API
   cudaError_t cudaEventCreate(cudaEvent_t *event)
   {
-    GPUProcessor *p = get_gpu_or_die("cudaEventCreate");
-    p->event_create(event, cudaEventDefault);
+    get_gpu_or_die("cudaEventCreate");
+    CHECK_CU( cuEventCreate(event, CU_EVENT_DEFAULT) );
     return cudaSuccess;
   }
 	
@@ -224,8 +225,8 @@ extern "C" {
   cudaError_t cudaEventCreateWithFlags(cudaEvent_t *event,
 				       unsigned int flags)
   {
-    GPUProcessor *p = get_gpu_or_die("cudaEventCreateWithFlags");
-    p->event_create(event, flags);
+    get_gpu_or_die("cudaEventCreateWithFlags");
+    CHECK_CU( cuEventCreate(event, flags) );
     return cudaSuccess;
   }
 
@@ -240,24 +241,24 @@ extern "C" {
   REALM_PUBLIC_API
   cudaError_t cudaEventSynchronize(cudaEvent_t event)
   {
-    GPUProcessor *p = get_gpu_or_die("cudaEventSynchronize");
-    p->event_synchronize(event);
+    get_gpu_or_die("cudaEventSynchronize");
+    CHECK_CU( cuEventSynchronize(event) );
     return cudaSuccess;
   }
 
   REALM_PUBLIC_API
   cudaError_t cudaEventDestroy(cudaEvent_t event)
   {
-    GPUProcessor *p = get_gpu_or_die("cudaEventDestroy");
-    p->event_destroy(event);
+    get_gpu_or_die("cudaEventDestroy");
+    CHECK_CU( cuEventDestroy(event) );
     return cudaSuccess;
   }
 
   REALM_PUBLIC_API
   cudaError_t cudaEventElapsedTime(float *ms, cudaEvent_t start, cudaEvent_t end)
   {
-    GPUProcessor *p = get_gpu_or_die("cudaEventElapsedTime");
-    p->event_elapsed_time(ms, start, end);
+    get_gpu_or_die("cudaEventElapsedTime");
+    CHECK_CU( cuEventElapsedTime(ms, start, end) );
     return cudaSuccess;
   }
 

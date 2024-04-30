@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------#
-# Copyright 2023 Kitware, Inc.
+# Copyright 2024 Kitware, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -24,6 +24,7 @@ endif()
 
 add_executable(global_vars global_vars.cc)
 target_link_libraries(global_vars Legion::Legion)
+target_compile_options(global_vars PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
 if(Legion_ENABLE_TESTING)
   add_test(NAME global_vars COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:global_vars> ${Legion_TEST_ARGS})
 endif()

@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University
+/* Copyright 2024 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -129,7 +129,7 @@ void top_level_task(const Task *task,
   UpdateVoltagesTask upv_launcher(parts.pvt_nodes, parts.shr_nodes, parts.node_locations,
                                  circuit.all_nodes, circuit.node_locator, launch_rect, local_args);
 
-  printf("Starting main simulation loop\n");
+  LEGION_PRINT_ONCE(runtime, ctx, stdout, "Starting main simulation loop\n");
   //struct timespec ts_start, ts_end;
   //clock_gettime(CLOCK_MONOTONIC, &ts_start);
   Future f_start = runtime->get_current_time_in_microseconds(ctx);
@@ -149,13 +149,14 @@ void top_level_task(const Task *task,
   runtime->issue_execution_fence(ctx);
   Future f_end = runtime->get_current_time_in_microseconds(ctx);
   double ts_end = f_end.get_result<long long>();
-  if (simulation_success)
-    printf("SUCCESS!\n");
-  else
-    printf("FAILURE!\n");
+  if (simulation_success) {
+    LEGION_PRINT_ONCE(runtime, ctx, stdout, "SUCCESS!\n");
+  } else {
+    LEGION_PRINT_ONCE(runtime, ctx, stdout, "FAILURE!\n");
+  }
   {
     double sim_time = 1e-6 * (ts_end - ts_start);
-    printf("ELAPSED TIME = %7.3f s\n", sim_time);
+    LEGION_PRINT_ONCE(runtime, ctx, stdout, "ELAPSED TIME = %7.3f s\n", sim_time);
 
     // Compute the floating point operations per second
     long num_circuit_nodes = num_pieces * nodes_per_piece;
@@ -171,7 +172,7 @@ void top_level_task(const Task *task,
 
     // Compute the number of gflops
     double gflops = (1e-9*operations)/sim_time;
-    printf("GFLOPS = %7.3f GFLOPS\n", gflops);
+    LEGION_PRINT_ONCE(runtime, ctx, stdout, "GFLOPS = %7.3f GFLOPS\n", gflops);
   }
   log_circuit.print("simulation complete - destroying regions");
 
@@ -194,11 +195,13 @@ void top_level_task(const Task *task,
     for (int i = 0; i < (num_pieces * wires_per_piece); i++)
     {
       const Point<1> wire_ptr(i);
-      for (int i = 0; i < WIRE_SEGMENTS; ++i)
-        printf(" %.5g", fa_wire_currents[i][wire_ptr]);
-      for (int i = 0; i < WIRE_SEGMENTS - 1; ++i)
-        printf(" %.5g", fa_wire_voltages[i][wire_ptr]);
-      printf("\n");
+      for (int i = 0; i < WIRE_SEGMENTS; ++i) {
+        LEGION_PRINT_ONCE(runtime, ctx, stdout, " %.5g", fa_wire_currents[i][wire_ptr]);
+      }
+      for (int i = 0; i < WIRE_SEGMENTS - 1; ++i) {
+        LEGION_PRINT_ONCE(runtime, ctx, stdout, " %.5g", fa_wire_voltages[i][wire_ptr]);
+      }
+      LEGION_PRINT_ONCE(runtime, ctx, stdout, "\n");
     }
     runtime->unmap_region(ctx, wires);
   }
@@ -223,6 +226,9 @@ int main(int argc, char **argv)
   {
     TaskVariantRegistrar registrar(TOP_LEVEL_TASK_ID, "top_level");
     registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+#ifndef SEQUENTIAL_LOAD_CIRCUIT
+    registrar.set_replicable();
+#endif
     Runtime::preregister_task_variant<top_level_task>(registrar, "top_level");
   }
 

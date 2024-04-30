@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -52,6 +52,7 @@ namespace Realm {
 #endif
 
     extern Logger log_poison; // defined in event_impl.cc
+    class ProcessorImpl;      // defined in proc_impl.h
 
     class EventWaiter {
     public:
@@ -122,6 +123,7 @@ namespace Realm {
 
     public:
       ID me;
+      ProcessorImpl *owning_processor;
       NodeID owner;
     };
 
@@ -181,6 +183,7 @@ namespace Realm {
       void init(ID _me, unsigned _init_owner);
 
       static GenEventImpl *create_genevent(void);
+      static void free_genevent(GenEventImpl *);
 
       // get the Event (id+generation) for the current (i.e. untriggered) generation
       Event current_event(void) const;
@@ -201,8 +204,6 @@ namespace Realm {
       virtual bool remove_waiter(gen_t needed_gen, EventWaiter *waiter);
 
       // creates an event that won't trigger until all input events have
-      static Event merge_events(const std::set<Event>& wait_for,
-				bool ignore_faults);
       static Event merge_events(span<const Event> wait_for,
 				bool ignore_faults);
       static Event merge_events(Event ev1, Event ev2,
@@ -224,7 +225,14 @@ namespace Realm {
 			  int new_poisoned_count,
 			  TimeLimit work_until);
 
-    public: //protected:
+      // Set the operation that will trigger this event's generation.
+      void set_trigger_op(gen_t gen, Operation *op);
+      // Get the operation that will trigger this event's generation.
+      // The returned operation's reference is incremented and must be removed by the
+      // caller.
+      Operation *get_trigger_op(gen_t gen);
+
+    public: // protected:
       // these state variables are monotonic, so can be checked without a lock for
       //  early-out conditions
       atomic<gen_t> generation;
@@ -242,6 +250,9 @@ namespace Realm {
 
       // everything below here protected by this mutex
       Mutex mutex;
+
+      // The operation that will trigger this generation
+      Operation *current_trigger_op;
 
       // local waiters are tracked by generation - an easily-accessed list is used
       //  for the "current" generation, whereas a map-by-generation-id is used for

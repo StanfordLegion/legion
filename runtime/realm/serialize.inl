@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -73,13 +73,13 @@ namespace Realm {
     {}
 
     inline FixedBufferSerializer::FixedBufferSerializer(void *buffer, size_t size)
-      : pos(static_cast<char *>(buffer)),
-	limit(static_cast<char *>(buffer) + size)
+      : pos(static_cast<char *>(buffer))
+      , limit(static_cast<char *>(buffer) + size)
     {}
 
     inline FixedBufferSerializer::FixedBufferSerializer(ByteArray& array)
-      : pos(static_cast<char *>(array.base())),
-	limit(static_cast<char *>(array.base()) + array.size())
+      : pos(static_cast<char *>(array.base()))
+      , limit(static_cast<char *>(array.base()) + array.size())
     {}
 
     inline FixedBufferSerializer::~FixedBufferSerializer(void)
@@ -100,13 +100,6 @@ namespace Realm {
     inline ptrdiff_t FixedBufferSerializer::bytes_left(void) const
     {
       return limit - pos;
-    }
-
-    inline bool FixedBufferSerializer::enforce_alignment(size_t granularity)
-    {
-      // always move the pointer, but return false if we've overshot
-      pos = align_pointer(pos, granularity);
-      return (pos <= limit);
     }
 
     inline bool FixedBufferSerializer::append_bytes(const void *data, size_t datalen)
@@ -213,25 +206,6 @@ namespace Realm {
       return ByteArray().attach(buffer, size);
     }
 
-    inline bool DynamicBufferSerializer::enforce_alignment(size_t granularity)
-    {
-      char *pos2 = align_pointer(pos, granularity);
-      if(pos2 > limit) {
-	size_t used = pos - base;
-	size_t needed = pos2 - base;
-	size_t size = limit - base;
-	do { size <<= 1; } while(needed > size);
-	char *newbase = static_cast<char *>(realloc(base, size));
-	assert(newbase != 0);
-	base = newbase;
-	pos = newbase + used;
-	limit = newbase + size;
-	pos2 = pos + needed;
-      }
-      pos = pos2;
-      return true;
-    }
-
     inline bool DynamicBufferSerializer::append_bytes(const void *data, size_t datalen)
     {
       char *pos2 = pos + datalen;
@@ -305,12 +279,6 @@ namespace Realm {
       return count;
     }
 
-    inline bool ByteCountSerializer::enforce_alignment(size_t granularity)
-    {
-      count = align_offset(count, granularity);
-      return true;
-    }
-
     inline bool ByteCountSerializer::append_bytes(const void *data, size_t datalen)
     {
       count += datalen;
@@ -343,13 +311,13 @@ namespace Realm {
     //
 
     inline FixedBufferDeserializer::FixedBufferDeserializer(const void *buffer, size_t size)
-      : pos(static_cast<const char *>(buffer)),
-	limit(static_cast<const char *>(buffer) + size)
+      : pos(static_cast<const char *>(buffer))
+      , limit(static_cast<const char *>(buffer) + size)
     {}
 
     inline FixedBufferDeserializer::FixedBufferDeserializer(const ByteArrayRef& array)
-      : pos(static_cast<const char *>(array.base())),
-	limit(static_cast<const char *>(array.base()) + array.size())
+      : pos(static_cast<const char *>(array.base()))
+      , limit(static_cast<const char *>(array.base()) + array.size())
     {}
 
     inline FixedBufferDeserializer::~FixedBufferDeserializer(void)
@@ -358,13 +326,6 @@ namespace Realm {
     inline ptrdiff_t FixedBufferDeserializer::bytes_left(void) const
     {
       return limit - pos;
-    }
-
-    inline bool FixedBufferDeserializer::enforce_alignment(size_t granularity)
-    {
-      // always move the pointer, but return false if we've overshot
-      pos = align_pointer(pos, granularity);
-      return (pos <= limit);
     }
 
     inline bool FixedBufferDeserializer::extract_bytes(void *data, size_t datalen)
@@ -425,16 +386,14 @@ namespace Realm {
     template <typename S>
     /*static*/ bool SerializationHelper<T,true>::serialize_scalar(S& s, const T& data)
     {
-      return (s.enforce_alignment(REALM_ALIGNOF(T)) &&
-	      s.append_serializable(data));
+      return s.append_serializable(data);
     }
 
     template <typename T>
     template <typename S>
     /*static*/ bool SerializationHelper<T,true>::deserialize_scalar(S& s, T& data)
     {
-      return (s.enforce_alignment(REALM_ALIGNOF(T)) &&
-	      s.extract_serializable(data));
+      return s.extract_serializable(data);
     }
 
     template <typename T>
@@ -443,8 +402,7 @@ namespace Realm {
     {
       size_t c = v.size();
       return ((s << c) &&
-	      ((c == 0) || (s.enforce_alignment(REALM_ALIGNOF(T)) &&
-	                    s.append_bytes(&v[0], sizeof(T) * c))));
+	      ((c == 0) || s.append_bytes(&v[0], sizeof(T) * c)));
     }
 
     template <typename T>
@@ -455,8 +413,7 @@ namespace Realm {
       if(!(s >> c)) return false;
       // TODO: sanity-check size?
       v.resize(c);
-      return ((c == 0) || (s.enforce_alignment(REALM_ALIGNOF(T)) &&
-	                   s.extract_bytes(&v[0], sizeof(T) * c)));
+      return ((c == 0) || s.extract_bytes(&v[0], sizeof(T) * c));
     }
 
     template <typename T>
@@ -465,7 +422,6 @@ namespace Realm {
     {
       size_t c = sp.size();
       return ((s << c) &&
-	      s.enforce_alignment(REALM_ALIGNOF(T)) &&
 	      s.append_bytes(sp.data(), sizeof(T) * c));
     }
 
@@ -476,7 +432,6 @@ namespace Realm {
       size_t c;
       if(!(s >> c)) return false;
       // TODO: sanity-check size?
-      if(!s.enforce_alignment(REALM_ALIGNOF(T))) return false;
       T *data = static_cast<T *>(s.peek_bytes(sizeof(T) * c));
       if(!data || !s.extract_bytes(0, sizeof(T) * c)) return false;
       sp = span<T, Extent>(data, c);

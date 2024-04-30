@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University
+/* Copyright 2024 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -32,9 +32,9 @@ class EmbedMapper : public DefaultMapper
 public:
   EmbedMapper(MapperRuntime *rt, Machine machine, Processor local,
               const char *mapper_name);
-  virtual void select_task_options(const MapperContext    ctx,
+  void select_task_options(const MapperContext    ctx,
                                    const Task&            task,
-                                         TaskOptions&     output);
+                                         TaskOptions&     output) override;
 };
 
 EmbedMapper::EmbedMapper(MapperRuntime *rt, Machine machine, Processor local,

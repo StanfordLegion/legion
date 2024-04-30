@@ -1,4 +1,4 @@
--- Copyright 2023 Stanford University, NVIDIA Corporation
+-- Copyright 2024 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -2332,10 +2332,12 @@ std.rect_type = data.weak_memoize(function(index_type)
   terra st:to_domain()
     return [c["legion_domain_from_rect_" .. tostring(st.dim) .. "d"]](@self)
   end
+  st.methods.to_domain.replicable = true
 
   terra st:size()
     return self.hi - self.lo + [st.index_type:const(1)]
   end
+  st.methods.size.replicable = true
 
   if index_type.fields then
     terra st:volume()
@@ -2547,6 +2549,7 @@ std.ptr = std.index_type(opaque, "ptr")
 if max_dim >= 1 then
   std.int1d = std.index_type(int64, "int1d")
   std.rect1d = std.rect_type(std.int1d)
+  base.register_type_id(std.int1d)
 end
 do
   std.dim_names = {"x", "y", "z", "w", "v", "u", "t", "s", "r"}
@@ -2559,6 +2562,11 @@ do
     std["__int" .. dim .. "d"] = st
     std["int" .. dim .. "d"] = std.index_type(st, "int" .. dim .. "d")
     std["rect" .. dim .. "d"] = std.rect_type(std["int" .. dim .. "d"])
+    base.register_type_id(std["int" .. dim .. "d"])
+  end
+  for dim = max_dim, #std.dim_names do
+    -- Always pad the type IDs out for the highest max_dim we support.
+    base.register_type_id(nil)
   end
 end
 
@@ -3795,16 +3803,20 @@ local projection_functors = terralib.newlist()
 
 do
   local next_id = 1
-  function std.register_projection_functor(exclusive, functional, depth,
+  function std.register_projection_functor(exclusive, functional, has_args, depth,
                                            region_functor, partition_functor)
     local id = next_id
     next_id = next_id + 1
 
-    projection_functors:insert(terralib.newlist({id, exclusive, functional, depth,
+    projection_functors:insert(terralib.newlist({id, exclusive, functional, has_args, depth,
                                                  region_functor, partition_functor}))
 
     return id
   end
+end
+
+function std.count_projection_functors()
+  return #projection_functors
 end
 
 local variants = terralib.newlist()
@@ -4145,19 +4157,28 @@ function std.setup(main_task, extra_setup_thunk, task_wrappers, registration_nam
 
   local projection_functor_registrations = projection_functors:map(
     function(args)
-      local id, exclusive, functional, depth, region_functor, partition_functor = unpack(args)
+      local id, exclusive, functional, has_args, depth, region_functor, partition_functor = unpack(args)
 
       -- Hack: Work around Terra not wanting to escape nil.
       region_functor = region_functor or `nil
       partition_functor = partition_functor or `nil
 
       if functional then
-        return quote
-          c.legion_runtime_preregister_projection_functor(
-            id, exclusive, depth,
-            region_functor, partition_functor)
+        if not has_args then
+          return quote
+            c.legion_runtime_preregister_projection_functor(
+              id, exclusive, depth,
+              region_functor, partition_functor)
+          end
+        else
+          return quote
+            c.legion_runtime_preregister_projection_functor_args(
+              id, exclusive, depth,
+              region_functor, partition_functor)
+          end
         end
       else
+        assert(not has_args)
         return quote
           c.legion_runtime_preregister_projection_functor_mappable(
             id, exclusive, depth,
@@ -4664,7 +4685,8 @@ function std.start(main_task, extra_setup_thunk)
   if #objfiles > 0 then
     local dylib = os.tmpname()
     local cmd = os.getenv('CXX') or 'c++'
-    if os.execute('test "$(uname)" = Darwin') == 0 then
+    local ffi = require("ffi")
+    if ffi.os == "OSX" then
       cmd = cmd .. ' -dynamiclib -single_module -undefined dynamic_lookup -fPIC'
     else
       cmd = cmd .. ' -shared -fPIC'
@@ -4748,7 +4770,10 @@ function std.saveobj(main_task, filename, filetype, extra_setup_thunk, link_flag
   flags:insertall(objfiles)
   local use_cmake = os.getenv("USE_CMAKE") == "1"
   local lib_dir = os.getenv("LG_RT_DIR") .. "/../bindings/regent"
-  if use_cmake then
+  local legion_install_prefix = os.getenv("LEGION_INSTALL_PREFIX")
+  if legion_install_prefix then
+    lib_dir = legion_install_prefix .. "/lib"
+  elseif use_cmake then
     lib_dir = os.getenv("CMAKE_BUILD_DIR") .. "/lib"
   end
   if os.getenv('CRAYPE_VERSION') then
@@ -4779,7 +4804,7 @@ function std.saveobj(main_task, filename, filetype, extra_setup_thunk, link_flag
     end
   end
   flags:insertall({"-L" .. lib_dir, "-lregent"})
-  if use_cmake then
+  if legion_install_prefix or use_cmake then
     flags:insertall({"-llegion", "-lrealm"})
   end
   if gpuhelper.check_gpu_available() then
@@ -4832,7 +4857,7 @@ local function generate_task_interfaces(task_whitelist, need_launcher)
       end
     end
     -- In separate compilation, need to make sure all globals get exported.
-    if base.config["separate"] then
+    if std.config["separate"] then
       task_impl[task:get_task_id().name] = task:get_task_id()
       task_impl[task:get_mapper_id().name] = task:get_mapper_id()
       task_impl[task:get_mapping_tag_id().name] = task:get_mapping_tag_id()

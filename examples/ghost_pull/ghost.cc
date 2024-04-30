@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University
+/* Copyright 2024 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -140,7 +140,7 @@ void top_level_task(const Task *task,
         IndexSpace disjoint_space = runtime->get_index_subspace(ctx, disjoint_ip, color);
         LogicalRegion disjoint_lr = 
             runtime->create_logical_region(ctx, disjoint_space, fs);  
-        sprintf(buf, "disjoint_lr_%d", color);
+        snprintf(buf, sizeof buf, "disjoint_lr_%d", color);
         runtime->attach_name(disjoint_lr, buf);
 
         disjoint_subregions[color] = disjoint_lr;
@@ -232,6 +232,8 @@ void top_level_task(const Task *task,
             DomainPoint point(my_color);
             must_epoch_launcher.add_single_task(point, spmd_launcher);
         }
+        // Specify our launch domain
+        must_epoch_launcher.launch_domain = Domain(Point<1>(0), Point<1>(num_subregions-1));
         FutureMap fm = runtime->execute_must_epoch(ctx, must_epoch_launcher);
         // wait for completion at least
         fm.wait_all_results();
@@ -331,14 +333,14 @@ void spmd_task(const Task *task,
             ghost_ip = runtime->create_partition_by_restriction(ctx, neighbor_is,
                 ghost_color_left_is, transform, extent, DISJOINT_KIND);
         }
-        sprintf(buf, "%s_neighbor_ghost_ip_of_%d", parts[neighbor], color);
+        snprintf(buf, sizeof buf, "%s_neighbor_ghost_ip_of_%d", parts[neighbor], color);
         runtime->attach_name(ghost_ip, buf);
         
         // create the logical region
         IndexSpace ghost_is = runtime->get_index_subspace(ctx, ghost_ip, 
             (neighbor == NEIGHBOR_LEFT) ? GHOST_RIGHT : GHOST_LEFT);
         ghost_lrs[neighbor] = runtime->create_logical_region(ctx, ghost_is, ghost_fs);
-        sprintf(buf, "%s_neighbor_ghost_lr_of_%d", parts[neighbor], color);
+        snprintf(buf, sizeof buf, "%s_neighbor_ghost_lr_of_%d", parts[neighbor], color);
         runtime->attach_name(ghost_lrs[neighbor], buf);
     }
 
@@ -675,6 +677,7 @@ int main(int argc, char **argv)
     {
         TaskVariantRegistrar registrar(TOP_LEVEL_TASK_ID, "top_level");
         registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+        registrar.set_replicable();
         Runtime::preregister_task_variant<top_level_task>(registrar, "top_level");
     }
 

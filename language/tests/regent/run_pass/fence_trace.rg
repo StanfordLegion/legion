@@ -1,4 +1,4 @@
--- Copyright 2023 Stanford University
+-- Copyright 2024 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -38,6 +38,7 @@ task g(x : int)
   c.usleep(500000)
 end
 
+__demand(__replicable)
 task main()
   __demand(__trace)
   for i = 0, 3 do

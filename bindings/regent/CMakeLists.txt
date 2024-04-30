@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------#
-# Copyright 2023 Stanford University
+# Copyright 2024 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -52,18 +52,20 @@ list(APPEND REGENT_SRC
   murmur_hash3.h  murmur_hash3.cc
 )
 
-if(Legion_USE_CUDA)
-  cuda_add_library(Regent SHARED ${REGENT_SRC})
-elseif(Legion_USE_HIP)
+if(Legion_USE_HIP)
   hip_add_library(Regent SHARED ${REGENT_SRC})
 else()
   add_library(Regent SHARED ${REGENT_SRC})
 endif()
 add_library(Legion::Regent ALIAS Regent)
-target_link_libraries(Regent Legion::Legion)
+target_link_libraries(Regent PUBLIC Legion::Legion)
+target_compile_options(Regent PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
 
 if(Legion_USE_CUDA)
-  target_include_directories(Regent PRIVATE ${CUDA_INCLUDE_DIRS})
+  target_link_libraries(Regent PRIVATE CUDA::toolkit)
+  set_target_cuda_standard(Regent STANDARD ${Legion_CUDA_STANDARD})
+  set_target_cuda_architectures(Regent ARCHITECTURES ${Legion_CUDA_ARCH})
+  set_target_cuda_warnings_and_errors(Regent WARN_AS_ERROR ${Legion_BUILD_WARN_AS_ERROR})
 elseif(Legion_USE_HIP)
   target_include_directories(Regent PRIVATE ${HIP_INCLUDE_DIRS})
   if (Legion_HIP_TARGET STREQUAL "CUDA")

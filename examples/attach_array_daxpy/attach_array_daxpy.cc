@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, Los Alamos National Laboratory
+/* Copyright 2024 Stanford University, Los Alamos National Laboratory
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -115,8 +115,10 @@ void top_level_task(const Task *task,
   double *xyz_ptr = NULL;
   if (soa_flag == 0) 
   { // SOA
-    xy_ptr = (double*)malloc(2*sizeof(double)*(num_elements));
-    z_ptr = (double*)malloc(sizeof(double)*(num_elements));
+    size_t xy_bytes = 2*sizeof(double)*(num_elements);
+    xy_ptr = (double*)malloc(xy_bytes);
+    size_t z_bytes = sizeof(double)*(num_elements);
+    z_ptr = (double*)malloc(z_bytes);
     for (int j = 0; j < num_elements; j++ ) {
         xy_ptr[j]               = drand48();
         xy_ptr[num_elements+j]  = drand48();
@@ -125,25 +127,32 @@ void top_level_task(const Task *task,
     {
       printf("Attach SOA array fid %d, fid %d, ptr %p\n", 
            FID_X, FID_Y, xy_ptr);
-      AttachLauncher launcher(EXTERNAL_INSTANCE, input_lr, input_lr);
+      AttachLauncher launcher(LEGION_EXTERNAL_INSTANCE, input_lr, input_lr);
       std::vector<FieldID> attach_fields(2);
       attach_fields[0] = FID_X;
       attach_fields[1] = FID_Y;
-      launcher.attach_array_soa(xy_ptr, false/*column major*/, attach_fields);
+      launcher.initialize_constraints(false/*column major*/, true/*soa*/, attach_fields);
+      launcher.privilege_fields.insert(attach_fields.begin(), attach_fields.end());
+      Realm::ExternalMemoryResource resource(xy_ptr, xy_bytes);
+      launcher.external_resource = &resource;
       xy_pr = runtime->attach_external_resource(ctx, launcher);
     }
     { 
       printf("Attach SOA array fid %d, ptr %p\n", FID_Z, z_ptr);
-      AttachLauncher launcher(EXTERNAL_INSTANCE, output_lr, output_lr);
+      AttachLauncher launcher(LEGION_EXTERNAL_INSTANCE, output_lr, output_lr);
       std::vector<FieldID> attach_fields(1);
       attach_fields[0] = FID_Z;
-      launcher.attach_array_soa(z_ptr, false/*column major*/, attach_fields);
+      launcher.initialize_constraints(false/*column major*/, true/*soa*/, attach_fields);
+      launcher.privilege_fields.insert(attach_fields.begin(), attach_fields.end());
+      Realm::ExternalMemoryResource resource(z_ptr, z_bytes);
+      launcher.external_resource = &resource;
       z_pr = runtime->attach_external_resource(ctx, launcher);
     }
   } 
   else 
   { // AOS
-    daxpy_t *xyz_ptr = (daxpy_t*)malloc(sizeof(daxpy_t)*(num_elements));
+    size_t total_bytes = sizeof(daxpy_t)*(num_elements);
+    daxpy_t *xyz_ptr = (daxpy_t*)malloc(total_bytes);
     std::vector<FieldID> layout_constraint_fields(3);
     layout_constraint_fields[0] = FID_X;
     layout_constraint_fields[1] = FID_Y;
@@ -153,18 +162,22 @@ void top_level_task(const Task *task,
     // but only requests privileges on fields for its logical region
     printf("Attach AOS array ptr %p\n", xyz_ptr);  
     {
-      AttachLauncher launcher(EXTERNAL_INSTANCE, input_lr, input_lr);
-      launcher.attach_array_aos(xyz_ptr, false/*column major*/,
+      AttachLauncher launcher(LEGION_EXTERNAL_INSTANCE, input_lr, input_lr);
+      launcher.initialize_constraints(false/*column major*/, false/*soa*/,
                                 layout_constraint_fields);
-      launcher.privilege_fields.erase(FID_Z);
+      launcher.privilege_fields.insert(FID_X);
+      launcher.privilege_fields.insert(FID_Y);
+      Realm::ExternalMemoryResource resource(xyz_ptr, total_bytes);
+      launcher.external_resource = &resource;
       xy_pr = runtime->attach_external_resource(ctx, launcher);
     }
     {
-      AttachLauncher launcher(EXTERNAL_INSTANCE, output_lr, output_lr);
-      launcher.attach_array_aos(xyz_ptr, false/*column major*/,
-                                layout_constraint_fields);
-      launcher.privilege_fields.erase(FID_X);
-      launcher.privilege_fields.erase(FID_Y);
+      AttachLauncher launcher(LEGION_EXTERNAL_INSTANCE, output_lr, output_lr);
+      launcher.initialize_constraints(false/*columns major*/, false/*soa*/,
+                                      layout_constraint_fields);
+      launcher.privilege_fields.insert(FID_Z);
+      Realm::ExternalMemoryResource resource(xyz_ptr, total_bytes);
+      launcher.external_resource = &resource;
       z_pr = runtime->attach_external_resource(ctx, launcher);
     }
   }

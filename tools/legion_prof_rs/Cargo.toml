@@ -1,22 +1,42 @@
 [package]
 name = "legion_prof"
-version = "0.1.0"
+version = "0.2403.0"
+authors = ["Elliott Slaughter <slaughter@cs.stanford.edu>"]
+description = "Legion Prof: a profiler for Legion"
+documentation = "https://legion.stanford.edu/profiling"
+homepage = "https://legion.stanford.edu/profiling"
+repository = "https://github.com/StanfordLegion/legion"
+readme = "README.md"
+keywords = ["legion", "legion-prof", "profiler"]
+categories = ["development-tools::profiling"]
+license = "Apache-2.0"
+
 edition = "2021"
+rust-version = "1.74"
 
 [features]
+default = []
+archiver = ["dep:legion_prof_viewer"]
+client = ["dep:legion_prof_viewer", "dep:url", "legion_prof_viewer?/client"]
+server = ["dep:legion_prof_viewer", "legion_prof_viewer?/server"]
 viewer = ["dep:legion_prof_viewer"]
 
 [dependencies]
-clap = "2.33"
+clap = { version = "4", features = ["cargo", "derive"] }
 csv = "1.1"
 derive_more = { version = "0.99", default_features = false, features = ["add", "display", "from"] }
 flate2 = "1"
 nom = "7"
-num_enum = "0.5"
-rayon = "1.5"
+num_enum = "0.7"
+rayon = "1.7"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-legion_prof_viewer = { git = "https://github.com/StanfordLegion/prof-viewer", branch = "master", optional = true }
+legion_prof_viewer = { version = "0.2.1", optional = true }
+url = { version = "2", optional = true }
+slice-group-by = "0.3" # because &[]::group_by is unstable
+log = "0.4"
+env_logger = "0.10"
+nonmax = { version = "0.5.5", features = ["serde"] }
 
 [profile.dev]
 opt-level = 2

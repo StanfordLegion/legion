@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -106,18 +106,23 @@ namespace Realm {
       new_node->next_alloced_node = old_first;
     } while(!first_alloced_node.compare_exchange(old_first, new_node));
   }
-  
+
   template <typename ALLOCATOR>
-  typename DynamicTable<ALLOCATOR>::NodeBase *DynamicTable<ALLOCATOR>::new_tree_node(int level, IT first_index, IT last_index, int owner, typename ALLOCATOR::FreeList *free_list /*= 0*/)
+  typename DynamicTable<ALLOCATOR>::NodeBase *
+  DynamicTable<ALLOCATOR>::new_tree_node(int level, IT first_index, IT last_index,
+                                         int owner, ET **free_list_head,
+                                         ET **free_list_tail)
   {
     if(level > 0) {
       // an inner node - we can create that ourselves
-      typename ALLOCATOR::INNER_TYPE *inner = new typename ALLOCATOR::INNER_TYPE(level, first_index, last_index);
+      typename ALLOCATOR::INNER_TYPE *inner =
+          new typename ALLOCATOR::INNER_TYPE(level, first_index, last_index);
       for(size_t i = 0; i < ALLOCATOR::INNER_TYPE::SIZE; i++)
-	inner->elems[i].store(0);
+        inner->elems[i].store(0);
       return inner;
     } else {
-      return ALLOCATOR::new_leaf_node(first_index, last_index, owner, free_list);
+      return ALLOCATOR::new_leaf_node(first_index, last_index, owner, free_list_head,
+                                      free_list_tail);
     }
   }
 
@@ -197,7 +202,7 @@ namespace Realm {
   }
 
   template <typename ALLOCATOR>
-  typename DynamicTable<ALLOCATOR>::ET *DynamicTable<ALLOCATOR>::lookup_entry(IT index, int owner, typename ALLOCATOR::FreeList *free_list /*= 0*/)
+  typename DynamicTable<ALLOCATOR>::ET *DynamicTable<ALLOCATOR>::lookup_entry(IT index, int owner, ET **free_list_head /*= 0*/, ET **free_list_tail /*= 0*/)
   {
     // first, figure out how many levels the tree must have to find our index
     int level_needed = 0;
@@ -230,7 +235,7 @@ namespace Realm {
       n_level = extract_level(rlval);
       if(!n) {
 	// simple case - just create a root node at the level we want
-	n = new_tree_node(level_needed, 0, elems_addressable - 1, owner, free_list);
+	n = new_tree_node(level_needed, 0, elems_addressable - 1, owner, free_list_head, free_list_tail);
 	n_level = level_needed;
 	root_and_level.store_release(encode_root_and_level(n, n_level));
 
@@ -241,7 +246,7 @@ namespace Realm {
 	  int parent_level = n_level + 1;
 	  IT parent_first = 0;
 	  IT parent_last = (((n->last_index + 1) << ALLOCATOR::INNER_BITS) - 1);
-	  NodeBase *parent = new_tree_node(parent_level, parent_first, parent_last, owner, free_list);
+	  NodeBase *parent = new_tree_node(parent_level, parent_first, parent_last, owner, free_list_head, free_list_tail);
 	  typename ALLOCATOR::INNER_TYPE *inner = static_cast<typename ALLOCATOR::INNER_TYPE *>(parent);
 	  inner->elems[0].store_release(n);
 	  n = parent;
@@ -290,7 +295,7 @@ namespace Realm {
 	  IT child_first = inner->first_index + (i << child_shift);
 	  IT child_last = inner->first_index + ((i + 1) << child_shift) - 1;
 
-	  child = new_tree_node(child_level, child_first, child_last, owner, free_list);
+	  child = new_tree_node(child_level, child_first, child_last, owner, free_list_head, free_list_tail);
 	  inner->elems[i].store_release(child);
 
 	  prepend_alloced_node(child);
@@ -321,52 +326,118 @@ namespace Realm {
   //
 
   template <typename ALLOCATOR>
-  DynamicTableFreeList<ALLOCATOR>::DynamicTableFreeList(DynamicTable<ALLOCATOR>& _table, int _owner)
-    : table(_table), owner(_owner), first_free(0), next_alloc(0)
-  {}
+  DynamicTableFreeList<ALLOCATOR>::DynamicTableFreeList(DynamicTable<ALLOCATOR>& _table, int _owner, DynamicTableFreeList<ALLOCATOR> *_parent_list)
+    : table(_table), parent_list(_parent_list), owner(_owner), first_free(0), next_alloc(0)
+  {
+    assert((parent_list == nullptr) || (parent_list->parent_list == nullptr));
+    ALLOCATOR::register_freelist(this);
+  }
+
+  template<typename ALLOCATOR>
+  void DynamicTableFreeList<ALLOCATOR>::push_front(DynamicTableFreeList<ALLOCATOR>::ET *entry)
+  {
+    assert(entry->next_free == nullptr);
+    // no need for lock - use compare and swap to push item onto front of
+    //  free list (no ABA problem because the popper is mutex'd)
+    DynamicTableFreeList<ALLOCATOR>::ET *old_free = first_free.load_acquire();
+    do {
+      entry->next_free = old_free;
+    } while (!first_free.compare_exchange(old_free, entry));
+  }
+  template<typename ALLOCATOR>
+  void DynamicTableFreeList<ALLOCATOR>::push_front(DynamicTableFreeList<ALLOCATOR>::ET *head, DynamicTableFreeList<ALLOCATOR>::ET *tail)
+  {
+    // no need for lock - use compare and swap to push item onto front of
+    //  free list (no ABA problem because the popper is mutex'd)
+    ET *old_head = first_free.load_acquire();
+    do {
+      tail->next_free = old_head;
+    } while (!first_free.compare_exchange(old_head, head));
+  }
+
+  template<typename ALLOCATOR>
+  typename DynamicTableFreeList<ALLOCATOR>::ET *DynamicTableFreeList<ALLOCATOR>::pop_front_underlock(void)
+  {
+    // we are the only popper, but we need to use cmpxchg's to play nice
+    // with pushers that don't take the lock
+    DynamicTableFreeList<ALLOCATOR>::ET *old_first = first_free.load_acquire();
+    while((old_first != nullptr) &&
+          !first_free.compare_exchange(old_first, old_first->next_free))
+      ;
+    if(old_first != nullptr) {
+      old_first->next_free = nullptr;
+    }
+    return old_first;
+  }
+
+  template<typename ALLOCATOR>
+  typename DynamicTableFreeList<ALLOCATOR>::ET *DynamicTableFreeList<ALLOCATOR>::pop_front(void)
+  {
+    AutoLock<> al(lock);
+    return pop_front_underlock();
+  }
 
   template <typename ALLOCATOR>
-  typename DynamicTableFreeList<ALLOCATOR>::ET *DynamicTableFreeList<ALLOCATOR>::alloc_entry(void)
+  typename DynamicTableFreeList<ALLOCATOR>::ET *
+  DynamicTableFreeList<ALLOCATOR>::alloc_entry(void)
   {
-    // take the lock first, since we're messing with the free list
-    lock.lock();
-
-    // if the free list is empty, we can fill it up by referencing the next entry to be allocated -
-    // this uses the existing dynamic-filling code to avoid race conditions
-    // we are the only popper, but we need to use cmpxchg's to play nice
-    //  with pushers that don't take the lock
     while(true) {
-      ET *old_first = first_free.load_acquire();
+      IT to_lookup;
 
-      while(old_first) {
-        // look ahead one in the list (we have exclusive access to anything
-        //  already on the list) and try to swap that in place of the old
-        //  head
-        ET *new_first = old_first->next_free;
-        if(first_free.compare_exchange(old_first, new_first)) {
-          typename DynamicTable<ALLOCATOR>::ET *entry = old_first;
-          lock.unlock();
-          entry->next_free = 0;
-          return entry;
-        } else {
-          // somebody pushed onto the list while were popping - try again
-          //  without releasing the lock
-          continue;
+      {
+        // take the lock first, since we're messing with the free list
+        AutoLock<> al(lock);
+        ET *elem = pop_front_underlock();
+        if(REALM_LIKELY(elem != nullptr)) {
+          return elem;
         }
+
+        // The free list is empty, we can fill it up by referencing the next entry to be
+        // allocated - this uses the existing dynamic-filling code to avoid race
+        // conditions
+
+        if(parent_list != nullptr) {
+          // We can reserve a region from the global list and use it to allocate
+          // from next.  This ensures any child lists of the parent list will query unique
+          // ranges of ids in order to reduce contention on the dynamic table
+          ID::IDType end_id;
+          parent_list->alloc_range(((IT)1) << ALLOCATOR::LEAF_BITS, next_alloc, end_id);
+        }
+
+        // list appears to be empty - drop the lock and do a lookup that has
+        //  the likely side-effect of pushing a bunch of new entries onto
+        //  the free list
+        to_lookup = next_alloc;
+        next_alloc += ((IT)1) << ALLOCATOR::LEAF_BITS;
       }
 
-      // list appears to be empty - drop the lock and do a lookup that has
-      //  the likely side-effect of pushing a bunch of new entries onto
-      //  the free list
-      IT to_lookup = next_alloc;
-      next_alloc += ((IT)1) << ALLOCATOR::LEAF_BITS; // do this before letting go of lock
-      lock.unlock();
-      typename DynamicTable<ALLOCATOR>::ET *dummy =
-        table.lookup_entry(to_lookup, owner, this);
+      ET *head = nullptr, *tail = nullptr;
+      ET *dummy = table.lookup_entry(to_lookup, owner, &head, &tail);
+      // Can't use dummy here since it may have been already allocated and used elsewhere.
+      // Only the items pushed in the free list as a symptom of the lookup are freely
+      // available.
       assert(dummy != 0);
-      // can't actually use dummy because we let go of lock - retake lock
-      //  and hopefully find non-empty list next time
       (void)dummy;
+      // No one is using the returned list, so we can freely pop the head off and push the
+      // rest onto this list for later
+      if(REALM_LIKELY(head != nullptr)) {
+        ET *rest = head->next_free;
+        head->next_free = nullptr;
+        if(REALM_LIKELY(rest != nullptr)) {
+          push_front(rest, tail);
+        }
+        return head;
+      }
+      // We failed to retrieve a new element from the dynamic table.  This is usually due
+      // to ID exhaustion, so lets try to steal an element from another registered list in
+      // the allocator.  This increases contention on these free lists and can reduce
+      // parallelism, so only do this as a last resort.
+      // TODO: implement a watermark for lower memory foot-print?
+      ET *elem = ALLOCATOR::steal_freelist_element(this);
+      if(REALM_LIKELY(elem != nullptr)) {
+        return elem;
+      }
+      // Unable to retrieve anything, try again
       lock.lock();
     }
   }
@@ -374,18 +445,8 @@ namespace Realm {
   template <typename ALLOCATOR>
   void DynamicTableFreeList<ALLOCATOR>::free_entry(ET *entry)
   {
-#ifdef DEBUG_REALM
-    assert(entry->next_free == 0);
-#endif
-
-    // no need for lock - use compare and swap to push item onto front of
-    //  free list (no ABA problem because the popper is mutex'd)
-    ET *old_free = first_free.load();
-    while(true) {
-      entry->next_free = old_free;
-      if(first_free.compare_exchange(old_free, entry))
-        return;
-    }
+    // TODO: potentially implement a mechanism to limit the size of the free list
+    push_front(entry);
   }
 
   // allocates a range of IDs that can be given to a remote node for remote allocation

@@ -1,4 +1,4 @@
--- Copyright 2023 Stanford University
+-- Copyright 2024 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -29,7 +29,7 @@ end
 
 task foo_non_inner(r : region(node))
 where reduces +(r.m) do
-  for x in r do x.m += 1 end -- Force this to not be inner
+  -- for x in r do x.m += 1 end -- Force this to not be inner
   foo_leaf(r)
 end
 

@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,7 +20,7 @@
 
 #include "realm/python/python_source.h"
 
-#ifdef REALM_USE_OPENMP
+#if defined(REALM_USE_OPENMP) && !defined(REALM_OPENMP_SYSTEM_RUNTIME)
 #include "realm/openmp/openmp_threadpool.h"
 #endif
 
@@ -32,9 +32,7 @@ namespace Realm {
   struct PyObject;
   struct PyInterpreterState;
   struct PyThreadState {
-#if REALM_PYTHON_VERSION_MAJOR >= 3
     struct PyThreadState *prev;
-#endif
     struct PyThreadState *next;
     struct PyInterpreterState *interp;
     // lots more stuff here
@@ -77,9 +75,10 @@ namespace Realm {
     void (*PyEval_RestoreThread)(PyThreadState *);
     PyThreadState *(*PyEval_SaveThread)(void);
 
+    PyThreadState *(*PyGILState_GetThisThreadState)(void);
     PyThreadState *(*PyThreadState_Swap)(PyThreadState *);
     PyThreadState *(*PyThreadState_Get)(void);
-    int (*PyGILState_Check)(void);
+    PyObject      *(*PyThreadState_GetDict)(void);
 
     void (*PyErr_PrintEx)(int set_sys_last_vars);
 
@@ -90,12 +89,13 @@ namespace Realm {
     PyObject *(*PyLong_FromUnsignedLong)(unsigned long);
 
     PyObject *(*PyObject_CallFunction)(PyObject *, const char *, ...);
-    PyObject* (*PyObject_CallObject)(PyObject *callable, PyObject *args);
+    PyObject *(*PyObject_CallObject)(PyObject *callable, PyObject *args);
     PyObject *(*PyObject_GetAttrString)(PyObject *, const char *);
-    int (*PyObject_Print)(PyObject *, FILE *, int);
+    // PyObject_Print is not abi3 compatible and is used exclusively for debugging
+    // int (*PyObject_Print)(PyObject *, FILE *, int);
 
-    void (*PyRun_SimpleString)(const char *);
-    PyObject *(*PyRun_String)(const char *, int, PyObject *, PyObject *);
+    PyObject *(*Py_CompileString)(const char *, const char *, int);
+    PyObject *(*PyEval_EvalCode)(PyObject *, PyObject *, PyObject *);
 
     PyObject *(*PyTuple_New)(Py_ssize_t len);
     int (*PyTuple_SetItem)(PyObject *p, Py_ssize_t pos, PyObject *o);
@@ -110,6 +110,7 @@ namespace Realm {
 
     void import_module(const std::string& module_name);
     void run_string(const std::string& script_text);
+    int check_gil_state();
 
   protected:
     void *handle;
@@ -189,7 +190,7 @@ namespace Realm {
 
     int numa_node;
     CoreReservation *core_rsrv;
-#ifdef REALM_USE_OPENMP
+#if defined(REALM_USE_OPENMP) && !defined(REALM_OPENMP_SYSTEM_RUNTIME)
     ThreadPool *omp_threadpool;
 #endif
     const std::vector<std::string>& import_modules;

@@ -1,4 +1,4 @@
--- Copyright 2023 Stanford University
+-- Copyright 2024 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -31,7 +31,8 @@ local function dlopen_library(library_name)
   end
 end
 
-if os.execute("bash -c \"[ `uname` == 'Darwin' ]\"") == 0 then
+local ffi = require("ffi")
+if ffi.os == "OSX" then
   dlopen_library("libregent.dylib")
 else
   dlopen_library("libregent.so")

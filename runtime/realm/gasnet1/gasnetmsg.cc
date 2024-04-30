@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -845,7 +845,7 @@ public:
     int l = strlen(filename);
     if(l && (filename[l-1] != '/'))
       filename[l++] = '/';
-    sprintf(filename+l, "msgtiming_%d.dat", gasnet_mynode());
+    snprintf(filename+l, sizeof filename-l, "msgtiming_%d.dat", gasnet_mynode());
     int fd = open(filename, O_WRONLY | O_CREAT | O_TRUNC, 0666);
     assert(fd >= 0);
 
@@ -2147,7 +2147,7 @@ public:
 
 #ifdef TRACE_MESSAGES
     char filename[80];
-    sprintf(filename, "ams_%d.log", gasnet_mynode());
+    snprintf(filename, sizeof filename, "ams_%d.log", gasnet_mynode());
     msgtrace_file = fopen(filename, "w");
     if(!msgtrace_file) {
       log_amsg.fatal() << "could not open message trace file '" << filename << "': " << strerror(errno);

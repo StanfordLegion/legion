@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,8 +18,10 @@
 
 #include "realm/realm_config.h"
 
+#if defined (__CUDACC__) || defined (__HIPCC__)
 #ifdef REALM_USE_HIP
 #include <hip/hip_runtime.h>
+#endif
 #endif
 
 namespace Realm {

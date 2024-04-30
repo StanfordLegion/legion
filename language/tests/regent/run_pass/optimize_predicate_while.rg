@@ -1,4 +1,4 @@
--- Copyright 2023 Stanford University
+-- Copyright 2024 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -13,7 +13,13 @@
 -- limitations under the License.
 
 --runs-with:
--- [[], ["-fpredicate-unroll", "0"], ["-fpredicate-unroll", "1"], ["-fpredicate-unroll", "5"]]
+-- [
+--   ["-fpredicate", "1"],
+--   ["-fpredicate", "1", "-fpredicate-unroll", "0"],
+--   ["-fpredicate", "1", "-fpredicate-unroll", "1"],
+--   ["-fpredicate", "1", "-fpredicate-unroll", "5"],
+--   ["-fpredicate", "0"]
+-- ]
 
 import "regent"
 

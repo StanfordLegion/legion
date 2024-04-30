@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -139,7 +139,10 @@ namespace Realm {
 
     // gets info related to rdma access from other nodes
     const ByteArray *get_rdma_info(NetworkModule *network) const;
-    
+
+    // rdma transfers need to use LocalAddress and RemoteAddress helper objects
+    //  rather than raw pointers
+    virtual bool get_local_addr(off_t offset, LocalAddress &local_addr);
     virtual bool get_remote_addr(off_t offset, RemoteAddress& remote_addr);
 
     // gets the network segment info for potential registration
@@ -231,6 +234,11 @@ namespace Realm {
 
     BasicRangeAllocator(void);
     ~BasicRangeAllocator(void);
+
+    BasicRangeAllocator(const BasicRangeAllocator &) = default;
+    BasicRangeAllocator &operator=(const BasicRangeAllocator &) = default;
+    BasicRangeAllocator(BasicRangeAllocator &&) noexcept = default;
+    BasicRangeAllocator &operator=(BasicRangeAllocator &&) noexcept = default;
 
     void swap(BasicRangeAllocator<RT, TT>& swap_with);
 
@@ -436,6 +444,9 @@ namespace Realm {
       virtual void get_bytes(off_t offset, void *dst, size_t size);
       virtual void put_bytes(off_t offset, const void *src, size_t size);
       virtual void *get_direct_ptr(off_t offset, size_t size);
+      private:
+      // For mapped remote memory, this is non-null
+      void *base;
     };
 
 
@@ -478,6 +489,11 @@ namespace Realm {
       static void handle_message(NodeID sender, const MemStorageReleaseResponse &msg,
 				 const void *data, size_t datalen);
     };
+
+    /// @brief Returns the full path for use in SharedMemoryInfo::create and SharedMemoryInfo::open given the realm id
+    /// @param id identifier of the realm object to get the name of
+    /// @return shared memory name of the requested object
+    std::string get_shm_name(realm_id_t id);
 
 }; // namespace Realm
 

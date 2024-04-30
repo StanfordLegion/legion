@@ -1,4 +1,4 @@
--- Copyright 2023 Stanford University
+-- Copyright 2024 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -15,15 +15,12 @@
 -- runs-with:
 -- [
 --   ["pennant.tests/sedovsmall/sedovsmall.pnt",
---    "-npieces", "1", "-seq_init", "1", "-par_init", "1", "-interior", "0",
---    "-fflow-spmd", "1"],
+--    "-npieces", "1", "-seq_init", "1", "-par_init", "1", "-interior", "0"],
 --   ["pennant.tests/sedov/sedov.pnt",
 --    "-npieces", "3", "-ll:cpu", "3", "-seq_init", "1", "-par_init", "1", "-interior", "0",
---    "-absolute", "2e-6", "-relative", "1e-8", "-relative_absolute", "1e-10",
---    "-fflow-spmd", "1"],
+--    "-absolute", "2e-6", "-relative", "1e-8", "-relative_absolute", "1e-10"],
 --   ["pennant.tests/leblanc/leblanc.pnt",
---    "-npieces", "2", "-ll:cpu", "2", "-seq_init", "1", "-par_init", "1", "-interior", "0",
---    "-fflow-spmd", "1"]
+--    "-npieces", "2", "-ll:cpu", "2", "-seq_init", "1", "-par_init", "1", "-interior", "0"]
 -- ]
 
 -- Inspired by https://github.com/losalamos/PENNANT
@@ -1186,7 +1183,6 @@ task toplevel()
   var dt = dtmax
   var dthydro = dtmax
 
-  __demand(__spmd)
   do
     -- Initialization
     for _ = 0, par_init do
@@ -1258,7 +1254,7 @@ task toplevel()
   var time_copy = time
 
   -- Main Simulation Loop
-  __demand(__spmd, __predicate, __trace)
+  __demand(__predicate, __trace)
   while continue_simulation(warmup, cycle, cstop, time, tstop) do
     -- if warmup and cycle > 0 then
     --   wait_for(dthydro)
@@ -1377,11 +1373,5 @@ task toplevel()
   -- write_output(conf, rz_all, rp_all, rs_all)
 end
 
-if os.getenv('SAVEOBJ') == '1' then
-  local root_dir = arg[0]:match(".*/") or "./"
-  local link_flags = {"-L" .. root_dir, "-lpennant"}
-  local exe = os.getenv('OBJNAME') or "pennant"
-  regentlib.saveobj(toplevel, exe, "executable", cpennant.register_mappers, link_flags)
-else
-  regentlib.start(toplevel, cpennant.register_mappers)
-end
+local launcher = require("std/launcher")
+launcher.launch(toplevel, "pennant", cpennant.register_mappers, {"-lpennant", "-lm"})

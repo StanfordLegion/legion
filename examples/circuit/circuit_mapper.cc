@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University
+/* Copyright 2024 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -132,17 +132,17 @@ void CircuitMapper::map_circuit_region(const MapperContext ctx, LogicalRegion re
                                        const std::set<FieldID> &privilege_fields,
                                        ReductionOpID redop, LogicalRegion colocation)
 {
-  const std::pair<LogicalRegion,Memory> key(region, target);
+  const MemoizationKey key(region, colocation, target);
   if (redop > 0) {
     assert(redop == REDUCE_ID);
-    std::map<std::pair<LogicalRegion,Memory>,PhysicalInstance>::const_iterator
+    std::map<MemoizationKey,PhysicalInstance>::const_iterator
       finder = reduction_instances.find(key);
     if (finder != reduction_instances.end()) {
       instances.push_back(finder->second);
       return;
     }
   } else {
-    std::map<std::pair<LogicalRegion,Memory>,PhysicalInstance>::const_iterator
+    std::map<MemoizationKey,PhysicalInstance>::const_iterator
       finder = local_instances.find(key);
     if (finder != local_instances.end()) {
       instances.push_back(finder->second);
@@ -206,11 +206,19 @@ void CircuitMapper::map_circuit_region(const MapperContext ctx, LogicalRegion re
     local_instances[key] = result;
   if (colocation.exists())
   {
-    const std::pair<LogicalRegion,Memory> key(colocation, target); 
+    // Save it in the non-colocation cases too
+    const MemoizationKey one(region, LogicalRegion::NO_REGION, target);
+    const MemoizationKey two(colocation, LogicalRegion::NO_REGION, target);
     if (redop > 0)
-      reduction_instances[key] = result;
+    {
+      reduction_instances[one] = result;
+      reduction_instances[two] = result;
+    }
     else
-      local_instances[key] = result;
+    {
+      local_instances[one] = result;
+      local_instances[two] = result;
+    }
   }
 }
 

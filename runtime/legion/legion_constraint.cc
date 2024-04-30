@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -629,9 +629,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     SpecializedConstraint::SpecializedConstraint(SpecializedKind k,
-      ReductionOpID r, bool no, bool ext, Domain c, size_t pieces, int overhead)
-      : kind(k), redop(r), collective(c), max_pieces(pieces),
-        max_overhead(overhead), no_access(no), exact(ext)
+      ReductionOpID r, bool no, bool ext, size_t pieces, int overhead)
+      : kind(k), redop(r),  max_pieces(pieces), max_overhead(overhead),
+        no_access(no), exact(ext)
     //-------------------------------------------------------------------------
     {
       if (redop != 0)
@@ -655,8 +655,7 @@ namespace Legion {
     {
       return ((kind == other.kind) && (redop == other.redop) &&
         (max_pieces == other.max_pieces) && (max_overhead == other.max_overhead)
-          && (collective == other.collective) && (no_access == other.no_access) 
-          && (exact == other.exact));
+          && (no_access == other.no_access) && (exact == other.exact));
     }
 
     //--------------------------------------------------------------------------
@@ -670,8 +669,6 @@ namespace Legion {
         return false;
       // Make sure we also handle the unspecialized case of redop 0
       if ((redop != other.redop) && (other.redop != 0))
-        return false;
-      if (collective != other.collective)
         return false;
       if (max_pieces > other.max_pieces)
         return false;
@@ -697,8 +694,6 @@ namespace Legion {
       // Only conflicts if we both have non-zero redops that don't equal
       if ((redop != other.redop) && (redop != 0) && (other.redop != 0))
         return true;
-      if (collective != other.collective)
-        return true;
       if (max_pieces != other.max_pieces)
         return true;
       if (max_overhead != other.max_overhead)
@@ -714,7 +709,6 @@ namespace Legion {
     {
       SWAP_HELPER(SpecializedKind, kind)
       SWAP_HELPER(ReductionOpID, redop)
-      SWAP_HELPER(Domain, collective)
       SWAP_HELPER(size_t, max_pieces)
       SWAP_HELPER(int, max_overhead)
       SWAP_HELPER(bool, no_access)
@@ -735,7 +729,6 @@ namespace Legion {
         rez.serialize(max_pieces);
         rez.serialize(max_overhead);
       }
-      rez.serialize(collective);
       rez.serialize<bool>(no_access);
       rez.serialize<bool>(exact);
     }
@@ -754,7 +747,6 @@ namespace Legion {
         derez.deserialize(max_pieces);
         derez.deserialize(max_overhead);
       }
-      derez.deserialize(collective);
       derez.deserialize<bool>(no_access);
       derez.deserialize<bool>(exact);
     }
@@ -1358,83 +1350,81 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
-    // Splitting Constraint 
+    // Tiling Constraint 
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    SplittingConstraint::SplittingConstraint(void)
-      : chunks(true)
+    TilingConstraint::TilingConstraint(void)
+      : tiles(true)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    SplittingConstraint::SplittingConstraint(DimensionKind k)
-      : kind(k), chunks(true)
+    TilingConstraint::TilingConstraint(DimensionKind d)
+      : dim(d), tiles(true)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    SplittingConstraint::SplittingConstraint(DimensionKind k, size_t v)
-      : kind(k), value(v), chunks(false)
+    TilingConstraint::TilingConstraint(DimensionKind d, size_t v, bool t)
+      : dim(d), value(v), tiles(t)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    bool SplittingConstraint::entails(const SplittingConstraint &other) const
+    bool TilingConstraint::entails(const TilingConstraint &other) const
     //--------------------------------------------------------------------------
     {
-      if (kind != other.kind)
+      if (dim != other.dim)
         return false;
       if (value != other.value)
         return false;
-      if (chunks != other.value)
+      if (tiles != other.tiles)
         return false;
       return true;
     }
 
     //--------------------------------------------------------------------------
-    bool SplittingConstraint::conflicts(const SplittingConstraint &other) const
+    bool TilingConstraint::conflicts(const TilingConstraint &other) const
     //--------------------------------------------------------------------------
     {
-      if (kind != other.kind)
+      if (dim != other.dim)
         return false;
       if (value != other.value)
         return true;
-      if (chunks != other.chunks)
+      if (tiles != other.tiles)
         return true;
       return false;
     }
 
     //--------------------------------------------------------------------------
-    void SplittingConstraint::swap(SplittingConstraint &rhs)
+    void TilingConstraint::swap(TilingConstraint &rhs)
     //--------------------------------------------------------------------------
     {
-      SWAP_HELPER(DimensionKind, kind)
+      SWAP_HELPER(DimensionKind, dim)
       SWAP_HELPER(size_t, value)
-      SWAP_HELPER(bool, chunks)
+      SWAP_HELPER(bool, tiles)
     }
 
     //--------------------------------------------------------------------------
-    void SplittingConstraint::serialize(Serializer &rez) const
+    void TilingConstraint::serialize(Serializer &rez) const
     //--------------------------------------------------------------------------
     {
-      rez.serialize(kind);
-      rez.serialize(chunks);
-      if (!chunks)
-        rez.serialize(value);
+      rez.serialize(dim);
+      rez.serialize(value);
+      rez.serialize(tiles);
     }
 
     //--------------------------------------------------------------------------
-    void SplittingConstraint::deserialize(Deserializer &derez)
+    void TilingConstraint::deserialize(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      derez.deserialize(kind);
-      derez.deserialize(chunks);
-      if (!chunks)
-        derez.deserialize(value);
+      derez.deserialize(dim);
+      derez.deserialize(value);
+      derez.deserialize(tiles);
     }
 
     /////////////////////////////////////////////////////////////
@@ -1714,6 +1704,116 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // Padding Constraint
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    PaddingConstraint::PaddingConstraint(const Domain &del)
+      : delta(del)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    PaddingConstraint::PaddingConstraint(const DomainPoint &lower,
+                                         const DomainPoint &upper)
+      : delta(Domain(lower, upper))
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    bool PaddingConstraint::entails(const PaddingConstraint &other) const
+    //--------------------------------------------------------------------------
+    {
+      if (other.delta.get_dim() > 0)
+      {
+        if (delta.get_dim() != other.delta.get_dim())
+          return false;
+        for (int idx = 0; idx < delta.get_dim(); idx++)
+        {
+          if (other.delta.lo()[idx] >= 0)
+          {
+            if (other.delta.lo()[idx] == 0)
+            {
+              if (delta.lo()[idx] != 0)
+                return false;
+            }
+            else if (delta.lo()[idx] < other.delta.lo()[idx])
+              return false;
+          }
+          if (other.delta.hi()[idx] >= 0)
+          {
+            if (other.delta.hi()[idx] == 0)
+            {
+              if (delta.hi()[idx] != 0)
+                return false;
+            }
+            else if (delta.hi()[idx] < other.delta.hi()[idx])
+              return false;
+          }
+        }
+      }
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    bool PaddingConstraint::conflicts(const PaddingConstraint &other) const
+    //--------------------------------------------------------------------------
+    {
+      if ((delta.get_dim() > 0) && (other.delta.get_dim() > 0))
+      {
+        if (delta.get_dim() != other.delta.get_dim())
+          return true;
+        for (int idx = 0; idx < delta.get_dim(); idx++)
+        {
+          if ((delta.lo()[idx] >= 0) && (other.delta.lo()[idx] >= 0))
+          {
+            if ((delta.lo()[idx] == 0) || (other.delta.lo()[idx] == 0))
+            {
+              if (delta.lo()[idx] != other.delta.lo()[idx])
+                return true;
+            }
+            else if (delta.lo()[idx] < other.delta.lo()[idx])
+              return true;
+          }
+          if ((delta.hi()[idx] >= 0) && (other.delta.hi()[idx] >= 0))
+          {
+            if ((delta.hi()[idx] == 0) || (other.delta.hi()[idx] == 0))
+            {
+              if (delta.hi()[idx] != other.delta.hi()[idx])
+                return true;
+            }
+            else if (delta.hi()[idx] < other.delta.hi()[idx])
+              return true;
+          }
+        }
+      }
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    void PaddingConstraint::swap(PaddingConstraint &rhs)
+    //--------------------------------------------------------------------------
+    {
+      SWAP_HELPER(Domain, delta)
+    }
+
+    //--------------------------------------------------------------------------
+    void PaddingConstraint::serialize(Serializer &rez) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize(delta);
+    }
+
+    //--------------------------------------------------------------------------
+    void PaddingConstraint::deserialize(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      derez.deserialize(delta);
+    }
+
+    /////////////////////////////////////////////////////////////
     // Layout Constraint Set 
     /////////////////////////////////////////////////////////////
 
@@ -1746,10 +1846,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     LayoutConstraintSet& LayoutConstraintSet::add_constraint(
-                                          const SplittingConstraint &constraint)
+                                             const TilingConstraint &constraint)
     //--------------------------------------------------------------------------
     {
-      splitting_constraints.push_back(constraint);
+      tiling_constraints.push_back(constraint);
       return *this;
     }
 
@@ -1799,23 +1899,205 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    LayoutConstraintSet& LayoutConstraintSet::add_constraint(
+                                            const PaddingConstraint &constraint)
+    //--------------------------------------------------------------------------
+    {
+      padding_constraint = constraint;
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
     bool LayoutConstraintSet::operator==(const LayoutConstraintSet &other) const
     //--------------------------------------------------------------------------
     {
-      return specialized_constraint == other.specialized_constraint
-             && field_constraint == other.field_constraint
-             && memory_constraint == other.memory_constraint
-             && pointer_constraint == other.pointer_constraint
-             && ordering_constraint == other.ordering_constraint
-             && splitting_constraints == other.splitting_constraints
-             && dimension_constraints == other.dimension_constraints
-             && alignment_constraints == other.alignment_constraints
-             && offset_constraints == other.offset_constraints;
+      return equals(other);
     }
+
+    //--------------------------------------------------------------------------
+    bool LayoutConstraintSet::operator!=(const LayoutConstraintSet &other) const
+    //--------------------------------------------------------------------------
+    {
+      return !equals(other);
+    }
+
+    //--------------------------------------------------------------------------
+    bool LayoutConstraintSet::equals(const LayoutConstraintSet &other,
+                        LayoutConstraintKind *bad_kind, size_t *bad_index) const
+    //--------------------------------------------------------------------------
+    {
+      if (specialized_constraint != other.specialized_constraint)
+      {
+        if (bad_kind != NULL)
+          *bad_kind = LEGION_SPECIALIZED_CONSTRAINT;
+        if (bad_index != NULL)
+          *bad_index = 0;
+        return false;
+      }
+      if (field_constraint != other.field_constraint)
+      {
+        if (bad_kind != NULL)
+          *bad_kind = LEGION_FIELD_CONSTRAINT;
+        if (bad_index != NULL)
+          *bad_index = 0;
+        return false;
+      }
+      if (memory_constraint != other.memory_constraint)
+      {
+        if (bad_kind != NULL)
+          *bad_kind = LEGION_MEMORY_CONSTRAINT;
+        if (bad_index != NULL)
+          *bad_index = 0;
+        return false;
+      }
+      if (pointer_constraint != other.pointer_constraint)
+      {
+        if (bad_kind != NULL)
+          *bad_kind = LEGION_POINTER_CONSTRAINT;
+        if (bad_index != NULL)
+          *bad_index = 0;
+        return false;
+      }
+      if (ordering_constraint != other.ordering_constraint)
+      {
+        if (bad_kind != NULL)
+          *bad_kind = LEGION_ORDERING_CONSTRAINT;
+        if (bad_index != NULL)
+          *bad_index = 0;
+        return false;
+      }
+      if (padding_constraint != other.padding_constraint)
+      {
+        if (bad_kind != NULL)
+          *bad_kind = LEGION_PADDING_CONSTRAINT;
+        if (bad_index != NULL)
+          *bad_index = 0;
+        return false;
+      }
+      if (tiling_constraints.size() != other.tiling_constraints.size())
+      {
+        if (bad_kind != NULL)
+          *bad_kind = LEGION_TILING_CONSTRAINT;
+        if (bad_index != NULL)
+          *bad_index = 0;
+        return false;
+      }
+      for (unsigned idx = 0; idx < tiling_constraints.size(); idx++)
+      {
+        bool found = false;
+        for (std::vector<TilingConstraint>::const_iterator it =
+              other.tiling_constraints.begin(); it !=
+              other.tiling_constraints.end(); it++)
+        {
+          if (tiling_constraints[idx] != *it)
+            continue;
+          found = true;
+          break;
+        }
+        if (!found)
+        {
+          if (bad_kind != NULL)
+            *bad_kind = LEGION_TILING_CONSTRAINT;
+          if (bad_index != NULL)
+            *bad_index = idx;
+          return false;
+        }
+      }
+      if (dimension_constraints.size() != other.dimension_constraints.size())
+      {
+        if (bad_kind != NULL)
+          *bad_kind = LEGION_DIMENSION_CONSTRAINT;
+        if (bad_index != NULL)
+          *bad_index = 0;
+        return false;
+      }
+      for (unsigned idx = 0; idx < dimension_constraints.size(); idx++)
+      {
+        bool found = false;
+        for (std::vector<DimensionConstraint>::const_iterator it =
+              other.dimension_constraints.begin(); it !=
+              other.dimension_constraints.end(); it++)
+        {
+          if (dimension_constraints[idx] != *it)
+            continue;
+          found = true;
+          break;
+        }
+        if (!found)
+        {
+          if (bad_kind != NULL)
+            *bad_kind = LEGION_DIMENSION_CONSTRAINT;
+          if (bad_index != NULL)
+            *bad_index = idx;
+          return false;
+        }
+      }
+      if (alignment_constraints.size() != other.alignment_constraints.size())
+      {
+        if (bad_kind != NULL)
+          *bad_kind = LEGION_ALIGNMENT_CONSTRAINT;
+        if (bad_index != NULL)
+          *bad_index = 0;
+        return false;
+      }
+      for (unsigned idx = 0; idx < alignment_constraints.size(); idx++)
+      {
+        bool found = false;
+        for (std::vector<AlignmentConstraint>::const_iterator it =
+              other.alignment_constraints.begin(); it !=
+              other.alignment_constraints.end(); it++)
+        {
+          if (alignment_constraints[idx] != *it)
+            continue;
+          found = true;
+          break;
+        }
+        if (!found)
+        {
+          if (bad_kind != NULL)
+            *bad_kind = LEGION_ALIGNMENT_CONSTRAINT;
+          if (bad_index != NULL)
+            *bad_index = idx;
+          return false;
+        }
+      }
+      if (offset_constraints.size() != other.offset_constraints.size())
+      {
+        if (bad_kind != NULL)
+          *bad_kind = LEGION_OFFSET_CONSTRAINT;
+        if (bad_index != NULL)
+          *bad_index = 0;
+        return false;
+      }
+      for (unsigned idx = 0; idx < offset_constraints.size(); idx++)
+      {
+        bool found = false;
+        for (std::vector<OffsetConstraint>::const_iterator it =
+              other.offset_constraints.begin(); it !=
+              other.offset_constraints.end(); it++)
+        {
+          if (offset_constraints[idx] != *it)
+            continue;
+          found = true;
+          break;
+        }
+        if (!found)
+        {
+          if (bad_kind != NULL)
+            *bad_kind = LEGION_OFFSET_CONSTRAINT;
+          if (bad_index != NULL)
+            *bad_index = idx;
+          return false;
+        }
+      }
+      return true;
+    }
+
     //--------------------------------------------------------------------------
     bool LayoutConstraintSet::entails(const LayoutConstraintSet &other,
                                       unsigned total_dims,
-                                      const LayoutConstraint **failed) const
+                                      const LayoutConstraint **failed,
+                                      bool test_pointer) const
     //--------------------------------------------------------------------------
     {
       if (!specialized_constraint.entails(other.specialized_constraint))
@@ -1836,10 +2118,16 @@ namespace Legion {
           *failed = &other.memory_constraint;
         return false;
       }
-      if (!pointer_constraint.entails(other.pointer_constraint))
+      if (test_pointer && !pointer_constraint.entails(other.pointer_constraint))
       {
         if (failed != NULL)
           *failed = &other.pointer_constraint;
+        return false;
+      }
+      if (!padding_constraint.entails(other.padding_constraint))
+      {
+        if (failed != NULL)
+          *failed = &other.padding_constraint;
         return false;
       }
       if (!ordering_constraint.entails(other.ordering_constraint, total_dims))
@@ -1848,14 +2136,14 @@ namespace Legion {
           *failed = &other.ordering_constraint;
         return false;
       }
-      for (std::vector<SplittingConstraint>::const_iterator it = 
-            other.splitting_constraints.begin(); it !=
-            other.splitting_constraints.end(); it++)
+      for (std::vector<TilingConstraint>::const_iterator it = 
+            other.tiling_constraints.begin(); it !=
+            other.tiling_constraints.end(); it++)
       {
         bool entailed = false;
-        for (unsigned idx = 0; idx < splitting_constraints.size(); idx++)
+        for (unsigned idx = 0; idx < tiling_constraints.size(); idx++)
         {
-          if (splitting_constraints[idx].entails(*it))
+          if (tiling_constraints[idx].entails(*it))
           {
             entailed = true;
             break;
@@ -1962,18 +2250,24 @@ namespace Legion {
           *conflict = &pointer_constraint;
         return true;
       }
+      if (padding_constraint.conflicts(other.padding_constraint))
+      {
+        if (conflict != NULL)
+          *conflict = &padding_constraint;
+        return true;
+      }
       if (ordering_constraint.conflicts(other.ordering_constraint, total_dims))
       {
         if (conflict != NULL)
           *conflict = &ordering_constraint;
         return true;
       }
-      for (std::vector<SplittingConstraint>::const_iterator it = 
-            splitting_constraints.begin(); it != 
-            splitting_constraints.end(); it++)
+      for (std::vector<TilingConstraint>::const_iterator it = 
+            tiling_constraints.begin(); it != 
+            tiling_constraints.end(); it++)
       {
-        for (unsigned idx = 0; idx < other.splitting_constraints.size(); idx++)
-          if (it->conflicts(other.splitting_constraints[idx]))
+        for (unsigned idx = 0; idx < other.tiling_constraints.size(); idx++)
+          if (it->conflicts(other.tiling_constraints[idx]))
           {
             if (conflict != NULL)
               *conflict = &(*it);
@@ -2036,8 +2330,10 @@ namespace Legion {
           return &ordering_constraint;
         case LEGION_POINTER_CONSTRAINT:
           return &pointer_constraint;
-        case LEGION_SPLITTING_CONSTRAINT:
-          return &splitting_constraints[index];
+        case LEGION_PADDING_CONSTRAINT:
+          return &padding_constraint;
+        case LEGION_TILING_CONSTRAINT:
+          return &tiling_constraints[index];
         case LEGION_DIMENSION_CONSTRAINT:
           return &dimension_constraints[index];
         case LEGION_ALIGNMENT_CONSTRAINT:
@@ -2058,8 +2354,9 @@ namespace Legion {
       field_constraint.swap(rhs.field_constraint);
       memory_constraint.swap(rhs.memory_constraint);
       pointer_constraint.swap(rhs.pointer_constraint);
+      padding_constraint.swap(rhs.padding_constraint);
       ordering_constraint.swap(rhs.ordering_constraint);
-      splitting_constraints.swap(rhs.splitting_constraints);
+      tiling_constraints.swap(rhs.tiling_constraints);
       dimension_constraints.swap(rhs.dimension_constraints);
       alignment_constraints.swap(rhs.alignment_constraints);
       offset_constraints.swap(rhs.offset_constraints);
@@ -2073,6 +2370,7 @@ namespace Legion {
       field_constraint.serialize(rez);
       memory_constraint.serialize(rez);
       pointer_constraint.serialize(rez);
+      padding_constraint.serialize(rez);
       ordering_constraint.serialize(rez);
 #define PACK_CONSTRAINTS(Type, constraints)                             \
       rez.serialize<size_t>(constraints.size());                        \
@@ -2081,7 +2379,7 @@ namespace Legion {
       {                                                                 \
         it->serialize(rez);                                             \
       }
-      PACK_CONSTRAINTS(SplittingConstraint, splitting_constraints)
+      PACK_CONSTRAINTS(TilingConstraint, tiling_constraints)
       PACK_CONSTRAINTS(DimensionConstraint, dimension_constraints)
       PACK_CONSTRAINTS(AlignmentConstraint, alignment_constraints)
       PACK_CONSTRAINTS(OffsetConstraint, offset_constraints)
@@ -2096,6 +2394,7 @@ namespace Legion {
       field_constraint.deserialize(derez);
       memory_constraint.deserialize(derez);
       pointer_constraint.deserialize(derez);
+      padding_constraint.deserialize(derez);
       ordering_constraint.deserialize(derez);
 #define UNPACK_CONSTRAINTS(Type, constraints)                       \
       {                                                             \
@@ -2108,7 +2407,7 @@ namespace Legion {
           it->deserialize(derez);                                   \
         }                                                           \
       }
-      UNPACK_CONSTRAINTS(SplittingConstraint, splitting_constraints)
+      UNPACK_CONSTRAINTS(TilingConstraint, tiling_constraints)
       UNPACK_CONSTRAINTS(DimensionConstraint, dimension_constraints)
       UNPACK_CONSTRAINTS(AlignmentConstraint, alignment_constraints)
       UNPACK_CONSTRAINTS(OffsetConstraint, offset_constraints)

@@ -2,13 +2,14 @@
 #include <cstdlib>
 #include <cassert>
 #include <cstring>
+#include <chrono>
 
 #include <time.h>
 
-#include "osdep.h"
-
 #include "realm.h"
 #include "realm/profiling.h"
+
+#include "osdep.h"
 
 using namespace Realm;
 using namespace Realm::ProfilingMeasurements;
@@ -61,10 +62,10 @@ MyMachineUpdateTracker tracker;
 #endif
 
 struct ChildTaskArgs {
-  bool inject_fault;
-  bool hang;
-  int sleep_useconds;
-  Event wait_on;
+  bool inject_fault = false;
+  bool hang = false;
+  int sleep_useconds = 100000;
+  Event wait_on = Event::NO_EVENT;
 };
 
 void child_task(const void *args, size_t arglen, 
@@ -301,9 +302,12 @@ void top_level_task(const void *args, size_t arglen,
   if(has_gpus)
     pr.add_measurement<OperationTimelineGPU>();
 
-  // we expect (exactly) 7 responses for tasks + 2 for instances
+  // we expect (exactly) 5 responses for tasks + 2 for instances
   // exception: gpu doesn't do the interrupt-during-wait task yet
-  expected_responses_remaining = (has_gpus ? 6 : 7) + 2;
+  // TODO: update the responses for tasks back to 7 once we bring
+  //   back the failed cancel_operation test cases.
+  // expected_responses_remaining = (has_gpus ? 6 : 7) + 2;
+  expected_responses_remaining = 7;
   response_counter = Barrier::create_barrier(expected_responses_remaining);
 
 #ifndef _MSC_VER
@@ -313,19 +317,13 @@ void top_level_task(const void *args, size_t arglen,
   alarm(60);
 #endif
 
-  ChildTaskArgs cargs;
-  cargs.inject_fault = false;
-  cargs.sleep_useconds = 100000;
-  cargs.hang = false;
-  cargs.wait_on = Event::NO_EVENT;
-  Event e1 = task_proc.spawn(CHILD_TASK, &cargs, sizeof(cargs), prs);
-
-  cargs.inject_fault = true;
-  Event e2 = task_proc.spawn(CHILD_TASK, &cargs, sizeof(cargs), prs, e1);
-  cargs.inject_fault = false;
-  Event e3 = task_proc.spawn(CHILD_TASK, &cargs, sizeof(cargs), prs, e2);
-
   {
+    ChildTaskArgs cargs;
+    Event e1 = task_proc.spawn(CHILD_TASK, &cargs, sizeof(cargs), prs);
+    cargs.inject_fault = true;
+    Event e2 = task_proc.spawn(CHILD_TASK, &cargs, sizeof(cargs), prs, e1);
+    cargs.inject_fault = false;
+    Event e3 = task_proc.spawn(CHILD_TASK, &cargs, sizeof(cargs), prs, e2);
     bool poisoned = false;
     e3.wait_faultaware(poisoned);
     printf("e3 done! (poisoned=%d)\n", poisoned);
@@ -333,6 +331,7 @@ void top_level_task(const void *args, size_t arglen,
 
   // test event wait profiling
   {
+    ChildTaskArgs cargs;
     UserEvent u = UserEvent::create_user_event();
     cargs.wait_on = u;
     Event e4 = task_proc.spawn(CHILD_TASK, &cargs, sizeof(cargs), prs);
@@ -343,8 +342,18 @@ void top_level_task(const void *args, size_t arglen,
     e4.wait();
   }
 
+  // Disable the cancel_operation due to this error https://gitlab.com/StanfordLegion/legion/-/jobs/5715868078
+  // Even though the CHILD_TASK will sleep for 5s and there is a sleep(2) after spawn, 
+  //   which should be enough for issuing the cancel_operation, 
+  //   the CI container does not guarantee the sleep will be accurate, so it is possible
+  //   that the cancel_operation is issued after the task is done. 
+  // Tried to fix it with the PR https://gitlab.com/StanfordLegion/legion/-/merge_requests/1049, however,
+  //   it triggers another bug https://github.com/StanfordLegion/legion/issues/1623,
+  //   so let's keep the original code but disable the cancel tests.
+#if 0
   // test cancellation - first of a task that is "running"
   {
+    ChildTaskArgs cargs;
     cargs.sleep_useconds = 5000000;
     Event e4 = task_proc.spawn(CHILD_TASK, &cargs, sizeof(cargs), prs);
     sleep(2);
@@ -357,6 +366,7 @@ void top_level_task(const void *args, size_t arglen,
 
   // now cancellation of an event that is blocked on some event
   if(!has_gpus) {
+    ChildTaskArgs cargs;
     cargs.hang = true;
     Event e5 = task_proc.spawn(CHILD_TASK, &cargs, sizeof(cargs), prs);
     sleep(2);
@@ -366,6 +376,7 @@ void top_level_task(const void *args, size_t arglen,
     e5.wait_faultaware(poisoned);
     assert(poisoned);
   }
+#endif
 
   // instance profiling #1 - normal instance creation/deletion
   {
@@ -384,7 +395,37 @@ void top_level_task(const void *args, size_t arglen,
 					      std::vector<size_t>(1, 8),
 					      0, // SOA
 					      prs);
-    inst.destroy(e);
+
+    // while we've got an instance, let's try canceling some copies
+    {
+      // variant 1: canceling the copy before the preconditions are
+      //  satisfied
+      UserEvent u = UserEvent::create_user_event();
+      std::vector<CopySrcDstField> srcs(1), dsts(1);
+      srcs[0].set_field(inst, 0, 1);
+      dsts[0].set_field(inst, 0, 1);
+      Event e2 = is.copy(srcs, dsts, prs, u);
+      int info = 113;
+      e2.cancel_operation(&info, sizeof(info));
+      u.trigger(e);
+      bool poisoned = false;
+      e2.wait_faultaware(poisoned);
+      assert(poisoned);
+    }
+    {
+      // variant 2: propagate poison from a canceled precondition
+      UserEvent u = UserEvent::create_user_event();
+      std::vector<CopySrcDstField> srcs(1), dsts(1);
+      srcs[0].set_field(inst, 0, 1);
+      dsts[0].set_field(inst, 0, 1);
+      Event e2 = is.copy(srcs, dsts, prs, u);
+      u.cancel();
+      bool poisoned = false;
+      e2.wait_faultaware(poisoned);
+      assert(poisoned);
+    }
+
+    inst.destroy();
   }
 
   // instance profiling #2 - allocation failure
@@ -420,6 +461,13 @@ int main(int argc, char **argv)
   Runtime rt;
 
   rt.init(&argc, &argv);
+
+  // get reference times using both C++'s steady_clock and realm timers - we'll
+  //  check their correlation at the end
+  std::chrono::time_point<std::chrono::steady_clock> t1_sys =
+      std::chrono::steady_clock::now();
+  long long t1_realm = Clock::current_time_in_nanoseconds();
+  long long init_err = Clock::get_calibration_error();
 
   rt.register_task(TOP_LEVEL_TASK, top_level_task);
   rt.register_task(CHILD_TASK, child_task);
@@ -457,6 +505,22 @@ int main(int argc, char **argv)
 
   // now sleep this thread until that shutdown actually happens
   rt.wait_for_shutdown();
+
+  std::cout << "init calibration error = " << init_err << "\n";
+
+  // get updated timer values and check for correlation
+  std::chrono::time_point<std::chrono::steady_clock> t2_sys =
+      std::chrono::steady_clock::now();
+  long long t2_realm = Clock::current_time_in_nanoseconds();
+
+  long long td_sys = std::chrono::nanoseconds(t2_sys - t1_sys).count();
+  long long td_realm = t2_realm - t1_realm;
+
+  // ask realm for its calibration error and correct accordingly
+  long long cal_error = Clock::get_calibration_error();
+  long long td_realm_corr = td_realm - (cal_error - init_err);
+  std::cout << "sys=" << td_sys << " realm=" << td_realm << " corr=" << td_realm_corr
+            << "\n";
 
 #ifdef TRACK_MACHINE_UPDATES
   // the machine is gone at this point, so no need to remove ourselves explicitly

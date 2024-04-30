@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# Copyright 2023 Los Alamos National Laboratory, NVIDIA Corporation
+# Copyright 2024 Los Alamos National Laboratory, NVIDIA Corporation
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.

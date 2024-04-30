@@ -1,4 +1,4 @@
--- Copyright 2023 Stanford University
+-- Copyright 2024 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -15,20 +15,22 @@
 -- runs-with:
 -- [
 --   ["-ll:cpu", "4"],
---   ["-ll:cpu", "2", "-fflow-spmd", "1", "-fflow-spmd-shardsize", "2", "-ftrace", "0", "-freplicable", "0"],
+--   ["-ll:cpu", "2", "-ftrace", "0", "-freplicable", "0"],
 --   ["-ll:cpu", "4", "-dm:memoize", "-ffuture", "0"],
---   ["-ll:cpu", "2", "-fflow-spmd", "1", "-fflow-spmd-shardsize", "2", "-dm:memoize", "-freplicable", "0"],
---   ["-ll:cpu", "5", "-fflow-spmd", "1", "-fflow-spmd-shardsize", "5", "-p", "5", "-freplicable", "0"]
+--   ["-ll:cpu", "2", "-dm:memoize", "-freplicable", "0"],
+--   ["-ll:cpu", "5", "-p", "5", "-freplicable", "0"]
 -- ]
 
 import "regent"
 
 local format = require("std/format")
+local launcher = require("std/launcher")
 
 local use_python_main = rawget(_G, "circuit_use_python_main") == true
 
 -- Compile and link circuit_mapper.cc
-local cmapper
+local cmapper = launcher.build_library("circuit_mapper")
+
 local cconfig
 do
   local root_dir = arg[0]:match(".*/") or "./"
@@ -42,37 +44,6 @@ do
     include_dirs:insert("-I")
     include_dirs:insert(path)
   end
-
-  local mapper_cc = root_dir .. "circuit_mapper.cc"
-  local mapper_so
-  if os.getenv('OBJNAME') then
-    local out_dir = os.getenv('OBJNAME'):match('.*/') or './'
-    mapper_so = out_dir .. "libcircuit_mapper.so"
-  elseif os.getenv('SAVEOBJ') == '1' then
-    mapper_so = root_dir .. "libcircuit_mapper.so"
-  else
-    mapper_so = os.tmpname() .. ".so" -- root_dir .. "circuit_mapper.so"
-  end
-  local cxx = os.getenv('CXX') or 'c++'
-
-  local cxx_flags = os.getenv('CXXFLAGS') or ''
-  cxx_flags = cxx_flags .. " -O2 -Wall -Werror"
-  if os.execute('test "$(uname)" = Darwin') == 0 then
-    cxx_flags =
-      (cxx_flags ..
-         " -dynamiclib -single_module -undefined dynamic_lookup -fPIC")
-  else
-    cxx_flags = cxx_flags .. " -shared -fPIC"
-  end
-
-  local cmd = (cxx .. " " .. cxx_flags .. " " .. include_path .. " " ..
-                 mapper_cc .. " -o " .. mapper_so)
-  if os.execute(cmd) ~= 0 then
-    print("Error: failed to compile " .. mapper_cc)
-    assert(false)
-  end
-  regentlib.linklibrary(mapper_so)
-  cmapper = terralib.includec("circuit_mapper.h", include_dirs)
   cconfig = terralib.includec("circuit_config.h", include_dirs)
 end
 
@@ -622,25 +593,6 @@ task create_colorings(conf : Config)
   return coloring
 end
 
-task create_ghost_partition(conf         : Config,
-                            all_shared   : region(node),
-                            ghost_ranges : region(ghost_range))
-where
-  reads(ghost_ranges)
-do
-  var ghost_node_map = c.legion_point_coloring_create()
-  var num_superpieces = conf.num_pieces / conf.pieces_per_superpiece
-
-  for range in ghost_ranges do
-    c.legion_point_coloring_add_range(ghost_node_map,
-      range,
-      c.legion_ptr_t { value = range.rect.lo },
-      c.legion_ptr_t { value = range.rect.hi })
-  end
-
-  return partition(aliased, all_shared, ghost_node_map, ghost_ranges.ispace)
-end
-
 task parse_input(conf : Config)
   conf = parse_input_args(conf)
 
@@ -783,9 +735,8 @@ task toplevel()
     end
   end
 
-  var rp_ghost = create_ghost_partition(conf, all_shared, ghost_ranges)
+  var rp_ghost = image(aliased, all_shared, rp_ghost_ranges, ghost_ranges.rect)
 
-  __demand(__spmd)
   for j = 0, 1 do
     for i in launch_domain do
       init_pointers(rp_private[i], rp_shared[i], rp_ghost[i], rp_wires[i])
@@ -798,7 +749,7 @@ task toplevel()
   var num_loops = conf.num_loops + 2*prune
 
   __fence(__execution, __block)
-  __demand(__spmd, __trace)
+  __demand(__trace)
   for j = 0, num_loops do
     for i in launch_domain do
       calculate_new_currents(j == prune, steps, rp_private[i], rp_shared[i], rp_ghost[i], rp_wires[i], rp_times[i])
@@ -822,18 +773,4 @@ toplevel:set_task_id(2)
 
 end -- not use_python_main
 
-if os.getenv('SAVEOBJ') == '1' then
-  local root_dir = arg[0]:match(".*/") or "./"
-  local out_dir = (os.getenv('OBJNAME') and os.getenv('OBJNAME'):match('.*/')) or root_dir
-  local link_flags = terralib.newlist({"-L" .. out_dir, "-lcircuit_mapper", "-lm"})
-
-  if os.getenv('STANDALONE') == '1' then
-    os.execute('cp ' .. os.getenv('LG_RT_DIR') .. '/../bindings/regent/' ..
-        regentlib.binding_library .. ' ' .. out_dir)
-  end
-
-  local exe = os.getenv('OBJNAME') or "circuit"
-  regentlib.saveobj(toplevel, exe, "executable", cmapper.register_mappers, link_flags)
-else
-  regentlib.start(toplevel, cmapper.register_mappers)
-end
+launcher.launch(toplevel, "circuit", cmapper.register_mappers, {"-lcircuit_mapper", "-lm"})

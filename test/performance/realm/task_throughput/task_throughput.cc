@@ -1,5 +1,5 @@
-/* Copyright 2023 Stanford University
- * Copyright 2023 Los Alamos National Laboratory 
+/* Copyright 2024 Stanford University
+ * Copyright 2024 Los Alamos National Laboratory
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -299,18 +299,18 @@ void top_level_task(const void *args, size_t arglen,
 				      ProfilingRequestSet()).wait();
       assert(i.exists());
 
+      i.fetch_metadata(p).wait();
       launch_args.instances[p] = i;
       {
-	std::vector<CopySrcDstField> dsts(1);
-	dsts[0].inst = i;
-	dsts[0].field_id = FieldIDs::TASKDATA;
-	dsts[0].size = sizeof(TestTaskData);
-	TestTaskData ival;
-	ival.first_count = 0;
-	ival.last_count = 0;
-	ival.start_time = 0;
-	r.fill(dsts, ProfilingRequestSet(),
-	       &ival, sizeof(ival)).wait();
+        std::vector<CopySrcDstField> dsts(1);
+        dsts[0].inst = i;
+        dsts[0].field_id = FieldIDs::TASKDATA;
+        dsts[0].size = sizeof(TestTaskData);
+        TestTaskData ival;
+        ival.first_count = 0;
+        ival.last_count = 0;
+        ival.start_time = 0;
+        r.fill(dsts, ProfilingRequestSet(), &ival, sizeof(ival)).wait();
       }
     }
   }

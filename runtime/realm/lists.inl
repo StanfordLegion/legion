@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -160,6 +160,24 @@ namespace Realm {
 #endif
     lastlink->next = new_entry;
     lastlink = &REALM_PMTA_DEREF(new_entry,LINK);
+    lock.unlock();
+  }
+
+  template <typename T, REALM_PMTA_DECL(T,IntrusiveListLink<T>,LINK), typename LT>
+  inline void IntrusiveList<T, LINK, LT>::push_front(T *new_entry)
+  {
+    lock.lock();
+#ifdef DEBUG_REALM_LISTS
+    assert(REALM_PMTA_DEREF(new_entry,LINK).current_list == 0);
+    REALM_PMTA_DEREF(new_entry,LINK).current_list = this;
+    assert(REALM_PMTA_DEREF(new_entry,LINK).next == 0);
+#endif
+    REALM_PMTA_DEREF(new_entry, LINK).next = head.next;
+    if (lastlink == &head) {
+      lastlink = &REALM_PMTA_DEREF(new_entry, LINK);
+    }
+    head.next = new_entry;
+
     lock.unlock();
   }
 
@@ -368,7 +386,6 @@ namespace Realm {
   void IntrusivePriorityList<T, PT, LINK, PRI, LT>::push_back(T *new_entry)
   {
     lock.lock();
-    lock.unlock();
 #ifdef DEBUG_REALM_LISTS
     // entry being added should be unentangled
     assert(REALM_PMTA_DEREF(new_entry,LINK).next_within_pri == 0);
@@ -400,13 +417,13 @@ namespace Realm {
     size_t act_size = size();
     assert(exp_size == act_size);
 #endif
+    lock.unlock();
   }
 
   template <typename T, typename PT, REALM_PMTA_DECL(T,IntrusivePriorityListLink<T>,LINK), REALM_PMTA_DECL(T,PT,PRI), typename LT>
   void IntrusivePriorityList<T, PT, LINK, PRI, LT>::push_front(T *new_entry)
   {
     lock.lock();
-    lock.unlock();
 #ifdef DEBUG_REALM_LISTS
     // entry being added should be unentangled
     assert(REALM_PMTA_DEREF(new_entry,LINK).next_within_pri == 0);
@@ -443,6 +460,7 @@ namespace Realm {
     size_t act_size = size();
     assert(exp_size == act_size);
 #endif
+    lock.unlock();
   }
 
   template <typename T, typename PT, REALM_PMTA_DECL(T,IntrusivePriorityListLink<T>,LINK), REALM_PMTA_DECL(T,PT,PRI), typename LT>

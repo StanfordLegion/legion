@@ -1,4 +1,4 @@
--- Copyright 2023 Stanford University
+-- Copyright 2024 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -34,12 +34,14 @@ where
   reads(r)
 do
   var sum1 : double = 0.0
-  var sum2 : int = 0
+  var sum2 : double = 0.0
+  var sum3 : double = 0.0
   for e in r do
     sum1 += @e
-    sum2 += [int](@e)
+    sum2 += -(@e)
+    sum3 += @e
   end
-  return [int](sum1) + sum2
+  return sum1 + sum2 + sum3
 end
 
 task main()
@@ -48,7 +50,7 @@ task main()
   var r = region(ispace(int2d, {size, size}), double)
   init(r, v)
   var res = red(r)
-  regentlib.assert(res == [int](2 * r.volume * v), "test failed")
+  regentlib.assert(res == r.volume * v, "test failed")
 end
 
 regentlib.start(main)

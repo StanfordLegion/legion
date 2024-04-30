@@ -1,4 +1,4 @@
--- Copyright 2023 Stanford University
+-- Copyright 2024 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -12,27 +12,24 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- runs-with:
--- [["-fmapping", "0"]]
-
--- FIXME: This test breaks inline optimization.
-
 import "regent"
 
 -- This code has not been optimized and is not high performance.
 
 local fabs = regentlib.fabs(double)
 
-task saxpy(is : ispace(int1d), x : region(is, float), y : region(ispace(int1d), float), a : float)
+__demand(__cuda)
+task saxpy(x : region(ispace(int1d), float), y : region(ispace(int1d), float), a : float)
 where
   reads(x, y), writes(y)
 do
   __demand(__vectorize)
-  for i in is do
+  for i in x do
     y[i] += a*x[i]
   end
 end
 
+__demand(__local)
 task test(n : int, np : int)
   var is = ispace(int1d, n)
   var x = region(is, float)
@@ -46,7 +43,7 @@ task test(n : int, np : int)
   fill(y, 0.0)
 
   for c in cs do
-    saxpy(px[c].ispace, px[c], py[c], 0.5)
+    saxpy(px[c], py[c], 0.5)
   end
 
   for i in is do
@@ -55,7 +52,21 @@ task test(n : int, np : int)
 end
 
 task main()
-  test(10, 2)
   test(20, 4)
 end
-regentlib.start(main)
+
+if os.getenv('SAVEOBJ') == '1' then
+  local root_dir = arg[0]:match(".*/") or "./"
+  local out_dir = (os.getenv('OBJNAME') and os.getenv('OBJNAME'):match('.*/')) or root_dir
+  local link_flags = terralib.newlist({"-L" .. out_dir})
+
+  if os.getenv('STANDALONE') == '1' then
+    os.execute('cp ' .. os.getenv('LG_RT_DIR') .. '/../bindings/regent/' ..
+        regentlib.binding_library .. ' ' .. out_dir)
+  end
+
+  local exe = os.getenv('OBJNAME') or "saxpy"
+  regentlib.saveobj(main, exe, "executable", nil, link_flags)
+else
+  regentlib.start(main)
+end

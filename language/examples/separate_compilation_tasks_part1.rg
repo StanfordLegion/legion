@@ -1,4 +1,4 @@
--- Copyright 2023 Stanford University
+-- Copyright 2024 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -19,17 +19,11 @@
 
 import "regent"
 
-assert(regentlib.config["separate"], "test requires separate compilation")
+require("separate_compilation_common")
 
 local format = require("std/format")
 
 local SAME_ADDRESS_SPACE = 4 -- (1 << 2)
-
-struct fs {
-  x : int
-  y : int
-  z : int
-}
 
 task my_regent_task(r : region(ispace(int1d), fs), x : int, y : double, z : bool)
 where reads writes(r.{x, y}), reads(r.z) do

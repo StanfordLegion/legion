@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -256,17 +256,6 @@ namespace Legion {
   }
 
   //----------------------------------------------------------------------------
-  template<unsigned DIM>
-  inline DomainPoint::operator LegionRuntime::Arrays::Point<DIM>(void) const
-  //----------------------------------------------------------------------------
-  {
-    LegionRuntime::Arrays::Point<DIM> result;
-    for (int i = 0; i < DIM; i++)
-      result.x[i] = point_data[i];
-    return result;
-  }
-
-  //----------------------------------------------------------------------------
   template<int DIM, typename T> __CUDA_HD__
   inline DomainPoint::operator Point<DIM,T>(void) const
   //----------------------------------------------------------------------------
@@ -284,7 +273,7 @@ namespace Legion {
   //----------------------------------------------------------------------------
   {
     dim = rhs.dim;
-    for (int i = 0; i < dim; i++)
+    for (int i = 0; i < MAX_POINT_DIM; i++)
       point_data[i] = rhs.point_data[i];
     return *this;
   }
@@ -298,6 +287,8 @@ namespace Legion {
     dim = DIM;
     for (int i = 0; i < DIM; i++)
       point_data[i] = check_for_overflow<T>(rhs[i]);
+    for (int i = DIM; i < MAX_POINT_DIM; i++)
+      point_data[i] = 0;
     return *this;
   }
 
@@ -568,19 +559,6 @@ namespace Legion {
   }
 
   //----------------------------------------------------------------------------
-  template<int DIM>
-  /*static*/ inline DomainPoint 
-                    DomainPoint::from_point(LegionRuntime::Arrays::Point<DIM> p)
-  //----------------------------------------------------------------------------
-  {
-    DomainPoint dp;
-    assert(DIM <= MAX_POINT_DIM);
-    dp.dim = DIM;
-    p.to_array(dp.point_data);
-    return dp;
-  }
-
-  //----------------------------------------------------------------------------
   __CUDA_HD__ inline Color DomainPoint::get_color(void) const
   //----------------------------------------------------------------------------
   {
@@ -601,15 +579,6 @@ namespace Legion {
   //----------------------------------------------------------------------------
   {
     return dim;
-  }
-
-  //----------------------------------------------------------------------------
-  template<int DIM>
-  inline LegionRuntime::Arrays::Point<DIM> DomainPoint::get_point(void) const
-  //----------------------------------------------------------------------------
-  {
-    assert(dim == DIM); 
-    return LegionRuntime::Arrays::Point<DIM>(point_data);
   }
 
   //----------------------------------------------------------------------------
@@ -720,6 +689,17 @@ namespace Legion {
   }
 
   //----------------------------------------------------------------------------
+  __CUDA_HD__ inline Domain::Domain(Domain &&other) noexcept
+    : is_id(other.is_id), is_type(is_id > 0 ? other.is_type : 0), dim(other.dim)
+  //----------------------------------------------------------------------------
+  {
+    for (int i = 0; i < 2*MAX_RECT_DIM; i++)
+      rect_data[i] = other.rect_data[i];
+    other.is_id = 0;
+    other.is_type = 0;
+  }
+
+  //----------------------------------------------------------------------------
   __CUDA_HD__ inline Domain::Domain(const DomainPoint &lo,const DomainPoint &hi)
     : is_id(0), is_type(0), dim(lo.dim)
   //----------------------------------------------------------------------------
@@ -760,8 +740,12 @@ namespace Legion {
 #ifndef NDEBUG
     constexpr bool CHECK =
       std::is_unsigned<T>::value && (sizeof(T) >= sizeof(coord_t));
-    assert(!CHECK ||
-        (((unsigned long long)value) <= ((unsigned long long)LLONG_MAX)));
+#if !defined(__CUDA_ARCH__) && !defined(__HIP_DEVICE_COMPILE__)
+    constexpr uint64_t MAX = std::numeric_limits<coord_t>::max();
+#else
+    const uint64_t MAX = LLONG_MAX;
+#endif
+    assert(!CHECK || (((uint64_t)value) <= MAX));
 #endif
 #endif
     return coord_t(value);
@@ -793,6 +777,21 @@ namespace Legion {
     is_id = other.is_id;
     // Like this for backwards compatibility
     is_type = (is_id > 0) ? other.is_type : 0;
+    dim = other.dim;
+    for(int i = 0; i < 2*dim; i++)
+      rect_data[i] = other.rect_data[i];
+    return *this;
+  }
+
+  //----------------------------------------------------------------------------
+  __CUDA_HD__ inline Domain& Domain::operator=(Domain &&other) noexcept
+  //----------------------------------------------------------------------------
+  {
+    is_id = other.is_id;
+    other.is_id = 0;
+    // Like this for backwards compatibility
+    is_type = (is_id > 0) ? other.is_type : 0;
+    other.is_type = 0;
     dim = other.dim;
     for(int i = 0; i < 2*dim; i++)
       rect_data[i] = other.rect_data[i];
@@ -949,48 +948,6 @@ namespace Legion {
   }
 
   //----------------------------------------------------------------------------
-  template<int DIM>
-  /*static*/ inline Domain Domain::from_rect(
-                                    typename LegionRuntime::Arrays::Rect<DIM> r)
-  //----------------------------------------------------------------------------
-  {
-    Domain d;
-    assert(DIM <= MAX_RECT_DIM);
-    d.dim = DIM;
-    r.to_array(d.rect_data);
-    return d;
-  }
-
-  //----------------------------------------------------------------------------
-  template<int DIM>
-  /*static*/ inline Domain Domain::from_point(
-                                   typename LegionRuntime::Arrays::Point<DIM> p)
-  //----------------------------------------------------------------------------
-  {
-    Domain d;
-    assert(DIM <= MAX_RECT_DIM);
-    d.dim = DIM;
-    p.to_array(d.rect_data);
-    p.to_array(d.rect_data+DIM);
-    return d;
-  }
-
-  //----------------------------------------------------------------------------
-  template<int DIM>
-  inline Domain::operator LegionRuntime::Arrays::Rect<DIM>(void) const
-  //----------------------------------------------------------------------------
-  {
-    assert(DIM == dim);
-    assert(is_id == 0); // better not be one of these
-    LegionRuntime::Arrays::Rect<DIM> result;
-    for (int i = 0; i < DIM; i++)
-      result.lo.x[i] = rect_data[i];
-    for (int i = 0; i < DIM; i++)
-      result.hi.x[i] = rect_data[DIM+i];
-    return result;
-  }
-
-  //----------------------------------------------------------------------------
   template<int DIM, typename T> __CUDA_HD__
   inline Domain::operator Rect<DIM,T>(void) const
   //----------------------------------------------------------------------------
@@ -1046,7 +1003,7 @@ namespace Legion {
         assert(false);
 #define DIMFUNC(DIM) \
       case DIM: \
-        return Domain::from_point<DIM>(p.get_point<DIM>());
+        return Domain(p, p);
       LEGION_FOREACH_N(DIMFUNC)
 #undef DIMFUNC
       default:
@@ -1236,19 +1193,6 @@ namespace Legion {
   }
 
   //----------------------------------------------------------------------------
-  template<int DIM>
-  inline LegionRuntime::Arrays::Rect<DIM> Domain::get_rect(void) const
-  //----------------------------------------------------------------------------
-  {
-    assert(DIM > 0);
-    assert(DIM == dim);
-    // Runtime only returns tight domains so if it still has
-    // a sparsity map then it is a real sparsity map
-    assert(is_id == 0);
-    return LegionRuntime::Arrays::Rect<DIM>(rect_data);
-  }
-
-  //----------------------------------------------------------------------------
   inline Domain::DomainPointIterator::DomainPointIterator(const Domain &d)
     : is_type(d.is_type)
   //----------------------------------------------------------------------------
@@ -1263,7 +1207,7 @@ namespace Legion {
         { \
           Rect<DIM,coord_t> rect = d; \
           Realm::PointInRectIterator<DIM,coord_t> rect_itr(rect); \
-          static_assert(sizeof(rect_itr) <= sizeof(rect_iterator), "very bad");\
+          static_assert(sizeof(rect_itr) <= sizeof(rect_iterator)); \
           rect_valid = rect_itr.valid; \
           if (rect_valid) { \
             is_valid = true; \
@@ -2105,14 +2049,14 @@ namespace Legion {
       inline const FT& operator*(void) const 
         { 
           FT *result = NULL;
-          static_assert(sizeof(result) == sizeof(ptr), "C++ is dumb");
+          static_assert(sizeof(result) == sizeof(ptr));
           memcpy(&result, &ptr, sizeof(result));
           return *result;
         }
       inline const FT* operator->(void) const
         { 
           FT *result = NULL;
-          static_assert(sizeof(result) == sizeof(ptr), "C++ is dumb");
+          static_assert(sizeof(result) == sizeof(ptr));
           memcpy(&result, &ptr, sizeof(result));
           return result;
         }
@@ -2120,7 +2064,7 @@ namespace Legion {
         { 
           FT *result = NULL;
           const uint8_t *ptr2 = ptr + rhs * stride;
-          static_assert(sizeof(result) == sizeof(ptr2), "C++ is dumb");
+          static_assert(sizeof(result) == sizeof(ptr2));
           memcpy(&result, &ptr2, sizeof(result));
           return *result;
         }
@@ -2174,14 +2118,14 @@ namespace Legion {
       inline const FT& operator*(void) const 
         { 
           FT *result = NULL;
-          static_assert(sizeof(result) == sizeof(ptr), "C++ is dumb");
+          static_assert(sizeof(result) == sizeof(ptr));
           memcpy(&result, &ptr, sizeof(result));
           return *result;
         }
       inline const FT* operator->(void) const
         { 
           FT *result = NULL;
-          static_assert(sizeof(result) == sizeof(ptr), "C++ is dumb");
+          static_assert(sizeof(result) == sizeof(ptr));
           memcpy(&result, &ptr, sizeof(result));
           return result;
         }
@@ -2189,7 +2133,7 @@ namespace Legion {
         { 
           FT *result = NULL;
           const uint8_t *ptr2 = ptr - rhs * stride;
-          static_assert(sizeof(result) == sizeof(ptr2), "C++ is dumb");
+          static_assert(sizeof(result) == sizeof(ptr2));
           memcpy(&result, &ptr2, sizeof(result));
           return *result;
         }
@@ -2228,7 +2172,7 @@ namespace Legion {
     Span(const FT *b, size_t e, size_t s = sizeof(FT))
       : base(NULL), extent(e), stride(s)
       { 
-        static_assert(sizeof(base) == sizeof(b), "C++ is dumb");
+        static_assert(sizeof(base) == sizeof(b));
         memcpy(&base, &b, sizeof(base));
       }
   public:
@@ -2243,7 +2187,7 @@ namespace Legion {
     inline const FT& front(void) const 
       { 
         FT *result = NULL;
-        static_assert(sizeof(result) == sizeof(base), "C++ is dumb");
+        static_assert(sizeof(result) == sizeof(base));
         memcpy(&result, &base, sizeof(result));
         return *result;
       }
@@ -2251,7 +2195,7 @@ namespace Legion {
       {
         FT *result = NULL;
         const uint8_t *ptr = base + (extent-1)*stride;
-        static_assert(sizeof(result) == sizeof(ptr), "C++ is dumb");
+        static_assert(sizeof(result) == sizeof(ptr));
         memcpy(&result, &ptr, sizeof(result));
         return *result;
       }
@@ -2259,14 +2203,14 @@ namespace Legion {
       { 
         FT *result = NULL;
         const uint8_t *ptr = base + index * stride;
-        static_assert(sizeof(result) == sizeof(ptr), "C++ is dumb");
+        static_assert(sizeof(result) == sizeof(ptr));
         memcpy(&result, &ptr, sizeof(result));
         return *result;
       }
     inline const FT* data(void) const
       {
         FT *result = NULL;
-        static_assert(sizeof(result) == sizeof(base), "C++ is dumb");
+        static_assert(sizeof(result) == sizeof(base));
         memcpy(&result, &base, sizeof(result));
         return result;
       }

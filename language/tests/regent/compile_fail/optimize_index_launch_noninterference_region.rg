@@ -1,4 +1,4 @@
--- Copyright 2023 Stanford University
+-- Copyright 2024 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -12,11 +12,8 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- runs-with:
--- [["-fflow", "0"]]
-
 -- fails-with:
--- optimize_index_launch_noninterference_region.rg:33: loop optimization failed: argument 2 interferes with argument 1
+-- optimize_index_launch_noninterference_region.rg:30: loop optimization failed: argument 2 interferes with argument 1
 
 import "regent"
 

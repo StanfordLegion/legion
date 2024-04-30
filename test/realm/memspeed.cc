@@ -38,6 +38,7 @@ struct SpeedTestArgs {
 
 struct CopyProfResult {
   long long *nanoseconds;
+  unsigned int *num_hops;
   UserEvent done;
 };
 
@@ -51,11 +52,16 @@ void copy_profiling_task(const void *args, size_t arglen,
   ProfilingMeasurements::OperationTimeline timeline;
   if(resp.get_measurement(timeline)) {
     *(result->nanoseconds) = timeline.complete_time - timeline.start_time;
-    result->done.trigger();
   } else {
     log_app.fatal() << "no operation timeline in profiling response!";
     assert(0);
   }
+  ProfilingMeasurements::OperationCopyInfo copy_info;
+  if(resp.get_measurement(copy_info)) {
+    assert(copy_info.inst_info.size() == 1);
+    *(result->num_hops) = copy_info.inst_info[0].num_hops;
+  }
+  result->done.trigger();
 }
 
 namespace TestConfig {
@@ -68,6 +74,7 @@ namespace TestConfig {
   size_t sparse_gap = 16;   // gap between sparse chunks (if used)
   bool copy_aos = false;   // if true, use an AOS memory layout
   bool slow_mems = false;  // show slow memories be tested?
+  bool show_mems = false;  // display the affinity of memories on the system
 };
 
 void memspeed_cpu_task(const void *args, size_t arglen, 
@@ -222,12 +229,39 @@ void memspeed_gpu_task(const void *args, size_t arglen,
 }
 #endif
 
+static void display_memory_info(Memory m)
+{
+  std::vector<Machine::MemoryMemoryAffinity> affinities;
+  affinities.clear();
+  Realm::Machine::get_machine().get_mem_mem_affinity(affinities, m, Memory::NO_MEMORY,
+                                                     false);
+  log_app.print() << "Memory: " << m << " kind: " << m.kind()
+                  << " size: " << static_cast<double>(m.capacity()) / (1024.0 * 1024.0)
+                  << "MiB";
+  for(Machine::MemoryMemoryAffinity &m2m : affinities) {
+    log_app.print() << "\t" << m2m.m2 << " est-bw: " << m2m.bandwidth
+                    << "MB/s est-lat: " << m2m.latency << "ns";
+  }
+}
+
 std::set<Processor::Kind> supported_proc_kinds;
 
 void top_level_task(const void *args, size_t arglen, 
 		    const void *userdata, size_t userlen, Processor p)
 {
   log_app.print() << "Realm memory speed test";
+
+  if(TestConfig::show_mems) {
+    Realm::Machine::MemoryQuery mq(Realm::Machine::get_machine());
+    std::vector<Realm::Memory> memories(mq.begin(), mq.end());
+    log_app.print("=== Memory Info, total %zu memories ===", memories.size());
+    for(Memory m : memories) {
+      if(m.capacity() > 0) {
+        display_memory_info(m);
+      }
+    }
+    log_app.print("===================");
+  }
 
   size_t elements = TestConfig::buffer_size / sizeof(void *);
   IndexSpace<1> d = Rect<1>(0, elements - 1);
@@ -280,28 +314,31 @@ void top_level_task(const void *args, size_t arglen,
       d.fill(sdf, ProfilingRequestSet(), &fill_value, sizeof(fill_value)).wait();
 
       Machine::ProcessorQuery pq = Machine::ProcessorQuery(machine).has_affinity_to(m);
-      for(Machine::ProcessorQuery::iterator it2 = pq.begin(); it2; ++it2) {
-	Processor p = *it2;
+      for (Machine::ProcessorQuery::iterator it2 = pq.begin(); it2; ++it2) {
+        Processor p = *it2;
 
-	SpeedTestArgs cargs;
-	cargs.mem = m;
-	cargs.inst = inst;
-	cargs.elements = elements;
-	cargs.reps = 8;
-	bool ok = machine.has_affinity(p, m, &cargs.affinity);
-	assert(ok);
+        SpeedTestArgs cargs;
+        cargs.mem = m;
+        cargs.inst = inst;
+        cargs.elements = elements;
+        cargs.reps = 8;
+        bool ok = machine.has_affinity(p, m, &cargs.affinity);
+        assert(ok);
 
-	log_app.info() << "  Affinity: " << p << "->" << m << " BW: " << cargs.affinity.bandwidth
-		       << " Latency: " << cargs.affinity.latency;
+        log_app.info() << "  Affinity: " << p << "->" << m
+                       << " BW: " << cargs.affinity.bandwidth
+                       << " Latency: " << cargs.affinity.latency;
 
-	if(supported_proc_kinds.count(p.kind()) == 0) {
-	  log_app.info() << "processor " << p << " is of unsupported kind " << p.kind() << " - skipping";
-	  continue;
-	}
+        if (supported_proc_kinds.count(p.kind()) == 0) {
+          log_app.info() << "processor " << p << " is of unsupported kind "
+                         << p.kind() << " - skipping";
+          continue;
+        }
 
-	Event e = p.spawn(MEMSPEED_TASK, &cargs, sizeof(cargs));
+        Event e = cargs.inst.fetch_metadata(p);
+        e = p.spawn(MEMSPEED_TASK, &cargs, sizeof(cargs), e);
 
-	e.wait();
+        e.wait();
       }
 
       inst.destroy();
@@ -377,6 +414,8 @@ void top_level_task(const void *args, size_t arglen,
 	long long total_full_copy_time = 0;
 	long long total_short_copy_time = 0;
         long long total_sparse_copy_time = 0;
+        unsigned int num_hops_full = 0;
+        unsigned int num_hops_short = 0;
 
         std::vector<CopySrcDstField> srcs(TestConfig::copy_fields);
         for(int i = 0; i < TestConfig::copy_fields; i++)
@@ -394,12 +433,19 @@ void top_level_task(const void *args, size_t arglen,
 	  {
 	    CopyProfResult result;
 	    result.nanoseconds = &full_copy_time;
-	    result.done = full_copy_done;
-	    ProfilingRequestSet prs;
-	    prs.add_request(p, COPYPROF_TASK, &result, sizeof(CopyProfResult))
-	      .add_measurement<ProfilingMeasurements::OperationTimeline>();
-	    d.copy(srcs, dsts, prs).wait();
-	  }
+            result.num_hops = &num_hops_full;
+            result.done = full_copy_done;
+            ProfilingRequestSet prs;
+            if(rep == 0) {
+              prs.add_request(p, COPYPROF_TASK, &result, sizeof(CopyProfResult))
+                  .add_measurement<ProfilingMeasurements::OperationTimeline>()
+                  .add_measurement<ProfilingMeasurements::OperationCopyInfo>();
+            } else {
+              prs.add_request(p, COPYPROF_TASK, &result, sizeof(CopyProfResult))
+                  .add_measurement<ProfilingMeasurements::OperationTimeline>();
+            }
+            d.copy(srcs, dsts, prs).wait();
+          }
 
 	  // copy #2 - single-element copy
 	  long long short_copy_time = -1;
@@ -407,12 +453,19 @@ void top_level_task(const void *args, size_t arglen,
 	  {
 	    CopyProfResult result;
 	    result.nanoseconds = &short_copy_time;
-	    result.done = short_copy_done;
-	    ProfilingRequestSet prs;
-	    prs.add_request(p, COPYPROF_TASK, &result, sizeof(CopyProfResult))
-	      .add_measurement<ProfilingMeasurements::OperationTimeline>();
-	    Rect<1>(0, 0).copy(srcs, dsts, prs).wait();
-	  }
+            result.num_hops = &num_hops_short;
+            result.done = short_copy_done;
+            ProfilingRequestSet prs;
+            if(rep == 0) {
+              prs.add_request(p, COPYPROF_TASK, &result, sizeof(CopyProfResult))
+                  .add_measurement<ProfilingMeasurements::OperationTimeline>()
+                  .add_measurement<ProfilingMeasurements::OperationCopyInfo>();
+            } else {
+              prs.add_request(p, COPYPROF_TASK, &result, sizeof(CopyProfResult))
+                  .add_measurement<ProfilingMeasurements::OperationTimeline>();
+            }
+            Rect<1>(0, 0).copy(srcs, dsts, prs).wait();
+          }
 
 	  // wait for both results
 	  full_copy_done.wait();
@@ -457,13 +510,30 @@ void top_level_task(const void *args, size_t arglen,
 	double bw = (1.0 * elements * TestConfig::copy_fields * sizeof(void *) /
 		     (total_full_copy_time - total_short_copy_time));
 
+        // verify the copy only need one hop if src and dst are on the same node.
+        if(inst1.address_space() == inst2.address_space()) {
+          if(num_hops_full != 1) {
+            log_app.error() << "Error: the full copy from " << inst1 << " to " << inst2
+                            << " takes more than one hop, num_hops=" << num_hops_full;
+          }
+          if(num_hops_short != 1) {
+            log_app.error() << "Error: the short copy from " << inst1 << " to " << inst2
+                            << " takes more than one hop, num_hops=" << num_hops_full;
+          }
+        }
+
         if(TestConfig::sparse_chunk == 0) {
-          log_app.info() << "copy " << m1 << " -> " << m2 << ": bw:" << bw << " lat:" << latency;
+          log_app.info() << "copy " << m1 << " -> " << m2 << ": bw:" << bw
+                         << " lat:" << latency << ", num_hops_full_copy:" << num_hops_full
+                         << ", num_hops_short_copy:" << num_hops_short;
         } else {
           double sparse_bw = (1.0 * sparse_elements * TestConfig::copy_fields * sizeof(void *) /
                               (total_sparse_copy_time - total_short_copy_time));
 
-          log_app.info() << "copy " << m1 << " -> " << m2 << ": bw:" << bw << " lat:" << latency << " sparse_bw:" << sparse_bw;
+          log_app.info() << "copy " << m1 << " -> " << m2 << ": bw:" << bw
+                         << " lat:" << latency << " sparse_bw:" << sparse_bw
+                         << ", num_hops_full_copy:" << num_hops_full
+                         << ", num_hops_short_copy:" << num_hops_short;
         }
 
 	inst2.destroy();
@@ -485,14 +555,15 @@ int main(int argc, char **argv)
 
   CommandLineParser cp;
   cp.add_option_int_units("-b", TestConfig::buffer_size, 'M')
-    .add_option_int("-tasks", TestConfig::do_tasks)
-    .add_option_int("-copies", TestConfig::do_copies)
-    .add_option_int("-reps", TestConfig::copy_reps)
-    .add_option_int("-fields", TestConfig::copy_fields)
-    .add_option_int("-sparse", TestConfig::sparse_chunk)
-    .add_option_int("-gap", TestConfig::sparse_gap)
-    .add_option_int("-aos", TestConfig::copy_aos)
-    .add_option_int("-slowmem", TestConfig::slow_mems);
+      .add_option_int("-tasks", TestConfig::do_tasks)
+      .add_option_int("-copies", TestConfig::do_copies)
+      .add_option_int("-reps", TestConfig::copy_reps)
+      .add_option_int("-fields", TestConfig::copy_fields)
+      .add_option_int("-sparse", TestConfig::sparse_chunk)
+      .add_option_int("-gap", TestConfig::sparse_gap)
+      .add_option_int("-aos", TestConfig::copy_aos)
+      .add_option_int("-slowmem", TestConfig::slow_mems)
+      .add_option_bool("-showmem", TestConfig::show_mems);
   bool ok = cp.parse_command_line(argc, const_cast<const char **>(argv));
   assert(ok);
 

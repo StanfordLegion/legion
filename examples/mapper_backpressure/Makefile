@@ -1,4 +1,4 @@
-# Copyright 2023 Stanford University, NVIDIA Corporation
+# Copyright 2024 Stanford University, NVIDIA Corporation
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -21,7 +21,7 @@ endif
 # Flags for directing the runtime makefile what to include
 DEBUG           ?= 1		# Include debugging symbols
 MAX_DIM         ?= 3		# Maximum number of dimensions
-OUTPUT_LEVEL    ?= LEVEL_DEBUG	# Compile time logging level
+OUTPUT_LEVEL    ?= LEVEL_INFO	# Compile time logging level
 USE_CUDA        ?= 0		# Include CUDA support (requires CUDA)
 USE_GASNET      ?= 0		# Include GASNet support (requires GASNet)
 USE_HDF         ?= 0		# Include HDF5 support (requires HDF5)
@@ -35,7 +35,7 @@ GEN_GPU_SRC	?=			# .cu files
 
 # You can modify these variables, some will be appended to by the runtime makefile
 INC_FLAGS	?=
-CC_FLAGS	?= -std=c++11
+CC_FLAGS	?=
 NVCC_FLAGS	?=
 GASNET_FLAGS	?=
 LD_FLAGS	?=

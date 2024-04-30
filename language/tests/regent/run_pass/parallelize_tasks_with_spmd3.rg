@@ -1,4 +1,4 @@
--- Copyright 2023 Stanford University
+-- Copyright 2024 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -14,10 +14,7 @@
 
 -- runs-with:
 -- [
---  ["-ll:cpu", "3", "-fbounds-checks", "1",
---   "-fparallelize-dop", "9", "-fflow-spmd", "1", "-fflow-spmd-shardsize", "3"],
---  ["-ll:cpu", "4", "-fflow-spmd", "1"],
---  ["-ll:cpu", "4", "-fflow-spmd", "1", "-fflow-spmd-shardsize", "2"]
+--  ["-ll:cpu", "3", "-fbounds-checks", "1", "-fparallelize-dop", "9"]
 -- ]
 
 import "regent"
@@ -65,7 +62,6 @@ task test(size : int)
   fill(primary_region.h, 3)
 
   var steps = 1
-  __demand(__spmd)
   for i = 0, steps do
     stencil1(primary_region)
     centered(primary_region)

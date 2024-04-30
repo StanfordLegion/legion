@@ -75,9 +75,9 @@ void nccl_reduce_task(const Task *task,
   int *dev_buf;
   CUDA_CHECK(cudaMalloc(&dev_buf, 42 * sizeof(int)));
   CUDA_CHECK(cudaMemcpyAsync(dev_buf, host_buf, 42 * sizeof(int), cudaMemcpyHostToDevice, task_stream));
-  CUDA_CHECK(cudaStreamSynchronize(task_stream));
+  runtime->concurrent_task_barrier(ctx);
   NCCL_CHECK(ncclAllReduce(dev_buf, dev_buf, 42, ncclInt, ncclSum, nccl_comm, task_stream));
-  CUDA_CHECK(cudaStreamSynchronize(task_stream));
+  runtime->concurrent_task_barrier(ctx);
   CUDA_CHECK(cudaMemcpyAsync(host_buf, dev_buf, 42 * sizeof(int), cudaMemcpyDeviceToHost, task_stream));
   CUDA_CHECK(cudaStreamSynchronize(task_stream));
   if (gpu_idx == 0) {
@@ -127,18 +127,18 @@ void top_level_task(const Task *task,
   IndexTaskLauncher nccl_init_launcher(
     TID_NCCL_INIT, is_gpu, TaskArgument(NULL, 0), ArgumentMap());
   nccl_init_launcher.add_future(nccl_get_id_future);
+  nccl_init_launcher.concurrent = true;
   FutureMap nccl_init_futures = runtime->execute_index_space(ctx, nccl_init_launcher);
-  nccl_init_futures.wait_all_results();
 
   IndexTaskLauncher nccl_reduce_launcher(
-    TID_NCCL_REDUCE, is_gpu, TaskArgument(NULL, 0), ArgumentMap());
+    TID_NCCL_REDUCE, is_gpu, TaskArgument(NULL, 0), ArgumentMap(nccl_init_futures));
+  nccl_reduce_launcher.concurrent = true;
   FutureMap nccl_reduce_futures = runtime->execute_index_space(ctx, nccl_reduce_launcher);
-  nccl_reduce_futures.wait_all_results();
 
   IndexTaskLauncher nccl_finalize_launcher(
-    TID_NCCL_FINALIZE, is_gpu, TaskArgument(NULL, 0), ArgumentMap());
-  FutureMap nccl_finalize_futures = runtime->execute_index_space(ctx, nccl_finalize_launcher);
-  nccl_finalize_futures.wait_all_results();
+    TID_NCCL_FINALIZE, is_gpu, TaskArgument(NULL, 0), ArgumentMap(nccl_reduce_futures));
+  nccl_finalize_launcher.concurrent = true;
+  runtime->execute_index_space(ctx, nccl_finalize_launcher);
 }
 
 int main(int argc, char **argv) {
@@ -149,6 +149,7 @@ int main(int argc, char **argv) {
     TaskVariantRegistrar registrar(TID_TOP_LEVEL, "top_level");
     registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
     registrar.set_inner();
+    registrar.set_replicable();
     Runtime::preregister_task_variant<top_level_task>(registrar, "top_level");
   }
   {
@@ -160,18 +161,22 @@ int main(int argc, char **argv) {
   {
     TaskVariantRegistrar registrar(TID_NCCL_INIT, "nccl_init");
     registrar.set_leaf();
+    registrar.set_concurrent();
     registrar.add_constraint(ProcessorConstraint(Processor::TOC_PROC));
     Runtime::preregister_task_variant<nccl_init_task>(registrar, "nccl_init");
   }
   {
     TaskVariantRegistrar registrar(TID_NCCL_REDUCE, "nccl_reduce");
     registrar.set_leaf();
+    registrar.set_concurrent();
+    registrar.set_concurrent_barrier();
     registrar.add_constraint(ProcessorConstraint(Processor::TOC_PROC));
     Runtime::preregister_task_variant<nccl_reduce_task>(registrar, "nccl_reduce");
   }
   {
     TaskVariantRegistrar registrar(TID_NCCL_FINALIZE, "nccl_finalize");
     registrar.set_leaf();
+    registrar.set_concurrent();
     registrar.add_constraint(ProcessorConstraint(Processor::TOC_PROC));
     Runtime::preregister_task_variant<nccl_finalize_task>(registrar, "nccl_finalize");
   }

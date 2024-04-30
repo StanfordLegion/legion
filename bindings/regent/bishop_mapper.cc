@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University
+/* Copyright 2024 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,7 +25,7 @@ namespace Legion {
 
 namespace Mapping {
 
-LegionRuntime::Logger::Category log_bishop("bishop");
+Logger log_bishop("bishop");
 
 //------------------------------------------------------------------------------
 BishopMapper::BishopMapper(const std::vector<bishop_mapper_impl_t>& impls,

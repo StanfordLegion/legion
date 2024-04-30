@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -71,6 +71,13 @@
       #define REALM_CXX_STANDARD 0
     #endif
   #endif
+#endif
+
+// REALM_NOEXCEPT - indicates that the declaration does not throw exceptions
+#if REALM_CXX_STANDARD >= 11
+  #define REALM_NOEXCEPT noexcept
+#else
+  #define REALM_NOEXCEPT throw()
 #endif
 
 // REALM_ON_LINUX   - defined if Realm is being built for a Linux host

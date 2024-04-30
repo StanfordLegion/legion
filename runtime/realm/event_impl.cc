@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -36,10 +36,8 @@ namespace Realm {
   // class Event
   //
 
-  /*static*/ const Event Event::NO_EVENT = { 0 };
-  // Take this you POS c++ type system
-  /* static */ const UserEvent UserEvent::NO_USER_EVENT = 
-    *(static_cast<UserEvent*>(const_cast<Event*>(&Event::NO_EVENT)));
+  /*static*/ const Event Event::NO_EVENT = {/* zero-initialization */};
+  /*static*/ const UserEvent UserEvent::NO_USER_EVENT = {/* zero-initialization */};
 
   bool Event::has_triggered(void) const
   {
@@ -88,14 +86,9 @@ namespace Realm {
   }
 
   // creates an event that won't trigger until all input events have
-  /*static*/ Event Event::merge_events(const std::set<Event>& wait_for)
+  /*static*/ Event Event::merge_events(const Event *wait_for, size_t num_events)
   {
-    return GenEventImpl::merge_events(wait_for, false /*!ignore faults*/);
-  }
-
-  /*static*/ Event Event::merge_events(const std::vector<Event>& wait_for)
-  {
-    return GenEventImpl::merge_events(wait_for, false /*!ignore faults*/);
+    return GenEventImpl::merge_events(span<const Event>(wait_for, num_events), false /*!ignore faults*/);
   }
 
   /*static*/ Event Event::merge_events(Event ev1, Event ev2,
@@ -105,14 +98,9 @@ namespace Realm {
     return GenEventImpl::merge_events(ev1, ev2, ev3, ev4, ev5, ev6);
   }
 
-  /*static*/ Event Event::merge_events_ignorefaults(const std::set<Event>& wait_for)
+  /*static*/ Event Event::merge_events_ignorefaults(const Event *wait_for, size_t num_events)
   {
-    return GenEventImpl::merge_events(wait_for, true /*ignore faults*/);
-  }
-
-  /*static*/ Event Event::merge_events_ignorefaults(const std::vector<Event>& wait_for)
-  {
-    return GenEventImpl::merge_events(wait_for, true /*ignore faults*/);
+    return GenEventImpl::merge_events(span<const Event>(wait_for, num_events), true /*ignore faults*/);
   }
 
   /*static*/ Event Event::ignorefaults(Event wait_for)
@@ -339,12 +327,54 @@ namespace Realm {
 
   void Event::cancel_operation(const void *reason_data, size_t reason_len) const
   {
-    get_runtime()->optable.request_cancellation(*this, reason_data, reason_len);
+    GenEventImpl *e = nullptr;
+    EventImpl::gen_t gen = ID(id).event_generation();
+    Operation *op = nullptr;
+    bool poisoned = false;
+
+    if(!ID(id).is_event()) {
+      // Only event types can be cancelled
+      abort();
+    }
+
+    e = get_runtime()->get_genevent_impl(*this);
+    if (e->has_triggered(gen, poisoned)) {
+      return;
+    }
+
+    op = e->get_trigger_op(gen);
+    if (op != nullptr) {
+      // Fast path, triggering operation is local!
+      op->attempt_cancellation(Realm::Faults::ERROR_CANCELLED, reason_data, reason_len);
+      op->remove_reference();
+    }
+    else {
+      // Slow path, triggering operation is remote
+      get_runtime()->optable.request_cancellation(*this, reason_data, reason_len);
+    }
   }
 
   void Event::set_operation_priority(int new_priority) const
   {
-    get_runtime()->optable.set_priority(*this, new_priority);
+    GenEventImpl *e = get_runtime()->get_genevent_impl(*this);
+    EventImpl::gen_t gen = ID(id).event_generation();
+    Operation *op = nullptr;
+    bool poisoned = false;
+
+    if (e->has_triggered(gen, poisoned)) {
+      return;
+    }
+
+    op = e->get_trigger_op(gen);
+    if (op != nullptr) {
+      // Fast path, triggering operation is local!
+      op->set_priority(new_priority);
+      op->remove_reference();
+    }
+    else {
+      // Slow path, triggering operation is remote
+      get_runtime()->optable.set_priority(*this, new_priority);
+    }
   }
 
 
@@ -409,17 +439,7 @@ namespace Realm {
   // class Barrier
   //
 
-  namespace {
-    Barrier make_no_barrier(void)
-    {
-      Barrier b;
-      b.id = 0;
-      b.timestamp = 0;
-      return b;
-    }
-  };
-
-  /*static*/ const Barrier Barrier::NO_BARRIER = make_no_barrier();
+  /*static*/ const Barrier Barrier::NO_BARRIER = {/* zero-initialization */};
 
   /*static*/ const ::realm_event_gen_t Barrier::MAX_PHASES = (::realm_event_gen_t(1) << REALM_EVENT_GENERATION_BITS) - 1;
 
@@ -931,7 +951,7 @@ namespace Realm {
   //
 
   EventImpl::EventImpl(void)
-    : me((ID::IDType)-1), owner(-1)
+    : me((ID::IDType)-1), owning_processor(nullptr), owner(-1)
   {}
 
   EventImpl::~EventImpl(void)
@@ -948,6 +968,7 @@ namespace Realm {
     , gen_subscribed(0)
     , num_poisoned_generations(0)
     , merger(this)
+    , current_trigger_op(nullptr)
     , has_external_waiters(false)
     , external_waiter_condvar(external_waiter_mutex)
   {
@@ -1002,62 +1023,6 @@ namespace Realm {
 
 
     // creates an event that won't trigger until all input events have
-    /*static*/ Event GenEventImpl::merge_events(const std::set<Event>& wait_for,
-						bool ignore_faults)
-    {
-      if (wait_for.empty())
-        return Event::NO_EVENT;
-      // scan through events to see how many exist/haven't fired - we're
-      //  interested in counts of 0, 1, or 2+ - also remember the first
-      //  event we saw for the count==1 case
-      int wait_count = 0;
-      Event first_wait;
-      for(std::set<Event>::const_iterator it = wait_for.begin();
-	  (it != wait_for.end()) && (wait_count < 2);
-	  it++) {
-	bool poisoned = false;
-	if((*it).has_triggered_faultaware(poisoned)) {
-          if(poisoned) {
-	    // if we're not ignoring faults, we need to propagate this fault, and can do
-	    //  so by just returning this poisoned event
-	    if(!ignore_faults) {
-	      log_poison.info() << "merging events - " << (*it) << " already poisoned";
-	      return *it;
-	    }
-          }
-	} else {
-	  if(!wait_count) first_wait = *it;
-	  wait_count++;
-	}
-      }
-      log_event.debug() << "merging events - at least " << wait_count << " not triggered";
-
-      // Avoid these optimizations if we are doing event graph tracing
-      // we also cannot return an input event directly in the (wait_count == 1) case
-      //  if we're ignoring faults
-      // counts of 0 or 1 don't require any merging
-      if(wait_count == 0) return Event::NO_EVENT;
-      if((wait_count == 1) && !ignore_faults) return first_wait;
-
-      // counts of 2+ require building a new event and a merger to trigger it
-      GenEventImpl *event_impl = GenEventImpl::create_genevent();
-      Event finish_event = event_impl->current_event();
-
-      EventMerger *m = &(event_impl->merger);
-      m->prepare_merger(finish_event, ignore_faults, wait_for.size());
-
-      for(std::set<Event>::const_iterator it = wait_for.begin();
-	  it != wait_for.end();
-	  it++) {
-	log_event.info() << "event merging: event=" << finish_event << " wait_on=" << *it;
-	m->add_precondition(*it);
-      }
-
-      // once they're all added - arm the thing (it might go off immediately)
-      m->arm_merger();
-
-      return finish_event;
-    }
 
     // creates an event that won't trigger until all input events have
     /*static*/ Event GenEventImpl::merge_events(span<const Event> wait_for,
@@ -1202,8 +1167,20 @@ namespace Realm {
 
     /*static*/ GenEventImpl *GenEventImpl::create_genevent(void)
     {
-      GenEventImpl *impl = get_runtime()->local_event_free_list->alloc_entry();
-      assert(impl);
+      GenEventImpl *impl = nullptr;
+      RuntimeImpl *runtime_impl = get_runtime();
+
+      Processor current_proc = Processor::get_executing_processor();
+      if(current_proc != Processor::NO_PROC) {
+        ProcessorImpl *proc_impl = runtime_impl->get_processor_impl(current_proc);
+        assert(proc_impl != nullptr);
+        impl = proc_impl->create_genevent();
+      }
+      else {
+        impl = runtime_impl->local_event_free_list->alloc_entry();
+      }
+
+      assert(impl != nullptr);
       assert(ID(impl->me).is_event());
 
       log_event.spew() << "event created: event=" << impl->current_event();
@@ -1217,6 +1194,18 @@ namespace Realm {
       }
 #endif
       return impl;
+    }
+
+    /*static*/ void GenEventImpl::free_genevent(GenEventImpl *impl)
+    {
+      // Free this entry to the global list
+      if (impl->owning_processor != nullptr) {
+        // If this genevent belongs to a processor, return it
+        impl->owning_processor->free_genevent(impl);
+      }
+      else {
+        get_runtime()->local_event_free_list->free_entry(impl);
+      }
     }
 
     bool GenEventImpl::add_waiter(gen_t needed_gen, EventWaiter *waiter)
@@ -1547,6 +1536,42 @@ namespace Realm {
     }
   }
 
+  void GenEventImpl::set_trigger_op(gen_t gen, Operation *op)
+  {
+    if (REALM_LIKELY(generation.load()+1 == gen)) {
+      AutoLock<> a(mutex);
+      if (REALM_LIKELY(generation.load()+1 == gen)) {
+        assert(ID(op->get_finish_event()).event_gen_event_idx() ==
+           ID(this->me).event_gen_event_idx());
+        // Make sure to drop the reference of a previous operation
+        if (current_trigger_op != nullptr) {
+          current_trigger_op->remove_reference();
+        }
+        // No need to add a reference to the operation here
+        // as we inherit the reference from the caller
+        current_trigger_op = op;
+        if (Network::my_node_id == owner) {
+          get_runtime()->num_untriggered_events.fetch_add(1);
+        }
+      }
+    }
+  }
+
+  Operation *GenEventImpl::get_trigger_op(gen_t gen)
+  {
+    Operation *op = nullptr;
+    if (REALM_LIKELY(generation.load()+1 == gen)) {
+      AutoLock<> a(mutex);
+      if (REALM_LIKELY(generation.load()+1 == gen)) {
+        op = current_trigger_op;
+        if (op != nullptr) {
+          op->add_reference();
+        }
+      }
+    }
+    return op;
+  }
+
     /*static*/ void EventUpdateMessage::handle_message(NodeID sender, const EventUpdateMessage &args,
 						       const void *data, size_t datalen,
 						       TimeLimit work_until)
@@ -1596,18 +1621,19 @@ namespace Realm {
 
       // both easy cases failed, so take the lock that lets us see which local triggers exist
       // this prevents us from ever answering "no" on the current node if the trigger occurred here
-      bool locally_triggered = false;
-      poisoned = false;
-      {
-	AutoLock<> a(mutex);
-
-	std::map<gen_t, bool>::const_iterator it = local_triggers.find(needed_gen);
-	if(it != local_triggers.end()) {
-	  locally_triggered = true;
-	  poisoned = it->second;
-	}
+      AutoLock<> a(mutex);
+      // In order to avoid cases where has_triggered gives non-monotonic results
+      // you also have to retest the generation condition above while holding the lock
+      if(needed_gen <= generation.load()) {
+        poisoned = is_generation_poisoned(needed_gen);
+        return true;
       }
-      return locally_triggered;
+      std::map<gen_t, bool>::const_iterator it = local_triggers.find(needed_gen);
+      if(it != local_triggers.end()) {
+        poisoned = it->second;
+        return true;
+      }
+      return false;
     }
 
     void GenEventImpl::subscribe(gen_t subscribe_gen)
@@ -1759,6 +1785,17 @@ namespace Realm {
 	      max_poisons = true;
 	  }
 
+    // Drop the trigger operation now that this event has been triggered
+    if (current_trigger_op != nullptr) {
+#ifdef REALM_USE_OPERATION_TABLE
+      // If the operation table is not in play, the operation will hold it's own reference and clean it up
+      // Otherwise, this is a local operation and the event owns the reference, so clean it up.
+      current_trigger_op->remove_reference();
+#endif // REALM_USE_OPERATION_TABLE
+      current_trigger_op = nullptr;
+      get_runtime()->num_untriggered_events.fetch_sub(1);
+    }
+
 	  // update generation last, with a synchronization to make sure poisoned generation
 	  // list is valid to any observer of this update
 	  generation.store_release(gen_triggered);
@@ -1795,7 +1832,7 @@ namespace Realm {
 
 	// free event?
 	if(free_event)
-	  get_runtime()->local_event_free_list->free_entry(this);
+          GenEventImpl::free_genevent(this);
       } else {
 	// we're triggering somebody else's event, so the first thing to do is tell them
 	assert(trigger_node == (int)Network::my_node_id);
@@ -1908,7 +1945,7 @@ namespace Realm {
       }
 
       if(free_event)
-	get_runtime()->local_event_free_list->free_entry(this);
+        GenEventImpl::free_genevent(this);
     }
 
     /*static*/ BarrierImpl *BarrierImpl::create_barrier(unsigned expected_arrivals,
@@ -2230,7 +2267,7 @@ static void *bytedup(const void *data, size_t datalen)
       if(reduce_value_size) {
         char buffer[129];
 	for(size_t i = 0; (i < reduce_value_size) && (i < 64); i++)
-	  sprintf(buffer+2*i, "%02x", ((const unsigned char *)reduce_value)[i]);
+	  snprintf(buffer+2*i, sizeof buffer - 2*i, "%02x", ((const unsigned char *)reduce_value)[i]);
 	log_barrier.info("barrier reduction: event=" IDFMT "/%d size=%zd data=%s",
 	                 me.id(), barrier_gen, reduce_value_size, buffer);
       }
@@ -2919,24 +2956,26 @@ static void *bytedup(const void *data, size_t datalen)
   // class CompletionQueue
   //
 
-  /*static*/ const CompletionQueue CompletionQueue::NO_QUEUE = { 0 };
+    /*static*/ const CompletionQueue CompletionQueue::NO_QUEUE = {
+        /* zero-initialization */};
 
-  /*static*/ CompletionQueue CompletionQueue::create_completion_queue(size_t max_size)
-  {
-    CompQueueImpl *cq = get_runtime()->local_compqueue_free_list->alloc_entry();
-    // sanity-check that we haven't exhausted the space of cq IDs
-    if(get_runtime()->get_compqueue_impl(cq->me) != cq) {
-      log_compqueue.fatal() << "completion queue ID space exhausted!";
-      abort();
+    /*static*/ CompletionQueue CompletionQueue::create_completion_queue(size_t max_size)
+    {
+      CompQueueImpl *cq = get_runtime()->local_compqueue_free_list->alloc_entry();
+      // sanity-check that we haven't exhausted the space of cq IDs
+      if(get_runtime()->get_compqueue_impl(cq->me) != cq) {
+        log_compqueue.fatal() << "completion queue ID space exhausted!";
+        abort();
+      }
+      if(max_size > 0)
+        cq->set_capacity(max_size, false /*!resizable*/);
+      else
+        cq->set_capacity(1024 /*no obvious way to pick this*/, true /*resizable*/);
+
+      log_compqueue.info() << "created completion queue: cq=" << cq->me
+                           << " size=" << max_size;
+      return cq->me;
     }
-    if(max_size > 0)
-      cq->set_capacity(max_size, false /*!resizable*/);
-    else
-      cq->set_capacity(1024 /*no obvious way to pick this*/, true /*resizable*/);
-
-    log_compqueue.info() << "created completion queue: cq=" << cq->me << " size=" << max_size;
-    return cq->me;
-  }
 
   // destroy a completion queue
   void CompletionQueue::destroy(Event wait_on /*= Event::NO_EVENT*/)
@@ -3472,7 +3511,9 @@ static void *bytedup(const void *data, size_t datalen)
       // once we've copied out our events, mark that we've consumed the
       //  entries - this has to happen in the same order as the rd_ptr
       //  bumps though
-      while(consume_ptr.load() != old_rd_ptr) { /*pause?*/ }
+      while(consume_ptr.load() != old_rd_ptr) {
+        REALM_SPIN_YIELD();
+      }
       size_t check = consume_ptr.fetch_add_acqrel(count);
       assert(check == old_rd_ptr);
 
@@ -3547,7 +3588,9 @@ static void *bytedup(const void *data, size_t datalen)
       completed_events[wr_ofs] = event;
 
       // bump commit pointer, but respecting order
-      while(commit_ptr.load() != old_wr_ptr) { /*pause?*/ }
+      while(commit_ptr.load() != old_wr_ptr) {
+        REALM_SPIN_YIELD();
+      }
       size_t check = commit_ptr.fetch_add_acqrel(1);
       assert(check == old_wr_ptr);
 

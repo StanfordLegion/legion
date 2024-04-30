@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@
  */
 
 #include "legion/legion_types.h"
+#include "legion/legion_domain.h"
 
 namespace Legion {
 
@@ -36,11 +37,12 @@ namespace Legion {
   __op__(MEMORY CONSTRAINT, "Memory") \
   __op__(FIELD_CONSTRAINT, "Field") \
   __op__(ORDERING_CONSTRAINT, "Ordering") \
-  __op__(SPLITTING_CONSTRAINT, "Splitting") \
+  __op__(TILING_CONSTRAINT, "Tiling") \
   __op__(DIMENSION_CONSTRAINT, "Dimension") \
   __op__(ALIGNMENT_CONSTRAINT, "Alignment") \
   __op__(OFFSET_CONSTRAINT, "Offset") \
-  __op__(POINTER_CONSTRAINT, "Pointer")
+  __op__(POINTER_CONSTRAINT, "Pointer") \
+  __op__(PADDING_CONSTRAINT, "Padding")
 
     /**
      * \class ISAConstraint
@@ -63,6 +65,8 @@ namespace Legion {
     public:
       inline bool operator==(const ISAConstraint &other) const
       { return isa_prop == other.isa_prop; }
+      inline bool operator!=(const ISAConstraint &other) const
+      { return !(*this == other); }
     public:
       bool entails(const ISAConstraint &other) const;
       bool conflicts(const ISAConstraint &other) const;
@@ -91,6 +95,8 @@ namespace Legion {
     public:
       inline bool operator==(const ProcessorConstraint &other) const
       { return valid_kinds == other.valid_kinds; }
+      inline bool operator!=(const ProcessorConstraint &other) const
+      { return !(*this == other); }
     public:
       inline bool is_valid(void) const { return !valid_kinds.empty(); }
       void add_kind(Processor::Kind kind);
@@ -123,6 +129,8 @@ namespace Legion {
                          EqualityKind eq_kind, size_t value);
     public:
       bool operator==(const ResourceConstraint &other) const;
+      inline bool operator!=(const ResourceConstraint &other) const
+      { return !(*this == other); }
     public:
       bool entails(const ResourceConstraint &other) const;
       bool conflicts(const ResourceConstraint &other) const;
@@ -154,6 +162,8 @@ namespace Legion {
       LaunchConstraint(LaunchKind kind, const size_t *value, int dims);
     public:
       bool operator==(const LaunchConstraint &other) const;
+      inline bool operator!=(const LaunchConstraint &other) const
+      { return !(*this == other); }
     public:
       bool entails(const LaunchConstraint &other) const;
       bool conflicts(const LaunchConstraint &other) const;
@@ -190,6 +200,8 @@ namespace Legion {
     public:
       inline bool operator==(const ColocationConstraint &o) const
       { return fields == o.fields && indexes == o.indexes; }
+      inline bool operator!=(const ColocationConstraint &other) const
+      { return !(*this == other); }
     public:
       bool entails(const ColocationConstraint &other) const;
       bool conflicts(const ColocationConstraint &other) const;
@@ -223,6 +235,8 @@ namespace Legion {
         add_constraint(const ColocationConstraint &constraint);
     public:
       bool operator==(const ExecutionConstraintSet &other) const;
+      inline bool operator!=(const ExecutionConstraintSet &other) const
+      { return !(*this == other); }
     public:
       void swap(ExecutionConstraintSet &rhs);
       void serialize(Serializer &rez) const;
@@ -254,7 +268,7 @@ namespace Legion {
         { return NULL; }
       virtual OrderingConstraint* as_ordering_constraint(void)
         { return NULL; }
-      virtual SplittingConstraint* as_splitting_constraint(void)
+      virtual TilingConstraint* as_tiling_constraint(void)
         { return NULL; }
       virtual DimensionConstraint* as_dimension_constraint(void)
         { return NULL; } 
@@ -263,6 +277,8 @@ namespace Legion {
       virtual OffsetConstraint* as_offset_constraint(void)
         { return NULL; }
       virtual PointerConstraint* as_pointer_constraint(void)
+        { return NULL; }
+      virtual PaddingConstraint* as_padding_constraint(void)
         { return NULL; }
     public:
       virtual const SpecializedConstraint* 
@@ -273,8 +289,8 @@ namespace Legion {
         as_field_constraint(void) const { return NULL; }
       virtual const OrderingConstraint* 
         as_ordering_constraint(void) const { return NULL; }
-      virtual const SplittingConstraint* 
-        as_splitting_constraint(void) const { return NULL; }
+      virtual const TilingConstraint* 
+        as_tiling_constraint(void) const { return NULL; }
       virtual const DimensionConstraint* 
         as_dimension_constraint(void) const { return NULL; }
       virtual const AlignmentConstraint* 
@@ -283,6 +299,8 @@ namespace Legion {
         as_offset_constraint(void) const { return NULL; }
       virtual const PointerConstraint* 
         as_pointer_constraint(void) const { return NULL; }
+      virtual const PaddingConstraint*
+        as_padding_constraint(void) const { return NULL; }
     };
 
     /**
@@ -308,11 +326,12 @@ namespace Legion {
                             ReductionOpID redop = 0, 
                             bool no_access = false,
                             bool exact = false,
-                            Domain collective = Domain(),
                             size_t max_pieces = SIZE_MAX,
                             int max_overhead = 0);
     public:
       bool operator==(const SpecializedConstraint &other) const;
+      inline bool operator!=(const SpecializedConstraint &other) const
+      { return !(*this == other); }
     public:
       virtual LayoutConstraintKind get_constraint_kind(void) const
         { return constraint_kind; }
@@ -336,7 +355,6 @@ namespace Legion {
       bool is_virtual(void) const;
       bool is_reduction(void) const;
       bool is_file(void) const;
-      inline bool is_collective(void) const { return collective.exists(); }
       inline bool is_no_access(void) const { return no_access; }
       inline bool is_exact(void) const { return exact; }
       // For backwards compatibility
@@ -344,7 +362,6 @@ namespace Legion {
     public:
       SpecializedKind kind;
       ReductionOpID  redop;
-      Domain    collective;
       size_t    max_pieces;
       int     max_overhead;
       bool       no_access;
@@ -368,6 +385,8 @@ namespace Legion {
     public:
       inline bool operator==(const MemoryConstraint &other) const
       { return kind == other.kind && has_kind == other.has_kind; }
+      inline bool operator!=(const MemoryConstraint &other) const
+      { return !(*this == other); }
     public:
       virtual LayoutConstraintKind get_constraint_kind(void) const
         { return constraint_kind; }
@@ -411,6 +430,8 @@ namespace Legion {
                       bool contiguous, bool inorder = true);
     public:
       bool operator==(const FieldConstraint &other) const;
+      inline bool operator!=(const FieldConstraint &other) const
+      { return !(*this == other); }
     public:
       virtual LayoutConstraintKind get_constraint_kind(void) const
         { return constraint_kind; }
@@ -451,14 +472,6 @@ namespace Legion {
      * almost certainly be to specify a total order. Users
      * can also specify whether or not the related constraints
      * are contiguous with each other.
-     *
-     * It is important to note that users cannot mix full
-     * dimensions with split dimensions. For example, either
-     * 'DIM_X' can be used or 'INNER_DIM_X' and 'OUTER_DIM_X'
-     * but never both at the same time. The 'INNER' and 
-     * 'OUTER' dims may only be specified in a dimension
-     * constraint if there is an associated split constraint
-     * saying how to split the logical dimension.
      */
     class OrderingConstraint : public LayoutConstraint {
     public:
@@ -471,6 +484,8 @@ namespace Legion {
     public:
       inline bool operator==(const OrderingConstraint &other) const
       { return ordering == other.ordering && contiguous == other.contiguous; }
+      inline bool operator!=(const OrderingConstraint &other) const
+      { return !(*this == other); }
     public:
       virtual LayoutConstraintKind get_constraint_kind(void) const
         { return constraint_kind; }
@@ -493,44 +508,45 @@ namespace Legion {
     };
 
     /**
-     * \class SplittingConstraint
-     * Specify how to split a normal index space dimension into
-     * an inner and outer dimension. The split can be specified
-     * in one of two ways: either by saying how many chunks to
-     * break the dimension into, or by specifying a splitting
-     * factor that will create as many chunks as necessary.
+     * \class TilingConstraint 
+     * Specify how to tile a dimension of an index space, The tile can 
+     * be specified in one of two ways: either by saying how many tiles
+     * to break the dimension into, or by specifying a tiling
+     * factor that will create as many tiles as necessary.
      * These two constructors provide both top-down and bottom-up
      * ways of saying how to break a dimension apart.
      */
-    class SplittingConstraint : public LayoutConstraint { 
+    class TilingConstraint : public LayoutConstraint { 
     public:
       static const LayoutConstraintKind constraint_kind = 
-                                            LEGION_SPLITTING_CONSTRAINT;
+                                            LEGION_TILING_CONSTRAINT;
     public:
-      SplittingConstraint(void);
-      SplittingConstraint(DimensionKind dim); // chunks
-      SplittingConstraint(DimensionKind dim, size_t value);
+      TilingConstraint(void);
+      TilingConstraint(DimensionKind dim); // tiles
+      TilingConstraint(DimensionKind dim, size_t value, bool tiles = false);
     public:
-      inline bool operator==(const SplittingConstraint &o) const
-      { return kind == o.kind && value == o.value && chunks == o.chunks; }
+      inline bool operator==(const TilingConstraint &o) const
+      { return dim == o.dim && value == o.value && tiles == o.tiles; }
+      inline bool operator!=(const TilingConstraint &other) const
+      { return !(*this == other); }
     public:
       virtual LayoutConstraintKind get_constraint_kind(void) const
         { return constraint_kind; }
-      virtual SplittingConstraint* as_splitting_constraint(void) 
+      virtual TilingConstraint* as_tiling_constraint(void) 
         { return this; }
-      virtual const SplittingConstraint* as_splitting_constraint(void) const
+      virtual const TilingConstraint* as_tiling_constraint(void) const
         { return this; }
     public:
-      bool entails(const SplittingConstraint &other) const;
-      bool conflicts(const SplittingConstraint &other) const;
+      bool entails(const TilingConstraint &other) const;
+      bool conflicts(const TilingConstraint &other) const;
     public:
-      void swap(SplittingConstraint &rhs);
+      void swap(TilingConstraint &rhs);
       void serialize(Serializer &rez) const;
       void deserialize(Deserializer &derez);
     public:
-      DimensionKind kind;
+      DimensionKind dim;
       size_t value;
-      bool chunks;
+      bool tiles;
     };
 
     /**
@@ -548,6 +564,8 @@ namespace Legion {
     public:
       inline bool operator==(const DimensionConstraint &o) const
       { return kind == o.kind && eqk == o.eqk && value == o.value; }
+      inline bool operator!=(const DimensionConstraint &other) const
+      { return !(*this == other); }
     public:
       virtual LayoutConstraintKind get_constraint_kind(void) const
         { return constraint_kind; }
@@ -585,6 +603,8 @@ namespace Legion {
     public:
       inline bool operator==(const AlignmentConstraint &o) const
       { return fid == o.fid && eqk == o.eqk && alignment == o.alignment; }
+      inline bool operator!=(const AlignmentConstraint &other) const
+      { return !(*this == other); }
     public:
       virtual LayoutConstraintKind get_constraint_kind(void) const
         { return constraint_kind; }
@@ -620,6 +640,8 @@ namespace Legion {
     public:
       inline bool operator==(const OffsetConstraint &o) const
       { return fid == o.fid && offset == o.offset; }
+      inline bool operator!=(const OffsetConstraint &other) const
+      { return !(*this == other); }
     public:
       virtual LayoutConstraintKind get_constraint_kind(void) const
         { return constraint_kind; }
@@ -654,6 +676,8 @@ namespace Legion {
     public:
       inline bool operator==(const PointerConstraint &o) const
       { return is_valid == o.is_valid && memory == o.memory && ptr == o.ptr; }
+      inline bool operator!=(const PointerConstraint &other) const
+      { return !(*this == other); }
     public:
       virtual LayoutConstraintKind get_constraint_kind(void) const
         { return constraint_kind; }
@@ -675,6 +699,46 @@ namespace Legion {
     };
 
     /**
+     * \class PaddingConstraint
+     * Specify additional scratch space padding around the instance.
+     * This can only be specified for non-compact instances
+     */
+    class PaddingConstraint : public LayoutConstraint {
+    public:
+      static const LayoutConstraintKind constraint_kind =
+                                          LEGION_PADDING_CONSTRAINT;
+    public:
+      PaddingConstraint(void) = default;
+      PaddingConstraint(const Domain &delta);
+      PaddingConstraint(const DomainPoint &lower, const DomainPoint &upper);
+    public:
+      inline bool operator==(const PaddingConstraint &rhs) const 
+      { return (delta == rhs.delta); }
+      inline bool operator!=(const PaddingConstraint &other) const
+      { return !(*this == other); }
+    public:
+      virtual LayoutConstraintKind get_constraint_kind(void) const
+        { return constraint_kind; }
+      virtual PaddingConstraint* as_padding_constraint(void) 
+        { return this; }
+      virtual const PaddingConstraint* as_padding_constraint(void) const
+        { return this; }
+    public:
+      bool entails(const PaddingConstraint &other) const;
+      bool conflicts(const PaddingConstraint &other) const;
+    public:
+      void swap(PaddingConstraint &rhs);
+      void serialize(Serializer &rez) const;
+      void deserialize(Deserializer &derez);
+    public:
+      // Positive integers mean you must have that much padding
+      // Zero means that there should never be any padding
+      // Any negative integers will be interpreted as meaning that
+      // you don't care whether there is any padding or not
+      Domain delta;
+    };
+
+    /**
      * \class LayoutConstraintSet
      * Provide a class for tracking all the associated 
      * layout constraints for a given region requirement
@@ -693,7 +757,7 @@ namespace Legion {
       LayoutConstraintSet&
         add_constraint(const OrderingConstraint &constraint);
       LayoutConstraintSet&
-        add_constraint(const SplittingConstraint &constraint);
+        add_constraint(const TilingConstraint &constraint);
       LayoutConstraintSet&
         add_constraint(const DimensionConstraint &constraint);
       LayoutConstraintSet&
@@ -702,13 +766,20 @@ namespace Legion {
         add_constraint(const OffsetConstraint &constraint);
       LayoutConstraintSet&
         add_constraint(const PointerConstraint &constraint);
+      LayoutConstraintSet&
+        add_constraint(const PaddingConstraint &constraint);
     public:
       bool operator==(const LayoutConstraintSet &other) const;
+      bool operator!=(const LayoutConstraintSet &other) const;
+      bool equals(const LayoutConstraintSet &other,
+                  LayoutConstraintKind *bad_kind = NULL,
+                  size_t *bad_index = NULL) const;
     public:
       // failed_constraint will be the one from 'other' that wasn't entailed
       bool entails(const LayoutConstraintSet &other, 
                    unsigned total_dims = 0,
-                   const LayoutConstraint **failed_constraint = NULL) const;
+                   const LayoutConstraint **failed_constraint = NULL,
+                   bool test_pointer = true) const;
       // conflict_constraint will be the one from 'this' that conficted
       // with a constraint from 'other'
       bool conflicts(const LayoutConstraintSet &other,
@@ -725,8 +796,9 @@ namespace Legion {
       FieldConstraint                  field_constraint;
       MemoryConstraint                 memory_constraint;
       PointerConstraint                pointer_constraint;
+      PaddingConstraint                padding_constraint;
       OrderingConstraint               ordering_constraint;
-      std::vector<SplittingConstraint> splitting_constraints;
+      std::vector<TilingConstraint>    tiling_constraints;
       std::vector<DimensionConstraint> dimension_constraints;
       std::vector<AlignmentConstraint> alignment_constraints; 
       std::vector<OffsetConstraint>    offset_constraints;

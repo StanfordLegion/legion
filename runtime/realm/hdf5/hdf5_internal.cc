@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -206,7 +206,7 @@ namespace Realm {
         } else {
           // which hdf5 dim are we doing next?
           int hd = info->dim_order[order[d]];
-          if((hd < 0) && (hd >= first_nontrivial_hdf5_dim)) {
+          if((hd < 0) || (hd >= first_nontrivial_hdf5_dim)) {
             // have to stop here
             break;
           }

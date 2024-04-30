@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------#
-# Copyright 2023 Stanford University
+# Copyright 2024 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -26,7 +26,7 @@ endif()
 # `--single-version-externally-managed --root=/`
 # to work around setuptools changes.
 if (NOT DEFINED Legion_PYTHON_EXTRA_INSTALL_ARGS)
-  set(Legion_PYTHON_EXTRA_INSTALL_ARGS "")
+  set(Legion_PYTHON_EXTRA_INSTALL_ARGS "--root / --prefix \"\${CMAKE_INSTALL_PREFIX}\"")
 endif()
 # Use setup.py script to install the Python bindings library
-install(CODE "execute_process(COMMAND ${PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/setup.py install --prefix \"\${CMAKE_INSTALL_PREFIX}\" ${Legion_PYTHON_EXTRA_INSTALL_ARGS} WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})")
+install(CODE "execute_process(COMMAND ${Python3_EXECUTABLE} -m pip install --ignore-installed ${Legion_PYTHON_EXTRA_INSTALL_ARGS} . WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} COMMAND_ECHO STDOUT)")

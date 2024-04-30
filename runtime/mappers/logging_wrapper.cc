@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -92,6 +92,12 @@ class MessageBuffer {
 LoggingWrapper::LoggingWrapper(Mapper* mapper, Logger* _logger)
     : ForwardingMapper(mapper),
       logger(_logger != NULL ? _logger : &log_maplog) {
+  {
+    std::stringstream ss;
+    ss << "LoggingWrapper(" << mapper->get_mapper_name() << ")";
+    name = ss.str();
+  }
+
   if (!logger->want_info()) return;
   MessageBuffer buf(runtime, NULL, logger);
   Machine machine = Machine::get_machine();
@@ -163,23 +169,18 @@ void LoggingWrapper::select_sharding_functor_impl(
   }
 }
 
-void LoggingWrapper::map_replicate_task(const MapperContext ctx,
-                                        const Task& task,
-                                        const MapTaskInput& input,
-                                        const MapTaskOutput& default_output,
-                                        MapReplicateTaskOutput& output) {
-  mapper->map_replicate_task(ctx, task, input, default_output, output);
+void LoggingWrapper::replicate_task(MapperContext ctx,
+                                    const Task& task,
+                                    const ReplicateTaskInput& input,
+                                          ReplicateTaskOutput& output) {
+  mapper->replicate_task(ctx, task, input, output);
   if (!logger->want_info()) return;
   MessageBuffer buf(runtime, ctx, logger);
   buf.line() << "MAP_REPLICATE_TASK for "
              << to_string(runtime, ctx, task, false /*include_index_point*/);
-  for (unsigned i = 0; i < output.task_mappings.size(); ++i) {
+  for (unsigned i = 0; i < output.target_processors.size(); ++i) {
     std::stringstream& ss = buf.line();
-    ss << "  REPLICANT " << i;
-    if (!output.control_replication_map.empty()) {
-      ss << " -> " << output.control_replication_map[i];
-    }
-    buf.report(task, output.task_mappings[i]);
+    ss << "  REPLICANT " << i << " -> " << output.target_processors[i];
   }
 }
 
@@ -199,6 +200,10 @@ void LoggingWrapper::select_sharding_functor(
   select_sharding_functor_impl(ctx, copy, input, output);
 }
 #endif // NO_LEGION_CONTROL_REPLICATION
+
+const char* LoggingWrapper::get_mapper_name(void) const {
+  return name.c_str();
+}
 
 void LoggingWrapper::slice_task(const MapperContext ctx,
                                 const Task& task,

@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University
+/* Copyright 2024 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -34,14 +34,14 @@ public:
                 std::map<Processor, Memory>* proc_fbmems,
                 std::map<Processor, Memory>* proc_zcmems);
 public:
-  virtual void map_task(const MapperContext      ctx,
-                        const Task&              task,
-                        const MapTaskInput&      input,
-                              MapTaskOutput&     output);
-  virtual void map_inline(const MapperContext    ctx,
-                          const InlineMapping&   inline_op,
-                          const MapInlineInput&  input,
-                                MapInlineOutput& output);
+  void map_task(const MapperContext      ctx,
+                const Task&              task,
+                const MapTaskInput&      input,
+                      MapTaskOutput&     output) override;
+  void map_inline(const MapperContext    ctx,
+                  const InlineMapping&   inline_op,
+                  const MapInlineInput&  input,
+                        MapInlineOutput& output) override;
 protected:
   void map_circuit_region(const MapperContext ctx, LogicalRegion region,
                           Processor target_proc, Memory target,
@@ -58,8 +58,31 @@ protected:
   std::map<Processor, Memory>& proc_zcmems;
 protected:
   // For memoizing mapping instances
-  std::map<std::pair<LogicalRegion,Memory>,PhysicalInstance> local_instances;
-  std::map<std::pair<LogicalRegion,Memory>,PhysicalInstance> reduction_instances;
+  struct MemoizationKey {
+  public:
+    MemoizationKey(LogicalRegion o, LogicalRegion t, Memory m)
+      : one(o), two(t), memory(m) { }
+  public:
+    inline bool operator==(const MemoizationKey &rhs) const
+    {
+      if (one != rhs.one) return false;
+      if (two != rhs.two) return false;
+      return (memory == rhs.memory);
+    }
+    inline bool operator<(const MemoizationKey &rhs) const
+    {
+      if (one < rhs.one) return true;
+      if (one != rhs.one) return false; // same as >
+      if (two < rhs.two) return true;
+      if (two != rhs.two) return false; // same as >
+      return (memory < rhs.memory);
+    }
+  public:
+    LogicalRegion one, two;
+    Memory memory;
+  };
+  std::map<MemoizationKey,PhysicalInstance> local_instances;
+  std::map<MemoizationKey,PhysicalInstance> reduction_instances;
 };
 
 void update_mappers(Machine machine, Runtime *rt,

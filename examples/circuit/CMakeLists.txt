@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------#
-# Copyright 2023 Kitware, Inc.
+# Copyright 2024 Kitware, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -29,15 +29,17 @@ set(CPU_SOURCES
   circuit_mapper.h  circuit_mapper.cc
 )
 if(Legion_USE_CUDA)
-  set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS} -Wno-deprecated-gpu-targets)
   set(GPU_SOURCES circuit_gpu.cu)
-  cuda_add_executable(circuit ${CPU_SOURCES} ${GPU_SOURCES})
+  add_executable(circuit ${CPU_SOURCES} ${GPU_SOURCES})
+  set_target_cuda_standard(circuit STANDARD ${Legion_CUDA_STANDARD})
+  set_target_cuda_architectures(circuit ARCHITECTURES ${Legion_CUDA_ARCH})
+  set_target_cuda_warnings_and_errors(circuit WARN_AS_ERROR ${Legion_BUILD_WARN_AS_ERROR})
 elseif(Legion_USE_HIP)
   set(GPU_SOURCES circuit_gpu.cu)
   if(Legion_HIP_TARGET STREQUAL "CUDA")
-    set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS} -Wno-deprecated-gpu-targets)
-    cuda_add_executable(circuit ${CPU_SOURCES} ${GPU_SOURCES})
+    add_executable(circuit ${CPU_SOURCES} ${GPU_SOURCES})
     target_compile_definitions(circuit PRIVATE __HIP_PLATFORM_NVIDIA__)
+    target_include_directories(circuit PRIVATE ${HIP_ROOT_DIR}/include)
   elseif (Legion_HIP_TARGET STREQUAL "ROCM")
     hip_add_executable(circuit ${CPU_SOURCES} ${GPU_SOURCES})
     target_compile_definitions(circuit PRIVATE __HIP_PLATFORM_AMD__)
@@ -45,6 +47,9 @@ elseif(Legion_USE_HIP)
 else()
   add_executable(circuit ${CPU_SOURCES})
 endif()
+
+target_compile_options(circuit PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
+
 target_link_libraries(circuit Legion::Legion)
 if(Legion_ENABLE_TESTING)
   add_test(NAME circuit COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:circuit> ${Legion_TEST_ARGS})

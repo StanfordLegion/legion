@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------#
-# Copyright 2023 Kitware, Inc.
+# Copyright 2024 Kitware, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -28,6 +28,7 @@ install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/
 list(APPEND REALM_SRC
   realm/realm_c.h
   realm/transfer/lowlevel_disk.cc
+  realm/transfer/address_list.h            realm/transfer/address_list.cc
   realm/transfer/channel.h                 realm/transfer/channel.cc
   realm/transfer/channel_disk.h            realm/transfer/channel_disk.cc
   realm/transfer/transfer.h                realm/transfer/transfer.cc
@@ -59,6 +60,7 @@ list(APPEND REALM_SRC
   realm/mem_impl.h          realm/mem_impl.cc
   realm/metadata.h          realm/metadata.cc
   realm/module.h            realm/module.cc
+  realm/module_config.h     realm/module_config.inl realm/module_config.cc
   realm/nodeset.h           realm/nodeset.inl      realm/nodeset.cc
   realm/numa/numa_module.h  realm/numa/numa_module.cc
   realm/numa/numasysif.h    realm/numa/numasysif.cc
@@ -74,13 +76,18 @@ list(APPEND REALM_SRC
   realm/tasks.h             realm/tasks.cc
   realm/threads.h           realm/threads.cc
   realm/threads.inl
+  realm/shm.h               realm/shm.cc
 )
 
 if(Legion_USE_CUDA)
   list(APPEND REALM_SRC
     realm/cuda/cuda_module.h    realm/cuda/cuda_module.cc
+    realm/cuda/cuda_module.inl
     realm/cuda/cuda_internal.h  realm/cuda/cuda_internal.cc
     realm/cuda/cuda_access.h    realm/cuda/cuda_access.cc
+  )
+  list(APPEND REALM_CUDA_SRC
+    realm/cuda/cuda_memcpy.cu
   )
   if(REALM_USE_CUDART_HIJACK)
     list(APPEND REALM_SRC
@@ -92,9 +99,10 @@ endif()
 if(Legion_USE_HIP)
   list(APPEND REALM_SRC
     realm/hip/hip_module.h    realm/hip/hip_module.cc
+    realm/hip/hip_module.inl
     realm/hip/hip_internal.h  realm/hip/hip_internal.cc
     realm/hip/hip_access.h    realm/hip/hip_access.cc
-		realm/hip/hiphijack_api.h
+    realm/hip/hiphijack_api.h
   )
   if(REALM_USE_HIP_HIJACK)
     list(APPEND REALM_SRC
@@ -183,6 +191,7 @@ endif()
 if(REALM_USE_UCX)
   list(APPEND REALM_SRC
     realm/ucx/ucp_utils.h
+    realm/ucx/ucp_dyn_load.h
     realm/ucx/ucp_module.h
     realm/ucx/ucp_module.cc
     realm/ucx/ucp_internal.h
@@ -191,6 +200,7 @@ if(REALM_USE_UCX)
     realm/ucx/ucp_context.cc
     realm/ucx/mpool.h
     realm/ucx/mpool.cc
+    realm/ucx/spinlock.h
     realm/ucx/bootstrap/bootstrap.h
     realm/ucx/bootstrap/bootstrap.cc
     realm/ucx/bootstrap/bootstrap_loader.h
@@ -261,11 +271,54 @@ foreach(INST_N1 RANGE 1 ${REALM_MAX_DIM})
   endforeach()
 endforeach()
 
+if(Legion_USE_CUDA)
+
+  add_library(realm_cuda_fatbin OBJECT ${REALM_CUDA_SRC})
+  #TODO(apryakhin): Enable with cmake 3.27
+  #set_property(TARGET realm_cuda_fatbin PROPERTY CUDA_FATBIN_COMPILATION ON)
+  target_compile_options(realm_cuda_fatbin PRIVATE $<$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>:
+                         -Xcudafe=--diag_suppress=boolean_controlling_expr_is_constant
+                         --fatbin>)
+  target_compile_definitions(realm_cuda_fatbin PRIVATE "CUDA_FATBIN_COMPILATION")
+
+  target_include_directories(realm_cuda_fatbin
+                     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
+                             ${PROJECT_BINARY_DIR}/runtime)
+
+  set_target_cuda_standard(realm_cuda_fatbin STANDARD ${Legion_CUDA_STANDARD})
+  set_target_cuda_architectures(realm_cuda_fatbin ARCHITECTURES ${Legion_CUDA_ARCH})
+  set_target_cuda_warnings_and_errors(realm_cuda_fatbin WARN_AS_ERROR ${Legion_BUILD_WARN_AS_ERROR})
+
+  set(realm_fatbin_cc "${CMAKE_CURRENT_BINARY_DIR}/realm_fatbin.cc")
+
+  add_custom_command(
+    OUTPUT "${realm_fatbin_cc}"
+    COMMAND ${CMAKE_COMMAND}
+      "-DVAR_NAME=realm_fatbin"
+      "-DDEFINES_HEADER=realm/realm_config.h"
+      "-DIN_FILE=$<TARGET_OBJECTS:realm_cuda_fatbin>"
+      "-DOUT_FILE=${realm_fatbin_cc}"
+      -P ${PROJECT_SOURCE_DIR}/cmake/bin2c.cmake
+    VERBATIM
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+    DEPENDS $<TARGET_OBJECTS:realm_cuda_fatbin>
+    COMMENT "Embedding binary objects $<TARGET_OBJECTS:realm_cuda_fatbin> -> ${realm_fatbin_cc}"
+  )
+
+  # Add a direct dependency on realm_fatbin.cc in order to force a rebuild as realm_fatbin.cc changes
+  list(APPEND REALM_SRC ${realm_fatbin_cc})
+endif()
+
 find_package(Threads REQUIRED)
 cmake_policy(SET CMP0063 NEW) # visibility controls in all builds
 add_library(RealmRuntime ${REALM_SRC})
+
+if(TARGET realm_cuda_fatbin)
+  add_dependencies(RealmRuntime realm_cuda_fatbin)
+endif()
+
 add_library(Legion::RealmRuntime ALIAS RealmRuntime)
-target_compile_options(RealmRuntime PRIVATE ${CXX_BUILD_WARNING_FLAGS})
+target_compile_options(RealmRuntime PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
 
 # turn on warnings about partially-overloaded methods, if supported
 check_cxx_compiler_flag("-Woverloaded-virtual" COMPILER_SUPORTS_OVERLOADED_VIRTUAL_WARNING)
@@ -276,7 +329,7 @@ endif()
 if(COMPILER_SUPPORTS_DEFCHECK)
   # use the cxx_defcheck wrapper to make sure realm_defines.h is included
   #  any place it needs to be
-  target_compile_options(RealmRuntime PRIVATE --defcheck realm_defines.h)
+  target_compile_options(RealmRuntime PRIVATE $<$<COMPILE_LANGUAGE:CXX>:--defcheck;realm_defines.h>)
 endif()
 if(REALM_USE_LIBDL)
   target_link_libraries(RealmRuntime PRIVATE ${CMAKE_DL_LIBS})
@@ -291,11 +344,20 @@ endif()
 set_target_properties(RealmRuntime PROPERTIES POSITION_INDEPENDENT_CODE ON)
 set_target_properties(RealmRuntime PROPERTIES SOVERSION ${SOVERSION})
 if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
-  set_target_properties(RealmRuntime PROPERTIES BUILD_RPATH "\$ORIGIN")
-  set_target_properties(RealmRuntime PROPERTIES INSTALL_RPATH "\$ORIGIN")
+  set_property(TARGET RealmRuntime APPEND PROPERTY BUILD_RPATH "\$ORIGIN")
+  set_property(TARGET RealmRuntime APPEND PROPERTY INSTALL_RPATH "\$ORIGIN")
 elseif (CMAKE_SYSTEM_NAME STREQUAL "Darwin")
-  set_target_properties(RealmRuntime PROPERTIES BUILD_RPATH "@loader_path")
-  set_target_properties(RealmRuntime PROPERTIES INSTALL_RPATH "@loader_path")
+  set_property(TARGET RealmRuntime APPEND PROPERTY BUILD_RPATH "@loader_path")
+  set_property(TARGET RealmRuntime APPEND PROPERTY INSTALL_RPATH "@loader_path")
+endif ()
+
+if(Legion_USE_Python)
+  # Realm dlopens libpython.so, so we need to add the directory that contains it
+  # to BUILD_RPATH, otherwise build/lib/librealm.so's dlopen will not find it.
+  # We're assuming that libpython.so will be found in the same dir as librealm.so
+  # after installation, so no need to update INSTALL_RPATH.
+  get_filename_component(PYTHON_LIB_DIR "${Python3_LIBRARIES}" DIRECTORY)
+  set_property(TARGET RealmRuntime APPEND PROPERTY BUILD_RPATH "${PYTHON_LIB_DIR}")
 endif ()
 
 if(REALM_LIMIT_SYMBOL_VISIBILITY)
@@ -332,7 +394,7 @@ if(REALM_USE_GASNET1 OR REALM_USE_GASNETEX)
     # we'll write the GASNet configuration to a file so that we can rebuild
     #  (only) if it changes
     set(GASNet_CONFIG_FILE ${PROJECT_BINARY_DIR}/embed-gasnet/config.txt)
-    set(GASNet_CONFIG_SETTINGS "CONDUIT=${GASNet_CONDUIT}" "GASNET_EXTRA_CONFIGURE_ARGS=${Legion_EMBED_GASNet_CONFIGURE_ARGS}" "GASNET_CFLAGS=${GASNET_CFLAGS}" "GASNET_CXXFLAGS=${GASNET_CXXFLAGS}")
+    set(GASNet_CONFIG_SETTINGS "LEGION_GASNET_CONDUIT=${GASNet_CONDUIT}" "LEGION_GASNET_SYSTEM=${GASNet_SYSTEM}" "GASNET_EXTRA_CONFIGURE_ARGS=${Legion_EMBED_GASNet_CONFIGURE_ARGS}" "GASNET_CFLAGS=${GASNET_CFLAGS}" "GASNET_CXXFLAGS=${GASNET_CXXFLAGS}")
     if(Legion_EMBED_GASNet_VERSION)
       # make the source directory version-specific
       set(GASNet_SOURCE_DIR ${PROJECT_BINARY_DIR}/embed-gasnet/${Legion_EMBED_GASNet_VERSION})
@@ -341,16 +403,16 @@ if(REALM_USE_GASNET1 OR REALM_USE_GASNETEX)
     if(EXISTS ${GASNet_CONFIG_FILE})
       file(READ ${GASNet_CONFIG_FILE} PREV_CONFIG_SETTINGS)
       if("${GASNet_CONFIG_SETTINGS}" STREQUAL "${PREV_CONFIG_SETTINGS}")
-	# configs match - no build needed
-	set(GASNET_BUILD_NEEDED OFF)
+        # configs match - no build needed
+        set(GASNET_BUILD_NEEDED OFF)
       else()
-	message(STATUS "Embedded GASNet configuration has changed - rebuilding...")
-	file(REMOVE_RECURSE ${GASNet_BUILD_DIR} ${GASNet_INSTALL_DIR} ${GASNet_CONFIG_FILE})
-	# clear any cached paths/conduits/etc.
-	unset(GASNet_INCLUDE_DIR CACHE)
-	unset(GASNet_CONDUITS CACHE)
-	unset(GASNet_THREADING_OPTS CACHE)
-	set(GASNET_BUILD_NEEDED ON)
+        message(STATUS "Embedded GASNet configuration has changed - rebuilding...")
+        file(REMOVE_RECURSE ${GASNet_BUILD_DIR} ${GASNet_INSTALL_DIR} ${GASNet_CONFIG_FILE})
+        # clear any cached paths/conduits/etc.
+        unset(GASNet_INCLUDE_DIR CACHE)
+        unset(GASNet_CONDUITS CACHE)
+        unset(GASNet_THREADING_OPTS CACHE)
+        set(GASNET_BUILD_NEEDED ON)
       endif()
     else()
       message(STATUS "Configuring and building embedded GASNet...")
@@ -358,33 +420,34 @@ if(REALM_USE_GASNET1 OR REALM_USE_GASNETEX)
     endif()
     if(GASNET_BUILD_NEEDED)
       if(Legion_EMBED_GASNet_LOCALSRC)
-	# relative paths are relative to the _build_ dir - this does the
-	#  intuitive thing when you do:
-	#     cmake ... -DLegion_EMBED_GASNet_LOCALSRC=relative/to/cwd (source_dir)
-	#  but is a little nonobvious when you type:
-	#     cmake -S (source_dir) -B (build_dir) ... -DLegion_EMBED_GASNet_LOCALSRC=still/relative/to/build_dir
-	get_filename_component(
-	  EMBEDDED_GASNET_SRC
-	  "${Legion_EMBED_GASNet_LOCALSRC}"
-	  ABSOLUTE BASE_DIR ${PROJECT_BINARY_DIR})
+      # relative paths are relative to the _build_ dir - this does the
+      #  intuitive thing when you do:
+      #     cmake ... -DLegion_EMBED_GASNet_LOCALSRC=relative/to/cwd (source_dir)
+      #  but is a little nonobvious when you type:
+      #     cmake -S (source_dir) -B (build_dir) ... -DLegion_EMBED_GASNet_LOCALSRC=still/relative/to/build_dir
+      get_filename_component(
+        EMBEDDED_GASNET_SRC
+        "${Legion_EMBED_GASNet_LOCALSRC}"
+        ABSOLUTE BASE_DIR ${PROJECT_BINARY_DIR})
       else()
-	include(FetchContent)
-	FetchContent_Declare(embed-gasnet
-	  GIT_REPOSITORY ${Legion_EMBED_GASNet_GITREPO}
-	  GIT_TAG        ${Legion_EMBED_GASNet_GITREF}
-	  )
-	message(STATUS "Downloading StanfordLegion/gasnet repo from: ${Legion_EMBED_GASNet_GITREPO}")
-	FetchContent_Populate(embed-gasnet)
-	set(EMBEDDED_GASNET_SRC "${embed-gasnet_SOURCE_DIR}")
+        include(FetchContent)
+        FetchContent_Declare(embed-gasnet
+          GIT_REPOSITORY ${Legion_EMBED_GASNet_GITREPO}
+          GIT_TAG        ${Legion_EMBED_GASNet_GITREF}
+          )
+        message(STATUS "Downloading StanfordLegion/gasnet repo from: ${Legion_EMBED_GASNet_GITREPO}")
+        FetchContent_Populate(embed-gasnet)
+        set(EMBEDDED_GASNET_SRC "${embed-gasnet_SOURCE_DIR}")
+        message(STATUS "make -C ${EMBEDDED_GASNET_SRC} GASNET_SOURCE_DIR=${GASNet_SOURCE_DIR} GASNET_BUILD_DIR=${GASNet_BUILD_DIR} GASNET_INSTALL_DIR=${GASNet_INSTALL_DIR} ${GASNet_CONFIG_SETTINGS}")
       endif()
       execute_process(
-	COMMAND make -C ${EMBEDDED_GASNET_SRC} GASNET_SOURCE_DIR=${GASNet_SOURCE_DIR} GASNET_BUILD_DIR=${GASNet_BUILD_DIR} GASNET_INSTALL_DIR=${GASNet_INSTALL_DIR} ${GASNet_CONFIG_SETTINGS}
-	RESULT_VARIABLE GASNET_BUILD_STATUS
-	OUTPUT_FILE ${GASNet_BUILD_OUTPUT}
-	ERROR_FILE ${GASNet_BUILD_OUTPUT}
-	)
+        COMMAND make -C ${EMBEDDED_GASNET_SRC} GASNET_SOURCE_DIR=${GASNet_SOURCE_DIR} GASNET_BUILD_DIR=${GASNet_BUILD_DIR} GASNET_INSTALL_DIR=${GASNet_INSTALL_DIR} ${GASNet_CONFIG_SETTINGS}
+        RESULT_VARIABLE GASNET_BUILD_STATUS
+        OUTPUT_FILE ${GASNet_BUILD_OUTPUT}
+        ERROR_FILE ${GASNet_BUILD_OUTPUT}
+      )
       if(GASNET_BUILD_STATUS)
-	message(FATAL_ERROR "GASNet build result = ${GASNET_BUILD_STATUS} - see ${GASNet_BUILD_OUTPUT} for more details")
+        message(FATAL_ERROR "GASNet build result = ${GASNET_BUILD_STATUS} - see ${GASNet_BUILD_OUTPUT} for more details")
       endif()
       file(WRITE ${GASNet_CONFIG_FILE} "${GASNet_CONFIG_SETTINGS}")
     endif()
@@ -439,17 +502,20 @@ if(REALM_USE_MPI)
 endif()
 
 if(REALM_USE_UCX)
-  target_link_libraries(RealmRuntime PRIVATE UCX::UCP)
+  target_include_directories(RealmRuntime PRIVATE ${UCX_INCLUDE_DIRS})
+  if(NOT REALM_UCX_DYNAMIC_LOAD)
+    target_link_libraries(RealmRuntime PRIVATE ucx::ucp)
+  endif()
   # build the MPI bootstrap plugin
   add_library(realm_ucp_bootstrap_mpi MODULE
     realm/ucx/bootstrap/bootstrap_mpi.c)
   target_include_directories(realm_ucp_bootstrap_mpi PRIVATE
-	${CMAKE_CURRENT_SOURCE_DIR}
-	${PROJECT_BINARY_DIR}/runtime)
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${PROJECT_BINARY_DIR}/runtime)
   target_link_libraries(realm_ucp_bootstrap_mpi PRIVATE MPI::MPI_C)
   set_target_properties(realm_ucp_bootstrap_mpi PROPERTIES PREFIX "")
   install(TARGETS realm_ucp_bootstrap_mpi LIBRARY
-    DESTINATION ${CMAKE_INSTALL_LIBDIR})
+      DESTINATION ${CMAKE_INSTALL_LIBDIR})
 endif()
 
 if(Legion_USE_LLVM)
@@ -466,56 +532,69 @@ if(Legion_USE_CUDA)
   if(REALM_USE_CUDART_HIJACK)
     if(Legion_USE_Kokkos)
       # we need kokkos to depend on the hijack without creating a circular
-      #  dependency, so put it in an object library - this works only on newer
-      #  cmakes, but we already need cmake 3.13 for Kokkos, so this is ok
+      # dependency, so put it in an object library - this works only on newer
+      # cmakes, but we already need cmake 3.13 for Kokkos, so this is ok
       add_library(realm_cudarthijack OBJECT
-	realm/cuda/cudart_hijack.cc
-	realm/cuda/cudart_hijack.h)
+        realm/cuda/cudart_hijack.cc
+        realm/cuda/cudart_hijack.h)
       set_target_properties(realm_cudarthijack PROPERTIES POSITION_INDEPENDENT_CODE ON)
       if(REALM_LIMIT_SYMBOL_VISIBILITY)
         set_target_properties(realm_cudarthijack PROPERTIES CXX_VISIBILITY_PRESET hidden)
         set_target_properties(realm_cudarthijack PROPERTIES VISIBILITY_INLINES_HIDDEN 1)
       endif()
-      target_include_directories(realm_cudarthijack PRIVATE
-	${CMAKE_CURRENT_SOURCE_DIR}
-	${PROJECT_BINARY_DIR}/runtime
-	${CUDA_INCLUDE_DIRS})
+      target_link_libraries(realm_cudarthijack PRIVATE CUDA::toolkit)
+      target_include_directories(realm_cudarthijack
+                         PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
+                                 ${PROJECT_BINARY_DIR}/runtime)
       target_link_libraries(RealmRuntime PRIVATE realm_cudarthijack)
       install(TARGETS realm_cudarthijack EXPORT LegionTargets)
     else()
       # without Kokkos interop, we can just add the hijack directly
       target_sources(RealmRuntime PRIVATE realm/cuda/cudart_hijack.cc)
     endif()
-
-    # filter anything referring to *cudart* out of the CUDA_LIBRARIES
-    #  making sure our changes are visible to the scope above
-    # so list(FILTER ...) doesn't exist until cmake 3.6 - do string regex instead
-    string(REGEX REPLACE "[^\;]*cudart[^\;]*(\;?)" "" CUDA_LIBRARIES "${CUDA_LIBRARIES}")
-    set(CUDA_LIBRARIES ${CUDA_LIBRARIES} PARENT_SCOPE)
   else()
-    if(NOT REALM_CUDA_DYNAMIC_LOAD)
-      target_link_libraries(RealmRuntime PRIVATE ${CUDA_CUDART_LIBRARY})
+    if(REALM_CUDA_DYNAMIC_LOAD)
+      target_link_libraries(RealmRuntime INTERFACE CUDA::cudart)
+    else()
+      target_link_libraries(RealmRuntime INTERFACE CUDA::cudart_static)
     endif()
   endif()
 
-  target_include_directories(RealmRuntime PRIVATE ${CUDA_INCLUDE_DIRS})
-  if(NOT REALM_CUDA_DYNAMIC_LOAD)
-    target_link_libraries(RealmRuntime PRIVATE ${CUDA_CUDA_LIBRARY})
-  endif()
+  target_link_libraries(RealmRuntime PUBLIC CUDA::toolkit)
+  # Advertise our driver link to Realm consumers while ensuring libcuda.so isn't in Realm's RPATH
+  target_link_libraries(RealmRuntime INTERFACE CUDA::cuda_driver)
   # for backwards compatibility in applications
   target_compile_definitions(RealmRuntime INTERFACE USE_CUDA)
+
+  set_target_cuda_standard(RealmRuntime STANDARD ${Legion_CUDA_STANDARD})
+  set_target_cuda_architectures(RealmRuntime ARCHITECTURES ${Legion_CUDA_ARCH})
+
+  # build cuda hook library
+  add_library(realm_cuhook SHARED
+    realm/cuda/cuda_hook.cc)
+  set_target_properties(realm_cuhook PROPERTIES POSITION_INDEPENDENT_CODE ON)
+  if(REALM_LIMIT_SYMBOL_VISIBILITY)
+    set_target_properties(realm_cuhook PROPERTIES CXX_VISIBILITY_PRESET hidden)
+    set_target_properties(realm_cuhook PROPERTIES VISIBILITY_INLINES_HIDDEN 1)
+  endif()
+  target_include_directories(realm_cuhook PRIVATE
+                            ${CMAKE_CURRENT_SOURCE_DIR}
+                            ${PROJECT_BINARY_DIR}/runtime)
+  target_link_libraries(realm_cuhook PUBLIC CUDA::toolkit)
+  add_dependencies(RealmRuntime realm_cuhook)
+  install(TARGETS realm_cuhook EXPORT LegionTargets)
 endif()
 
 if(Legion_USE_HIP)
   if (Legion_HIP_TARGET STREQUAL "CUDA")
     if(REALM_USE_HIP_HIJACK)
       target_sources(RealmRuntime PRIVATE realm/hip/hip_hijack.cc)
-      set(CUDA_LIBRARIES ${CUDA_LIBRARIES} PARENT_SCOPE)
     endif()
 
-    target_include_directories(RealmRuntime PRIVATE ${CUDA_INCLUDE_DIRS})
+    target_link_libraries(RealmRuntime PUBLIC CUDA::toolkit)
+    # Advertise our driver link to Realm consumers while ensuring libcuda.so isn't in Realm's RPATH
+    target_link_libraries(RealmRuntime INTERFACE CUDA::cuda_driver)
     target_include_directories(RealmRuntime PRIVATE ${HIP_ROOT_DIR}/include)
-    target_link_libraries(RealmRuntime PRIVATE ${CUDA_CUDA_LIBRARY})
     # for backwards compatibility in applications
     target_compile_definitions(RealmRuntime INTERFACE USE_HIP)
 
@@ -606,7 +685,7 @@ if(Legion_USE_Kokkos)
   endif()
 
   if(Legion_USE_OpenMP AND (Kokkos_VERSION_MAJOR GREATER_EQUAL 4))
-    # hack the kokkos_compile_options because -Xcompiler and -fopenmp are no longer 
+    # hack the kokkos_compile_options because -Xcompiler and -fopenmp are no longer
     #   added by INTERFACE_COMPILE_OPTIONS, so we will added them ourselved
     if(Legion_USE_CUDA)
       list(APPEND kokkos_compile_options "-Xcompiler")
@@ -617,7 +696,7 @@ if(Legion_USE_Kokkos)
 
   # and then finally, tell clang (if it is clang) where to find CUDA
   if(Legion_USE_CUDA AND (KOKKOS_CXX_COMPILER MATCHES ".*clang.*"))
-    list(APPEND kokkos_compile_options "--cuda-path=${CUDA_TOOLKIT_ROOT_DIR}")
+    list(APPEND kokkos_compile_options "--cuda-path=${CUDAToolkit_LIBRARY_ROOT}")
   endif()
 
   # now define our custom build command
@@ -668,8 +747,12 @@ if(Legion_USE_OpenMP)
 endif()
 
 if(REALM_USE_NVTX)
-  target_include_directories(RealmRuntime PRIVATE ${NVTX_INCLUDE_DIRS})
-  target_link_libraries(RealmRuntime PRIVATE ${NVTX_LIBRARIES})
+  target_link_libraries(RealmRuntime PRIVATE CUDA::nvtx3)
+endif()
+
+if(Legion_BACKTRACE_USE_LIBDW)
+  target_include_directories(RealmRuntime PRIVATE ${LIBDW_INCLUDE_DIR})
+  target_link_libraries(RealmRuntime PRIVATE ${LIBDW_LIBRARY})
 endif()
 
 set_target_properties(RealmRuntime PROPERTIES OUTPUT_NAME "realm${INSTALL_SUFFIX}")
@@ -693,6 +776,26 @@ install(TARGETS RealmRuntime EXPORT LegionTargets
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
 
+add_library(RealmStatic STATIC EXCLUDE_FROM_ALL ${REALM_SRC})
+add_library(Legion::RealmStatic ALIAS RealmStatic)
+target_compile_options(RealmStatic PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
+if(UNIX AND NOT APPLE)
+  target_link_libraries(RealmStatic PRIVATE rt)
+endif()
+set_target_properties(RealmStatic PROPERTIES OUTPUT_NAME "realm${INSTALL_SUFFIX}_static")
+target_include_directories(RealmStatic
+  INTERFACE
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
+    $<INSTALL_INTERFACE:include>
+  PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
+
+  # Include paths for generated header files.
+  INTERFACE
+    $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/runtime>
+  PRIVATE
+    ${PROJECT_BINARY_DIR}/runtime
+  )
+
 # Mapper objects
 list(APPEND MAPPER_SRC
   mappers/default_mapper.h     mappers/default_mapper.cc
@@ -711,12 +814,9 @@ list(APPEND MAPPER_SRC
 # Legion runtime
 list(APPEND LEGION_SRC
   legion.h
-  legion/accessor.h
-  legion/arrays.h
   legion/bitmask.h
-  legion/field_tree.h
   legion/garbage_collection.h             legion/garbage_collection.cc
-  legion/interval_tree.h
+  legion/index_space_value.h              legion/index_space_value.cc
   legion/legion_allocation.h
   legion/legion_analysis.h                legion/legion_analysis.cc
   legion/legion_c.h                       legion/legion_c.cc
@@ -733,6 +833,8 @@ list(APPEND LEGION_SRC
   legion/legion_ops.h                     legion/legion_ops.cc
   legion/legion_profiling.h               legion/legion_profiling.cc
   legion/legion_profiling_serializer.h    legion/legion_profiling_serializer.cc
+  legion/legion_profiling_version.h
+  legion/legion_replication.h             legion/legion_replication.cc
   legion/legion_spy.h                     legion/legion_spy.cc
   legion/legion_tasks.h                   legion/legion_tasks.cc
   legion/legion_trace.h                   legion/legion_trace.cc
@@ -741,7 +843,6 @@ list(APPEND LEGION_SRC
   legion/legion_views.h                   legion/legion_views.cc
   legion/legion_redop.h                   legion/legion_redop.cc
   legion/mapper_manager.h                 legion/mapper_manager.cc
-  legion/rectangle_set.h
   legion/region_tree.h                    legion/region_tree.cc
   legion/runtime.h                        legion/runtime.cc
 )
@@ -759,12 +860,12 @@ if(Legion_REDOP_COMPLEX)
 endif()
 
 if(Legion_USE_CUDA)
-  list(APPEND LEGION_CUDA_SRC
+  list(APPEND LEGION_SRC
     legion/legion_redop.cu
   )
 endif()
 
-if(Legion_USE_HIP AND Legion_GPU_REDUCTIONS)
+if(Legion_USE_HIP)
   list(APPEND LEGION_HIP_SRC
     legion/legion_redop.cu
   )
@@ -803,119 +904,55 @@ endif()
 
 add_library(LegionRuntime ${EXCLUDE_LEGION} ${MAPPER_SRC} ${LEGION_SRC} ${LEGION_FORTRAN_SRC})
 add_library(Legion::LegionRuntime ALIAS LegionRuntime)
-# do we have any cuda source files in Legion itself?
-if(LEGION_CUDA_SRC)
-  # Fill in the most compatible set of architectures we support
-  if("${Legion_CUDA_ARCH}" STREQUAL "")
-    if (${CUDA_VERSION_STRING} VERSION_LESS "11.5")
-      # Prior to 11.5, we don't have -arch=all and have to list the architectures out manually
-      if (${CUDA_VERSION_STRING} VERSION_GREATER_EQUAL "3.2" AND ${CUDA_VERSION_STRING} VERSION_LESS "9.0")
-        list(APPEND Legion_CUDA_ARCH 20)
-      endif ()
-      if (${CUDA_VERSION_STRING} VERSION_GREATER_EQUAL "5.0" AND ${CUDA_VERSION_STRING} VERSION_LESS "11.0")
-        list(APPEND Legion_CUDA_ARCH 30)
-      endif ()
-      if (${CUDA_VERSION_STRING} VERSION_GREATER_EQUAL "5.0" AND ${CUDA_VERSION_STRING} VERSION_LESS "12.0")
-        list(APPEND Legion_CUDA_ARCH 35)
-      endif ()
-      if (${CUDA_VERSION_STRING} VERSION_GREATER_EQUAL "6.0" AND ${CUDA_VERSION_STRING} VERSION_LESS "12.0")
-        list(APPEND Legion_CUDA_ARCH 50)
-      endif ()
-      if (${CUDA_VERSION_STRING} VERSION_GREATER_EQUAL "8.0")
-        list(APPEND Legion_CUDA_ARCH 60)
-      endif ()
-      if (${CUDA_VERSION_STRING} VERSION_GREATER_EQUAL "9.0")
-        list(APPEND Legion_CUDA_ARCH 70)
-      endif ()
-      if (${CUDA_VERSION_STRING} VERSION_GREATER_EQUAL "11.0")
-        list(APPEND Legion_CUDA_ARCH 80)
-      endif ()
-    else ()
-        # New with 11.5, nvcc supports 'all-major' which does all this for us
-        set(CUDA_GENCODE "-arch all-major")
-    endif ()
-  else ()
-      # If the user specified a specific gencode to use, use that
-      string(REPLACE "," ";" Legion_CUDA_ARCH "${Legion_CUDA_ARCH}")
-  endif ()
 
-  if (Legion_CUDA_ARCH)
-    list(SORT Legion_CUDA_ARCH)
-    set(CUDA_GENCODE "${Legion_CUDA_ARCH}")
-    # Add all the specified architectures we support
-    string(REGEX REPLACE "([0-9]+)" "-gencode arch=compute_\\1,code=sm_\\1" CUDA_GENCODE "${CUDA_GENCODE}")
-    list(GET Legion_CUDA_ARCH -1 COMPUTE_ARCH)
-    # For the last architecture we support, add PTX
-    list(APPEND CUDA_GENCODE "-gencode arch=compute_${COMPUTE_ARCH},code=compute_${COMPUTE_ARCH}")
-  endif ()
+# Add CUDA-specific properties
+if(Legion_USE_CUDA)
+  target_compile_options(LegionRuntime PRIVATE $<$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>:
+                         -Xcudafe=--diag_suppress=boolean_controlling_expr_is_constant>)
 
-  # starting with NVCC 10.2, we can error out on all warnings
-  if(Legion_BUILD_WARN_AS_ERROR AND CUDA_VERSION VERSION_GREATER "10.1")
-    set(CUDA_WARNINGS "-Werror all-warnings")
-  else()
-    set(CUDA_WARNINGS "")
-  endif()
+  set_target_cuda_warnings_and_errors(LegionRuntime WARN_AS_ERROR ${Legion_BUILD_WARN_AS_ERROR})
 
-  set(NVCC_EXTRA_FLAGS -Xcompiler -fPIC)
-
-  if (CMAKE_CXX_STANDARD)
-    list(APPEND NVCC_EXTRA_FLAGS "-std=c++${CMAKE_CXX_STANDARD}")
-  endif()
-  cuda_compile(LEGION_CUDA_OBJS ${LEGION_CUDA_SRC} OPTIONS
-    -Xcudafe "--diag_suppress=boolean_controlling_expr_is_constant"
-    ${CUDA_WARNINGS}
-    ${CUDA_GENCODE}
-    -I ${CMAKE_CURRENT_SOURCE_DIR}
-    -I ${PROJECT_BINARY_DIR}/runtime
-    ${NVCC_EXTRA_FLAGS}
-    DEBUG -g
-    RELEASE -O2
-    RELWITHDEBINFO -g -O2)
-  target_sources(LegionRuntime PRIVATE ${LEGION_CUDA_OBJS})
-  target_link_libraries(LegionRuntime PUBLIC ${CUDA_LIBRARIES})
-
-  # complex reduction ops bring in a public dependency on cuda headers
   if(Legion_REDOP_COMPLEX)
-    target_include_directories(LegionRuntime PUBLIC ${CUDA_INCLUDE_DIRS})
+    # libcudacxx is required for complex reductions; let cmake find it.
+    # By including this before the CUDA headers we make sure the libcudacxx
+    # installation we pass to cmake will take priority against whatever version
+    # is bundled with CUDA.
+    find_package(libcudacxx CONFIG)
+    if(libcudacxx_FOUND)
+      if(${LIBCUDACXX_VERSION} VERSION_LESS "1.8.0")
+        # cuda::std::complex started working properly in libcudacxx 1.8.0
+        message(FATAL_ERROR "Legion_REDOP_COMPLEX requires libcudacxx >= 1.8.0 (found ${LIBCUDACXX_VERSION})")
+      endif()
+      target_link_libraries(LegionRuntime PUBLIC libcudacxx::libcudacxx)
+    else()
+      # If we can't find a standalone libcudacxx then don't do anything and just
+      # let the build pick up the version that comes bundled with CUDA. But make
+      # sure CUDA is recent enough to include a libcudacxx with a working
+      # implementation of cuda::std::complex.
+      if(${CUDAToolkit_VERSION} VERSION_LESS "11.7")
+        message(FATAL_ERROR "Legion_REDOP_COMPLEX requires CUDA >= 11.7 (found ${CUDAToolkit_VERSION}) or libcudacxx >= 1.8.0")
+      endif()
+    endif()
+    # complex reduction ops bring in a public dependency on cuda headers
+    target_link_libraries(LegionRuntime PUBLIC CUDA::toolkit)
   endif()
+
+  set_target_cuda_standard(LegionRuntime STANDARD ${Legion_CUDA_STANDARD})
+  set_target_cuda_architectures(LegionRuntime ARCHITECTURES ${Legion_CUDA_ARCH})
 endif()
 
-if(LEGION_HIP_SRC)
-  if (Legion_HIP_TARGET STREQUAL "CUDA")
-    if("${Legion_CUDA_ARCH}" STREQUAL "")
-      set(CUDA_GENCODE "")
-    else()
-      string(REPLACE "," ";" CUDA_GENCODE "${Legion_CUDA_ARCH}")
-      string(REGEX REPLACE "([0-9]+)" "-gencode arch=compute_\\1,code=sm_\\1" CUDA_GENCODE "${CUDA_GENCODE}")
-    endif()
-    # starting with NVCC 10.2, we can error out on all warnings
-    if(Legion_BUILD_WARN_AS_ERROR AND CUDA_VERSION VERSION_GREATER "10.1")
-      set(CUDA_WARNINGS "-Werror all-warnings")
-    else()
-      set(CUDA_WARNINGS "")
-    endif()
-    cuda_compile(LEGION_HIP_OBJS ${LEGION_HIP_SRC} OPTIONS
-      -Xcudafe "--diag_suppress=boolean_controlling_expr_is_constant"
-      ${CUDA_WARNINGS}
-      ${CUDA_GENCODE}
-      ${HIPCC_FLAGS}
-      -I ${CMAKE_CURRENT_SOURCE_DIR}
-      -I ${PROJECT_BINARY_DIR}/runtime
-      -Xcompiler -fPIC
-      DEBUG -g
-      RELEASE -O2
-      RELWITHDEBINFO -g -O2)
-    target_sources(LegionRuntime PRIVATE ${LEGION_HIP_OBJS})
-    target_link_libraries(LegionRuntime PUBLIC ${CUDA_LIBRARIES})
-
+if(Legion_USE_HIP)
+  if(Legion_HIP_TARGET STREQUAL "CUDA")
+    target_sources(LegionRuntime PRIVATE ${LEGION_HIP_SRC})
+    target_compile_options(LegionRuntime PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:
+                           -Xcudafe=--diag_suppress=boolean_controlling_expr_is_constant>)
+    target_include_directories(LegionRuntime PRIVATE ${HIP_ROOT_DIR}/include)
     # complex reduction ops bring in a public dependency on cuda headers
     if(Legion_REDOP_COMPLEX)
-      target_include_directories(LegionRuntime PUBLIC ${CUDA_INCLUDE_DIRS})
+      target_link_libraries(LegionRuntime PUBLIC CUDA::toolkit)
       target_compile_definitions(LegionRuntime PUBLIC __HIP_PLATFORM_NVIDIA__)
     endif()
-  endif()
-
-  if (Legion_HIP_TARGET STREQUAL "ROCM")
+  elseif(Legion_HIP_TARGET STREQUAL "ROCM")
     set(HIP_LIBRARIES ${HIP_ROOT_DIR}/lib/libamdhip64.so)
     set_source_files_properties(${LEGION_HIP_SRC} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
     hip_compile(LEGION_HIP_OBJS ${LEGION_HIP_SRC} HIPCC_OPTIONS
@@ -936,7 +973,7 @@ if(LEGION_HIP_SRC)
       # set thrust package
       # please download thrust from https://github.com/ROCmSoftwarePlatform/Thrust
       if(NOT DEFINED THRUST_PATH)
-          set(THRUST_PATH $ENV{THRUST_PATH} CACHE PATH "Path to where Thrust has been installed")
+        set(THRUST_PATH $ENV{THRUST_PATH} CACHE PATH "Path to where Thrust has been installed")
       endif()
       target_include_directories(LegionRuntime PUBLIC ${HIP_INCLUDE_DIRS})
       target_compile_definitions(LegionRuntime PUBLIC __HIP_PLATFORM_AMD__)
@@ -955,19 +992,32 @@ set_target_properties(LegionRuntime PROPERTIES POSITION_INDEPENDENT_CODE ON)
 set_target_properties(LegionRuntime PROPERTIES OUTPUT_NAME "legion${INSTALL_SUFFIX}")
 set_target_properties(LegionRuntime PROPERTIES SOVERSION ${SOVERSION})
 if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
-  set_target_properties(LegionRuntime PROPERTIES BUILD_RPATH "\$ORIGIN")
-  set_target_properties(LegionRuntime PROPERTIES INSTALL_RPATH "\$ORIGIN")
+  target_link_libraries(LegionRuntime PUBLIC atomic)
+  set_property(TARGET LegionRuntime APPEND PROPERTY BUILD_RPATH "\$ORIGIN")
+  set_property(TARGET LegionRuntime APPEND PROPERTY INSTALL_RPATH "\$ORIGIN")
 elseif (CMAKE_SYSTEM_NAME STREQUAL "Darwin")
-  set_target_properties(LegionRuntime PROPERTIES BUILD_RPATH "@loader_path")
-  set_target_properties(LegionRuntime PROPERTIES INSTALL_RPATH "@loader_path")
+  set_property(TARGET LegionRuntime APPEND PROPERTY BUILD_RPATH "@loader_path")
+  set_property(TARGET LegionRuntime APPEND PROPERTY INSTALL_RPATH "@loader_path")
 endif ()
 
-target_compile_options(LegionRuntime PRIVATE ${CXX_BUILD_WARNING_FLAGS})
+target_compile_options(LegionRuntime PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
 if(COMPILER_SUPPORTS_DEFCHECK)
   # use the cxx_defcheck wrapper to make sure legion_defines.h is included
   #  any place it needs to be
-  target_compile_options(LegionRuntime PRIVATE --defcheck legion_defines.h)
+  target_compile_options(LegionRuntime PRIVATE $<$<COMPILE_LANGUAGE:CXX>:--defcheck;legion_defines.h>)
 endif()
+
+# compiler options' check for realm
+check_cxx_compiler_flag("-Wdeprecated" COMPILER_SUPPORTS_CXX_WDEPRECATED)
+if(COMPILER_SUPPORTS_CXX_WDEPRECATED)
+  target_compile_options(RealmRuntime PRIVATE -Wdeprecated)
+endif()
+check_cxx_compiler_flag("-Wformat-pedantic" COMPILER_SUPPORTS_CXX_FORMAT_PEDENTIC)
+if(COMPILER_SUPPORTS_CXX_FORMAT_PEDENTIC)
+  target_compile_options(RealmRuntime PRIVATE -Wformat-pedantic)
+endif()
+
+
 
 target_include_directories(LegionRuntime
   INTERFACE

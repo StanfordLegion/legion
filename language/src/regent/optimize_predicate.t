@@ -1,4 +1,4 @@
--- Copyright 2023 Stanford University
+-- Copyright 2024 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -41,8 +41,14 @@ function context:__newindex (field, value)
 end
 
 function context:new_local_scope(cond)
+  local parent_scope = false
+  if rawget(self, "cond") then
+    parent_scope = self
+  end
   local cx = {
-    cond = cond
+    cond = cond,
+    parent_scope = parent_scope,
+    false_future = false,
   }
   return setmetatable(cx, context)
 end
@@ -51,6 +57,17 @@ function context:new_task_scope()
   local cx = {
   }
   return setmetatable(cx, context)
+end
+
+function context:get_false_future()
+  if self.parent_scope then
+    return self.parent_scope:get_false_future()
+  end
+
+  if not self.false_future then
+    self.false_future = std.newsymbol(std.future(bool), "__normalized_in_predicate_opt")
+  end
+  return self.false_future
 end
 
 function context.new_global_scope()
@@ -169,12 +186,6 @@ local node_is_side_effect_free = {
   [ast.typed.expr.Internal]                   = unreachable,
 
   -- Statements:
-  [ast.typed.stat.IndexLaunchList] = function(cx, node)
-    return {not node.reduce_op, node}
-  end,
-  [ast.typed.stat.IndexLaunchNum] = function(cx, node)
-    return {not node.reduce_op, node}
-  end,
 
   -- Currently we can only support unpredicated conditionals inside of
   -- a predicated statement.
@@ -189,7 +200,6 @@ local node_is_side_effect_free = {
   [ast.typed.stat.MustEpoch]                  = always_false,
   [ast.typed.stat.Return]                     = always_false,
   [ast.typed.stat.Break]                      = always_false,
-  [ast.typed.stat.Reduce]                     = always_false,
   [ast.typed.stat.RawDelete]                  = always_false,
   [ast.typed.stat.Fence]                      = always_false,
   [ast.typed.stat.ParallelizeWith]            = always_false,
@@ -201,9 +211,12 @@ local node_is_side_effect_free = {
   [ast.typed.stat.ForList]                    = always_true,
   [ast.typed.stat.Repeat]                     = always_true,
   [ast.typed.stat.Block]                      = always_true,
+  [ast.typed.stat.IndexLaunchList]            = always_true,
+  [ast.typed.stat.IndexLaunchNum]             = always_true,
   [ast.typed.stat.Var]                        = always_true,
   [ast.typed.stat.VarUnpack]                  = always_true,
   [ast.typed.stat.Assignment]                 = always_true,
+  [ast.typed.stat.Reduce]                     = always_true,
   [ast.typed.stat.Expr]                       = always_true,
 
   -- TODO: unimplemented
@@ -235,15 +248,11 @@ local function predicate_call(cx, node)
   if std.type_eq(expr_type, bool) then
     -- Hack: for nested predication, make sure all bool-typed tasks have an
     -- else expression
+    local false_future = cx:get_false_future()
     if not node.predicate_else_value then
       node = node {
-        predicate_else_value = ast.typed.expr.Future {
-          value = ast.typed.expr.Constant {
-            value = false,
-            expr_type = bool,
-            annotations = ast.default_annotations(),
-            span = node.span,
-          },
+        predicate_else_value = ast.typed.expr.ID {
+          value = cx:get_false_future(),
           expr_type = std.future(bool),
           annotations = ast.default_annotations(),
           span = node.span,
@@ -335,6 +344,26 @@ local function predicate_block(cx, node)
   return ast.map_expr_stat_postorder(predicate_node(cx), node)
 end
 
+local function generate_false_future_var(cx, node)
+  return ast.typed.stat.Var {
+    symbol = cx.false_future,
+    type = std.future(bool),
+    value = ast.typed.expr.Future {
+      value = ast.typed.expr.Constant {
+        value = false,
+        expr_type = bool,
+        annotations = ast.default_annotations(),
+        span = node.span,
+      },
+      expr_type = std.future(bool),
+      annotations = ast.default_annotations(),
+      span = node.span,
+    },
+    span = node.span,
+    annotations = ast.default_annotations(),
+  }
+end
+
 function optimize_predicate.stat_if(cx, node)
   local report_fail = report.info
   if node.annotations.predicate:is(ast.annotation.Demand) then
@@ -370,9 +399,14 @@ function optimize_predicate.stat_if(cx, node)
   assert(cond:is(ast.typed.expr.ID)) -- should be handled by normalizer
 
   local then_cx = cx:new_local_scope(cond)
+  local block = predicate_block(then_cx, node.then_block)
+  if then_cx.false_future then
+    local future_var = generate_false_future_var(then_cx, node)
+    block.stats:insert(1, future_var)
+  end
 
   return ast.typed.stat.Block {
-    block = predicate_block(then_cx, node.then_block),
+    block = block,
     annotations = ast.default_annotations(),
     span = node.span,
   }
@@ -408,6 +442,10 @@ function optimize_predicate.stat_while(cx, node)
 
   local body_cx = cx:new_local_scope(cond)
   local body = predicate_block(body_cx, node.block)
+  if body_cx.false_future then
+    local future_var = generate_false_future_var(body_cx, node)
+    body.stats:insert(1, future_var)
+  end
 
   local conds = terralib.newlist()
   conds:insert(cond.value)

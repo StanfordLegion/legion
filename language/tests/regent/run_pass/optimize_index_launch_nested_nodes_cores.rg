@@ -1,4 +1,4 @@
--- Copyright 2023 Stanford University
+-- Copyright 2024 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 -- runs-with:
--- [["-fflow", "0", "-foverride-demand-index-launch", "1"]]
+-- [["-foverride-demand-index-launch", "1"]]
 
 -- Test index launches with cross-products in a semi-realistic scenario with
 -- nodes, cores and ghost cells.

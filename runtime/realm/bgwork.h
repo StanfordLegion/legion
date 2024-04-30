@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -37,13 +37,13 @@ namespace Realm {
     ~BackgroundWorkManager(void);
 
     struct Config {
-      WithDefault<unsigned, 2> generic_workers; // non-numa-specific workers
-      WithDefault<unsigned, 0> per_numa_workers;
-      WithDefault<bool, false> pin_generic;
-      WithDefault<bool, false> pin_numa;
-      WithDefault<size_t, 1024> worker_stacksize_in_kb;
-      WithDefault<long long, 0> worker_spin_interval;
-      WithDefault<long long, 100000> work_item_timeslice;
+      unsigned generic_workers = 2; // non-numa-specific workers
+      unsigned per_numa_workers = 0;
+      bool pin_generic = false;
+      bool pin_numa = false;
+      size_t worker_stacksize_in_kb = 1024;
+      long long worker_spin_interval = 0;
+      long long work_item_timeslice = 100000;
     };
 
     void configure_from_cmdline(std::vector<std::string>& cmdline);

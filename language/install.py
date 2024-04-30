@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# Copyright 2023 Stanford University
+# Copyright 2024 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -80,41 +80,6 @@ def dump_json_config(filename, value):
     with open(filename, 'w') as f:
         return json.dump(value, f)
 
-prompt_text = '''
-RDIR is an optional compiler plugin for Regent which provides support
-for dataflow optimizations (most notably control replication). RDIR
-support is opt-in because RDIR's license is different from that of
-Regent (thus this prompt). Specifically:
-
-  * portions of RDIR are licensed under BSD
-  * other portions of RDIR are dual-licensed under BSD and Apache
-
-(Regent itself is licensed entirely under Apache.)
-
-You may choose to use RDIR automatically (select "auto" below),
-manually, or not at all. Your preference will be saved. You can change
-your mind at any time by re-running this script with the "--rdir"
-parameter.
-'''
-
-def install_rdir(rdir, legion_dir, regent_dir):
-    config_filename = os.path.join(regent_dir, '.rdir.json')
-    if rdir is None:
-        rdir = load_json_config(config_filename)
-        if rdir is None: rdir = 'prompt'
-
-    if rdir == 'prompt':
-        print(prompt_text)
-        while rdir not in ['auto', 'manual', 'never']:
-            rdir = _input('Enable RDIR? (auto/manual/never) ')
-    assert rdir in ['auto', 'manual', 'skip', 'never']
-
-    if rdir == 'auto':
-        git_submodule_update(legion_dir)
-
-    if rdir != 'skip':
-        dump_json_config(config_filename, rdir)
-
 def build_terra(terra_dir, terra_branch, use_cmake, cmake_exe, thread_count, llvm):
     build_dir = os.path.join(terra_dir, 'build')
     release_dir = os.path.join(terra_dir, 'release')
@@ -132,8 +97,13 @@ def build_terra(terra_dir, terra_branch, use_cmake, cmake_exe, thread_count, llv
 
     if use_cmake:
         if not os.path.exists(os.path.join(build_dir, 'CMakeCache.txt')):
+            llvm_cmakedir = None
+            llvm_config = os.environ.get('LLVM_CONFIG')
+            if llvm_config is not None:
+                llvm_cmakedir = subprocess.check_output([llvm_config, '--cmakedir']).decode('utf-8').strip()
             subprocess.check_call(
-                [cmake_exe, '..', '-DCMAKE_INSTALL_PREFIX=%s' % release_dir],
+                [cmake_exe, '..', '-DCMAKE_INSTALL_PREFIX=%s' % release_dir] + (
+                    ['-DLLVM_HINTS=%s' % llvm_cmakedir] if llvm_cmakedir is not None else []),
                 cwd=build_dir)
         subprocess.check_call(
             [make_exe, 'install', '-j', str(thread_count)],
@@ -392,9 +362,22 @@ def get_cmake_config(cmake, regent_dir, default=None):
     dump_json_config(config_filename, cmake)
     return cmake
 
+def get_legion_install_prefix(legion_install_prefix, regent_dir, default=None):
+    config_filename = os.path.join(regent_dir, '.legion_install_prefix.json')
+    if legion_install_prefix is None:
+        legion_install_prefix = load_json_config(config_filename)
+        if legion_install_prefix is None:
+            legion_install_prefix = default
+    if legion_install_prefix is not None:
+        assert isinstance(legion_install_prefix, str)
+        legion_install_prefix = os.path.abspath(legion_install_prefix)
+    dump_json_config(config_filename, legion_install_prefix)
+    return legion_install_prefix
+
 def install(gasnet=False, cuda=False, hip=False, openmp=False, python=False, llvm=False, hdf=False,
-            spy=False, conduit=None, cmake=None, rdir=None,
+            spy=False, conduit=None, cmake=None,
             cmake_exe=None, cmake_build_dir=None,
+            legion_install_prefix=None,
             terra_url=None, terra_branch=None, terra_use_cmake=None, external_terra_dir=None,
             gasnet_dir=None, debug=False, clean_first=True, extra_flags=[],
             thread_count=None, verbose=False):
@@ -402,6 +385,7 @@ def install(gasnet=False, cuda=False, hip=False, openmp=False, python=False, llv
     legion_dir = os.path.dirname(regent_dir)
 
     cmake = get_cmake_config(cmake, regent_dir, default=False)
+    legion_install_prefix = get_legion_install_prefix(legion_install_prefix, regent_dir)
 
     if clean_first is None:
         clean_first = not cmake
@@ -411,6 +395,12 @@ def install(gasnet=False, cuda=False, hip=False, openmp=False, python=False, llv
 
     if clean_first and cmake_build_dir is not None:
         raise Exception('Cannot clean a pre-existing build directory')
+
+    if legion_install_prefix:
+        if cmake:
+            raise Exception('Cannot build with CMake, Legion is already installed')
+        if len(extra_flags) > 0:
+            raise Exception('Cannot build with extra flags, Legion is already installed')
 
     if thread_count is None:
         try:
@@ -426,21 +416,20 @@ def install(gasnet=False, cuda=False, hip=False, openmp=False, python=False, llv
     if 'LG_RT_DIR' in os.environ:
         runtime_dir = os.path.realpath(os.environ['LG_RT_DIR'])
 
-    install_rdir(rdir, legion_dir, regent_dir)
-
     terra_dir = os.path.join(regent_dir, 'terra')
     install_terra(terra_dir, terra_url, terra_branch, terra_use_cmake, cmake_exe,
                   external_terra_dir, thread_count, llvm)
     # luarocks_dir = os.path.join(regent_dir, 'luarocks')
     # install_luarocks(terra_dir, luarocks_dir)
 
-    bindings_dir = os.path.join(legion_dir, 'bindings', 'regent')
-    python_bindings_dir = os.path.join(legion_dir, 'bindings', 'python')
-    install_bindings(regent_dir, legion_dir, bindings_dir, python_bindings_dir, runtime_dir,
-                     cmake, cmake_exe, cmake_build_dir,
-                     debug, cuda, hip, openmp, python, llvm, hdf, spy,
-                     gasnet, gasnet_dir, conduit, clean_first,
-                     extra_flags, thread_count, verbose)
+    if legion_install_prefix is None:
+        bindings_dir = os.path.join(legion_dir, 'bindings', 'regent')
+        python_bindings_dir = os.path.join(legion_dir, 'bindings', 'python')
+        install_bindings(regent_dir, legion_dir, bindings_dir, python_bindings_dir, runtime_dir,
+                         cmake, cmake_exe, cmake_build_dir,
+                         debug, cuda, hip, openmp, python, llvm, hdf, spy,
+                         gasnet, gasnet_dir, conduit, clean_first,
+                         extra_flags, thread_count, verbose)
 
 def driver():
     parser = argparse.ArgumentParser(
@@ -521,9 +510,8 @@ def driver():
         '--with-cmake-build', dest='cmake_build_dir', metavar='DIR', required=False,
         help='Path to CMake build directory (optional).')
     parser.add_argument(
-        '--rdir', dest='rdir', required=False,
-        choices=['prompt', 'auto', 'manual', 'skip', 'never'], default=None,
-        help='Enable RDIR compiler plugin.')
+        '--legion-install-prefix', dest='legion_install_prefix', metavar='DIR', required=False,
+        help='Do NOT build Legion. Just use the specified installation.')
     parser.add_argument(
         '--clean', dest='clean_first', action='store_true', required=False,
         default=None,

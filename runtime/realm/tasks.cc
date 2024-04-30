@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,6 +18,11 @@
 #include "realm/tasks.h"
 
 #include "realm/runtime_impl.h"
+#include "realm/proc_impl.h"
+
+#if defined(REALM_USE_CACHING_ALLOCATOR)
+#include "realm/caching_allocator.h"
+#endif
 
 namespace Realm {
 
@@ -70,6 +75,25 @@ namespace Realm {
 
     // if we're still holding a reference to a pending_head, something is wrong
     assert(pending_head.load() == 0);
+  }
+
+  void *Task::operator new(size_t size)
+  {
+    assert(size == sizeof(Task));
+#if REALM_USE_CACHING_ALLOCATOR
+    return CachingAllocator<Task, REALM_TASK_BLOCK_SIZE>::alloc_obj();
+#else
+    return ::operator new(size);
+#endif
+  }
+
+  void Task::operator delete(void *ptr)
+  {
+#if REALM_USE_CACHING_ALLOCATOR
+    CachingAllocator<Task, REALM_TASK_BLOCK_SIZE>::free_obj(ptr);
+#else
+    ::operator delete(ptr);
+#endif
   }
 
   void Task::print(std::ostream& os) const
@@ -246,7 +270,7 @@ namespace Realm {
     char argstr[100];
     argstr[0] = 0;
     for(size_t i = 0; (i < arglen) && (i < 40); i++)
-      sprintf(argstr+2*i, "%02x", ((unsigned char *)(args))[i]);
+      snprintf(argstr+2*i, sizeof argstr-2*i, "%02x", ((unsigned char *)(args))[i]);
     if(arglen > 40) strcpy(argstr+80, "...");
     log_util(((func_id == 3) ? LEVEL_SPEW : LEVEL_INFO), 
 	     "task start: %d (%p) (%s)", func_id, fptr, argstr);
@@ -417,7 +441,7 @@ namespace Realm {
   //
 
   TaskQueue::TaskQueue(void)
-    : task_count_gauge(0)
+    : top_priority(PRI_NEG_INF), task_count(0), task_count_gauge(0)
   {}
 
   void TaskQueue::add_subscription(NotificationCallback *callback,
@@ -455,77 +479,107 @@ namespace Realm {
   }
 
   // gets highest priority task available from any task queue
-  /*static*/ Task *TaskQueue::get_best_task(const std::vector<TaskQueue *>& queues,
-					    int& task_priority)
-  {
+  /*static*/ Task *
+  TaskQueue::get_best_task(const std::vector<TaskQueue *> &queues,
+                           int &task_priority) {
     // remember where a task has come from in case we want to put it back
-    Task *task = 0;
-    TaskQueue *task_source = 0;
+    Task *task = nullptr;
+    TaskQueue *task_source = nullptr;
 
-    for(std::vector<TaskQueue *>::const_iterator it = queues.begin();
-	it != queues.end();
-	it++) {
-      Task *new_task;
-      {
-	AutoLock<FIFOMutex> al((*it)->mutex);
-	new_task = (*it)->ready_task_list.pop_front(task_priority+1);
+    for (TaskQueue *task_queue : queues) {
+      Task *new_task = nullptr;
+      // Some early checks to reduce contention on the queue's lock.
+      // This alone doesn't solve the thundering herd problem, but
+      // it will slow it down.
+
+      // Is there possibly a task with higher priority in this queue?
+      // If not, no need to wait in line to take a look
+      if ((task != nullptr) && (task->priority > task_queue->top_priority.load())) {
+        continue;
       }
-      if(new_task) {
-	if((*it)->task_count_gauge)
-	  *((*it)->task_count_gauge) -= 1;
 
-	// if we got something better, put back the old thing (if any)
-	if(task) {
-	  {
-	    AutoLock<FIFOMutex> al(task_source->mutex);
-	    task_source->ready_task_list.push_front(task);
-	  }
-	  if(task_source->task_count_gauge)
-	    (*task_source->task_count_gauge) += 1;
-	}
-	  
-	task = new_task;
-	task_source = *it;
-	task_priority = task->priority;
+      // Is there something available?
+      // If not, no need to wait in iine to look.
+      if (task_queue->task_count.load() == 0) {
+        continue;
+      }
+
+      {
+        // Got our ticket, lets try to pop off
+        AutoLock<FIFOMutex> al(task_queue->mutex);
+        // Pop off a higher priority task, if there is one
+        new_task = task_queue->ready_task_list.pop_front(task_priority + 1);
+        if (new_task != nullptr) {
+          // Update the top priority and the task count
+          Task *next = task_queue->ready_task_list.front();
+          task_queue->top_priority.store(next == nullptr ? PRI_MIN_FINITE : next->priority);
+          task_queue->task_count.fetch_sub(1);
+        }
+      }
+
+      if (new_task != nullptr) {
+        if (task_queue->task_count_gauge)
+          *(task_queue->task_count_gauge) -= 1;
+
+        // if we got something better, put back the old thing (if any)
+        // This can cause some threads that would have otherwise picked up the
+        // task to not get it, so we make sure to push a notification to all
+        // these threads so when they go back to sleep they can try again
+        if (task != nullptr) {
+          assert(task->priority < new_task->priority);
+          task_source->enqueue_ready_task(task, true /*front*/);
+        }
+
+        task = new_task;
+        task_source = task_queue;
+        task_priority = task->priority;
       }
     }
 
     return task;
   }
 
-  void TaskQueue::enqueue_task(Task *task)
-  {
+  void TaskQueue::enqueue_task(Task *task) {
+    // Tasks being enqueued should not be part of a chain of tasks yet.
+    assert(task->pending_head.load() == 0);
+
+    if (task->mark_ready()) {
+      enqueue_ready_task(task);
+    }
+    else {
+      task->mark_finished(false /*!successful*/);
+    }
+  }
+  void TaskQueue::enqueue_ready_task(Task *task, bool front /* = false */) {
     priority_t notify_priority = PRI_NEG_INF;
 
-    // just jam it into the task queue
-    if(task->mark_ready()) {
-//#ifdef DEBUG_REALM
-      // we should not be directly pushing a task that was part of a chain
-      assert(task->pending_head.load() == 0);
-//#endif
-
-      {
-	AutoLock<FIFOMutex> al(mutex);
-	if(ready_task_list.empty(task->priority))
-	  notify_priority = task->priority;
-	ready_task_list.push_back(task);
+    {
+      AutoLock<FIFOMutex> al(mutex);
+      if (ready_task_list.empty(task->priority))
+        notify_priority = task->priority;
+      if (front) {
+        ready_task_list.push_front(task);
       }
+      else {
+        ready_task_list.push_back(task);
+      }
+      top_priority.fetch_max(notify_priority);
+      task_count.fetch_add(1);
+    }
 
-      if(task_count_gauge)
-	*task_count_gauge += 1;
+    if (task_count_gauge)
+      *task_count_gauge += 1;
 
-      if(notify_priority > PRI_NEG_INF)
-	for(size_t i = 0; i < callbacks.size(); i++)
-	  if(notify_priority >= callback_priorities[i])
-	    callbacks[i]->item_available(notify_priority);
-    } else
-      task->mark_finished(false /*!successful*/);
+    if (notify_priority > PRI_NEG_INF)
+      for (size_t i = 0; i < callbacks.size(); i++)
+        if (notify_priority >= callback_priorities[i])
+          callbacks[i]->item_available(notify_priority);
   }
 
-  void TaskQueue::enqueue_tasks(Task::TaskList& tasks, size_t num_tasks)
-  {
+  void TaskQueue::enqueue_tasks(Task::TaskList &tasks, size_t num_tasks) {
     // early out if there are no tasks to add
-    if(tasks.empty(PRI_NEG_INF)) return;
+    if (tasks.empty(PRI_NEG_INF))
+      return;
 
     // mark just the first task as ready - the remaining tasks will lazily
     //  pick up the update when mark_started gets called or when the state
@@ -537,13 +591,13 @@ namespace Realm {
     //  front of the list (since higher-priority tasks jump ahead in the list)
     Task *first_task = tasks.front();
     uintptr_t phead = first_task->pending_head.load();
-    if(phead != 0) {
+    if (phead != 0) {
       // LSB needs to be masked off to make a valid pointer
       first_task = reinterpret_cast<Task *>(phead & ~uintptr_t(1));
-//#ifdef DEBUG_REALM
-      // this task had better not also have a pending_head link
+      // #ifdef DEBUG_REALM
+      //  this task had better not also have a pending_head link
       assert(first_task->pending_head.load() == 0);
-//#endif
+      // #endif
     }
     first_task->mark_ready();
 
@@ -554,21 +608,22 @@ namespace Realm {
     {
       AutoLock<FIFOMutex> al(mutex);
       // cancel notification if we already have equal/higher priority tasks
-      if(!ready_task_list.empty(notify_priority))
-	notify_priority = PRI_NEG_INF;
+      if (!ready_task_list.empty(notify_priority))
+        notify_priority = PRI_NEG_INF;
       // absorb new list into ours
       ready_task_list.absorb_append(tasks);
+      top_priority.fetch_max(notify_priority);
+      task_count.fetch_add(num_tasks);
     }
 
-    if(task_count_gauge)
+    if (task_count_gauge)
       *task_count_gauge += num_tasks;
 
-    if(notify_priority > PRI_NEG_INF)
-      for(size_t i = 0; i < callbacks.size(); i++)
-	if(notify_priority >= callback_priorities[i])
-	  callbacks[i]->item_available(notify_priority);
+    if (notify_priority > PRI_NEG_INF)
+      for (size_t i = 0; i < callbacks.size(); i++)
+        if (notify_priority >= callback_priorities[i])
+          callbacks[i]->item_available(notify_priority);
   }
-
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -1334,7 +1389,7 @@ namespace Realm {
 
     // if the thread is still in our all_workers list, this was unexpected
     if(all_workers.count(thread) > 0) {
-      printf("unexpected worker termination: %p\n", thread);
+      printf("unexpected worker termination: %p\n", static_cast<void *>(thread));
 
       // if this was our last worker, and we're not shutting down,
       //  something bad probably happened - fire up a new worker and

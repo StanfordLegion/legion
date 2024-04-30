@@ -1,13 +1,14 @@
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <cassert>
 #include <cstring>
 
-#include "osdep.h"
-
 #include <time.h>
 
 #include "realm.h"
+
+#include "osdep.h"
 
 using namespace Realm;
 
@@ -48,7 +49,7 @@ void delay_task(const void *args, size_t arglen,
   task_start_times[d_args.id] = Clock::current_time();
 
   //printf("starting task %d on processor " IDFMT "\n", d_args.id, p.id);
-  usleep(d_args.sleep_useconds);
+  accurate_sleep(d_args.sleep_useconds);
   //printf("ending task %d on processor " IDFMT "\n", d_args.id, p.id);
 
   task_end_times[d_args.id] = Clock::current_time();
@@ -56,27 +57,40 @@ void delay_task(const void *args, size_t arglen,
 
 // checks that all tasks in the first group started before all tasks in the second group
 static int check_task_ordering(int start1, int end1, int start2, int end2,
-			       AffineAccessor<double, 1> task_start_times)
+                               std::vector<double> &task_create_times,
+                               AffineAccessor<double, 1> task_start_times)
 {
   // get the max start time of group 1 and the min start time of group 2
   double max1 = -1e100;
+  double create_max1 = -1e100;
   for(int i = start1; i <= end1; i++)
-    if(max1 < task_start_times[i])
+    if(max1 < task_start_times[i]) {
       max1 = task_start_times[i];
+      create_max1 = task_create_times[i];
+    }
 
   double min2 = 1e100;
   for(int i = start2; i <= end2; i++)
     if(min2 > task_start_times[i])
       min2 = task_start_times[i];
 
+  int incorrect = 0;
   if(max1 > min2) {
-    log_app.error() << "ERROR: At least one task in ["
-		    << start1 << "," << end1 << "] started after a task in ["
-		    << start2 << "," << end2 << "]";
-    return 1;
+    if (create_max1 > min2) {
+      log_app.warning() << "WARNING: At least one task in ["
+                      << start1 << "," << end1 << "] started after a task in ["
+                      << start2 << "," << end2 << "], which is due to create "
+                      << create_max1 << " > start " << min2;
+    } else {
+      log_app.error() << "ERROR: At least one task in ["
+                      << start1 << "," << end1 << "] started after a task in ["
+                      << start2 << "," << end2 << "]";
+      incorrect = 1;
+    }
+
   }
 
-  return 0;
+  return incorrect;
 }    
 
 void top_level_task(const void *args, size_t arglen, 
@@ -181,6 +195,7 @@ void top_level_task(const void *args, size_t arglen,
     is_tasks.copy(srcs, dsts, ProfilingRequestSet(), Event::NO_EVENT).wait();
   }
 
+  std::vector<double> task_create_times;
   std::set<Event> task_events, pgrp_events;
   int count = 0;
   for(int batch = 0; batch < 4; batch++) {
@@ -190,16 +205,17 @@ void top_level_task(const void *args, size_t arglen,
 
       DelayTaskArgs d_args;
       d_args.id = count++;
-      d_args.sleep_useconds = 250000;
+      d_args.sleep_useconds = 1000000;
       d_args.inst = tgt_inst;
       Event e = (to_group ? pgrp : all_cpus[i]).spawn(DELAY_TASK, &d_args, sizeof(d_args),
 						      Event::NO_EVENT, priority);
+      task_create_times.push_back(Clock::current_time());
       task_events.insert(e);
       if(to_group)
 	pgrp_events.insert(e);
     }
     // small delay after each batch to make sure the tasks are all enqueued
-    usleep(100000);
+    accurate_sleep(400000);
   }
   log_app.info() << count << " tasks launched";
 
@@ -253,14 +269,14 @@ void top_level_task(const void *args, size_t arglen,
     int start2 = (expected_order[i+1] - 1) * num_cpus;
     int end2 = start2 + (num_cpus - 1);
 
-    errors += check_task_ordering(start1, end1, start2, end2, task_start_times);
+    errors += check_task_ordering(start1, end1, start2, end2, task_create_times, task_start_times);
   }
 
   if(errors) {
     log_app.error() << "Raw data:";
     for(int i = 0; i < total_tasks; i++) {
-      log_app.error("%2d: %d " IDFMT " %4.1f %4.1f\n",
-		    i, task_counts[i], task_procs[i].id, task_start_times[i], task_end_times[i]);
+      log_app.error("%2d: %d " IDFMT " %4.3f %4.3f %4.3f\n",
+		    i, task_counts[i], task_procs[i].id, task_create_times[i], task_start_times[i], task_end_times[i]);
     }
 
     log_app.error() <<  "Exiting with errors.";
