@@ -3215,7 +3215,6 @@ namespace Legion {
           if (target_space != implicit_runtime->address_space)
           {
 #ifdef DEBUG_LEGION
-            assert(instance.exists());
             assert(!freeproc.exists() || 
                 freeproc.address_space() == target_space);
 #endif
