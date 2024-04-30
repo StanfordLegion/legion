@@ -3462,7 +3462,10 @@ impl SpyState {
     }
 
     fn create_spy_op(&mut self, op: OpID, pre: EventID, post: EventID) {
-        let entry = self.spy_ops.entry(op).or_insert_with(|| SpyOp::new(pre, post));
+        let entry = self
+            .spy_ops
+            .entry(op)
+            .or_insert_with(|| SpyOp::new(pre, post));
         if pre.0 != 0 {
             assert!(entry.precondition == pre || entry.precondition.0 == 0);
             entry.precondition = pre;
