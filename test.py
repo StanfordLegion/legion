@@ -343,41 +343,38 @@ def precompile_regent(tests, flags, launcher, root_dir, env, thread_count):
         exe_tests.append([exe, test_flags])
     return exe_tests
 
+def get_default_args(env):
+    flags = []
+    if env['USE_CUDA'] == '1' or env['USE_HIP'] == '1':
+        flags.extend(['-ll:gpu', '1', '-ll:fsize', '1024', '-ll:msize', '64'])
+    if env['USE_KOKKOS'] == '1' and env['USE_OPENMP'] == '1':
+        flags.extend(['-ll:ocpu', '1', '-ll:onuma', '0' ])
+    return flags
+
 def run_test_legion_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit):
     flags = ['-logfile', 'out_%.log']
-    if env['USE_CUDA'] == '1' or env['USE_HIP'] == '1':
-        flags.extend(['-ll:gpu', '1'])
-    if (env['USE_KOKKOS'] == '1') and (env['USE_OPENMP'] == '1'):
-        flags.extend(['-ll:ocpu', '1', '-ll:onuma', '0' ])
+    flags.extend(get_default_args(env))
     run_cxx(legion_cxx_tests, flags, launcher, root_dir, bin_dir, env, thread_count, timelimit)
 
 def run_test_legion_network_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit):
     flags = ['-logfile', 'out_%.log']
-    if env['USE_CUDA'] == '1' or env['USE_HIP'] == '1':
-        flags.extend(['-ll:gpu', '1'])
-    if (env['USE_KOKKOS'] == '1') and (env['USE_OPENMP'] == '1'):
-        flags.extend(['-ll:ocpu', '1', '-ll:onuma', '0' ])
+    flags.extend(get_default_args(env))
     run_cxx(legion_network_cxx_tests, flags, launcher, root_dir, bin_dir, env, thread_count, timelimit)
 
 def run_test_legion_openmp_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit):
     flags = ['-logfile', 'out_%.log']
-    if env['USE_CUDA'] == '1' or env['USE_HIP'] == '1':
-        flags.extend(['-ll:gpu', '1'])
-    if (env['USE_KOKKOS'] == '1') and (env['USE_OPENMP'] == '1'):
-        flags.extend(['-ll:ocpu', '1', '-ll:onuma', '0' ])
+    flags.extend(get_default_args(env))
     run_cxx(legion_openmp_cxx_tests, flags, launcher, root_dir, bin_dir, env, thread_count, timelimit)
 
 def run_test_legion_kokkos_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit):
     flags = ['-logfile', 'out_%.log']
-    if env['USE_CUDA'] == '1' or env['USE_HIP'] == '1':
-        flags.extend(['-ll:gpu', '1'])
-    if (env['USE_KOKKOS'] == '1') and (env['USE_OPENMP'] == '1'):
-        flags.extend(['-ll:ocpu', '1', '-ll:onuma', '0' ])
+    flags.extend(get_default_args(env))
     run_cxx(legion_kokkos_cxx_tests, flags, launcher, root_dir, bin_dir, env, thread_count, timelimit)
 
 def run_test_legion_python_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit):
     # Hack: legion_python currently requires the module name to come first
     flags = [] # ['-logfile', 'out_%.log']
+    flags.extend(get_default_args(env))
     python_dir = os.path.join(root_dir, 'bindings', 'python')
     # Hack: Fix up the environment so that Python can find all the examples.
     env = dict(list(env.items()) + [
@@ -398,6 +395,7 @@ def run_test_legion_python_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread
 def run_test_legion_jupyter_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit):
     # Hack: legion_python currently requires the module name to come first
     flags = [] # ['-logfile', 'out_%.log']
+    flags.extend(get_default_args(env))
     python_dir = os.path.join(root_dir, 'bindings', 'python')
     env = env.copy()
     if bin_dir is None:
@@ -424,6 +422,7 @@ def run_test_legion_jupyter_cxx(launcher, root_dir, tmp_dir, bin_dir, env, threa
 
 def run_test_legion_prof_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit):
     flags = ['-lg:prof','1', '-lg:prof_logfile', 'prof_%.gz']
+    flags.extend(get_default_args(env))
     from tools.test_prof import run_prof_test
     for test_file, test_flags in legion_cxx_prof_tests:
         prof_test = [[test_file, test_flags],]
@@ -434,16 +433,12 @@ def run_test_legion_prof_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_c
 
 def run_test_legion_hdf_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit):
     flags = ['-logfile', 'out_%.log']
-    if env['USE_CUDA'] == '1' or env['USE_HIP'] == '1':
-        flags.extend(['-ll:gpu', '1'])
-    if (env['USE_KOKKOS'] == '1') and (env['USE_OPENMP'] == '1'):
-        flags.extend(['-ll:ocpu', '1', '-ll:onuma', '0' ])
+    flags.extend(get_default_args(env))
     run_cxx(legion_hdf_cxx_tests, flags, launcher, root_dir, bin_dir, env, thread_count, timelimit)
 
 def run_test_legion_fortran(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit):
     flags = ['-logfile', 'out_%.log']
-    if env['USE_CUDA'] == '1' or env['USE_HIP'] == '1':
-        flags.extend(['-ll:gpu', '1'])
+    flags.extend(get_default_args(env))
     run_cxx(legion_fortran_tests, flags, launcher, root_dir, bin_dir, env, thread_count, timelimit)
 
 def run_test_fuzzer(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
@@ -852,8 +847,7 @@ def build_cmake(root_dir, tmp_dir, env, thread_count,
         cmake_cmd.append('-DLegion_ENABLE_TESTING=ON')
         if 'LAUNCHER' in env:
             cmake_cmd.append('-DLegion_TEST_LAUNCHER=%s' % env['LAUNCHER'])
-        if env['USE_CUDA'] == '1' or env['USE_HIP'] == '1':
-            cmake_cmd.append('-DLegion_TEST_ARGS=-ll:gpu 1 -ll:fsize 1024')
+        cmake_cmd.append('-DLegion_TEST_ARGS=%s' % ' '.join(get_default_args(env)))
     else:
         cmake_cmd.append('-DLegion_ENABLE_TESTING=OFF')
     if test_regent or (test_legion_cxx and (env['USE_PYTHON'] == '1')):
