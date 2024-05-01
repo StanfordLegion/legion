@@ -236,14 +236,6 @@ namespace Legion {
                                             Provenance *provenance) = 0;
       virtual IndexPartition create_partition_by_domain(
                                             IndexSpace parent,
-                                  const std::map<DomainPoint,Domain> &domains,
-                                            IndexSpace color_space,
-                                            bool perform_intersections,
-                                            PartitionKind part_kind,
-                                            Color color,
-                                            Provenance *provenance) = 0;
-      virtual IndexPartition create_partition_by_domain(
-                                            IndexSpace parent,
                                             const FutureMap &domains,
                                             IndexSpace color_space,
                                             bool perform_intersections,
@@ -1244,14 +1236,6 @@ namespace Legion {
                                             size_t transform_size,
                                             const void *extent,
                                             size_t extent_size,
-                                            PartitionKind part_kind,
-                                            Color color,
-                                            Provenance *provenance);
-      virtual IndexPartition create_partition_by_domain(
-                                            IndexSpace parent,
-                                  const std::map<DomainPoint,Domain> &domains,
-                                            IndexSpace color_space,
-                                            bool perform_intersections,
                                             PartitionKind part_kind,
                                             Color color,
                                             Provenance *provenance);
@@ -2652,14 +2636,6 @@ namespace Legion {
                                             Provenance *provenance);
       virtual IndexPartition create_partition_by_domain(
                                             IndexSpace parent,
-                                  const std::map<DomainPoint,Domain> &domains,
-                                            IndexSpace color_space,
-                                            bool perform_intersections,
-                                            PartitionKind part_kind,
-                                            Color color,
-                                            Provenance *provenance);
-      virtual IndexPartition create_partition_by_domain(
-                                            IndexSpace parent,
                                             const FutureMap &domains,
                                             IndexSpace color_space,
                                             bool perform_intersections,
@@ -3621,14 +3597,6 @@ namespace Legion {
                                             size_t transform_size,
                                             const void *extent,
                                             size_t extent_size,
-                                            PartitionKind part_kind,
-                                            Color color,
-                                            Provenance *provenance);
-      virtual IndexPartition create_partition_by_domain(
-                                            IndexSpace parent,
-                                  const std::map<DomainPoint,Domain> &domains,
-                                            IndexSpace color_space,
-                                            bool perform_intersections,
                                             PartitionKind part_kind,
                                             Color color,
                                             Provenance *provenance);

@@ -192,7 +192,8 @@ namespace Legion {
       Future result(new FutureImpl(this, runtime, true/*register*/,
             runtime->get_available_distributed_id(), provenance));
       FutureInstance *instance = new FutureInstance(buffer, size,
-          owned, resource.clone(), freefunc);
+          owned, resource.clone(), freefunc, (freefunc == NULL) ?
+          Processor::NO_PROC : executing_processor);
       result.impl->set_result(ApEvent::NO_AP_EVENT, instance);
       return result;
     }
@@ -4450,27 +4451,6 @@ namespace Legion {
       if (runtime->verify_partitions)
         verify_partition(pid, verify_kind, __func__);
       return pid;
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition InnerContext::create_partition_by_domain(
-                                                IndexSpace parent,
-                                    const std::map<DomainPoint,Domain> &domains,
-                                                IndexSpace color_space,
-                                                bool perform_intersections,
-                                                PartitionKind part_kind,
-                                                Color color,
-                                                Provenance *provenance)
-    //--------------------------------------------------------------------------
-    {
-      ArgumentMap argmap;
-      for (std::map<DomainPoint,Domain>::const_iterator it = 
-            domains.begin(); it != domains.end(); it++)
-        argmap.set_point(it->first,
-            UntypedBuffer(&it->second, sizeof(it->second)));
-      FutureMap future_map(argmap.impl->freeze(this, provenance));
-      return create_partition_by_domain(parent, future_map, color_space,
-          perform_intersections, part_kind, color, provenance);
     }
 
     //--------------------------------------------------------------------------
@@ -15439,55 +15419,6 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexPartition ReplicateContext::create_partition_by_domain(
-                                                IndexSpace parent,
-                                    const std::map<DomainPoint,Domain> &domains,
-                                                IndexSpace color_space,
-                                                bool perform_intersections,
-                                                PartitionKind part_kind,
-                                                Color color,
-                                                Provenance *provenance)
-    //--------------------------------------------------------------------------
-    {
-      AutoRuntimeCall call(this);
-      for (int i = 0; runtime->safe_control_replication && (i < 2) &&
-            ((current_trace == NULL) || !current_trace->is_fixed()); i++)
-      {
-        HashVerifier hasher(this, runtime->safe_control_replication > 1,
-                              i > 0, provenance);
-        hasher.hash(REPLICATE_CREATE_PARTITION_BY_DOMAIN, __func__);
-        hasher.hash(parent, "parent");
-        for (std::map<DomainPoint,Domain>::const_iterator it = 
-              domains.begin(); it != domains.end(); it++)
-        {
-          hasher.hash(it->first, "domains");
-          hasher.hash(it->second, "domains");
-        }
-        hasher.hash(color_space, "color_space");
-        hasher.hash(perform_intersections, "perform_intersections");
-        hasher.hash(part_kind, "part_kind");
-        hasher.hash(color, "color");
-        if (hasher.verify(__func__))
-          break;
-      }
-      const DistributedID did = runtime->get_available_distributed_id();
-      IndexSpaceNode *color_node = runtime->forest->get_node(color_space); 
-      FutureMap future_map(new FutureMapImpl(this, runtime, color_node, did,
-            NO_FUTURE_COORDINATE, provenance, true/*reg now*/));
-      // Prune out every N-th one for this shard and then pass through
-      // the subset to the normal InnerContext variation of this
-      std::map<DomainPoint,Future> shard_futures;
-      for (std::map<DomainPoint,Domain>::const_iterator it = 
-            domains.begin(); it != domains.end(); it++)
-        shard_futures[it->first] = TaskContext::from_value(
-            &it->second, sizeof(it->second), false/*owned*/, 
-            provenance, false/*shard local*/);
-      future_map.impl->set_all_futures(shard_futures);
-      return create_partition_by_domain(parent, future_map, color_space, 
-       perform_intersections, part_kind, color, provenance, true/*skip check*/);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition ReplicateContext::create_partition_by_domain(
                                                     IndexSpace parent,
                                                     const FutureMap &domains,
                                                     IndexSpace color_space,
@@ -23942,23 +23873,6 @@ namespace Legion {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_CREATE_RESTRICTED_PARTITION,
         "Illegal create restricted partition performed in "
                      "leaf task %s (ID %lld)", get_task_name(),get_unique_id())
-      return IndexPartition::NO_PART;
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition LeafContext::create_partition_by_domain(
-                                                IndexSpace parent,
-                                    const std::map<DomainPoint,Domain> &domains,
-                                                IndexSpace color_space,
-                                                bool perform_intersections,
-                                                PartitionKind part_kind,
-                                                Color color,
-                                                Provenance *provenance)
-    //--------------------------------------------------------------------------
-    {
-      REPORT_LEGION_ERROR(ERROR_ILLEGAL_PARTITION_BY_DOMAIN,
-          "Illegal create partition by domain performed in leaf "
-          "task %s (UID %lld)", get_task_name(), get_unique_id())
       return IndexPartition::NO_PART;
     }
 
