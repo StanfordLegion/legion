@@ -2667,7 +2667,7 @@ namespace Legion {
       const void *name; size_t dummy_size;
       runtime->retrieve_semantic_information(task_id, LEGION_NAME_SEMANTIC_TAG,
                                              name, dummy_size, false, false);
-      static_assert(sizeof(result) == sizeof(name), "Fuck c++");
+      static_assert(sizeof(result) == sizeof(name));
       memcpy(&result, &name, sizeof(result));
       resume_mapper_call(ctx, MAPPER_RETRIEVE_NAME_CALL);
     }
@@ -2681,7 +2681,7 @@ namespace Legion {
       const void *name; size_t dummy_size;
       runtime->retrieve_semantic_information(handle, LEGION_NAME_SEMANTIC_TAG,
                                              name, dummy_size, false, false);
-      static_assert(sizeof(result) == sizeof(name), "Fuck c++");
+      static_assert(sizeof(result) == sizeof(name));
       memcpy(&result, &name, sizeof(result));
       resume_mapper_call(ctx, MAPPER_RETRIEVE_NAME_CALL);
     }
@@ -2695,7 +2695,7 @@ namespace Legion {
       const void *name; size_t dummy_size;
       runtime->retrieve_semantic_information(handle, LEGION_NAME_SEMANTIC_TAG,
                                              name, dummy_size, false, false);
-      static_assert(sizeof(result) == sizeof(name), "Fuck c++");
+      static_assert(sizeof(result) == sizeof(name));
       memcpy(&result, &name, sizeof(result));
       resume_mapper_call(ctx, MAPPER_RETRIEVE_NAME_CALL);
     }
@@ -2709,7 +2709,7 @@ namespace Legion {
       const void *name; size_t dummy_size;
       runtime->retrieve_semantic_information(handle, LEGION_NAME_SEMANTIC_TAG,
                                              name, dummy_size, false, false);
-      static_assert(sizeof(result) == sizeof(name), "Fuck c++");
+      static_assert(sizeof(result) == sizeof(name));
       memcpy(&result, &name, sizeof(result));
       resume_mapper_call(ctx, MAPPER_RETRIEVE_NAME_CALL);
     }
@@ -2723,7 +2723,7 @@ namespace Legion {
       const void *name; size_t dummy_size;
       runtime->retrieve_semantic_information(handle, fid, 
           LEGION_NAME_SEMANTIC_TAG, name, dummy_size, false, false);
-      static_assert(sizeof(result) == sizeof(name), "Fuck c++");
+      static_assert(sizeof(result) == sizeof(name));
       memcpy(&result, &name, sizeof(result));
       resume_mapper_call(ctx, MAPPER_RETRIEVE_NAME_CALL);
     }
@@ -2737,7 +2737,7 @@ namespace Legion {
       const void *name; size_t dummy_size;
       runtime->retrieve_semantic_information(handle, LEGION_NAME_SEMANTIC_TAG,
                                              name, dummy_size, false, false);
-      static_assert(sizeof(result) == sizeof(name), "Fuck c++");
+      static_assert(sizeof(result) == sizeof(name));
       memcpy(&result, &name, sizeof(result));
       resume_mapper_call(ctx, MAPPER_RETRIEVE_NAME_CALL);
     }
@@ -2751,7 +2751,7 @@ namespace Legion {
       const void *name; size_t dummy_size;
       runtime->retrieve_semantic_information(handle, LEGION_NAME_SEMANTIC_TAG,
                                              name, dummy_size, false, false);
-      static_assert(sizeof(result) == sizeof(name), "Fuck c++");
+      static_assert(sizeof(result) == sizeof(name));
       memcpy(&result, &name, sizeof(result));
       resume_mapper_call(ctx, MAPPER_RETRIEVE_NAME_CALL);
     }

@@ -12,12 +12,6 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- runs-with:
--- [
---   ["-ll:cpu", "4", "-fflow-spmd", "1"],
---   ["-ll:cpu", "2", "-fflow-spmd", "1", "-fflow-spmd-shardsize", "2"]
--- ]
-
 import "regent"
 
 -- This tests the SPMD optimization of the compiler with:
@@ -29,6 +23,7 @@ import "regent"
 --   * read-only references to scalars inside the loop
 
 local c = regentlib.c
+local format = require("std/format")
 
 struct t {
   a : int,
@@ -63,7 +58,7 @@ end
 task check(r : region(t))
 where reads(r) do
   for x in r do
-    regentlib.c.printf("%d %d %d\n", x.a, x.b, x.c)
+    format.println("{} {} {}", x.a, x.b, x.c)
     regentlib.assert(x.a == 30903, "test failed")
     regentlib.assert(x.b == 50063, "test failed")
     regentlib.assert(x.c == 70960, "test failed")
@@ -98,7 +93,6 @@ task main()
   var inc_by_bc = 20
   var inc_by_ca = 300
 
-  __demand(__spmd)
   for t = 0, 3 do
     for i = start, stop do
       inc_ab(p[i], inc_by_ab)

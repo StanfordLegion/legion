@@ -94,6 +94,7 @@ pub enum Record {
     MetaDesc { kind: VariantID, message: bool, ordered_vc: bool, name: String },
     OpDesc { kind: u32, name: String },
     MaxDimDesc { max_dim: MaxDim },
+    RuntimeConfig { debug: bool, spy: bool, gc: bool, inorder: bool, safe_mapper: bool, safe_runtime: bool, safe_ctrlrepl: bool, part_checks: bool, bounds_checks: bool, resilient: bool },
     MachineDesc { node_id: NodeID, num_nodes: u32, version: u32, hostname: String, host_id: u64, process_id: u32 },
     ZeroTime { zero_time: i64 },
     ProcDesc { proc_id: ProcID, kind: ProcKind, cuda_device_uuid: Uuid },
@@ -387,6 +388,33 @@ fn parse_op_desc(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
 fn parse_max_dim_desc(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, max_dim) = le_i32(input)?;
     Ok((input, Record::MaxDimDesc { max_dim }))
+}
+fn parse_runtime_config(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
+    let (input, debug) = parse_bool(input)?;
+    let (input, spy) = parse_bool(input)?;
+    let (input, gc) = parse_bool(input)?;
+    let (input, inorder) = parse_bool(input)?;
+    let (input, safe_mapper) = parse_bool(input)?;
+    let (input, safe_runtime) = parse_bool(input)?;
+    let (input, safe_ctrlrepl) = parse_bool(input)?;
+    let (input, part_checks) = parse_bool(input)?;
+    let (input, bounds_checks) = parse_bool(input)?;
+    let (input, resilient) = parse_bool(input)?;
+    Ok((
+        input,
+        Record::RuntimeConfig {
+            debug,
+            spy,
+            gc,
+            inorder,
+            safe_mapper,
+            safe_runtime,
+            safe_ctrlrepl,
+            part_checks,
+            bounds_checks,
+            resilient,
+        },
+    ))
 }
 fn parse_machine_desc(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, nodeid) = le_u32(input)?;
@@ -1096,6 +1124,7 @@ fn parse<'a>(
     parsers.insert(ids["MetaDesc"], parse_meta_desc);
     parsers.insert(ids["OpDesc"], parse_op_desc);
     parsers.insert(ids["MaxDimDesc"], parse_max_dim_desc);
+    parsers.insert(ids["RuntimeConfig"], parse_runtime_config);
     parsers.insert(ids["MachineDesc"], parse_machine_desc);
     parsers.insert(ids["ZeroTime"], parse_zero_time);
     parsers.insert(ids["ProcDesc"], parse_proc_desc);

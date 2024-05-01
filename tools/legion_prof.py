@@ -3515,6 +3515,7 @@ class State(object):
             "MetaDesc": self.log_meta_desc,
             "OpDesc": self.log_op_desc,
             "MaxDimDesc": self.log_max_dim,
+            "RuntimeConfig": self.log_runtime_config,
             "MachineDesc": self.log_machine_desc,
             "ZeroTime": self.log_zero_time,
             "ProcDesc": self.log_proc_desc,
@@ -3572,6 +3573,14 @@ class State(object):
     @typecheck
     def log_max_dim(self, max_dim: int) -> None:
         self.max_dim = max_dim
+
+    @typecheck
+    def log_runtime_config(self, debug: bool, spy: bool,
+                           gc: bool, inorder: bool,
+                           safe_mapper: bool, safe_runtime: bool,
+                           safe_ctrlrepl: bool, part_checks: bool,
+                           bounds_checks: bool, resilient: bool) -> None:
+        pass
 
     # MachineDesc
     @typecheck

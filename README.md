@@ -119,12 +119,13 @@ This repository includes the following contents:
 To get started with Legion, you'll need:
 
   * Linux, macOS, or another Unix
-  * A C++ 11 (or newer) compiler (GCC, Clang, Intel, or PGI) and GNU Make
+  * A C++ 17 (or newer) compiler (GCC, Clang, Intel, or PGI) and GNU Make
   * *Optional*: CMake 3.16 or newer
   * *Optional*: Python 3.5 or newer (used for tools and Python bindings)
       * Note: Python 3.8 or newer is required for `tools/legion_prof.py`
-  * *Optional*: Rust 1.67 or newer (used for Rust profiler)
+  * *Optional*: Rust 1.74 or newer (used for Rust profiler)
   * *Optional*: CUDA 10.0 or newer (for NVIDIA GPUs)
+  * *Optional*: CUDA 11.7 or newer if using Legion's built-in complex reduction operators
   * *Optional*: [GASNet](https://gasnet.lbl.gov/) (for networking, see
      [installation instructions](http://legion.stanford.edu/gasnet/))
   * *Optional*: LLVM 7-14 (for dynamic code generation)

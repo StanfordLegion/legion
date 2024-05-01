@@ -23,7 +23,8 @@ end
 
 task g(x : int, y : int, z : dynamic_collective(int))
   arrive(z, y)
-  arrive(z, f(x))
+  var w = f(x)
+  arrive(z, w)
 end
 
 task main()

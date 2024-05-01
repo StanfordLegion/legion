@@ -3354,7 +3354,13 @@ namespace Realm {
     assert(ep_index == xmitsrcs.size());
     xmitsrcs.push_back(new XmitSrc(this, ep_index));
 
+    gex_System_SetVerboseErrors(1);
     gex_EP_BindSegment(ep, segment, 0 /*flags*/);
+    if(gex_EP_QuerySegment(ep) != segment) {
+      log_gex_bind.fatal() << "failed to bind segment";
+      abort();
+    }
+    gex_System_SetVerboseErrors(0);
 
     uintptr_t base_as_uint = reinterpret_cast<uintptr_t>(base);
     segments_by_addr.push_back({ base_as_uint, base_as_uint+size,

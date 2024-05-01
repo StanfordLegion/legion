@@ -1797,7 +1797,32 @@ namespace Legion {
       LegionProfDesc::MaxDimDesc max_dim_desc;
       max_dim_desc.max_dim = LEGION_MAX_DIM;
       serializer->serialize(max_dim_desc);
-
+      // Log the runtime configuration
+      const LegionProfDesc::RuntimeConfig config = {
+#ifdef DEBUG_LEGION
+        true,
+#else
+        false,
+#endif
+        runtime->legion_spy_enabled,
+#ifdef LEGION_GC
+        true,
+#else
+        false,
+#endif
+        runtime->program_order_execution,
+        !runtime->unsafe_mapper,
+        runtime->check_privileges,
+        runtime->safe_control_replication > 0,
+        runtime->verify_partitions,
+#ifdef LEGION_BOUNDS_CHECKS
+        true,
+#else
+        false,
+#endif
+        runtime->resilient_mode,
+      };
+      serializer->serialize(config);
 #ifdef DEBUG_LEGION
       for (unsigned idx = 0; idx < LEGION_PROF_LAST; idx++)
         total_outstanding_requests[idx] = 0;

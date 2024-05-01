@@ -16,6 +16,7 @@ import "regent"
 
 local format = require("std/format")
 
+__demand(__replicable)
 task main()
   var a : int8 = -1
   var b : uint16 = 65535

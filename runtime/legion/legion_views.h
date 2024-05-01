@@ -362,7 +362,7 @@ namespace Legion {
                                             ApEvent remote_term_event,
                                             ApUserEvent remote_ready_event,
                                             RtUserEvent remote_registered,
-                                            RtUserEvent remote_applied);
+                                            std::set<RtEvent> &applied_events);
     public:
       static void handle_view_find_copy_pre_request(Deserializer &derez,
                         Runtime *runtime, AddressSpaceID source);
@@ -1847,7 +1847,8 @@ namespace Legion {
                            EquivalenceSet *tracing_eq,
                            CopyAcrossHelper *helper); 
     public:
-      bool matches(const void *value, size_t size) const;
+      bool matches(FillView *other);
+      bool matches(const void *value, size_t size);
       bool set_value(const void *value, size_t size);
       ApEvent issue_fill(Operation *op, IndexSpaceExpression *fill_expr,
                          const PhysicalTraceInfo &trace_info,

@@ -2692,7 +2692,7 @@ task toplevel()
 
   var ts_start = c.legion_get_current_time_in_micros()
   var ts_end = ts_start
-  __demand(__spmd) do __parallelize_with is_blocks do
+  __parallelize_with is_blocks do
     for time_it = 0, max_its do
 
       if time_it == prune then
@@ -2745,7 +2745,7 @@ task toplevel()
         ts_end = c.legion_get_current_time_in_micros()
       end
     end -- for time_it = 0, max_its + 1
-  end end
+  end
 
   --c.printf("Main task end\n")
   var sim_time : double = 1e-6 * (ts_end - ts_start)
