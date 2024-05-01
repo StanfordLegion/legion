@@ -15,8 +15,7 @@
 -- runs-with:
 -- [
 --  ["-ll:cpu", "4"],
---  ["-ll:cpu", "4", "-fbounds-checks", "1"],
---  ["-ll:cpu", "9", "-fflow", "1", "-fflow-spmd", "1"]
+--  ["-ll:cpu", "4", "-fbounds-checks", "1"]
 -- ]
 
 import "regent"
@@ -74,11 +73,8 @@ task test(size : int, p : int)
   var primary_partition = partition(equal, primary_region, color_space)
   __parallelize_with primary_partition, color_space
   do
-    __demand(__spmd)
-    do
-      init(primary_region)
-      stencil(primary_region)
-    end
+    init(primary_region)
+    stencil(primary_region)
     stencil_serial(primary_region)
   end
   for e in primary_region do

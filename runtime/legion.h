@@ -426,6 +426,9 @@ namespace Legion {
        * @param provenance an optional string describing the provenance 
        *                   information for this index space
        */
+      LEGION_DEPRECATED("We are considering removing support for freeing fields"
+          "in a future Legion release. Please contact the Legion developer's "
+          "list if field deletion is important for your application.") 
       void free_field(FieldID fid, const bool unordered = false,
                       const char *provenance = NULL);
 
@@ -476,6 +479,9 @@ namespace Legion {
        * @param provenance an optional string describing the provenance 
        *                   information for this index space
        */
+      LEGION_DEPRECATED("We are considering removing support for freeing fields"
+          "in a future Legion release. Please contact the Legion developer's "
+          "list if field deletion is important for your application.")
       void free_fields(const std::set<FieldID> &to_free, 
                        const bool unordered = false,
                        const char *provenance = NULL);
@@ -9283,6 +9289,8 @@ namespace Legion {
        *              Level 0: no checks
        *              Level 1: sound but incomplete checks (no false positives)
        *              Level 2: unsound but complete checks (no false negatives)
+       * -lg:safe_tracing Request that the runtime check the invariants
+       *              required for using tracing.
        * -lg:local <int> Specify the maximum number of local fields
        *              permitted in any field space within a context.
        * ---------------------

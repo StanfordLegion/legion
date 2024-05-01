@@ -943,7 +943,7 @@ bool spmd_main_task(const Task *task,
     iter++;
 
     if(args.use_tracing)
-      runtime->begin_trace(ctx, TRACE_ID_CG_ITER);
+      runtime->begin_trace(ctx, TRACE_ID_CG_ITER, true/*logical only*/);
 
     // compute Ap = A * p
     for(std::map<Point<3>, BlockMetadata>::iterator it = myblocks.begin();

@@ -1358,7 +1358,7 @@ namespace Realm {
     struct CudaIpcImportRequest {
       unsigned count = 0;
 #if !defined(REALM_IS_WINDOWS)
-      unsigned hostid = 0;
+      long hostid = 0;
 #endif
       static void handle_message(NodeID sender, const CudaIpcImportRequest &args,
                                  const void *data, size_t datalen);

@@ -42,7 +42,15 @@ void node_task_0(const void *args, size_t arglen, const void *userdata, size_t u
   // remove remote reference
   task_args.sparsity_map.remove_references(2);
   // deferred remote destroy
+
   task_args.sparsity_map.destroy(task_args.wait_on);
+
+  SparsityMap<1> local_sparsity =
+      SparsityMap<1>::construct({Rect<1>(Point<1>(0), Point<1>(50000))}, true, true);
+  local_sparsity.destroy(task_args.wait_on);
+
+  task_args.wait_on.wait();
+  assert(local_sparsity.impl()->is_valid() == 0);
 }
 
 void main_task(const void *args, size_t arglen, const void *userdata, size_t userlen,

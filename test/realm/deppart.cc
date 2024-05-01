@@ -1,6 +1,4 @@
 #include "realm.h"
-// for WithDefault<>
-#include "realm/threads.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -160,9 +158,13 @@ public:
     BC_TOTAL = 6,
   };
 
-  WithDefault<ProblemType, PTYPE_0> problem_type;
-  WithDefault<int,  4> global_x, global_y, global_z;
-  WithDefault<int,   2> blocks_x, blocks_y, blocks_z;
+  ProblemType problem_type = PTYPE_0;
+  int global_x = 4;
+  int global_y = 4;
+  int global_z = 4;
+  int blocks_x = 2;
+  int blocks_y = 2;
+  int blocks_z = 2;
 
   int n_cells;  // total cell count
   int n_blocks; // total block count
@@ -828,10 +830,10 @@ public:
 class CircuitTest : public TestInterface {
 public:
   // graph config parameters
-  WithDefault<int, 100> num_nodes;
-  WithDefault<int,  10> num_edges;
-  WithDefault<int,   2> num_pieces;
-  WithDefault<int,  50> pct_wire_in_piece;
+  int num_nodes = 100;
+  int num_edges = 10;
+  int num_pieces = 2;
+  int pct_wire_in_piece = 50;
 
   CircuitTest(int argc, const char *argv[])
   {
@@ -1305,11 +1307,11 @@ public:
   enum MeshType {
     RectangularMesh,
   };
-  WithDefault<MeshType, RectangularMesh> mesh_type;
-  WithDefault<int,  10> nzx;  // number of zones in x
-  WithDefault<int,  10> nzy;  // number of zones in y
-  WithDefault<int,   2> numpcx;  // number of submeshes in x
-  WithDefault<int,   2> numpcy;  // number of submeshes in y
+  MeshType mesh_type = RectangularMesh;
+  int nzx = 10;   // number of zones in x
+  int nzy = 10;   // number of zones in y
+  int numpcx = 2; // number of submeshes in x
+  int numpcy = 2; // number of submeshes in y
 
   int npx, npy;      // number of points in each dimension
   int nz, ns, np, numpc;  // total number of zones, sides, points, and pieces

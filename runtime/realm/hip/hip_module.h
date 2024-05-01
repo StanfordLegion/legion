@@ -110,6 +110,7 @@ namespace Realm {
       // configurations
       size_t cfg_zc_mem_size = 64 << 20, cfg_zc_ib_size = 256 << 20;
       size_t cfg_fb_mem_size = 256 << 20, cfg_fb_ib_size = 128 << 20;
+      size_t cfg_uvm_mem_size = 0;
       bool cfg_use_dynamic_fb = true;
       size_t cfg_dynfb_max_size = ~size_t(0);
       int cfg_num_gpus = 0;
@@ -190,6 +191,8 @@ namespace Realm {
       std::vector<GPU *> gpus;
       void *zcmem_cpu_base, *zcib_cpu_base;
       GPUZCMemory *zcmem;
+      void *uvm_base; // guaranteed to be same for CPU and GPU
+      GPUZCMemory *uvmmem;
       std::vector<void *> registered_host_ptrs;
       GPUReplHeapListener *rh_listener;
 

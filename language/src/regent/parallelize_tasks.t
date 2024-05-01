@@ -1654,13 +1654,11 @@ local function create_indexspace_launch(parallelizable, caller_cx, expr, lhs)
   end
   local index_launch =
     ast_util.mk_stat_for_list(color_symbol, color_space_expr, ast_util.mk_block(call_stat))
-  if not std.config["flow-spmd"] then
-    index_launch = index_launch {
-      annotations = index_launch.annotations {
-        parallel = ast.annotation.Demand
-      }
+  index_launch = index_launch {
+    annotations = index_launch.annotations {
+      parallel = ast.annotation.Demand
     }
-  end
+  }
   stats:insert(index_launch)
   return stats
 end

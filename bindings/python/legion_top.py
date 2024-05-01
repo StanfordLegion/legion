@@ -277,9 +277,14 @@ def run_cmd(cmd, run_name):
 # cleaning up after itself and removes the module before execution
 # has completed.
 def run_path(filename, run_name):
-    import importlib.util
-    spec = importlib.util.spec_from_file_location(run_name, filename)
-    module = importlib.util.module_from_spec(spec)
+    from importlib.machinery import SourceFileLoader
+    from importlib.util import spec_from_loader, module_from_spec
+    loader = SourceFileLoader(run_name, filename)
+    spec = spec_from_loader(run_name, loader)
+    if spec is None:
+        print("legion_python: can't load "+str(run_name)+" from "+str(filename))
+        c.legion_runtime_set_return_code(1)
+    module = module_from_spec(spec)
     setattr(module, '__name__', run_name)
     setattr(module, '__file__', filename)
     setattr(module, '__loader__', None)

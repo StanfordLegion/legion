@@ -779,7 +779,7 @@ impl StateDataSource {
 
             let first_index = points.partition_point(|p| {
                 let stop: ts::Timestamp = cont.entry(p.entry).time_range().stop.unwrap().into();
-                stop < tile_id.0.start
+                ts::Timestamp(stop.0.saturating_sub(1)) < tile_id.0.start
             });
             let last_index = points[first_index..].partition_point(|p| {
                 let start: ts::Timestamp = cont.entry(p.entry).time_range().start.unwrap().into();
@@ -1436,6 +1436,16 @@ impl StateDataSource {
         let last_time = last_time + Timestamp::from_ns(last_time.to_ns() / 200);
         ts::Interval::new(ts::Timestamp(0), last_time.into())
     }
+
+    fn generate_warning_message(&self) -> Option<String> {
+        if !self.state.runtime_config.any() {
+            return None;
+        }
+        Some(format!(
+            "This profile was generated with {}. Extreme performance degradation may occur.",
+            self.state.runtime_config
+        ))
+    }
 }
 
 impl DataSource for StateDataSource {
@@ -1451,14 +1461,15 @@ impl DataSource for StateDataSource {
             interval: self.interval(),
             tile_set: TileSet::default(),
             field_schema: self.field_schema.clone(),
+            warning_message: self.generate_warning_message(),
         }
     }
 
     fn fetch_summary_tile(&self, entry_id: &EntryID, tile_id: TileID, full: bool) -> SummaryTile {
         // Pick this number to be approximately the number of pixels we expect
         // the user to have on their screen. If this is a full tile, increase
-        // 10x so that we get more resolution when zoomed in.
-        let samples = if full { 10_000 } else { 1_000 };
+        // this so that we get more resolution when zoomed in.
+        let samples = if full { 4_000 } else { 800 };
 
         let step_utilization = self.generate_step_utilization(entry_id);
 

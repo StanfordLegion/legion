@@ -29,7 +29,7 @@ end
 
 task foo_non_inner(r : region(node))
 where reduces +(r.m) do
-  for x in r do x.m += 1 end -- Force this to not be inner
+  -- for x in r do x.m += 1 end -- Force this to not be inner
   foo_leaf(r)
 end
 

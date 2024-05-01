@@ -12,16 +12,12 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- runs-with:
--- [
---   ["-ll:cpu", "4", "-fflow-spmd", "1"],
---   ["-ll:cpu", "2", "-fflow-spmd", "1", "-fflow-spmd-shardsize", "2"]
--- ]
-
 import "regent"
 
 -- This tests the SPMD optimization of the compiler with:
 --   * loop-carried dependencies for multiple aliased partitions
+
+local format = require("std/format")
 
 fspace fs {
   a : int,
@@ -60,6 +56,7 @@ end
 
 local c = regentlib.c
 
+__demand(__replicable)
 task toplevel()
   var r = region(ispace(int1d, 4), fs)
 
@@ -85,7 +82,6 @@ task toplevel()
     r[i].b = 1000 - i
   end
 
-  __demand(__spmd)
   for t = 0, 3 do
     for c in cs do taskA(rp[c], gp2[c]) end
 
@@ -97,7 +93,7 @@ task toplevel()
   end
 
   for i in r do
-    c.printf("%d: %d %d\n", i, r[i].a, r[i].b)
+    format.println("{}: {} {}", i, r[i].a, r[i].b)
   end
 
   regentlib.assert(r[0].b == 7741, "test failed")

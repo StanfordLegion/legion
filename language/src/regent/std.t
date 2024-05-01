@@ -2332,10 +2332,12 @@ std.rect_type = data.weak_memoize(function(index_type)
   terra st:to_domain()
     return [c["legion_domain_from_rect_" .. tostring(st.dim) .. "d"]](@self)
   end
+  st.methods.to_domain.replicable = true
 
   terra st:size()
     return self.hi - self.lo + [st.index_type:const(1)]
   end
+  st.methods.size.replicable = true
 
   if index_type.fields then
     terra st:volume()
@@ -3811,6 +3813,10 @@ do
 
     return id
   end
+end
+
+function std.count_projection_functors()
+  return #projection_functors
 end
 
 local variants = terralib.newlist()

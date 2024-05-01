@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 -- runs-with:
--- [["-foverride-demand-cuda", "1", "-ll:gpu", "1", "-fflow", "0" ]]
+-- [["-foverride-demand-cuda", "1", "-ll:gpu", "1"]]
 
 import "regent"
 

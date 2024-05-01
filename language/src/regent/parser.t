@@ -81,8 +81,6 @@ function parser.annotation_name(p, required)
     return "predicate"
   elseif p:nextif("__replicable") then
     return "replicable"
-  elseif p:nextif("__spmd") then
-    return "spmd"
   elseif p:nextif("__trace") then
     return "trace"
   elseif p:nextif("__vectorize") then
