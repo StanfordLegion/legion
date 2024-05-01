@@ -1302,7 +1302,7 @@ namespace Legion {
       unsigned committed_points;
       unsigned concurrent_points;
     protected:
-      std::set<SliceTask*> origin_mapped_slices;
+      std::vector<SliceTask*> origin_mapped_slices;
       std::vector<FutureInstance*> reduction_instances;
       std::vector<Memory> serdez_redop_targets;
     protected:
@@ -1427,6 +1427,7 @@ namespace Legion {
                             VariantID vid, RtBarrier concurrent_task_barrier);
     protected:
       void trigger_slice_mapped(void);
+      void forward_completion_effects(void);
       void pack_remote_mapped(Serializer &rez, RtEvent applied_condition);
       void pack_remote_complete(Serializer &rez, ApEvent slice_effects);
       void pack_remote_commit(Serializer &rez, RtEvent applied_condition);

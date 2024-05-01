@@ -2221,9 +2221,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock o_lock(op_lock,1,false/*exclusive*/);
-#ifdef DEBUG_LEGION
-      assert(mapped);
-#endif
       if (!completion_effects.empty())
         target->record_completion_effects(completion_effects);
     }

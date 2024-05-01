@@ -8385,12 +8385,10 @@ namespace Legion {
       MultiTask::deactivate(false/*free*/);
       if (!origin_mapped_slices.empty())
       {
-        for (std::set<SliceTask*>::const_iterator it = 
+        for (std::vector<SliceTask*>::const_iterator it = 
               origin_mapped_slices.begin(); it != 
               origin_mapped_slices.end(); it++)
-        {
           (*it)->deactivate();
-        }
         origin_mapped_slices.clear();
       }
       if (!reduction_instances.empty())
@@ -10062,7 +10060,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock o_lock(op_lock);
-      origin_mapped_slices.insert(local_slice);
+      origin_mapped_slices.push_back(local_slice);
     }
 
     //--------------------------------------------------------------------------
@@ -10192,6 +10190,11 @@ namespace Legion {
           // Finish the index task reduction
           finish_index_task_reduction();
         }
+        // Forward completion effects for any local-mapped slices
+        for (std::vector<SliceTask*>::const_iterator it =
+              origin_mapped_slices.begin(); it != 
+              origin_mapped_slices.end(); it++)
+          (*it)->forward_completion_effects();
         complete_execution();
       }
       // If we didn't grab ownership then free this now
@@ -11245,11 +11248,6 @@ namespace Legion {
         // to this node so also hold onto these slices until the
         // index space is done
         index_owner->record_origin_mapped_slice(this);
-        // Also record any completion effects for mapping the point
-        // tasks with the index owner as well
-        for (std::vector<PointTask*>::const_iterator it =
-              points.begin(); it != points.end(); it++)
-          (*it)->forward_completion_effects(index_owner);
         return false;
       }
       // Always return true for slice tasks since they should
@@ -12168,6 +12166,15 @@ namespace Legion {
         index_owner->return_slice_mapped(points.size(), applied_condition); 
       }
       complete_mapping(applied_condition);
+    }
+
+    //--------------------------------------------------------------------------
+    void SliceTask::forward_completion_effects(void)
+    //--------------------------------------------------------------------------
+    {
+      for (std::vector<PointTask*>::const_iterator it =
+            points.begin(); it != points.end(); it++)
+        (*it)->forward_completion_effects(index_owner);
     }
 
     //--------------------------------------------------------------------------
