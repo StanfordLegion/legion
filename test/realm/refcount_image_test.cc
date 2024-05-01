@@ -114,7 +114,6 @@ void main_task(const void *args, size_t arglen, const void *userdata, size_t use
     args.parent = parent;
     Event e = proc.spawn(NODE_TASK, &args, sizeof(args));
     events.push_back(e);
-
   }
 
   Event::merge_events(events).wait();

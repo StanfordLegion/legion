@@ -267,9 +267,7 @@ namespace Realm {
 
     assert(references > 0);
 
-    if(references > 0) {
-      references -= std::min(references, count);
-    }
+    references -= std::min(references, count);
 
     if(references == 0) {
       if(map_impl.load() != 0) {

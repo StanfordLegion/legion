@@ -249,7 +249,7 @@ namespace Realm {
       int res_num_cpus = 0;
       size_t res_sysmem_size = 0;
 
-      //sparstiy maps
+      // sparstiy maps
       bool enable_sparsity_refcount = 0;
     };
 
