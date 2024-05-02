@@ -3938,6 +3938,22 @@ namespace Legion {
 #else
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
+      if (!commit_barrier.has_triggered())
+      {
+        // We need to make sure all the operations across all the shards
+        // have committed before we actually do this deletion on every
+        // shard. If we ever move to a mode where we do a commit barrier
+        // for every operation in a control replicated context then we can
+        // get rid of this but for now it is absolutely necessary
+        Runtime::phase_barrier_arrive(commit_barrier, 1/*count*/);
+        if (!commit_barrier.has_triggered())
+        {
+          DeferDeletionCommitArgs args(this);
+          runtime->issue_runtime_meta_task(args,
+              LG_THROUGHPUT_DEFERRED_PRIORITY, commit_barrier);
+          return;
+        }
+      }
       std::set<RtEvent> applied;
       const CollectiveMapping &mapping =
         repl_ctx->shard_manager->get_collective_mapping();
@@ -4028,11 +4044,18 @@ namespace Legion {
 #endif
       // commit once all the shards are done
       if (!applied.empty())
-        Runtime::phase_barrier_arrive(commit_barrier, 1/*count*/, 
-            Runtime::merge_events(applied));
+        commit_operation(true/*deactivate*/, Runtime::merge_events(applied));
       else
-        Runtime::phase_barrier_arrive(commit_barrier, 1/*count*/);
-      commit_operation(true/*deactivate*/, commit_barrier);
+        commit_operation(true/*deactivate*/);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ReplDeletionOp::handle_defer_commit(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DeferDeletionCommitArgs *dargs = 
+        (const DeferDeletionCommitArgs*)args;
+      dargs->op->trigger_commit();
     }
 
     //--------------------------------------------------------------------------

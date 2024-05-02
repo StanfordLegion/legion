@@ -2347,6 +2347,17 @@ namespace Legion {
     class ReplDeletionOp : 
       public ReplCollectiveVersioning<CollectiveVersioning<DeletionOp> > {
     public:
+      struct DeferDeletionCommitArgs : 
+        public LgTaskArgs<DeferDeletionCommitArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFER_DELETION_COMMIT_TASK_ID;
+      public:
+        DeferDeletionCommitArgs(ReplDeletionOp *o)
+          : LgTaskArgs(o->get_unique_op_id()), op(o) { }
+      public:
+        ReplDeletionOp *const op;
+      };
+    public:
       ReplDeletionOp(Runtime *rt);
       ReplDeletionOp(const ReplDeletionOp &rhs) = delete;
       virtual ~ReplDeletionOp(void);
@@ -2372,6 +2383,8 @@ namespace Legion {
        std::map<FieldSpace,ReplDeletionOp*> &field_space_deletions,
        std::map<std::pair<FieldSpace,FieldID>,ReplDeletionOp*> &field_deletions,
        std::map<LogicalRegion,ReplDeletionOp*> &logical_region_deletions);
+    public:
+      static void handle_defer_commit(const void *args);
     protected:
       RtBarrier ready_barrier;
       RtBarrier mapping_barrier;

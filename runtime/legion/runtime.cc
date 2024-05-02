@@ -32726,6 +32726,11 @@ namespace Legion {
             FutureInstance::handle_free_external(args);
             break;
           }
+        case LG_DEFER_DELETION_COMMIT_TASK_ID:
+          {
+            ReplDeletionOp::handle_defer_commit(args);
+            break;
+          }
         case LG_YIELD_TASK_ID:
           break; // nothing to do here
         case LG_RETRY_SHUTDOWN_TASK_ID:
