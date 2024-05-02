@@ -107,6 +107,7 @@ namespace Realm {
       if(NodeID(ID(sparsity_map_id).sparsity_creator_node()) == Network::my_node_id) {
         get_runtime()->get_sparsity_impl(sparsity_map_id)->destroy();
       }
+      delete this;
     }
 
     virtual void print(std::ostream &os) const {}
