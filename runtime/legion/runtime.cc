@@ -7214,7 +7214,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(shard_manager == NULL);
       assert(runtime->address_space > 0);
-      assert(shard_points.size() == shards_per_address_space);
 #endif
       Serializer rez;
       {
