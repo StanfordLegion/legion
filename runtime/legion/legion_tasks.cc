@@ -6424,7 +6424,7 @@ namespace Legion {
       // it is returned or we might prematurely release the references
       // that we hold on the version state objects
       // Pass back our created and deleted operations
-      if (execution_context != NULL)
+      if ((execution_context != NULL) && !is_remote())
       {
         if (top_level_task)
           execution_context->report_leaks_and_duplicates(
