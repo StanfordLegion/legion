@@ -7240,9 +7240,6 @@ namespace Legion {
     void ImplicitShardManager::process_implicit_rendezvous(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(runtime->address_space == 0);
-#endif
       AutoLock m_lock(manager_lock);
       size_t num_points = 0;
       derez.deserialize(num_points);
