@@ -250,7 +250,7 @@ namespace Realm {
       size_t res_sysmem_size = 0;
 
       // sparstiy maps
-      bool enable_sparsity_refcount = 0;
+      bool enable_sparsity_refcount = false;
     };
 
     class CoreModule : public Module {
