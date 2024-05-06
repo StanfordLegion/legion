@@ -145,11 +145,10 @@ namespace Realm {
     template <typename T>
     T *pointer(size_t offset) const;
 
-    ///@{
     /**
      * Reuse an underlying memory of the instance to create the next
      * set of instances.
-     * \param instance instance to be redistricted
+     * \param instance resulting instance
      * \param layout of a new instance to be created
      * \param prs profiling information
      * \param wait_on precondition to wait on
@@ -158,10 +157,19 @@ namespace Realm {
     Event redistrict(RegionInstance &instance, InstanceLayoutGeneric *layout,
                      const ProfilingRequestSet &prs, Event wait_on = Event::NO_EVENT);
 
+    /**
+     * Reuse an underlying memory of the instance to create the next
+     * set of instances.
+     * \param instances instances to be redistricted
+     * \param layouts layouts for new instances
+     * \param num_layouts number of instances and instance layouts
+     * \param prs profiling information
+     * \param wait_on precondition to wait on
+     * \return The event to wait on before using the new instance.
+     */
     Event redistrict(RegionInstance *instances, InstanceLayoutGeneric **layouts,
                      size_t num_layouts, const ProfilingRequestSet *prs,
                      Event wait_on = Event::NO_EVENT);
-    ///@}
 
     /**
      * Create a new region instance. Calls to create_instance return immediately
