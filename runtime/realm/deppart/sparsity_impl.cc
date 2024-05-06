@@ -275,7 +275,9 @@ namespace Realm {
         map_impl.store(0);
         type_tag.store(0);
       }
-      get_runtime()->free_sparsity_impl(this);
+      if(Network::my_node_id == NodeID(ID(me).sparsity_creator_node())) {
+        get_runtime()->free_sparsity_impl(this);
+      }
 #endif
     }
   }
