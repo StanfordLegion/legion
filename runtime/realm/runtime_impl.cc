@@ -3024,6 +3024,13 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
       return wrap;
     }
 
+    void RuntimeImpl::free_sparsity_impl(SparsityMapImplWrapper *impl)
+    {
+      if(Network::my_node_id == NodeID(impl->me.sparsity_creator_node())) {
+        local_sparsity_map_free_lists[impl->me.sparsity_owner_node()]->free_entry(impl);
+      }
+    }
+
     SubgraphImpl *RuntimeImpl::get_subgraph_impl(ID id)
     {
       if(!id.is_subgraph()) {

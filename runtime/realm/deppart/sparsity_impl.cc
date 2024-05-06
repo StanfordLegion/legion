@@ -269,15 +269,13 @@ namespace Realm {
 
     if(references == 0) {
 #ifdef REALM_SPARSITY_DELETES
-      (*map_deleter)(map_impl.load());
-
-      NodeID owner_node = ID(me).sparsity_creator_node();
-      assert(owner_node == Network::my_node_id);
-
-      get_runtime()->local_sparsity_map_free_lists[owner_node]->free_entry(this);
-
-      map_impl.store(0);
-      type_tag.store(0);
+      if(map_impl.load() != 0) {
+        assert(map_deleter);
+        (*map_deleter)(map_impl.load());
+        map_impl.store(0);
+        type_tag.store(0);
+      }
+      get_runtime()->free_sparsity_impl(this);
 #endif
     }
   }
