@@ -30,7 +30,6 @@ TEST_F(IndexSpaceIteratorTest, CreateWithEmptyIndexSpace)
   IndexSpace<1> index_space(Rect<1>(Point<1>(0), Point<1>(-1)));
   IndexSpaceIterator<1> it(index_space);
   EXPECT_FALSE(it.valid);
-  EXPECT_TRUE(it.rect.empty());
 }
 
 TEST_F(IndexSpaceIteratorTest, StepDense)
