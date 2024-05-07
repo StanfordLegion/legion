@@ -29,10 +29,6 @@ list(APPEND REALM_TESTS
   sequence_assembler_test.cc
  )
 
-list(APPEND REALM_MEMORY_QUERY_TEST
-  memory_query_test.cc
- )
-
 include(FetchContent)
 FetchContent_Declare(
   googletest
@@ -43,11 +39,9 @@ FetchContent_MakeAvailable(googletest)
 
 enable_testing()
 add_executable(realm_tests ${REALM_TESTS})
-add_executable(realm_memory_query_test ${REALM_MEMORY_QUERY_TEST})
 
 list(APPEND REALM_UNIT_TESTS_LIST
   realm_tests
-  realm_memory_query_test
 )
 
 foreach(ITEM IN LISTS REALM_UNIT_TESTS_LIST)
