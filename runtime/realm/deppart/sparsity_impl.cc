@@ -29,8 +29,6 @@ namespace Realm {
   extern Logger log_part;
   extern Logger log_dpops;
 
-#define REALM_SPARSITY_DELETES
-
   ////////////////////////////////////////////////////////////////////////
   //
   // class SparsityMapRefCounter
@@ -232,7 +230,10 @@ namespace Realm {
     , type_tag(0)
     , map_impl(0)
     , references(0)
-  {}
+  {
+    assert(get_runtime()->get_module_config("core")->get_property(
+        "enable_sparsity_refcount", need_refcount));
+  }
 
   SparsityMapImplWrapper::~SparsityMapImplWrapper(void)
   {
@@ -251,6 +252,9 @@ namespace Realm {
 
   void SparsityMapImplWrapper::add_references(unsigned count)
   {
+    if(!need_refcount) {
+      return;
+    }
     AutoLock<> al(mutex);
     if(map_impl.load() != 0) {
       references += count;
@@ -259,6 +263,9 @@ namespace Realm {
 
   void SparsityMapImplWrapper::remove_references(unsigned count)
   {
+    if(!need_refcount) {
+      return;
+    }
     AutoLock<> al(mutex);
     if(map_impl.load() == 0) {
       return;
@@ -269,7 +276,6 @@ namespace Realm {
     }
 
     if(references == 0) {
-#ifdef REALM_SPARSITY_DELETES
       (*map_deleter)(map_impl.load());
 
       NodeID owner_node = ID(me).sparsity_creator_node();
@@ -279,7 +285,6 @@ namespace Realm {
 
       map_impl.store(0);
       type_tag.store(0);
-#endif
     }
   }
 
