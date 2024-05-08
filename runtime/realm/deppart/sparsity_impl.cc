@@ -29,8 +29,6 @@ namespace Realm {
   extern Logger log_part;
   extern Logger log_dpops;
 
-#define REALM_SPARSITY_DELETES
-
   ////////////////////////////////////////////////////////////////////////
   //
   // class SparsityMapRefCounter
@@ -107,6 +105,7 @@ namespace Realm {
       if(NodeID(ID(sparsity_map_id).sparsity_creator_node()) == Network::my_node_id) {
         get_runtime()->get_sparsity_impl(sparsity_map_id)->destroy();
       }
+      delete this;
     }
 
     virtual void print(std::ostream &os) const {}
@@ -231,7 +230,10 @@ namespace Realm {
     , type_tag(0)
     , map_impl(0)
     , references(0)
-  {}
+  {
+    assert(get_runtime()->get_module_config("core")->get_property(
+        "enable_sparsity_refcount", need_refcount));
+  }
 
   SparsityMapImplWrapper::~SparsityMapImplWrapper(void)
   {
@@ -250,6 +252,9 @@ namespace Realm {
 
   void SparsityMapImplWrapper::add_references(unsigned count)
   {
+    if(!need_refcount) {
+      return;
+    }
     AutoLock<> al(mutex);
     if(map_impl.load() != 0) {
       references += count;
@@ -258,6 +263,9 @@ namespace Realm {
 
   void SparsityMapImplWrapper::remove_references(unsigned count)
   {
+    if(!need_refcount) {
+      return;
+    }
     AutoLock<> al(mutex);
     if(map_impl.load() == 0) {
       return;
@@ -268,16 +276,16 @@ namespace Realm {
     }
 
     if(references == 0) {
-#ifdef REALM_SPARSITY_DELETES
       if(map_impl.load() != 0) {
         assert(map_deleter);
         (*map_deleter)(map_impl.load());
         map_impl.store(0);
         type_tag.store(0);
       }
-      assert(Network::my_node_id == NodeID(ID(me).sparsity_creator_node()));
-      get_runtime()->free_sparsity_impl(this);
-#endif
+
+      if(Network::my_node_id == NodeID(ID(me).sparsity_creator_node())) {
+        get_runtime()->free_sparsity_impl(this);
+      }
     }
   }
 

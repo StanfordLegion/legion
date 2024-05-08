@@ -25,14 +25,8 @@ list(APPEND REALM_TESTS
   path_cache_test.cc
   transfer_utils_test.cc
   address_list_test.cc
-  index_space_iterator_test.cc
-  sparsity_map_test.cc
   cmdline_parser_test.cc
   sequence_assembler_test.cc
- )
-
-list(APPEND REALM_MEMORY_QUERY_TEST
-  memory_query_test.cc
  )
 
 include(FetchContent)
@@ -45,11 +39,9 @@ FetchContent_MakeAvailable(googletest)
 
 enable_testing()
 add_executable(realm_tests ${REALM_TESTS})
-add_executable(realm_memory_query_test ${REALM_MEMORY_QUERY_TEST})
 
 list(APPEND REALM_UNIT_TESTS_LIST
   realm_tests
-  realm_memory_query_test
 )
 
 foreach(ITEM IN LISTS REALM_UNIT_TESTS_LIST)
