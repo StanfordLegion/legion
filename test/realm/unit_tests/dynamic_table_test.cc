@@ -9,7 +9,6 @@
 #include "realm/dynamic_table.h"
 #include "realm/dynamic_table_allocator.h"
 
-#include <tuple>
 #include <gtest/gtest.h>
 
 using namespace Realm;
@@ -22,20 +21,12 @@ struct Dummy {
 
 typedef DynamicTableAllocator<Dummy, 1, 4> DummyTableAllocator;
 
-TEST(DynamicTableTest, EmptyTable)
+TEST(DynamicTableTest, LookupSingleEntry)
 {
   DynamicTable<DummyTableAllocator> dtable;
   int id = 0;
   EXPECT_FALSE(dtable.has_entry(id));
   EXPECT_EQ(dtable.max_entries(), 0);
-  dtable.lookup_entry(id, 0);
-  EXPECT_TRUE(dtable.has_entry(id));
-}
-
-TEST(DynamicTableTest, LookupSingleEntry)
-{
-  DynamicTable<DummyTableAllocator> dtable;
-  int id = 0;
   dtable.lookup_entry(id, 0);
   EXPECT_TRUE(dtable.has_entry(id));
   EXPECT_EQ(dtable.max_entries(), 16);
@@ -92,13 +83,15 @@ TEST(DynamicTableTest, FreeListSingleAlloc)
 
   Dummy *entry = free_list.alloc_entry();
   EXPECT_NE(entry, nullptr);
+  EXPECT_EQ(entry->next_free, nullptr);
   EXPECT_TRUE(dtable.has_entry(entry->me.id));
 
   free_list.free_entry(entry);
+  EXPECT_NE(entry->next_free, nullptr);
   EXPECT_TRUE(free_list.table.has_entry(entry->me.id)); //??
 }
 
-TEST(DynamicTableTest, FreeListMaxAlloc)
+TEST(DynamicTableTest, FreeListUpMaxAlloc)
 {
   DynamicTable<DynamicTableAllocator<Dummy, 0, 4>> dtable;
   DynamicTableAllocator<Dummy, 0, 4>::FreeList free_list(dtable, 0);
