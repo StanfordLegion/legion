@@ -46,7 +46,9 @@ namespace Realm {
     template <typename T>
     static ID make_id(const T &dummy, int owner, IT index)
     {
-      return ID::make_event(owner, index, 0).convert<ID>();
+      ID id;
+      id.id = index;
+      return id;
     }
 
     // hack for now - these should be factored out

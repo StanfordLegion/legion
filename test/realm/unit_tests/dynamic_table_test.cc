@@ -15,9 +15,9 @@
 using namespace Realm;
 
 struct Dummy {
-  void init(ID _me, unsigned _init_owner) {}
-  Dummy *next_free;
-  atomic<DynamicTemplates::TagType> type_tag;
+  void init(ID _me, unsigned _init_owner) { me = me; }
+  ID me;
+  Dummy *next_free = nullptr;
 };
 
 typedef DynamicTableAllocator<Dummy, 1, 4> DummyTableAllocator;
@@ -83,4 +83,42 @@ TEST(DynamicTableTest, LookupTheLimit)
     }
   }
   EXPECT_EQ(dtable.max_entries(), index);
+}
+
+TEST(DynamicTableTest, FreeListSingleAlloc)
+{
+  DynamicTable<DynamicTableAllocator<Dummy, 0, 4>> dtable;
+  DynamicTableAllocator<Dummy, 0, 4>::FreeList free_list(dtable, 0);
+
+  Dummy *entry = free_list.alloc_entry();
+  EXPECT_NE(entry, nullptr);
+  EXPECT_TRUE(dtable.has_entry(entry->me.id));
+
+  free_list.free_entry(entry);
+  EXPECT_TRUE(free_list.table.has_entry(entry->me.id)); //??
+}
+
+TEST(DynamicTableTest, FreeListMaxAlloc)
+{
+  DynamicTable<DynamicTableAllocator<Dummy, 0, 4>> dtable;
+  DynamicTableAllocator<Dummy, 0, 4>::FreeList free_list(dtable, 0);
+
+  for(int i = 0; i < 15; i++) {
+    Dummy *entry = free_list.alloc_entry();
+    EXPECT_NE(entry, nullptr);
+    EXPECT_TRUE(dtable.has_entry(entry->me.id));
+  }
+}
+
+TEST(DynamicTableTest, FreeListOverMaxAlloc)
+{
+  DynamicTable<DynamicTableAllocator<Dummy, 0, 4>> dtable;
+  DynamicTableAllocator<Dummy, 0, 4>::FreeList free_list(dtable, 0);
+
+  for(int i = 0; i < 32; i++) {
+    Dummy *entry = free_list.alloc_entry();
+    EXPECT_NE(entry, nullptr);
+    EXPECT_TRUE(dtable.has_entry(entry->me.id));
+    free_list.free_entry(entry);
+  }
 }
