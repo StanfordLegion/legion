@@ -22,6 +22,7 @@ pub trait StatePostprocess {
     fn group_procs(&self) -> BTreeMap<ProcGroup, Vec<ProcID>>;
     fn group_mems(&self) -> BTreeMap<MemGroup, Vec<MemID>>;
     fn group_chans(&self) -> BTreeMap<Option<NodeID>, Vec<ChanID>>;
+    fn group_depparts(&self) -> BTreeMap<Option<NodeID>, Vec<ChanID>>;
 
     fn proc_group_timepoints(
         &self,
@@ -145,6 +146,16 @@ impl StatePostprocess for State {
         let mut groups = BTreeMap::new();
 
         for (chan_id, chan) in &self.chans {
+            match *chan_id {
+                ChanID::Copy { .. }
+                | ChanID::Fill { .. }
+                | ChanID::Gather { .. }
+                | ChanID::Scatter { .. } => {} // ok
+                _ => {
+                    continue;
+                }
+            }
+
             if !chan.is_visible() {
                 continue;
             }
@@ -159,11 +170,40 @@ impl StatePostprocess for State {
                         nodes.push(Some(dst.node_id()))
                     }
                     ChanID::Scatter { src } => nodes.push(Some(src.node_id())),
-                    ChanID::DepPart { node_id } => nodes.push(Some(node_id)),
+                    ChanID::DepPart { .. } => unreachable!(),
                 }
                 nodes.dedup();
                 for node in nodes {
                     groups.entry(node).or_insert_with(Vec::new).push(*chan_id)
+                }
+            }
+        }
+
+        groups
+    }
+
+    fn group_depparts(&self) -> BTreeMap<Option<NodeID>, Vec<ChanID>> {
+        let mut groups = BTreeMap::new();
+
+        for (chan_id, chan) in &self.chans {
+            match *chan_id {
+                ChanID::DepPart { .. } => {} // ok
+                _ => {
+                    continue;
+                }
+            }
+            if !chan.is_visible() {
+                continue;
+            }
+            if !chan.util_time_points(None).is_empty() {
+                let mut nodes = vec![None];
+                match *chan_id {
+                    ChanID::DepPart { node_id } => nodes.push(Some(node_id)),
+                    _ => unreachable!(),
+                }
+                nodes.dedup();
+                for node in nodes {
+                    groups.entry(node).or_insert_with(Vec::new).push(*chan_id);
                 }
             }
         }
