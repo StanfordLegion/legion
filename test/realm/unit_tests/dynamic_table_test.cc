@@ -93,10 +93,10 @@ TEST(DynamicTableTest, FreeListSingleAlloc)
 
 TEST(DynamicTableTest, FreeListUpMaxAlloc)
 {
-  DynamicTable<DynamicTableAllocator<Dummy, 0, 4>> dtable;
-  DynamicTableAllocator<Dummy, 0, 4>::FreeList free_list(dtable, 0);
+  DynamicTable<DynamicTableAllocator<Dummy, 1, 1>> dtable;
+  DynamicTableAllocator<Dummy, 1, 1>::FreeList free_list(dtable, 0);
 
-  for(int i = 0; i < 15; i++) {
+  for(int i = 0; i < 255; i++) {
     Dummy *entry = free_list.alloc_entry();
     EXPECT_NE(entry, nullptr);
     EXPECT_TRUE(dtable.has_entry(entry->me.id));
@@ -105,10 +105,10 @@ TEST(DynamicTableTest, FreeListUpMaxAlloc)
 
 TEST(DynamicTableTest, FreeListOverMaxAlloc)
 {
-  DynamicTable<DynamicTableAllocator<Dummy, 0, 4>> dtable;
-  DynamicTableAllocator<Dummy, 0, 4>::FreeList free_list(dtable, 0);
+  DynamicTable<DynamicTableAllocator<Dummy, 1, 1>> dtable;
+  DynamicTableAllocator<Dummy, 1, 1>::FreeList free_list(dtable, 0);
 
-  for(int i = 0; i < 32; i++) {
+  for(int i = 0; i < 256; i++) {
     Dummy *entry = free_list.alloc_entry();
     EXPECT_NE(entry, nullptr);
     EXPECT_TRUE(dtable.has_entry(entry->me.id));

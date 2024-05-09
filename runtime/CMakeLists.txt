@@ -757,6 +757,9 @@ endif()
 
 set_target_properties(RealmRuntime PROPERTIES OUTPUT_NAME "realm${INSTALL_SUFFIX}")
 
+include(CodeCoverage)
+append_coverage_compiler_flags()
+
 target_include_directories(RealmRuntime
   INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
