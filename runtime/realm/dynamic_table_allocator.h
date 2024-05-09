@@ -43,6 +43,12 @@ namespace Realm {
     typedef DynamicTableFreeList<DynamicTableAllocator<ET, _INNER_BITS, _LEAF_BITS>>
         FreeList;
 
+    template <typename T>
+    static ID make_id(const T &dummy, int owner, IT index)
+    {
+      return ID::make_event(owner, index, 0).convert<ID>();
+    }
+
     // hack for now - these should be factored out
     static ID make_id(const GenEventImpl &dummy, int owner, IT index)
     {
