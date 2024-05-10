@@ -1997,6 +1997,23 @@ impl Color {
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct MapperID(pub u32);
 
+#[derive(Debug)]
+pub struct Mapper {
+    pub mapper_id: MapperID,
+    pub proc_id: ProcID,
+    pub name: String,
+}
+
+impl Mapper {
+    fn new(mapper_id: MapperID, proc_id: ProcID, name: &str) -> Self {
+        Mapper {
+            mapper_id,
+            proc_id,
+            name: name.to_owned(),
+        }
+    }
+}
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct MapperCallKindID(pub u32);
 
@@ -2776,6 +2793,7 @@ pub struct State {
     pub tasks: BTreeMap<OpID, ProcID>,
     pub multi_tasks: BTreeMap<OpID, MultiTask>,
     pub last_time: Timestamp,
+    pub mappers: BTreeMap<(MapperID, ProcID), Mapper>,
     pub mapper_call_kinds: BTreeMap<MapperCallKindID, MapperCallKind>,
     pub runtime_call_kinds: BTreeMap<RuntimeCallKindID, RuntimeCallKind>,
     pub insts: BTreeMap<InstUID, MemID>,
@@ -3788,7 +3806,16 @@ fn process_record(
     call_threshold: Timestamp,
 ) {
     match record {
-        Record::MapperName { .. } => {}
+        Record::MapperName {
+            mapper_id,
+            mapper_proc,
+            name,
+        } => {
+            state
+                .mappers
+                .entry((*mapper_id, *mapper_proc))
+                .or_insert_with(|| Mapper::new(*mapper_id, *mapper_proc, name));
+        }
         Record::MapperCallDesc { kind, name } => {
             state
                 .mapper_call_kinds

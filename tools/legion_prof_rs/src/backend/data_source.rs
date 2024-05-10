@@ -101,6 +101,8 @@ pub struct Fields {
     delayed_time: FieldID,
     creator: FieldID,
     caller: FieldID,
+    mapper: FieldID,
+    mapper_proc: FieldID,
 }
 
 #[derive(Debug)]
@@ -144,6 +146,8 @@ impl StateDataSource {
             delayed_time: field_schema.insert("Delayed".to_owned(), false),
             creator: field_schema.insert("Creator".to_owned(), false),
             caller: field_schema.insert("Caller".to_owned(), false),
+            mapper: field_schema.insert("Mapper".to_owned(), true),
+            mapper_proc: field_schema.insert("Mapper Processor".to_owned(), true),
         };
 
         let mut entry_map = BTreeMap::<EntryID, EntryKind>::new();
@@ -1124,6 +1128,22 @@ impl StateDataSource {
                         }
                     }
                 }
+            }
+            match entry.kind {
+                ProcEntryKind::MapperCall(mapper_id, mapper_proc, _) => {
+                    let mapper = self.state.mappers.get(&(mapper_id, mapper_proc)).unwrap();
+                    fields.push((self.fields.mapper, Field::String(mapper.name.to_owned())));
+                    let proc = self.state.procs.get(&mapper_proc).unwrap();
+                    let proc_name = format!(
+                        "Node {} {:?} {}",
+                        mapper_proc.node_id().0,
+                        proc.kind,
+                        mapper_proc.proc_in_node()
+                    );
+
+                    fields.push((self.fields.mapper_proc, Field::String(proc_name)));
+                }
+                _ => {}
             }
             if let Some(ready) = entry.time_range.ready {
                 if let Some(create) = entry.time_range.create {
