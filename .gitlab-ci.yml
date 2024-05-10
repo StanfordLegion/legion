@@ -216,6 +216,10 @@ cache: &global_cache
 .ctest: &ctest
   TEST_CTEST: "1"
 
+# The realm unit tests only works on single node
+.realm_unit_ctest: &realm_unit_ctest
+  TEST_REALM_UNIT_CTEST: "1"
+
 .regent: &regent
   TEST_LEGION_CXX: "0"
   TEST_REALM: "0"
@@ -728,12 +732,12 @@ gcc9_cxx17_debug_openmp_system_regent:
 gcc9_cxx17_debug_python3_cmake_prof_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *debug, *cxx17_normal, *python3, *cmake, *legion, *ctest, *prof, *shared, *short]
+    <<: [*gcc9, *terra12, *debug, *cxx17_normal, *python3, *cmake, *legion, *ctest, *realm_unit_ctest, *prof, *shared, *short]
 #   * LLVM
 gcc9_cxx17_debug_llvm_cmake_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *debug, *cxx17_normal, *llvm, *llvm12, *cmake, *legion, *ctest, *shared, *libdw]
+    <<: [*gcc9, *terra12, *debug, *cxx17_normal, *llvm, *llvm12, *cmake, *legion, *ctest, *realm_unit_ctest, *shared, *libdw]
 gcc9_cxx17_debug_llvm_regent:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
@@ -998,7 +1002,7 @@ clang12_cxx17_debug_python3_legion:
 clang12_cxx17_debug_llvm_cmake_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*clang12, *terra12, *debug, *cxx17_normal, *llvm, *llvm12, *cmake, *legion, *ctest, *libdw]
+    <<: [*clang12, *terra12, *debug, *cxx17_normal, *llvm, *llvm12, *cmake, *legion, *ctest, *realm_unit_ctest, *libdw]
 clang12_cxx17_debug_llvm_regent:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
@@ -1138,7 +1142,7 @@ macos_clang_cxx17_release_legion:
 macos_clang_cxx20_release_cmake_legion:
   <<: [*macos, *tests]
   variables:
-    <<: [*macos_clang, *release, *cxx20_normal, *cmake, *legion, *ctest, *short, *no_ccache]
+    <<: [*macos_clang, *release, *cxx20_normal, *cmake, *legion, *ctest, *realm_unit_ctest, *short, *no_ccache]
 # macos_clang_cxx17_debug_cmake_regent:
 #   <<: [*macos, *tests]
 #   variables:
@@ -1232,39 +1236,39 @@ clang14_cxx20_release_regent:
 nvidia_cuda117_gcc10_cxx17_debug_cmake_cuda_dynamic_legion:
   <<: [*nvidia, *tests]
   variables:
-    <<: [*gcc10, *debug, *cxx17_normal, *cuda117, *cmake, *legion, *cuda_dynamic, *ctest, *short, *shared, *libdw]
+    <<: [*gcc10, *debug, *cxx17_normal, *cuda117, *cmake, *legion, *cuda_dynamic, *ctest, *realm_unit_ctest, *short, *shared, *libdw]
 nvidia_cuda117_gcc10_cxx17_release_cmake_cuda_legion:
   <<: [*nvidia, *tests]
   variables:
-    <<: [*gcc10, *release, *cxx17_normal, *cuda117, *legion, *cmake, *ctest, *shared]
+    <<: [*gcc10, *release, *cxx17_normal, *cuda117, *legion, *cmake, *ctest, *realm_unit_ctest, *shared]
 nvidia_cuda121_gcc11_cxx17_debug_cmake_cuda_legion:
   <<: [*nvidia, *tests]
   variables:
-    <<: [*gcc11, *debug, *cxx17_normal, *cuda121, *legion, *short, *cmake, *ctest, *shared, *libdw]
+    <<: [*gcc11, *debug, *cxx17_normal, *cuda121, *legion, *short, *cmake, *ctest, *realm_unit_ctest, *shared, *libdw]
 nvidia_cuda121_gcc11_cxx17_release_cmake_cuda_legion:
   <<: [*nvidia, *tests]
   variables:
-    <<: [*gcc11, *release, *cxx17_normal, *cuda121, *cmake, *legion, *ctest, *shared]
+    <<: [*gcc11, *release, *cxx17_normal, *cuda121, *cmake, *legion, *ctest, *realm_unit_ctest, *shared]
 nvidia_cuda124_gcc11_cxx17_release_cmake_cuda_legion:
   <<: [*nvidia, *tests]
   variables:
-    <<: [*gcc11, *release, *cxx17_normal, *cuda124, *legion, *cmake, *ctest, *shared]
+    <<: [*gcc11, *release, *cxx17_normal, *cuda124, *legion, *cmake, *ctest, *realm_unit_ctest, *shared]
 nvidia_cuda124_gcc11_cxx20_debug_checks_cmake_cuda_legion:
   <<: [*nvidia, *tests]
   variables:
-    <<: [*gcc11, *debug, *cxx20_normal, *checks, *cuda124, *legion, *short, *cmake, *ctest, *shared, *libdw]
+    <<: [*gcc11, *debug, *cxx20_normal, *checks, *cuda124, *legion, *short, *cmake, *ctest, *realm_unit_ctest, *shared, *libdw]
 nvidia_cuda124_gcc11_cxx20_release_cmake_cuda_legion:
   <<: [*nvidia, *tests]
   variables:
-    <<: [*gcc11, *release, *cxx20_normal, *cuda124, *cmake, *legion, *ctest, *shared]
+    <<: [*gcc11, *release, *cxx20_normal, *cuda124, *cmake, *legion, *ctest, *realm_unit_ctest, *shared]
 nvidia_cuda124_clang12_cxx17_release_cmake_cuda_regent:
   <<: [*nvidia, *tests]
   variables:
-    <<: [*clang12, *llvm12, *release, *cxx17_normal, *cuda124, *regent, *cmake, *ctest, *short]
+    <<: [*clang12, *llvm12, *release, *cxx17_normal, *cuda124, *regent, *cmake, *ctest, *realm_unit_ctest, *short]
 nvidia_cuda124_clang12_cxx20_release_cmake_cuda_regent:
   <<: [*nvidia, *tests]
   variables:
-    <<: [*clang12, *llvm12, *release, *cxx20_normal, *cuda124, *cmake, *ctest, *regent, *shared]
+    <<: [*clang12, *llvm12, *release, *cxx20_normal, *cuda124, *cmake, *ctest, *realm_unit_ctest, *regent, *shared]
 nvidia_cuda124_gcc11_cxx17_debug_maxdim4_external2:
   <<: [*nvidia, *external_tests]
   variables:
@@ -1339,7 +1343,7 @@ icc212_cxx17_release_legion:
 icc212_cxx17_debug_cmake_legion:
   <<: [*linux, *image_icc, *tests]
   variables:
-    <<: [*icc212, *debug, *cxx17_precise, *cmake, *legion, *ctest, *short, *libdw]
+    <<: [*icc212, *debug, *cxx17_precise, *cmake, *legion, *ctest, *realm_unit_ctest, *short, *libdw]
 
 # MSVC (Realm only):
 msvc169_realm:

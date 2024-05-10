@@ -43,11 +43,10 @@ TEST(AddressListTestsWithParams, Create3DEntry)
   const size_t stride = 8;
   const size_t bytes = 1024;
   const std::vector<size_t> strides{stride, stride * stride, stride * stride * stride};
-  const size_t total_bytes = strides[0];
   size_t *addr_data = addrlist.begin_nd_entry(dim);
 
   size_t cur_dim = 1;
-  for(int i = 0; i < strides.size() - 1; i++) {
+  for(size_t i = 0; i < strides.size() - 1; i++) {
     addr_data[cur_dim * 2] = bytes / strides[i];
     addr_data[cur_dim * 2 + 1] = strides[i];
     cur_dim++;
