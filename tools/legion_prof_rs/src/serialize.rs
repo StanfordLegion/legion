@@ -20,8 +20,8 @@ use nom::{
 use serde::Serialize;
 
 use crate::state::{
-    EventID, FSpaceID, FieldID, IPartID, ISpaceID, InstID, InstUID, MapperCallKindID, MemID,
-    NodeID, OpID, ProcID, RuntimeCallKindID, State, TaskID, Timestamp, TreeID, VariantID,
+    EventID, FSpaceID, FieldID, IPartID, ISpaceID, InstID, InstUID, MapperCallKindID, MapperID,
+    MemID, NodeID, OpID, ProcID, RuntimeCallKindID, State, TaskID, Timestamp, TreeID, VariantID,
 };
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -31,6 +31,7 @@ pub enum ValueFormat {
     DepPartOpKind,
     IDType,
     InstID,
+    MapperID,
     MappingCallKind,
     MaxDim,
     MemID,
@@ -87,6 +88,7 @@ pub struct Uuid(pub Vec<u8>);
 #[rustfmt::skip]
 #[derive(Debug, Clone, Serialize)]
 pub enum Record {
+    MapperName { mapper_id: MapperID, mapper_proc: ProcID, name: String },
     MapperCallDesc { kind: MapperCallKindID, name: String },
     RuntimeCallDesc { kind: RuntimeCallKindID, name: String },
     MetaDesc { kind: VariantID, message: bool, ordered_vc: bool, name: String },
@@ -129,7 +131,7 @@ pub enum Record {
     FillInstInfo { dst: MemID, fid: FieldID, dst_inst: InstUID, fevent: EventID },
     InstTimelineInfo { inst_uid: InstUID, inst_id: InstID, mem_id: MemID, size: u64, op_id: OpID, create: Timestamp, ready: Timestamp, destroy: Timestamp, creator: EventID },
     PartitionInfo { op_id: OpID, part_op: DepPartOpKind, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp, creator: EventID },
-    MapperCallInfo { kind: MapperCallKindID, op_id: OpID, start: Timestamp, stop: Timestamp, proc_id: ProcID, fevent: EventID },
+    MapperCallInfo { mapper_id: MapperID, mapper_proc: ProcID, kind: MapperCallKindID, op_id: OpID, start: Timestamp, stop: Timestamp, proc_id: ProcID, fevent: EventID },
     RuntimeCallInfo { kind: RuntimeCallKindID, start: Timestamp, stop: Timestamp, proc_id: ProcID, fevent: EventID },
     ProfTaskInfo { proc_id: ProcID, op_id: OpID, start: Timestamp, stop: Timestamp, creator: EventID, fevent: EventID  },
     CalibrationErr { calibration_err: i64 },
@@ -142,6 +144,7 @@ fn convert_value_format(name: String) -> Option<ValueFormat> {
         "DepPartOpKind" => Some(ValueFormat::DepPartOpKind),
         "IDType" => Some(ValueFormat::IDType),
         "InstID" => Some(ValueFormat::InstID),
+        "MapperID" => Some(ValueFormat::MapperID),
         "MappingCallKind" => Some(ValueFormat::MappingCallKind),
         "maxdim" => Some(ValueFormat::MaxDim),
         "MemID" => Some(ValueFormat::MemID),
@@ -316,6 +319,9 @@ fn parse_field_id(input: &[u8]) -> IResult<&[u8], FieldID> {
 }
 fn parse_tree_id(input: &[u8]) -> IResult<&[u8], TreeID> {
     map(le_u32, TreeID)(input)
+}
+fn parse_mapper_id(input: &[u8]) -> IResult<&[u8], MapperID> {
+    map(le_u32, MapperID)(input)
 }
 fn parse_mapper_call_kind_id(input: &[u8]) -> IResult<&[u8], MapperCallKindID> {
     map(le_u32, MapperCallKindID)(input)
@@ -961,7 +967,22 @@ fn parse_partition_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
         },
     ))
 }
+fn parse_mapper_name(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
+    let (input, mapper_id) = parse_mapper_id(input)?;
+    let (input, mapper_proc) = parse_proc_id(input)?;
+    let (input, name) = parse_string(input)?;
+    Ok((
+        input,
+        Record::MapperName {
+            mapper_id,
+            mapper_proc,
+            name,
+        },
+    ))
+}
 fn parse_mapper_call_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
+    let (input, mapper_id) = parse_mapper_id(input)?;
+    let (input, mapper_proc) = parse_proc_id(input)?;
     let (input, kind) = parse_mapper_call_kind_id(input)?;
     let (input, op_id) = parse_op_id(input)?;
     let (input, start) = parse_timestamp(input)?;
@@ -971,6 +992,8 @@ fn parse_mapper_call_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record>
     Ok((
         input,
         Record::MapperCallInfo {
+            mapper_id,
+            mapper_proc,
             kind,
             op_id,
             start,
@@ -1102,6 +1125,7 @@ fn parse<'a>(
     let (input, _) = newline(input)?;
 
     let mut parsers = BTreeMap::<u32, fn(&[u8], i32) -> IResult<&[u8], Record>>::new();
+    parsers.insert(ids["MapperName"], parse_mapper_name);
     parsers.insert(ids["MapperCallDesc"], parse_mapper_call_desc);
     parsers.insert(ids["RuntimeCallDesc"], parse_runtime_call_desc);
     parsers.insert(ids["MetaDesc"], parse_meta_desc);

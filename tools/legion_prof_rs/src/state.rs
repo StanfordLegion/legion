@@ -380,7 +380,7 @@ pub trait ContainerEntry {
 pub enum ProcEntryKind {
     Task(TaskID, VariantID),
     MetaTask(VariantID),
-    MapperCall(MapperCallKindID),
+    MapperCall(MapperID, ProcID, MapperCallKindID),
     RuntimeCall(RuntimeCallKindID),
     GPUKernel(TaskID, VariantID),
     ProfTask,
@@ -476,7 +476,7 @@ impl ContainerEntry for ProcEntry {
             ProcEntryKind::MetaTask(variant_id) => {
                 state.meta_variants.get(&variant_id).unwrap().name.clone()
             }
-            ProcEntryKind::MapperCall(kind) => {
+            ProcEntryKind::MapperCall(_, _, kind) => {
                 let name = &state.mapper_call_kinds.get(&kind).unwrap().name;
                 if let Some(initiation_op_id) = initiation_op {
                     format!("Mapper Call {} for {}", name, initiation_op_id.0)
@@ -524,7 +524,7 @@ impl ContainerEntry for ProcEntry {
             ProcEntryKind::MetaTask(variant_id) => {
                 state.meta_variants.get(&variant_id).unwrap().color.unwrap()
             }
-            ProcEntryKind::MapperCall(kind) => {
+            ProcEntryKind::MapperCall(_, _, kind) => {
                 state.mapper_call_kinds.get(&kind).unwrap().color.unwrap()
             }
             ProcEntryKind::RuntimeCall(kind) => {
@@ -699,7 +699,7 @@ impl Proc {
         let mut subcalls = BTreeMap::new();
         for (uid, entry) in self.entries.iter() {
             match entry.kind {
-                ProcEntryKind::MapperCall(_) | ProcEntryKind::RuntimeCall(_) => {
+                ProcEntryKind::MapperCall(..) | ProcEntryKind::RuntimeCall(_) => {
                     let task_uid = fevents.get(&entry.fevent).unwrap();
                     let call_start = entry.time_range.start.unwrap();
                     let call_stop = entry.time_range.stop.unwrap();
@@ -1995,6 +1995,26 @@ impl Color {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+pub struct MapperID(pub u32);
+
+#[derive(Debug)]
+pub struct Mapper {
+    pub mapper_id: MapperID,
+    pub proc_id: ProcID,
+    pub name: String,
+}
+
+impl Mapper {
+    fn new(mapper_id: MapperID, proc_id: ProcID, name: &str) -> Self {
+        Mapper {
+            mapper_id,
+            proc_id,
+            name: name.to_owned(),
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct MapperCallKindID(pub u32);
 
 #[derive(Debug)]
@@ -2773,6 +2793,7 @@ pub struct State {
     pub tasks: BTreeMap<OpID, ProcID>,
     pub multi_tasks: BTreeMap<OpID, MultiTask>,
     pub last_time: Timestamp,
+    pub mappers: BTreeMap<(MapperID, ProcID), Mapper>,
     pub mapper_call_kinds: BTreeMap<MapperCallKindID, MapperCallKind>,
     pub runtime_call_kinds: BTreeMap<RuntimeCallKindID, RuntimeCallKind>,
     pub insts: BTreeMap<InstUID, MemID>,
@@ -2908,6 +2929,8 @@ impl State {
 
     fn create_mapper_call(
         &mut self,
+        mapper_id: MapperID,
+        mapper_proc: ProcID,
         kind: MapperCallKindID,
         proc_id: ProcID,
         op_id: OpID,
@@ -2925,7 +2948,7 @@ impl State {
             } else {
                 None
             },
-            ProcEntryKind::MapperCall(kind),
+            ProcEntryKind::MapperCall(mapper_id, mapper_proc, kind),
             time_range,
             fevent,
             fevent,
@@ -3783,6 +3806,16 @@ fn process_record(
     call_threshold: Timestamp,
 ) {
     match record {
+        Record::MapperName {
+            mapper_id,
+            mapper_proc,
+            name,
+        } => {
+            state
+                .mappers
+                .entry((*mapper_id, *mapper_proc))
+                .or_insert_with(|| Mapper::new(*mapper_id, *mapper_proc, name));
+        }
         Record::MapperCallDesc { kind, name } => {
             state
                 .mapper_call_kinds
@@ -4303,6 +4336,8 @@ fn process_record(
             state.update_last_time(*stop);
         }
         Record::MapperCallInfo {
+            mapper_id,
+            mapper_proc,
             kind,
             op_id,
             start,
@@ -4314,7 +4349,15 @@ fn process_record(
             if call_threshold <= (*stop - *start) {
                 assert!(state.mapper_call_kinds.contains_key(kind));
                 let time_range = TimeRange::new_start(*start, *stop);
-                state.create_mapper_call(*kind, *proc_id, *op_id, time_range, *fevent);
+                state.create_mapper_call(
+                    *mapper_id,
+                    *mapper_proc,
+                    *kind,
+                    *proc_id,
+                    *op_id,
+                    time_range,
+                    *fevent,
+                );
                 state.update_last_time(*stop);
             }
         }
