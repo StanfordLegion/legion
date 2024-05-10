@@ -286,6 +286,8 @@ def slugify(filename: str) -> str:
     # remove 'L" for hex
     if (slugified[-1] == "L"):
         slugified = slugified[:-1]
+    # remove '
+    slugified = slugified.replace("'", "")
     # remove special characters
     slugified = slugified.translate("!@#$%^&*(),/?<>\"':;{}[]|/+=`~")
     return slugified
@@ -2355,16 +2357,17 @@ class Fill(ChanOperation, TimeRange, HasInitiationDependencies):
         tsv_file.writerow(tsv_line)
 
 class DepPart(ChanOperation, TimeRange, HasInitiationDependencies):
-    __slots__ = TimeRange._abstract_slots + HasInitiationDependencies._abstract_slots + ['part_op']
+    __slots__ = TimeRange._abstract_slots + HasInitiationDependencies._abstract_slots + ['node_id', 'part_op']
     
     @typecheck
-    def __init__(self, part_op: int, initiation_op: Operation, 
+    def __init__(self, node_id: int, part_op: int, initiation_op: Operation, 
                  create: int, ready: int, 
                  start: int, stop: int
     ) -> None:
         Base.__init__(self)
         HasInitiationDependencies.__init__(self, initiation_op)
         TimeRange.__init__(self, create, ready, start, stop)
+        self.node_id = node_id
         self.part_op = part_op
 
     @typecheck
@@ -3162,21 +3165,15 @@ class Memory(object):
     def __gt__(self, other: Memory) -> bool:
         return self.__cmp__(other) > 0
 
-
-
-class Channel(object):
-    __slots__ = [
-        'src', 'dst', 'channel_kind', 'visible', 'copies', 'time_points', 'max_live_copies', 'last_time'
+class Channel(ABC):
+    _abstract_slots = [
+        'channel_kind', 'visible', 'copies', 'time_points', 'max_live_copies', 'last_time'
     ]
 
     @typecheck
     def __init__(self, 
-                 src: Optional[Memory], 
-                 dst: Optional[Memory],
                  channel_kind: ChanKind
     ) -> None:
-        self.src = src
-        self.dst = dst
         self.channel_kind = channel_kind
         self.visible = True
         self.copies: Set[Union[Copy, DepPart, Fill]] = set()
@@ -3184,86 +3181,21 @@ class Channel(object):
         self.max_live_copies = 0
         self.last_time: Optional[int] = None
 
-    @typecheck
-    def node_id(self) -> Optional[int]:
-        if self.src is not None and self.src.mem_id != 0:
-            # MEMORY:      tag:8 = 0x1e, owner_node:16,   (unused):32, mem_idx: 8
-            # owner_node = mem_id[55:40]
-            # (mem_id >> 40) & ((1 << 16) - 1)
-            return (self.src.mem_id >> 40) & ((1 << 16) - 1)
-        elif self.dst is not None and self.dst.mem_id != 0:
-            return (self.dst.mem_id >> 40) & ((1 << 16) - 1)
-        else:
-            return None
+    @abstractmethod
+    def node_id(self) -> int:
+        pass
+
+    @abstractmethod
+    def get_short_text(self) -> str:
+        pass
 
     @typecheck
     def node_id_src(self) -> Optional[int]:
-        if self.src is not None and self.src.mem_id != 0:
-            # MEMORY:      tag:8 = 0x1e, owner_node:16,   (unused):32, mem_idx: 8
-            # owner_node = mem_id[55:40]
-            # (mem_id >> 40) & ((1 << 16) - 1)
-            return (self.src.mem_id >> 40) & ((1 << 16) - 1)
-        else:
-            return None
-
-    # mem_idx: 8
-    @typecheck
-    def mem_idx_str(self, mem: Optional[Memory]) -> str:
-        if mem is not None:
-            if mem.mem_id == 0:
-                return "[all n]"
-            return str(mem.mem_id & 0xff)
-        return "none"
-
-    @typecheck
-    def node_idx_str(self, mem_id: int) -> str:
-        if mem_id == 0:
-            return "[all n]"
-        return str((mem_id >> 40) & ((1 << 16) - 1))
-
-    @typecheck
-    def mem_str(self, mem: Optional[Memory]) -> str:
-        if mem and mem.mem_id == 0:
-            return "[all n]"
-        elif mem and mem.affinity is not None:
-            return mem.affinity.get_short_text()
-        elif  mem and mem.affinity is None:
-            return "[n" +self.node_idx_str(mem.mem_id) + "] unknown " + self.mem_idx_str(mem)
-        assert False
+        return None
 
     @typecheck
     def node_id_dst(self) -> Optional[int]:
-        if self.dst is not None and self.dst.mem_id != 0:
-            # MEMORY:      tag:8 = 0x1e, owner_node:16,   (unused):32, mem_idx: 8
-            # owner_node = mem_id[55:40]
-            # (mem_id >> 40) & ((1 << 16) - 1)
-            return (self.dst.mem_id >> 40) & ((1 << 16) - 1)
-        else:
-            return None
-
-    @typecheck
-    def get_short_text(self) -> str:
-        if self.dst is None and self.src is None:
-            return "Dependent Partition Channel"
-        # fill/gather channel
-        elif self.src is None:
-            assert self.dst is not None
-            if self.dst.affinity is not None:
-                return self.channel_kind.name + " " + self.dst.affinity.get_short_text()
-            else:
-                return self.channel_kind.name + " Channel"
-        # scatter channel
-        elif self.dst is None:
-            assert self.src is not None
-            if self.src.affinity is not None:
-                return self.channel_kind.name + " " + self.src.affinity.get_short_text()
-            else:
-                return self.channel_kind.name + " Channel"
-        # normal channels
-        elif self.src is not None and self.dst is not None:
-            return self.mem_str(self.src) + " to " + self.mem_str(self.dst)
-        else:
-            assert False
+        return None
 
     @typecheck
     def add_copy(self, copy: Union[Copy, DepPart, Fill]) -> None:
@@ -3364,53 +3296,215 @@ class Channel(object):
             print("    Maximum Executing Transfers: %d" % (max_transfers))
             print("    Average Utilization: %.3f%%" % (100.0 * average_usage))
             print()
-        
-    def __repr__(self) -> str:
-        if self.src is None and self.dst is None:
-            return 'Dependent Partition Channel'
-        if self.src is None or self.dst is None:
-            return self.channel_kind.name + ' ' + self.dst.__repr__() + ' Channel'
-        else:
-            return self.src.__repr__() + ' to ' + self.dst.__repr__() + ' Channel'
 
-    def __cmp__(a: Channel, b: Channel) -> int:
-        if a.src:
-            if b.src:
-                x = a.src.__cmp__(b.src)
-                if x != 0:
-                    return x
-                if a.dst:
-                    if b.dst:
-                        return a.dst.__cmp__(b.dst)
-                    else:
-                        return 1
-                else:
-                    if b.dst:
-                        return -1
-                    else:
-                        return 0
-            else:
-                return 1
-        else:
-            if b.src:
-                return -1
-            else:
-                if a.dst:
-                    if b.dst:
-                        return a.dst.__cmp__(b.dst)
-                    else:
-                        return 1
-                else:
-                    if b.dst:
-                        return -1
-                    else:
-                        return 0
+    @abstractmethod
+    def __cmp__(self, other: Channel) -> int:
+        pass
 
     def __lt__(self, other: Channel) -> bool:
         return self.__cmp__(other) < 0
 
     def __gt__(self, other: Channel) -> bool:
         return self.__cmp__(other) > 0
+    
+    @typecheck
+    def _mem_idx_str(self, mem: Optional[Memory]) -> str:
+        if mem is not None:
+            if mem.mem_id == 0:
+                return "[all n]"
+            return str(mem.mem_id & 0xff)
+        return "none"
+    
+    @typecheck
+    def _node_idx_str(self, mem_id: int) -> str:
+        if mem_id == 0:
+            return "[all n]"
+        return str((mem_id >> 40) & ((1 << 16) - 1))
+    
+    @typecheck
+    def _mem_str(self, mem: Optional[Memory]) -> str:
+        if mem and mem.mem_id == 0:
+            return "[all n]"
+        elif mem and mem.affinity is not None:
+            return mem.affinity.get_short_text()
+        elif  mem and mem.affinity is None:
+            return "[n" +self._node_idx_str(mem.mem_id) + "] unknown " + self._mem_idx_str(mem)
+        assert False
+    
+class CopyChannel(Channel):
+    __slots__ = Channel._abstract_slots + ['src', 'dst']
+
+    @typecheck
+    def __init__(self, 
+                 src: Memory, 
+                 dst: Memory,
+    ) -> None:
+        Channel.__init__(self, ChanKind.Copy)
+        self.src = src
+        self.dst = dst
+
+    @typecheck
+    def node_id(self) -> int:
+        return (self.src.mem_id >> 40) & ((1 << 16) - 1)
+
+    @typecheck
+    def node_id_src(self) -> Optional[int]:
+        return (self.src.mem_id >> 40) & ((1 << 16) - 1)
+
+    @typecheck
+    def node_id_dst(self) -> Optional[int]:
+        return (self.dst.mem_id >> 40) & ((1 << 16) - 1)
+
+    @typecheck
+    def get_short_text(self) -> str:
+        return self._mem_str(self.src) + " to " + self._mem_str(self.dst)
+
+    def __repr__(self) -> str:
+        return self.src.__repr__() + ' to ' + self.dst.__repr__() + ' Channel'
+        
+    def __cmp__(self, other: Channel) -> int:
+        if not isinstance(other, CopyChannel):
+            return self.channel_kind.value - other.channel_kind.value
+        else:
+            x = self.src.__cmp__(other.src)
+            if x != 0:
+                return x
+            else:
+                return self.dst.__cmp__(other.dst)
+
+class FillChannel(Channel):
+    __slots__ = Channel._abstract_slots + ['dst']
+
+    @typecheck
+    def __init__(self,
+                 dst: Memory
+    ) -> None:
+        Channel.__init__(self, ChanKind.Fill)
+        self.dst = dst
+
+    @typecheck
+    def node_id(self) -> int:
+        return (self.dst.mem_id >> 40) & ((1 << 16) - 1)
+
+    @typecheck
+    def node_id_dst(self) -> Optional[int]:
+        return (self.dst.mem_id >> 40) & ((1 << 16) - 1)
+
+    @typecheck
+    def get_short_text(self) -> str:
+        if self.dst.affinity is not None:
+            return self.channel_kind.name + " " + self.dst.affinity.get_short_text()
+        else:
+            return self.channel_kind.name + " Channel"
+
+    def __repr__(self) -> str:
+       return self.channel_kind.name + ' ' + self.dst.__repr__() + ' Channel'
+        
+    def __cmp__(self, other: Channel) -> int:
+        if not isinstance(other, FillChannel):
+            return self.channel_kind.value - other.channel_kind.value
+        else:
+            return self.dst.__cmp__(other.dst)
+
+class GatherChannel(Channel):
+    __slots__ = Channel._abstract_slots + ['dst']
+
+    @typecheck
+    def __init__(self, 
+                 dst: Memory
+    ) -> None:
+        Channel.__init__(self, ChanKind.Gather)
+        self.dst = dst
+
+    @typecheck
+    def node_id(self) -> int:
+        return (self.dst.mem_id >> 40) & ((1 << 16) - 1)
+
+    @typecheck
+    def node_id_dst(self) -> Optional[int]:
+        return (self.dst.mem_id >> 40) & ((1 << 16) - 1)
+
+    @typecheck
+    def get_short_text(self) -> str:
+        if self.dst.affinity is not None:
+            return self.channel_kind.name + " " + self.dst.affinity.get_short_text()
+        else:
+            return self.channel_kind.name + " Channel"
+
+    def __repr__(self) -> str:
+        return self.channel_kind.name + ' ' + self.dst.__repr__() + ' Channel'
+        
+    def __cmp__(self, other: Channel) -> int:
+        if not isinstance(other, GatherChannel):
+            return self.channel_kind.value - other.channel_kind.value
+        else:
+            return self.dst.__cmp__(other.dst)
+                        
+class ScatterChannel(Channel):
+    __slots__ = Channel._abstract_slots + ['src']
+
+    @typecheck
+    def __init__(self, 
+                 src: Memory
+    ) -> None:
+        Channel.__init__(self, ChanKind.Scatter)
+        self.src = src
+
+    @typecheck
+    def node_id(self) -> int:
+        return (self.src.mem_id >> 40) & ((1 << 16) - 1)
+
+    @typecheck
+    def node_id_src(self) -> Optional[int]:
+        return (self.src.mem_id >> 40) & ((1 << 16) - 1)
+
+    @typecheck
+    def get_short_text(self) -> str:
+        if self.src.affinity is not None:
+                return self.channel_kind.name + " " + self.src.affinity.get_short_text()
+        else:
+            return self.channel_kind.name + " Channel"
+
+    def __repr__(self) -> str:
+        return self.channel_kind.name + ' ' + self.src.__repr__() + ' Channel'
+        
+    def __cmp__(self, other: Channel) -> int:
+        if not isinstance(other, ScatterChannel):
+            return self.channel_kind.value - other.channel_kind.value
+        else:
+            return self.src.__cmp__(other.src)
+
+class DepPartChannel(Channel):
+    __slots__ = Channel._abstract_slots + ['_node_id']
+
+    @typecheck
+    def __init__(self, 
+                 node_id: int
+    ) -> None:
+        Channel.__init__(self, ChanKind.DepPart)
+        self._node_id = node_id
+
+    @typecheck
+    def node_id(self) -> int:
+        return self._node_id
+    
+    # we consider the src of deppart channel is the node id
+    @typecheck
+    def node_id_src(self) -> Optional[int]:
+        return self.node_id()
+
+    @typecheck
+    def get_short_text(self) -> str:
+        return self.__repr__()
+
+    def __repr__(self) -> str:
+        return "Dependent Partition " + str(self._node_id)
+    
+    def __cmp__(self, other: Channel) -> int:
+        if not isinstance(other, DepPartChannel):
+            return self.channel_kind.value - other.channel_kind.value
+        else:
+            return self._node_id - other._node_id
 
 class LFSR(object):
     __slots__ = ['register', 'max_value', 'taps']
@@ -3481,7 +3575,7 @@ class State(object):
         self.processors: Dict[int, Processor] = {}
         self.memories: Dict[int, Memory] = {}
         self.mem_proc_affinity: Dict[int, MemProcAffinity] = {}
-        self.channels: Dict[Tuple[Optional[Memory], Optional[Memory], ChanKind], Channel] = {}
+        self.channels: Dict[Union[Tuple[str, ChanKind], Tuple[Optional[Memory], Optional[Memory], ChanKind]], Channel] = {}
         self.task_kinds: Dict[int, TaskKind] = {}
         self.variants: Dict[Tuple[int, int], Variant] = {}
         self.meta_variants: Dict[int, Variant] = {}
@@ -3886,10 +3980,10 @@ class State(object):
                            creator: int
     ) -> None:
         op = self.find_or_create_op(op_id)
-        deppart = self.create_deppart(part_op, op, create, ready, start, stop)
+        deppart = self.create_deppart(self.current_node_id, part_op, op, create, ready, start, stop)
         if stop > self.last_time:
             self.last_time = stop
-        channel = self.find_or_create_deppart_channel()
+        channel = self.find_or_create_deppart_channel(self.current_node_id)
         channel.add_copy(deppart)
 
     # TaskWaitInfo
@@ -4123,7 +4217,7 @@ class State(object):
     ) -> Channel:
         key = (src, dst, ChanKind.Copy)
         if key not in self.channels:
-            self.channels[key] = Channel(src, dst, ChanKind.Copy)
+            self.channels[key] = CopyChannel(src, dst)
         return self.channels[key]
 
     @typecheck
@@ -4132,7 +4226,7 @@ class State(object):
     ) -> Channel:
         key = (None, dst, ChanKind.Fill)
         if key not in self.channels:
-            self.channels[key] = Channel(None, dst, ChanKind.Fill)
+            self.channels[key] = FillChannel(dst)
         return self.channels[key]
 
     @typecheck
@@ -4141,7 +4235,7 @@ class State(object):
     ) -> Channel:
         key = (None, dst, ChanKind.Gather)
         if key not in self.channels:
-            self.channels[key] = Channel(None, dst, ChanKind.Gather)
+            self.channels[key] = GatherChannel(dst)
         return self.channels[key]
 
     @typecheck
@@ -4150,15 +4244,16 @@ class State(object):
     ) -> Channel:
         key = (src, None, ChanKind.Scatter)
         if key not in self.channels:
-            self.channels[key] = Channel(src, None, ChanKind.Scatter)
+            self.channels[key] = ScatterChannel(src)
         return self.channels[key]
 
     @typecheck
-    def find_or_create_deppart_channel(self
+    def find_or_create_deppart_channel(self,
+                                       node_id: int,
     ) -> Channel:
-        key = (None, None, ChanKind.DepPart)
+        key = ("Node" + str(node_id), ChanKind.DepPart)
         if key not in self.channels:
-            self.channels[key] = Channel(None, None, ChanKind.DepPart)
+            self.channels[key] = DepPartChannel(node_id)
         return self.channels[key]
 
     @typecheck
@@ -4443,11 +4538,11 @@ class State(object):
         return fill_inst_info
 
     @typecheck
-    def create_deppart(self, part_op: int, op: Operation, 
+    def create_deppart(self, node_id: int, part_op: int, op: Operation, 
                        create: int, ready: int, 
                        start: int, stop: int
     ) ->DepPart:
-        deppart = DepPart(part_op, op, create, ready, start, stop)
+        deppart = DepPart(node_id, part_op, op, create, ready, start, stop)
         # update the prof_uid map
         self.prof_uid_map[deppart.prof_uid] = deppart
         return deppart
@@ -5342,14 +5437,9 @@ class State(object):
 
         chan_to_be_deleted = []
         for chan_id, chan in self.channels.items():
-            # DepPart
-            if chan.node_id() == None:
-                continue
-            else:
-                if chan.node_id_src() not in self.visible_nodes and chan.node_id_dst() not in self.visible_nodes:
-                    chan.visible = False
-                    print(chan_id)
-                    chan_to_be_deleted.append(chan_id)
+            if chan.node_id_src() not in self.visible_nodes and chan.node_id_dst() not in self.visible_nodes:
+                chan.visible = False
+                chan_to_be_deleted.append(chan_id)
         if filter_input:
             for chan_key in chan_to_be_deleted:
                 del self.channels[chan_key]

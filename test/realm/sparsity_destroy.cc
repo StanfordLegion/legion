@@ -17,8 +17,6 @@
 
 using namespace Realm;
 
-#define REALM_SPARSITY_DELETES
-
 Logger log_app("app");
 
 enum
@@ -130,6 +128,9 @@ int main(int argc, char **argv)
                                    CodeDescriptor(node_task_0), ProfilingRequestSet(), 0,
                                    0)
       .wait();
+
+  ModuleConfig *core = Runtime::get_runtime().get_module_config("core");
+  assert(core->set_property("enable_sparsity_refcount", 1));
 
   Processor p = Machine::ProcessorQuery(Machine::get_machine())
                     .only_kind(Processor::LOC_PROC)

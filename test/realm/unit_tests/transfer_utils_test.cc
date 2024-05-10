@@ -18,7 +18,6 @@ TEST(TransferUtilsTest, EmptyDomainAndBounds)
 
 TEST(TransferUtilsTest, EmptyDomain)
 {
-  Rect<2> bounds = Rect<2>(Point<2>(0, 0), Point<2>(10, 10));
   Rect<1> subrect, domain = Rect<1>(Point<1>(1), Point<1>(0));
   Point<1> next_start(0);
   std::vector<int> dim_order{0};
