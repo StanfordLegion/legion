@@ -1334,72 +1334,30 @@ impl ContainerEntry for ChanEntry {
 
 pub type ChanPoint = TimePoint<ProfUID, Timestamp>;
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, TryFromPrimitive)]
-#[repr(u32)]
-pub enum ChanKind {
-    Copy = 0,
-    Fill = 1,
-    Gather = 2,
-    Scatter = 3,
-    DepPart = 4,
-}
-
-impl fmt::Display for ChanKind {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", self)
-    }
-}
-
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct ChanID {
-    pub src: Option<MemID>,
-    pub dst: Option<MemID>,
-    pub channel_kind: ChanKind,
+pub enum ChanID {
+    Copy { src: MemID, dst: MemID },
+    Fill { dst: MemID },
+    Gather { dst: MemID },
+    Scatter { src: MemID },
+    DepPart { node_id: NodeID },
 }
 
 impl ChanID {
     fn new_copy(src: MemID, dst: MemID) -> Self {
-        ChanID {
-            src: Some(src),
-            dst: Some(dst),
-            channel_kind: ChanKind::Copy,
-        }
+        ChanID::Copy { src, dst }
     }
     fn new_fill(dst: MemID) -> Self {
-        ChanID {
-            src: None,
-            dst: Some(dst),
-            channel_kind: ChanKind::Fill,
-        }
+        ChanID::Fill { dst }
     }
     fn new_gather(dst: MemID) -> Self {
-        ChanID {
-            src: None,
-            dst: Some(dst),
-            channel_kind: ChanKind::Gather,
-        }
+        ChanID::Gather { dst }
     }
     fn new_scatter(src: MemID) -> Self {
-        ChanID {
-            src: Some(src),
-            dst: None,
-            channel_kind: ChanKind::Scatter,
-        }
+        ChanID::Scatter { src }
     }
-    fn new_deppart() -> Self {
-        ChanID {
-            src: None,
-            dst: None,
-            channel_kind: ChanKind::DepPart,
-        }
-    }
-
-    pub fn node_id(&self) -> Option<NodeID> {
-        if self.src.is_some() {
-            self.src.map(|src| src.node_id())
-        } else {
-            self.dst.map(|dst| dst.node_id())
-        }
+    fn new_deppart(node_id: NodeID) -> Self {
+        ChanID::DepPart { node_id }
     }
 }
 
@@ -2595,7 +2553,6 @@ impl Fill {
     }
 
     fn add_channel(&mut self) {
-        // sanity check
         assert!(self.chan_id.is_none());
         assert!(!self.fill_inst_infos.is_empty());
         let chan_dst = self.fill_inst_infos[0]._dst;
@@ -3093,6 +3050,7 @@ impl State {
 
     fn create_deppart(
         &mut self,
+        node_id: NodeID,
         op_id: OpID,
         part_op: DepPartKind,
         time_range: TimeRange,
@@ -3100,7 +3058,7 @@ impl State {
     ) {
         self.create_op(op_id);
         let base = Base::new(&mut self.prof_uid_allocator); // FIXME: construct here to avoid mutability conflict
-        let chan = self.find_deppart_chan_mut();
+        let chan = self.find_deppart_chan_mut(node_id);
         chan.add_deppart(DepPart::new(base, part_op, time_range, op_id, creator));
     }
 
@@ -3110,8 +3068,8 @@ impl State {
             .or_insert_with(|| Chan::new(chan_id))
     }
 
-    fn find_deppart_chan_mut(&mut self) -> &mut Chan {
-        let chan_id = ChanID::new_deppart();
+    fn find_deppart_chan_mut(&mut self, node_id: NodeID) -> &mut Chan {
+        let chan_id = ChanID::new_deppart(node_id);
         self.chans
             .entry(chan_id)
             .or_insert_with(|| Chan::new(chan_id))
@@ -3161,6 +3119,7 @@ impl State {
         // immediately linked to their associated memory from the
         // logs. Therefore we defer this process until all records
         // have been processed.
+        let mut node = None;
         let mut insts = BTreeMap::new();
         let mut copies = BTreeMap::new();
         let mut fills = BTreeMap::new();
@@ -3168,12 +3127,14 @@ impl State {
             process_record(
                 record,
                 self,
+                &mut node,
                 &mut insts,
                 &mut copies,
                 &mut fills,
                 call_threshold,
             );
         }
+
         // put inst into memories
         for inst in insts.into_values() {
             if let Some(mem_id) = inst.mem_id {
@@ -3374,39 +3335,44 @@ impl State {
             }
         }
 
-        let mut memid_to_be_deleted: Vec<MemID> = Vec::new();
+        let mut memid_to_be_deleted = BTreeSet::new();
         for (mem_id, mem) in self.mems.iter_mut() {
             let node_id = mem.mem_id.node_id();
             if !self.visible_nodes.contains(&node_id) {
                 mem.visible = false;
-                memid_to_be_deleted.push(*mem_id);
+                memid_to_be_deleted.insert(*mem_id);
             }
         }
 
         for (_, chan) in self.chans.iter_mut() {
-            let mut src_node_id: Option<NodeID> = None;
-            let mut dst_node_id: Option<NodeID> = None;
-            if let Some(src_mem) = chan.chan_id.src {
-                src_node_id = Some(src_mem.node_id());
-            }
-            if let Some(dst_mem) = chan.chan_id.dst {
-                dst_node_id = Some(dst_mem.node_id());
-            }
-            // DepPart
-            if src_node_id.is_none() && dst_node_id.is_none() {
-                continue;
-            } else {
-                if !src_node_id.map_or(false, |n| self.visible_nodes.contains(&n))
-                    && !dst_node_id.map_or(false, |n| self.visible_nodes.contains(&n))
-                {
-                    chan.visible = false;
-                } else {
-                    // we need to keep memory if it is chan.src/dst
-                    if let Some(src_mem) = chan.chan_id.src {
-                        memid_to_be_deleted.retain(|value| *value != src_mem);
+            match chan.chan_id {
+                ChanID::Copy { src, dst } => {
+                    if !self.visible_nodes.contains(&src.node_id())
+                        && !self.visible_nodes.contains(&dst.node_id())
+                    {
+                        chan.visible = false;
+                    } else {
+                        memid_to_be_deleted.remove(&src);
+                        memid_to_be_deleted.remove(&dst);
                     }
-                    if let Some(dst_mem) = chan.chan_id.dst {
-                        memid_to_be_deleted.retain(|value| *value != dst_mem);
+                }
+                ChanID::Fill { dst } | ChanID::Gather { dst } => {
+                    if !self.visible_nodes.contains(&dst.node_id()) {
+                        chan.visible = false;
+                    } else {
+                        memid_to_be_deleted.remove(&dst);
+                    }
+                }
+                ChanID::Scatter { src } => {
+                    if !self.visible_nodes.contains(&src.node_id()) {
+                        chan.visible = false;
+                    } else {
+                        memid_to_be_deleted.remove(&src);
+                    }
+                }
+                ChanID::DepPart { node_id } => {
+                    if !self.visible_nodes.contains(&node_id) {
+                        chan.visible = false;
                     }
                 }
             }
@@ -3810,6 +3776,7 @@ impl SpyState {
 fn process_record(
     record: &Record,
     state: &mut State,
+    node: &mut Option<NodeID>,
     insts: &mut BTreeMap<InstUID, Inst>,
     copies: &mut BTreeMap<EventID, Copy>,
     fills: &mut BTreeMap<EventID, Fill>,
@@ -3874,7 +3841,10 @@ fn process_record(
                 resilient: *resilient,
             };
         }
-        Record::MachineDesc { num_nodes, .. } => {
+        Record::MachineDesc {
+            node_id, num_nodes, ..
+        } => {
+            *node = Some(*node_id);
             state.num_nodes = *num_nodes;
         }
         Record::ZeroTime { zero_time } => {
@@ -4329,7 +4299,7 @@ fn process_record(
                 Err(_) => panic!("bad deppart kind"),
             };
             let time_range = TimeRange::new_full(*create, *ready, *start, *stop);
-            state.create_deppart(*op_id, part_op, time_range, *creator);
+            state.create_deppart(node.unwrap(), *op_id, part_op, time_range, *creator);
             state.update_last_time(*stop);
         }
         Record::MapperCallInfo {

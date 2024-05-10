@@ -23,9 +23,9 @@ use crate::backend::common::{
 };
 use crate::conditional_assert;
 use crate::state::{
-    ChanEntry, ChanID, ChanKind, Color, Config, Container, ContainerEntry, Copy, CopyInstInfo,
-    DeviceKind, Fill, FillInstInfo, Inst, InstUID, MemID, MemKind, NodeID, OpID, ProcEntryKind,
-    ProcID, ProcKind, ProfUID, State, TimeRange, Timestamp,
+    ChanEntry, ChanID, Color, Config, Container, ContainerEntry, Copy, CopyInstInfo, DeviceKind,
+    Fill, FillInstInfo, Inst, InstUID, MemID, MemKind, NodeID, OpID, ProcEntryKind, ProcID,
+    ProcKind, ProfUID, State, TimeRange, Timestamp,
 };
 
 impl Into<ts::Timestamp> for Timestamp {
@@ -70,6 +70,8 @@ enum EntryKind {
     Mem(MemID),
     ChanKind(Option<NodeID>),
     Chan(ChanID),
+    DepPartKind(Option<NodeID>),
+    DepPart(ChanID),
 }
 
 #[derive(Debug, Clone)]
@@ -113,6 +115,7 @@ pub struct StateDataSource {
     mem_entries: BTreeMap<MemID, EntryID>,
     mem_groups: BTreeMap<MemGroup, Vec<MemID>>,
     chan_groups: BTreeMap<Option<NodeID>, Vec<ChanID>>,
+    deppart_groups: BTreeMap<Option<NodeID>, Vec<ChanID>>,
     step_utilization_cache: Mutex<BTreeMap<EntryID, Arc<Vec<(Timestamp, f64)>>>>,
 }
 
@@ -150,6 +153,7 @@ impl StateDataSource {
         let mut proc_groups = state.group_procs();
         let mem_groups = state.group_mems();
         let chan_groups = state.group_chans();
+        let deppart_groups = state.group_depparts();
 
         let mut nodes: BTreeSet<_> = proc_groups.keys().map(|ProcGroup(n, _, _)| *n).collect();
         let proc_kinds: BTreeSet<_> = proc_groups
@@ -358,13 +362,14 @@ impl StateDataSource {
                 });
             }
 
-            // Channels
+            // Channels (except for Dependent Partitioning)
             loop {
                 let Some(chans) = chan_groups.get(node) else {
                     break;
                 };
 
                 let kind_id = node_id.child(kind_index);
+                kind_index += 1;
 
                 let color: Color32 = Color::ORANGERED.into();
 
@@ -374,72 +379,76 @@ impl StateDataSource {
                         let chan_id = kind_id.child(chan_index as u64);
                         entry_map.insert(chan_id, EntryKind::Chan(*chan));
 
-                        let (src_name, src_short) = if let Some(mem) = chan.src {
-                            let kind = state.mems.get(&mem).unwrap().kind;
-                            let kind_first_letter =
-                                format!("{:?}", kind).chars().next().unwrap().to_lowercase();
-                            let src_node = mem.node_id().0;
-                            (
-                                Some(format!(
-                                    "Node {} {:?} {}",
-                                    src_node,
-                                    kind,
-                                    mem.mem_in_node()
-                                )),
-                                Some(format!(
-                                    "n{}{}{}",
-                                    src_node,
-                                    kind_first_letter,
-                                    mem.mem_in_node()
-                                )),
-                            )
-                        } else {
-                            (None, None)
+                        let (src_name, src_short) = match chan {
+                            ChanID::Copy { src, .. } | ChanID::Scatter { src } => {
+                                let kind = state.mems.get(&src).unwrap().kind;
+                                let kind_first_letter =
+                                    format!("{:?}", kind).chars().next().unwrap().to_lowercase();
+                                let src_node = src.node_id().0;
+                                (
+                                    Some(format!(
+                                        "Node {} {:?} {}",
+                                        src_node,
+                                        kind,
+                                        src.mem_in_node()
+                                    )),
+                                    Some(format!(
+                                        "n{}{}{}",
+                                        src_node,
+                                        kind_first_letter,
+                                        src.mem_in_node()
+                                    )),
+                                )
+                            }
+                            _ => (None, None),
                         };
 
-                        let (dst_name, dst_short) = if let Some(mem) = chan.dst {
-                            let kind = state.mems.get(&mem).unwrap().kind;
-                            let kind_first_letter =
-                                format!("{:?}", kind).chars().next().unwrap().to_lowercase();
-                            let dst_node = mem.node_id().0;
-                            (
-                                Some(format!(
-                                    "Node {} {:?} {}",
-                                    dst_node,
-                                    kind,
-                                    mem.mem_in_node()
-                                )),
-                                Some(format!(
-                                    "n{}{}{}",
-                                    dst_node,
-                                    kind_first_letter,
-                                    mem.mem_in_node()
-                                )),
-                            )
-                        } else {
-                            (None, None)
+                        let (dst_name, dst_short) = match chan {
+                            ChanID::Copy { dst, .. }
+                            | ChanID::Fill { dst }
+                            | ChanID::Gather { dst } => {
+                                let kind = state.mems.get(&dst).unwrap().kind;
+                                let kind_first_letter =
+                                    format!("{:?}", kind).chars().next().unwrap().to_lowercase();
+                                let dst_node = dst.node_id().0;
+                                (
+                                    Some(format!(
+                                        "Node {} {:?} {}",
+                                        dst_node,
+                                        kind,
+                                        dst.mem_in_node()
+                                    )),
+                                    Some(format!(
+                                        "n{}{}{}",
+                                        dst_node,
+                                        kind_first_letter,
+                                        dst.mem_in_node()
+                                    )),
+                                )
+                            }
+                            _ => (None, None),
                         };
 
-                        let short_name = match chan.channel_kind {
-                            ChanKind::Copy => {
+                        let short_name = match chan {
+                            ChanID::Copy { .. } => {
                                 format!("{}-{}", src_short.unwrap(), dst_short.unwrap())
                             }
-                            ChanKind::Fill => format!("f {}", dst_short.unwrap()),
-                            ChanKind::Gather => format!("g {}", dst_short.unwrap()),
-                            ChanKind::Scatter => format!("s {}", src_short.unwrap()),
-                            ChanKind::DepPart => "dp".to_owned(),
+                            ChanID::Fill { .. } => format!("f {}", dst_short.unwrap()),
+                            ChanID::Gather { .. } => format!("g {}", dst_short.unwrap()),
+                            ChanID::Scatter { .. } => format!("s {}", src_short.unwrap()),
+                            ChanID::DepPart { .. } => unreachable!(),
                         };
 
-                        let long_name = match chan.channel_kind {
-                            ChanKind::Copy => {
+                        let long_name = match chan {
+                            ChanID::Copy { .. } => {
                                 format!("{} to {}", src_name.unwrap(), dst_name.unwrap())
                             }
-                            ChanKind::Fill => format!("Fill {}", dst_name.unwrap()),
-                            ChanKind::Gather => format!("Gather to {}", dst_name.unwrap()),
-                            ChanKind::Scatter => {
+                            ChanID::Fill { .. } => format!("Fill {}", dst_name.unwrap()),
+                            ChanID::Gather { .. } => format!("Gather to {}", dst_name.unwrap()),
+                            ChanID::Scatter { .. } => {
                                 format!("Scatter from {}", src_name.unwrap())
                             }
-                            ChanKind::DepPart => "Dependent Partitioning".to_owned(),
+                            ChanID::DepPart { .. } => unreachable!(),
                         };
 
                         let rows = state.chans.get(chan).unwrap().max_levels(None) as u64 + 1;
@@ -459,6 +468,56 @@ impl StateDataSource {
                     long_name: format!("{} Channel", node_long_name),
                     summary: Some(Box::new(EntryInfo::Summary { color })),
                     slots: chan_slots,
+                });
+
+                break;
+            }
+
+            // Dependent Partitioning Channels
+            loop {
+                let Some(chans) = deppart_groups.get(node) else {
+                    break;
+                };
+
+                let kind_id = node_id.child(kind_index);
+
+                let color: Color32 = Color::ORANGERED.into();
+
+                let mut deppart_slots = Vec::new();
+                if node.is_some() {
+                    for (chan_index, chan) in chans.iter().enumerate() {
+                        let chan_id = kind_id.child(chan_index as u64);
+                        entry_map.insert(chan_id, EntryKind::DepPart(*chan));
+
+                        let short_name = match chan {
+                            ChanID::DepPart { node_id } => format!("dp{}", node_id.0),
+                            _ => unreachable!(),
+                        };
+
+                        let long_name = match chan {
+                            ChanID::DepPart { node_id } => {
+                                format!("Dependent Partitioning {}", node_id.0)
+                            }
+                            _ => unreachable!(),
+                        };
+
+                        let rows = state.chans.get(chan).unwrap().max_levels(None) as u64 + 1;
+                        deppart_slots.push(EntryInfo::Slot {
+                            short_name,
+                            long_name,
+                            max_rows: rows,
+                        });
+                    }
+                }
+
+                let summary_id = kind_id.summary();
+                entry_map.insert(summary_id, EntryKind::DepPartKind(*node));
+
+                kind_slots.push(EntryInfo::Panel {
+                    short_name: "dp".to_owned(),
+                    long_name: format!("{} Dependent Partitioning", node_long_name),
+                    summary: Some(Box::new(EntryInfo::Summary { color })),
+                    slots: deppart_slots,
                 });
 
                 break;
@@ -489,6 +548,7 @@ impl StateDataSource {
             mem_entries,
             mem_groups,
             chan_groups,
+            deppart_groups,
             step_utilization_cache: Mutex::new(BTreeMap::new()),
         }
     }
@@ -513,7 +573,8 @@ impl StateDataSource {
             return util.clone();
         }
 
-        let step_utilization = match self.entry_map.get(entry_id).unwrap() {
+        let group_kind = self.entry_map.get(entry_id).unwrap();
+        let step_utilization = match group_kind {
             EntryKind::ProcKind(group) => {
                 let ProcGroup(_, _, device) = *group;
                 let procs = self.proc_groups.get(group).unwrap();
@@ -564,8 +625,12 @@ impl StateDataSource {
                         .calculate_mem_utilization_data(utilizations, owners)
                 }
             }
-            EntryKind::ChanKind(node) => {
-                let chans = self.chan_groups.get(node).unwrap();
+            EntryKind::ChanKind(node) | EntryKind::DepPartKind(node) => {
+                let chans = match group_kind {
+                    EntryKind::ChanKind(..) => self.chan_groups.get(node).unwrap(),
+                    EntryKind::DepPartKind(..) => self.deppart_groups.get(node).unwrap(),
+                    _ => unreachable!(),
+                };
                 let points = self.state.chan_group_timepoints(chans);
                 let owners: BTreeSet<_> = chans
                     .iter()
@@ -1483,7 +1548,7 @@ impl DataSource for StateDataSource {
                 self.generate_proc_slot_tile(entry_id, *proc_id, *device, tile_id, full)
             }
             EntryKind::Mem(mem_id) => self.generate_mem_slot_tile(entry_id, *mem_id, tile_id, full),
-            EntryKind::Chan(chan_id) => {
+            EntryKind::Chan(chan_id) | EntryKind::DepPart(chan_id) => {
                 self.generate_chan_slot_tile(entry_id, *chan_id, tile_id, full)
             }
             _ => unreachable!(),
@@ -1504,7 +1569,7 @@ impl DataSource for StateDataSource {
             EntryKind::Mem(mem_id) => {
                 self.generate_mem_slot_meta_tile(entry_id, *mem_id, tile_id, full)
             }
-            EntryKind::Chan(chan_id) => {
+            EntryKind::Chan(chan_id) | EntryKind::DepPart(chan_id) => {
                 self.generate_chan_slot_meta_tile(entry_id, *chan_id, tile_id, full)
             }
             _ => unreachable!(),

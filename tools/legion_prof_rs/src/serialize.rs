@@ -1023,41 +1023,48 @@ fn filter_record<'a>(
     node_id: Option<NodeID>,
 ) -> bool {
     assert!(!visible_nodes.is_empty());
-    if let Some(nodeid) = node_id {
-        if !visible_nodes.contains(&nodeid) {
-            match record {
-                Record::ProcDesc { .. } => true,
-                Record::MemDesc { .. } => true,
-                Record::ProcMDesc { .. } => true,
-                Record::TaskInfo { proc_id, .. } => {
-                    State::is_on_visible_nodes(visible_nodes, proc_id.node_id())
-                }
-                Record::GPUTaskInfo { proc_id, .. } => {
-                    State::is_on_visible_nodes(visible_nodes, proc_id.node_id())
-                }
-                Record::MetaInfo { proc_id, .. } => {
-                    State::is_on_visible_nodes(visible_nodes, proc_id.node_id())
-                }
-                Record::CopyInfo { .. } => true,
-                Record::CopyInstInfo { src, dst, .. } => {
-                    State::is_on_visible_nodes(visible_nodes, src.node_id())
-                        || State::is_on_visible_nodes(visible_nodes, dst.node_id())
-                }
-                Record::FillInfo { .. } => true,
-                Record::FillInstInfo { dst, .. } => {
-                    State::is_on_visible_nodes(visible_nodes, dst.node_id())
-                }
-                Record::InstTimelineInfo { mem_id, .. } => {
-                    State::is_on_visible_nodes(visible_nodes, mem_id.node_id())
-                }
-                Record::PartitionInfo { .. } => true,
-                _ => false,
-            }
-        } else {
-            true
+    let Some(node_id) = node_id else {
+        return true;
+    };
+    if visible_nodes.contains(&node_id) {
+        return true;
+    }
+
+    match record {
+        Record::MapperCallDesc { .. }
+        | Record::RuntimeCallDesc { .. }
+        | Record::MetaDesc { .. }
+        | Record::OpDesc { .. }
+        | Record::MaxDimDesc { .. }
+        | Record::RuntimeConfig { .. }
+        | Record::MachineDesc { .. }
+        | Record::ZeroTime { .. }
+        | Record::ProcDesc { .. }
+        | Record::MemDesc { .. }
+        | Record::ProcMDesc { .. } => true,
+        Record::TaskInfo { proc_id, .. } => {
+            State::is_on_visible_nodes(visible_nodes, proc_id.node_id())
         }
-    } else {
-        true
+        Record::GPUTaskInfo { proc_id, .. } => {
+            State::is_on_visible_nodes(visible_nodes, proc_id.node_id())
+        }
+        Record::MetaInfo { proc_id, .. } => {
+            State::is_on_visible_nodes(visible_nodes, proc_id.node_id())
+        }
+        Record::CopyInfo { .. } => true,
+        Record::CopyInstInfo { src, dst, .. } => {
+            State::is_on_visible_nodes(visible_nodes, src.node_id())
+                || State::is_on_visible_nodes(visible_nodes, dst.node_id())
+        }
+        Record::FillInfo { .. } => true,
+        Record::FillInstInfo { dst, .. } => {
+            State::is_on_visible_nodes(visible_nodes, dst.node_id())
+        }
+        Record::InstTimelineInfo { mem_id, .. } => {
+            State::is_on_visible_nodes(visible_nodes, mem_id.node_id())
+        }
+        Record::PartitionInfo { .. } => true,
+        _ => false,
     }
 }
 
