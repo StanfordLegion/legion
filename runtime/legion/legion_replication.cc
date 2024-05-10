@@ -990,6 +990,7 @@ namespace Legion {
       output_bar = RtBarrier::NO_RT_BARRIER;
       concurrent_mapping_rendezvous = NULL;
       concurrent_exchange = NULL;
+      concurrent_exchange_id = 0;
 #ifdef DEBUG_LEGION
       sharding_collective = NULL;
 #endif
@@ -1233,13 +1234,8 @@ namespace Legion {
             complete_mapping();
         }
         if (concurrent_task)
-        {
           concurrent_mapping_rendezvous->perform_rendezvous(
-              concurrent_processors, ApUserEvent::NO_AP_USER_EVENT);
-          concurrent_exchange->exchange(concurrent_slices,
-              concurrent_lamport_clock, concurrent_poisoned,
-              concurrent_task_barrier, concurrent_variant, 0/*points*/);
-        }
+              concurrent_processors, RtEvent::NO_RT_EVENT);
         if (redop > 0)
           finish_index_task_reduction();
         complete_execution();
@@ -1260,6 +1256,31 @@ namespace Legion {
           Domain shard_domain;
           node->get_domain(shard_domain);
           enumerate_futures(shard_domain);
+        }
+        if (concurrent_task)
+        {
+          if (is_recording())
+          {
+            // See if we're the shard that owns the first point in the
+            // launch, if we are then we're the one to make the barrier
+            Domain launch_domain, sharding_domain;
+            launch_space->get_domain(launch_domain);
+            if (sharding_space.exists())
+              runtime->forest->find_domain(sharding_space, sharding_domain);
+            else
+              sharding_domain = launch_domain;
+            Domain::DomainPointIterator itr(launch_domain);
+            ShardID first_nonempty_shard = 
+              sharding_function->find_owner(*itr, sharding_domain);
+            if (first_nonempty_shard == repl_ctx->owner_shard->shard_id)
+            {
+              const RtBarrier barrier(Realm::Barrier::create_barrier(
+                    launch_space->get_volume()));
+              concurrent_mapping_rendezvous->set_trace_barrier(barrier);
+            }
+          }
+          concurrent_precondition.interpreted =
+            Runtime::create_rt_user_event();
         }
         // If we still need to slice the task then we can run it 
         // through the normal path, otherwise we can simply make 
@@ -1312,11 +1333,6 @@ namespace Legion {
         LegionSpy::log_operation_events(unique_op_id, 
             ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
 #endif
-        // Still need to do any rendezvous for concurrent analysis
-        if (concurrent_task)
-          concurrent_exchange->exchange(concurrent_slices,
-              concurrent_lamport_clock, concurrent_poisoned,
-              concurrent_task_barrier, concurrent_variant, 0/*points*/);
         // We have no local points, so we can just trigger
         if (serdez_redop_fns == NULL)
         {
@@ -1337,7 +1353,24 @@ namespace Legion {
         trigger_children_committed();
       }
       else
+      {
+        if (concurrent_task)
+        {
+          // Create the all-reduce collective for when we need it
+#ifdef DEBUG_LEGION
+          ReplicateContext *repl_ctx =
+            dynamic_cast<ReplicateContext*>(parent_ctx);
+          assert(repl_ctx != NULL);
+          assert(concurrent_exchange == NULL);
+#else
+          ReplicateContext *repl_ctx =
+            static_cast<ReplicateContext*>(parent_ctx);
+#endif
+          concurrent_exchange = new ConcurrentAllreduce(repl_ctx,
+              concurrent_exchange_id, tpl->get_concurrent_shards(this));
+        }
         IndexTask::trigger_replay();
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -1611,12 +1644,10 @@ namespace Legion {
         collective_check_id = ctx->get_next_collective_index(COLLECTIVE_LOC_76);
       if (concurrent_task)
       {
-        const size_t expected_points = launch_space->get_volume();
-        concurrent_exchange = new ConcurrentAllreduce(COLLECTIVE_LOC_79, ctx,
-            expected_points);
-        complete_preconditions.insert(concurrent_exchange->get_done_event());
+        concurrent_exchange_id =
+          ctx->get_next_collective_index(COLLECTIVE_LOC_79);
         concurrent_mapping_rendezvous = new ConcurrentMappingRendezvous(this,
-              COLLECTIVE_LOC_104, ctx, 0/*owner shard*/, expected_points);
+              COLLECTIVE_LOC_104, ctx);
         complete_preconditions.insert(
             concurrent_mapping_rendezvous->get_done_event());
       }
@@ -1657,8 +1688,8 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    ApEvent ReplIndexTask::rendezvous_concurrent_mapped(
-                                     const DomainPoint &point, Processor target)
+    void ReplIndexTask::rendezvous_concurrent_mapped(const DomainPoint &point, 
+        Processor target, RtEvent precondition)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1666,17 +1697,10 @@ namespace Legion {
       assert(concurrent_mapping_rendezvous != NULL);
 #endif
       bool done = false;
-      ApUserEvent mapped;
       {
         AutoLock o_lock(op_lock);
-        if (concurrent_processors.empty())
-        {
-#ifdef DEBUG_LEGION
-          assert(!concurrent_mapped.exists());
-#endif
-          concurrent_mapped = Runtime::create_ap_user_event(NULL);
-        }
-        mapped = concurrent_mapped;
+        if (precondition.exists())
+          concurrent_preconditions.push_back(precondition);
         std::map<Processor,DomainPoint>::const_iterator finder =
           concurrent_processors.find(target);
         if (finder != concurrent_processors.end())
@@ -1688,13 +1712,16 @@ namespace Legion {
         done = (concurrent_processors.size() == total_points);
       }
       if (done)
+      {
+        if (concurrent_preconditions.size() > 1)
+          precondition = Runtime::merge_events(concurrent_preconditions);
         concurrent_mapping_rendezvous->perform_rendezvous(
-            concurrent_processors, mapped);
-      return mapped;
+            concurrent_processors, precondition);
+      }
     }
 
     //--------------------------------------------------------------------------
-    ApEvent ReplIndexTask::rendezvous_concurrent_mapped(
+    void ReplIndexTask::rendezvous_concurrent_mapped(RtEvent precondition,
                          std::vector<std::pair<Processor,DomainPoint> > &points)
     //--------------------------------------------------------------------------
     {
@@ -1703,17 +1730,10 @@ namespace Legion {
       assert(concurrent_mapping_rendezvous != NULL);
 #endif
       bool done = false;
-      ApUserEvent mapped;
       {
         AutoLock o_lock(op_lock);
-        if (concurrent_processors.empty())
-        {
-#ifdef DEBUG_LEGION
-          assert(!concurrent_mapped.exists());
-#endif
-          concurrent_mapped = Runtime::create_ap_user_event(NULL);
-        }
-        mapped = concurrent_mapped;
+        if (precondition.exists())
+          concurrent_preconditions.push_back(precondition);
         for (std::vector<std::pair<Processor,DomainPoint> >::iterator it =
               points.begin(); it != points.end(); it++)
         {
@@ -1730,9 +1750,42 @@ namespace Legion {
         done = (concurrent_processors.size() == total_points);
       }
       if (done)
+      {
+        if (concurrent_preconditions.size() > 1)
+          precondition = Runtime::merge_events(concurrent_preconditions);
         concurrent_mapping_rendezvous->perform_rendezvous(
-            concurrent_processors, mapped);
-      return mapped;
+            concurrent_processors, precondition);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplIndexTask::finish_concurrent_mapped(RtEvent precondition,
+        RtBarrier barrier, const std::vector<ShardID> &participants)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(concurrent_exchange == NULL);
+      assert(is_recording() == barrier.exists());
+#endif
+      if (concurrent_precondition.interpreted.exists())
+      {
+#ifdef DEBUG_LEGION
+        ReplicateContext *repl_ctx =
+          dynamic_cast<ReplicateContext*>(parent_ctx);
+        assert(repl_ctx != NULL);
+#else
+        ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+        // Record the barrier for this task for future replays
+        if (is_recording())
+          tpl->record_concurrent_barrier(this, barrier, participants,
+              launch_space->get_volume());
+        // Create the max allreduce collective
+        concurrent_exchange = new ConcurrentAllreduce(repl_ctx,
+            concurrent_exchange_id, participants);
+        Runtime::trigger_event(concurrent_precondition.interpreted,
+            precondition);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -1787,7 +1840,7 @@ namespace Legion {
         }
         concurrent_exchange->exchange(concurrent_slices, 
             concurrent_lamport_clock, concurrent_poisoned,
-            concurrent_task_barrier, concurrent_variant, concurrent_points);
+            concurrent_task_barrier, concurrent_variant);
       }
     }
 
@@ -12706,14 +12759,15 @@ namespace Legion {
     template<bool INORDER>
     AllGatherCollective<INORDER>::AllGatherCollective(
         CollectiveIndexLocation loc, ReplicateContext *ctx)
-      : ShardCollective(loc, ctx),
+      : ShardCollective(loc, ctx), participants(NULL), 
+        total_shards(manager->total_shards), local_index(local_shard),
         shard_collective_radix(ctx->get_shard_collective_radix()),
         shard_collective_log_radix(ctx->get_shard_collective_log_radix()),
         shard_collective_stages(ctx->get_shard_collective_stages()),
         shard_collective_participating_shards(
             ctx->get_shard_collective_participating_shards()),
         shard_collective_last_radix(ctx->get_shard_collective_last_radix()),
-        participating(int(local_shard) < shard_collective_participating_shards),
+        participating(local_index < shard_collective_participating_shards),
         reorder_stages(NULL), pending_send_ready_stages(0)
 #ifdef DEBUG_LEGION
         , done_triggered(false)
@@ -12727,14 +12781,15 @@ namespace Legion {
     template<bool INORDER>
     AllGatherCollective<INORDER>::AllGatherCollective(ReplicateContext *ctx,
                                                       CollectiveID id)
-      : ShardCollective(ctx, id),
+      : ShardCollective(ctx, id), participants(NULL),
+        total_shards(manager->total_shards), local_index(local_shard),
         shard_collective_radix(ctx->get_shard_collective_radix()),
         shard_collective_log_radix(ctx->get_shard_collective_log_radix()),
         shard_collective_stages(ctx->get_shard_collective_stages()),
         shard_collective_participating_shards(
             ctx->get_shard_collective_participating_shards()),
         shard_collective_last_radix(ctx->get_shard_collective_last_radix()),
-        participating(int(local_shard) < shard_collective_participating_shards),
+        participating(local_index < shard_collective_participating_shards),
         reorder_stages(NULL), pending_send_ready_stages(0)
 #ifdef DEBUG_LEGION
         , done_triggered(false)
@@ -12746,10 +12801,42 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<bool INORDER>
+    AllGatherCollective<INORDER>::AllGatherCollective(
+        ReplicateContext *ctx, CollectiveID id,
+        const std::vector<ShardID> &parts)
+      : ShardCollective(ctx, id), participants(&parts),
+        total_shards(parts.size()),
+        reorder_stages(NULL), pending_send_ready_stages(0)
+#ifdef DEBUG_LEGION
+        , done_triggered(false)
+#endif
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(std::is_sorted(parts.begin(), parts.end()));
+      assert(std::binary_search(parts.begin(), parts.end(), local_shard));
+#endif
+      std::vector<ShardID>::const_iterator finder = std::lower_bound(
+          parts.begin(), parts.end(), local_shard);
+#ifdef DEBUG_LEGION
+      assert(finder != parts.end());
+      assert(*finder == local_shard);
+#endif
+      local_index = std::distance(parts.begin(), finder);
+      shard_collective_radix = ctx->runtime->legion_collective_radix;
+      participating = configure_collective_settings(parts.size(), local_index,
+          shard_collective_radix, shard_collective_log_radix,
+          shard_collective_stages, shard_collective_participating_shards,
+          shard_collective_last_radix);
+      initialize_collective();
+    }
+
+    //--------------------------------------------------------------------------
+    template<bool INORDER>
     void AllGatherCollective<INORDER>::initialize_collective(void)
     //--------------------------------------------------------------------------
     {
-      if (manager->total_shards > 1)
+      if (total_shards > 1)
       {
         // We already have our contributions for each stage so
         // we can set the inditial participants to 1
@@ -12786,9 +12873,8 @@ namespace Legion {
         // We should have sent all our stages before being deleted
         for (unsigned idx = 0; idx < sent_stages.size(); idx++)
           assert(sent_stages[idx]);
-      }
-      if (participating)
         assert(done_triggered);
+      }
 #endif
     } 
 
@@ -12801,17 +12887,23 @@ namespace Legion {
         return;
       // Register this with the context
       context->register_collective(this);
-      if (manager->total_shards <= 1)
+      if (total_shards <= 1)
+      {
+        post_complete_exchange().wait();
+#ifdef DEBUG_LEGION
+        done_triggered = true;
+#endif
         return;
+      }
       // See if we are a participating shard or not
       if (participating)
       {
         // We are a participating shard 
         // See if we are waiting for an initial notification
         // if not we can just send our message now
-        if ((int(manager->total_shards) == 
+        if ((int(total_shards) == 
               shard_collective_participating_shards) || 
-            (local_shard >= (manager->total_shards -
+            (local_index >= (int(total_shards) -
               shard_collective_participating_shards)))
         {
           const bool all_stages_done = initiate_collective();
@@ -12833,7 +12925,7 @@ namespace Legion {
                                                             bool block/*=true*/)
     //--------------------------------------------------------------------------
     {
-      if (manager->total_shards <= 1)
+      if (total_shards <= 1)
         return RtEvent::NO_RT_EVENT;
       if (!done_event.has_triggered())
       {
@@ -12940,7 +13032,9 @@ namespace Legion {
       if (participating)
       {
         // Send back to the shards that are not participating
-        ShardID target = local_shard + shard_collective_participating_shards;
+        ShardID target = (participants == NULL) ?
+          (local_shard + shard_collective_participating_shards) :
+          participants->at(local_index + shard_collective_participating_shards);
 #ifdef DEBUG_LEGION
         assert(target < manager->total_shards);
 #endif
@@ -12951,7 +13045,9 @@ namespace Legion {
       else
       {
         // Send to a node that is participating
-        ShardID target = local_shard % shard_collective_participating_shards;
+        ShardID target = (participants == NULL) ?
+          local_shard % shard_collective_participating_shards :
+          participants->at(local_index % shard_collective_participating_shards);
         Serializer rez;
         construct_message(target, -1/*stage*/, rez);
         manager->send_collective_message(message, target, rez);
@@ -13031,11 +13127,10 @@ namespace Legion {
         {
           for (int r = 1; r < shard_collective_last_radix; r++)
           {
-            const ShardID target = local_shard ^
-              (r << (stage * shard_collective_log_radix));
-#ifdef DEBUG_LEGION
-            assert(int(target) < shard_collective_participating_shards);
-#endif
+            const ShardID target = (participants == NULL) ?
+              local_shard ^ (r << (stage * shard_collective_log_radix)) :
+              participants->at(
+                  local_index ^ (r << (stage *shard_collective_log_radix)));
             Serializer rez;
             construct_message(target, stage, rez);
             manager->send_collective_message(message, target, rez);
@@ -13045,11 +13140,10 @@ namespace Legion {
         {
           for (int r = 1; r < shard_collective_radix; r++)
           {
-            const ShardID target = local_shard ^
-              (r << (stage * shard_collective_log_radix));
-#ifdef DEBUG_LEGION
-            assert(int(target) < shard_collective_participating_shards);
-#endif
+            const ShardID target = (participants == NULL) ?
+              local_shard ^ (r << (stage * shard_collective_log_radix)) :
+              participants->at(
+                  local_index ^ (r << (stage * shard_collective_log_radix)));
             Serializer rez;
             construct_message(target, stage, rez);
             manager->send_collective_message(message, target, rez);
@@ -13153,8 +13247,8 @@ namespace Legion {
         reorder_stages->erase(remaining);
       }
       // See if we have to send a message back to a non-participating shard 
-      if ((int(manager->total_shards) > shard_collective_participating_shards)
-          && (int(local_shard) < int(manager->total_shards -
+      if ((int(total_shards) > shard_collective_participating_shards)
+          && (local_index < int(total_shards -
                                      shard_collective_participating_shards)))
         send_remainder_stage();
       // Pull this onto the stack in case post_complete_exchange ends up
@@ -17019,20 +17113,32 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ConcurrentMappingRendezvous::ConcurrentMappingRendezvous(
-        ReplIndexTask *own, CollectiveIndexLocation loc,
-        ReplicateContext *ctx, ShardID target, size_t points)
-      : GatherCollective(loc, ctx, target), owner(own), expected_points(points)
+        ReplIndexTask *own, CollectiveIndexLocation loc, ReplicateContext *ctx)
+      : AllGatherCollective<true>(loc, ctx), owner(own)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    void ConcurrentMappingRendezvous::pack_collective(Serializer &rez) const
+    void ConcurrentMappingRendezvous::pack_collective_stage(ShardID target,
+        Serializer &rez, int stage)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(all_mapped_event.exists() != concurrent_processors.empty());
-#endif
+      if (preconditions.empty())
+        rez.serialize(RtEvent::NO_RT_EVENT);
+      else if (preconditions.size() == 1)
+        rez.serialize(preconditions.front());
+      else
+      {
+        RtEvent precondition = Runtime::merge_events(preconditions);
+        rez.serialize(precondition);
+        preconditions.resize(1);
+        preconditions[0] = precondition;
+      }
+      rez.serialize<size_t>(nonempty_shards.size());
+      for (std::vector<ShardID>::const_iterator it =
+            nonempty_shards.begin(); it != nonempty_shards.end(); it++)
+        rez.serialize(*it);
       rez.serialize<size_t>(concurrent_processors.size());
       for (std::map<Processor,DomainPoint>::const_iterator it =
             concurrent_processors.begin(); it != 
@@ -17041,13 +17147,27 @@ namespace Legion {
         rez.serialize(it->first);
         rez.serialize(it->second);
       }
-      rez.serialize(all_mapped_event);
+      rez.serialize(barrier);
     }
 
     //--------------------------------------------------------------------------
-    void ConcurrentMappingRendezvous::unpack_collective(Deserializer &derez)
+    void ConcurrentMappingRendezvous::unpack_collective_stage(
+        Deserializer &derez, int stage)
     //--------------------------------------------------------------------------
     {
+      RtEvent precondition;
+      derez.deserialize(precondition);
+      if (precondition.exists())
+        preconditions.push_back(precondition);
+      size_t num_shards;
+      derez.deserialize(num_shards);
+      if (num_shards > 0)
+      {
+        const size_t offset = nonempty_shards.size();
+        nonempty_shards.resize(offset+num_shards);
+        for (unsigned idx = 0; idx < num_shards; idx++)
+          derez.deserialize(nonempty_shards[offset+idx]);
+      }
       size_t num_points;
       derez.deserialize(num_points);
       for (unsigned idx = 0; idx < num_points; idx++)
@@ -17062,45 +17182,49 @@ namespace Legion {
           owner->report_concurrent_mapping_failure(proc, point, finder->second);
         concurrent_processors[proc] = point;
       }
-      ApUserEvent upstream;
-      derez.deserialize(upstream);
-      if (upstream.exists())
-      {
-        if (!all_mapped_event.exists())
-          all_mapped_event = Runtime::create_ap_user_event(NULL);
-        Runtime::trigger_event(NULL, upstream, all_mapped_event);
-      }
+      RtBarrier bar;
+      derez.deserialize(bar);
+      if (bar.exists())
+        barrier = bar;
+    }
+
+    //--------------------------------------------------------------------------
+    void ConcurrentMappingRendezvous::set_trace_barrier(RtBarrier bar)
+    //--------------------------------------------------------------------------
+    {
 #ifdef DEBUG_LEGION
-      assert(concurrent_processors.size() <= expected_points);
+      assert(bar.exists());
+      assert(!barrier.exists());
 #endif
-      if (concurrent_processors.size() == expected_points)
-      {
-#ifdef DEBUG_LEGION
-        assert(all_mapped_event.exists());
-#endif
-        Runtime::trigger_event(NULL, all_mapped_event);
-        all_mapped_event = ApUserEvent::NO_AP_USER_EVENT;
-        concurrent_processors.clear();
-      }
+      barrier = bar;
     }
 
     //--------------------------------------------------------------------------
     void ConcurrentMappingRendezvous::perform_rendezvous(
-            std::map<Processor,DomainPoint> &processors, ApUserEvent all_mapped)
+              std::map<Processor,DomainPoint> &processors, RtEvent precondition)
+    //--------------------------------------------------------------------------
+    {
+      if (!processors.empty())
+      {
+        concurrent_processors.swap(processors);
+        nonempty_shards.push_back(local_shard);
+      }
+      if (precondition.exists())
+        preconditions.push_back(precondition);
+      perform_collective_async();
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent ConcurrentMappingRendezvous::post_complete_exchange(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(all_mapped.exists() != processors.empty());
+      assert(!preconditions.empty());
 #endif
-      concurrent_processors.swap(processors);
-      all_mapped_event = all_mapped;
-      if (concurrent_processors.size() == expected_points)
-      {
-        Runtime::trigger_event(NULL, all_mapped_event);
-        all_mapped_event = ApUserEvent::NO_AP_USER_EVENT;
-        concurrent_processors.clear();
-      }
-      perform_collective_async();
+      std::sort(nonempty_shards.begin(), nonempty_shards.end());
+      owner->finish_concurrent_mapped(
+          Runtime::merge_events(preconditions), barrier, nonempty_shards);
+      return RtEvent::NO_RT_EVENT;
     }
 
     /////////////////////////////////////////////////////////////
@@ -17108,9 +17232,9 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    ConcurrentAllreduce::ConcurrentAllreduce(CollectiveIndexLocation loc,
-                                           ReplicateContext *ctx, size_t points)
-      : AllGatherCollective<true>(loc, ctx), expected_points(points)
+    ConcurrentAllreduce::ConcurrentAllreduce(ReplicateContext *ctx,
+        CollectiveID id, const std::vector<ShardID> &parts)
+      : AllGatherCollective<true>(ctx, id, parts)
     //--------------------------------------------------------------------------
     {
     }
@@ -17126,14 +17250,10 @@ namespace Legion {
                                                     Serializer &rez, int stage)
     //--------------------------------------------------------------------------
     {
-      rez.serialize<size_t>(total_points);
-      if (total_points > 0)
-      {
-        rez.serialize(collective_kernel_barrier);
-        rez.serialize(concurrent_lamport_clock);
-        rez.serialize(concurrent_variant);
-        rez.serialize<bool>(concurrent_poisoned);
-      }
+      rez.serialize(collective_kernel_barrier);
+      rez.serialize(concurrent_lamport_clock);
+      rez.serialize(concurrent_variant);
+      rez.serialize<bool>(concurrent_poisoned);
     }
 
     //--------------------------------------------------------------------------
@@ -17141,49 +17261,26 @@ namespace Legion {
                                                       int stage)
     //--------------------------------------------------------------------------
     {
-      size_t points;
-      derez.deserialize(points);
-      if (points > 0)
-      {
-        RtBarrier barrier;
-        derez.deserialize(barrier);
-        if (!collective_kernel_barrier.exists() && barrier.exists())
-          collective_kernel_barrier = barrier;
-        uint64_t lamport_clock;
-        derez.deserialize(lamport_clock);
-        if (concurrent_lamport_clock < lamport_clock)
-          concurrent_lamport_clock = lamport_clock;
-        VariantID vid;
-        derez.deserialize(vid);
-        if (total_points == 0)
-          concurrent_variant = vid;
-        else if (concurrent_variant != vid)
-          concurrent_variant = std::min(concurrent_variant, vid);
-        bool poisoned;
-        derez.deserialize<bool>(poisoned);
-        if (poisoned)
-          concurrent_poisoned = true;
-        if (!participating)
-        {
-#ifdef DEBUG_LEGION
-          assert(stage == -1);
-          assert(points == expected_points);
-#endif
-          total_points = points;
-        }
-        else
-          total_points += points;
-#ifdef DEBUG_LEGION
-        assert(total_points <= expected_points);
-#endif
-        // this should only happen once
-        if (total_points == expected_points)
-          notify_concurrent_slices();
-      }
+      RtBarrier barrier;
+      derez.deserialize(barrier);
+      if (!collective_kernel_barrier.exists() && barrier.exists())
+        collective_kernel_barrier = barrier;
+      uint64_t lamport_clock;
+      derez.deserialize(lamport_clock);
+      if (concurrent_lamport_clock < lamport_clock)
+        concurrent_lamport_clock = lamport_clock;
+      VariantID vid;
+      derez.deserialize(vid);
+      if (concurrent_variant != vid)
+        concurrent_variant = std::min(concurrent_variant, vid);
+      bool poisoned;
+      derez.deserialize<bool>(poisoned);
+      if (poisoned)
+        concurrent_poisoned = true;
     }
 
     //--------------------------------------------------------------------------
-    void ConcurrentAllreduce::notify_concurrent_slices(void)
+    RtEvent ConcurrentAllreduce::post_complete_exchange(void)
     //--------------------------------------------------------------------------
     {
       Runtime *runtime = context->runtime;
@@ -17209,26 +17306,21 @@ namespace Legion {
               concurrent_lamport_clock, concurrent_poisoned,
               concurrent_variant, collective_kernel_barrier);
       }
+      return RtEvent::NO_RT_EVENT;
     }
 
     //--------------------------------------------------------------------------
     void ConcurrentAllreduce::exchange(
         std::vector<std::pair<SliceTask*,AddressSpaceID> > &slices,
         uint64_t lamport_clock, bool poisoned, RtBarrier barrier, 
-        VariantID vid, size_t points)
+        VariantID vid)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(points <= expected_points);
-#endif
       concurrent_slices.swap(slices);
       collective_kernel_barrier = barrier;
       concurrent_lamport_clock = lamport_clock;
       concurrent_variant = vid;
       concurrent_poisoned = poisoned;
-      total_points = points;
-      if (total_points == expected_points)
-        notify_concurrent_slices();
       perform_collective_async();
     }
 

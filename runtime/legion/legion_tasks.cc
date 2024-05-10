@@ -439,6 +439,7 @@ namespace Legion {
       rez.serialize(parent_req_indexes.size());
       for (unsigned idx = 0; idx < parent_req_indexes.size(); idx++)
         rez.serialize(parent_req_indexes[idx]);
+      rez.serialize(memo_state);
       rez.serialize(map_origin);
       if (map_origin)
       {
@@ -452,7 +453,6 @@ namespace Legion {
       }
       else
       {
-        rez.serialize(memo_state);
         if (memo_state == MEMO_RECORD)
         {
           rez.serialize(tpl);
@@ -487,6 +487,7 @@ namespace Legion {
         for (unsigned idx = 0; idx < num_indexes; idx++)
           derez.deserialize(parent_req_indexes[idx]);
       }
+      derez.deserialize(memo_state);
       derez.deserialize(map_origin);
       if (map_origin)
       {
@@ -501,7 +502,6 @@ namespace Legion {
       }
       else
       {
-        derez.deserialize(memo_state);
         if (memo_state == MEMO_RECORD)
         {
           derez.deserialize(tpl);
@@ -2245,7 +2245,6 @@ namespace Legion {
       profiling_reported = RtUserEvent::NO_RT_USER_EVENT;
       profiling_priority = LG_THROUGHPUT_WORK_PRIORITY;
       single_task_termination = ApUserEvent::NO_AP_USER_EVENT;
-      concurrent_mapped_event = ApEvent::NO_AP_EVENT;
       copy_fill_priority = 0;
       outstanding_profiling_requests.store(0);
       outstanding_profiling_reported.store(0);
@@ -2402,7 +2401,6 @@ namespace Legion {
         rez.serialize<size_t>(untracked_valid_regions.size());
         for (unsigned idx = 0; idx < untracked_valid_regions.size(); idx++)
           rez.serialize(untracked_valid_regions[idx]); 
-        rez.serialize(concurrent_mapped_event);
       }
       else
       { 
@@ -2490,7 +2488,6 @@ namespace Legion {
         untracked_valid_regions.resize(num_untracked_valid_regions);
         for (unsigned idx = 0; idx < num_untracked_valid_regions; idx++)
           derez.deserialize(untracked_valid_regions[idx]); 
-        derez.deserialize(concurrent_mapped_event);
       }
       else
       {
@@ -4616,8 +4613,6 @@ namespace Legion {
       std::set<ApEvent> wait_on_events;
       if (execution_fence_event.exists())
         wait_on_events.insert(execution_fence_event);
-      if (concurrent_mapped_event.exists())
-        wait_on_events.insert(concurrent_mapped_event);
 #ifdef LEGION_SPY
       // TODO: teach legion spy how to check the inner task optimization
       // for now we'll just turn it off whenever we are going to be
@@ -4751,17 +4746,7 @@ namespace Legion {
       // need to perform an extra step here to ensure a global ordering 
       // between concurrent index space task launches on the same processor
       if (is_concurrent())
-      {
-#ifdef DEBUG_LEGION
-        assert(target_processors.size() == 1);
-#endif
-        const OrderConcurrentLaunchArgs args(this, target_processors.front(),
-            start_condition, variant->is_concurrent() ? selected_variant : 0);
-        // Give this very high priority as it is likely on the critical path
-        runtime->issue_runtime_meta_task(args, LG_RESOURCE_PRIORITY,
-            Runtime::protect_event(start_condition));
-        start_condition = args.ready;
-      }
+        start_condition = order_concurrent_launch(start_condition, variant);
       // Need a copy of any locks to release on the stack since the 
       // atomic_locks cannot be touched after we launch the task
       std::vector<Reservation> to_release;
@@ -5284,7 +5269,7 @@ namespace Legion {
       reduction_metasize = 0;
       reduction_instance = NULL;
       first_mapping = true;
-      concurrent_mapped = ApUserEvent::NO_AP_USER_EVENT;
+      concurrent_precondition.interpreted = RtUserEvent::NO_RT_USER_EVENT;
       concurrent_task_barrier = RtBarrier::NO_RT_BARRIER;
       children_complete_invoked = false;
       children_commit_invoked = false;
@@ -5325,6 +5310,7 @@ namespace Legion {
           delete it->second.first;
         temporary_futures.clear();
       }
+      concurrent_preconditions.clear();
       concurrent_processors.clear();
       // Remove our reference to the point arguments 
       point_arguments = FutureMap();
@@ -5565,6 +5551,15 @@ namespace Legion {
                  this->predicate_false_size);
         }
       }
+      if (rhs->concurrent_task)
+      {
+        if (rhs->is_replaying())
+          this->concurrent_precondition.traced = 
+            rhs->concurrent_precondition.traced;
+        else
+          this->concurrent_precondition.interpreted =
+            rhs->concurrent_precondition.interpreted;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -5714,6 +5709,13 @@ namespace Legion {
       }
       else
         rez.serialize<size_t>(0); 
+      if (concurrent_task)
+      {
+        if (is_replaying())
+          rez.serialize(concurrent_precondition.traced);
+        else
+          rez.serialize(concurrent_precondition.interpreted);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -5774,6 +5776,13 @@ namespace Legion {
         for (unsigned idx = 0; idx < num_globals; idx++)
           derez.deserialize(output_region_options[idx]);
         output_region_extents.resize(num_globals);
+      }
+      if (concurrent_task)
+      {
+        if (is_replaying())
+          derez.deserialize(concurrent_precondition.traced);
+        else
+          derez.deserialize(concurrent_precondition.interpreted);
       }
     }
 
@@ -7300,9 +7309,11 @@ namespace Legion {
       {
 #ifdef DEBUG_LEGION
         assert(target_proc.exists());
+        assert(concurrent_postcondition.exists());
 #endif
-        concurrent_mapped_event = 
-          slice_owner->rendezvous_concurrent_mapped(index_point, target_proc);
+        concurrent_precondition.interpreted = Runtime::create_rt_user_event();
+        slice_owner->rendezvous_concurrent_mapped(index_point, target_proc,
+            concurrent_precondition.interpreted);
       }
       // For point tasks we use the point termination event which as the
       // end event for this task since point tasks can be moved and
@@ -7485,6 +7496,14 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(is_origin_mapped()); // should be origin mapped if we're here
 #endif
+      if (concurrent_task)
+      {
+        if (is_replaying())
+          rez.serialize(concurrent_precondition.traced);
+        else
+          rez.serialize(concurrent_precondition.interpreted);
+        rez.serialize(concurrent_postcondition);
+      }
       // Return false since point tasks should always be deactivated
       // once they are sent to a remote node
       return false;
@@ -7499,6 +7518,14 @@ namespace Legion {
       DerezCheck z(derez);
       unpack_single_task(derez, ready_events);
       derez.deserialize(orig_task);
+      if (concurrent_task)
+      {
+        if (is_replaying())
+          derez.deserialize(concurrent_precondition.traced);
+        else
+          derez.deserialize(concurrent_precondition.interpreted);
+        derez.deserialize(concurrent_postcondition);
+      }
       set_current_proc(current);
       // Get the context information from our slice owner
       parent_ctx = slice_owner->get_context();
@@ -7562,6 +7589,42 @@ namespace Legion {
       slice_owner->set_predicate_false_result(index_point);
       // Pretend like we executed the task
       execution_context->handle_mispredication();
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent PointTask::order_concurrent_launch(ApEvent start, VariantImpl *impl)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(target_processors.size() == 1);
+      assert(concurrent_postcondition.exists());
+#endif
+      // To order concurrent launches we do a two-phase algorithm here
+      // 1. We do a barrier across all the point tasks to make sure that
+      //    the preconditions for all the point tasks are ready before we
+      //    start the lamport clock protocol. In the interpreted case this
+      //    barrier is done with a butterfly network of Realm events. In the
+      //    tracing case we do this with a proper Realm barrier since we 
+      //    can assume it will be done many times. The concurrent_postcondition
+      //    event represents the event for the end of this barrier
+      // 2. We do a max all-reduce of lamport clocks from each of the point
+      //    tasks so that we can establish an ordering of concurrent index
+      //    space task launches that use overlapping processors.
+      const OrderConcurrentLaunchArgs args(this, target_processors.front(),
+          start, impl->is_concurrent() ? selected_variant : 0);
+      RtEvent precondition;
+      if (start.exists())
+        precondition = Runtime::protect_event(start);
+      if (is_replaying())
+        Runtime::phase_barrier_arrive(concurrent_precondition.traced,
+            1/*count*/, precondition);
+      else
+        Runtime::trigger_event(concurrent_precondition.interpreted, 
+            precondition);
+      // Give this very high priority as it is likely on the critical path
+      runtime->issue_runtime_meta_task(args, LG_RESOURCE_PRIORITY,
+          concurrent_postcondition);
+      return args.ready;
     }
 
     //--------------------------------------------------------------------------
@@ -9620,6 +9683,19 @@ namespace Legion {
         // Enumerate the futures in the future map
         if ((redop == 0) && !elide_future_return)
           enumerate_futures(index_domain);
+        if (concurrent_task)
+        {
+          if (is_recording())
+          {
+            // Set up a barrier for use with tracing
+            RtBarrier barrier(Realm::Barrier::create_barrier(total_points));
+            std::vector<ShardID> participants(1,0);
+            tpl->record_concurrent_barrier(this, barrier, 
+                participants, total_points);
+          }
+          concurrent_precondition.interpreted =
+            Runtime::create_rt_user_event();
+        }
         Operation::trigger_ready();
       }
     }
@@ -9650,21 +9726,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent IndexTask::rendezvous_concurrent_mapped(const DomainPoint &point,
-                                                    Processor target)
+    void IndexTask::rendezvous_concurrent_mapped(const DomainPoint &point,
+                                         Processor target, RtEvent precondition)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(concurrent_task);
 #endif
       AutoLock o_lock(op_lock);
-      if (concurrent_processors.empty())
-      {
-#ifdef DEBUG_LEGION
-        assert(!concurrent_mapped.exists());
-#endif
-        concurrent_mapped = Runtime::create_ap_user_event(NULL);
-      }
+      if (precondition.exists())
+        concurrent_preconditions.push_back(precondition);
       std::map<Processor,DomainPoint>::const_iterator finder =
         concurrent_processors.find(target);
       if (finder != concurrent_processors.end())
@@ -9674,12 +9745,20 @@ namespace Legion {
 #endif
       concurrent_processors[target] = point;
       if (concurrent_processors.size() == total_points)
-        Runtime::trigger_event(NULL, concurrent_mapped);
-      return concurrent_mapped;
+      {
+#ifdef DEBUG_LEGION
+        assert(concurrent_precondition.interpreted.exists());
+#endif
+        if (!concurrent_preconditions.empty())
+          Runtime::trigger_event(concurrent_precondition.interpreted,
+              Runtime::merge_events(concurrent_preconditions));
+        else
+          Runtime::trigger_event(concurrent_precondition.interpreted);
+      }
     }
 
     //--------------------------------------------------------------------------
-    ApEvent IndexTask::rendezvous_concurrent_mapped(
+    void IndexTask::rendezvous_concurrent_mapped(RtEvent precondition,
         std::vector<std::pair<Processor,DomainPoint> > &points)
     //--------------------------------------------------------------------------
     {
@@ -9687,13 +9766,8 @@ namespace Legion {
       assert(concurrent_task);
 #endif
       AutoLock o_lock(op_lock);
-      if (concurrent_processors.empty())
-      {
-#ifdef DEBUG_LEGION
-        assert(!concurrent_mapped.exists());
-#endif
-        concurrent_mapped = Runtime::create_ap_user_event(NULL);
-      }
+      if (precondition.exists())
+        concurrent_preconditions.push_back(precondition);
 #ifdef DEBUG_LEGION
       assert((concurrent_processors.size() + points.size()) <= total_points); 
 #endif
@@ -9708,8 +9782,16 @@ namespace Legion {
         concurrent_processors.emplace(*it);
       }
       if (concurrent_processors.size() == total_points)
-        Runtime::trigger_event(NULL, concurrent_mapped);
-      return concurrent_mapped;
+      {
+#ifdef DEBUG_LEGION
+        assert(concurrent_precondition.interpreted.exists());
+#endif
+        if (!concurrent_preconditions.empty())
+          Runtime::trigger_event(concurrent_precondition.interpreted,
+              Runtime::merge_events(concurrent_preconditions));
+        else
+          Runtime::trigger_event(concurrent_precondition.interpreted);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -10936,6 +11018,8 @@ namespace Legion {
         runtime->forest->find_domain(internal_space, internal_domain);
         enumerate_futures(internal_domain);
       }
+      if (concurrent_task)
+        concurrent_precondition.traced = tpl->get_concurrent_barrier(this);
       // Mark that this is origin mapped effectively in case we
       // have any remote tasks, do this before we clone it
       map_origin = true;
@@ -11981,6 +12065,18 @@ namespace Legion {
       // Now figure out our local point information
       result->initialize_point(this, point, point_arguments,
                                inline_task, point_futures);
+      if (concurrent_task)
+      {
+        if (is_replaying())
+        {
+          result->concurrent_precondition.traced =
+            concurrent_precondition.traced;
+          result->concurrent_postcondition = concurrent_precondition.traced;
+        }
+        else
+          result->concurrent_postcondition = 
+            concurrent_precondition.interpreted;
+      }
       if (runtime->legion_spy_enabled)
         LegionSpy::log_slice_point(get_unique_id(), 
                                    result->get_unique_id(),
@@ -12425,8 +12521,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent SliceTask::rendezvous_concurrent_mapped(const DomainPoint &point,
-                                                    Processor target)
+    void SliceTask::rendezvous_concurrent_mapped(const DomainPoint &point,
+                                         Processor target, RtEvent precondition)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -12435,13 +12531,8 @@ namespace Legion {
       if (is_remote())
       {
         AutoLock o_lock(op_lock);
-        if (concurrent_processors.empty())
-        {
-#ifdef DEBUG_LEGION
-          assert(!concurrent_mapped.exists());
-#endif
-          concurrent_mapped = Runtime::create_ap_user_event(NULL);
-        }
+        if (precondition.exists())
+          concurrent_preconditions.push_back(precondition);
         std::map<Processor,DomainPoint>::const_iterator finder =
           concurrent_processors.find(target);
         if (finder != concurrent_processors.end())
@@ -12464,14 +12555,16 @@ namespace Legion {
               rez.serialize(it->first);
               rez.serialize(it->second);
             }
-            rez.serialize(concurrent_mapped);
+            if (!concurrent_preconditions.empty())
+              rez.serialize(Runtime::merge_events(concurrent_preconditions));
+            else
+              rez.serialize(RtEvent::NO_RT_EVENT);
           }
           runtime->send_slice_rendezvous_concurrent_mapped(orig_proc, rez);
         }
-        return concurrent_mapped;
       }
       else
-        return index_owner->rendezvous_concurrent_mapped(point, target);
+        index_owner->rendezvous_concurrent_mapped(point, target, precondition);
     }
 
     //--------------------------------------------------------------------------
@@ -12550,10 +12643,9 @@ namespace Legion {
         derez.deserialize(points[idx].first);
         derez.deserialize(points[idx].second);
       }
-      const ApEvent done = owner->rendezvous_concurrent_mapped(points); 
-      ApUserEvent to_trigger;
-      derez.deserialize(to_trigger);
-      Runtime::trigger_event(NULL, to_trigger, done);
+      RtEvent precondition;
+      derez.deserialize(precondition);
+      owner->rendezvous_concurrent_mapped(precondition, points); 
     }
 
     //--------------------------------------------------------------------------

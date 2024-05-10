@@ -7750,6 +7750,57 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void PhysicalTemplate::record_concurrent_barrier(IndexTask *task,
+        RtBarrier barrier, const std::vector<ShardID> &shards, size_t arrivals)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!shards.empty());
+      assert(std::is_sorted(shards.begin(), shards.end()));
+#endif
+      const TraceLocalID tlid = task->get_trace_local_id();
+      AutoLock tpl_lock(template_lock);
+#ifdef DEBUG_LEGION
+      assert(concurrent_barriers.find(tlid) == concurrent_barriers.end());
+#endif
+      ConcurrentBarrier &concurrent = concurrent_barriers[tlid];
+      concurrent.barrier = barrier;
+      concurrent.shards = shards;
+      concurrent.participants = arrivals;
+    }
+
+    //--------------------------------------------------------------------------
+    RtBarrier PhysicalTemplate::get_concurrent_barrier(IndexTask *task)
+    //--------------------------------------------------------------------------
+    {
+      const TraceLocalID tlid = task->get_trace_local_id();
+      AutoLock tpl_lock(template_lock);
+      std::map<TraceLocalID,ConcurrentBarrier>::iterator finder =
+        concurrent_barriers.find(tlid);
+#ifdef DEBUG_LEGION
+      assert(finder != concurrent_barriers.end());
+#endif
+      const RtBarrier result = finder->second.barrier;
+      Runtime::advance_barrier(finder->second.barrier);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    const std::vector<ShardID>& PhysicalTemplate::get_concurrent_shards(
+                                                            ReplIndexTask *task)
+    //--------------------------------------------------------------------------
+    {
+      const TraceLocalID tlid = task->get_trace_local_id();
+      AutoLock tpl_lock(template_lock);
+      std::map<TraceLocalID,ConcurrentBarrier>::iterator finder =
+        concurrent_barriers.find(tlid);
+#ifdef DEBUG_LEGION
+      assert(finder != concurrent_barriers.end());
+#endif
+      return finder->second.shards;
+    }
+
+    //--------------------------------------------------------------------------
     void PhysicalTemplate::get_task_reservations(SingleTask *task,
                                  std::map<Reservation,bool> &reservations) const
     //--------------------------------------------------------------------------
@@ -7918,6 +7969,17 @@ namespace Legion {
           for (unsigned idx = 0; idx < finder->second.size(); idx++)
             finder->second[idx]->set_managed_barrier(it->second);
         }
+      }
+      for (std::map<TraceLocalID,ConcurrentBarrier>::iterator it =
+            concurrent_barriers.begin(); it != concurrent_barriers.end(); it++)
+      {
+#ifdef DEBUG_LEGION
+        assert(it->second.shards.size() == 1);
+        assert(it->second.shards.back() == 0);
+#endif
+        it->second.barrier.destroy_barrier();
+        it->second.barrier =
+          RtBarrier(Realm::Barrier::create_barrier(it->second.participants));
       }
       return RtEvent::NO_RT_EVENT;
     }
@@ -8887,9 +8949,22 @@ namespace Legion {
                 else
                   finder->second->remote_refresh_barrier(bar);
               }
-              refreshed_barriers += num_barriers;
-              const size_t expected = 
-                local_advances.size() + managed_arrivals.size();
+              size_t num_concurrent;
+              derez.deserialize(num_concurrent);
+              for (unsigned idx = 0; idx < num_concurrent; idx++)
+              {
+                TraceLocalID tlid;
+                tlid.deserialize(derez);
+                std::map<TraceLocalID,ConcurrentBarrier>::iterator finder =
+                  concurrent_barriers.find(tlid);
+#ifdef DEBUG_LEGION
+                assert(finder != concurrent_barriers.end());
+#endif
+                derez.deserialize(finder->second.barrier);
+              }
+              refreshed_barriers += num_barriers + num_concurrent;
+              const size_t expected = local_advances.size() +
+                managed_arrivals.size() + concurrent_barriers.size();
 #ifdef DEBUG_LEGION
               assert(refreshed_barriers <= expected);
 #endif
@@ -8916,6 +8991,18 @@ namespace Legion {
                         pending_refresh_barriers.end());
 #endif
                 derez.deserialize(pending_refresh_barriers[key]); 
+              }
+              size_t num_concurrent;
+              derez.deserialize(num_concurrent);
+              for (unsigned idx = 0; idx < num_concurrent; idx++)
+              {
+                TraceLocalID tlid;
+                tlid.deserialize(derez);
+#ifdef DEBUG_LEGION
+                assert(pending_concurrent_barriers.find(tlid) ==
+                    pending_concurrent_barriers.end());
+#endif
+                derez.deserialize(pending_concurrent_barriers[tlid]);
               }
             }
             break;
@@ -9409,9 +9496,33 @@ namespace Legion {
       for (std::map<ApEvent,BarrierAdvance*>::const_iterator it = 
             managed_barriers.begin(); it != managed_barriers.end(); it++)
         it->second->refresh_barrier(it->first, notifications);
+      // Also see if we have any concurrent barriers to update
+      size_t local_refreshed = 0;
+      std::map<ShardID,std::map<TraceLocalID,RtBarrier> > concurrent_updates;
+      for (std::map<TraceLocalID,ConcurrentBarrier>::iterator it =
+            concurrent_barriers.begin(); it != concurrent_barriers.end(); it++)
+      {
+#ifdef DEBUG_LEGION
+        assert(!it->second.shards.empty());
+        assert(std::binary_search(it->second.shards.begin(),
+              it->second.shards.end(), local_shard));
+#endif
+        if (local_shard == it->second.shards.front())
+        {
+          it->second.barrier.destroy_barrier();
+          it->second.barrier = 
+            RtBarrier(Realm::Barrier::create_barrier(it->second.participants));
+          for (unsigned idx = 1; idx < it->second.shards.size(); idx++)
+          {
+            ShardID shard = it->second.shards[idx];
+            notifications[shard]; // instantiate so it is there
+            concurrent_updates[shard][it->first] = it->second.barrier;
+          }
+          local_refreshed++;
+        }
+      }
       // Send out the notifications to all the shards
       ShardManager *manager = repl_ctx->shard_manager;
-      size_t local_refreshed = 0;
       for (std::map<ShardID,std::map<ApEvent,ApBarrier> >::const_iterator
             nit = notifications.begin(); nit != notifications.end(); nit++)
       {
@@ -9429,6 +9540,20 @@ namespace Legion {
             rez.serialize(it->first);
             rez.serialize(it->second);
           }
+          std::map<ShardID,std::map<TraceLocalID,RtBarrier> >::const_iterator
+            finder = concurrent_updates.find(nit->first);
+          if (finder != concurrent_updates.end())
+          {
+            rez.serialize<size_t>(finder->second.size());
+            for (std::map<TraceLocalID,RtBarrier>::const_iterator it =
+                  finder->second.begin(); it != finder->second.end(); it++)
+            {
+              it->first.serialize(rez);
+              rez.serialize(it->second);
+            }
+          }
+          else
+            rez.serialize<size_t>(0);
           manager->send_trace_update(nit->first, rez);
         }
         else
@@ -9478,11 +9603,26 @@ namespace Legion {
               finder->second->remote_refresh_barrier(it->second);
           }
           refreshed_barriers += pending_refresh_barriers.size();
-
           pending_refresh_barriers.clear();
         }
-        const size_t expected = 
-          local_advances.size() + managed_arrivals.size();
+        if (!pending_concurrent_barriers.empty())
+        {
+          for (std::map<TraceLocalID,RtBarrier>::const_iterator it =
+                pending_concurrent_barriers.begin(); it !=
+                pending_concurrent_barriers.end(); it++)
+          {
+            std::map<TraceLocalID,ConcurrentBarrier>::iterator finder =
+              concurrent_barriers.find(it->first);
+#ifdef DEBUG_LEGION
+            assert(finder != concurrent_barriers.end()); 
+#endif
+            finder->second.barrier = it->second;
+          }
+          refreshed_barriers += pending_concurrent_barriers.size();
+          pending_concurrent_barriers.clear();
+        }
+        const size_t expected = local_advances.size() +
+          managed_arrivals.size() + concurrent_barriers.size();
 #ifdef DEBUG_LEGION
         assert(refreshed_barriers <= expected);
 #endif
