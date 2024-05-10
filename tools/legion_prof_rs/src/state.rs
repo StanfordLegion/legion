@@ -1,11 +1,11 @@
-use std::cmp::Ordering;
-use std::cmp::{max, Reverse};
+use std::cmp::{max, Ordering, Reverse};
 use std::collections::{BTreeMap, BTreeSet, BinaryHeap};
 use std::convert::TryFrom;
 use std::fmt;
 use std::sync::OnceLock;
 
 use derive_more::{Add, From, LowerHex, Sub};
+use nonmax::NonMaxU64;
 use num_enum::TryFromPrimitive;
 
 use rayon::prelude::*;
@@ -145,6 +145,12 @@ pub enum DimKind {
     OuterDimR = 27,
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum DeviceKind {
+    Device,
+    Host,
+}
+
 // the class used to save configurations
 #[derive(Debug, PartialEq)]
 pub struct Config {
@@ -201,24 +207,77 @@ macro_rules! conditional_assert {
     )
 }
 
-#[derive(
-    Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Default, Serialize, Add, Sub, From,
-)]
-pub struct Timestamp(pub u64 /* ns */);
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Default, Serialize, From)]
+pub struct Timestamp(NonMaxU64 /* ns */);
 
 impl Timestamp {
+    pub const MAX: Timestamp = Timestamp(NonMaxU64::MAX);
+    pub const MIN: Timestamp = Timestamp(NonMaxU64::ZERO);
+    pub const ZERO: Timestamp = Timestamp(NonMaxU64::ZERO);
+    pub const ONE: Timestamp = Timestamp(NonMaxU64::ONE);
     pub const fn from_us(microseconds: u64) -> Timestamp {
-        Timestamp(microseconds * 1000)
+        Timestamp(unwrap_option(NonMaxU64::new(microseconds * 1000)))
+    }
+    pub const fn from_ns(nanoseconds: u64) -> Timestamp {
+        Timestamp(unwrap_option(NonMaxU64::new(nanoseconds)))
     }
     pub fn to_us(&self) -> f64 {
-        self.0 as f64 / 1000.0
+        self.0.get() as f64 / 1000.0
+    }
+    pub const fn to_ns(&self) -> u64 {
+        self.0.get()
+    }
+}
+
+// This is a horrible, but currently supported, way of unwrapping an
+// Option in a const function in safe code. Once Rust supports unwrap
+// directly this can be removed.
+//
+// Note: this will hit an array access out of bounds, so the code
+// never reaches the infinite loop
+//
+// from: https://users.rust-lang.org/t/compile-time-const-unwrapping/51619/7
+const fn unwrap_option(opt: Option<NonMaxU64>) -> NonMaxU64 {
+    match opt {
+        Some(x) => x,
+        None => {
+            #[allow(unconditional_panic)]
+            ["You tried to unwrap a None!"][10];
+            loop {}
+        }
+    }
+}
+
+impl std::ops::Add for Timestamp {
+    type Output = Timestamp;
+    fn add(self, rhs: Timestamp) -> Timestamp {
+        Timestamp::from_ns(self.to_ns() + rhs.to_ns())
+    }
+}
+
+impl std::ops::AddAssign for Timestamp {
+    fn add_assign(&mut self, rhs: Timestamp) {
+        *self = *self + rhs;
+    }
+}
+
+impl std::ops::Sub for Timestamp {
+    type Output = Timestamp;
+    fn sub(self, rhs: Timestamp) -> Timestamp {
+        Timestamp::from_ns(self.to_ns() - rhs.to_ns())
+    }
+}
+
+impl std::ops::SubAssign for Timestamp {
+    fn sub_assign(&mut self, rhs: Timestamp) {
+        *self = *self - rhs;
     }
 }
 
 impl fmt::Display for Timestamp {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // Time is stored in nanoseconds. But it is displayed in microseconds.
-        let nanoseconds = self.0;
+        let nanoseconds = self.to_ns();
         let divisor = 1000;
         let microseconds = nanoseconds / divisor;
         let remainder = nanoseconds % divisor;
@@ -261,7 +320,7 @@ where
     }
     pub fn time_key(&self) -> (u64, u8, Secondary) {
         (
-            self.time.0,
+            self.time.to_ns(),
             if self.first { 0 } else { 1 },
             self.secondary_sort_key,
         )
@@ -274,10 +333,31 @@ pub trait Container {
     type S: std::marker::Copy + std::fmt::Debug;
     type Entry: ContainerEntry;
 
-    fn max_levels(&self) -> usize;
-    fn time_points(&self) -> &Vec<TimePoint<Self::E, Self::S>>;
+    fn max_levels(&self, device: Option<DeviceKind>) -> u32;
+    fn max_levels_ready(&self, device: Option<DeviceKind>) -> u32;
+    fn time_points(&self, device: Option<DeviceKind>) -> &Vec<TimePoint<Self::E, Self::S>>;
+    fn time_points_stacked(
+        &self,
+        device: Option<DeviceKind>,
+    ) -> &Vec<Vec<TimePoint<Self::E, Self::S>>>;
+    fn util_time_points(&self, device: Option<DeviceKind>) -> &Vec<TimePoint<Self::E, Self::S>>;
     fn entry(&self, entry: Self::E) -> &Self::Entry;
     fn entry_mut(&mut self, entry: Self::E) -> &mut Self::Entry;
+
+    // For internal use only
+    fn stack(
+        &self,
+        time_points: Vec<TimePoint<Self::E, Self::S>>,
+        max_levels: u32,
+    ) -> Vec<Vec<TimePoint<Self::E, Self::S>>> {
+        let mut stacked = Vec::new();
+        stacked.resize_with(max_levels as usize + 1, Vec::new);
+        for point in time_points {
+            let level = self.entry(point.entry).base().level;
+            stacked[level.unwrap() as usize].push(point);
+        }
+        stacked
+    }
 }
 
 // Common methods that apply to ProcEntry, MemEntry, ChanEntry
@@ -296,12 +376,13 @@ pub trait ContainerEntry {
     fn provenance<'a, 'b>(&'a self, state: &'b State) -> Option<&'b str>;
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ProcEntryKind {
     Task(TaskID, VariantID),
     MetaTask(VariantID),
     MapperCall(MapperCallKindID),
     RuntimeCall(RuntimeCallKindID),
+    GPUKernel(TaskID, VariantID),
     ProfTask,
 }
 
@@ -406,6 +487,25 @@ impl ContainerEntry for ProcEntry {
             ProcEntryKind::RuntimeCall(kind) => {
                 state.runtime_call_kinds.get(&kind).unwrap().name.clone()
             }
+            ProcEntryKind::GPUKernel(task_id, variant_id) => {
+                let task_name = &state.task_kinds.get(&task_id).unwrap().name;
+                let variant_name = &state.variants.get(&(task_id, variant_id)).unwrap().name;
+                match task_name {
+                    Some(task_name) => {
+                        if task_name != variant_name {
+                            format!(
+                                "GPU Kernel(s) for {} [{}] <{}>",
+                                task_name,
+                                variant_name,
+                                op_id.unwrap().0
+                            )
+                        } else {
+                            format!("GPU Kernel(s) for {} <{}>", task_name, op_id.unwrap().0)
+                        }
+                    }
+                    None => format!("GPU Kernel(s) for {}", variant_name.clone()),
+                }
+            }
             ProcEntryKind::ProfTask => {
                 format!("ProfTask <{:?}>", initiation_op.unwrap().0)
             }
@@ -414,7 +514,8 @@ impl ContainerEntry for ProcEntry {
 
     fn color(&self, state: &State) -> Color {
         match self.kind {
-            ProcEntryKind::Task(task_id, variant_id) => state
+            ProcEntryKind::Task(task_id, variant_id)
+            | ProcEntryKind::GPUKernel(task_id, variant_id) => state
                 .variants
                 .get(&(task_id, variant_id))
                 .unwrap()
@@ -444,7 +545,7 @@ impl ContainerEntry for ProcEntry {
     }
 }
 
-pub type ProcPoint = TimePoint<ProfUID, u64>;
+pub type ProcPoint = TimePoint<ProfUID, Timestamp>;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, LowerHex)]
 pub struct ProcID(pub u64);
@@ -472,10 +573,16 @@ pub struct Proc {
     entries: BTreeMap<ProfUID, ProcEntry>,
     tasks: BTreeMap<OpID, ProfUID>,
     meta_tasks: BTreeMap<(OpID, VariantID), Vec<ProfUID>>,
-    pub max_levels: u32,
-    pub max_levels_ready: u32,
-    pub time_points: Vec<ProcPoint>,
-    pub util_time_points: Vec<ProcPoint>,
+    max_levels: u32,
+    max_levels_ready: u32,
+    time_points: Vec<ProcPoint>,
+    time_points_stacked: Vec<Vec<ProcPoint>>,
+    util_time_points: Vec<ProcPoint>,
+    max_levels_device: u32,
+    max_levels_ready_device: u32,
+    time_points_device: Vec<ProcPoint>,
+    time_points_stacked_device: Vec<Vec<ProcPoint>>,
+    util_time_points_device: Vec<ProcPoint>,
     visible: bool,
 }
 
@@ -490,7 +597,13 @@ impl Proc {
             max_levels: 0,
             max_levels_ready: 0,
             time_points: Vec::new(),
+            time_points_stacked: Vec::new(),
             util_time_points: Vec::new(),
+            max_levels_device: 0,
+            max_levels_ready_device: 0,
+            time_points_device: Vec::new(),
+            time_points_stacked_device: Vec::new(),
+            util_time_points_device: Vec::new(),
             visible: true,
         }
     }
@@ -569,6 +682,10 @@ impl Proc {
 
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
+    }
+
+    pub(crate) fn entries(&self) -> impl Iterator<Item = &ProcEntry> {
+        self.entries.values()
     }
 
     fn trim_time_range(&mut self, start: Timestamp, stop: Timestamp) {
@@ -684,33 +801,18 @@ impl Proc {
             let stop = time.stop.unwrap();
             let ready = time.ready;
             if stop - start > TASK_GRANULARITY_THRESHOLD && ready.is_some() {
-                all_points.push(ProcPoint::new(ready.unwrap(), prof_uid, true, start.0));
-                all_points.push(ProcPoint::new(stop, prof_uid, false, 0));
+                all_points.push(ProcPoint::new(ready.unwrap(), prof_uid, true, start));
+                all_points.push(ProcPoint::new(stop, prof_uid, false, Timestamp::ZERO));
             } else {
-                all_points.push(ProcPoint::new(
-                    start,
-                    prof_uid,
-                    true,
-                    std::u64::MAX - stop.0,
-                ));
-                all_points.push(ProcPoint::new(stop, prof_uid, false, 0));
+                all_points.push(ProcPoint::new(start, prof_uid, true, Timestamp::MAX - stop));
+                all_points.push(ProcPoint::new(stop, prof_uid, false, Timestamp::ZERO));
             }
 
-            points.push(ProcPoint::new(
-                start,
-                prof_uid,
-                true,
-                std::u64::MAX - stop.0,
-            ));
-            points.push(ProcPoint::new(stop, prof_uid, false, 0));
+            points.push(ProcPoint::new(start, prof_uid, true, Timestamp::MAX - stop));
+            points.push(ProcPoint::new(stop, prof_uid, false, Timestamp::ZERO));
 
-            util_points.push(ProcPoint::new(
-                start,
-                prof_uid,
-                true,
-                std::u64::MAX - stop.0,
-            ));
-            util_points.push(ProcPoint::new(stop, prof_uid, false, 0));
+            util_points.push(ProcPoint::new(start, prof_uid, true, Timestamp::MAX - stop));
+            util_points.push(ProcPoint::new(stop, prof_uid, false, Timestamp::ZERO));
         }
         fn add_waiters(waiters: &Waiters, prof_uid: ProfUID, util_points: &mut Vec<ProcPoint>) {
             for wait in &waiters.wait_intervals {
@@ -718,9 +820,9 @@ impl Proc {
                     wait.start,
                     prof_uid,
                     false,
-                    std::u64::MAX - wait.end.0,
+                    Timestamp::MAX - wait.end,
                 ));
-                util_points.push(ProcPoint::new(wait.end, prof_uid, true, 0));
+                util_points.push(ProcPoint::new(wait.end, prof_uid, true, Timestamp::ZERO));
             }
         }
 
@@ -731,55 +833,127 @@ impl Proc {
         let mut points = Vec::new();
         let mut util_points = Vec::new();
 
-        for (uid, entry) in &self.entries {
-            let time = &entry.time_range;
-            add(time, *uid, &mut all_points, &mut points, &mut util_points);
-            add_waiters(&entry.waiters, *uid, &mut util_points);
-        }
+        let mut all_points_device = Vec::new();
+        let mut points_device = Vec::new();
+        let mut util_points_device = Vec::new();
 
-        points.sort_by_key(|a| a.time_key());
-        util_points.sort_by_key(|a| a.time_key());
-
-        // Hack: This is a max heap so reverse the values as they go in.
-        let mut free_levels = BinaryHeap::<Reverse<u32>>::new();
-        for point in &points {
-            if point.first {
-                let level = if let Some(level) = free_levels.pop() {
-                    level.0
-                } else {
-                    self.max_levels.postincrement()
-                };
-                self.entry_mut(point.entry).base.set_level(level);
-            } else {
-                let level = self.entry(point.entry).base.level.unwrap();
-                free_levels.push(Reverse(level));
+        if self.kind == ProcKind::GPU {
+            // On GPUs, split the entries between GPU kernels (which
+            // we put on the device timeline) and other tasks (which
+            // we put on the host timeline).
+            for (uid, entry) in &self.entries {
+                let time = &entry.time_range;
+                match entry.kind {
+                    ProcEntryKind::GPUKernel(_, _) => {
+                        add(
+                            time,
+                            *uid,
+                            &mut all_points_device,
+                            &mut points_device,
+                            &mut util_points_device,
+                        );
+                        add_waiters(&entry.waiters, *uid, &mut util_points_device);
+                    }
+                    _ => {
+                        add(time, *uid, &mut all_points, &mut points, &mut util_points);
+                        add_waiters(&entry.waiters, *uid, &mut util_points);
+                    }
+                }
+            }
+        } else {
+            for (uid, entry) in &self.entries {
+                let time = &entry.time_range;
+                add(time, *uid, &mut all_points, &mut points, &mut util_points);
+                add_waiters(&entry.waiters, *uid, &mut util_points);
             }
         }
 
-        all_points.sort_by_key(|a| a.time_key());
+        let mut sort_and_stack =
+            |max_levels: &mut u32,
+             max_levels_ready: &mut u32,
+             all_points: &mut Vec<ProcPoint>,
+             points: &mut Vec<ProcPoint>,
+             util_points: &mut Vec<ProcPoint>| {
+                points.sort_by_key(|a| a.time_key());
+                util_points.sort_by_key(|a| a.time_key());
 
-        // Hack: This is a max heap so reverse the values as they go in.
-        let mut free_levels_ready = BinaryHeap::<Reverse<u32>>::new();
-        for point in &all_points {
-            if point.first {
-                let level = if let Some(level) = free_levels_ready.pop() {
-                    level.0
-                } else {
-                    self.max_levels_ready.postincrement()
-                };
-                self.entry_mut(point.entry).base.set_level_ready(level);
-            } else {
-                let level = self.entry(point.entry).base.level_ready.unwrap();
-                free_levels_ready.push(Reverse(level));
-            }
-        }
+                // Hack: This is a max heap so reverse the values as they go in.
+                let mut free_levels = BinaryHeap::<Reverse<u32>>::new();
+                for point in points.iter() {
+                    if point.first {
+                        let level = if let Some(level) = free_levels.pop() {
+                            level.0
+                        } else {
+                            max_levels.postincrement()
+                        };
+                        self.entry_mut(point.entry).base.set_level(level);
+                    } else {
+                        let level = self.entry(point.entry).base.level.unwrap();
+                        free_levels.push(Reverse(level));
+                    }
+                }
 
-        // Rendering of the profile will never use non-first points, so we can
-        // throw those away now.
-        points.retain(|p| p.first);
+                all_points.sort_by_key(|a| a.time_key());
 
+                // Hack: This is a max heap so reverse the values as they go in.
+                let mut free_levels_ready = BinaryHeap::<Reverse<u32>>::new();
+                for point in all_points {
+                    if point.first {
+                        let level = if let Some(level) = free_levels_ready.pop() {
+                            level.0
+                        } else {
+                            max_levels_ready.postincrement()
+                        };
+                        self.entry_mut(point.entry).base.set_level_ready(level);
+                    } else {
+                        let level = self.entry(point.entry).base.level_ready.unwrap();
+                        free_levels_ready.push(Reverse(level));
+                    }
+                }
+
+                // Rendering of the profile will never use non-first points, so we can
+                // throw those away now.
+                points.retain(|p| p.first);
+            };
+
+        let mut max_levels = 0;
+        let mut max_levels_ready = 0;
+        let mut max_levels_device = 0;
+        let mut max_levels_ready_device = 0;
+        sort_and_stack(
+            &mut max_levels,
+            &mut max_levels_ready,
+            &mut all_points,
+            &mut points,
+            &mut util_points,
+        );
+        sort_and_stack(
+            &mut max_levels_device,
+            &mut max_levels_ready_device,
+            &mut all_points_device,
+            &mut points_device,
+            &mut util_points_device,
+        );
+
+        self.max_levels = max_levels;
+        self.max_levels_ready = max_levels_ready;
         self.time_points = points;
         self.util_time_points = util_points;
+
+        self.max_levels_device = max_levels_device;
+        self.max_levels_ready_device = max_levels_ready_device;
+        self.time_points_device = points_device;
+        self.util_time_points_device = util_points_device;
+    }
+
+    fn stack_time_points(&mut self) {
+        let mut time_points = Vec::new();
+        std::mem::swap(&mut time_points, &mut self.time_points);
+        self.time_points_stacked = self.stack(time_points, self.max_levels);
+
+        let mut time_points_device = Vec::new();
+        std::mem::swap(&mut time_points_device, &mut self.time_points_device);
+        self.time_points_stacked_device = self.stack(time_points_device, self.max_levels_device);
     }
 
     pub fn is_visible(&self) -> bool {
@@ -789,15 +963,50 @@ impl Proc {
 
 impl Container for Proc {
     type E = ProfUID;
-    type S = u64;
+    type S = Timestamp;
     type Entry = ProcEntry;
 
-    fn max_levels(&self) -> usize {
-        self.max_levels as usize
+    fn max_levels(&self, device: Option<DeviceKind>) -> u32 {
+        match device {
+            Some(DeviceKind::Device) => self.max_levels_device,
+            Some(DeviceKind::Host) => self.max_levels,
+            None => self.max_levels,
+        }
     }
 
-    fn time_points(&self) -> &Vec<TimePoint<Self::E, Self::S>> {
-        &self.time_points
+    fn max_levels_ready(&self, device: Option<DeviceKind>) -> u32 {
+        match device {
+            Some(DeviceKind::Device) => self.max_levels_ready_device,
+            Some(DeviceKind::Host) => self.max_levels_ready,
+            None => self.max_levels_ready,
+        }
+    }
+
+    fn time_points(&self, device: Option<DeviceKind>) -> &Vec<TimePoint<Self::E, Self::S>> {
+        match device {
+            Some(DeviceKind::Device) => &self.time_points_device,
+            Some(DeviceKind::Host) => &self.time_points,
+            None => &self.time_points,
+        }
+    }
+
+    fn time_points_stacked(
+        &self,
+        device: Option<DeviceKind>,
+    ) -> &Vec<Vec<TimePoint<Self::E, Self::S>>> {
+        match device {
+            Some(DeviceKind::Device) => &self.time_points_stacked_device,
+            Some(DeviceKind::Host) => &self.time_points_stacked,
+            None => &self.time_points_stacked,
+        }
+    }
+
+    fn util_time_points(&self, device: Option<DeviceKind>) -> &Vec<TimePoint<Self::E, Self::S>> {
+        match device {
+            Some(DeviceKind::Device) => &self.util_time_points_device,
+            Some(DeviceKind::Host) => &self.util_time_points,
+            None => &self.util_time_points,
+        }
     }
 
     fn entry(&self, prof_uid: ProfUID) -> &ProcEntry {
@@ -811,7 +1020,7 @@ impl Container for Proc {
 
 pub type MemEntry = Inst;
 
-pub type MemPoint = TimePoint<InstUID, u64>;
+pub type MemPoint = TimePoint<InstUID, Timestamp>;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, LowerHex)]
 pub struct MemID(pub u64);
@@ -834,9 +1043,10 @@ pub struct Mem {
     pub kind: MemKind,
     pub capacity: u64,
     pub insts: BTreeMap<InstUID, Inst>,
-    pub time_points: Vec<MemPoint>,
-    pub util_time_points: Vec<MemPoint>,
-    pub max_live_insts: u32,
+    time_points: Vec<MemPoint>,
+    time_points_stacked: Vec<Vec<MemPoint>>,
+    util_time_points: Vec<MemPoint>,
+    max_live_insts: u32,
     visible: bool,
 }
 
@@ -848,6 +1058,7 @@ impl Mem {
             capacity,
             insts: BTreeMap::new(),
             time_points: Vec::new(),
+            time_points_stacked: Vec::new(),
             util_time_points: Vec::new(),
             max_live_insts: 0,
             visible: true,
@@ -875,17 +1086,27 @@ impl Mem {
                 inst.time_range.start.unwrap(),
                 *key,
                 true,
-                std::u64::MAX - inst.time_range.stop.unwrap().0,
+                Timestamp::MAX - inst.time_range.stop.unwrap(),
             ));
-            time_points.push(MemPoint::new(inst.time_range.stop.unwrap(), *key, false, 0));
+            time_points.push(MemPoint::new(
+                inst.time_range.stop.unwrap(),
+                *key,
+                false,
+                Timestamp::ZERO,
+            ));
 
             time_points_level.push(MemPoint::new(
                 inst.time_range.create.unwrap(),
                 *key,
                 true,
-                std::u64::MAX - inst.time_range.stop.unwrap().0,
+                Timestamp::MAX - inst.time_range.stop.unwrap(),
             ));
-            time_points_level.push(MemPoint::new(inst.time_range.stop.unwrap(), *key, false, 0));
+            time_points_level.push(MemPoint::new(
+                inst.time_range.stop.unwrap(),
+                *key,
+                false,
+                Timestamp::ZERO,
+            ));
         }
         time_points.sort_by_key(|a| a.time_key());
         time_points_level.sort_by_key(|a| a.time_key());
@@ -917,6 +1138,12 @@ impl Mem {
         self.util_time_points = time_points;
     }
 
+    fn stack_time_points(&mut self) {
+        let mut time_points = Vec::new();
+        std::mem::swap(&mut time_points, &mut self.time_points);
+        self.time_points_stacked = self.stack(time_points, self.max_live_insts);
+    }
+
     pub fn is_visible(&self) -> bool {
         self.visible
     }
@@ -924,15 +1151,34 @@ impl Mem {
 
 impl Container for Mem {
     type E = InstUID;
-    type S = u64;
+    type S = Timestamp;
     type Entry = Inst;
 
-    fn max_levels(&self) -> usize {
-        self.max_live_insts as usize
+    fn max_levels(&self, device: Option<DeviceKind>) -> u32 {
+        assert!(device.is_none());
+        self.max_live_insts
     }
 
-    fn time_points(&self) -> &Vec<TimePoint<Self::E, Self::S>> {
+    fn max_levels_ready(&self, _device: Option<DeviceKind>) -> u32 {
+        unreachable!()
+    }
+
+    fn time_points(&self, device: Option<DeviceKind>) -> &Vec<TimePoint<Self::E, Self::S>> {
+        assert!(device.is_none());
         &self.time_points
+    }
+
+    fn time_points_stacked(
+        &self,
+        device: Option<DeviceKind>,
+    ) -> &Vec<Vec<TimePoint<Self::E, Self::S>>> {
+        assert!(device.is_none());
+        &self.time_points_stacked
+    }
+
+    fn util_time_points(&self, device: Option<DeviceKind>) -> &Vec<TimePoint<Self::E, Self::S>> {
+        assert!(device.is_none());
+        &self.util_time_points
     }
 
     fn entry(&self, inst_uid: InstUID) -> &Inst {
@@ -1086,7 +1332,7 @@ impl ContainerEntry for ChanEntry {
     }
 }
 
-pub type ChanPoint = TimePoint<ProfUID, u64>;
+pub type ChanPoint = TimePoint<ProfUID, Timestamp>;
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, TryFromPrimitive)]
 #[repr(u32)]
@@ -1161,12 +1407,13 @@ impl ChanID {
 pub struct Chan {
     pub chan_id: ChanID,
     entries: BTreeMap<ProfUID, ChanEntry>,
-    pub copies: BTreeMap<EventID, ProfUID>,
-    pub fills: BTreeMap<EventID, ProfUID>,
-    pub depparts: BTreeMap<OpID, Vec<ProfUID>>,
-    pub time_points: Vec<ChanPoint>,
-    pub util_time_points: Vec<ChanPoint>,
-    pub max_levels: u32,
+    copies: BTreeMap<EventID, ProfUID>,
+    fills: BTreeMap<EventID, ProfUID>,
+    depparts: BTreeMap<OpID, Vec<ProfUID>>,
+    time_points: Vec<ChanPoint>,
+    time_points_stacked: Vec<Vec<ChanPoint>>,
+    util_time_points: Vec<ChanPoint>,
+    max_levels: u32,
     visible: bool,
 }
 
@@ -1179,6 +1426,7 @@ impl Chan {
             fills: BTreeMap::new(),
             depparts: BTreeMap::new(),
             time_points: Vec::new(),
+            time_points_stacked: Vec::new(),
             util_time_points: Vec::new(),
             max_levels: 0,
             visible: true,
@@ -1221,13 +1469,8 @@ impl Chan {
         fn add(time: TimeRange, prof_uid: ProfUID, points: &mut Vec<ChanPoint>) {
             let start = time.start.unwrap();
             let stop = time.stop.unwrap();
-            points.push(ChanPoint::new(
-                start,
-                prof_uid,
-                true,
-                std::u64::MAX - stop.0,
-            ));
-            points.push(ChanPoint::new(stop, prof_uid, false, 0));
+            points.push(ChanPoint::new(start, prof_uid, true, Timestamp::MAX - stop));
+            points.push(ChanPoint::new(stop, prof_uid, false, Timestamp::ZERO));
         }
 
         let mut points = Vec::new();
@@ -1259,6 +1502,12 @@ impl Chan {
         self.util_time_points = points;
     }
 
+    fn stack_time_points(&mut self) {
+        let mut time_points = Vec::new();
+        std::mem::swap(&mut time_points, &mut self.time_points);
+        self.time_points_stacked = self.stack(time_points, self.max_levels);
+    }
+
     pub fn is_visible(&self) -> bool {
         self.visible
     }
@@ -1266,15 +1515,34 @@ impl Chan {
 
 impl Container for Chan {
     type E = ProfUID;
-    type S = u64;
+    type S = Timestamp;
     type Entry = ChanEntry;
 
-    fn max_levels(&self) -> usize {
-        self.max_levels as usize
+    fn max_levels(&self, device: Option<DeviceKind>) -> u32 {
+        assert!(device.is_none());
+        self.max_levels
     }
 
-    fn time_points(&self) -> &Vec<TimePoint<Self::E, Self::S>> {
+    fn max_levels_ready(&self, _device: Option<DeviceKind>) -> u32 {
+        unreachable!()
+    }
+
+    fn time_points(&self, device: Option<DeviceKind>) -> &Vec<TimePoint<Self::E, Self::S>> {
+        assert!(device.is_none());
         &self.time_points
+    }
+
+    fn time_points_stacked(
+        &self,
+        device: Option<DeviceKind>,
+    ) -> &Vec<Vec<TimePoint<Self::E, Self::S>>> {
+        assert!(device.is_none());
+        &self.time_points_stacked
+    }
+
+    fn util_time_points(&self, device: Option<DeviceKind>) -> &Vec<TimePoint<Self::E, Self::S>> {
+        assert!(device.is_none());
+        &self.util_time_points
     }
 
     fn entry(&self, prof_uid: ProfUID) -> &ChanEntry {
@@ -1942,13 +2210,12 @@ impl TimeRange {
     }
     fn trim_time_range(&mut self, start: Timestamp, stop: Timestamp) -> bool {
         let clip = |value| {
-            let value = value - start;
-            if value < 0.into() {
-                0.into()
-            } else if value > stop - start {
+            if value <= start {
+                Timestamp::ZERO
+            } else if value - start > stop - start {
                 stop - start
             } else {
-                value
+                value - start
             }
         };
 
@@ -1996,17 +2263,21 @@ impl Waiters {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
-pub struct OpID(pub u64);
+pub struct OpID(pub NonMaxU64);
+
+impl OpID {
+    pub const ZERO: OpID = OpID(NonMaxU64::ZERO);
+}
 
 impl From<spy::serialize::UniqueID> for OpID {
     fn from(e: spy::serialize::UniqueID) -> Self {
-        OpID(e.0)
+        OpID(NonMaxU64::new(e.0).unwrap())
     }
 }
 
 impl From<spy::serialize::ContextID> for OpID {
     fn from(e: spy::serialize::ContextID) -> Self {
-        OpID(e.0)
+        OpID(NonMaxU64::new(e.0).unwrap())
     }
 }
 
@@ -2077,14 +2348,9 @@ impl Operation {
             operation_inst_infos: Vec::new(),
         }
     }
-    fn set_parent_id(&mut self, parent_id: OpID) -> &mut Self {
-        let parent = if parent_id == OpID(std::u64::MAX) {
-            None
-        } else {
-            Some(parent_id)
-        };
-        assert!(self.parent_id.is_none() || self.parent_id == parent);
-        self.parent_id = parent;
+    fn set_parent_id(&mut self, parent_id: Option<OpID>) -> &mut Self {
+        assert!(self.parent_id.is_none() || self.parent_id == parent_id);
+        self.parent_id = parent_id;
         self
     }
     fn set_kind(&mut self, kind: OpKindID) -> &mut Self {
@@ -2472,10 +2738,67 @@ impl ProfUIDAllocator {
 }
 
 #[derive(Debug, Default)]
+pub struct RuntimeConfig {
+    pub debug: bool,
+    pub spy: bool,
+    pub gc: bool,
+    pub inorder: bool,
+    pub safe_mapper: bool,
+    pub safe_runtime: bool,
+    pub safe_ctrlrepl: bool,
+    pub part_checks: bool,
+    pub bounds_checks: bool,
+    pub resilient: bool,
+}
+
+impl RuntimeConfig {
+    pub fn any(&self) -> bool {
+        self.debug
+            || self.spy
+            || self.gc
+            || self.inorder
+            || self.safe_mapper
+            || self.safe_runtime
+            || self.safe_ctrlrepl
+            || self.part_checks
+            || self.bounds_checks
+            || self.resilient
+    }
+}
+
+impl fmt::Display for RuntimeConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut first = true;
+        let mut conf = |cond, name| {
+            if cond {
+                if !first {
+                    write!(f, ", ")?;
+                }
+                write!(f, "{}", name)?;
+                first = false;
+            }
+            Ok(())
+        };
+
+        conf(self.debug, "Debug Mode")?;
+        conf(self.spy, "Legion Spy")?;
+        conf(self.gc, "Legion GC")?;
+        conf(self.inorder, "-lg:inorder")?;
+        conf(self.safe_mapper && !self.debug, "-lg:safe_mapper")?;
+        conf(self.safe_runtime && !self.debug, "Safe Runtime")?;
+        conf(self.safe_ctrlrepl, "-lg:safe_ctrlrepl")?;
+        conf(self.part_checks, "-lg:partcheck")?;
+        conf(self.bounds_checks, "Bounds Checks")?;
+        conf(self.resilient, "Resilience")
+    }
+}
+
+#[derive(Debug, Default)]
 pub struct State {
     prof_uid_allocator: ProfUIDAllocator,
     max_dim: i32,
     pub num_nodes: u32,
+    pub runtime_config: RuntimeConfig,
     pub zero_time: TimestampDelta,
     pub _calibration_err: i64,
     pub procs: BTreeMap<ProcID, Proc>,
@@ -2640,7 +2963,11 @@ impl State {
         proc.create_proc_entry(
             Base::new(alloc),
             None,
-            if op_id.0 > 0 { Some(op_id) } else { None },
+            if op_id != OpID::ZERO {
+                Some(op_id)
+            } else {
+                None
+            },
             ProcEntryKind::MapperCall(kind),
             time_range,
             fevent,
@@ -2665,6 +2992,31 @@ impl State {
             None,
             None,
             ProcEntryKind::RuntimeCall(kind),
+            time_range,
+            fevent,
+            fevent,
+            &mut self.op_prof_uid,
+            &mut self.prof_uid_proc,
+            &mut self.fevents,
+        )
+    }
+
+    fn create_gpu_kernel(
+        &mut self,
+        op_id: OpID,
+        proc_id: ProcID,
+        task_id: TaskID,
+        variant_id: VariantID,
+        time_range: TimeRange,
+        fevent: EventID,
+    ) -> &mut ProcEntry {
+        let alloc = &mut self.prof_uid_allocator;
+        let proc = self.procs.get_mut(&proc_id).unwrap();
+        proc.create_proc_entry(
+            Base::new(alloc),
+            Some(op_id),
+            None,
+            ProcEntryKind::GPUKernel(task_id, variant_id),
             time_range,
             fevent,
             fevent,
@@ -2864,13 +3216,13 @@ impl State {
         if let Some(proc_id) = self.prof_uid_proc.get(&prof_uid) {
             let proc = self.procs.get(proc_id).unwrap();
             let entry = &proc.entry(prof_uid);
-            let mut total = 0;
-            let mut start = entry.time_range.start.unwrap().0;
+            let mut total = 0u64;
+            let mut start = entry.time_range.start.unwrap().to_ns();
             for wait in &entry.waiters.wait_intervals {
-                total += wait.start.0 - start;
-                start = wait.end.0;
+                total += wait.start.to_ns() - start;
+                start = wait.end.to_ns();
             }
-            total += entry.time_range.stop.unwrap().0 - start;
+            total += entry.time_range.stop.unwrap().to_ns() - start;
             return total;
         }
         0
@@ -2880,11 +3232,10 @@ impl State {
         if start.is_none() && stop.is_none() {
             return;
         }
-        let start = start.unwrap_or_else(|| 0.into());
+        let start = start.unwrap_or(Timestamp::ZERO);
         let stop = stop.unwrap_or(self.last_time);
 
         assert!(start <= stop);
-        assert!(start >= 0.into());
         assert!(stop <= self.last_time);
 
         for proc in self.procs.values_mut() {
@@ -2965,6 +3316,18 @@ impl State {
         self.chans
             .par_iter_mut()
             .for_each(|(_, chan)| chan.sort_time_range());
+    }
+
+    pub fn stack_time_points(&mut self) {
+        self.procs
+            .par_iter_mut()
+            .for_each(|(_, proc)| proc.stack_time_points());
+        self.mems
+            .par_iter_mut()
+            .for_each(|(_, mem)| mem.stack_time_points());
+        self.chans
+            .par_iter_mut()
+            .for_each(|(_, chan)| chan.stack_time_points());
     }
 
     pub fn assign_colors(&mut self) {
@@ -3486,6 +3849,31 @@ fn process_record(
         Record::MaxDimDesc { max_dim } => {
             state.max_dim = *max_dim;
         }
+        Record::RuntimeConfig {
+            debug,
+            spy,
+            gc,
+            inorder,
+            safe_mapper,
+            safe_runtime,
+            safe_ctrlrepl,
+            part_checks,
+            bounds_checks,
+            resilient,
+        } => {
+            state.runtime_config = RuntimeConfig {
+                debug: *debug,
+                spy: *spy,
+                gc: *gc,
+                inorder: *inorder,
+                safe_mapper: *safe_mapper,
+                safe_runtime: *safe_runtime,
+                safe_ctrlrepl: *safe_ctrlrepl,
+                part_checks: *part_checks,
+                bounds_checks: *bounds_checks,
+                resilient: *resilient,
+            };
+        }
         Record::MachineDesc { num_nodes, .. } => {
             state.num_nodes = *num_nodes;
         }
@@ -3713,7 +4101,7 @@ fn process_record(
             // order the logger calls are going to come in. If the task gets
             // logged first, this will come back Some(_) and we'll store it below.
             if let Some(task) = state.find_task_mut(*op_id) {
-                task.initiation_op = Some(*parent_id);
+                task.initiation_op = *parent_id;
             }
         }
         Record::MultiTask { op_id, task_id } => {
@@ -3724,7 +4112,7 @@ fn process_record(
                 .or_insert_with(|| MultiTask::new(*op_id, *task_id));
         }
         Record::SliceOwner { parent_id, op_id } => {
-            let parent_id = OpID(*parent_id);
+            let parent_id = OpID(NonMaxU64::new(*parent_id).unwrap());
             state.create_op(parent_id);
             state.create_op(*op_id); //.set_owner(parent_id);
         }
@@ -3786,20 +4174,23 @@ fn process_record(
             proc_id,
             create,
             ready,
+            start,
+            stop,
             gpu_start,
             gpu_stop,
             creator,
             fevent,
-            ..
         } => {
             // it is possible that gpu_start is larger than gpu_stop when cuda hijack is disabled,
             // because the cuda event completions of these two timestamp may be out of order when
             // they are not in the same stream. Usually, when it happened, it means the GPU task is tiny.
             let mut gpu_start = *gpu_start;
             if gpu_start > *gpu_stop {
-                gpu_start.0 = gpu_stop.0 - 1;
+                gpu_start = *gpu_stop - Timestamp::ONE;
             }
-            let time_range = TimeRange::new_full(*create, *ready, gpu_start, *gpu_stop);
+            let gpu_range = TimeRange::new_start(gpu_start, *gpu_stop);
+            state.create_gpu_kernel(*op_id, *proc_id, *task_id, *variant_id, gpu_range, *fevent);
+            let time_range = TimeRange::new_full(*create, *ready, *start, *stop);
             state.create_task(
                 *op_id,
                 *proc_id,
@@ -3809,7 +4200,7 @@ fn process_record(
                 *creator,
                 *fevent,
             );
-            state.update_last_time(*gpu_stop);
+            state.update_last_time(max(*stop, *gpu_stop));
         }
         Record::MetaInfo {
             op_id,

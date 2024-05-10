@@ -1,18 +1,44 @@
 This file lists the major changes as they appear in the stable branch.  No
 attempt is made to keep this list accurate for the master branch.
 
-Version 24.03.0 (March ??, 2024)
+Version 24.03.0 (March 27, 2024)
+  * Build
+    - ROCm 6.0 is now supported, and support for ROCm 4.x has been removed
   * Legion
     - Support for control replication has been merged
     - Support for discarding region contents on task completion
+    - Long-deprecated APIs, such as the old `HighLevel` namespace, have
+       been removed
   * Mappers
     - Default mapper support for control replication
     - Default and null mapper now use C++ `override` keyword
   * Regent
     - Support for pure projection functors that capture arguments
+    - Static control replication (SCR) has been deprecated and will be
+       removed in a future release
   * Tools
+    - The profiler now correctly recognizes the logger format version
+       and throws an error if it does not match
+    - The profiler now reports when a profile was generated with debug
+       mode (or another expensive setting) was enabled
     - Many profiler fixes for correctly rendering runtime and mapper calls
+    - Profiler now renders GPU device and host execution separately
+    - Optimizations to improve profiler memory usage and running time
     - Rust profiler now requires at least Rust 1.74
+  * Realm
+    - Support for registration of dynamically allocated buffers
+    - Support for handling poisoned events for reservation
+    - Refactor CUDA allocation and IPC paths
+    - Support for querying CUDA device information (GPU UUID and ID),
+       process information (process ID, hostname, host ID) and timer
+       calibration error from the profiler
+    - Remove address alignment from serializer and deserializer
+    - Support for creating network shared peers using IPC mailbox
+    - Support OMP thread binding and allow for multiple OMP parallel
+       sections when enabling system OMP runtime
+    - Add Realm unit tests
+    - Fixes for Realm tests, sparsity map, MemoryQuery, dynamic framebuffer
+       memory and memcpy channel
 
 Version 23.12.0 (December 14, 2023)
   * Regent

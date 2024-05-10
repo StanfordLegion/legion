@@ -3471,7 +3471,7 @@ class State(object):
         'minimum_call_threshold', 'mapper_call_kinds', 'mapper_calls', 'runtime_call_kinds', 
         'runtime_calls', 'instances', 'index_spaces', 'partitions', 'logical_regions', 
         'field_spaces', 'fields', 'has_spy_data', 'spy_state', 'callbacks', 'copy_map',
-        'fill_map', 'visible_nodes', 'always_parsed_callbacks', 'current_node_id',
+        'fill_map', 'visible_nodes', 'always_parsed_callbacks', 'current_node_id', 'version',
         'hostname', 'host_id', 'process_id', 'calibration_err',
     ]
     def __init__(self, call_threshold: int) -> None:
@@ -3514,6 +3514,7 @@ class State(object):
             "MetaDesc": self.log_meta_desc,
             "OpDesc": self.log_op_desc,
             "MaxDimDesc": self.log_max_dim,
+            "RuntimeConfig": self.log_runtime_config,
             "MachineDesc": self.log_machine_desc,
             "ZeroTime": self.log_zero_time,
             "ProcDesc": self.log_proc_desc,
@@ -3557,6 +3558,7 @@ class State(object):
             #"UserInfo": self.log_user_info
         }
         self.current_node_id: Optional[int] = None
+        self.version: Optional[int] = None
         self.hostname = ""
         self.host_id = 0
         self.process_id = 0
@@ -3571,20 +3573,33 @@ class State(object):
     def log_max_dim(self, max_dim: int) -> None:
         self.max_dim = max_dim
 
+    @typecheck
+    def log_runtime_config(self, debug: bool, spy: bool,
+                           gc: bool, inorder: bool,
+                           safe_mapper: bool, safe_runtime: bool,
+                           safe_ctrlrepl: bool, part_checks: bool,
+                           bounds_checks: bool, resilient: bool) -> None:
+        pass
+
     # MachineDesc
     @typecheck
     def log_machine_desc(self, node_id: int, num_nodes: int,
+                         version: int,
                          hostname: str, host_id: int,
-                         process_id: int) -> int:
+                         process_id: int) -> Tuple[int, int]:
         if self.num_nodes == 0:
             self.num_nodes = num_nodes
         else:
             assert self.num_nodes == num_nodes
         self.current_node_id = node_id
+        if self.version is None:
+            self.version = version
+        else:
+            assert self.version == version
         self.hostname = hostname
         self.host_id = host_id
         self.process_id = process_id
-        return node_id
+        return node_id, version
 
     # ZeroTime
     @typecheck

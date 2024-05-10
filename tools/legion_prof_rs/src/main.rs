@@ -316,12 +316,13 @@ fn main() -> io::Result<()> {
     state.check_message_latencies(message_threshold, message_percentage);
     state.filter_output();
     if cli.statistics {
-        analyze::print_statistics(&state);
+        analyze::analyze_statistics(&state);
     } else if cli.trace {
         trace_viewer::emit_trace(&state, cli.output, cli.force)?;
     } else if cli.archive {
         #[cfg(feature = "archiver")]
         {
+            state.stack_time_points();
             state.assign_colors();
             archiver::write(
                 state,
@@ -335,12 +336,14 @@ fn main() -> io::Result<()> {
     } else if cli.serve {
         #[cfg(feature = "server")]
         {
+            state.stack_time_points();
             state.assign_colors();
             server::start(state, &cli.host, cli.port);
         }
     } else if cli.view {
         #[cfg(feature = "viewer")]
         {
+            state.stack_time_points();
             state.assign_colors();
             viewer::start(state);
         }

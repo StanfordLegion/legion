@@ -14,8 +14,11 @@
 
 import "regent"
 
+local format = require("std/format")
+
+__demand(__replicable)
 task main()
-  regentlib.c.printf("Main running...\n")
-  regentlib.c.printf("Main complete.\n")
+  format.println("Main running...")
+  format.println("Main complete.")
 end
 regentlib.start(main)

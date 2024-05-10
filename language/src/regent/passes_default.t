@@ -30,12 +30,6 @@ local parallelize_tasks = require("regent/parallelize_tasks")
 local skip_empty_tasks = require("regent/skip_empty_tasks")
 local vectorize_loops = require("regent/vectorize_loops")
 
-if std.config["flow"] then
-  require("regent/flow_from_ast") -- priority 15
-  require("regent/flow_spmd")     -- priority 16
-  require("regent/flow_to_ast")   -- priority 24
-end
-
 local needs_check_parallelizable =
   std.config["parallelize"] or std.config["openmp"] or std.config["cuda"] or std.config["vectorize"]
 
@@ -55,7 +49,6 @@ if std.config["predicate"] then passes_hooks.add_optimization(40, optimize_predi
 if std.config["mapping"] then passes_hooks.add_optimization(50, optimize_mapping) end
 if std.config["trace"] then passes_hooks.add_optimization(60, optimize_traces) end
 if std.config["no-dynamic-branches"] then passes_hooks.add_optimization(70, optimize_divergence) end
-if needs_check_parallelizable and std.config["flow"] then passes_hooks.add_optimization(75, check_parallelizable) end
 if std.config["vectorize"] then passes_hooks.add_optimization(80, vectorize_loops) end
 
 passes_hooks.debug_optimizations()

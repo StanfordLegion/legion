@@ -27,10 +27,6 @@ namespace Legion {
     };
 
     // Make sure all the handle types are trivially copyable.
-
-    // Note: GCC 4.9 breaks even with C++11, so for now peg this on
-    // C++14 until we deprecate GCC 4.9 support.
-#if !defined(__GNUC__) || (__GNUC__ >= 5)
     static_assert(std::is_trivially_copyable<IndexSpace>::value,
                   "IndexSpace is not trivially copyable");
     static_assert(std::is_trivially_copyable<IndexPartition>::value,
@@ -52,7 +48,6 @@ namespace Legion {
                   "LogicalPartitionT is not trivially copyable");
     LEGION_FOREACH_N(DIMFUNC)
 #undef DIMFUNC
-#endif
 
     const LogicalRegion LogicalRegion::NO_REGION = LogicalRegion();
     const LogicalPartition LogicalPartition::NO_PART = LogicalPartition();  
@@ -1250,29 +1245,6 @@ namespace Legion {
         }
       }
     }
-
-#ifdef LEGION_PRIVILEGE_CHECKS
-    //--------------------------------------------------------------------------
-    unsigned RegionRequirement::get_accessor_privilege(void) const
-    //--------------------------------------------------------------------------
-    {
-      switch (privilege)
-      {
-        case LEGION_NO_ACCESS:
-          return LegionRuntime::ACCESSOR_NONE;
-        case LEGION_READ_ONLY:
-          return LegionRuntime::ACCESSOR_READ;
-        case LEGION_READ_WRITE:
-        case LEGION_WRITE_DISCARD:
-          return LegionRuntime::ACCESSOR_ALL;
-        case LEGION_REDUCE:
-          return LegionRuntime::ACCESSOR_REDUCE;
-        default:
-          assert(false);
-      }
-      return LegionRuntime::ACCESSOR_NONE;
-    }
-#endif
 
     //--------------------------------------------------------------------------
     bool RegionRequirement::has_field_privilege(FieldID fid) const
@@ -2779,31 +2751,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    LegionRuntime::Accessor::RegionAccessor<
-      LegionRuntime::Accessor::AccessorType::Generic>
-        PhysicalRegion::get_accessor(bool silence_warnings) const
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(impl != NULL);
-#endif
-      return impl->get_accessor(silence_warnings);
-    }
-
-    //--------------------------------------------------------------------------
-    LegionRuntime::Accessor::RegionAccessor<
-      LegionRuntime::Accessor::AccessorType::Generic>
-        PhysicalRegion::get_field_accessor(FieldID fid, 
-                                           bool silence_warnings) const
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(impl != NULL);
-#endif
-      return impl->get_field_accessor(fid, silence_warnings);
-    }
-
-    //--------------------------------------------------------------------------
     void PhysicalRegion::get_memories(std::set<Memory>& memories,
                         bool silence_warnings, const char *warning_string) const
     //--------------------------------------------------------------------------
@@ -2986,7 +2933,9 @@ namespace Legion {
     {
       Machine machine = Realm::Machine::get_machine();
       Machine::MemoryQuery finder(machine);
-      const Processor exec_proc = Processor::get_executing_processor();
+      Runtime *runtime = Runtime::get_runtime();
+      Context ctx = Runtime::get_context();
+      const Processor exec_proc = runtime->get_executing_processor(ctx);
       finder.best_affinity_to(exec_proc);
       finder.only_kind(memkind);
       if (finder.count() == 0)
@@ -3007,7 +2956,6 @@ namespace Legion {
           REALM_PROCESSOR_KINDS(PROC_NAMES)
 #undef PROC_NAMES
         };
-        Context ctx = Runtime::get_context();
         REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
             "Unable to find associated %s memory for %s processor when "
             "performing an UntypedDeferredValue creation in task %s (UID %lld)",
@@ -3025,7 +2973,6 @@ namespace Legion {
         Realm::InstanceLayoutGeneric::choose_instance_layout(bounds, 
             constraints, dim_order);
       layout->alignment_reqd = alignment;
-      Runtime *runtime = Runtime::get_runtime();
       instance = runtime->create_task_local_instance(memory, layout);
       if (initial_value != NULL)
       {
@@ -3360,152 +3307,6 @@ namespace Legion {
         index = impl->get_next(index, current_piece);
       return valid();
     }
-
-    LEGION_DISABLE_DEPRECATED_WARNINGS
-
-    /////////////////////////////////////////////////////////////
-    // Index Iterator  
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    IndexIterator::IndexIterator(void)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    IndexIterator::IndexIterator(const Domain &dom, ptr_t start)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(dom.get_dim() == 1);
-#endif
-      const DomainT<1,coord_t> is = dom;
-      is_iterator = Realm::IndexSpaceIterator<1,coord_t>(is);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexIterator::IndexIterator(Runtime *rt, Context ctx,
-                                 IndexSpace space, ptr_t start)
-    //--------------------------------------------------------------------------
-    {
-      Domain dom = rt->get_index_space_domain(ctx, space);
-#ifdef DEBUG_LEGION
-      assert(dom.get_dim() == 1);
-#endif
-      const DomainT<1,coord_t> is = dom;
-      is_iterator = Realm::IndexSpaceIterator<1,coord_t>(is);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexIterator::IndexIterator(Runtime *rt, Context ctx,
-                                 LogicalRegion handle, ptr_t start)
-    //--------------------------------------------------------------------------
-    {
-      Domain dom = rt->get_index_space_domain(ctx, handle.get_index_space());
-#ifdef DEBUG_LEGION
-      assert(dom.get_dim() == 1);
-#endif
-      const DomainT<1,coord_t> is = dom;
-      is_iterator = Realm::IndexSpaceIterator<1,coord_t>(is);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexIterator::IndexIterator(Runtime *rt, IndexSpace space, ptr_t start)
-    //--------------------------------------------------------------------------
-    {
-      Domain dom = rt->get_index_space_domain(space);
-#ifdef DEBUG_LEGION
-      assert(dom.get_dim() == 1);
-#endif
-      const DomainT<1,coord_t> is = dom;
-      is_iterator = Realm::IndexSpaceIterator<1,coord_t>(is);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexIterator::IndexIterator(const IndexIterator &rhs)
-      : is_iterator(rhs.is_iterator), rect_iterator(rhs.rect_iterator)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    IndexIterator::~IndexIterator(void)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    IndexIterator& IndexIterator::operator=(const IndexIterator &rhs)
-    //--------------------------------------------------------------------------
-    {
-      is_iterator = rhs.is_iterator;
-      rect_iterator = rhs.rect_iterator;
-      return *this;
-    }
-
-    /////////////////////////////////////////////////////////////
-    // IndexAllocator 
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    IndexAllocator::IndexAllocator(void)
-      : index_space(IndexSpace::NO_SPACE)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    IndexAllocator::IndexAllocator(const IndexAllocator &rhs)
-      : index_space(rhs.index_space), iterator(rhs.iterator)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    IndexAllocator::IndexAllocator(IndexSpace is, IndexIterator itr)
-      : index_space(is), iterator(itr)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    IndexAllocator::~IndexAllocator(void)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    IndexAllocator& IndexAllocator::operator=(const IndexAllocator &rhs)
-    //--------------------------------------------------------------------------
-    {
-      index_space = rhs.index_space;
-      iterator = rhs.iterator;
-      return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    ptr_t IndexAllocator::alloc(unsigned num_elements)
-    //--------------------------------------------------------------------------
-    {
-      size_t allocated = 0;
-      ptr_t result = iterator.next_span(allocated, num_elements);
-      if (allocated == num_elements)
-        return result;
-      else
-        return ptr_t::nil();
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexAllocator::free(ptr_t ptr, unsigned num_elements)
-    //--------------------------------------------------------------------------
-    {
-      Internal::log_run.error("Dynamic free of index space points is "
-                              "no longer supported");
-      assert(false);
-    }
-
-    LEGION_REENABLE_DEPRECATED_WARNINGS
 
     /////////////////////////////////////////////////////////////
     // Field Allocator
@@ -4077,160 +3878,6 @@ namespace Legion {
     }
     
     /////////////////////////////////////////////////////////////
-    // Coloring Serializer 
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    ColoringSerializer::ColoringSerializer(const Coloring &c)
-      : coloring(c)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    size_t ColoringSerializer::legion_buffer_size(void) const
-    //--------------------------------------------------------------------------
-    {
-      size_t result = sizeof(size_t); // number of elements
-      for (Coloring::const_iterator it = coloring.begin();
-            it != coloring.end(); it++)
-      {
-        result += sizeof(Color);
-        result += 2*sizeof(size_t); // number of each kind of pointer
-        result += (it->second.points.size() * sizeof(ptr_t));
-        result += (it->second.ranges.size() * 2 * sizeof(ptr_t));
-      }
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    size_t ColoringSerializer::legion_serialize(void *buffer) const
-    //--------------------------------------------------------------------------
-    {
-      char *target = (char*)buffer; 
-      *((size_t*)target) = coloring.size();
-      target += sizeof(size_t);
-      for (Coloring::const_iterator it = coloring.begin();
-            it != coloring.end(); it++)
-      {
-        *((Color*)target) = it->first;
-        target += sizeof(it->first);
-        *((size_t*)target) = it->second.points.size();
-        target += sizeof(size_t);
-        for (std::set<ptr_t>::const_iterator ptr_it = it->second.points.begin();
-              ptr_it != it->second.points.end(); ptr_it++)
-        {
-          *((ptr_t*)target) = *ptr_it;
-          target += sizeof(ptr_t);
-        }
-        *((size_t*)target) = it->second.ranges.size();
-        target += sizeof(size_t);
-        for (std::set<std::pair<ptr_t,ptr_t> >::const_iterator range_it = 
-              it->second.ranges.begin(); range_it != it->second.ranges.end();
-              range_it++)
-        {
-          *((ptr_t*)target) = range_it->first;
-          target += sizeof(range_it->first);
-          *((ptr_t*)target) = range_it->second;
-          target += sizeof(range_it->second);
-        }
-      }
-      return (size_t(target) - size_t(buffer));
-    }
-
-    //--------------------------------------------------------------------------
-    size_t ColoringSerializer::legion_deserialize(const void *buffer)
-    //--------------------------------------------------------------------------
-    {
-      const char *source = (const char*)buffer;
-      size_t num_colors = *((const size_t*)source);
-      source += sizeof(num_colors);
-      for (unsigned idx = 0; idx < num_colors; idx++)
-      {
-        Color c = *((const Color*)source);
-        source += sizeof(c);
-        coloring[c]; // Force coloring to exist even if empty.
-        size_t num_points = *((const size_t*)source);
-        source += sizeof(num_points);
-        for (unsigned p = 0; p < num_points; p++)
-        {
-          ptr_t ptr = *((const ptr_t*)source);
-          source += sizeof(ptr);
-          coloring[c].points.insert(ptr);
-        }
-        size_t num_ranges = *((const size_t*)source);
-        source += sizeof(num_ranges);
-        for (unsigned r = 0; r < num_ranges; r++)
-        {
-          ptr_t start = *((const ptr_t*)source);
-          source += sizeof(start);
-          ptr_t stop = *((const ptr_t*)source);
-          source += sizeof(stop);
-          coloring[c].ranges.insert(std::pair<ptr_t,ptr_t>(start,stop));
-        }
-      }
-      // Return the number of bytes consumed
-      return (size_t(source) - size_t(buffer));
-    }
-
-    /////////////////////////////////////////////////////////////
-    // Domain Coloring Serializer 
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    DomainColoringSerializer::DomainColoringSerializer(const DomainColoring &d)
-      : coloring(d)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    size_t DomainColoringSerializer::legion_buffer_size(void) const
-    //--------------------------------------------------------------------------
-    {
-      size_t result = sizeof(size_t); // number of elements
-      result += (coloring.size() * (sizeof(Color) + sizeof(Domain)));
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    size_t DomainColoringSerializer::legion_serialize(void *buffer) const
-    //--------------------------------------------------------------------------
-    {
-      char *target = (char*)buffer;
-      *((size_t*)target) = coloring.size();
-      target += sizeof(size_t);
-      for (DomainColoring::const_iterator it = coloring.begin();
-            it != coloring.end(); it++)
-      {
-        *((Color*)target) = it->first; 
-        target += sizeof(it->first);
-        *((Domain*)target) = it->second;
-        target += sizeof(it->second);
-      }
-      return (size_t(target) - size_t(buffer));
-    }
-
-    //--------------------------------------------------------------------------
-    size_t DomainColoringSerializer::legion_deserialize(const void *buffer)
-    //--------------------------------------------------------------------------
-    {
-      const char *source = (const char*)buffer;
-      size_t num_elements = *((const size_t*)source);
-      source += sizeof(size_t);
-      for (unsigned idx = 0; idx < num_elements; idx++)
-      {
-        Color c = *((const Color*)source);
-        source += sizeof(c);
-        Domain d = *((const Domain*)source);
-        source += sizeof(d);
-        coloring[c] = d;
-      }
-      // Return the number of bytes consumed
-      return (size_t(source) - size_t(buffer));
-    }
-
-    /////////////////////////////////////////////////////////////
     // Legion Runtime 
     /////////////////////////////////////////////////////////////
 
@@ -4368,293 +4015,6 @@ namespace Legion {
       Internal::AutoProvenance provenance(prov);
       ctx->destroy_index_space(handle, unordered, recurse, provenance);
     } 
-
-    //--------------------------------------------------------------------------
-    IndexPartition Runtime::create_index_partition(Context ctx,
-                                          IndexSpace parent,
-                                          const Domain &color_space,
-                                          const PointColoring &coloring,
-                                          PartitionKind part_kind,
-                                          Color color, bool allocable)
-    //--------------------------------------------------------------------------
-    {
-      if (allocable)
-        Internal::log_run.warning("WARNING: allocable index partitions are "
-                                  "no longer supported");
-      std::map<DomainPoint,Domain> domains;
-      for (PointColoring::const_iterator cit = 
-            coloring.begin(); cit != coloring.end(); cit++)
-      {
-        if (cit->second.ranges.empty())
-        {
-          std::vector<Realm::Point<1,coord_t> > 
-            points(cit->second.points.size());
-          unsigned index = 0;
-          for (std::set<ptr_t>::const_iterator it = 
-                cit->second.points.begin(); it != 
-                cit->second.points.end(); it++)
-            points[index++] = Realm::Point<1,coord_t>(*it);
-          const Realm::IndexSpace<1,coord_t> space(points);
-          domains[cit->first] = DomainT<1,coord_t>(space);
-        }
-        else
-        {
-          std::vector<Realm::Rect<1,coord_t> >
-            ranges(cit->second.points.size() + cit->second.ranges.size());
-          unsigned index = 0;
-          for (std::set<ptr_t>::const_iterator it = 
-                cit->second.points.begin(); it != 
-                cit->second.points.end(); it++)
-          {
-            Realm::Point<1,coord_t> point(*it);
-            ranges[index++] = Realm::Rect<1,coord_t>(point, point);
-          }
-          for (std::set<std::pair<ptr_t,ptr_t> >::iterator it = 
-                cit->second.ranges.begin(); it !=
-                cit->second.ranges.end(); it++)
-          {
-            Realm::Point<1,coord_t> lo(it->first);
-            Realm::Point<1,coord_t> hi(it->second);
-            ranges[index++] = Realm::Rect<1,coord_t>(lo, hi);
-          }
-          const Realm::IndexSpace<1,coord_t> space(ranges);
-          domains[cit->first] = DomainT<1,coord_t>(space);
-        }
-      }
-      // Make an index space for the color space
-      IndexSpace index_color_space = create_index_space(ctx, color_space);
-      IndexPartition result = create_partition_by_domain(ctx, parent, domains,
-          index_color_space, true/*perform intersections*/, part_kind, color);
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition Runtime::create_index_partition(
-                                          Context ctx, IndexSpace parent,
-                                          const Coloring &coloring,
-                                          bool disjoint,
-                                          Color part_color)
-    //--------------------------------------------------------------------------
-    {
-      std::map<DomainPoint,Domain> domains;
-      Color lower_bound = UINT_MAX, upper_bound = 0;
-      for (Coloring::const_iterator cit = 
-            coloring.begin(); cit != coloring.end(); cit++)
-      {
-        if (cit->first < lower_bound)
-          lower_bound = cit->first;
-        if (cit->first > upper_bound)
-          upper_bound = cit->first;
-        const DomainPoint color = Point<1,coord_t>(cit->first);
-        if (cit->second.ranges.empty())
-        {
-          std::vector<Realm::Point<1,coord_t> > 
-            points(cit->second.points.size());
-          unsigned index = 0;
-          for (std::set<ptr_t>::const_iterator it = 
-                cit->second.points.begin(); it != 
-                cit->second.points.end(); it++)
-            points[index++] = Realm::Point<1,coord_t>(*it);
-          const Realm::IndexSpace<1,coord_t> space(points);
-          domains[color] = DomainT<1,coord_t>(space);
-        }
-        else
-        {
-          std::vector<Realm::Rect<1,coord_t> >
-            ranges(cit->second.points.size() + cit->second.ranges.size());
-          unsigned index = 0;
-          for (std::set<ptr_t>::const_iterator it = 
-                cit->second.points.begin(); it != 
-                cit->second.points.end(); it++)
-          {
-            Realm::Point<1,coord_t> point(*it);
-            ranges[index++] = Realm::Rect<1,coord_t>(point, point);
-          }
-          for (std::set<std::pair<ptr_t,ptr_t> >::iterator it = 
-                cit->second.ranges.begin(); it !=
-                cit->second.ranges.end(); it++)
-          {
-            Realm::Point<1,coord_t> lo(it->first);
-            Realm::Point<1,coord_t> hi(it->second);
-            ranges[index++] = Realm::Rect<1,coord_t>(lo, hi);
-          }
-          const Realm::IndexSpace<1,coord_t> space(ranges);
-          domains[color] = DomainT<1,coord_t>(space);
-        }
-      }
-#ifdef DEBUG_LEGION
-      assert(lower_bound <= upper_bound);
-#endif
-      // Make the color space
-      Rect<1,coord_t> 
-        color_space((Point<1,coord_t>(lower_bound)),
-                    (Point<1,coord_t>(upper_bound)));
-      // Make an index space for the color space
-      IndexSpaceT<1,coord_t> index_color_space = 
-                                  create_index_space(ctx, color_space);
-      IndexPartition result = create_partition_by_domain(ctx, parent, domains,
-          index_color_space, true/*perform intersections*/,
-          (disjoint ? LEGION_DISJOINT_KIND : LEGION_ALIASED_KIND), part_color);
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition Runtime::create_index_partition(Context ctx,
-                                          IndexSpace parent, 
-                                          const Domain &color_space,
-                                          const DomainPointColoring &coloring,
-                                          PartitionKind part_kind, Color color)
-    //--------------------------------------------------------------------------
-    {
-      // Make an index space for the color space
-      IndexSpace index_color_space = create_index_space(ctx, color_space);
-      IndexPartition result = create_partition_by_domain(ctx, parent, coloring,
-          index_color_space, true/*perform intersections*/, part_kind, color);
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition Runtime::create_index_partition(
-                                          Context ctx, IndexSpace parent,
-                                          Domain color_space,
-                                          const DomainColoring &coloring,
-                                          bool disjoint, Color part_color)
-    //--------------------------------------------------------------------------
-    {
-      std::map<DomainPoint,Domain> domains;
-      for (DomainColoring::const_iterator it = 
-            coloring.begin(); it != coloring.end(); it++)
-      {
-        Point<1,coord_t> color(it->first);
-        domains[color] = it->second;
-      }
-      // Make an index space for the color space
-      IndexSpace index_color_space = create_index_space(ctx, color_space);
-      IndexPartition result = create_partition_by_domain(ctx, parent, domains,
-          index_color_space, true/*perform intersections*/,
-          (disjoint ? LEGION_DISJOINT_KIND : LEGION_ALIASED_KIND), part_color);
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition Runtime::create_index_partition(Context ctx,
-                                       IndexSpace parent,
-                                       const Domain &color_space,
-                                       const MultiDomainPointColoring &coloring,
-                                       PartitionKind part_kind, Color color)
-    //--------------------------------------------------------------------------
-    {
-      const int dim = parent.get_dim();
-      std::map<DomainPoint,Domain> domains;
-      Realm::ProfilingRequestSet no_reqs;
-      switch (dim)
-      {
-#define DIMFUNC(DIM) \
-        case DIM:                                                       \
-          {                                                             \
-            for (MultiDomainPointColoring::const_iterator cit =         \
-                  coloring.begin(); cit != coloring.end(); cit++)       \
-            {                                                           \
-              std::vector<Realm::IndexSpace<DIM,coord_t> >              \
-                  subspaces(cit->second.size());                        \
-              unsigned index = 0;                                       \
-              for (std::set<Domain>::const_iterator it =                \
-                    cit->second.begin(); it != cit->second.end(); it++) \
-              {                                                         \
-                const DomainT<DIM,coord_t> domaint = *it;               \
-                subspaces[index++] = domaint;                           \
-              }                                                         \
-              Realm::IndexSpace<DIM,coord_t> summary;                   \
-              Internal::LgEvent wait_on(                                \
-                  Realm::IndexSpace<DIM,coord_t>::compute_union(        \
-                    subspaces, summary, no_reqs));                      \
-              if (wait_on.exists())                                     \
-                wait_on.wait();                                         \
-              summary = summary.tighten();                              \
-              domains[cit->first] = DomainT<DIM,coord_t>(summary);      \
-            }                                                           \
-            break;                                                      \
-          }
-        LEGION_FOREACH_N(DIMFUNC)
-#undef DIMFUNC
-        default:
-          assert(false);
-      }
-      // Make an index space for the color space
-      IndexSpace index_color_space = create_index_space(ctx, color_space);
-      IndexPartition result = create_partition_by_domain(ctx, parent, domains,
-        index_color_space, true/*perform intersections*/, part_kind, color);
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition Runtime::create_index_partition(
-                                          Context ctx, IndexSpace parent,
-                                          Domain color_space,
-                                          const MultiDomainColoring &coloring,
-                                          bool disjoint, Color part_color)
-    //--------------------------------------------------------------------------
-    {
-      const int dim = parent.get_dim();
-      std::map<DomainPoint,Domain> domains;
-      Realm::ProfilingRequestSet no_reqs;
-      switch (dim)
-      {
-#define DIMFUNC(DIM) \
-        case DIM:                                                       \
-          {                                                             \
-            for (MultiDomainColoring::const_iterator cit =              \
-                  coloring.begin(); cit != coloring.end(); cit++)       \
-            {                                                           \
-              std::vector<Realm::IndexSpace<DIM,coord_t> >              \
-                  subspaces(cit->second.size());                        \
-              unsigned index = 0;                                       \
-              for (std::set<Domain>::const_iterator it =                \
-                    cit->second.begin(); it != cit->second.end(); it++) \
-              {                                                         \
-                const DomainT<DIM,coord_t> domaint = *it;               \
-                subspaces[index++] = domaint;                           \
-              }                                                         \
-              Realm::IndexSpace<DIM,coord_t> summary;                   \
-              Internal::LgEvent wait_on(                                \
-                  Realm::IndexSpace<DIM,coord_t>::compute_union(        \
-                    subspaces, summary, no_reqs));                      \
-              const Point<1,coord_t> color(cit->first);                 \
-              if (wait_on.exists())                                     \
-                wait_on.wait();                                         \
-              summary = summary.tighten();                              \
-              domains[color] = DomainT<DIM,coord_t>(summary);           \
-            }                                                           \
-            break;                                                      \
-          }
-        LEGION_FOREACH_N(DIMFUNC)
-#undef DIMFUNC
-        default:
-          assert(false);
-      }
-      // Make an index space for the color space
-      IndexSpace index_color_space = create_index_space(ctx, color_space);
-      IndexPartition result = create_partition_by_domain(ctx, parent, domains,
-        index_color_space, true/*perform intersections*/, 
-        (disjoint ? LEGION_DISJOINT_KIND : LEGION_ALIASED_KIND), part_color);
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition Runtime::create_index_partition(
-                                          Context ctx, IndexSpace parent,
-    LegionRuntime::Accessor::RegionAccessor<
-      LegionRuntime::Accessor::AccessorType::Generic> field_accessor,
-                                                      Color part_color)
-    //--------------------------------------------------------------------------
-    {
-      Internal::log_run.error("Call to deprecated 'create_index_partition' "
-                    "method with an accessor in task %s (UID %lld) should be "
-                    "replaced with a call to create_partition_by_field.",
-                    ctx->get_task_name(), ctx->get_unique_id());
-      assert(false);
-      return IndexPartition::NO_PART;
-    }
 
     //--------------------------------------------------------------------------
     void Runtime::create_shared_ownership(Context ctx, IndexPartition handle)
@@ -4952,9 +4312,14 @@ namespace Legion {
                  PartitionKind part_kind, Color color, const char *prov)
     //--------------------------------------------------------------------------
     {
-      Internal::AutoProvenance provenance(prov);
-      return ctx->create_partition_by_domain(parent, domains, color_space,
-                      perform_intersections, part_kind, color, provenance);
+      // Convert this into a future map and call that version of this method
+      std::map<DomainPoint,Future> futures;
+      for (std::map<DomainPoint,Domain>::const_iterator it =
+            domains.begin(); it != domains.end(); it++)
+        futures[it->first] = Future::from_value(it->second);
+      FutureMap fm = construct_future_map(ctx, color_space, futures);
+      return create_partition_by_domain(ctx, parent, fm, color_space,
+          perform_intersections, part_kind, color, prov);
     }
 
     //--------------------------------------------------------------------------
@@ -5743,19 +5108,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ptr_t Runtime::safe_cast(Context ctx, ptr_t pointer, 
-                                      LogicalRegion region)
-    //--------------------------------------------------------------------------
-    {
-      if (pointer.is_null())
-        return pointer;
-      Point<1,coord_t> p(pointer.value);
-      if (runtime->safe_cast(ctx, region, &p, TYPE_TAG_1D))
-        return pointer;
-      return ptr_t::nil();
-    }
-
-    //--------------------------------------------------------------------------
     DomainPoint Runtime::safe_cast(Context ctx, DomainPoint point, 
                                             LogicalRegion region)
     //--------------------------------------------------------------------------
@@ -6277,21 +5629,6 @@ namespace Legion {
     {
       return runtime->get_parent_logical_partition(handle);
     }
-
-    LEGION_DISABLE_DEPRECATED_WARNINGS
-
-    //--------------------------------------------------------------------------
-    IndexAllocator Runtime::create_index_allocator(Context ctx, IndexSpace is)
-    //--------------------------------------------------------------------------
-    {
-      Internal::log_run.warning("Dynamic index space allocation is no longer "
-                                "supported. You can only make one allocator "
-                                "per index space and it must always be in the "
-                                "same task that created the index space.");
-      return IndexAllocator(is, IndexIterator(this, ctx, is));
-    }
-
-    LEGION_REENABLE_DEPRECATED_WARNINGS
 
     //--------------------------------------------------------------------------
     FieldAllocator Runtime::create_field_allocator(Context ctx,FieldSpace space)
@@ -7572,7 +6909,7 @@ namespace Legion {
       const void* dummy_ptr; size_t dummy_size;
       Runtime::retrieve_semantic_information(task_id, LEGION_NAME_SEMANTIC_TAG,
                                          dummy_ptr, dummy_size, false, false);
-      static_assert(sizeof(dummy_ptr) == sizeof(result), "Fuck c++");
+      static_assert(sizeof(dummy_ptr) == sizeof(result));
       memcpy(&result, &dummy_ptr, sizeof(result));
     }
 
@@ -7583,7 +6920,7 @@ namespace Legion {
       const void* dummy_ptr; size_t dummy_size;
       Runtime::retrieve_semantic_information(handle,
           LEGION_NAME_SEMANTIC_TAG, dummy_ptr, dummy_size, false, false);
-      static_assert(sizeof(dummy_ptr) == sizeof(result), "Fuck c++");
+      static_assert(sizeof(dummy_ptr) == sizeof(result));
       memcpy(&result, &dummy_ptr, sizeof(result));
     }
 
@@ -7594,7 +6931,7 @@ namespace Legion {
       const void* dummy_ptr; size_t dummy_size;
       Runtime::retrieve_semantic_information(handle,
           LEGION_NAME_SEMANTIC_TAG, dummy_ptr, dummy_size, false, false);
-      static_assert(sizeof(dummy_ptr) == sizeof(result), "Fuck c++");
+      static_assert(sizeof(dummy_ptr) == sizeof(result));
       memcpy(&result, &dummy_ptr, sizeof(result));
     }
 
@@ -7605,7 +6942,7 @@ namespace Legion {
       const void* dummy_ptr; size_t dummy_size;
       Runtime::retrieve_semantic_information(handle,
           LEGION_NAME_SEMANTIC_TAG, dummy_ptr, dummy_size, false, false);
-      static_assert(sizeof(dummy_ptr) == sizeof(result), "Fuck c++");
+      static_assert(sizeof(dummy_ptr) == sizeof(result));
       memcpy(&result, &dummy_ptr, sizeof(result));
     }
 
@@ -7618,7 +6955,7 @@ namespace Legion {
       const void* dummy_ptr; size_t dummy_size;
       Runtime::retrieve_semantic_information(handle, fid,
           LEGION_NAME_SEMANTIC_TAG, dummy_ptr, dummy_size, false, false);
-      static_assert(sizeof(dummy_ptr) == sizeof(result), "Fuck c++");
+      static_assert(sizeof(dummy_ptr) == sizeof(result));
       memcpy(&result, &dummy_ptr, sizeof(result));
     }
 
@@ -7630,7 +6967,7 @@ namespace Legion {
       const void* dummy_ptr; size_t dummy_size;
       Runtime::retrieve_semantic_information(handle,
           LEGION_NAME_SEMANTIC_TAG, dummy_ptr, dummy_size, false, false);
-      static_assert(sizeof(dummy_ptr) == sizeof(result), "Fuck c++");
+      static_assert(sizeof(dummy_ptr) == sizeof(result));
       memcpy(&result, &dummy_ptr, sizeof(result));
     }
 
@@ -7642,7 +6979,7 @@ namespace Legion {
       const void* dummy_ptr; size_t dummy_size;
       Runtime::retrieve_semantic_information(part,
           LEGION_NAME_SEMANTIC_TAG, dummy_ptr, dummy_size, false, false);
-      static_assert(sizeof(dummy_ptr) == sizeof(result), "Fuck c++");
+      static_assert(sizeof(dummy_ptr) == sizeof(result));
       memcpy(&result, &dummy_ptr, sizeof(result));
     }
 

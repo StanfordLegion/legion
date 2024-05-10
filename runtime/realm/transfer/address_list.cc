@@ -34,7 +34,9 @@ namespace Realm {
     : total_bytes(0)
     , write_pointer(0)
     , read_pointer(0)
-  {}
+  {
+    memset(data, 0, MAX_ENTRIES * sizeof(size_t));
+  }
 
   size_t *AddressList::begin_nd_entry(int max_dim)
   {
@@ -102,6 +104,7 @@ namespace Realm {
   AddressListCursor::AddressListCursor()
     : addrlist(0)
     , partial(false)
+    , partial_dim(0)
   {
     for(int i = 0; i < MAX_DIM; i++)
       pos[i] = 0;

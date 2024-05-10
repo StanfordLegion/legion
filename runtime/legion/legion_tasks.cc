@@ -2042,15 +2042,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RemoteTaskOp::RemoteTaskOp(const RemoteTaskOp &rhs)
-      : ExternalTask(), RemoteOp(rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
     RemoteTaskOp::~RemoteTaskOp(void)
     //--------------------------------------------------------------------------
     {
@@ -2069,15 +2060,6 @@ namespace Legion {
       }
       if (local_args != NULL)
         free(local_args);
-    }
-
-    //--------------------------------------------------------------------------
-    RemoteTaskOp& RemoteTaskOp::operator=(const RemoteTaskOp &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
     }
 
     //--------------------------------------------------------------------------
@@ -2263,7 +2245,7 @@ namespace Legion {
       profiling_reported = RtUserEvent::NO_RT_USER_EVENT;
       profiling_priority = LG_THROUGHPUT_WORK_PRIORITY;
       single_task_termination = ApUserEvent::NO_AP_USER_EVENT;
-      concurrent_fence_event = ApEvent::NO_AP_EVENT;
+      concurrent_mapped_event = ApEvent::NO_AP_EVENT;
       copy_fill_priority = 0;
       outstanding_profiling_requests.store(0);
       outstanding_profiling_reported.store(0);
@@ -2374,9 +2356,7 @@ namespace Legion {
       // no need to copy the control replication map
       this->selected_variant  = rhs->selected_variant;
       this->task_priority     = rhs->task_priority;
-      this->shard_manager     = rhs->shard_manager;
-      if (this->shard_manager != NULL)
-        this->shard_manager->add_base_gc_ref(SINGLE_TASK_REF);
+      // DON'T CLONE THE SHARD MANAGER! (will be set by the caller)
       // For now don't copy anything else below here
       // In the future we may need to copy the profiling requests
     }
@@ -2422,7 +2402,7 @@ namespace Legion {
         rez.serialize<size_t>(untracked_valid_regions.size());
         for (unsigned idx = 0; idx < untracked_valid_regions.size(); idx++)
           rez.serialize(untracked_valid_regions[idx]); 
-        rez.serialize(concurrent_fence_event);
+        rez.serialize(concurrent_mapped_event);
       }
       else
       { 
@@ -2477,7 +2457,15 @@ namespace Legion {
         derez.deserialize(num_future_memories);
         future_memories.resize(num_future_memories);
         for (unsigned idx = 0; idx < num_future_memories; idx++)
+        {
           derez.deserialize(future_memories[idx]);
+          const RtEvent future_mapped =
+            futures[idx].impl->request_application_instance(
+                future_memories[idx], this, unique_op_id,
+                future_memories[idx].address_space());
+          if (future_mapped.exists())
+            ready_events.insert(future_mapped);
+        }
         size_t num_task_requests;
         derez.deserialize(num_task_requests);
         if (num_task_requests > 0)
@@ -2502,7 +2490,7 @@ namespace Legion {
         untracked_valid_regions.resize(num_untracked_valid_regions);
         for (unsigned idx = 0; idx < num_untracked_valid_regions; idx++)
           derez.deserialize(untracked_valid_regions[idx]); 
-        derez.deserialize(concurrent_fence_event);
+        derez.deserialize(concurrent_mapped_event);
       }
       else
       {
@@ -2551,12 +2539,8 @@ namespace Legion {
           else
           {
             // Remote but still need to map
-            if (is_replicable())
-            {
-              if (replicate_task())
-                return;
-              replicate = false;
-            }
+            if (is_replicable() && replicate_task())
+              return;
             const RtEvent done_mapping = perform_mapping();
             if (done_mapping.exists() && !done_mapping.has_triggered())
               defer_launch_task(done_mapping);
@@ -2601,12 +2585,8 @@ namespace Legion {
             if (distribute_task())
             {
               // Still local so try mapping and launching
-              if (is_replicable())
-              {
-                if (replicate_task())
-                  return;
-                replicate = false;
-              }
+              if (is_replicable() && replicate_task())
+                return;
               const RtEvent done_mapping = perform_mapping();
               if (!done_mapping.exists() || done_mapping.has_triggered())
                 launch_task();
@@ -3172,14 +3152,6 @@ namespace Legion {
                           "or a single composite instance is supported.",
                           "map_task", mapper->get_mapper_name(), idx, 
                           get_task_name(), get_unique_id())
-          if (IS_REDUCE(regions[idx]))
-            REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
-                          "Invalid mapper output from invocation of '%s' on "
-                          "mapper %s. Illegal composite mapping requested on "
-                          "region requirement %d of task %s (UID %lld) which "
-                          "has only reduction privileges.", 
-                          "map_task", mapper->get_mapper_name(), idx, 
-                          get_task_name(), get_unique_id())
           if (!IS_EXCLUSIVE(regions[idx]))
             REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                           "Invalid mapper output from invocation of '%s' on "
@@ -3506,7 +3478,6 @@ namespace Legion {
 #ifdef LEGION_SPY
       LegionSpy::log_replay_operation(unique_op_id);
 #endif
-      tpl->register_operation(this);
       tpl->get_mapper_output(this, selected_variant, task_priority,
           perform_postmap, target_processors, future_memories,
           physical_instances);
@@ -3758,6 +3729,7 @@ namespace Legion {
             "the Legion developers list or opening a github issue. The "
             "mapper call to replicate_task is being elided.",
             get_task_name(), get_unique_id(), mapper->get_mapper_name())
+        replicate = false;
         return false;
       }
       Mapper::ReplicateTaskInput input;
@@ -3766,8 +3738,24 @@ namespace Legion {
       mapper->invoke_replicate_task(this, input, output);
       // If we don't have more than one target processor then we're not
       // actually going to replicate this task
-      if (output.target_processors.size() <= 1)
+      if (output.target_processors.empty())
+      {
+        replicate = false;
         return false;
+      }
+      else if (output.target_processors.size() == 1)
+      {
+        REPORT_LEGION_WARNING(LEGION_WARNING_IGNORED_REPLICATION,
+            "Mapper %s requested to replicate task %s (UID %lld) but "
+            "only reqeuested one shard to be made. Since one shard does "
+            "not actually constitute replication, Legion is ignoring this "
+            "request and the task will be mapped like normal. If the "
+            "mapper intended to not perform replication it should return "
+            "an empty vector of target processors for 'replicate_task'.",
+            mapper->get_mapper_name(), get_task_name(), get_unique_id())
+        replicate = false;
+        return false;
+      }
       VariantImpl *var_impl = NULL;
       if (output.leaf_variants.empty())
       {
@@ -3846,7 +3834,9 @@ namespace Legion {
       if (!runtime->unsafe_mapper)
       {
         // Check that all the processors exist
+        bool has_local = false;
         for (unsigned idx = 0; idx < output.target_processors.size(); idx++)
+        {
           if (!output.target_processors[idx].exists())
             REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                         "Invalid mapper output from invocation of '%s' "
@@ -3856,6 +3846,20 @@ namespace Legion {
                         "target_processors must exist.", "replicate_task",
                          mapper->get_mapper_name(),
                          get_task_name(), get_unique_id())
+          else if (!has_local && (runtime->address_space ==
+                output.target_processors[idx].address_space()))
+            has_local = true;
+        }
+        if (!has_local)
+          REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+              "Invalid mapper output from invocation of '%s' on mapper %s. "
+              "Mapper did not provide a local processor when replicating "
+              "task %s (UID %lld). At last one shard of a replicated task "
+              "must be present on the node where the task is being mapped "
+              "to remain consistent with the semantics of 'map_task' which "
+              "would require this anyway even if the task were not replicated.",
+              "replicate_task", mapper->get_mapper_name(), get_task_name(),
+              get_unique_id())
         // Check that the chosen variant works with all the targets processors
         if (output.leaf_variants.empty())
         {
@@ -4067,10 +4071,11 @@ namespace Legion {
         }
       }
       // Construct the collective mapping
-      std::vector<AddressSpaceID> spaces(output.target_processors.size());
-      for (unsigned idx = 0; idx < spaces.size(); idx++)
-        spaces[idx] =
-          runtime->find_address_space(output.target_processors[idx]);
+      std::vector<AddressSpaceID> spaces(output.target_processors.size()+1);
+      for (unsigned idx = 0; idx < output.target_processors.size(); idx++)
+        spaces[idx] = output.target_processors[idx].address_space();
+      // Make sure we include our local space too
+      spaces.back() = runtime->address_space;
       std::sort(spaces.begin(), spaces.end());
       // Uniquify them
       std::vector<AddressSpaceID>::iterator last = 
@@ -4121,12 +4126,10 @@ namespace Legion {
       // Check to see if we need to make a remote trace recorder
       if (is_remote() && is_recording() && (remote_trace_recorder == NULL))
       {
-        const RtUserEvent remote_applied = Runtime::create_rt_user_event();
         remote_trace_recorder = new RemoteTraceRecorder(runtime,
-            orig_proc.address_space(), runtime->address_space, 
-            get_trace_local_id(), tpl, remote_applied);
+            orig_proc.address_space(), get_trace_local_id(), tpl,
+            0/*did*/, 0/*tid*/, map_applied_conditions);
         remote_trace_recorder->add_recorder_reference();
-        map_applied_conditions.insert(remote_applied);
 #ifdef DEBUG_LEGION
         assert(!single_task_termination.exists());
 #endif
@@ -4347,11 +4350,6 @@ namespace Legion {
         RtEvent record_replay_precondition;
         if (!map_applied_conditions.empty())
         {
-          // If we have a remote trace recorder, make sure we don't
-          // accidentally include ourselves in the preconditions for
-          // ourself which will cause a recording deadlock
-          if (remote_trace_recorder != NULL)
-            map_applied_conditions.erase(remote_trace_recorder->applied_event);
           record_replay_precondition =
             Runtime::merge_events(map_applied_conditions);
           map_applied_conditions.clear();
@@ -4539,7 +4537,7 @@ namespace Legion {
         }
         log_mapping_decision(idx, regions[idx], result, true/*postmapping*/);
         // TODO: Implement physical tracing for postmapped regions
-        if (is_memoizing())
+        if (is_recording())
           assert(false);
         // Register this with a no-event so that the instance can
         // be used as soon as it is valid from the copy to it
@@ -4618,8 +4616,8 @@ namespace Legion {
       std::set<ApEvent> wait_on_events;
       if (execution_fence_event.exists())
         wait_on_events.insert(execution_fence_event);
-      if (concurrent_fence_event.exists())
-        wait_on_events.insert(concurrent_fence_event);
+      if (concurrent_mapped_event.exists())
+        wait_on_events.insert(concurrent_mapped_event);
 #ifdef LEGION_SPY
       // TODO: teach legion spy how to check the inner task optimization
       // for now we'll just turn it off whenever we are going to be
@@ -4670,11 +4668,11 @@ namespace Legion {
       }
 
       // STEP 2: Set up the task's context
+      std::vector<ApUserEvent> unmap_events(regions.size());
       {
         const bool is_leaf_variant = variant->is_leaf();
         execution_context = create_execution_context(variant, 
             wait_on_events, inline_task, is_leaf_variant);
-        std::vector<ApUserEvent> unmap_events(regions.size());
         std::vector<RegionRequirement> clone_requirements(regions.size());
         // Make physical regions for each our region requirements
         for (unsigned idx = 0; idx < regions.size(); idx++)
@@ -4929,6 +4927,13 @@ namespace Legion {
           MispredicationTaskArgs::TASK_ID].fetch_sub(1);
 #endif
       }
+#ifdef LEGION_SPY
+      // Chain the start event into the unmap events so Legion Spy can see
+      // the dependences between child operations the start of the parent task
+      for (unsigned idx = 0; idx < unmap_events.size(); idx++)
+        if (unmap_events[idx].exists())
+          LegionSpy::log_event_dependence(start_condition, unmap_events[idx]);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -5279,7 +5284,7 @@ namespace Legion {
       reduction_metasize = 0;
       reduction_instance = NULL;
       first_mapping = true;
-      concurrent_verified = RtUserEvent::NO_RT_USER_EVENT;
+      concurrent_mapped = ApUserEvent::NO_AP_USER_EVENT;
       concurrent_task_barrier = RtBarrier::NO_RT_BARRIER;
       children_complete_invoked = false;
       children_commit_invoked = false;
@@ -5846,11 +5851,11 @@ namespace Legion {
           effects = reduction_instance_precondition;
         if (!deterministic_redop)
         {
+          AutoLock o_lock(op_lock);
           const ApEvent done = reduction_instance.load()->reduce_from(instance,
               this, redop, reduction_op, false/*exclusive*/, effects);
           if (done.exists())
           {
-            AutoLock o_lock(op_lock);
             reduction_fold_effects.push_back(done);
             return false;
           }
@@ -5867,6 +5872,24 @@ namespace Legion {
         }
       }
     } 
+
+    //--------------------------------------------------------------------------
+    void MultiTask::report_concurrent_mapping_failure(Processor proc,
+        const DomainPoint &one, const DomainPoint &two) const
+    //--------------------------------------------------------------------------
+    {
+      MapperManager *bad_mapper = mapper;
+      if (bad_mapper == NULL)
+        bad_mapper = runtime->find_mapper(current_proc, map_id);
+      // TODO: update this error message to name the bad points
+      REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+          "Mapper %s performed illegal mapping of concurrent index "
+          "space task %s (UID %lld) by mapping multiple points to "
+          "the same processor " IDFMT ". All point tasks must be "
+          "mapped to different processors for concurrent execution "
+          "of index space tasks.", bad_mapper->get_mapper_name(),
+          get_task_name(), get_unique_id(), proc.id)
+    }
 
     /////////////////////////////////////////////////////////////
     // Individual Task 
@@ -6168,9 +6191,6 @@ namespace Legion {
     void IndividualTask::perform_base_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(memo_state != MEMO_REQ);
-#endif
       if (runtime->check_privileges && 
           !is_top_level_task() && !local_function)
         perform_privilege_checks();
@@ -7100,6 +7120,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       slice_owner->record_point_mapped(mapped_event);
+      tpl->register_operation(this);
       SingleTask::trigger_replay();
     }
 
@@ -7280,14 +7301,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(target_proc.exists());
 #endif
-        // If we're doing mapper checks then we need to do that now
-        if (!runtime->unsafe_mapper)
-        {
-          const RtEvent checked = 
-            slice_owner->verify_concurrent_execution(index_point, target_proc);
-          if (checked.exists())
-            map_applied_conditions.insert(checked);
-        }
+        concurrent_mapped_event = 
+          slice_owner->rendezvous_concurrent_mapped(index_point, target_proc);
       }
       // For point tasks we use the point termination event which as the
       // end event for this task since point tasks can be moved and
@@ -7899,7 +7914,7 @@ namespace Legion {
       stealable = false;
       replicate = false;
       shard_manager = manager;
-      shard_manager->add_base_gc_ref(SINGLE_TASK_REF);
+      shard_manager->add_base_resource_ref(SINGLE_TASK_REF);
       selected_variant = variant;
       shard_barrier = shard_manager->get_shard_task_barrier();
       // If we have any region requirements then they are all collective
@@ -7931,7 +7946,7 @@ namespace Legion {
       replicate = false;
       parent_ctx = parent;
       shard_manager = manager;
-      shard_manager->add_base_gc_ref(SINGLE_TASK_REF);
+      shard_manager->add_base_resource_ref(SINGLE_TASK_REF);
       selected_variant = variant;
       shard_barrier = shard_manager->get_shard_task_barrier();
       // If we have any region requirements then they are all collective
@@ -7971,7 +7986,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Set our shard manager to NULL since we are not supposed to delete it
-      if (shard_manager->remove_base_gc_ref(SINGLE_TASK_REF))
+      if (shard_manager->remove_base_resource_ref(SINGLE_TASK_REF))
         delete shard_manager;
       shard_manager = NULL;
       SingleTask::deactivate(false/*free*/);
@@ -8412,10 +8427,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Have to launch a task to do this in case they need to rendezvous
-      const RtUserEvent shard_mapped = Runtime::create_rt_user_event();
-      DeferMappingArgs args(this, NULL, shard_mapped,
-          0/*invocation count*/, NULL/*performed*/, NULL/*effects*/);
-      runtime->issue_runtime_meta_task(args, LG_THROUGHPUT_DEFERRED_PRIORITY);
+      const RtEvent shard_mapped = defer_perform_mapping(RtEvent::NO_RT_EVENT,
+          NULL/*must epoch*/, NULL/*prior args*/, 0/*invocation count*/);
       // Then defer the launching of the shard when the mapping is done
       defer_launch_task(shard_mapped);
     }
@@ -8506,6 +8519,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       get_replicate_context()->handle_trace_update(derez, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardTask::handle_find_trace_local_sets(Deserializer &derez, 
+                                                 AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      get_replicate_context()->handle_find_trace_local_sets(derez, source);
     }
 
     //--------------------------------------------------------------------------
@@ -9537,9 +9558,6 @@ namespace Legion {
     void IndexTask::perform_base_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(memo_state != MEMO_REQ);
-#endif 
       if (runtime->check_privileges)
         perform_privilege_checks();
       // To be correct with the new scheduler we also have to 
@@ -9632,8 +9650,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent IndexTask::verify_concurrent_execution(const DomainPoint &point,
-                                                   Processor target)
+    ApEvent IndexTask::rendezvous_concurrent_mapped(const DomainPoint &point,
+                                                    Processor target)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -9643,43 +9661,55 @@ namespace Legion {
       if (concurrent_processors.empty())
       {
 #ifdef DEBUG_LEGION
-        assert(!concurrent_verified.exists());
+        assert(!concurrent_mapped.exists());
 #endif
-        concurrent_verified = Runtime::create_rt_user_event();
+        concurrent_mapped = Runtime::create_ap_user_event(NULL);
       }
+      std::map<Processor,DomainPoint>::const_iterator finder =
+        concurrent_processors.find(target);
+      if (finder != concurrent_processors.end())
+        report_concurrent_mapping_failure(target, point, finder->second);
 #ifdef DEBUG_LEGION
-      assert(concurrent_processors.find(point) == 
-              concurrent_processors.end());
       assert(concurrent_processors.size() < total_points);
 #endif
-      concurrent_processors[point] = target;
+      concurrent_processors[target] = point;
       if (concurrent_processors.size() == total_points)
+        Runtime::trigger_event(NULL, concurrent_mapped);
+      return concurrent_mapped;
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent IndexTask::rendezvous_concurrent_mapped(
+        std::vector<std::pair<Processor,DomainPoint> > &points)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(concurrent_task);
+#endif
+      AutoLock o_lock(op_lock);
+      if (concurrent_processors.empty())
       {
-        std::map<Processor,DomainPoint> inverted;
-        for (std::map<DomainPoint,Processor>::const_iterator it =
-              concurrent_processors.begin(); it != 
-              concurrent_processors.end(); it++)
-        {
-          std::map<Processor,DomainPoint>::const_iterator finder = 
-            inverted.find(it->second);
-          if (finder != inverted.end())
-          {
-            if (mapper == NULL)
-              mapper = runtime->find_mapper(current_proc, map_id);
-            // TODO: update this error message to name the bad points
-            REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
-                "Mapper %s performed illegal mapping of concurrent index "
-                "space task %s (UID %lld) by mapping multiple points to "
-                "the same processor " IDFMT ". All point tasks must be "
-                "mapped to different processors for concurrent execution "
-                "of index space tasks.", mapper->get_mapper_name(),
-                get_task_name(), get_unique_id(), it->second.id)
-          }
-          inverted[it->second] = it->first;
-        }
-        Runtime::trigger_event(concurrent_verified);
+#ifdef DEBUG_LEGION
+        assert(!concurrent_mapped.exists());
+#endif
+        concurrent_mapped = Runtime::create_ap_user_event(NULL);
       }
-      return concurrent_verified;
+#ifdef DEBUG_LEGION
+      assert((concurrent_processors.size() + points.size()) <= total_points); 
+#endif
+      for (std::vector<std::pair<Processor,DomainPoint> >::iterator it =
+            points.begin(); it != points.end(); it++)
+      {
+        std::map<Processor,DomainPoint>::const_iterator finder =
+          concurrent_processors.find(it->first);
+        if (finder != concurrent_processors.end())
+          report_concurrent_mapping_failure(it->first,
+              it->second, finder->second);
+        concurrent_processors.emplace(*it);
+      }
+      if (concurrent_processors.size() == total_points)
+        Runtime::trigger_event(NULL, concurrent_mapped);
+      return concurrent_mapped;
     }
 
     //--------------------------------------------------------------------------
@@ -10893,7 +10923,6 @@ namespace Legion {
 #ifdef LEGION_SPY
       LegionSpy::log_replay_operation(unique_op_id);
 #endif
-      tpl->register_operation(this);
       // If we're going to be doing an output reduction do that now
       if (redop > 0)
       {
@@ -11439,6 +11468,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       // Should never get duplicate invocations here
       assert(args == NULL);
+      assert(!is_replicable());
+      assert(is_origin_mapped());
 #endif
       // Check to see if we already enumerated all the points, if
       // not then do so now
@@ -11502,6 +11533,11 @@ namespace Legion {
       for (unsigned idx = 0; idx < num_points; idx++)
       {
         PointTask *point = points[idx];
+        // See if we're going to replicate this point task
+        // Note you can do this inline here because if we do replicate
+        // the point task then all the shards will map in parallel
+        if (point->is_replicable() && point->replicate_task())
+          continue;
         // Now that we support collective instance creation, we need to 
         // enable all the point tasks to be mapping in parallel with
         // each other in case they need to synchronize to create 
@@ -12389,8 +12425,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent SliceTask::verify_concurrent_execution(const DomainPoint &point,
-                                                   Processor target)
+    ApEvent SliceTask::rendezvous_concurrent_mapped(const DomainPoint &point,
+                                                    Processor target)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -12402,16 +12438,18 @@ namespace Legion {
         if (concurrent_processors.empty())
         {
 #ifdef DEBUG_LEGION
-          assert(!concurrent_verified.exists());
+          assert(!concurrent_mapped.exists());
 #endif
-          concurrent_verified = Runtime::create_rt_user_event();
+          concurrent_mapped = Runtime::create_ap_user_event(NULL);
         }
+        std::map<Processor,DomainPoint>::const_iterator finder =
+          concurrent_processors.find(target);
+        if (finder != concurrent_processors.end())
+          report_concurrent_mapping_failure(target, point, finder->second);
 #ifdef DEBUG_LEGION
-        assert(concurrent_processors.find(point) == 
-                concurrent_processors.end());
         assert(concurrent_processors.size() < points.size());
 #endif
-        concurrent_processors[point] = target;
+        concurrent_processors[target] = point;
         if (concurrent_processors.size() == points.size())
         {
           Serializer rez;
@@ -12419,21 +12457,21 @@ namespace Legion {
             RezCheck z(rez);
             rez.serialize(index_owner);
             rez.serialize<size_t>(points.size());
-            for (std::map<DomainPoint,Processor>::const_iterator it =
+            for (std::map<Processor,DomainPoint>::const_iterator it =
                   concurrent_processors.begin(); it != 
                   concurrent_processors.end(); it++)
             {
               rez.serialize(it->first);
               rez.serialize(it->second);
             }
-            rez.serialize(concurrent_verified);
+            rez.serialize(concurrent_mapped);
           }
-          runtime->send_slice_verify_concurrent_execution(orig_proc, rez);
+          runtime->send_slice_rendezvous_concurrent_mapped(orig_proc, rez);
         }
-        return concurrent_verified;
+        return concurrent_mapped;
       }
       else
-        return index_owner->verify_concurrent_execution(point, target);
+        return index_owner->rendezvous_concurrent_mapped(point, target);
     }
 
     //--------------------------------------------------------------------------
@@ -12497,7 +12535,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void SliceTask::handle_verify_concurrent_execution(
+    /*static*/ void SliceTask::handle_rendezvous_concurrent_mapped(
                                                             Deserializer &derez)
     //--------------------------------------------------------------------------
     {
@@ -12506,18 +12544,16 @@ namespace Legion {
       derez.deserialize(owner);
       size_t num_points;
       derez.deserialize(num_points);
-      RtEvent verified;
+      std::vector<std::pair<Processor,DomainPoint> > points(num_points);
       for (unsigned idx = 0; idx < num_points; idx++)
       {
-        DomainPoint point;
-        derez.deserialize(point);
-        Processor proc;
-        derez.deserialize(proc);
-        verified = owner->verify_concurrent_execution(point, proc);
+        derez.deserialize(points[idx].first);
+        derez.deserialize(points[idx].second);
       }
-      RtUserEvent done;
-      derez.deserialize(done);
-      Runtime::trigger_event(done, verified);
+      const ApEvent done = owner->rendezvous_concurrent_mapped(points); 
+      ApUserEvent to_trigger;
+      derez.deserialize(to_trigger);
+      Runtime::trigger_event(NULL, to_trigger, done);
     }
 
     //--------------------------------------------------------------------------

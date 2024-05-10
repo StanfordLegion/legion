@@ -625,7 +625,7 @@ task toplevel()
 
   __fence(__execution, __block)
   var ts_start = c.legion_get_current_time_in_micros()
-  __demand(__spmd, __trace)
+  __demand(__trace)
   for j = 0, num_loops do
     for i = 0, num_pieces do
       calculate_new_currents(steps, rp_private[i], rp_shared[i], rp_ghost[i], rp_wires[i])

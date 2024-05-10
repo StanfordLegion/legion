@@ -175,12 +175,6 @@ namespace Legion {
       virtual ~InstanceManager(void);
     public:
       virtual PointerConstraint get_pointer_constraint(void) const = 0;
-      virtual LegionRuntime::Accessor::RegionAccessor<
-        LegionRuntime::Accessor::AccessorType::Generic>
-          get_accessor(void) const = 0;
-      virtual LegionRuntime::Accessor::RegionAccessor<
-        LegionRuntime::Accessor::AccessorType::Generic>
-          get_field_accessor(FieldID fid) const = 0; 
     public:
       inline bool is_reduction_manager(void) const;
       inline bool is_physical_manager(void) const;
@@ -349,12 +343,6 @@ namespace Legion {
       PhysicalManager& operator=(const PhysicalManager &rhs) = delete;
     public:
       virtual PointerConstraint get_pointer_constraint(void) const;
-      virtual LegionRuntime::Accessor::RegionAccessor<
-        LegionRuntime::Accessor::AccessorType::Generic>
-          get_accessor(void) const;
-      virtual LegionRuntime::Accessor::RegionAccessor<
-        LegionRuntime::Accessor::AccessorType::Generic>
-          get_field_accessor(FieldID fid) const;
     public:
       void log_instance_creation(UniqueID creator_id, Processor proc,
                                  const std::vector<LogicalRegion> &regions) const;
@@ -618,13 +606,6 @@ namespace Legion {
       virtual ~VirtualManager(void);
     public:
       VirtualManager& operator=(const VirtualManager &rhs);
-    public:
-      virtual LegionRuntime::Accessor::RegionAccessor<
-        LegionRuntime::Accessor::AccessorType::Generic>
-          get_accessor(void) const;
-      virtual LegionRuntime::Accessor::RegionAccessor<
-        LegionRuntime::Accessor::AccessorType::Generic>
-          get_field_accessor(FieldID fid) const;
     public:
       virtual void notify_local(void) { }
     public: 

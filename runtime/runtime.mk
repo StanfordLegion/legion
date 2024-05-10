@@ -361,7 +361,7 @@ ifeq ($(strip $(USE_LLVM)),1)
   REALM_CC_FLAGS += -DREALM_USE_LLVM
 
   # NOTE: do not use these for all source files - just the ones that include llvm include files
-  LLVM_CXXFLAGS ?= -std=c++11 -I$(shell $(LLVM_CONFIG) --includedir)
+  LLVM_CXXFLAGS ?= -I$(shell $(LLVM_CONFIG) --includedir)
 
   # realm can be configured to allow LLVM library linkage to be optional
   #  (i.e. a per-application choice)
@@ -460,8 +460,8 @@ endif
 ifeq ($(strip $(USE_HIP)),1)
   HIP_TARGET ?= ROCM
   USE_GPU_REDUCTIONS ?= 1
-  ifndef HIP_PATH
-    $(error HIP_PATH variable is not defined, aborting build)
+  ifndef ROCM_PATH
+    $(error ROCM_PATH variable is not defined, aborting build)
   endif
   ifeq ($(strip $(HIP_TARGET)),ROCM)
     #HIP on AMD
@@ -470,16 +470,16 @@ ifeq ($(strip $(USE_HIP)),1)
         $(error THRUST_PATH variable is not defined, aborting build)
       endif
       # Please download the thrust from https://github.com/ROCmSoftwarePlatform/Thrust
-      # We need to put thrust inc ahead of HIP_PATH because the thrust comes with hip is broken
+      # We need to put thrust inc ahead of ROCM_PATH because the thrust comes with hip is broken
       INC_FLAGS += -I$(THRUST_PATH)
     endif
-    HIPCC	        ?= $(HIP_PATH)/bin/hipcc
+    HIPCC	        ?= $(ROCM_PATH)/bin/hipcc
     # Latter is preferred, former is for backwards compatability
     REALM_CC_FLAGS  += -DREALM_USE_HIP
     LEGION_CC_FLAGS += -DLEGION_USE_HIP
     CC_FLAGS        += -D__HIP_PLATFORM_AMD__
     HIPCC_FLAGS     += -fno-strict-aliasing
-    INC_FLAGS       += -I$(HIP_PATH)/include -I$(HIP_PATH)/../include
+    INC_FLAGS       += -I$(ROCM_PATH)/include
     ifeq ($(strip $(DEBUG)),1)
       HIPCC_FLAGS	+= -g
     else
@@ -488,7 +488,7 @@ ifeq ($(strip $(USE_HIP)),1)
     ifneq ($(strip $(HIP_ARCH)),)
       HIPCC_FLAGS	+= --offload-arch=$(HIP_ARCH)
     endif
-    LEGION_LD_FLAGS	+= -lm -L$(HIP_PATH)/lib -lamdhip64
+    LEGION_LD_FLAGS	+= -lm -L$(ROCM_PATH)/lib -lamdhip64
   else ifeq ($(strip $(HIP_TARGET)),CUDA)
     # HIP on CUDA
     ifndef CUDA_PATH
@@ -500,7 +500,7 @@ ifeq ($(strip $(USE_HIP)),1)
     LEGION_CC_FLAGS += -DLEGION_USE_HIP
     CC_FLAGS        += -D__HIP_PLATFORM_NVIDIA__
     HIPCC_FLAGS     += -D__HIP_PLATFORM_NVIDIA__
-    INC_FLAGS       += -I$(CUDA_PATH)/include -I$(HIP_PATH)/include  -I$(HIP_PATH)/../include
+    INC_FLAGS       += -I$(CUDA_PATH)/include -I$(ROCM_PATH)/include
     ifeq ($(strip $(DEBUG)),1)
       HIPCC_FLAGS	+= -g -O0
     else
@@ -915,17 +915,17 @@ CC_FLAGS        += -Werror
 FC_FLAGS	+= -Werror
 endif
 
-# Check for a minimum C++ version and if none is specified then set it to c++11
+# Check for a minimum C++ version and if none is specified then set it to c++17
 ifneq ($(findstring -std=c++,$(CC_FLAGS)),-std=c++)
-ifeq ($(shell $(CXX) -x c++ -std=c++11 -c /dev/null -o /dev/null 2> /dev/null; echo $$?),0)
-CC_FLAGS += -std=c++11
+ifeq ($(shell $(CXX) -x c++ -std=c++17 -c /dev/null -o /dev/null 2> /dev/null; echo $$?),0)
+CC_FLAGS += -std=c++17
 else ifeq ($(findstring nvc++,$(CXX)),nvc++)
 # nvc++ is dumb and will give you an error if you try to overwrite the input
 # file with the output file and so errors at our test above, we'll just assume
-# that all versions of nvc++ will support c++11 for now
-CC_FLAGS += -std=c++11
+# that all versions of nvc++ will support c++17 for now
+CC_FLAGS += -std=c++17
 else
-$(error Legion requires a C++ compiler that supports at least C++11)
+$(error Legion requires a C++ compiler that supports at least C++17)
 endif
 endif
 
@@ -1141,11 +1141,7 @@ INSTALL_HEADERS += legion.h \
 		   realm.h \
 		   legion/bitmask.h \
 		   legion/legion.inl \
-		   legion/legion_agency.h \
-		   legion/legion_agency.inl \
-		   legion/accessor.h \
 		   legion/legion_allocation.h \
-		   legion/arrays.h \
 		   legion/legion_c.h \
 		   legion/legion_c_util.h \
 		   legion/legion_config.h \
@@ -1156,9 +1152,6 @@ INSTALL_HEADERS += legion.h \
 		   legion/legion_mapping.inl \
 		   legion/legion_redop.h \
 		   legion/legion_redop.inl \
-		   legion/legion_stl.h \
-		   legion/legion_stl.inl \
-		   legion/legion_template_help.h \
 		   legion/legion_types.h \
 		   legion/legion_utilities.h \
 		   mappers/debug_mapper.h \
@@ -1249,6 +1242,7 @@ INSTALL_HEADERS += realm/cuda/cuda_redop.h \
 endif
 ifeq ($(strip $(USE_HIP)),1)
 INSTALL_HEADERS += hip_cuda_compat/hip_cuda.h \
+                   realm/hip/hiphijack_api.h \
                    realm/hip/hip_redop.h
 endif
 ifeq ($(strip $(USE_HALF)),1)

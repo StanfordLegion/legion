@@ -40,6 +40,13 @@
 #define DETAILED_PROFILER(runtime, call) // Nothing
 #endif
 
+// This version tracks the compabilitity of the Legion Prof logging
+// format. Whenver you make changes to the logging format, increment the number
+// stored in legion_profiling_version.h to track the change.
+constexpr unsigned LEGION_PROF_VERSION =
+#include "legion/legion_profiling_version.h"
+;
+
 namespace Legion {
   namespace Internal { 
 
@@ -82,7 +89,7 @@ namespace Legion {
       void record_instance_name(PhysicalInstance inst, LgEvent name);
       virtual LgEvent find_instance_name(PhysicalInstance inst) const;
     private:
-      static_assert(ENTRIES > 0, "Must be positive");
+      static_assert(ENTRIES > 0);
       // Optimize for the common case of there being one or two entries
       PhysicalInstance instances[ENTRIES];
       LgEvent names[ENTRIES];
@@ -127,9 +134,22 @@ namespace Legion {
       struct MaxDimDesc {
 	unsigned max_dim;
       };
+      struct RuntimeConfig {
+        bool debug;
+        bool spy;
+        bool gc;
+        bool inorder;
+        bool safe_mapper;
+        bool safe_runtime;
+        bool safe_ctrlrepl;
+        bool part_checks;
+        bool bounds_checks;
+        bool resilient;
+      };
       struct MachineDesc {
         unsigned node_id;
-	unsigned num_nodes;
+        unsigned num_nodes;
+        unsigned version;
         Machine::ProcessInfo process_info;
       };
       struct CalibrationErr {

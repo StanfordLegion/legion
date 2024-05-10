@@ -267,8 +267,6 @@ namespace Legion {
         DELETION_OP_KIND,
         MERGE_CLOSE_OP_KIND,
         POST_CLOSE_OP_KIND,
-        VIRTUAL_CLOSE_OP_KIND,
-        RETURN_CLOSE_OP_KIND,
         REFINEMENT_OP_KIND,
         RESET_OP_KIND,
         ACQUIRE_OP_KIND,
@@ -288,11 +286,9 @@ namespace Legion {
         TIMING_OP_KIND,
         TUNABLE_OP_KIND,
         ALL_REDUCE_OP_KIND,
-        TRACE_CAPTURE_OP_KIND,
-        TRACE_COMPLETE_OP_KIND,
-        TRACE_REPLAY_OP_KIND,
         TRACE_BEGIN_OP_KIND,
-        TRACE_SUMMARY_OP_KIND,
+        TRACE_RECURRENT_OP_KIND,
+        TRACE_COMPLETE_OP_KIND,
         TASK_OP_KIND,
         LAST_OP_KIND,
       };
@@ -306,8 +302,6 @@ namespace Legion {
         "Deletion",                 \
         "Merge Close",              \
         "Post Close",               \
-        "Virtual Close",            \
-        "Return Close",             \
         "Refinement",               \
         "Reset",                    \
         "Acquire",                  \
@@ -327,11 +321,9 @@ namespace Legion {
         "Timing",                   \
         "Tunable",                  \
         "All Reduce Op",            \
-        "Trace Capture",            \
-        "Trace Complete",           \
-        "Trace Replay",             \
         "Trace Begin",              \
-        "Trace Summary",            \
+        "Trace Recurrent",          \
+        "Trace Complete",           \
         "Task",                     \
       } 
     public:
@@ -670,8 +662,6 @@ namespace Legion {
       void notify_regions_verified(const std::set<unsigned> &regions,
                                    GenerationID gen);
     public:
-      // Help for seeing if the parent region is non-exclusively virtual mapped
-      bool is_parent_nonexclusive_virtual_mapping(unsigned index);
       // Help for finding the contexts for an operation
       InnerContext* find_physical_context(unsigned index);
     public:
@@ -726,7 +716,7 @@ namespace Legion {
       Runtime *const runtime;
     protected:
       mutable LocalLock op_lock;
-      GenerationID gen;
+      std::atomic<GenerationID> gen;
       UniqueID unique_op_id;
       // The issue index of this operation in the context
       uint64_t context_index;
@@ -1113,7 +1103,6 @@ namespace Legion {
     public:
       enum MemoizableState {
         NO_MEMO,   // The operation is not subject to memoization
-        MEMO_REQ,  // The mapper requested memoization on this operation
         MEMO_RECORD,    // The runtime is recording analysis for this operation
         MEMO_REPLAY,    // The runtime is replaying analysis for this opeartion
       };
@@ -1139,15 +1128,12 @@ namespace Legion {
       virtual void deactivate(bool free = true);
     public:
       inline PhysicalTemplate* get_template(void) const { return tpl; }
-      inline bool is_memoizing(void) const { return memo_state != NO_MEMO; }
       inline bool is_recording(void) const { return memo_state == MEMO_RECORD;}
       inline bool is_replaying(void) const { return memo_state == MEMO_REPLAY; }
       inline MemoizableState get_memoizable_state(void) const 
         { return memo_state; }
     public:
       virtual void trigger_replay(void) = 0;
-      virtual void initialize_memoizable(void) 
-        { /* do nothing unless override by a base class */ }
       virtual TraceLocalID get_trace_local_id(void) const
         { return TraceLocalID(trace_local_id, DomainPoint()); }
       virtual ApEvent compute_sync_precondition(const TraceInfo &info) const
@@ -1159,7 +1145,8 @@ namespace Legion {
         { assert(false); return ApEvent::NO_AP_EVENT; }
       virtual MemoizableOp* get_memoizable(void) { return this; }
     protected:
-      void invoke_memoize_operation(void);
+      void set_memoizable_state(void);
+      bool can_memoize_operation(void);
       RtEvent record_complete_replay(const TraceInfo &trace_info,
                     RtEvent ready = RtEvent::NO_RT_EVENT,
                     ApEvent precondition = ApEvent::NO_AP_EVENT);
@@ -1188,11 +1175,9 @@ namespace Legion {
         : OP(rt, std::forward<Args>(args) ...) { }
       virtual ~Memoizable(void) { }
     public:
-      virtual void trigger_dependence_analysis(void) override;
       virtual void trigger_ready(void) override;
       virtual ApEvent compute_sync_precondition(
                         const TraceInfo &info) const override;
-      virtual void initialize_memoizable(void) override;
     };
 
     /**
@@ -1773,6 +1758,7 @@ namespace Legion {
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
+      virtual void trigger_replay(void);
       // trigger_mapping same as base class
       virtual void complete_replay(ApEvent precondition,
                                    ApEvent postcondition);
@@ -2181,6 +2167,7 @@ namespace Legion {
     public:
       virtual unsigned find_parent_index(unsigned idx);
       virtual void trigger_dependence_analysis(void);
+      virtual void trigger_ready(void);
     protected:
       unsigned parent_req_index; 
     protected:
@@ -2251,41 +2238,6 @@ namespace Legion {
       int                                          profiling_priority;
       std::atomic<int>                 outstanding_profiling_requests;
       std::atomic<int>                 outstanding_profiling_reported;
-    };
-
-    /**
-     * \class VirtualCloseOp
-     * Virtual close operations are issued by the runtime for
-     * closing up virtual mappings to a composite instance
-     * that can then be propagated back to the enclosing
-     * parent task.
-     */
-    class VirtualCloseOp : public CloseOp {
-    public:
-      VirtualCloseOp(Runtime *runtime);
-      VirtualCloseOp(const VirtualCloseOp &rhs);
-      virtual ~VirtualCloseOp(void);
-    public:
-      VirtualCloseOp& operator=(const VirtualCloseOp &rhs);
-    public:
-      void initialize(InnerContext *ctx, unsigned index,
-                      const RegionRequirement &req,
-                      const VersionInfo *targets);
-    public:
-      virtual void activate(void);
-      virtual void deactivate(bool free = true);
-      virtual const char* get_logging_name(void) const;
-      virtual OpKind get_operation_kind(void) const;
-    public:
-      virtual void trigger_dependence_analysis(void);
-      virtual void trigger_ready(void);
-      virtual void trigger_mapping(void);
-      virtual unsigned find_parent_index(unsigned idx);
-    protected:
-      VersionInfo source_version_info;
-      const VersionInfo *target_version_info;
-      std::set<RtEvent> map_applied_conditions;
-      unsigned parent_idx;
     };
 
     /**
@@ -3481,10 +3433,10 @@ namespace Legion {
       };
     public:
       DependentPartitionOp(Runtime *rt);
-      DependentPartitionOp(const DependentPartitionOp &rhs);
+      DependentPartitionOp(const DependentPartitionOp &rhs) = delete;
       virtual ~DependentPartitionOp(void);
     public:
-      DependentPartitionOp& operator=(const DependentPartitionOp &rhs);
+      DependentPartitionOp& operator=(const DependentPartitionOp &rhs) = delete;
     public:
       void initialize_by_field(InnerContext *ctx, IndexPartition pid,
                                LogicalRegion handle, LogicalRegion parent,
@@ -3647,10 +3599,10 @@ namespace Legion {
     class PointDepPartOp : public DependentPartitionOp, public ProjectionPoint {
     public:
       PointDepPartOp(Runtime *rt);
-      PointDepPartOp(const PointDepPartOp &rhs);
+      PointDepPartOp(const PointDepPartOp &rhs) = delete;
       virtual ~PointDepPartOp(void);
     public:
-      PointDepPartOp& operator=(const PointDepPartOp &rhs);
+      PointDepPartOp& operator=(const PointDepPartOp &rhs) = delete;
     public:
       void initialize(DependentPartitionOp *owner, const DomainPoint &point);
       void launch(void);
@@ -3861,6 +3813,7 @@ namespace Legion {
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
+      virtual void trigger_replay(void);
       // trigger_mapping same as base class
       virtual void complete_replay(ApEvent precondition,
                                    ApEvent postcondition);
@@ -4450,10 +4403,10 @@ namespace Legion {
       };
     public:
       RemoteOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
-      RemoteOp(const RemoteOp &rhs);
+      RemoteOp(const RemoteOp &rhs) = delete;
       virtual ~RemoteOp(void);
     public:
-      RemoteOp& operator=(const RemoteOp &rhs);
+      RemoteOp& operator=(const RemoteOp &rhs) = delete;
     public:
       virtual void unpack(Deserializer &derez) = 0;
     public:
@@ -4520,10 +4473,10 @@ namespace Legion {
                         public LegionHeapify<RemoteMapOp> {
     public:
       RemoteMapOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
-      RemoteMapOp(const RemoteMapOp &rhs);
+      RemoteMapOp(const RemoteMapOp &rhs) = delete;
       virtual ~RemoteMapOp(void);
     public:
-      RemoteMapOp& operator=(const RemoteMapOp &rhs); 
+      RemoteMapOp& operator=(const RemoteMapOp &rhs) = delete; 
     public:
       virtual UniqueID get_unique_id(void) const;
       virtual uint64_t get_context_index(void) const;
@@ -4552,10 +4505,10 @@ namespace Legion {
                          public LegionHeapify<RemoteCopyOp> {
     public:
       RemoteCopyOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
-      RemoteCopyOp(const RemoteCopyOp &rhs);
+      RemoteCopyOp(const RemoteCopyOp &rhs) = delete;
       virtual ~RemoteCopyOp(void);
     public:
-      RemoteCopyOp& operator=(const RemoteCopyOp &rhs);
+      RemoteCopyOp& operator=(const RemoteCopyOp &rhs) = delete;
     public:
       virtual UniqueID get_unique_id(void) const;
       virtual uint64_t get_context_index(void) const;
@@ -4584,10 +4537,10 @@ namespace Legion {
                           public LegionHeapify<RemoteCloseOp> {
     public:
       RemoteCloseOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
-      RemoteCloseOp(const RemoteCloseOp &rhs);
+      RemoteCloseOp(const RemoteCloseOp &rhs) = delete;
       virtual ~RemoteCloseOp(void);
     public:
-      RemoteCloseOp& operator=(const RemoteCloseOp &rhs);
+      RemoteCloseOp& operator=(const RemoteCloseOp &rhs) = delete;
     public:
       virtual UniqueID get_unique_id(void) const;
       virtual uint64_t get_context_index(void) const;
@@ -4616,10 +4569,10 @@ namespace Legion {
                             public LegionHeapify<RemoteAcquireOp> {
     public:
       RemoteAcquireOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
-      RemoteAcquireOp(const RemoteAcquireOp &rhs);
+      RemoteAcquireOp(const RemoteAcquireOp &rhs) = delete;
       virtual ~RemoteAcquireOp(void);
     public:
-      RemoteAcquireOp& operator=(const RemoteAcquireOp &rhs);
+      RemoteAcquireOp& operator=(const RemoteAcquireOp &rhs) = delete;
     public:
       virtual UniqueID get_unique_id(void) const;
       virtual uint64_t get_context_index(void) const;
@@ -4644,10 +4597,10 @@ namespace Legion {
                             public LegionHeapify<RemoteReleaseOp> {
     public:
       RemoteReleaseOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
-      RemoteReleaseOp(const RemoteReleaseOp &rhs);
+      RemoteReleaseOp(const RemoteReleaseOp &rhs) = delete;
       virtual ~RemoteReleaseOp(void);
     public:
-      RemoteReleaseOp& operator=(const RemoteReleaseOp &rhs);
+      RemoteReleaseOp& operator=(const RemoteReleaseOp &rhs) = delete;
     public:
       virtual UniqueID get_unique_id(void) const;
       virtual uint64_t get_context_index(void) const;
@@ -4676,10 +4629,10 @@ namespace Legion {
                          public LegionHeapify<RemoteFillOp> {
     public:
       RemoteFillOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
-      RemoteFillOp(const RemoteFillOp &rhs);
+      RemoteFillOp(const RemoteFillOp &rhs) = delete;
       virtual ~RemoteFillOp(void);
     public:
-      RemoteFillOp& operator=(const RemoteFillOp &rhs);
+      RemoteFillOp& operator=(const RemoteFillOp &rhs) = delete;
     public:
       virtual UniqueID get_unique_id(void) const;
       virtual uint64_t get_context_index(void) const;
@@ -4730,10 +4683,10 @@ namespace Legion {
                               public LegionHeapify<RemotePartitionOp> {
     public:
       RemotePartitionOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
-      RemotePartitionOp(const RemotePartitionOp &rhs);
+      RemotePartitionOp(const RemotePartitionOp &rhs) = delete;
       virtual ~RemotePartitionOp(void);
     public:
-      RemotePartitionOp& operator=(const RemotePartitionOp &rhs);
+      RemotePartitionOp& operator=(const RemotePartitionOp &rhs) = delete;
     public:
       virtual UniqueID get_unique_id(void) const;
       virtual uint64_t get_context_index(void) const;
@@ -4765,10 +4718,10 @@ namespace Legion {
                            public LegionHeapify<RemoteAttachOp> {
     public:
       RemoteAttachOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
-      RemoteAttachOp(const RemoteAttachOp &rhs);
+      RemoteAttachOp(const RemoteAttachOp &rhs) = delete;
       virtual ~RemoteAttachOp(void);
     public:
-      RemoteAttachOp& operator=(const RemoteAttachOp &rhs);
+      RemoteAttachOp& operator=(const RemoteAttachOp &rhs) = delete;
     public:
       virtual UniqueID get_unique_id(void) const;
       virtual uint64_t get_context_index(void) const;
@@ -4791,10 +4744,10 @@ namespace Legion {
                            public LegionHeapify<RemoteDetachOp> {
     public:
       RemoteDetachOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
-      RemoteDetachOp(const RemoteDetachOp &rhs);
+      RemoteDetachOp(const RemoteDetachOp &rhs) = delete;
       virtual ~RemoteDetachOp(void);
     public:
-      RemoteDetachOp& operator=(const RemoteDetachOp &rhs);
+      RemoteDetachOp& operator=(const RemoteDetachOp &rhs) = delete;
     public:
       virtual UniqueID get_unique_id(void) const;
       virtual uint64_t get_context_index(void) const;
@@ -4821,10 +4774,10 @@ namespace Legion {
                              public LegionHeapify<RemoteDeletionOp> {
     public:
       RemoteDeletionOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
-      RemoteDeletionOp(const RemoteDeletionOp &rhs);
+      RemoteDeletionOp(const RemoteDeletionOp &rhs) = delete;
       virtual ~RemoteDeletionOp(void);
     public:
-      RemoteDeletionOp& operator=(const RemoteDeletionOp &rhs);
+      RemoteDeletionOp& operator=(const RemoteDeletionOp &rhs) = delete;
     public:
       virtual UniqueID get_unique_id(void) const;
       virtual uint64_t get_context_index(void) const;
@@ -4839,48 +4792,20 @@ namespace Legion {
     };
 
     /**
-     * \class RemoteReplayOp
-     * This is a remote copy of a trace replay op, it really doesn't
-     * have to do very much at all other than implement the interface
-     * for remote ops as it will only be used for checking equivalence
-     * sets for valid physical template replay conditions
-     */
-    class RemoteReplayOp : public RemoteOp,
-                           public LegionHeapify<RemoteReplayOp> {
-    public:
-      RemoteReplayOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
-      RemoteReplayOp(const RemoteReplayOp &rhs);
-      virtual ~RemoteReplayOp(void);
-    public:
-      RemoteReplayOp& operator=(const RemoteReplayOp &rhs);
-    public:
-      virtual UniqueID get_unique_id(void) const;
-      virtual uint64_t get_context_index(void) const;
-      virtual void set_context_index(uint64_t index);
-      virtual int get_depth(void) const;
-    public:
-      virtual const char* get_logging_name(void) const;
-      virtual OpKind get_operation_kind(void) const;
-      virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
-                                         std::set<RtEvent> &applied) const;
-      virtual void unpack(Deserializer &derez);
-    };
-
-    /**
-     * \class RemoteSummaryOp
-     * This is a remote copy of a trace summary op, it really doesn't
+     * \class RemoteTraceOp
+     * This is a remote copy of a trace op, it really doesn't
      * have to do very much at all other than implement the interface
      * for remote ops as it will only be used for updating state for
      * physical template replays
      */
-    class RemoteSummaryOp : public RemoteOp,
-                            public LegionHeapify<RemoteSummaryOp> {
+    class RemoteTraceOp : public RemoteOp,
+                          public LegionHeapify<RemoteTraceOp> {
     public:
-      RemoteSummaryOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
-      RemoteSummaryOp(const RemoteSummaryOp &rhs);
-      virtual ~RemoteSummaryOp(void);
+      RemoteTraceOp(Runtime *rt, Operation *ptr, AddressSpaceID src, OpKind k);
+      RemoteTraceOp(const RemoteTraceOp &rhs) = delete;
+      virtual ~RemoteTraceOp(void);
     public:
-      RemoteSummaryOp& operator=(const RemoteSummaryOp &rhs);
+      RemoteTraceOp& operator=(const RemoteTraceOp &rhs) = delete;
     public:
       virtual UniqueID get_unique_id(void) const;
       virtual uint64_t get_context_index(void) const;
@@ -4892,6 +4817,8 @@ namespace Legion {
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const;
       virtual void unpack(Deserializer &derez);
+    public:
+      const OpKind kind;
     };
 
   }; //namespace Internal 

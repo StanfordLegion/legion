@@ -50,6 +50,12 @@ function launcher.build_library(library_name, source_files, cxx, additional_cxx_
   end
 
   local cxx_flags = os.getenv('CXXFLAGS') or ''
+
+  -- Add the C++ standard to the front of the flags so that if the user
+  -- overwrites it in CXXFLAGS, their value wins.
+  local cxx_standard = os.getenv('CXX_STANDARD') or '17'
+  cxx_flags = "-std=c++" .. cxx_standard .. " " .. cxx_flags
+
   cxx_flags = cxx_flags .. " -O2 -Wall -Werror"
   local ffi = require("ffi")
   if ffi.os == "OSX" then

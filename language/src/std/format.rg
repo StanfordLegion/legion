@@ -229,6 +229,28 @@ local function format_arguments(macro_name, msg, args)
   return format_str, format_args
 end
 
+-- Hack: we wrap this in a Terra macro to hide it from the config
+-- option optimizer.
+local printf_once = macro(function(format_str, ...)
+  local format_args = terralib.newlist({...})
+  return quote
+    if regentlib.c.legion_runtime_local_shard_without_context() == 0 then
+      regentlib.c.printf(format_str, format_args)
+    end
+  in nil end
+end)
+printf_once.replicable = true
+
+local fprintf_once = macro(function(stream, format_str, ...)
+  local format_args = terralib.newlist({...})
+  return quote
+    if regentlib.c.legion_runtime_local_shard_without_context() == 0 then
+      regentlib.c.fprintf(stream, format_str, format_args)
+    end
+  in nil end
+end)
+fprintf_once.replicable = true
+
 --- Print formatted string (no automatic newline).
 -- @param msg Format string. Must be a literal constant.
 -- @param ... Arguments.
@@ -237,7 +259,7 @@ format.print = regentlib.macro(
     local args = terralib.newlist({...})
     local format_str, format_args = format_arguments("println", msg, args)
 
-    return rexpr regentlib.c.printf(format_str, format_args) end
+    return rexpr printf_once(format_str, format_args) end
   end)
 
 --- Print formatted string (with automatic newline).
@@ -248,7 +270,7 @@ format.println = regentlib.macro(
     local args = terralib.newlist({...})
     local format_str, format_args = format_arguments("println", msg, args)
 
-    return rexpr regentlib.c.printf([format_str .. "\n"], format_args) end
+    return rexpr printf_once([format_str .. "\n"], format_args) end
   end)
 
 --- Print formatted string to stream (no automatic newline).

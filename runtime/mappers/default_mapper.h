@@ -93,12 +93,13 @@ namespace Legion {
       public:
         VariantInfo(void)
           : variant(0), tight_bound(false), 
-            is_inner(false), is_replicable(false) { }
+            is_inner(false), is_leaf(false), is_replicable(false) { }
       public:
         VariantID            variant;
         Processor::Kind      proc_kind;
         bool                 tight_bound;
         bool                 is_inner;
+        bool                 is_leaf;
         bool                 is_replicable;
       };
       enum CachedMappingPolicy
@@ -479,14 +480,6 @@ namespace Legion {
                             const DomainT<DIM,coord_t> &point_space,
                             const std::vector<Processor> &targets,
                             const Point<DIM,coord_t> &blocking,
-                            bool recurse, bool stealable,
-                            std::vector<TaskSlice> &slices);
-      // For some backwards compatibility with the old interface
-      template<int DIM>
-      static void default_decompose_points(
-                            const LegionRuntime::Arrays::Rect<DIM> &rect,
-                            const std::vector<Processor> &targets,
-                            const LegionRuntime::Arrays::Point<DIM> &blocking,
                             bool recurse, bool stealable,
                             std::vector<TaskSlice> &slices);
       template<int DIM>

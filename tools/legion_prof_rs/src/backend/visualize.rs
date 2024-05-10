@@ -14,9 +14,9 @@ use crate::backend::common::{
     CopyInstInfoDumpInstVec, FillInstInfoDumpInstVec, MemGroup, ProcGroup, StatePostprocess,
 };
 use crate::state::{
-    Chan, ChanEntry, ChanID, ChanPoint, Config, Container, ContainerEntry, Mem, MemID, MemKind,
-    MemPoint, MemProcAffinity, NodeID, OperationInstInfo, Proc, ProcEntryKind, ProcID, ProcPoint,
-    ProfUID, SpyState, State, Timestamp,
+    Chan, ChanEntry, ChanID, ChanPoint, Config, Container, ContainerEntry, DeviceKind, Mem, MemID,
+    MemKind, MemPoint, MemProcAffinity, NodeID, OpID, OperationInstInfo, Proc, ProcEntryKind,
+    ProcID, ProcKind, ProcPoint, ProfUID, SpyState, State, Timestamp,
 };
 
 use crate::conditional_assert;
@@ -76,21 +76,21 @@ struct DataRecord<'a> {
     color: &'a str,
     opacity: f64,
     title: &'a str,
-    initiation: Option<u64>,
+    initiation: Option<OpID>,
     #[serde(rename = "in")]
     in_: &'a str,
     out: &'a str,
     children: &'a str,
     parents: &'a str,
     prof_uid: u64,
-    op_id: Option<u64>,
+    op_id: Option<OpID>,
     instances: &'a str,
 }
 
 #[derive(Serialize, Copy, Clone)]
 struct OpRecord<'a> {
-    op_id: u64,
-    parent_id: Option<u64>,
+    op_id: OpID,
+    parent_id: Option<OpID>,
     desc: &'a str,
     proc: Option<&'a str>,
     level: Option<u32>,
@@ -168,6 +168,7 @@ impl Proc {
     fn emit_tsv_point(
         &self,
         f: &mut csv::Writer<File>,
+        device: Option<DeviceKind>,
         point: &ProcPoint,
         state: &State,
         spy_state: &SpyState,
@@ -184,14 +185,14 @@ impl Proc {
             // FIXME: Elliott: special case on ProfTask to match legion_prof.py behavior
             ProcEntryKind::ProfTask => None,
             // And another special case, because for MapperCalls only, we set default to 0 to match with python
-            ProcEntryKind::MapperCall(_) => Some(initiation_op.map_or(0, |op_id| op_id.0)),
-            _ => initiation_op.map(|op_id| op_id.0),
+            ProcEntryKind::MapperCall(_) => Some(initiation_op.unwrap_or(OpID::ZERO)),
+            _ => initiation_op,
         };
 
         let op_id = match entry.kind {
             // FIXME: Elliott: special case on ProfTask to match legion_prof.py behavior
-            ProcEntryKind::ProfTask => Some(initiation_op.unwrap().0),
-            _ => op_id.map(|id| id.0),
+            ProcEntryKind::ProfTask => Some(initiation_op.unwrap()),
+            _ => op_id,
         };
 
         let render_op = |prof_uid: &ProfUID| prof_uid_record(*prof_uid, state);
@@ -221,8 +222,8 @@ impl Proc {
             }
         }
 
-        let level = self.max_levels - base.level.unwrap();
-        let level_ready = base.level_ready.map(|l| self.max_levels_ready - l);
+        let level = self.max_levels(device) - base.level.unwrap();
+        let level_ready = base.level_ready.map(|l| self.max_levels_ready(device) - l);
 
         let instances = {
             // ProfTask has no op_id
@@ -241,8 +242,8 @@ impl Proc {
             level,
             level_ready,
             ready: None,
-            start: TimestampFormat(Timestamp(0)),
-            end: TimestampFormat(Timestamp(0)),
+            start: TimestampFormat(Timestamp::ZERO),
+            end: TimestampFormat(Timestamp::ZERO),
             color: &color,
             opacity: 1.0,
             title: &name,
@@ -324,27 +325,44 @@ impl Proc {
 
     fn emit_tsv<P: AsRef<Path>>(
         &self,
+        device: Option<DeviceKind>,
         path: P,
         state: &State,
         spy_state: &SpyState,
     ) -> io::Result<ProcessorRecord> {
+        let suffix = match device {
+            Some(DeviceKind::Device) => " Device",
+            Some(DeviceKind::Host) => " Host",
+            None => "",
+        };
+        let file_suffix = match device {
+            Some(DeviceKind::Device) => "_Device",
+            Some(DeviceKind::Host) => "_Host",
+            None => "",
+        };
+
         let mut filename = PathBuf::new();
         filename.push("tsv");
-        filename.push(format!("Proc_0x{:x}.tsv", self.proc_id));
+        filename.push(format!("Proc_0x{:x}{}.tsv", self.proc_id, file_suffix));
         let mut f = csv::WriterBuilder::new()
             .delimiter(b'\t')
             .from_path(path.as_ref().join(&filename))?;
 
-        for point in &self.time_points {
+        for point in self.time_points(device) {
             assert!(point.first);
-            self.emit_tsv_point(&mut f, point, state, spy_state)?;
+            self.emit_tsv_point(&mut f, device, point, state, spy_state)?;
         }
 
-        let level = max(self.max_levels, 1);
+        let level = max(self.max_levels(device), 1);
 
         Ok(ProcessorRecord {
-            full_text: format!("{:?} Processor 0x{:x}", self.kind, self.proc_id),
-            text: format!("{:?} Proc {}", self.kind, self.proc_id.proc_in_node()),
+            full_text: format!("{:?}{} Processor 0x{:x}", self.kind, suffix, self.proc_id),
+            text: format!(
+                "{:?}{} Proc {}",
+                self.kind,
+                suffix,
+                self.proc_id.proc_in_node(),
+            ),
             tsv: filename,
             levels: level,
         })
@@ -453,7 +471,7 @@ impl Chan {
 
         let color = format!("#{:06x}", entry.color(state));
 
-        let level = max(self.max_levels + 1, 4) - base.level.unwrap() - 1;
+        let level = max(self.max_levels(None) + 1, 4) - base.level.unwrap() - 1;
 
         let instances = match entry {
             ChanEntry::Copy(copy) => {
@@ -474,7 +492,7 @@ impl Chan {
             color: &color,
             opacity: 1.0,
             title: &name,
-            initiation: Some(initiation.unwrap().0),
+            initiation,
             in_: "",
             out: "",
             children: "",
@@ -597,12 +615,12 @@ impl Chan {
             .delimiter(b'\t')
             .from_path(path.as_ref().join(&filename))?;
 
-        for point in &self.time_points {
+        for point in self.time_points(None) {
             assert!(point.first);
             self.emit_tsv_point(&mut f, point, state)?;
         }
 
-        let level = max(self.max_levels + 1, 4) - 1;
+        let level = max(self.max_levels(None) + 1, 4) - 1;
 
         Ok(ProcessorRecord {
             full_text: long_name,
@@ -628,7 +646,7 @@ impl Mem {
 
         let color = format!("#{:06x}", inst.color(state));
 
-        let level = max(self.max_live_insts + 1, 4) - base.level.unwrap();
+        let level = max(self.max_levels(None) + 1, 4) - base.level.unwrap();
 
         f.serialize(DataRecord {
             level,
@@ -639,7 +657,7 @@ impl Mem {
             color: &color,
             opacity: 0.45,
             title: &format!("{} (deferred)", &name),
-            initiation: Some(initiation.unwrap().0),
+            initiation,
             in_: "",
             out: "",
             children: "",
@@ -658,7 +676,7 @@ impl Mem {
             color: &color,
             opacity: 1.0,
             title: &name,
-            initiation: Some(initiation.unwrap().0),
+            initiation,
             in_: "",
             out: "",
             children: "",
@@ -694,12 +712,12 @@ impl Mem {
             .delimiter(b'\t')
             .from_path(path.as_ref().join(&filename))?;
 
-        for point in &self.time_points {
+        for point in self.time_points(None) {
             assert!(point.first);
             self.emit_tsv_point(&mut f, point, state)?;
         }
 
-        let level = max(self.max_live_insts + 1, 4) - 1;
+        let level = max(self.max_levels(None) + 1, 4) - 1;
 
         Ok(ProcessorRecord {
             full_text: long_name,
@@ -738,12 +756,17 @@ impl State {
             self.calculate_proc_utilization_data(utilizations, owners, count)
         };
 
-        let ProcGroup(node, kind) = group;
+        let ProcGroup(node, kind, device) = group;
         let node_name = match node {
             None => "all".to_owned(),
             Some(node_id) => format!("{}", node_id.0),
         };
-        let group_name = format!("{} ({:?})", &node_name, kind);
+        let suffix = match device {
+            Some(DeviceKind::Device) => " Device",
+            Some(DeviceKind::Host) => " Host",
+            None => "",
+        };
+        let group_name = format!("{} ({:?}{})", &node_name, kind, suffix);
         let filename = path
             .as_ref()
             .join("tsv")
@@ -752,7 +775,7 @@ impl State {
             .delimiter(b'\t')
             .from_path(filename)?;
         f.serialize(UtilizationRecord {
-            time: TimestampFormat(Timestamp(0)),
+            time: TimestampFormat(Timestamp::ZERO),
             count: Count(0.0),
         })?;
         for (time, count) in utilization {
@@ -803,7 +826,7 @@ impl State {
             .delimiter(b'\t')
             .from_path(filename)?;
         f.serialize(UtilizationRecord {
-            time: TimestampFormat(Timestamp(0)),
+            time: TimestampFormat(Timestamp::ZERO),
             count: Count(0.0),
         })?;
         for (time, count) in utilization {
@@ -855,7 +878,7 @@ impl State {
             .delimiter(b'\t')
             .from_path(filename)?;
         f.serialize(UtilizationRecord {
-            time: TimestampFormat(Timestamp(0)),
+            time: TimestampFormat(Timestamp::ZERO),
             count: Count(0.0),
         })?;
         for (time, count) in utilization {
@@ -877,13 +900,18 @@ impl State {
 
         let multinode = self.has_multiple_nodes();
         for group in timepoint_proc.keys() {
-            let ProcGroup(node, kind) = group;
+            let ProcGroup(node, kind, device) = group;
             if node.is_some() || multinode {
                 let node_name = match node {
                     None => "all".to_owned(),
                     Some(node_id) => format!("{}", node_id.0),
                 };
-                let group_name = format!("{} ({:?})", &node_name, kind);
+                let suffix = match device {
+                    Some(DeviceKind::Device) => " Device",
+                    Some(DeviceKind::Host) => " Host",
+                    None => "",
+                };
+                let group_name = format!("{} ({:?}{})", &node_name, kind, suffix);
                 stats
                     .entry(node_name)
                     .or_insert_with(Vec::new)
@@ -1022,9 +1050,16 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
     let proc_records: BTreeMap<_, _> = procs
         .par_iter()
         .filter(|proc| !proc.is_empty() && proc.is_visible())
-        .map(|proc| {
-            proc.emit_tsv(&path, state, spy_state)
-                .map(|record| (proc.proc_id, record))
+        .flat_map(|proc| match proc.kind {
+            ProcKind::GPU => vec![
+                (proc, Some(DeviceKind::Device)),
+                (proc, Some(DeviceKind::Host)),
+            ],
+            _ => vec![(proc, None)],
+        })
+        .map(|(proc, device)| {
+            proc.emit_tsv(device, &path, state, spy_state)
+                .map(|record| ((proc.proc_id, device), record))
         })
         .collect::<io::Result<_>>()?;
 
@@ -1085,7 +1120,7 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
             .delimiter(b'\t')
             .from_path(filename)?;
         for (op_id, op) in &state.operations {
-            let parent_id = op.parent_id.map(|x| x.0);
+            let parent_id = op.parent_id;
             let provenance = Some(op.provenance.as_deref().unwrap_or(""));
             if let Some(proc_id) = state.tasks.get(op_id) {
                 let proc = state.procs.get(proc_id).unwrap();
@@ -1109,7 +1144,7 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
                 };
 
                 file.serialize(OpRecord {
-                    op_id: op_id.0,
+                    op_id: *op_id,
                     parent_id,
                     desc: &desc,
                     proc: Some(&proc_full_text),
@@ -1126,7 +1161,7 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
                     .unwrap();
 
                 file.serialize(OpRecord {
-                    op_id: op_id.0,
+                    op_id: *op_id,
                     parent_id,
                     desc: &format!("{} <{}>", task_name, op_id.0),
                     proc: None,
@@ -1140,7 +1175,7 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
                 );
 
                 file.serialize(OpRecord {
-                    op_id: op_id.0,
+                    op_id: *op_id,
                     parent_id,
                     desc: &desc,
                     proc: None,
@@ -1155,7 +1190,7 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
         let stats_levels = 4;
         let scale_data = ScaleRecord {
             start: 0.0,
-            end: (state.last_time.0 as f64 / 100. * 1.01).ceil() / 10.,
+            end: (state.last_time.to_ns() as f64 / 100. * 1.01).ceil() / 10.,
             stats_levels,
             max_level: base_level + 1,
         };

@@ -39,8 +39,8 @@ struct alignas(16) Integer128 {
     : hi(v)
     , lo(v)
   {}
-  bool operator==(const Integer128 &o) { return hi == o.hi && lo == o.lo; }
-  bool operator!=(const Integer128 &o) { return !operator==(o); }
+  bool operator==(const Integer128 &o) const { return hi == o.hi && lo == o.lo; }
+  bool operator!=(const Integer128 &o) const { return !operator==(o); }
 };
 
 std::ostream &operator<<(std::ostream &os, const Integer128 &dt)

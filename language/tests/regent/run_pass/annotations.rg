@@ -26,6 +26,10 @@ where reads writes(r) do
   end
 end
 
+task f(t : int)
+  return t < 1
+end
+
 task main()
   var r = region(ispace(ptr, 4), int)
   var x0 = dynamic_cast(ptr(int, r), 0)
@@ -41,11 +45,14 @@ task main()
 
   var t = 0
 
-  __demand(__spmd, __trace)
-  do
+  var c = f(t)
+  __demand(__predicate, __trace)
+  while c do
     for i = 0, 3 do
       inc(p[i], 100)
     end
+    t += 1
+    c = f(t)
   end
 
   regentlib.assert(@x0 == 101, "test failed")

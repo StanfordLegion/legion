@@ -1,0 +1,175 @@
+variables:
+  USE_HIP: "1"
+  HIP_ARCH: "gfx90a" # for runtime.mk
+  GPU_ARCH: "gfx90a" # for Regent
+
+  REALM_NETWORKS: "gasnetex"
+  GASNET_CONDUIT: "ofi-slingshot11"
+  CONDUIT: "ofi"
+
+  CXXFLAGS: "-std=c++17"
+  CXX_STANDARD: "17"
+
+  OLCF_SERVICE_ACCOUNT: ums036_auser
+  EXTERNAL_WORKDIR: /lustre/orion/proj-shared/ums036/ci/${CI_PIPELINE_ID}
+  GIT_SUBMODULE_STRATEGY: recursive
+
+  THREADS: 32 # for parallel build
+
+.rocm543: &rocm543
+  ROCM_VERSION: "5.4.3"
+
+.rocm560: &rocm560
+  ROCM_VERSION: "5.6.0"
+
+.rocm571: &rocm571
+  ROCM_VERSION: "5.7.1"
+  WARN_AS_ERROR: "0"
+
+.rocm600: &rocm600
+  ROCM_VERSION: "6.0.0"
+  WARN_AS_ERROR: "0"
+
+.legion: &legion
+  TEST_REGENT: "0"
+  LEGION_WARNINGS_FATAL: "1"
+  DEBUG: "0"
+
+.regent: &regent
+  TEST_LEGION_CXX: "0"
+  TEST_REALM: "0"
+  TEST_FUZZER: "0"
+  NO_PRETTY: "1"
+  CXXFLAGS: "-std=c++17 -D__HIP_PLATFORM_AMD__"
+
+.cmake: &cmake
+  USE_CMAKE: "1"
+
+.ctest: &ctest
+  TEST_CTEST: "1"
+
+.nodes1: &nodes1
+  SCHEDULER_PARAMETERS: "-A UMS036 -t 0:20:00 -N 1 -n 1 -c 56 -p batch --exclusive"
+
+.nodes2: &nodes2
+  SCHEDULER_PARAMETERS: "-A UMS036 -t 0:20:00 -N 2 -n 2 -c 56 -p batch --exclusive"
+
+.tests: &tests
+  script:
+    - .gitlab/test_script.sh
+  retry:
+    max: 0
+    when:
+      - runner_system_failure
+      - unknown_failure
+
+stages:
+  - prep
+  - test
+  - clean
+
+prep:
+  stage: prep
+  script:
+    - .gitlab/prep_script.sh
+  tags:
+    - shell
+    - frontier
+
+legion_rocm543:
+  <<: [*tests]
+  stage: test
+  tags:
+    - slurm
+    - frontier
+  variables:
+    <<: [*legion, *rocm543, *nodes1]
+
+legion_rocm560:
+  <<: [*tests]
+  stage: test
+  tags:
+    - slurm
+    - frontier
+  variables:
+    <<: [*legion, *rocm560, *nodes1]
+
+legion_rocm571:
+  <<: [*tests]
+  stage: test
+  tags:
+    - slurm
+    - frontier
+  variables:
+    <<: [*legion, *rocm571, *nodes1]
+
+legion_rocm600:
+  <<: [*tests]
+  stage: test
+  tags:
+    - slurm
+    - frontier
+  variables:
+    <<: [*legion, *rocm600, *nodes2]
+
+legion_cmake_rocm543:
+  <<: [*tests]
+  stage: test
+  tags:
+    - slurm
+    - frontier
+  variables:
+    <<: [*legion, *cmake, *ctest, *rocm543, *nodes1]
+
+legion_cmake_rocm560:
+  <<: [*tests]
+  stage: test
+  tags:
+    - slurm
+    - frontier
+  variables:
+    <<: [*legion, *cmake, *ctest, *rocm560, *nodes1]
+
+legion_cmake_rocm571:
+  <<: [*tests]
+  stage: test
+  tags:
+    - slurm
+    - frontier
+  variables:
+    <<: [*legion, *cmake, *ctest, *rocm571, *nodes1]
+
+legion_cmake_rocm600:
+  <<: [*tests]
+  stage: test
+  tags:
+    - slurm
+    - frontier
+  variables:
+    <<: [*legion, *cmake, *ctest, *rocm600, *nodes1]
+
+regent_rocm543:
+  <<: [*tests]
+  stage: test
+  tags:
+    - slurm
+    - frontier
+  variables:
+    <<: [*regent, *rocm543, *nodes1]
+
+regent_cmake_rocm543:
+  <<: [*tests]
+  stage: test
+  tags:
+    - slurm
+    - frontier
+  variables:
+    <<: [*regent, *cmake, *rocm543, *nodes2]
+
+clean:
+  stage: clean
+  script:
+    - rm -rf ${EXTERNAL_WORKDIR}*
+  tags:
+    - shell
+    - frontier

@@ -490,8 +490,7 @@ namespace Legion {
         info.create = timeline.create_time;
         info.ready = timeline.ready_time;
         info.start = timeline.start_time;
-        // use complete_time instead of end_time to include async work
-        info.stop = timeline.complete_time;
+        info.stop = timeline.end_time;
 
         // record gpu time
         info.gpu_start = timeline_gpu.start_time;
@@ -1755,6 +1754,7 @@ namespace Legion {
       machine_desc.node_id = static_cast<unsigned>(rt->address_space);
       machine_desc.num_nodes = static_cast<unsigned>(
         rt->total_address_spaces);
+      machine_desc.version = LEGION_PROF_VERSION;
 
       serializer->serialize(machine_desc);
 
@@ -1795,7 +1795,32 @@ namespace Legion {
       LegionProfDesc::MaxDimDesc max_dim_desc;
       max_dim_desc.max_dim = LEGION_MAX_DIM;
       serializer->serialize(max_dim_desc);
-
+      // Log the runtime configuration
+      const LegionProfDesc::RuntimeConfig config = {
+#ifdef DEBUG_LEGION
+        true,
+#else
+        false,
+#endif
+        runtime->legion_spy_enabled,
+#ifdef LEGION_GC
+        true,
+#else
+        false,
+#endif
+        runtime->program_order_execution,
+        !runtime->unsafe_mapper,
+        runtime->check_privileges,
+        runtime->safe_control_replication > 0,
+        runtime->verify_partitions,
+#ifdef LEGION_BOUNDS_CHECKS
+        true,
+#else
+        false,
+#endif
+        runtime->resilient_mode,
+      };
+      serializer->serialize(config);
 #ifdef DEBUG_LEGION
       for (unsigned idx = 0; idx < LEGION_PROF_LAST; idx++)
         total_outstanding_requests[idx] = 0;

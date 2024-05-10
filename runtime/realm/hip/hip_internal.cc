@@ -569,11 +569,9 @@ namespace Realm {
       mapped_cpu_mems.insert(mapped_cpu_mems.end(),
                              src_gpu->pinned_sysmems.begin(),
                              src_gpu->pinned_sysmems.end());
-      // TODO:managed memory
-      // // treat managed memory as usually being on the host as well
-      // mapped_cpu_mems.insert(mapped_cpu_mems.end(),
-      //                        src_gpu->managed_mems.begin(),
-      //                        src_gpu->managed_mems.end());
+      // treat managed memory as usually being on the host as well
+      mapped_cpu_mems.insert(mapped_cpu_mems.end(), src_gpu->managed_mems.begin(),
+                             src_gpu->managed_mems.end());
 
       switch(_kind) {
       case XFER_GPU_TO_FB:
@@ -1302,7 +1300,11 @@ namespace Realm {
                   // if src is allocated by hipHostMalloc, then this is not necessary                  
                   hipPointerAttribute_t src_attr;
                   CHECK_HIP( hipPointerGetAttributes(&src_attr, src_ptr) );
-                  if (src_attr.memoryType == hipMemoryTypeHost) {
+#if HIP_VERSION_MAJOR < 6
+                  if(src_attr.memoryType == hipMemoryTypeHost) {
+#else
+                  if(src_attr.type == hipMemoryTypeHost) {
+#endif
                     CHECK_HIP( hipHostGetDevicePointer((void **)&src_device, src_ptr, 0) );
                   }
 #endif

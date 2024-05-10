@@ -12,29 +12,13 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- runs-with:
--- [
--- ]
-
--- FIXME: This test triggers a bug in RDIR which is sensitive to the
--- iteration order of maps. The insertion-ordered data.map hits it
--- deterministically, and the unordered tables built into LuaJIT hit
--- it nondeterministically (depending on the LuaJIT version). Until
--- this is fixed the test has to be disabled.
-
--- Originally I tried to work around it by allowing the old iteration
--- order (just for this test). But of course this fails because LuaJIT
--- tweaks its internals from time to time, causing this to keep breaking.
-
---   ["-ll:cpu", "4", "-fflow-spmd", "1", "-fflow-old-iteration-order", "1"],
---   ["-ll:cpu", "2", "-fflow-spmd", "1", "-fflow-spmd-shardsize", "2", "-fflow-old-iteration-order", "1"]
-
 import "regent"
 
 -- This tests the SPMD optimization of the compiler with:
 --   * reductions
 
 local c = regentlib.c
+local format = require("std/format")
 
 struct t {
   a : int,
@@ -73,6 +57,7 @@ where reads(r.c), reads writes(r.b) do
   end
 end
 
+__demand(__replicable)
 task main()
   var r = region(ispace(ptr, 4), t)
   var x0 = dynamic_cast(ptr(t, r), 0)
@@ -111,12 +96,11 @@ task main()
   end
 
   for x in r do
-    c.printf("x %d %d %d\n", x.a, x.b, x.c)
+    format.println("x {} {} {}", x.a, x.b, x.c)
   end
 
   var pieces = 4
 
-  __demand(__spmd)
   for t = 0, 3 do
     for i = 0, pieces do
       inc_ba(p[i])
@@ -131,7 +115,7 @@ task main()
   end
 
   for x in r do
-    c.printf("x %d %d %d\n", x.a, x.b, x.c)
+    format.println("x {} {} {}", x.a, x.b, x.c)
   end
 
   regentlib.assert(x0.a ==  9905, "test failed")

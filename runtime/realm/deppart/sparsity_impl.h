@@ -186,18 +186,6 @@ namespace Realm {
     SparsityMapImplWrapper(void);
     ~SparsityMapImplWrapper(void);
 
-    class DeferredDestroy : public EventWaiter {
-    public:
-      void defer(SparsityMapImplWrapper *wrap, Event wait_on);
-      virtual void event_triggered(bool poisoned, TimeLimit work_until);
-      virtual void print(std::ostream &os) const;
-      virtual Event get_finish_event(void) const;
-
-    protected:
-      SparsityMapImplWrapper *wrapper;
-    };
-    DeferredDestroy deferred_destroy;
-
     void init(ID _me, unsigned _init_owner);
     void destroy(void);
 
@@ -210,6 +198,8 @@ namespace Realm {
     atomic<DynamicTemplates::TagType> type_tag;
     atomic<void *> map_impl;  // actual implementation
     atomic<unsigned> references;
+
+    bool need_refcount;
 
     Mutex mutex;
 

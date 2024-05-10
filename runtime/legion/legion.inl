@@ -44,20 +44,64 @@ namespace Legion {
      * size_t legion_buffer_size(void)
      * void legion_serialize(void *buffer)
      * void legion_deserialize(const void *buffer)
+     *(optional) void legion_buffer_finalize(const void *buffer)
      */
     class LegionSerialization {
     public:
       // A helper method for getting access to the runtime's
       // end_task method with private access
       static inline void end_helper(Context ctx,
-          const void *result, size_t result_size, bool owned)
+          const void *result, size_t result_size)
       {
-        Runtime::legion_task_postamble(ctx, result, result_size, owned);
+        Runtime::legion_task_postamble(ctx, result, result_size,false/*owned*/);
+      }
+      static inline void end_helper(Context ctx,
+          const void *result, size_t result_size,
+          const Realm::ExternalInstanceResource &resource,
+          void (*freefunc)(const Realm::ExternalInstanceResource&))
+      {
+        Runtime::legion_task_postamble(ctx, result, result_size, true/*owned*/,
+                                       resource, freefunc);
       }
       static inline Future from_value_helper(
-          const void *value, size_t value_size, bool owned)
+          const void *value, size_t value_size)
       {
-        return Future::from_untyped_pointer(value, value_size, owned);
+        return Future::from_untyped_pointer(value, value_size, false/*owned*/);
+      }
+      static inline Future from_value_helper(
+          const void *value, size_t value_size,
+          const Realm::ExternalInstanceResource &resource,
+          void (*freefunc)(const Realm::ExternalInstanceResource&))
+      {
+        return Future::from_value(value, value_size, true/*owned*/,
+                                  resource, freefunc);
+      }
+      static void free_func(const Realm::ExternalInstanceResource &res)
+      {
+#ifdef DEBUG_LEGION
+        const Realm::ExternalMemoryResource *resource =
+          dynamic_cast<const Realm::ExternalMemoryResource*>(&res);
+        assert(resource != NULL);
+#else
+        const Realm::ExternalMemoryResource *resource =
+          static_cast<const Realm::ExternalMemoryResource*>(&res);
+#endif
+        free((void*)resource->base);
+      }
+      template<void (*FINALIZE)(const void *buffer)>
+      static void free_func_wrapper(const Realm::ExternalInstanceResource &res)
+      {
+#ifdef DEBUG_LEGION
+        const Realm::ExternalMemoryResource *resource =
+          dynamic_cast<const Realm::ExternalMemoryResource*>(&res);
+        assert(resource != NULL);
+#else
+        const Realm::ExternalMemoryResource *resource =
+          static_cast<const Realm::ExternalMemoryResource*>(&res);
+#endif
+        void *buffer = (void*)resource->base;
+        (*FINALIZE)(buffer);
+        free(buffer);
       }
 
       // WARNING: There are two levels of SFINAE (substitution failure is 
@@ -67,7 +111,7 @@ namespace Legion {
       // a 'legion_serialize' method there are also 'legion_buffer_size'
       // and 'legion_deserialize' methods.
       
-      template<typename T, bool HAS_SERIALIZE>
+      template<typename T, bool HAS_SERIALIZE, bool HAS_FINALIZE>
       struct NonPODSerializer {
         static inline void end_task(Context ctx, T *result)
         {
@@ -76,18 +120,57 @@ namespace Legion {
           {
             void *buffer = malloc(buffer_size);
             result->legion_serialize(buffer);
-            end_helper(ctx, buffer, buffer_size, true/*owned*/);
-            // No need to free the buffer, the Legion runtime owns it now
+            Realm::ExternalMemoryResource resource(buffer, buffer_size);
+            end_helper(ctx, buffer, buffer_size, resource, free_func);
           }
           else
-            end_helper(ctx, NULL, 0, false/*owned*/);
+            end_helper(ctx, NULL, 0);
         }
         static inline Future from_value(const T *value)
         {
           size_t buffer_size = value->legion_buffer_size();
           void *buffer = malloc(buffer_size);
           value->legion_serialize(buffer);
-          return from_value_helper(buffer, buffer_size, true/*owned*/);
+          Realm::ExternalMemoryResource resource(buffer, buffer_size);
+          return from_value_helper(buffer, buffer_size, resource, free_func);
+        }
+        static inline T unpack(const Future &f, bool silence_warnings,
+                               const char *warning_string)
+        {
+          size_t size = 0;
+          const void *result = f.get_buffer(Memory::SYSTEM_MEM, &size,
+                false/*check size*/, silence_warnings, warning_string);
+          T derez;
+          derez.legion_deserialize(result);
+          return derez;
+        }
+      };
+
+      // Specialization for the case where we have a finalize method
+      template<typename T>
+      struct NonPODSerializer<T,true,true> { 
+        static inline void end_task(Context ctx, T *result)
+        {
+          size_t buffer_size = result->legion_buffer_size();
+          if (buffer_size > 0)
+          {
+            void *buffer = malloc(buffer_size);
+            result->legion_serialize(buffer);
+            Realm::ExternalMemoryResource resource(buffer, buffer_size);
+            end_helper(ctx, buffer, buffer_size,
+                resource, free_func_wrapper<T::legion_buffer_finalize>);
+          }
+          else
+            end_helper(ctx, NULL, 0);
+        }
+        static inline Future from_value(const T *value)
+        {
+          size_t buffer_size = value->legion_buffer_size();
+          void *buffer = malloc(buffer_size);
+          value->legion_serialize(buffer);
+          Realm::ExternalMemoryResource resource(buffer, buffer_size);
+          return from_value_helper(buffer, buffer_size,
+              resource, free_func_wrapper<T::legion_buffer_finalize>);
         }
         static inline T unpack(const Future &f, bool silence_warnings,
                                const char *warning_string)
@@ -102,8 +185,8 @@ namespace Legion {
       };
 
       // Further specialization for deferred reductions
-      template<typename REDOP, bool EXCLUSIVE>
-      struct NonPODSerializer<DeferredReduction<REDOP,EXCLUSIVE>,false> {
+      template<typename REDOP, bool EXCLUSIVE, bool FINAL>
+      struct NonPODSerializer<DeferredReduction<REDOP,EXCLUSIVE>,false,FINAL> {
         static inline void end_task(Context ctx,
                                     DeferredReduction<REDOP,EXCLUSIVE> *result)
         {
@@ -118,7 +201,7 @@ namespace Legion {
           // Should never be called
           assert(false);
           return from_value_helper((const void*)value,
-            sizeof(DeferredReduction<REDOP,EXCLUSIVE>), false/*owned*/);
+            sizeof(DeferredReduction<REDOP,EXCLUSIVE>));
         }
         static inline DeferredReduction<REDOP,EXCLUSIVE> 
           unpack(const Future &f, bool silence_warnings, const char *warning)
@@ -133,8 +216,8 @@ namespace Legion {
       };
 
       // Further specialization to see if this a deferred value
-      template<typename T>
-      struct NonPODSerializer<DeferredValue<T>,false> {
+      template<typename T, bool FINAL>
+      struct NonPODSerializer<DeferredValue<T>,false,FINAL> {
         static inline void end_task(Context ctx,
                                     DeferredValue<T> *result)
         {
@@ -148,7 +231,7 @@ namespace Legion {
           // Should never be called
           assert(false);
           return from_value_helper((const void*)value,
-                                   sizeof(DeferredValue<T>), false/*owned*/);
+                                   sizeof(DeferredValue<T>));
         }
         static inline DeferredValue<T> unpack(const Future &f,
             bool silence_warnings, const char *warning_string)
@@ -162,16 +245,15 @@ namespace Legion {
         }
       }; 
       
-      template<typename T>
-      struct NonPODSerializer<T,false> {
+      template<typename T, bool FINAL>
+      struct NonPODSerializer<T,false,FINAL> {
         static inline void end_task(Context ctx, T *result)
         {
-          end_helper(ctx, (void*)result, sizeof(T), false/*owned*/);
+          end_helper(ctx, (void*)result, sizeof(T));
         }
         static inline Future from_value(const T *value)
         {
-          return from_value_helper((const void*)value,
-                                   sizeof(T), false/*owned*/);
+          return from_value_helper((const void*)value, sizeof(T));
         }
         static inline T unpack(const Future &f, bool silence_warnings,
                                const char *warning_string)
@@ -198,22 +280,36 @@ namespace Legion {
           sizeof(test<T>(nullptr, nullptr, nullptr)) == sizeof(yes);
       };
 
+      template <typename T>
+      struct IsFinalizeType {
+        typedef char yes; typedef long no;
+
+        template <typename C>
+        static yes test(decltype(&C::legion_buffer_finalize));
+        template <typename C> static no test(...);
+
+        static constexpr bool value = sizeof(test<T>(nullptr)) == sizeof(yes);
+      };
+
       template<typename T, bool IS_STRUCT>
       struct StructHandler {
         static inline void end_task(Context ctx, T *result)
         {
           // Otherwise this is a struct, so see if it has serialization methods
-          NonPODSerializer<T,IsSerdezType<T>::value>::end_task(ctx, result);
+          NonPODSerializer<T,IsSerdezType<T>::value,
+            IsFinalizeType<T>::value>::end_task(ctx, result);
         }
         static inline Future from_value(const T *value)
         {
-          return NonPODSerializer<T,IsSerdezType<T>::value>::from_value(value);
+          return NonPODSerializer<T,IsSerdezType<T>::value,
+                 IsFinalizeType<T>::value>::from_value(value);
         }
         static inline T unpack(const Future &f, bool silence_warnings,
                                const char *warning_string)
         {
-          return NonPODSerializer<T,IsSerdezType<T>::value>::unpack(f,
-                                    silence_warnings, warning_string); 
+          return NonPODSerializer<T,IsSerdezType<T>::value,
+                  IsFinalizeType<T>::value>::unpack(
+                      f, silence_warnings, warning_string); 
         }
       };
       // False case of template specialization
@@ -221,12 +317,11 @@ namespace Legion {
       struct StructHandler<T,false> {
         static inline void end_task(Context ctx, T *result)
         {
-          end_helper(ctx, (void*)result, sizeof(T), false/*owned*/);
+          end_helper(ctx, (void*)result, sizeof(T));
         }
         static inline Future from_value(const T *value)
         {
-          return from_value_helper((const void*)value, 
-                                   sizeof(T), false/*owned*/);
+          return from_value_helper((const void*)value, sizeof(T));
         }
         static inline T unpack(const Future &f, bool silence_warnings,
                                const char *warning_string)
@@ -17986,7 +18081,7 @@ namespace Legion {
                                            bool replace/*= false*/)
     //--------------------------------------------------------------------------
     {
-      LEGION_STATIC_ASSERT(DIM <= DomainPoint::MAX_POINT_DIM,
+      static_assert(DIM <= DomainPoint::MAX_POINT_DIM,
           "ArgumentMap DIM is larger than LEGION_MAX_DIM");  
       DomainPoint dp;
       dp.dim = DIM;
@@ -18000,7 +18095,7 @@ namespace Legion {
     inline bool ArgumentMap::remove_point(const PT point[DIM])
     //--------------------------------------------------------------------------
     {
-      LEGION_STATIC_ASSERT(DIM <= DomainPoint::MAX_POINT_DIM,
+      static_assert(DIM <= DomainPoint::MAX_POINT_DIM,
           "ArgumentMap DIM is larger than LEGION_MAX_DIM");
       DomainPoint dp;
       dp.dim = DIM;
@@ -19503,7 +19598,7 @@ namespace Legion {
     inline RT FutureMap::get_result(const PT point[DIM]) const
     //--------------------------------------------------------------------------
     {
-      LEGION_STATIC_ASSERT(DIM <= DomainPoint::MAX_POINT_DIM,
+      static_assert(DIM <= DomainPoint::MAX_POINT_DIM,
           "FutureMap DIM is larger than LEGION_MAX_DIM");
       DomainPoint dp;
       dp.dim = DIM;
@@ -19518,7 +19613,7 @@ namespace Legion {
     inline Future FutureMap::get_future(const PT point[DIM]) const
     //--------------------------------------------------------------------------
     {
-      LEGION_STATIC_ASSERT(DIM <= DomainPoint::MAX_POINT_DIM,
+      static_assert(DIM <= DomainPoint::MAX_POINT_DIM,
           "FutureMap DIM is larger than LEGION_MAX_DIM");
       DomainPoint dp;
       dp.dim = DIM;
@@ -19532,7 +19627,7 @@ namespace Legion {
     inline void FutureMap::get_void_result(const PT point[DIM]) const
     //--------------------------------------------------------------------------
     {
-      LEGION_STATIC_ASSERT(DIM <= DomainPoint::MAX_POINT_DIM,
+      static_assert(DIM <= DomainPoint::MAX_POINT_DIM,
           "FutureMap DIM is larger than LEGION_MAX_DIM");
       DomainPoint dp;
       dp.dim = DIM;
@@ -19972,75 +20067,6 @@ namespace Legion {
       return result;
     }
 
-    LEGION_DISABLE_DEPRECATED_WARNINGS
-
-    //--------------------------------------------------------------------------
-    inline bool IndexIterator::has_next(void) const
-    //--------------------------------------------------------------------------
-    {
-      return is_iterator.valid;
-    }
-    
-    //--------------------------------------------------------------------------
-    inline ptr_t IndexIterator::next(void)
-    //--------------------------------------------------------------------------
-    {
-      if (!rect_iterator.valid)
-        rect_iterator = 
-          Realm::PointInRectIterator<1,coord_t>(is_iterator.rect);
-      const ptr_t result = rect_iterator.p[0];
-      rect_iterator.step();
-      if (!rect_iterator.valid)
-        is_iterator.step();
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    inline ptr_t IndexIterator::next_span(size_t& act_count, size_t req_count)
-    //--------------------------------------------------------------------------
-    {
-      if (rect_iterator.valid)
-      {
-        // If we have a rect iterator we just go to the end of the rectangle
-        const ptr_t result = rect_iterator.p[0];
-        const ptr_t last = is_iterator.rect.hi[0];
-        act_count = (last.value - result.value) + 1;
-        if (act_count <= req_count)
-        {
-          rect_iterator.valid = false;
-          is_iterator.step();
-        }
-        else
-	{
-          rect_iterator.p[0] = result.value + req_count;
-	  act_count = req_count;
-	}
-        return result;
-      }
-      else
-      {
-        // Consume the whole rectangle
-        const ptr_t result = is_iterator.rect.lo[0];
-        const ptr_t last = is_iterator.rect.hi[0];
-        act_count = (last.value - result.value) + 1;
-        if (act_count > req_count)
-        {
-          rect_iterator = 
-            Realm::PointInRectIterator<1,coord_t>(is_iterator.rect);
-          rect_iterator.p[0] = result.value + req_count;
-	  act_count = req_count;
-        }
-        else
-        {
-          rect_iterator.valid = false;
-          is_iterator.step();
-        }
-        return result;
-      }
-    }
-
-    LEGION_REENABLE_DEPRECATED_WARNINGS
-
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     IndexSpaceT<DIM,T> Runtime::create_index_space(Context ctx, 
@@ -20137,32 +20163,6 @@ namespace Legion {
     {
       return IndexSpaceT<DIM,T>(subtract_index_spaces(ctx, 
                               IndexSpace(left), IndexSpace(right), provenance));
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename T>
-    IndexPartition Runtime::create_index_partition(Context ctx,
-      IndexSpace parent, const T& mapping, Color part_color /*= AUTO_GENERATE*/)
-    //--------------------------------------------------------------------------
-    {
-      LegionRuntime::Arrays::Rect<T::IDIM> parent_rect = 
-        get_index_space_domain(ctx, parent).get_rect<T::IDIM>();
-      LegionRuntime::Arrays::Rect<T::ODIM> color_space = 
-        mapping.image_convex(parent_rect);
-      DomainPointColoring c;
-      for (typename T::PointInOutputRectIterator pir(color_space); 
-          pir; pir++) 
-      {
-        LegionRuntime::Arrays::Rect<T::IDIM> preimage = mapping.preimage(pir.p);
-#ifdef DEBUG_LEGION
-        assert(mapping.preimage_is_dense(pir.p));
-#endif
-        c[DomainPoint::from_point<T::IDIM>(pir.p)] =
-          Domain::from_rect<T::IDIM>(preimage.intersection(parent_rect));
-      }
-      return create_index_partition(ctx, parent, 
-              Domain::from_rect<T::ODIM>(color_space), c, 
-              LEGION_DISJOINT_KIND, part_color);
     }
 
     //--------------------------------------------------------------------------
@@ -20795,16 +20795,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<unsigned DIM>
-    IndexSpace Runtime::get_index_subspace(Context ctx, 
-                IndexPartition p, LegionRuntime::Arrays::Point<DIM> color_point)
-    //--------------------------------------------------------------------------
-    {
-      DomainPoint dom_point = DomainPoint::from_point<DIM>(color_point);
-      return get_index_subspace(ctx, p, dom_point);
-    }
-
-    //--------------------------------------------------------------------------
     template<int DIM, typename T, int COLOR_DIM, typename COLOR_T>
     Point<COLOR_DIM,COLOR_T> Runtime::get_index_space_color(
                                                       IndexSpaceT<DIM,T> handle)
@@ -21170,9 +21160,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Assert that we are returning Futures or FutureMaps
-      LEGION_STATIC_ASSERT((LegionTypeInequality<T,Future>::value),
+      static_assert(!std::is_same<T,Future>::value,
           "Future types are not permitted as return types for Legion tasks");
-      LEGION_STATIC_ASSERT((LegionTypeInequality<T,FutureMap>::value),
+      static_assert(!std::is_same<T,FutureMap>::value,
           "FutureMap types are not permitted as return types for Legion tasks");
       const Task *task; Context ctx; Runtime *rt;
       const std::vector<PhysicalRegion> *regions;
@@ -21217,9 +21207,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Assert that we are returning Futures or FutureMaps
-      LEGION_STATIC_ASSERT((LegionTypeInequality<T,Future>::value),
+      static_assert(!std::is_same<T,Future>::value,
           "Future types are not permitted as return types for Legion tasks");
-      LEGION_STATIC_ASSERT((LegionTypeInequality<T,FutureMap>::value),
+      static_assert(!std::is_same<T,FutureMap>::value,
           "FutureMap types are not permitted as return types for Legion tasks");
 
       const Task *task; Context ctx; Runtime *rt;
@@ -21792,296 +21782,3 @@ namespace Legion {
     }
 
 }; // namespace Legion
-
-// This is for backwards compatibility with the old namespace scheme
-namespace LegionRuntime {
-  namespace HighLevel {
-    using namespace LegionRuntime::Arrays;
-
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Legion::IndexSpace IndexSpace;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Legion::IndexPartition IndexPartition;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Legion::FieldSpace FieldSpace;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Legion::LogicalRegion LogicalRegion;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Legion::LogicalPartition LogicalPartition;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Legion::FieldAllocator FieldAllocator;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Legion::UntypedBuffer TaskArgument;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Legion::ArgumentMap ArgumentMap;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Legion::Predicate Predicate;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Legion::Lock Lock;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Legion::LockRequest LockRequest;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Legion::Grant Grant;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Legion::PhaseBarrier PhaseBarrier;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Legion::DynamicCollective DynamicCollective;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Legion::RegionRequirement RegionRequirement;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Legion::IndexSpaceRequirement IndexSpaceRequirement;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Legion::FieldSpaceRequirement FieldSpaceRequirement;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Legion::Future Future;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Legion::FutureMap FutureMap;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Legion::TaskLauncher TaskLauncher;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Legion::IndexLauncher IndexLauncher;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Legion::InlineLauncher InlineLauncher;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Legion::CopyLauncher CopyLauncher;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Legion::PhysicalRegion PhysicalRegion;
-    LEGION_DISABLE_DEPRECATED_WARNINGS
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Legion::IndexIterator IndexIterator;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Legion::IndexAllocator IndexAllocator;
-    LEGION_REENABLE_DEPRECATED_WARNINGS
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Legion::AcquireLauncher AcquireLauncher;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Legion::ReleaseLauncher ReleaseLauncher;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Legion::TaskVariantRegistrar TaskVariantRegistrar;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Legion::MustEpochLauncher MustEpochLauncher;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Legion::MPILegionHandshake MPILegionHandshake;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Legion::Mappable Mappable;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Legion::Task Task;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Legion::Copy Copy;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Legion::InlineMapping Inline;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Legion::Acquire Acquire;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Legion::Release Release;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Legion::Mapping::Mapper Mapper;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Legion::InputArgs InputArgs;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Legion::TaskConfigOptions TaskConfigOptions;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Legion::ProjectionFunctor ProjectionFunctor;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Legion::Runtime Runtime;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Legion::Runtime HighLevelRuntime; // for backwards compatibility
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Legion::ColoringSerializer ColoringSerializer;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Legion::DomainColoringSerializer DomainColoringSerializer;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Legion::Serializer Serializer;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Legion::Deserializer Deserializer;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Legion::TaskResult TaskResult;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Legion::CObjectWrapper CObjectWrapper;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Legion::ISAConstraint ISAConstraint;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Legion::ProcessorConstraint ProcessorConstraint;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Legion::ResourceConstraint ResourceConstraint;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Legion::LaunchConstraint LaunchConstraint;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Legion::ColocationConstraint ColocationConstraint;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Legion::ExecutionConstraintSet ExecutionConstraintSet;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Legion::SpecializedConstraint SpecializedConstraint;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Legion::MemoryConstraint MemoryConstraint;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Legion::FieldConstraint FieldConstraint;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Legion::OrderingConstraint OrderingConstraint;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Legion::TilingConstraint TilingConstraint;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Legion::DimensionConstraint DimensionConstraint;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Legion::AlignmentConstraint AlignmentConstraint;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Legion::OffsetConstraint OffsetConstraint;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Legion::PointerConstraint PointerConstraint;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Legion::LayoutConstraintSet LayoutConstraintSet;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Legion::TaskLayoutConstraintSet TaskLayoutConstraintSet;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Realm::Runtime RealmRuntime;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Realm::Machine Machine;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Legion::Domain Domain;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Legion::DomainPoint DomainPoint;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Realm::RegionInstance PhysicalInstance;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Realm::Memory Memory;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Realm::Processor Processor;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Realm::CodeDescriptor CodeDescriptor;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Realm::Event Event;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Realm::Event MapperEvent;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Realm::UserEvent UserEvent;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Realm::Reservation Reservation;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Realm::Barrier Barrier;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef ::legion_reduction_op_id_t ReductionOpID;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Realm::ReductionOpUntyped ReductionOp;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef ::legion_custom_serdez_id_t CustomSerdezID;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Realm::CustomSerdezUntyped SerdezOp;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Realm::Machine::ProcessorMemoryAffinity ProcessorMemoryAffinity;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Realm::Machine::MemoryMemoryAffinity MemoryMemoryAffinity;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef std::map<Legion::CustomSerdezID, 
-                     const Realm::CustomSerdezUntyped *> SerdezOpTable;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef std::map<Realm::ReductionOpID, 
-            const Realm::ReductionOpUntyped *> ReductionOpTable;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef void (*SerdezInitFnptr)(const Legion::ReductionOp*, 
-                                    void *&, size_t&);
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef void (*SerdezFoldFnptr)(const Legion::ReductionOp*, void *&, 
-                                    size_t&, const void*, bool);
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef std::map<Realm::ReductionOpID, 
-                     Legion::SerdezRedopFns> SerdezRedopTable;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef ::legion_address_space_t AddressSpace;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef ::legion_task_priority_t TaskPriority;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef ::legion_color_t Color;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef ::legion_field_id_t FieldID;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef ::legion_trace_id_t TraceID;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef ::legion_mapper_id_t MapperID;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef ::legion_context_id_t ContextID;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef ::legion_instance_id_t InstanceID;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef ::legion_index_space_id_t IndexSpaceID;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef ::legion_index_partition_id_t IndexPartitionID;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef ::legion_index_tree_id_t IndexTreeID;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef ::legion_field_space_id_t FieldSpaceID;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef ::legion_generation_id_t GenerationID;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef ::legion_type_handle TypeHandle;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef ::legion_projection_id_t ProjectionID;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef ::legion_region_tree_id_t RegionTreeID;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef ::legion_distributed_id_t DistributedID;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef ::legion_address_space_t AddressSpaceID;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef ::legion_tunable_id_t TunableID;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef ::legion_mapping_tag_id_t MappingTagID;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef ::legion_semantic_tag_t SemanticTag;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef ::legion_variant_id_t VariantID;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef ::legion_unique_id_t UniqueID;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef ::legion_version_id_t VersionID;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef ::legion_task_id_t TaskID;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef ::legion_layout_constraint_id_t LayoutConstraintID;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef std::map<Legion::Color,Legion::ColoredPoints<ptr_t> > Coloring;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef std::map<Legion::Color,Legion::Domain> DomainColoring;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef std::map<Legion::Color,
-                     std::set<Legion::Domain> > MultiDomainColoring;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef std::map<Legion::DomainPoint,
-                     Legion::ColoredPoints<ptr_t> > PointColoring;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef std::map<Legion::DomainPoint,Legion::Domain> DomainPointColoring;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef std::map<Legion::DomainPoint,
-                     std::set<Legion::Domain> > MultiDomainPointColoring;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef void (*RegistrationCallbackFnptr)(Realm::Machine machine, 
-        Legion::Runtime *rt, const std::set<Legion::Processor> &local_procs);
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Legion::LogicalRegion (*RegionProjectionFnptr)(
-        Legion::LogicalRegion parent,
-        const Legion::DomainPoint&, Legion::Runtime *rt);
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Legion::LogicalRegion (*PartitionProjectionFnptr)(
-        Legion::LogicalPartition parent, 
-        const Legion::DomainPoint&, Legion::Runtime *rt);
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef bool (*PredicateFnptr)(const void*, size_t, 
-        const std::vector<Legion::Future> futures);
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef std::map<Legion::ProjectionID,Legion::RegionProjectionFnptr> 
-      RegionProjectionTable;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef std::map<Legion::ProjectionID,Legion::PartitionProjectionFnptr> 
-      PartitionProjectionTable;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef void (*RealmFnptr)(const void*,size_t,
-                               const void*,size_t,Legion::Processor);
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Legion::Internal::TaskContext* Context; 
-  };
-
-  // map old Logger::Category to new Realm::Logger
-  namespace Logger {
-    typedef Realm::Logger Category;
-  };
-};
-

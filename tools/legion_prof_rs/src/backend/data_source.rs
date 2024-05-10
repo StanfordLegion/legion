@@ -12,6 +12,9 @@ use legion_prof_viewer::{
     timestamp as ts,
 };
 
+#[cfg(debug_assertions)]
+use log::info;
+
 use slice_group_by::GroupBy;
 
 use crate::backend::common::{
@@ -21,19 +24,19 @@ use crate::backend::common::{
 use crate::conditional_assert;
 use crate::state::{
     ChanEntry, ChanID, ChanKind, Color, Config, Container, ContainerEntry, Copy, CopyInstInfo,
-    Fill, FillInstInfo, Inst, InstUID, MemID, MemKind, NodeID, OpID, ProcEntryKind, ProcID,
-    ProcKind, ProfUID, State, TimeRange, Timestamp,
+    DeviceKind, Fill, FillInstInfo, Inst, InstUID, MemID, MemKind, NodeID, OpID, ProcEntryKind,
+    ProcID, ProcKind, ProfUID, State, TimeRange, Timestamp,
 };
 
 impl Into<ts::Timestamp> for Timestamp {
     fn into(self) -> ts::Timestamp {
-        ts::Timestamp(self.0.try_into().unwrap())
+        ts::Timestamp(self.to_ns().try_into().unwrap())
     }
 }
 
 impl Into<Timestamp> for ts::Timestamp {
     fn into(self) -> Timestamp {
-        Timestamp(self.0.try_into().unwrap())
+        Timestamp::from_ns(self.0.try_into().unwrap())
     }
 }
 
@@ -62,7 +65,7 @@ impl Into<Color32> for Color {
 #[derive(Debug, Clone)]
 enum EntryKind {
     ProcKind(ProcGroup),
-    Proc(ProcID),
+    Proc(ProcID, Option<DeviceKind>),
     MemKind(MemGroup),
     Mem(MemID),
     ChanKind(Option<NodeID>),
@@ -148,8 +151,11 @@ impl StateDataSource {
         let mem_groups = state.group_mems();
         let chan_groups = state.group_chans();
 
-        let mut nodes: BTreeSet<_> = proc_groups.keys().map(|ProcGroup(n, _)| *n).collect();
-        let proc_kinds: BTreeSet<_> = proc_groups.keys().map(|ProcGroup(_, k)| *k).collect();
+        let mut nodes: BTreeSet<_> = proc_groups.keys().map(|ProcGroup(n, _, _)| *n).collect();
+        let proc_kinds: BTreeSet<_> = proc_groups
+            .keys()
+            .map(|ProcGroup(_, k, d)| (*k, *d))
+            .collect();
         let mem_kinds: BTreeSet<_> = mem_groups.keys().map(|MemGroup(_, k)| *k).collect();
 
         if !state.has_multiple_nodes() {
@@ -178,8 +184,8 @@ impl StateDataSource {
             let mut kind_index = 0;
             let mut node_empty = node.is_some();
             // Processors
-            for kind in &proc_kinds {
-                let group = ProcGroup(*node, *kind);
+            for (kind, device) in &proc_kinds {
+                let group = ProcGroup(*node, *kind, *device);
 
                 let procs = proc_groups.get(&group).unwrap();
                 if node.is_some() {
@@ -194,39 +200,71 @@ impl StateDataSource {
                 let kind_name = format!("{:?}", kind);
                 let kind_first_letter = kind_name.chars().next().unwrap().to_lowercase();
 
+                let short_suffix = match device {
+                    Some(DeviceKind::Device) => "d",
+                    Some(DeviceKind::Host) => "h",
+                    None => "",
+                };
+
+                let medium_suffix = match device {
+                    Some(DeviceKind::Device) => " dev",
+                    Some(DeviceKind::Host) => " host",
+                    None => "",
+                };
+
+                let long_suffix = match device {
+                    Some(DeviceKind::Device) => " Device",
+                    Some(DeviceKind::Host) => " Host",
+                    None => "",
+                };
+
                 let kind_id = node_id.child(kind_index);
                 kind_index += 1;
 
-                let color = match kind {
-                    ProcKind::GPU => Color::OLIVEDRAB,
-                    ProcKind::CPU => Color::STEELBLUE,
-                    ProcKind::Utility => Color::CRIMSON,
-                    ProcKind::IO => Color::ORANGERED,
-                    ProcKind::ProcGroup => Color::ORANGERED,
-                    ProcKind::ProcSet => Color::ORANGERED,
-                    ProcKind::OpenMP => Color::ORANGERED,
-                    ProcKind::Python => Color::OLIVEDRAB,
+                let color = match (kind, device) {
+                    (ProcKind::GPU, Some(DeviceKind::Device)) => Color::OLIVEDRAB,
+                    (ProcKind::GPU, Some(DeviceKind::Host)) => Color::ORANGERED,
+                    (ProcKind::CPU, None) => Color::STEELBLUE,
+                    (ProcKind::Utility, None) => Color::CRIMSON,
+                    (ProcKind::IO, None) => Color::ORANGERED,
+                    (ProcKind::ProcGroup, None) => Color::ORANGERED,
+                    (ProcKind::ProcSet, None) => Color::ORANGERED,
+                    (ProcKind::OpenMP, None) => Color::ORANGERED,
+                    (ProcKind::Python, None) => Color::OLIVEDRAB,
+                    _ => unreachable!(),
                 };
                 let color: Color32 = color.into();
 
                 let mut proc_slots = Vec::new();
                 if node.is_some() {
-                    for (proc_index, proc) in procs.iter().enumerate() {
+                    let mut proc_index = 0;
+                    for proc in procs {
                         let proc_id = kind_id.child(proc_index as u64);
-                        entry_map.insert(proc_id.clone(), EntryKind::Proc(*proc));
+                        entry_map.insert(proc_id.clone(), EntryKind::Proc(*proc, *device));
                         proc_entries.insert(*proc, proc_id);
 
-                        let rows = state.procs.get(proc).unwrap().max_levels as u64 + 1;
+                        let short_name = format!(
+                            "{}{}{}",
+                            kind_first_letter,
+                            proc.proc_in_node(),
+                            short_suffix
+                        );
+                        let long_name = format!(
+                            "{} {} {}{}",
+                            node_long_name,
+                            kind_name,
+                            proc.proc_in_node(),
+                            long_suffix
+                        );
+
+                        let max_rows =
+                            state.procs.get(proc).unwrap().max_levels(*device) as u64 + 1;
                         proc_slots.push(EntryInfo::Slot {
-                            short_name: format!("{}{}", kind_first_letter, proc.proc_in_node()),
-                            long_name: format!(
-                                "{} {} {}",
-                                node_long_name,
-                                kind_name,
-                                proc.proc_in_node()
-                            ),
-                            max_rows: rows,
+                            short_name,
+                            long_name,
+                            max_rows,
                         });
+                        proc_index += 1;
                     }
                 }
 
@@ -234,8 +272,8 @@ impl StateDataSource {
                 entry_map.insert(summary_id, EntryKind::ProcKind(group));
 
                 kind_slots.push(EntryInfo::Panel {
-                    short_name: kind_name.to_lowercase(),
-                    long_name: format!("{} {}", node_long_name, kind_name),
+                    short_name: format!("{}{}", kind_name.to_lowercase(), medium_suffix),
+                    long_name: format!("{} {}{}", node_long_name, kind_name, long_suffix),
                     summary: Some(Box::new(EntryInfo::Summary { color })),
                     slots: proc_slots,
                 });
@@ -245,8 +283,8 @@ impl StateDataSource {
             if node_empty {
                 // Remove this node's processors from the all nodes list to
                 // avoid influencing global utilization
-                for kind in &proc_kinds {
-                    let group = ProcGroup(None, *kind);
+                for (kind, device) in &proc_kinds {
+                    let group = ProcGroup(None, *kind, *device);
                     proc_groups
                         .get_mut(&group)
                         .unwrap()
@@ -295,7 +333,7 @@ impl StateDataSource {
                         entry_map.insert(mem_id.clone(), EntryKind::Mem(*mem));
                         mem_entries.insert(*mem, mem_id);
 
-                        let rows = state.mems.get(mem).unwrap().max_live_insts as u64 + 1;
+                        let rows = state.mems.get(mem).unwrap().max_levels(None) as u64 + 1;
                         mem_slots.push(EntryInfo::Slot {
                             short_name: format!("{}{}", kind_first_letter, mem.mem_in_node()),
                             long_name: format!(
@@ -404,7 +442,7 @@ impl StateDataSource {
                             ChanKind::DepPart => "Dependent Partitioning".to_owned(),
                         };
 
-                        let rows = state.chans.get(chan).unwrap().max_levels as u64 + 1;
+                        let rows = state.chans.get(chan).unwrap().max_levels(None) as u64 + 1;
                         chan_slots.push(EntryInfo::Slot {
                             short_name,
                             long_name,
@@ -477,8 +515,9 @@ impl StateDataSource {
 
         let step_utilization = match self.entry_map.get(entry_id).unwrap() {
             EntryKind::ProcKind(group) => {
+                let ProcGroup(_, _, device) = *group;
                 let procs = self.proc_groups.get(group).unwrap();
-                let points = self.state.proc_group_timepoints(procs);
+                let points = self.state.proc_group_timepoints(device, procs);
                 let count = procs.len() as u64;
                 let owners: BTreeSet<_> = procs
                     .iter()
@@ -579,48 +618,48 @@ impl StateDataSource {
             })
             .saturating_sub(1);
 
-        let mut last_index = step_utilization.partition_point(|&(t, _)| {
+        let mut last_index = step_utilization[first_index..].partition_point(|&(t, _)| {
             let t: ts::Timestamp = t.into();
             t < interval.stop
-        });
+        }) + first_index;
         if last_index + 1 < step_utilization.len() {
             last_index = last_index + 1;
         }
 
         let mut utilization = Vec::new();
-        let mut last_t = Timestamp(0);
+        let mut last_t = 0u64;
         let mut last_u = 0.0;
         let mut step_it = step_utilization[first_index..last_index].iter().peekable();
         for sample in 0..samples {
-            let sample_start = Timestamp(duration * sample / samples + start_time);
-            let sample_stop = Timestamp(duration * (sample + 1) / samples + start_time);
-            if sample_stop.0 - sample_start.0 == 0 {
+            let sample_start = duration * sample / samples + start_time;
+            let sample_stop = duration * (sample + 1) / samples + start_time;
+            if sample_stop - sample_start == 0 {
                 continue;
             }
 
             let mut sample_util = 0.0;
-            while let Some((t, u)) = step_it.next_if(|(t, _)| *t < sample_stop) {
-                if *t < sample_start {
-                    (last_t, last_u) = (*t, *u);
+            while let Some((t, u)) = step_it.next_if(|(t, _)| t.to_ns() < sample_stop) {
+                if t.to_ns() < sample_start {
+                    (last_t, last_u) = (t.to_ns(), *u);
                     continue;
                 }
 
                 // This is a step utilization. So utilization u begins on time
                 // t. That means the previous utilization stop at time t-1.
-                let last_duration = (t.0 - 1).saturating_sub(last_t.0.max(sample_start.0));
+                let last_duration = (t.to_ns() - 1).saturating_sub(last_t.max(sample_start));
                 sample_util += last_duration as f64 * last_u;
 
-                (last_t, last_u) = (*t, *u);
+                (last_t, last_u) = (t.to_ns(), *u);
             }
             if last_t < sample_stop {
-                let last_duration = sample_stop.0 - last_t.0.max(sample_start.0);
+                let last_duration = sample_stop - last_t.max(sample_start);
                 sample_util += last_duration as f64 * last_u;
             }
 
-            sample_util = sample_util / (sample_stop.0 - sample_start.0) as f64;
+            sample_util = sample_util / (sample_stop - sample_start) as f64;
             assert!(sample_util <= 1.0);
             utilization.push(UtilPoint {
-                time: Timestamp((sample_start.0 + sample_stop.0) / 2).into(),
+                time: Timestamp::from_ns((sample_start + sample_stop) / 2).into(),
                 util: sample_util as f32,
             });
         }
@@ -708,6 +747,7 @@ impl StateDataSource {
     fn build_items<C>(
         &self,
         cont: &C,
+        device: Option<DeviceKind>,
         tile_id: TileID,
         full: bool,
         mut item_metas: Option<&mut Vec<Vec<ItemMeta>>>,
@@ -718,107 +758,135 @@ impl StateDataSource {
     {
         let mut items: Vec<Vec<Item>> = Vec::new();
         let mut merged = Vec::new();
-        items.resize_with(cont.max_levels() + 1, Vec::new);
+        let levels = cont.max_levels(device) as usize + 1;
+        items.resize_with(levels, Vec::new);
         if let Some(ref mut item_metas) = item_metas {
-            item_metas.resize_with(cont.max_levels() + 1, Vec::new);
+            item_metas.resize_with(levels, Vec::new);
         }
-        merged.resize(cont.max_levels() + 1, 0u64);
-        let points = cont.time_points();
+        merged.resize(levels, 0u64);
+        let points_stacked = cont.time_points_stacked(device);
 
-        for point in points {
-            assert!(point.first);
+        for (level, points) in points_stacked.iter().enumerate() {
+            let items = &mut items[level];
+            let mut item_metas = item_metas.as_mut().map(|m| &mut m[level]);
+            let merged = &mut merged[level];
 
-            let entry = cont.entry(point.entry);
-            let (base, time_range, waiters) = (&entry.base(), entry.time_range(), &entry.waiters());
-
-            let point_interval: ts::Interval = time_range.into();
-            if !point_interval.overlaps(tile_id.0) {
-                continue;
-            }
-            let mut view_interval = point_interval.intersection(tile_id.0);
-
-            let level = base.level.unwrap() as usize;
-
-            let expand = !full
-                && Self::expand_item(
-                    &mut view_interval,
-                    tile_id,
-                    items[level].last(),
-                    merged[level],
-                );
-
-            if let Some(last) = items[level].last_mut() {
-                let last_meta = if let Some(ref mut item_metas) = item_metas {
-                    item_metas[level].last_mut()
-                } else {
-                    None
-                };
-                if Self::merge_items(
-                    view_interval,
-                    tile_id,
-                    last,
-                    last_meta,
-                    self.fields.num_items,
-                    &mut merged[level],
-                ) {
-                    continue;
-                }
-            }
-
-            let color = entry.color(&self.state);
-            let color: Color32 = color.into();
-            let color: Rgba = color.into();
-
-            let item_meta = item_metas.as_ref().map(|_| {
-                get_meta(
-                    entry,
-                    ItemInfo {
-                        point_interval,
-                        expand,
-                    },
-                )
+            let first_index = points.partition_point(|p| {
+                let stop: ts::Timestamp = cont.entry(p.entry).time_range().stop.unwrap().into();
+                ts::Timestamp(stop.0.saturating_sub(1)) < tile_id.0.start
             });
+            let last_index = points[first_index..].partition_point(|p| {
+                let start: ts::Timestamp = cont.entry(p.entry).time_range().start.unwrap().into();
+                start < tile_id.0.stop
+            }) + first_index;
 
-            let mut add_item = |interval: ts::Interval, opacity: f32, status: Option<FieldID>| {
-                if !interval.overlaps(tile_id.0) {
-                    return;
+            #[cfg(debug_assertions)]
+            {
+                info!("Debug assertions enabled: checking point overlap. This can be expensive.");
+                for point in &points[..first_index] {
+                    let time_range = cont.entry(point.entry).time_range();
+                    let point_interval: ts::Interval = time_range.into();
+                    assert!(!point_interval.overlaps(tile_id.0));
                 }
-                let view_interval = interval.intersection(tile_id.0);
-                let color = (Rgba::WHITE.multiply(1.0 - opacity) + color.multiply(opacity)).into();
-                let item = Item {
-                    item_uid: base.prof_uid.into(),
-                    interval: view_interval,
-                    color,
-                };
-                items[level].push(item);
-                if let Some(ref mut item_metas) = item_metas {
-                    let mut item_meta = item_meta.clone().unwrap();
-                    if let Some(status) = status {
-                        item_meta
-                            .fields
-                            .insert(1, (status, Field::Interval(interval)));
+                for point in &points[last_index..] {
+                    let time_range = cont.entry(point.entry).time_range();
+                    let point_interval: ts::Interval = time_range.into();
+                    assert!(!point_interval.overlaps(tile_id.0));
+                }
+            }
+
+            for point in &points[first_index..last_index] {
+                assert!(point.first);
+
+                let entry = cont.entry(point.entry);
+                let (base, time_range, waiters) =
+                    (&entry.base(), entry.time_range(), &entry.waiters());
+
+                let point_interval: ts::Interval = time_range.into();
+                assert!(point_interval.overlaps(tile_id.0));
+                let mut view_interval = point_interval.intersection(tile_id.0);
+
+                assert_eq!(level, base.level.unwrap() as usize);
+
+                let expand =
+                    !full && Self::expand_item(&mut view_interval, tile_id, items.last(), *merged);
+
+                if let Some(last) = items.last_mut() {
+                    let last_meta = if let Some(ref mut item_metas) = item_metas {
+                        item_metas.last_mut()
+                    } else {
+                        None
+                    };
+                    if Self::merge_items(
+                        view_interval,
+                        tile_id,
+                        last,
+                        last_meta,
+                        self.fields.num_items,
+                        merged,
+                    ) {
+                        continue;
                     }
-                    item_metas[level].push(item_meta);
                 }
-            };
-            if let Some(waiters) = waiters {
-                let mut start = time_range.start.unwrap();
-                for wait in &waiters.wait_intervals {
-                    let running_interval = ts::Interval::new(start.into(), wait.start.into());
-                    let waiting_interval = ts::Interval::new(wait.start.into(), wait.ready.into());
-                    let ready_interval = ts::Interval::new(wait.ready.into(), wait.end.into());
-                    add_item(running_interval, 1.0, Some(self.fields.status_running));
-                    add_item(waiting_interval, 0.15, Some(self.fields.status_waiting));
-                    add_item(ready_interval, 0.45, Some(self.fields.status_ready));
-                    start = max(start, wait.end);
+
+                let color = entry.color(&self.state);
+                let color: Color32 = color.into();
+                let color: Rgba = color.into();
+
+                let item_meta = item_metas.as_ref().map(|_| {
+                    get_meta(
+                        entry,
+                        ItemInfo {
+                            point_interval,
+                            expand,
+                        },
+                    )
+                });
+
+                let mut add_item =
+                    |interval: ts::Interval, opacity: f32, status: Option<FieldID>| {
+                        if !interval.overlaps(tile_id.0) {
+                            return;
+                        }
+                        let view_interval = interval.intersection(tile_id.0);
+                        let color =
+                            (Rgba::WHITE.multiply(1.0 - opacity) + color.multiply(opacity)).into();
+                        let item = Item {
+                            item_uid: base.prof_uid.into(),
+                            interval: view_interval,
+                            color,
+                        };
+                        items.push(item);
+                        if let Some(ref mut item_metas) = item_metas {
+                            let mut item_meta = item_meta.clone().unwrap();
+                            if let Some(status) = status {
+                                item_meta
+                                    .fields
+                                    .insert(1, (status, Field::Interval(interval)));
+                            }
+                            item_metas.push(item_meta);
+                        }
+                    };
+                if let Some(waiters) = waiters {
+                    let mut start = time_range.start.unwrap();
+                    for wait in &waiters.wait_intervals {
+                        let running_interval = ts::Interval::new(start.into(), wait.start.into());
+                        let waiting_interval =
+                            ts::Interval::new(wait.start.into(), wait.ready.into());
+                        let ready_interval = ts::Interval::new(wait.ready.into(), wait.end.into());
+                        add_item(running_interval, 1.0, Some(self.fields.status_running));
+                        add_item(waiting_interval, 0.15, Some(self.fields.status_waiting));
+                        add_item(ready_interval, 0.45, Some(self.fields.status_ready));
+                        start = max(start, wait.end);
+                    }
+                    let stop = time_range.stop.unwrap();
+                    if start < stop {
+                        let running_interval = ts::Interval::new(start.into(), stop.into());
+                        add_item(running_interval, 1.0, Some(self.fields.status_running));
+                    }
+                } else {
+                    add_item(view_interval, 1.0, None);
                 }
-                let stop = time_range.stop.unwrap();
-                if start < stop {
-                    let running_interval = ts::Interval::new(start.into(), stop.into());
-                    add_item(running_interval, 1.0, Some(self.fields.status_running));
-                }
-            } else {
-                add_item(view_interval, 1.0, None);
             }
         }
         items
@@ -828,11 +896,12 @@ impl StateDataSource {
         &self,
         entry_id: &EntryID,
         proc_id: ProcID,
+        device: Option<DeviceKind>,
         tile_id: TileID,
         full: bool,
     ) -> SlotTile {
         let proc = self.state.procs.get(&proc_id).unwrap();
-        let items = self.build_items(proc, tile_id, full, None, |_, _| unreachable!());
+        let items = self.build_items(proc, device, tile_id, full, None, |_, _| unreachable!());
         SlotTile {
             entry_id: entry_id.clone(),
             tile_id,
@@ -868,7 +937,7 @@ impl StateDataSource {
                 ));
             }
         }
-        Field::U64(op_id.0)
+        Field::U64(op_id.0.get())
     }
 
     fn generate_inst_link(&self, inst_uid: InstUID, prefix: &str) -> Option<Field> {
@@ -911,12 +980,13 @@ impl StateDataSource {
         &self,
         entry_id: &EntryID,
         proc_id: ProcID,
+        device: Option<DeviceKind>,
         tile_id: TileID,
         full: bool,
     ) -> SlotMetaTile {
         let proc = self.state.procs.get(&proc_id).unwrap();
-        let mut item_metas: Vec<Vec<ItemMeta>> = Vec::new();
-        let items = self.build_items(proc, tile_id, full, Some(&mut item_metas), |entry, info| {
+        let mut m: Vec<Vec<ItemMeta>> = Vec::new();
+        let items = self.build_items(proc, device, tile_id, full, Some(&mut m), |entry, info| {
             let ItemInfo {
                 point_interval,
                 expand,
@@ -934,7 +1004,7 @@ impl StateDataSource {
                 // FIXME: You might think that initiation_op is None rather than
                 // needing this check with zero, but backwards compatibility is hard
                 // You can remove this check once we stop needing to be compatible with Python
-                if initiation_op.0 > 0 {
+                if initiation_op != OpID::ZERO {
                     fields.push((self.fields.operation, self.generate_op_link(initiation_op)));
                 }
             }
@@ -967,13 +1037,15 @@ impl StateDataSource {
             if let Some(creator) = self.state.fevents.get(&entry.creator) {
                 // Check to see if these are function calls or tasks
                 match entry.kind {
-                    ProcEntryKind::MapperCall(_) | ProcEntryKind::RuntimeCall(_) => {
+                    ProcEntryKind::MapperCall(_)
+                    | ProcEntryKind::RuntimeCall(_)
+                    | ProcEntryKind::GPUKernel(_, _) => {
                         if let Some(start_time) = entry.time_range.start {
                             fields.push((
                                 self.fields.caller,
                                 // Use the first tick before the start so it is outside
                                 // of our box but hopefully in the caller's box
-                                self.generate_creator_link(*creator, start_time - Timestamp(1)),
+                                self.generate_creator_link(*creator, start_time - Timestamp::ONE),
                             ));
                         }
                     }
@@ -1009,14 +1081,14 @@ impl StateDataSource {
                 fields,
             }
         });
-        assert_eq!(items.len(), item_metas.len());
-        for (item_row, item_meta_row) in items.iter().zip(item_metas.iter()) {
+        assert_eq!(items.len(), m.len());
+        for (item_row, item_meta_row) in items.iter().zip(m.iter()) {
             assert_eq!(item_row.len(), item_meta_row.len());
         }
         SlotMetaTile {
             entry_id: entry_id.clone(),
             tile_id,
-            data: SlotMetaTileData { items: item_metas },
+            data: SlotMetaTileData { items: m },
         }
     }
 
@@ -1028,7 +1100,7 @@ impl StateDataSource {
         full: bool,
     ) -> SlotTile {
         let mem = self.state.mems.get(&mem_id).unwrap();
-        let items = self.build_items(mem, tile_id, full, None, |_, _| unreachable!());
+        let items = self.build_items(mem, None, tile_id, full, None, |_, _| unreachable!());
         SlotTile {
             entry_id: entry_id.clone(),
             tile_id,
@@ -1068,8 +1140,8 @@ impl StateDataSource {
         full: bool,
     ) -> SlotMetaTile {
         let mem = self.state.mems.get(&mem_id).unwrap();
-        let mut item_metas: Vec<Vec<ItemMeta>> = Vec::new();
-        let items = self.build_items(mem, tile_id, full, Some(&mut item_metas), |entry, info| {
+        let mut m: Vec<Vec<ItemMeta>> = Vec::new();
+        let items = self.build_items(mem, None, tile_id, full, Some(&mut m), |entry, info| {
             let ItemInfo {
                 point_interval,
                 expand,
@@ -1090,7 +1162,7 @@ impl StateDataSource {
                 // FIXME: You might think that initiation_op is None rather than
                 // needing this check with zero, but backwards compatibility is hard
                 // You can remove this check once we stop needing to be compatible with Python
-                if initiation_op.0 > 0 {
+                if initiation_op != OpID::ZERO {
                     fields.push((self.fields.operation, self.generate_op_link(initiation_op)));
                 }
             }
@@ -1117,14 +1189,14 @@ impl StateDataSource {
                 fields,
             }
         });
-        assert_eq!(items.len(), item_metas.len());
-        for (item_row, item_meta_row) in items.iter().zip(item_metas.iter()) {
+        assert_eq!(items.len(), m.len());
+        for (item_row, item_meta_row) in items.iter().zip(m.iter()) {
             assert_eq!(item_row.len(), item_meta_row.len());
         }
         SlotMetaTile {
             entry_id: entry_id.clone(),
             tile_id,
-            data: SlotMetaTileData { items: item_metas },
+            data: SlotMetaTileData { items: m },
         }
     }
 
@@ -1136,7 +1208,7 @@ impl StateDataSource {
         full: bool,
     ) -> SlotTile {
         let chan = self.state.chans.get(&chan_id).unwrap();
-        let items = self.build_items(chan, tile_id, full, None, |_, _| unreachable!());
+        let items = self.build_items(chan, None, tile_id, full, None, |_, _| unreachable!());
         SlotTile {
             entry_id: entry_id.clone(),
             tile_id,
@@ -1293,8 +1365,8 @@ impl StateDataSource {
         full: bool,
     ) -> SlotMetaTile {
         let chan = self.state.chans.get(&chan_id).unwrap();
-        let mut item_metas: Vec<Vec<ItemMeta>> = Vec::new();
-        let items = self.build_items(chan, tile_id, full, Some(&mut item_metas), |entry, info| {
+        let mut m: Vec<Vec<ItemMeta>> = Vec::new();
+        let items = self.build_items(chan, None, tile_id, full, Some(&mut m), |entry, info| {
             let ItemInfo {
                 point_interval,
                 expand,
@@ -1314,7 +1386,7 @@ impl StateDataSource {
                 // FIXME: You might think that initiation_op is None rather than
                 // needing this check with zero, but backwards compatibility is hard
                 // You can remove this check once we stop needing to be compatible with Python
-                if initiation_op.0 > 0 {
+                if initiation_op != OpID::ZERO {
                     fields.push((self.fields.operation, self.generate_op_link(initiation_op)));
                 }
             }
@@ -1341,22 +1413,32 @@ impl StateDataSource {
                 fields,
             }
         });
-        assert_eq!(items.len(), item_metas.len());
-        for (item_row, item_meta_row) in items.iter().zip(item_metas.iter()) {
+        assert_eq!(items.len(), m.len());
+        for (item_row, item_meta_row) in items.iter().zip(m.iter()) {
             assert_eq!(item_row.len(), item_meta_row.len());
         }
         SlotMetaTile {
             entry_id: entry_id.clone(),
             tile_id,
-            data: SlotMetaTileData { items: item_metas },
+            data: SlotMetaTileData { items: m },
         }
     }
 
     fn interval(&self) -> ts::Interval {
         let last_time = self.state.last_time;
         // Add a bit to the end of the timeline to make it more visible
-        let last_time = last_time + Timestamp(last_time.0 / 200);
+        let last_time = last_time + Timestamp::from_ns(last_time.to_ns() / 200);
         ts::Interval::new(ts::Timestamp(0), last_time.into())
+    }
+
+    fn generate_warning_message(&self) -> Option<String> {
+        if !self.state.runtime_config.any() {
+            return None;
+        }
+        Some(format!(
+            "This profile was generated with {}. Extreme performance degradation may occur.",
+            self.state.runtime_config
+        ))
     }
 }
 
@@ -1373,14 +1455,15 @@ impl DataSource for StateDataSource {
             interval: self.interval(),
             tile_set: TileSet::default(),
             field_schema: self.field_schema.clone(),
+            warning_message: self.generate_warning_message(),
         }
     }
 
     fn fetch_summary_tile(&self, entry_id: &EntryID, tile_id: TileID, full: bool) -> SummaryTile {
         // Pick this number to be approximately the number of pixels we expect
         // the user to have on their screen. If this is a full tile, increase
-        // 10x so that we get more resolution when zoomed in.
-        let samples = if full { 10_000 } else { 1_000 };
+        // this so that we get more resolution when zoomed in.
+        let samples = if full { 4_000 } else { 800 };
 
         let step_utilization = self.generate_step_utilization(entry_id);
 
@@ -1396,8 +1479,8 @@ impl DataSource for StateDataSource {
     fn fetch_slot_tile(&self, entry_id: &EntryID, tile_id: TileID, full: bool) -> SlotTile {
         let entry = self.entry_map.get(entry_id).unwrap();
         match entry {
-            EntryKind::Proc(proc_id) => {
-                self.generate_proc_slot_tile(entry_id, *proc_id, tile_id, full)
+            EntryKind::Proc(proc_id, device) => {
+                self.generate_proc_slot_tile(entry_id, *proc_id, *device, tile_id, full)
             }
             EntryKind::Mem(mem_id) => self.generate_mem_slot_tile(entry_id, *mem_id, tile_id, full),
             EntryKind::Chan(chan_id) => {
@@ -1415,8 +1498,8 @@ impl DataSource for StateDataSource {
     ) -> SlotMetaTile {
         let entry = self.entry_map.get(entry_id).unwrap();
         match entry {
-            EntryKind::Proc(proc_id) => {
-                self.generate_proc_slot_meta_tile(entry_id, *proc_id, tile_id, full)
+            EntryKind::Proc(proc_id, device) => {
+                self.generate_proc_slot_meta_tile(entry_id, *proc_id, *device, tile_id, full)
             }
             EntryKind::Mem(mem_id) => {
                 self.generate_mem_slot_meta_tile(entry_id, *mem_id, tile_id, full)

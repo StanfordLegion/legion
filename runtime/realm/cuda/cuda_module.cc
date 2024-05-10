@@ -4313,10 +4313,30 @@ namespace Realm {
       assert(m->config == nullptr);
       m->config = config;
 
-      // if we know gpus have been requested, correct loading of libraries
-      //  and driver initialization are required
+      // check if gpus have been requested
       bool init_required = ((m->config->cfg_num_gpus > 0) || !m->config->cfg_gpu_idxs.empty());
 
+      // check if cuda can be initialized
+      if(cuda_init_code != CUDA_SUCCESS && init_required) {
+        // failure to initialize the driver is a fatal error if we know gpus
+        //  have been requested
+        log_gpu.warning() << "gpus requested, but cuInit(0) returned " << cuda_init_code;
+        init_required = false;
+      }
+
+      // do not create the module if previous steps are failed
+      if(!init_required) {
+        const char *err_name, *err_str;
+        CUDA_DRIVER_FNPTR(cuGetErrorName)(cuda_init_code, &err_name);
+        CUDA_DRIVER_FNPTR(cuGetErrorString)(cuda_init_code, &err_str);
+        log_gpu.info() << "cuda module is not loaded, cuInit(0) returned:" << err_name
+                       << " (" << err_str << ")";
+        delete m;
+        return nullptr;
+      }
+
+      // check if nvml can be initialized
+      // we will continue create cuda module even if nvml can not be initialized
       if(!nvml_initialized && resolve_nvml_api_fnptrs()) {
         nvmlReturn_t res = NVML_FNPTR(nvmlInit)();
         if(res == NVML_SUCCESS) {
@@ -4327,105 +4347,87 @@ namespace Realm {
         }
       }
 
+      // create GPUInfo
       std::vector<GPUInfo *> infos;
       {
-        if(cuda_init_code != CUDA_SUCCESS) {
-          // failure to initialize the driver is a fatal error if we know gpus
-          //  have been requested
-          if(init_required) {
-            log_gpu.fatal() << "gpus requested, but cuInit(0) returned " << cuda_init_code;
-            abort();
-          } else if(cuda_init_code == CUDA_ERROR_NO_DEVICE) {
-            log_gpu.info() << "cuInit reports no devices found";
-          } else if(cuda_init_code != CUDA_SUCCESS) {
-            log_gpu.warning() << "cuInit(0) returned " << cuda_init_code << " - module not loaded";
-            delete m;
-            return 0;
-          }
-        } else {
-          for(int i = 0; i < config->res_num_gpus; i++) {
-            GPUInfo *info = new GPUInfo;
-            int attribute_value = 0;
+        for(int i = 0; i < config->res_num_gpus; i++) {
+          GPUInfo *info = new GPUInfo;
+          int attribute_value = 0;
 
-            info->index = i;
-            CHECK_CU(CUDA_DRIVER_FNPTR(cuDeviceGet)(&info->device, i));
-            CHECK_CU(CUDA_DRIVER_FNPTR(cuDeviceGetName)(info->name, sizeof(info->name),
-                                                        info->device));
-            CHECK_CU(
-                CUDA_DRIVER_FNPTR(cuDeviceTotalMem)(&info->totalGlobalMem, info->device));
-            CHECK_CU(CUDA_DRIVER_FNPTR(cuDeviceGetUuid)(&info->uuid, info->device));
-            CHECK_CU(CUDA_DRIVER_FNPTR(cuDeviceGetAttribute)(
-                &info->major, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR,
-                info->device));
-            CHECK_CU(CUDA_DRIVER_FNPTR(cuDeviceGetAttribute)(
-                &info->minor, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR,
-                info->device));
-            CHECK_CU(CUDA_DRIVER_FNPTR(cuDeviceGetAttribute)(
-                &info->pci_busid, CU_DEVICE_ATTRIBUTE_PCI_BUS_ID, info->device));
-            CHECK_CU(CUDA_DRIVER_FNPTR(cuDeviceGetAttribute)(
-                &info->pci_deviceid, CU_DEVICE_ATTRIBUTE_PCI_DEVICE_ID, info->device));
-            CHECK_CU(CUDA_DRIVER_FNPTR(cuDeviceGetAttribute)(
-                &info->pci_domainid, CU_DEVICE_ATTRIBUTE_PCI_DOMAIN_ID, info->device));
-            CUDA_DRIVER_FNPTR(cuDeviceGetAttribute)
-            (&attribute_value,
-             CU_DEVICE_ATTRIBUTE_CAN_USE_HOST_POINTER_FOR_REGISTERED_MEM, info->device);
-            info->host_gpu_same_va = !!attribute_value;
-            // Assume x16 PCI-e 2.0 = 8000 MB/s, which is reasonable for most
-            // systems
-            info->pci_bandwidth = 8000;
-            info->logical_peer_bandwidth.resize(config->res_num_gpus, 0);
-            info->logical_peer_latency.resize(config->res_num_gpus, SIZE_MAX);
+          info->index = i;
+          CHECK_CU(CUDA_DRIVER_FNPTR(cuDeviceGet)(&info->device, i));
+          CHECK_CU(CUDA_DRIVER_FNPTR(cuDeviceGetName)(info->name, sizeof(info->name),
+                                                      info->device));
+          CHECK_CU(
+              CUDA_DRIVER_FNPTR(cuDeviceTotalMem)(&info->totalGlobalMem, info->device));
+          CHECK_CU(CUDA_DRIVER_FNPTR(cuDeviceGetUuid)(&info->uuid, info->device));
+          CHECK_CU(CUDA_DRIVER_FNPTR(cuDeviceGetAttribute)(
+              &info->major, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR, info->device));
+          CHECK_CU(CUDA_DRIVER_FNPTR(cuDeviceGetAttribute)(
+              &info->minor, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR, info->device));
+          CHECK_CU(CUDA_DRIVER_FNPTR(cuDeviceGetAttribute)(
+              &info->pci_busid, CU_DEVICE_ATTRIBUTE_PCI_BUS_ID, info->device));
+          CHECK_CU(CUDA_DRIVER_FNPTR(cuDeviceGetAttribute)(
+              &info->pci_deviceid, CU_DEVICE_ATTRIBUTE_PCI_DEVICE_ID, info->device));
+          CHECK_CU(CUDA_DRIVER_FNPTR(cuDeviceGetAttribute)(
+              &info->pci_domainid, CU_DEVICE_ATTRIBUTE_PCI_DOMAIN_ID, info->device));
+          CUDA_DRIVER_FNPTR(cuDeviceGetAttribute)
+          (&attribute_value, CU_DEVICE_ATTRIBUTE_CAN_USE_HOST_POINTER_FOR_REGISTERED_MEM,
+           info->device);
+          info->host_gpu_same_va = !!attribute_value;
+          // Assume x16 PCI-e 2.0 = 8000 MB/s, which is reasonable for most
+          // systems
+          info->pci_bandwidth = 8000;
+          info->logical_peer_bandwidth.resize(config->res_num_gpus, 0);
+          info->logical_peer_latency.resize(config->res_num_gpus, SIZE_MAX);
 
-            info->has_numa_preference = false;
-            memset(info->numa_node_affinity, 0xff, sizeof(info->numa_node_affinity));
+          info->has_numa_preference = false;
+          memset(info->numa_node_affinity, 0xff, sizeof(info->numa_node_affinity));
 
-            if(nvml_initialized) {
-              // Convert uuid bytes to uuid string for nvml
-              std::string uuid = convert_uuid(info->uuid);
-              CHECK_NVML(
-                  NVML_FNPTR(nvmlDeviceGetHandleByUUID)(uuid.c_str(), &info->nvml_dev));
-              unsigned int gen, buswidth;
-              // Rates in MB/s from https://en.wikipedia.org/wiki/PCI_Express
-              static const unsigned int rates[] = {250,  500,  985,  1969,
-                                                   3938, 7563, 15125};
-              static const unsigned int rates_len =
-                  sizeof(rates) / sizeof(rates[0]);
-              // Use the max pcie link information here, as when the GPU is not in use,
-              // the OS may power down some links to conserve power, but we want to
-              // estimate the bandwidth when in use.
-              CHECK_NVML(
-                  NVML_FNPTR(nvmlDeviceGetMaxPcieLinkGeneration)(info->nvml_dev, &gen));
-              CHECK_NVML(
-                  NVML_FNPTR(nvmlDeviceGetMaxPcieLinkWidth)(info->nvml_dev, &buswidth));
-              if (gen >= sizeof(rates) / sizeof(rates[0])) {
-                log_gpu.warning() << "Unknown PCIe generation version '" << gen
-                                  << "', assuming '" << rates_len << '\'';
-                gen = rates_len;
-              }
-              info->pci_bandwidth = (rates[gen - 1] * buswidth);
+          if(nvml_initialized) {
+            // Convert uuid bytes to uuid string for nvml
+            std::string uuid = convert_uuid(info->uuid);
+            CHECK_NVML(
+                NVML_FNPTR(nvmlDeviceGetHandleByUUID)(uuid.c_str(), &info->nvml_dev));
+            unsigned int gen, buswidth;
+            // Rates in MB/s from https://en.wikipedia.org/wiki/PCI_Express
+            static const unsigned int rates[] = {250, 500, 985, 1969, 3938, 7563, 15125};
+            static const unsigned int rates_len = sizeof(rates) / sizeof(rates[0]);
+            // Use the max pcie link information here, as when the GPU is not in use,
+            // the OS may power down some links to conserve power, but we want to
+            // estimate the bandwidth when in use.
+            CHECK_NVML(
+                NVML_FNPTR(nvmlDeviceGetMaxPcieLinkGeneration)(info->nvml_dev, &gen));
+            CHECK_NVML(
+                NVML_FNPTR(nvmlDeviceGetMaxPcieLinkWidth)(info->nvml_dev, &buswidth));
+            if(gen >= sizeof(rates) / sizeof(rates[0])) {
+              log_gpu.warning() << "Unknown PCIe generation version '" << gen
+                                << "', assuming '" << rates_len << '\'';
+              gen = rates_len;
+            }
+            info->pci_bandwidth = (rates[gen - 1] * buswidth);
 
 #if !defined(_WIN32) && NVML_API_VERSION >= 11
-              memset(info->numa_node_affinity, 0, sizeof(info->numa_node_affinity));
-              CHECK_NVML(NVML_FNPTR(nvmlDeviceGetMemoryAffinity)(
-                  info->nvml_dev, info->MAX_NUMA_NODE_LEN, info->numa_node_affinity,
-                  NVML_AFFINITY_SCOPE_NODE));
+            memset(info->numa_node_affinity, 0, sizeof(info->numa_node_affinity));
+            CHECK_NVML(NVML_FNPTR(nvmlDeviceGetMemoryAffinity)(
+                info->nvml_dev, info->MAX_NUMA_NODE_LEN, info->numa_node_affinity,
+                NVML_AFFINITY_SCOPE_NODE));
 #endif
-            }
-
-            // For fast lookups, check if we actually have a numa preference
-            for(size_t i = 0; i < info->MAX_NUMA_NODE_LEN; i++) {
-              if(info->numa_node_affinity[i] != (unsigned long)-1) {
-                info->has_numa_preference = true;
-                break;
-              }
-            }
-
-            log_gpu.info() << "GPU #" << i << ": " << info->name << " (" << info->major
-                           << '.' << info->minor << ") " << (info->totalGlobalMem >> 20)
-                           << " MB";
-
-            infos.push_back(info);
           }
+
+          // For fast lookups, check if we actually have a numa preference
+          for(size_t i = 0; i < info->MAX_NUMA_NODE_LEN; i++) {
+            if(info->numa_node_affinity[i] != (unsigned long)-1) {
+              info->has_numa_preference = true;
+              break;
+            }
+          }
+
+          log_gpu.info() << "GPU #" << i << ": " << info->name << " (" << info->major
+                         << '.' << info->minor << ") " << (info->totalGlobalMem >> 20)
+                         << " MB";
+
+          infos.push_back(info);
         }
 
         size_t nvswitch_bandwidth = 0;
@@ -4693,7 +4695,13 @@ namespace Realm {
 
         if(config->cfg_min_avail_mem > 0) {
           size_t total_mem, avail_mem;
-          CHECK_CU(CUDA_DRIVER_FNPTR(cuMemGetInfo)(&avail_mem, &total_mem));
+          {
+            CHECK_CU(CUDA_DRIVER_FNPTR(cuCtxPushCurrent)(context));
+            CHECK_CU(CUDA_DRIVER_FNPTR(cuMemGetInfo)(&avail_mem, &total_mem));
+            CUcontext popped;
+            CHECK_CU(CUDA_DRIVER_FNPTR(cuCtxPopCurrent)(&popped));
+            assert(popped == context);
+          }
           if(avail_mem < config->cfg_min_avail_mem) {
             log_gpu.info() << "GPU " << gpu_info[idx]->device
                            << " does not have enough available memory (" << avail_mem
@@ -4939,7 +4947,7 @@ namespace Realm {
       }
 
       // ask any ipc-able nodes to share handles with us
-      if(config->cfg_use_cuda_ipc) {
+      if(config->cfg_use_cuda_ipc && !gpus.empty()) {
         NodeSet ipc_peers = Network::shared_peers;
 
         if(!ipc_peers.empty()) {
@@ -4952,7 +4960,7 @@ namespace Realm {
             CudaIpcResponseEntry entry;
             const CudaDeviceMemoryInfo *cdm =
                 memImpl->find_module_specific<CudaDeviceMemoryInfo>();
-            if(cdm == nullptr) {
+            if((cdm == nullptr) || (memImpl->size == 0)) {
               continue;
             }
             CUdeviceptr dptr =
@@ -5315,13 +5323,27 @@ namespace Realm {
                                                          const CudaIpcImportRequest &args,
                                                          const void *data, size_t datalen)
     {
+      const CudaIpcResponseEntry *entries = nullptr;
       assert(cuda_module_singleton != nullptr);
 
       log_cudaipc.debug() << "IPC request from " << sender;
 
+      {
+        // Make sure initialization of the cuda module is complete before servicing the
+        // active message. This will always be skipped, except in the rare case the
+        // network module is initialized before the cuda module.
+        AutoLock<> al(cuda_module_singleton->cudaipc_mutex);
+        log_cudaipc.debug(
+            "Waiting for cuda module initialization before processing IPC request");
+        while(!cuda_module_singleton->initialization_complete.load_acquire()) {
+          cuda_module_singleton->cudaipc_condvar.wait();
+        }
+        log_cudaipc.debug("Module initialized, processing IPC request");
+      }
+
       if(args.count == 0) {
-        log_cudaipc.info() << "Sender " << sender << " sent nothing to import";
-        return;
+        log_cudaipc.info("Sender sent no entries to import, skipping import...");
+        goto Done;
       }
 
 #if !defined(REALM_IS_WINDOWS)
@@ -5338,30 +5360,19 @@ namespace Realm {
         assert(datalen > sizeof(local_hostname));
         gethostname(local_hostname, sizeof(local_hostname));
         if((strncmp(local_hostname, static_cast<const char *>(data),
-                    sizeof(local_hostname)) != 0) ||
+                    sizeof(local_hostname)) != 0) &&
            (args.hostid != gethostid())) {
           log_cudaipc.info() << "Sender " << sender
                              << " is not an ipc-capable node, skipping import";
-          return;
+          goto Done;
         }
       }
       data = static_cast<const char *>(data) + HOST_NAME_MAX;
       datalen -= HOST_NAME_MAX;
 #endif
 
-      const CudaIpcResponseEntry *entries =
-          static_cast<const CudaIpcResponseEntry *>(data);
+      entries = static_cast<const CudaIpcResponseEntry *>(data);
       assert(datalen == (args.count * sizeof(CudaIpcResponseEntry)));
-
-      {
-        // Make sure initialization of the cuda module is complete before servicing the
-        // active message. This will always be skipped, except in the rare case the
-        // network module is initialized before the cuda module.
-        AutoLock<> al(cuda_module_singleton->cudaipc_mutex);
-        while(!cuda_module_singleton->initialization_complete.load_acquire()) {
-          cuda_module_singleton->cudaipc_condvar.wait();
-        }
-      }
 
       for(GPU *gpu : cuda_module_singleton->gpus) {
         AutoGPUContext agc(gpu);
@@ -5399,17 +5410,18 @@ namespace Realm {
           }
         }
       }
-
-      {
-        // Count the number of peers that have been received and signal to continue
-        // initialization when all of them have been recieved.
-        AutoLock<> al(cuda_module_singleton->cudaipc_mutex);
-        if((cuda_module_singleton->cudaipc_responses_received.fetch_add_acqrel(1) + 1) ==
-           Network::shared_peers.size()) {
-          log_cudaipc.spew() << "Signalling completion!";
-          cuda_module_singleton->cudaipc_condvar.signal();
-        }
+    Done:
+    {
+      // Count the number of peers that have been received and signal to continue
+      // initialization when all of them have been recieved.  This needs to be done for
+      // every message received in order to unblock module initialization
+      AutoLock<> al(cuda_module_singleton->cudaipc_mutex);
+      if((cuda_module_singleton->cudaipc_responses_received.fetch_add_acqrel(1) + 1) ==
+         Network::shared_peers.size()) {
+        log_cudaipc.spew() << "Signalling completion!";
+        cuda_module_singleton->cudaipc_condvar.signal();
       }
+    }
     }
 
     ActiveMessageHandlerReg<CudaIpcImportRequest> cuda_ipc_request_handler;

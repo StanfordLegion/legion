@@ -3,15 +3,15 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use crate::state::{
-    Align, Bounds, ChanEntry, ChanID, ChanPoint, Config, CopyInstInfo, DimKind, FSpace, FieldID,
-    FillInstInfo, ISpaceID, Inst, InstUID, MemID, MemKind, MemPoint, NodeID, ProcID, ProcKind,
-    ProcPoint, State, TimePoint, Timestamp,
+    Align, Bounds, ChanEntry, ChanID, ChanPoint, Config, Container, CopyInstInfo, DeviceKind,
+    DimKind, FSpace, FieldID, FillInstInfo, ISpaceID, Inst, InstUID, MemID, MemKind, MemPoint,
+    NodeID, ProcID, ProcKind, ProcPoint, State, TimePoint, Timestamp,
 };
 
 use crate::conditional_assert;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct ProcGroup(pub Option<NodeID>, pub ProcKind);
+pub struct ProcGroup(pub Option<NodeID>, pub ProcKind, pub Option<DeviceKind>);
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct MemGroup(pub Option<NodeID>, pub MemKind);
@@ -23,7 +23,11 @@ pub trait StatePostprocess {
     fn group_mems(&self) -> BTreeMap<MemGroup, Vec<MemID>>;
     fn group_chans(&self) -> BTreeMap<Option<NodeID>, Vec<ChanID>>;
 
-    fn proc_group_timepoints(&self, procs: &Vec<ProcID>) -> Vec<&Vec<ProcPoint>>;
+    fn proc_group_timepoints(
+        &self,
+        device: Option<DeviceKind>,
+        procs: &Vec<ProcID>,
+    ) -> Vec<&Vec<ProcPoint>>;
     fn mem_group_timepoints(&self, mems: &Vec<MemID>) -> Vec<&Vec<MemPoint>>;
     fn chan_group_timepoints(&self, chans: &Vec<ChanID>) -> Vec<&Vec<ChanPoint>>;
 
@@ -100,12 +104,18 @@ impl StatePostprocess for State {
             // Do NOT filter empty procs here because they count towards
             // utilization totals
             let nodes = [None, Some(proc.proc_id.node_id())];
+            let devices: &'static [_] = match proc.kind {
+                ProcKind::GPU => &[Some(DeviceKind::Device), Some(DeviceKind::Host)],
+                _ => &[None],
+            };
             for node in nodes {
-                let group = ProcGroup(node, proc.kind);
-                groups
-                    .entry(group)
-                    .or_insert_with(Vec::new)
-                    .push(proc.proc_id);
+                for device in devices {
+                    let group = ProcGroup(node, proc.kind, *device);
+                    groups
+                        .entry(group)
+                        .or_insert_with(Vec::new)
+                        .push(proc.proc_id);
+                }
             }
         }
         groups
@@ -117,7 +127,7 @@ impl StatePostprocess for State {
             if !mem.is_visible() {
                 continue;
             }
-            if !mem.time_points.is_empty() {
+            if !mem.util_time_points(None).is_empty() {
                 let nodes = [None, Some(mem.mem_id.node_id())];
                 for node in nodes {
                     let group = MemGroup(node, mem.kind);
@@ -138,7 +148,7 @@ impl StatePostprocess for State {
             if !chan.is_visible() {
                 continue;
             }
-            if !chan.time_points.is_empty() && chan_id.node_id().is_some() {
+            if !chan.util_time_points(None).is_empty() && chan_id.node_id().is_some() {
                 // gathers/scatters
                 let mut nodes = vec![None];
                 if chan_id.dst.is_some() && chan_id.dst.unwrap() != MemID(0) {
@@ -157,12 +167,16 @@ impl StatePostprocess for State {
         groups
     }
 
-    fn proc_group_timepoints(&self, procs: &Vec<ProcID>) -> Vec<&Vec<ProcPoint>> {
+    fn proc_group_timepoints(
+        &self,
+        device: Option<DeviceKind>,
+        procs: &Vec<ProcID>,
+    ) -> Vec<&Vec<ProcPoint>> {
         let mut timepoints = Vec::new();
         for proc_id in procs {
             let proc = self.procs.get(proc_id).unwrap();
             if proc.is_visible() {
-                timepoints.push(&proc.util_time_points);
+                timepoints.push(proc.util_time_points(device));
             }
         }
         timepoints
@@ -173,7 +187,7 @@ impl StatePostprocess for State {
         for mem_id in mems {
             let mem = self.mems.get(mem_id).unwrap();
             if mem.is_visible() {
-                timepoints.push(&mem.util_time_points);
+                timepoints.push(mem.util_time_points(None));
             }
         }
         timepoints
@@ -184,7 +198,7 @@ impl StatePostprocess for State {
         for chan_id in chans {
             let chan = self.chans.get(chan_id).unwrap();
             if chan.is_visible() {
-                timepoints.push(&chan.util_time_points);
+                timepoints.push(chan.util_time_points(None));
             }
         }
         timepoints
@@ -204,14 +218,20 @@ impl StatePostprocess for State {
                 continue;
             }
             let nodes = [None, Some(proc.proc_id.node_id())];
+            let devices: &'static [_] = match proc.kind {
+                ProcKind::GPU => &[Some(DeviceKind::Device), Some(DeviceKind::Host)],
+                _ => &[None],
+            };
             for node in nodes {
-                let group = ProcGroup(node, proc.kind);
-                proc_count.entry(group).and_modify(|i| *i += 1).or_insert(1);
-                if !proc.is_empty() {
-                    timepoint
-                        .entry(group)
-                        .or_insert_with(Vec::new)
-                        .push((proc.proc_id, &proc.util_time_points));
+                for device in devices {
+                    let group = ProcGroup(node, proc.kind, *device);
+                    proc_count.entry(group).and_modify(|i| *i += 1).or_insert(1);
+                    if !proc.is_empty() {
+                        timepoint
+                            .entry(group)
+                            .or_insert_with(Vec::new)
+                            .push((proc.proc_id, proc.util_time_points(*device)));
+                    }
                 }
             }
         }
@@ -225,14 +245,14 @@ impl StatePostprocess for State {
             if !mem.is_visible() {
                 continue;
             }
-            if !mem.time_points.is_empty() {
+            if !mem.time_points(None).is_empty() {
                 let nodes = [None, Some(mem.mem_id.node_id())];
                 for node in nodes {
                     let group = MemGroup(node, mem.kind);
                     result
                         .entry(group)
                         .or_insert_with(Vec::new)
-                        .push((mem.mem_id, &mem.util_time_points))
+                        .push((mem.mem_id, mem.util_time_points(None)))
                 }
             }
         }
@@ -249,7 +269,7 @@ impl StatePostprocess for State {
             if !chan.is_visible() {
                 continue;
             }
-            if !chan.time_points.is_empty() && chan_id.node_id().is_some() {
+            if !chan.time_points(None).is_empty() && chan_id.node_id().is_some() {
                 // gathers/scatters
                 let mut nodes = vec![None];
                 if chan_id.dst.is_some() && chan_id.dst.unwrap() != MemID(0) {
@@ -264,7 +284,7 @@ impl StatePostprocess for State {
                         result
                             .entry(node)
                             .or_insert_with(Vec::new)
-                            .push((*chan_id, &chan.util_time_points))
+                            .push((*chan_id, chan.util_time_points(None)))
                     }
                 }
             }

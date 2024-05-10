@@ -25,7 +25,7 @@ namespace Legion {
 
 namespace Mapping {
 
-LegionRuntime::Logger::Category log_bishop("bishop");
+Logger log_bishop("bishop");
 
 //------------------------------------------------------------------------------
 BishopMapper::BishopMapper(const std::vector<bishop_mapper_impl_t>& impls,

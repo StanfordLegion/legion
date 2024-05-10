@@ -618,8 +618,10 @@ void create_index_partitions(Context ctx, Runtime *runtime, IndexSpace is,
     colors[0] = fanout - 1;
     for (unsigned idx = 1; idx < DIM; ++idx) colors[idx] = 0;
 
-    Domain color_space(Rect<DIM>(Point<DIM>::ZEROES(), colors));
-    DomainPointColoring coloring;
+    Domain color_domain(Rect<DIM>(Point<DIM>::ZEROES(), colors));
+    IndexSpace color_space = runtime->create_index_space(ctx, color_domain);
+
+    std::map<DomainPoint,Domain> coloring;
     Point<DIM> rect_lo = rect.lo;
     Point<DIM> rect_hi = rect.hi;
     Point<DIM> start = rect.lo;
@@ -639,8 +641,8 @@ void create_index_partitions(Context ctx, Runtime *runtime, IndexSpace is,
               pt_max(start, rect_lo), pt_min(rect_hi, end)));
       start = end - one;
     }
-    ip = runtime->create_index_partition(ctx, is, color_space, coloring,
-      ALIASED_KIND, part_color);
+    ip = runtime->create_partition_by_domain(ctx, is, coloring, color_space,
+        true/*perform intersections*/, LEGION_ALIASED_KIND, part_color);
   }
   else
   {

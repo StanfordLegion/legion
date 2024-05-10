@@ -814,13 +814,9 @@ list(APPEND MAPPER_SRC
 # Legion runtime
 list(APPEND LEGION_SRC
   legion.h
-  legion/accessor.h
-  legion/arrays.h
   legion/bitmask.h
-  legion/field_tree.h
   legion/garbage_collection.h             legion/garbage_collection.cc
   legion/index_space_value.h              legion/index_space_value.cc
-  legion/interval_tree.h
   legion/legion_allocation.h
   legion/legion_analysis.h                legion/legion_analysis.cc
   legion/legion_c.h                       legion/legion_c.cc
@@ -837,6 +833,7 @@ list(APPEND LEGION_SRC
   legion/legion_ops.h                     legion/legion_ops.cc
   legion/legion_profiling.h               legion/legion_profiling.cc
   legion/legion_profiling_serializer.h    legion/legion_profiling_serializer.cc
+  legion/legion_profiling_version.h
   legion/legion_replication.h             legion/legion_replication.cc
   legion/legion_spy.h                     legion/legion_spy.cc
   legion/legion_tasks.h                   legion/legion_tasks.cc
@@ -846,7 +843,6 @@ list(APPEND LEGION_SRC
   legion/legion_views.h                   legion/legion_views.cc
   legion/legion_redop.h                   legion/legion_redop.cc
   legion/mapper_manager.h                 legion/mapper_manager.cc
-  legion/rectangle_set.h
   legion/region_tree.h                    legion/region_tree.cc
   legion/runtime.h                        legion/runtime.cc
 )
@@ -916,8 +912,28 @@ if(Legion_USE_CUDA)
 
   set_target_cuda_warnings_and_errors(LegionRuntime WARN_AS_ERROR ${Legion_BUILD_WARN_AS_ERROR})
 
-  # complex reduction ops bring in a public dependency on cuda headers
   if(Legion_REDOP_COMPLEX)
+    # libcudacxx is required for complex reductions; let cmake find it.
+    # By including this before the CUDA headers we make sure the libcudacxx
+    # installation we pass to cmake will take priority against whatever version
+    # is bundled with CUDA.
+    find_package(libcudacxx CONFIG)
+    if(libcudacxx_FOUND)
+      if(${LIBCUDACXX_VERSION} VERSION_LESS "1.8.0")
+        # cuda::std::complex started working properly in libcudacxx 1.8.0
+        message(FATAL_ERROR "Legion_REDOP_COMPLEX requires libcudacxx >= 1.8.0 (found ${LIBCUDACXX_VERSION})")
+      endif()
+      target_link_libraries(LegionRuntime PUBLIC libcudacxx::libcudacxx)
+    else()
+      # If we can't find a standalone libcudacxx then don't do anything and just
+      # let the build pick up the version that comes bundled with CUDA. But make
+      # sure CUDA is recent enough to include a libcudacxx with a working
+      # implementation of cuda::std::complex.
+      if(${CUDAToolkit_VERSION} VERSION_LESS "11.7")
+        message(FATAL_ERROR "Legion_REDOP_COMPLEX requires CUDA >= 11.7 (found ${CUDAToolkit_VERSION}) or libcudacxx >= 1.8.0")
+      endif()
+    endif()
+    # complex reduction ops bring in a public dependency on cuda headers
     target_link_libraries(LegionRuntime PUBLIC CUDA::toolkit)
   endif()
 
@@ -976,6 +992,7 @@ set_target_properties(LegionRuntime PROPERTIES POSITION_INDEPENDENT_CODE ON)
 set_target_properties(LegionRuntime PROPERTIES OUTPUT_NAME "legion${INSTALL_SUFFIX}")
 set_target_properties(LegionRuntime PROPERTIES SOVERSION ${SOVERSION})
 if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  target_link_libraries(LegionRuntime PUBLIC atomic)
   set_property(TARGET LegionRuntime APPEND PROPERTY BUILD_RPATH "\$ORIGIN")
   set_property(TARGET LegionRuntime APPEND PROPERTY INSTALL_RPATH "\$ORIGIN")
 elseif (CMAKE_SYSTEM_NAME STREQUAL "Darwin")
