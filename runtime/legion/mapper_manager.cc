@@ -65,6 +65,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(processor.exists());
 #endif
+      if (profile_mapper)
+        runtime->profiler->record_mapper_name(mapper_id, processor, 
+                                              get_mapper_name());
     }
 
     //--------------------------------------------------------------------------
@@ -3139,7 +3142,7 @@ namespace Legion {
 #endif
       // Record our finish time when we're done
       if (profile_mapper)
-        runtime->profiler->record_mapper_call(info->kind, 
+        runtime->profiler->record_mapper_call(mapper_id, processor, info->kind,
             (info->operation == NULL) ? 0 : info->operation->get_unique_op_id(),
             info->start_time, Realm::Clock::current_time_in_nanoseconds());
       // Set this flag asynchronously without the lock, there will
@@ -3429,7 +3432,7 @@ namespace Legion {
     {
       // Record our finish time when we are done
       if (profile_mapper)
-        runtime->profiler->record_mapper_call(info->kind, 
+        runtime->profiler->record_mapper_call(mapper_id, processor, info->kind,
             (info->operation == NULL) ? 0 : info->operation->get_unique_op_id(),
             info->start_time, Realm::Clock::current_time_in_nanoseconds());
       std::vector<RtUserEvent> to_trigger;

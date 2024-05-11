@@ -185,7 +185,7 @@ impl Proc {
             // FIXME: Elliott: special case on ProfTask to match legion_prof.py behavior
             ProcEntryKind::ProfTask => None,
             // And another special case, because for MapperCalls only, we set default to 0 to match with python
-            ProcEntryKind::MapperCall(_) => Some(initiation_op.unwrap_or(OpID::ZERO)),
+            ProcEntryKind::MapperCall(..) => Some(initiation_op.unwrap_or(OpID::ZERO)),
             _ => initiation_op,
         };
 
@@ -512,64 +512,44 @@ impl Chan {
                 .get(&mem_id)
                 .map_or(MemKind::NoMemKind, |mem| mem.kind)
         };
-        let slug = match (
-            self.chan_id.src,
-            self.chan_id.dst,
-            self.chan_id.channel_kind,
-        ) {
-            (Some(src), Some(dst), channel_kind) => format!(
-                "({}_Memory_0x{:x},_{}_Memory_0x{:x},_{})",
+        let slug = match self.chan_id {
+            ChanID::Copy { src, dst } => format!(
+                "({}_Memory_0x{:x},_{}_Memory_0x{:x},_Copy)",
                 mem_kind(src),
                 &src,
                 mem_kind(dst),
-                &dst,
-                channel_kind
+                &dst
             ),
-            (None, Some(dst), channel_kind) => format!(
-                "(None,_{}_Memory_0x{:x},_{})",
-                mem_kind(dst),
-                dst,
-                channel_kind
-            ),
-            (Some(src), None, channel_kind) => format!(
-                "({}_Memory_0x{:x},_None,_{})",
-                mem_kind(src),
-                src,
-                channel_kind
-            ),
-            (None, None, channel_kind) => format!("(None,_None,_{})", channel_kind),
+            ChanID::Fill { dst } => format!("(None,_{}_Memory_0x{:x},_Fill)", mem_kind(dst), dst),
+            ChanID::Gather { dst } => {
+                format!("(None,_{}_Memory_0x{:x},_Gather)", mem_kind(dst), dst)
+            }
+            ChanID::Scatter { src } => {
+                format!("(None,_{}_Memory_0x{:x},_Scatter)", mem_kind(src), src)
+            }
+            ChanID::DepPart { node_id } => format!("(Node{},_DepPart)", node_id.0),
         };
 
-        let long_name = match (
-            self.chan_id.src,
-            self.chan_id.dst,
-            self.chan_id.channel_kind,
-        ) {
-            (Some(src), Some(dst), _) => format!(
+        let long_name = match self.chan_id {
+            ChanID::Copy { src, dst } => format!(
                 "{} Memory 0x{:x} to {} Memory 0x{:x} Channel",
                 mem_kind(src),
                 &src,
                 mem_kind(dst),
                 &dst
             ),
-            (None, Some(dst), channel_kind) => {
-                format!(
-                    "{} {} Memory 0x{:x} Channel",
-                    channel_kind,
-                    mem_kind(dst),
-                    dst
-                )
+            ChanID::Fill { dst } => format!("Fill {} Memory 0x{:x} Channel", mem_kind(dst), dst),
+            ChanID::Gather { dst } => {
+                format!("Gather {} Memory 0x{:x} Channel", mem_kind(dst), dst)
             }
-            (Some(src), None, _) => format!("Scatter {} Memory 0x{:x} Channel", mem_kind(src), src),
-            (None, None, _) => "Dependent Partition Channel".to_owned(),
+            ChanID::Scatter { src } => {
+                format!("Scatter {} Memory 0x{:x} Channel", mem_kind(src), src)
+            }
+            ChanID::DepPart { node_id } => format!("Dependent Partition {}", node_id.0),
         };
 
-        let short_name = match (
-            self.chan_id.src,
-            self.chan_id.dst,
-            self.chan_id.channel_kind,
-        ) {
-            (Some(src), Some(dst), _) => format!(
+        let short_name = match self.chan_id {
+            ChanID::Copy { src, dst } => format!(
                 "{} to {}",
                 MemShort(
                     mem_kind(src),
@@ -584,19 +564,25 @@ impl Chan {
                     state
                 )
             ),
-            (None, Some(dst), channel_kind) => {
-                format!(
-                    "{} {}",
-                    channel_kind,
-                    MemShort(
-                        mem_kind(dst),
-                        state.mems.get(&dst),
-                        state.mem_proc_affinity.get(&dst),
-                        state
-                    )
+            ChanID::Fill { dst } => format!(
+                "Fill {}",
+                MemShort(
+                    mem_kind(dst),
+                    state.mems.get(&dst),
+                    state.mem_proc_affinity.get(&dst),
+                    state
                 )
-            }
-            (Some(src), None, _) => format!(
+            ),
+            ChanID::Gather { dst } => format!(
+                "Gather {}",
+                MemShort(
+                    mem_kind(dst),
+                    state.mems.get(&dst),
+                    state.mem_proc_affinity.get(&dst),
+                    state
+                )
+            ),
+            ChanID::Scatter { src } => format!(
                 "Scatter {}",
                 MemShort(
                     mem_kind(src),
@@ -605,7 +591,7 @@ impl Chan {
                     state
                 )
             ),
-            (None, None, _) => "Dependent Partition Channel".to_owned(),
+            ChanID::DepPart { node_id } => format!("Dependent Partition {}", node_id.0),
         };
 
         let mut filename = PathBuf::new();

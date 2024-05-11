@@ -109,6 +109,11 @@ namespace Legion {
 
     class LegionProfDesc {
     public:
+      struct MapperName {
+        MapperID mapper_id;
+        ProcID mapper_proc;
+        const char *name;
+      };
       struct MapperCallDesc {
       public:
         unsigned kind;
@@ -377,6 +382,8 @@ namespace Legion {
       };
       struct MapperCallInfo {
       public:
+        MapperID mapper;
+        ProcID mapper_proc;
         MappingCallKind kind;
         UniqueID op_id;
         timestamp_t start, stop;
@@ -516,7 +523,8 @@ namespace Legion {
       void process_proc_mem_aff_desc(const Memory &m);
       void process_proc_mem_aff_desc(const Processor &p);
     public:
-      void record_mapper_call(Processor proc, MappingCallKind kind, 
+      void record_mapper_call(Processor proc, MapperID mapper,
+                              Processor mapper_proc, MappingCallKind kind,
                               UniqueID uid, timestamp_t start,
                               timestamp_t stop, LgEvent finish_event);
       void record_runtime_call(Processor proc, RuntimeCallKind kind,
@@ -702,10 +710,11 @@ namespace Legion {
                                    sparse_size,
                                    bool is_sparse);
     public:
+      void record_mapper_name(MapperID mapper, Processor p, const char *name);
       void record_mapper_call_kinds(const char *const *const mapper_call_names,
                                     unsigned int num_mapper_call_kinds);
-      void record_mapper_call(MappingCallKind kind, UniqueID uid,
-                              timestamp_t start, timestamp_t stop);
+      void record_mapper_call(MapperID mapper, Processor mapper_proc,
+       MappingCallKind kind, UniqueID uid, timestamp_t start, timestamp_t stop);
     public:
       void record_runtime_call_kinds(const char *const *const runtime_calls,
                                      unsigned int num_runtime_call_kinds);
