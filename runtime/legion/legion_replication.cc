@@ -4639,7 +4639,7 @@ namespace Legion {
             // and then we scatter them all back out to the targets after
             // we've computed them on one node. We do this because Realm can
             // perform non-trivial optimizations for partition-by-field and
-            // partition-by-preimage for those cases when it see a single call
+            // partition-by-preimage for those cases when it sees a single call
             if (thunk->is_preimage())
               find_remote_targets(index_preconditions);
             if (index_preconditions.empty())

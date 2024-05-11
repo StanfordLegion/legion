@@ -4088,18 +4088,29 @@ namespace Legion {
       }
       IndexSpaceNodeT<COLOR_DIM,COLOR_T> *color_space = 
        static_cast<IndexSpaceNodeT<COLOR_DIM,COLOR_T>*>(partition->color_space);
-      unsigned index = 0;
-      std::vector<Point<COLOR_DIM,COLOR_T> > colors(partition->total_children);
-      if (results != NULL)
-        results->resize(partition->total_children);
-      for (ColorSpaceIterator itr(partition); itr; itr++)
+      std::vector<Point<COLOR_DIM,COLOR_T> > colors;
+      if (results == NULL)
       {
+        for (ColorSpaceIterator itr(partition, true/*local only*/); itr; itr++)
+        {
+          Point<COLOR_DIM,COLOR_T> color;
+          color_space->delinearize_color(*itr, color);
+          colors.push_back(color);
+        }
+      }
+      else
+      {
+        colors.resize(partition->total_children);
+        results->resize(partition->total_children);
+        unsigned index = 0;
+        for (ColorSpaceIterator itr(partition); itr; itr++)
+        {
 #ifdef DEBUG_LEGION
-        assert(index < colors.size());
+          assert(index < colors.size());
 #endif
-        if (results != NULL)
           results->at(index).color = *itr;
-        color_space->delinearize_color(*itr, colors[index++]);
+          color_space->delinearize_color(*itr, colors[index++]);
+        }
       }
       // Translate the instances to realm field data descriptors
       typedef Realm::FieldDataDescriptor<Realm::IndexSpace<DIM,T>,
@@ -4147,7 +4158,7 @@ namespace Legion {
       LegionSpy::log_deppart_events(op->get_unique_op_id(), expr_id,
                                     precondition, result, DEP_PART_BY_FIELD);
 #endif
-      index = colors.size();
+      unsigned index = (results == NULL) ? 0 : colors.size();
       // Set our local children results here
       for (ColorSpaceIterator itr(partition, true/*local only*/); itr; itr++)
       {
@@ -4476,22 +4487,45 @@ namespace Legion {
       }
       // Get the target index spaces of the projection partition
       std::vector<ApEvent> preconditions;
-      std::vector<Realm::IndexSpace<DIM2,T2> > 
-        targets(partition->total_children);
-      unsigned index = 0;
-      if (results != NULL)
-        results->resize(partition->total_children);
-      for (ColorSpaceIterator itr(partition); itr; itr++)
+      std::vector<Realm::IndexSpace<DIM2,T2> > targets; 
+      if (results == NULL)
       {
 #ifdef DEBUG_LEGION
-        assert(index < targets.size());
+        assert(remote_targets == NULL);
 #endif
-        if (results != NULL)
-          results->at(index).color = *itr;
-        const DomainPoint color =
-          partition->color_space->delinearize_color_to_point(*itr);
-        if (remote_targets != NULL)
+        for (ColorSpaceIterator itr(partition, true/*local only*/); itr; itr++)
         {
+          const DomainPoint color =
+            partition->color_space->delinearize_color_to_point(*itr);
+          // Get the corresponding subspace for the targets
+          const LegionColor target_color =
+            projection->color_space->linearize_color(color);
+          IndexSpaceNodeT<DIM2,T2> *target_child =
+            static_cast<IndexSpaceNodeT<DIM2,T2>*>(
+                projection->get_child(target_color));
+          targets.resize(targets.size() + 1);
+          ApEvent ready = target_child->get_realm_index_space(
+                              targets.back(), false/*tight*/);
+          if (ready.exists())
+            preconditions.push_back(ready);
+        }
+      }
+      else
+      {
+#ifdef DEBUG_LEGION
+        assert(remote_targets != NULL);
+#endif
+        unsigned index = 0;
+        targets.resize(partition->total_children);
+        results->resize(partition->total_children);
+        for (ColorSpaceIterator itr(partition); itr; itr++)
+        {
+#ifdef DEBUG_LEGION
+          assert(index < targets.size());
+#endif
+          results->at(index).color = *itr;
+          const DomainPoint color =
+            partition->color_space->delinearize_color_to_point(*itr);
           std::map<DomainPoint,Domain>::const_iterator finder =
             remote_targets->find(color);
           if (finder != remote_targets->end())
@@ -4499,21 +4533,21 @@ namespace Legion {
             targets[index++] = finder->second;
             continue;
           }
+          // Get the corresponding subspace for the targets
+          const LegionColor target_color =
+            projection->color_space->linearize_color(color);
+          IndexSpaceNodeT<DIM2,T2> *target_child =
+            static_cast<IndexSpaceNodeT<DIM2,T2>*>(
+                projection->get_child(target_color));
+          ApEvent ready = target_child->get_realm_index_space(
+                              targets[index++], false/*tight*/);
+          if (ready.exists())
+            preconditions.push_back(ready);
         }
-        // Get the corresponding subspace for the targets
-        const LegionColor target_color =
-          projection->color_space->linearize_color(color);
-        IndexSpaceNodeT<DIM2,T2> *target_child =
-          static_cast<IndexSpaceNodeT<DIM2,T2>*>(
-              projection->get_child(target_color));
-        ApEvent ready = target_child->get_realm_index_space(
-                            targets[index++], false/*tight*/);
-        if (ready.exists())
-          preconditions.push_back(ready);
-      }
 #ifdef DEBUG_LEGION
-      assert(index == targets.size());
+        assert(index == targets.size());
 #endif
+      }
       // Translate the descriptors into realm descriptors
       typedef Realm::FieldDataDescriptor<Realm::IndexSpace<DIM1,T1>,
                                        Realm::Point<DIM2,T2> > RealmDescriptor;
@@ -4557,7 +4591,7 @@ namespace Legion {
                                     precondition, result, DEP_PART_BY_PREIMAGE);
 #endif
       // Update any local children with their results
-      index = subspaces.size();
+      unsigned index = (results == NULL) ? 0 : subspaces.size();
       // Set our local children results here
       for (ColorSpaceIterator itr(partition, true/*local only*/); itr; itr++)
       {
@@ -4649,22 +4683,45 @@ namespace Legion {
 
       // Get the target index spaces of the projection partition
       std::vector<ApEvent> preconditions;
-      std::vector<Realm::IndexSpace<DIM2,T2> > 
-        targets(partition->total_children);
-      unsigned index = 0;
-      if (results != NULL)
-        results->resize(partition->total_children);
-      for (ColorSpaceIterator itr(partition); itr; itr++)
+      std::vector<Realm::IndexSpace<DIM2,T2> > targets; 
+      if (results == NULL)
       {
 #ifdef DEBUG_LEGION
-        assert(index < targets.size());
+        assert(remote_targets == NULL);
 #endif
-        if (results != NULL)
-          results->at(index).color = *itr;
-        const DomainPoint color =
-          partition->color_space->delinearize_color_to_point(*itr);
-        if (remote_targets != NULL)
+        for (ColorSpaceIterator itr(partition, true/*local only*/); itr; itr++)
         {
+          const DomainPoint color =
+            partition->color_space->delinearize_color_to_point(*itr);
+          // Get the corresponding subspace for the targets
+          const LegionColor target_color =
+            projection->color_space->linearize_color(color);
+          IndexSpaceNodeT<DIM2,T2> *target_child =
+            static_cast<IndexSpaceNodeT<DIM2,T2>*>(
+                projection->get_child(target_color));
+          targets.resize(targets.size() + 1);
+          ApEvent ready = target_child->get_realm_index_space(
+                              targets.back(), false/*tight*/);
+          if (ready.exists())
+            preconditions.push_back(ready);
+        }
+      }
+      else
+      {
+#ifdef DEBUG_LEGION
+        assert(remote_targets != NULL);
+#endif
+        unsigned index = 0;
+        targets.resize(partition->total_children);
+        results->resize(partition->total_children);
+        for (ColorSpaceIterator itr(partition); itr; itr++)
+        {
+#ifdef DEBUG_LEGION
+          assert(index < targets.size());
+#endif
+          results->at(index).color = *itr;
+          const DomainPoint color =
+            partition->color_space->delinearize_color_to_point(*itr);
           std::map<DomainPoint,Domain>::const_iterator finder =
             remote_targets->find(color);
           if (finder != remote_targets->end())
@@ -4672,21 +4729,21 @@ namespace Legion {
             targets[index++] = finder->second;
             continue;
           }
+          // Get the corresponding subspace for the targets
+          const LegionColor target_color =
+            projection->color_space->linearize_color(color);
+          IndexSpaceNodeT<DIM2,T2> *target_child =
+            static_cast<IndexSpaceNodeT<DIM2,T2>*>(
+                projection->get_child(target_color));
+          ApEvent ready = target_child->get_realm_index_space(
+                              targets[index++], false/*tight*/);
+          if (ready.exists())
+            preconditions.push_back(ready);
         }
-        // Get the corresponding subspace for the targets
-        const LegionColor target_color =
-          projection->color_space->linearize_color(color);
-        IndexSpaceNodeT<DIM2,T2> *target_child =
-          static_cast<IndexSpaceNodeT<DIM2,T2>*>(
-              projection->get_child(target_color));
-        ApEvent ready = target_child->get_realm_index_space(
-                            targets[index++], false/*tight*/);
-        if (ready.exists())
-          preconditions.push_back(ready);
-      }
 #ifdef DEBUG_LEGION
-      assert(index == targets.size());
+        assert(index == targets.size());
 #endif
+      }
       // Translate the descriptors into realm descriptors
       typedef Realm::FieldDataDescriptor<Realm::IndexSpace<DIM1,T1>,
                                        Realm::Rect<DIM2,T2> > RealmDescriptor;
@@ -4730,7 +4787,7 @@ namespace Legion {
                     precondition, result, DEP_PART_BY_PREIMAGE_RANGE);
 #endif
       // Update any local children with their results
-      index = subspaces.size();
+      unsigned index = (results == NULL) ? 0 : subspaces.size();
       // Set our local children results here
       for (ColorSpaceIterator itr(partition, true/*local only*/); itr; itr++)
       {
