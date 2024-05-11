@@ -4778,9 +4778,7 @@ namespace Legion {
         return true;
       if (child.get_tree_id() != parent.get_tree_id())
         return false;
-      std::vector<LegionColor> path;
-      return compute_index_path(parent.get_index_space(),
-                                child.get_index_space(), path);
+      return has_index_path(parent.get_index_space(), child.get_index_space());
     }
 
     //--------------------------------------------------------------------------
@@ -5020,47 +5018,34 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool RegionTreeForest::compute_index_path(IndexSpace parent, 
-                               IndexSpace child, std::vector<LegionColor> &path)
+    bool RegionTreeForest::has_index_path(IndexSpace parent, 
+                                          IndexSpace child)
     //--------------------------------------------------------------------------
     {
       IndexSpaceNode *child_node = get_node(child); 
-      path.push_back(child_node->color);
       if (parent == child) 
         return true; // Early out
       IndexSpaceNode *parent_node = get_node(parent);
       while (parent_node != child_node)
       {
         if (parent_node->depth >= child_node->depth)
-        {
-          path.clear();
           return false;
-        }
         if (child_node->parent == NULL)
-        {
-          path.clear();
           return false;
-        }
-        path.push_back(child_node->parent->color);
-        path.push_back(child_node->parent->parent->color);
         child_node = child_node->parent->parent;
       }
       return true;
     }
 
     //--------------------------------------------------------------------------
-    bool RegionTreeForest::compute_partition_path(IndexSpace parent, 
-                           IndexPartition child, std::vector<LegionColor> &path)
+    bool RegionTreeForest::has_partition_path(IndexSpace parent, 
+                                              IndexPartition child)
     //--------------------------------------------------------------------------
     {
       IndexPartNode *child_node = get_node(child);
-      path.push_back(child_node->color);
       if (child_node->parent == NULL)
-      {
-        path.clear();
         return false;
-      }
-      return compute_index_path(parent, child_node->parent->handle, path);
+      return has_index_path(parent, child_node->parent->handle);
     }
 
     //--------------------------------------------------------------------------

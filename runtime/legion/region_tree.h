@@ -792,10 +792,8 @@ namespace Legion {
       bool is_dominated_tree_only(IndexPartition test, IndexSpace dominator);
       bool is_dominated_tree_only(IndexPartition test,IndexPartition dominator);
     public:
-      bool compute_index_path(IndexSpace parent, IndexSpace child,
-                              std::vector<LegionColor> &path);
-      bool compute_partition_path(IndexSpace parent, IndexPartition child,
-                                  std::vector<LegionColor> &path); 
+      bool has_index_path(IndexSpace parent, IndexSpace child);
+      bool has_partition_path(IndexSpace parent, IndexPartition child);
    private:
       void initialize_path(IndexTreeNode *child,
                            IndexTreeNode *parent,

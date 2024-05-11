@@ -1073,54 +1073,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, TASK_PRIVILEGE_CHECK_CALL);
-      // First check the index privileges
-      for (unsigned idx = 0; idx < indexes.size(); idx++)
-      {
-        LegionErrorType et = parent_ctx->check_privilege(indexes[idx]);
-        switch (et)
-        {
-          case LEGION_NO_ERROR:
-            break;
-          case ERROR_BAD_PARENT_INDEX:
-            {
-              REPORT_LEGION_ERROR(ERROR_PARENT_TASK_TASK,
-                              "Parent task %s (ID %lld) of task %s "
-                              "(ID %lld) "
-                              "does not have an index requirement for "
-                              "index space %x as a parent of "
-                              "child task's index requirement index %d",
-                              parent_ctx->get_task_name(),
-                              parent_ctx->get_unique_id(), get_task_name(),
-                              get_unique_id(), indexes[idx].parent.id, idx)
-              break;
-            }
-          case ERROR_BAD_INDEX_PATH:
-            {
-              REPORT_LEGION_ERROR(ERROR_INDEX_SPACE_NOTSUBSPACE,
-                              "Index space %x is not a sub-space "
-                              "of parent index space %x for index "
-                              "requirement %d of task %s (ID %lld)",
-                              indexes[idx].handle.id,
-                              indexes[idx].parent.id, idx,
-                              get_task_name(), get_unique_id())
-              break;
-            }
-          case ERROR_BAD_INDEX_PRIVILEGES:
-            {
-              REPORT_LEGION_ERROR(ERROR_PRIVILEGES_INDEX_SPACE,
-                              "Privileges %x for index space %x "
-                              " are not a subset of privileges of parent "
-                              "task's privileges for index space "
-                              "requirement %d of task %s (ID %lld)",
-                              indexes[idx].privilege,
-                              indexes[idx].handle.id, idx,
-                              get_task_name(), get_unique_id())
-              break;
-            }
-          default:
-            assert(false); // Should never happen
-        }
-      }
       // Now check the region requirement privileges
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {

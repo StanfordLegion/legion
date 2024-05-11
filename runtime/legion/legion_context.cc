@@ -424,16 +424,14 @@ namespace Legion {
         if ((req.handle_type == LEGION_SINGULAR_PROJECTION) || 
             (req.handle_type == LEGION_REGION_PROJECTION))
         {
-          std::vector<LegionColor> path;
-          if (!runtime->forest->compute_index_path(req.parent.index_space,
-                                            req.region.index_space, path))
+          if (!runtime->forest->has_index_path(req.parent.index_space,
+                                               req.region.index_space))
             return ERROR_BAD_REGION_PATH;
         }
         else
         {
-          std::vector<LegionColor> path;
-          if (!runtime->forest->compute_partition_path(req.parent.index_space,
-                                        req.partition.index_partition, path))
+          if (!runtime->forest->has_partition_path(req.parent.index_space,
+                                            req.partition.index_partition))
             return ERROR_BAD_PARTITION_PATH;
         }
         // Now check that the types are subset of the fields
@@ -489,9 +487,8 @@ namespace Legion {
           return false;
         // Check to see if there is a path between
         // the index spaces
-        std::vector<LegionColor> path;
-        if (!runtime->forest->compute_index_path(our_space,
-                         req.region.get_index_space(),path))
+        if (!runtime->forest->has_index_path(our_space,
+                         req.region.get_index_space()))
           return false;
       }
       else
@@ -499,9 +496,8 @@ namespace Legion {
         // Check if the trees are different
         if (our_tid != req.partition.get_tree_id())
           return false;
-        std::vector<LegionColor> path;
-        if (!runtime->forest->compute_partition_path(our_space,
-                     req.partition.get_index_partition(), path))
+        if (!runtime->forest->has_partition_path(our_space,
+                       req.partition.get_index_partition()))
           return false;
       }
       // Check to see if any privilege fields overlap
@@ -3177,49 +3173,6 @@ namespace Legion {
       // This is not a returnable privilege requirement
       returnable_privileges[index] = false;
       return index;
-    }
-
-    //--------------------------------------------------------------------------
-    LegionErrorType InnerContext::check_privilege(
-                                         const IndexSpaceRequirement &req) const
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(runtime, CHECK_PRIVILEGE_CALL);
-      if (req.verified)
-        return LEGION_NO_ERROR;
-      // Find the parent index space
-      for (std::vector<IndexSpaceRequirement>::const_iterator it = 
-            owner_task->indexes.begin(); it != owner_task->indexes.end(); it++)
-      {
-        // Check to see if we found the requirement in the parent 
-        if (it->handle == req.parent)
-        {
-          // Check that there is a path between the parent and the child
-          std::vector<LegionColor> path;
-          if (!runtime->forest->compute_index_path(req.parent, 
-                                                   req.handle, path))
-            return ERROR_BAD_INDEX_PATH;
-          // Now check that the privileges are less than or equal
-          if (req.privilege & (~(it->privilege)))
-          {
-            return ERROR_BAD_INDEX_PRIVILEGES;  
-          }
-          return LEGION_NO_ERROR;
-        }
-      }
-      // If we didn't find it here, we have to check the added 
-      // index spaces that we have
-      if (has_created_index_space(req.parent))
-      {
-        // Still need to check that there is a path between the two
-        std::vector<LegionColor> path;
-        if (!runtime->forest->compute_index_path(req.parent, req.handle, path))
-          return ERROR_BAD_INDEX_PATH;
-        // No need to check privileges here since it is a created space
-        // which means that the parent has all privileges.
-        return LEGION_NO_ERROR;
-      }
-      return ERROR_BAD_PARENT_INDEX;
     }
 
     //--------------------------------------------------------------------------
