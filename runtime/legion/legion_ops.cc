@@ -9805,7 +9805,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       FenceOp::initialize(ctx,EXECUTION_FENCE,false/*need future*/,provenance);
-      parent_ctx->issue_frame(this);
     }
 
     //--------------------------------------------------------------------------

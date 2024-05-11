@@ -8031,7 +8031,22 @@ namespace Legion {
                     get_task_name(), get_unique_id());
 #endif
       frame_op->initialize(this, provenance);
+      RtEvent wait_on;
+      if (context_configuration.max_outstanding_frames > 0)
+      {
+        AutoLock child_lock(child_op_lock);
+        frame_ops.push_back(frame_op);
+#ifdef DEBUG_LEGION
+        assert(frame_ops.size() <=
+            (size_t)context_configuration.max_outstanding_frames);
+#endif
+        if (frame_ops.size() ==
+            (size_t)context_configuration.max_outstanding_frames)
+          wait_on = frame_ops.front()->get_commit_event();
+      }
       add_to_dependence_queue(frame_op);
+      if (wait_on.exists())
+        wait_on.wait();
     }
 
     //--------------------------------------------------------------------------
@@ -10031,28 +10046,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       ready.wait();
-    }
-
-    //--------------------------------------------------------------------------
-    void InnerContext::issue_frame(FrameOp *frame)
-    //--------------------------------------------------------------------------
-    {
-      RtEvent wait_on;
-      if (context_configuration.max_outstanding_frames > 0)
-      {
-        AutoLock child_lock(child_op_lock);
-        const size_t current_frames = frame_ops.size();
-        frame_ops.push_back(frame);
-#ifdef DEBUG_LEGION
-        assert(current_frames <= 
-            (size_t)context_configuration.max_outstanding_frames);
-#endif
-        if (current_frames == 
-            (size_t)context_configuration.max_outstanding_frames)
-          wait_on = frame_ops.front()->get_commit_event();
-      }
-      if (wait_on.exists())
-        wait_on.wait();
     }
 
     //--------------------------------------------------------------------------
@@ -24843,69 +24836,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       ready.wait();
-    }
-
-    //--------------------------------------------------------------------------
-    void LeafContext::issue_frame(FrameOp *frame)
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void LeafContext::finish_frame(FrameOp *frame)
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void LeafContext::increment_outstanding(void)
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void LeafContext::decrement_outstanding(void)
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void LeafContext::increment_pending(void)
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void LeafContext::decrement_pending(TaskOp *child)
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void LeafContext::decrement_pending(bool need_deferral)
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void LeafContext::increment_frame(void)
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void LeafContext::decrement_frame(void)
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
     }
 
     //--------------------------------------------------------------------------

@@ -513,17 +513,6 @@ namespace Legion {
       virtual void wait_on_future(FutureImpl *future, RtEvent ready) = 0;
       virtual void wait_on_future_map(FutureMapImpl *map, RtEvent ready) = 0;
     public:
-      virtual void issue_frame(FrameOp *frame) = 0;
-      virtual void finish_frame(FrameOp *frame) = 0;
-    public:
-      virtual void increment_outstanding(void) = 0;
-      virtual void decrement_outstanding(void) = 0;
-      virtual void increment_pending(void) = 0;
-      virtual void decrement_pending(TaskOp *child) = 0;
-      virtual void decrement_pending(bool need_deferral) = 0;
-      virtual void increment_frame(void) = 0;
-      virtual void decrement_frame(void) = 0;
-    public:
       // Override by RemoteTask and TopLevelTask
       virtual InnerContext* find_top_context(InnerContext *previous = NULL) = 0;
     public:
@@ -1598,16 +1587,14 @@ namespace Legion {
       virtual void wait_on_future(FutureImpl *future, RtEvent ready);
       virtual void wait_on_future_map(FutureMapImpl *map, RtEvent ready);
     public:
-      virtual void issue_frame(FrameOp *frame);
-      virtual void finish_frame(FrameOp *frame);
-    public:
-      virtual void increment_outstanding(void);
-      virtual void decrement_outstanding(void);
-      virtual void increment_pending(void);
-      virtual void decrement_pending(TaskOp *child);
-      virtual void decrement_pending(bool need_deferral);
-      virtual void increment_frame(void);
-      virtual void decrement_frame(void);
+      void increment_outstanding(void);
+      void decrement_outstanding(void);
+      void increment_pending(void);
+      void decrement_pending(TaskOp *child);
+      void decrement_pending(bool need_deferral);
+      void increment_frame(void);
+      void decrement_frame(void);
+      void finish_frame(FrameOp *frame);
     public:
 #ifdef DEBUG_LEGION_COLLECTIVES
       virtual MergeCloseOp* get_merge_close_op(Operation *op,
@@ -3873,17 +3860,6 @@ namespace Legion {
       virtual void record_blocking_call(uint64_t future_coordinate);
       virtual void wait_on_future(FutureImpl *future, RtEvent ready);
       virtual void wait_on_future_map(FutureMapImpl *map, RtEvent ready);
-    public:
-      virtual void issue_frame(FrameOp *frame);
-      virtual void finish_frame(FrameOp *frame);
-    public:
-      virtual void increment_outstanding(void);
-      virtual void decrement_outstanding(void);
-      virtual void increment_pending(void);
-      virtual void decrement_pending(TaskOp *child);
-      virtual void decrement_pending(bool need_deferral);
-      virtual void increment_frame(void);
-      virtual void decrement_frame(void);
     public:
       virtual InnerContext* find_top_context(InnerContext *previous = NULL);
     public:
