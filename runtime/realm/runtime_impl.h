@@ -248,6 +248,9 @@ namespace Realm {
       // resources
       int res_num_cpus = 0;
       size_t res_sysmem_size = 0;
+
+      // sparstiy maps
+      bool enable_sparsity_refcount = false;
     };
 
     class CoreModule : public Module {
@@ -384,6 +387,7 @@ namespace Realm {
       RegionInstanceImpl *get_instance_impl(ID id);
       SparsityMapImplWrapper *get_sparsity_impl(ID id);
       SparsityMapImplWrapper *get_available_sparsity_impl(NodeID target_node);
+      void free_sparsity_impl(SparsityMapImplWrapper *impl);
       CompQueueImpl *get_compqueue_impl(ID id);
       SubgraphImpl *get_subgraph_impl(ID id);
 
