@@ -9537,8 +9537,10 @@ namespace Legion {
           for (ColorSpaceIterator itr(index_part, true/*local*/); itr; itr++)
           {
             // This will force the instantiation of the child without blocking
-            RtEvent whatever;
-            index_part->get_child(*itr, &whatever);
+            RtEvent instantiated;
+            index_part->get_child(*itr, &instantiated);
+            if (instantiated.exists())
+              complete_preconditions.insert(instantiated);
           }
 
           // Create an output region and a partition
