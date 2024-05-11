@@ -1800,7 +1800,8 @@ namespace Legion {
                        const PhysicalTraceInfo &trace_info,
                        const std::vector<CopySrcDstField> &dst_fields,
                        PhysicalManager *manager, ApEvent precondition,
-                       PredEvent pred_guard, CollectiveKind collective);
+                       PredEvent pred_guard, CollectiveKind collective,
+                       bool fill_restrict);
       public:
         FillView *const view;
         Operation *const op;
@@ -1812,6 +1813,7 @@ namespace Legion {
         const PredEvent pred_guard;
         const CollectiveKind collective;
         const ApUserEvent done;
+        const bool fill_restricted;
       };
     public:
       // Don't know the fill value yet, will be set later
@@ -1856,7 +1858,7 @@ namespace Legion {
                          std::set<RtEvent> &applied_events,
                          PhysicalManager *manager,
                          ApEvent precondition, PredEvent pred_guard,
-                         CollectiveKind collective = COLLECTIVE_NONE);
+                         CollectiveKind collective, bool fill_restricted);
       static void handle_defer_issue_fill(const void *args);
     public:
       static void handle_send_fill_view(Runtime *runtime, Deserializer &derez);

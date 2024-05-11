@@ -6305,7 +6305,9 @@ class Operation(object):
         return self.kind == INTER_CLOSE_OP_KIND or self.kind == POST_CLOSE_OP_KIND
 
     def is_fence(self):
-        return self.kind == MAPPING_FENCE_OP_KIND or self.kind == EXECUTION_FENCE_OP_KIND
+        return self.kind == MAPPING_FENCE_OP_KIND or \
+                self.kind == EXECUTION_FENCE_OP_KIND or \
+                self.kind == TIMING_OP_KIND
 
     def is_internal(self):
         return self.is_close() or self.kind == REFINEMENT_OP_KIND
@@ -6364,8 +6366,8 @@ class Operation(object):
         assert self.creator is not None
         return self.creator.get_context_index()
 
-    def set_op_kind(self, kind):
-        if self.kind == NO_OP_KIND:
+    def set_op_kind(self, kind, override = False):
+        if self.kind == NO_OP_KIND or override:
             self.kind = kind
         else:
             assert self.kind is kind
@@ -7595,8 +7597,7 @@ class Operation(object):
                         merge_close_ops.append(current)
                 # We also allow mapping fences and execution fences (which are
                 # also a kind of mapping fence to fulfill this purpose)
-                elif current.kind == MAPPING_FENCE_OP_KIND or \
-                        current.kind == EXECUTION_FENCE_OP_KIND: 
+                elif current.is_fence(): 
                     merge_close_ops.append(current)
                     # No need to keep scanning past a fence since it dominates
                     continue
@@ -12735,7 +12736,7 @@ def parse_legion_spy_line(line, state):
     m = timing_op_pat.match(line)
     if m is not None:
         op = state.get_operation(int(m.group('uid')))
-        op.set_op_kind(TIMING_OP_KIND)
+        op.set_op_kind(TIMING_OP_KIND, override=True)
         op.set_name("Timing Op")
         context = state.get_task(int(m.group('ctx')))
         op.set_context(context)
