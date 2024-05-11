@@ -1713,7 +1713,7 @@ namespace Legion {
       }
       if (done)
       {
-        if (concurrent_preconditions.size() > 1)
+        if (!concurrent_preconditions.empty())
           precondition = Runtime::merge_events(concurrent_preconditions);
         concurrent_mapping_rendezvous->perform_rendezvous(
             concurrent_processors, precondition);
@@ -1751,7 +1751,7 @@ namespace Legion {
       }
       if (done)
       {
-        if (concurrent_preconditions.size() > 1)
+        if (!concurrent_preconditions.empty())
           precondition = Runtime::merge_events(concurrent_preconditions);
         concurrent_mapping_rendezvous->perform_rendezvous(
             concurrent_processors, precondition);
