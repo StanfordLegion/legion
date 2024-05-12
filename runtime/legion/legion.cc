@@ -2396,21 +2396,9 @@ namespace Legion {
     bool Future::is_ready(bool subscribe) const
     //--------------------------------------------------------------------------
     {
-      if (impl != NULL)
-      {
-        if (subscribe)
-          impl->subscribe();
-        const Internal::ApEvent ready = impl->get_ready_event();
-        // Always subscribe to the Realm event to know when it triggers
-        ready.subscribe();
-        bool poisoned = false;
-        if (ready.has_triggered_faultaware(poisoned))
-          return true;
-        if (poisoned && (Internal::implicit_context != NULL))
-          Internal::implicit_context->raise_poison_exception();
-        return false;
-      }
-      return true; // Empty futures are always ready
+      if ((impl == NULL) || (Internal::implicit_context != impl->context))
+        return true;
+      return impl->is_ready(subscribe);
     }
 
     //--------------------------------------------------------------------------

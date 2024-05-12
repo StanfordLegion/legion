@@ -99,7 +99,7 @@ namespace Legion {
 #endif
                                  ApEvent precondition, PredEvent pred_guard,
                                  LgEvent unique_event,
-                                 CollectiveKind collective,
+                                 CollectiveKind collective, bool record_effect,
                                  int priority, bool replay)
     //--------------------------------------------------------------------------
     {
@@ -175,6 +175,8 @@ namespace Legion {
         LegionSpy::log_fill_field(result, dst_fields[idx].field_id,
                                   unique_event);
 #endif
+      if (record_effect && result.exists())
+        op->record_completion_effect(result);
       if (trace_info.recording)
         trace_info.record_issue_fill(result, this, dst_fields,
                                      fill_value, fill_size,
@@ -182,7 +184,8 @@ namespace Legion {
                                      fill_uid, handle, tree_id,
 #endif
                                      precondition, pred_guard,
-                                     unique_event, priority, collective);
+                                     unique_event, priority, collective,
+                                     record_effect);
       return result;
     }
 
@@ -201,7 +204,7 @@ namespace Legion {
 #endif
                                  ApEvent precondition, PredEvent pred_guard,
                                  LgEvent src_unique, LgEvent dst_unique,
-                                 CollectiveKind collective,
+                                 CollectiveKind collective, bool record_effect,
                                  int priority, bool replay)
     //--------------------------------------------------------------------------
     {
@@ -263,6 +266,8 @@ namespace Legion {
           }
         }
       }
+      if (record_effect && result.exists())
+        op->record_completion_effect(result);
       if (trace_info.recording)
         trace_info.record_issue_copy(result, this, src_fields,
                                      dst_fields, reservations,
@@ -271,7 +276,7 @@ namespace Legion {
 #endif
                                      precondition, pred_guard,
                                      src_unique, dst_unique, 
-                                     priority, collective);
+                                     priority, collective, record_effect);
 #ifdef LEGION_DISABLE_EVENT_PRUNING
       if (!result.exists())
       {
@@ -1347,7 +1352,7 @@ namespace Legion {
 #endif
                                  ApEvent precondition, PredEvent pred_guard,
                                  LgEvent unique_event,
-                                 CollectiveKind collective,
+                                 CollectiveKind collective, bool record_effect,
                                  int priority, bool replay)
     //--------------------------------------------------------------------------
     {
@@ -1360,7 +1365,8 @@ namespace Legion {
             fill_uid, handle, tree_id,
 #endif
             Runtime::merge_events(&trace_info, space_ready, precondition),
-            pred_guard, unique_event, collective, priority, replay);
+            pred_guard, unique_event, collective, priority, replay,
+            record_effect);
       else if (space_ready.exists())
         return issue_fill_internal(context, op, local_space, trace_info, 
                                    dst_fields, fill_value, fill_size,
@@ -1368,7 +1374,7 @@ namespace Legion {
                                    fill_uid, handle, tree_id,
 #endif
                                    space_ready, pred_guard, unique_event,
-                                   collective, priority, replay);
+                                   collective, priority, replay, record_effect);
       else
         return issue_fill_internal(context, op, local_space, trace_info, 
                                    dst_fields, fill_value, fill_size,
@@ -1376,7 +1382,7 @@ namespace Legion {
                                    fill_uid, handle, tree_id,
 #endif
                                    precondition, pred_guard, unique_event,
-                                   collective, priority, replay);
+                                   collective, priority, replay, record_effect);
     }
 
     //--------------------------------------------------------------------------
@@ -1392,7 +1398,7 @@ namespace Legion {
 #endif
                                  ApEvent precondition, PredEvent pred_guard,
                                  LgEvent src_unique, LgEvent dst_unique,
-                                 CollectiveKind collective,
+                                 CollectiveKind collective, bool record_effect,
                                  int priority, bool replay)
     //--------------------------------------------------------------------------
     {
@@ -1405,7 +1411,8 @@ namespace Legion {
             src_tree_id, dst_tree_id,
 #endif
             Runtime::merge_events(&trace_info, precondition, space_ready),
-            pred_guard, src_unique, dst_unique, collective, priority, replay);
+            pred_guard, src_unique, dst_unique, collective, record_effect,
+            priority, replay);
       else if (space_ready.exists())
         return issue_copy_internal(context, op, local_space, trace_info,
                 dst_fields, src_fields, reservations,
@@ -1413,7 +1420,7 @@ namespace Legion {
                 src_tree_id, dst_tree_id,
 #endif
                 space_ready, pred_guard, src_unique, dst_unique,
-                collective, priority, replay);
+                collective, record_effect, priority, replay);
       else
         return issue_copy_internal(context, op, local_space, trace_info,
                 dst_fields, src_fields, reservations,
@@ -1421,7 +1428,7 @@ namespace Legion {
                 src_tree_id, dst_tree_id,
 #endif
                 precondition, pred_guard, src_unique, dst_unique,
-                collective, priority, replay);
+                collective, record_effect, priority, replay);
     }
 
     //--------------------------------------------------------------------------
@@ -4917,7 +4924,7 @@ namespace Legion {
 #endif
                                  ApEvent precondition, PredEvent pred_guard,
                                  LgEvent unique_event,
-                                 CollectiveKind collective,
+                                 CollectiveKind collective, bool record_effect,
                                  int priority, bool replay)
     //--------------------------------------------------------------------------
     {
@@ -4930,7 +4937,8 @@ namespace Legion {
                                    fill_uid, handle, tree_id,
 #endif
             Runtime::merge_events(&trace_info, space_ready, precondition),
-            pred_guard, unique_event, collective, priority, replay);
+            pred_guard, unique_event, collective, record_effect,
+            priority, replay);
       else if (space_ready.exists())
         return issue_fill_internal(context, op, local_space, trace_info, 
                                    dst_fields, fill_value, fill_size,
@@ -4938,7 +4946,8 @@ namespace Legion {
                                    fill_uid, handle, tree_id,
 #endif
                                    space_ready, pred_guard, unique_event,
-                                   collective, priority, replay);
+                                   collective, record_effect,
+                                   priority, replay);
       else
         return issue_fill_internal(context, op, local_space, trace_info, 
                                    dst_fields, fill_value, fill_size,
@@ -4946,7 +4955,8 @@ namespace Legion {
                                    fill_uid, handle, tree_id,
 #endif
                                    precondition, pred_guard, unique_event,
-                                   collective, priority, replay);
+                                   collective, record_effect,
+                                   priority, replay);
     }
 
     //--------------------------------------------------------------------------
@@ -4962,7 +4972,7 @@ namespace Legion {
 #endif
                                  ApEvent precondition, PredEvent pred_guard,
                                  LgEvent src_unique, LgEvent dst_unique,
-                                 CollectiveKind collective,
+                                 CollectiveKind collective, bool record_effect,
                                  int priority, bool replay)
     //--------------------------------------------------------------------------
     {
@@ -4975,7 +4985,8 @@ namespace Legion {
             src_tree_id, dst_tree_id,
 #endif
             Runtime::merge_events(&trace_info, space_ready, precondition),
-            pred_guard, src_unique, dst_unique, collective, priority, replay);
+            pred_guard, src_unique, dst_unique, collective, record_effect,
+            priority, replay);
       else if (space_ready.exists())
         return issue_copy_internal(context, op, local_space, trace_info, 
                 dst_fields, src_fields, reservations, 
@@ -4983,7 +4994,7 @@ namespace Legion {
                 src_tree_id, dst_tree_id,
 #endif
                 space_ready, pred_guard, src_unique, dst_unique,
-                collective, priority, replay);
+                collective, record_effect, priority, replay);
       else
         return issue_copy_internal(context, op, local_space, trace_info, 
                 dst_fields, src_fields, reservations,
@@ -4991,7 +5002,7 @@ namespace Legion {
                 src_tree_id, dst_tree_id,
 #endif
                 precondition, pred_guard, src_unique, dst_unique,
-                collective, priority, replay);
+                collective, record_effect, priority, replay);
     }
 
     //--------------------------------------------------------------------------

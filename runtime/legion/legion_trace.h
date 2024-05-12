@@ -37,12 +37,11 @@ namespace Legion {
       public:
         DependenceRecord(int idx)
           : operation_idx(idx), prev_idx(-1), next_idx(-1),
-            validates(false), dtype(LEGION_TRUE_DEPENDENCE) { }
+            dtype(LEGION_TRUE_DEPENDENCE) { }
         DependenceRecord(int op_idx, int pidx, int nidx,
-                         bool val, DependenceType d,
-                         const FieldMask &m)
+                         DependenceType d, const FieldMask &m)
           : operation_idx(op_idx), prev_idx(pidx), 
-            next_idx(nidx), validates(val),
+            next_idx(nidx),
             dtype(d), dependent_mask(m) { }
       public:
         inline bool merge(const DependenceRecord &record)
@@ -50,7 +49,6 @@ namespace Legion {
           if ((operation_idx != record.operation_idx) ||
               (prev_idx != record.prev_idx) ||
               (next_idx != record.next_idx) ||
-              (validates != record.validates) ||
               (dtype != record.dtype))
             return false;
           dependent_mask |= record.dependent_mask;
@@ -60,7 +58,6 @@ namespace Legion {
         int operation_idx;
         int prev_idx; // previous region requirement index
         int next_idx; // next region requirement index
-        bool validates;
         DependenceType dtype;
         FieldMask dependent_mask;
       };
@@ -159,7 +156,7 @@ namespace Legion {
       bool record_region_dependence(Operation *target, GenerationID target_gen,
                                     Operation *source, GenerationID source_gen,
                                     unsigned target_idx, unsigned source_idx,
-                                    DependenceType dtype, bool validates,
+                                    DependenceType dtype,
                                     const FieldMask &dependent_mask);
     public:
       // Called by task execution thread
@@ -815,7 +812,6 @@ namespace Legion {
         std::vector<std::vector<unsigned> > incoming, outgoing;
         std::vector<std::vector<unsigned> > incoming_reduced;
         std::vector<std::vector<int> > all_chain_frontiers;
-        std::map<TraceLocalID, GetTermEvent*> term_insts;
         std::map<TraceLocalID, ReplayMapping*> replay_insts;
         unsigned stage, iteration, num_chains;
         int pos;
@@ -847,7 +843,6 @@ namespace Legion {
       virtual void finish_replay(std::set<ApEvent> &postconditions);
       virtual ApEvent get_completion_for_deletion(void) const;
     public:
-      void find_execution_fence_preconditions(std::set<ApEvent> &preconditions);
       ReplayableStatus finalize(CompleteOp *op, bool has_blocking_call);
       IdempotencyStatus capture_conditions(CompleteOp *op);
       void receive_trace_conditions(TraceViewSet *preconditions,
@@ -958,8 +953,6 @@ namespace Legion {
       RtBarrier get_concurrent_barrier(IndexTask *task);
       const std::vector<ShardID>& get_concurrent_shards(ReplIndexTask* task);
     public:
-      virtual void record_completion_event(ApEvent lhs, unsigned op_kind,
-                                           const TraceLocalID &tlid);
       virtual void record_replay_mapping(ApEvent lhs, unsigned op_kind,
                           const TraceLocalID &tlid, bool register_memo);
       virtual void request_term_event(ApUserEvent &term_event);
@@ -1001,7 +994,8 @@ namespace Legion {
 #endif
                              ApEvent precondition, PredEvent pred_guard,
                              LgEvent src_unique, LgEvent dst_unique,
-                             int priority, CollectiveKind collective);
+                             int priority, CollectiveKind collective,
+                             bool record_effect);
       virtual void record_issue_across(const TraceLocalID &tlid, ApEvent &lhs,
                              ApEvent collective_precondition,
                              ApEvent copy_precondition,
@@ -1039,7 +1033,7 @@ namespace Legion {
 #endif
                              ApEvent precondition, PredEvent pred_guard,
                              LgEvent unique_event, int priority,
-                             CollectiveKind collective);
+                             CollectiveKind collective, bool record_effect);
     public:
       virtual void record_op_inst(const TraceLocalID &tlid,
                                   unsigned idx,
@@ -1069,7 +1063,7 @@ namespace Legion {
       virtual void record_set_op_sync_event(ApEvent &lhs,
                                             const TraceLocalID &tlid);
       virtual void record_complete_replay(const TraceLocalID &tlid,
-                                          ApEvent pre, ApEvent post,
+                                          ApEvent pre,
                                           std::set<RtEvent> &applied_events);
       virtual void record_reservations(const TraceLocalID &tlid,
                                 const std::map<Reservation,bool> &locks,
@@ -1078,6 +1072,7 @@ namespace Legion {
           const std::vector<Memory> &target_memories, size_t future_size);
       virtual void record_concurrent_barrier(IndexTask *task, RtBarrier bar,
           const std::vector<ShardID> &shards, size_t participants);
+      void record_execution_fence(const TraceLocalID &tlid);
     public:
       virtual void record_owner_shard(unsigned trace_local_id, ShardID owner);
       virtual void record_local_space(unsigned trace_local_id, IndexSpace sp);
@@ -1130,9 +1125,6 @@ namespace Legion {
                               std::pair<unsigned,unsigned> > &crossing_counts,
                            std::vector<Instruction*> &crossing_instructions);
     public:
-      inline void update_last_fence(GetTermEvent *fence)
-        { last_fence = fence; }
-    public:
       PhysicalTrace * const trace;
     protected:
       // Count how many times we've been replayed so we know when we're going
@@ -1163,7 +1155,7 @@ namespace Legion {
       std::atomic<bool> has_no_consensus;
       mutable TraceViewSet::FailedPrecondition failure;
     protected:
-      GetTermEvent                    *last_fence;
+      CompleteReplay                  *last_fence;
     protected:
       RtEvent                         replay_precondition;
       RtUserEvent                     replay_postcondition;
@@ -1229,7 +1221,6 @@ namespace Legion {
       friend class PhysicalTrace;
       friend class Instruction;
 #ifdef DEBUG_LEGION
-      friend class GetTermEvent;
       friend class ReplayMapping;
       friend class CreateApUserEvent;
       friend class TriggerEvent;
@@ -1353,7 +1344,8 @@ namespace Legion {
 #endif
                              ApEvent precondition, PredEvent guard_event,
                              LgEvent src_unique, LgEvent dst_unique,
-                             int priority, CollectiveKind collective);
+                             int priority, CollectiveKind collective,
+                             bool record_effect);
       virtual void record_issue_fill(const TraceLocalID &tlid, ApEvent &lhs,
                              IndexSpaceExpression *expr,
                              const std::vector<CopySrcDstField> &fields,
@@ -1365,7 +1357,7 @@ namespace Legion {
 #endif
                              ApEvent precondition, PredEvent guard_event,
                              LgEvent unique_event, int priority, 
-                             CollectiveKind collective);
+                             CollectiveKind collective, bool record_effect);
       virtual void record_issue_across(const TraceLocalID &tlid, ApEvent &lhs,
                              ApEvent collective_precondition,
                              ApEvent copy_precondition,
@@ -1488,8 +1480,7 @@ namespace Legion {
 
     enum InstructionKind
     {
-      GET_TERM_EVENT = 0,
-      REPLAY_MAPPING,
+      REPLAY_MAPPING = 0,
       CREATE_AP_USER_EVENT,
       TRIGGER_EVENT,
       MERGE_EVENT,
@@ -1520,7 +1511,6 @@ namespace Legion {
       virtual std::string to_string(const MemoEntries &memo_entires) = 0;
 
       virtual InstructionKind get_kind(void) = 0;
-      virtual GetTermEvent* as_get_term_event(void) { return NULL; }
       virtual ReplayMapping* as_replay_mapping(void) { return NULL; }
       virtual CreateApUserEvent* as_create_ap_user_event(void) { return NULL; }
       virtual TriggerEvent* as_trigger_event(void) { return NULL; }
@@ -1537,31 +1527,6 @@ namespace Legion {
       virtual BarrierAdvance* as_barrier_advance(void) { return NULL; }
     public:
       const TraceLocalID owner;
-    };
-
-    /**
-     * \class GetTermEvent
-     * This instruction has the following semantics:
-     *   events[lhs] = operations[rhs].get_memo_completion()
-     */
-    class GetTermEvent : public Instruction {
-    public:
-      GetTermEvent(PhysicalTemplate& tpl, unsigned lhs,
-                   const TraceLocalID& rhs, bool fence);
-      virtual void execute(std::vector<ApEvent> &events,
-                           std::map<unsigned,ApUserEvent> &user_events,
-                           std::map<TraceLocalID,MemoizableOp*> &operations,
-                           const bool recurrent_replay);
-      virtual std::string to_string(const MemoEntries &memo_entires);
-
-      virtual InstructionKind get_kind(void)
-        { return GET_TERM_EVENT; }
-      virtual GetTermEvent* as_get_term_event(void)
-        { return this; }
-    private:
-      friend class PhysicalTemplate;
-      friend class ShardedPhysicalTemplate;
-      unsigned lhs;
     };
 
     /**
@@ -1706,7 +1671,7 @@ namespace Legion {
                 UniqueID fill_uid, FieldSpace handle, RegionTreeID tree_id,
 #endif
                 unsigned precondition_idx, LgEvent unique_event,
-                int priority, CollectiveKind collective);
+                int priority, CollectiveKind collective, bool record_effect);
       virtual ~IssueFill(void);
       virtual void execute(std::vector<ApEvent> &events,
                            std::map<unsigned,ApUserEvent> &user_events,
@@ -1734,6 +1699,7 @@ namespace Legion {
       LgEvent unique_event;
       int priority;
       CollectiveKind collective;
+      bool record_effect;
     };
 
     /**
@@ -1757,7 +1723,7 @@ namespace Legion {
 #endif
                 unsigned precondition_idx,
                 LgEvent src_unique, LgEvent dst_unique,
-                int priority, CollectiveKind collective);
+                int priority, CollectiveKind collective, bool record_effect);
       virtual ~IssueCopy(void);
       virtual void execute(std::vector<ApEvent> &events,
                            std::map<unsigned,ApUserEvent> &user_events,
@@ -1784,6 +1750,7 @@ namespace Legion {
       LgEvent src_unique, dst_unique;
       int priority;
       CollectiveKind collective;
+      bool record_effect;
     };
 
     /**
@@ -1849,12 +1816,12 @@ namespace Legion {
     /**
      * \class CompleteReplay
      * This instruction has the following semantics:
-     *   operations[lhs]->complete_replay(events[rhs])
+     *   operations[lhs]->complete_replay(events[complete])
      */
     class CompleteReplay : public Instruction {
     public:
       CompleteReplay(PhysicalTemplate& tpl, const TraceLocalID& lhs,
-                     unsigned pre, unsigned post);
+                     unsigned complete);
       virtual void execute(std::vector<ApEvent> &events,
                            std::map<unsigned,ApUserEvent> &user_events,
                            std::map<TraceLocalID,MemoizableOp*> &operations,
@@ -1867,7 +1834,7 @@ namespace Legion {
         { return this; }
     private:
       friend class PhysicalTemplate;
-      unsigned pre, post;
+      unsigned complete;
     };
 
     /**
