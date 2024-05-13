@@ -260,22 +260,16 @@ namespace Realm {
   void SparsityMapImplWrapper::remove_references(unsigned count)
   {
     if(need_refcount) {
-      unsigned old_references = references.load();
-      while(true) {
-        unsigned new_references = (old_references > count) ? (old_references - count) : 0;
-        if(references.compare_exchange(old_references, new_references)) {
-          if(new_references == 0) {
-            if(map_impl.load() != nullptr) {
-              assert(map_deleter);
-              (*map_deleter)(map_impl.load());
-              map_impl.store(0);
-              type_tag.store(0);
-              if(Network::my_node_id == NodeID(ID(me).sparsity_creator_node())) {
-                get_runtime()->free_sparsity_impl(this);
-              }
-            }
+      if(references.fetch_sub_acqrel(count) == static_cast<int>(count)) {
+        void *impl = map_impl.load();
+        if(impl != nullptr) {
+          assert(map_deleter);
+          (*map_deleter)(impl);
+          map_impl.store(0);
+          type_tag.store(0);
+          if(Network::my_node_id == NodeID(ID(me).sparsity_creator_node())) {
+            get_runtime()->free_sparsity_impl(this);
           }
-          return;
         }
       }
     }
