@@ -22942,6 +22942,7 @@ namespace Legion {
               tree, set, mask, source_shard, true/*current*/);
           set->unpack_global_ref();
         }
+        tree->add_reference();
         created_trees[idx1] = tree;
       }
       RtUserEvent done_event;
@@ -22957,6 +22958,10 @@ namespace Legion {
             Runtime::merge_events(applied_events));
       else
         Runtime::trigger_event(done_event);
+      for (std::vector<EqKDTree*>::const_iterator it =
+            created_trees.begin(); it != created_trees.end(); it++)
+        if (((*it) != NULL) && (*it)->remove_reference())
+          delete (*it);
       context->unpack_global_ref();
     }
 

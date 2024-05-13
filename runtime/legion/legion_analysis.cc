@@ -20184,73 +20184,47 @@ namespace Legion {
         precondition_updates(preconditions),
         anticondition_updates(anticonditions),
         postcondition_updates(postconditions),
+        expr_references(new std::set<IndexSpaceExpression*>()),
         done_event(Runtime::create_rt_user_event()), forward_to_owner(forward),
         filter_invalidations(filter)
     //--------------------------------------------------------------------------
     {
       for (ExprLogicalViews::const_iterator it =
             valid.begin(); it != valid.end(); it++)
-        it->first->add_base_expression_reference(META_TASK_REF);
+        if (expr_references->insert(it->first).second)
+          it->first->add_base_expression_reference(META_TASK_REF);
       valid_updates->swap(valid);
       for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
             init.begin(); it != init.end(); it++)
-        it->first->add_base_expression_reference(META_TASK_REF);
+        if (expr_references->insert(it->first).second)
+          it->first->add_base_expression_reference(META_TASK_REF);
       initialized_updates->swap(init);
       for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
             invd.begin(); it != invd.end(); it++)
-        it->first->add_base_expression_reference(META_TASK_REF);
+        if (expr_references->insert(it->first).second)
+          it->first->add_base_expression_reference(META_TASK_REF);
       invalidated_updates->swap(invd);
       for (ExprReductionViews::const_iterator rit =
             reductions.begin(); rit != reductions.end(); rit++)
         for (std::list<std::pair<InstanceView*,IndexSpaceExpression*> >::
               const_iterator it = rit->second.begin();
               it != rit->second.end(); it++)
-          it->second->add_base_expression_reference(META_TASK_REF);
+          if (expr_references->insert(it->second).second)
+            it->second->add_base_expression_reference(META_TASK_REF);
       reduction_updates->swap(reductions);
       for (ExprInstanceViews::const_iterator it =
             restricted.begin(); it != restricted.end(); it++)
-        it->first->add_base_expression_reference(META_TASK_REF);
+        if (expr_references->insert(it->first).second)
+          it->first->add_base_expression_reference(META_TASK_REF);
       restricted_updates->swap(restricted);
       for (ExprInstanceViews::const_iterator it =
             released.begin(); it != released.end(); it++)
-        it->first->add_base_expression_reference(META_TASK_REF);
+        if (expr_references->insert(it->first).second)
+          it->first->add_base_expression_reference(META_TASK_REF);
       released_updates->swap(released);
       read_only_updates->swap(read_only);
       reduction_fill_updates->swap(reduc_fill);
       applied_events.push_back(done_event);
-    }
-
-    //--------------------------------------------------------------------------
-    void EquivalenceSet::DeferApplyStateArgs::release_references(void) const
-    //--------------------------------------------------------------------------
-    {
-      for (ExprLogicalViews::const_iterator it =
-            valid_updates->begin(); it != valid_updates->end(); it++)
-        if (it->first->remove_base_expression_reference(META_TASK_REF))
-          delete it->first;
-      for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
-           initialized_updates->begin(); it != initialized_updates->end(); it++)
-        if (it->first->remove_base_expression_reference(META_TASK_REF))
-          delete it->first;
-      for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
-           invalidated_updates->begin(); it != invalidated_updates->end(); it++)
-        if (it->first->remove_base_expression_reference(META_TASK_REF))
-          delete it->first;
-      for (ExprReductionViews::const_iterator rit =
-            reduction_updates->begin(); rit != reduction_updates->end(); rit++)
-        for (std::list<std::pair<InstanceView*,IndexSpaceExpression*> >::
-              const_iterator it = rit->second.begin(); 
-              it != rit->second.end(); it++)
-          if (it->second->remove_base_expression_reference(META_TASK_REF))
-            delete it->second;
-      for (ExprInstanceViews::const_iterator it =
-            restricted_updates->begin(); it != restricted_updates->end(); it++)
-        if (it->first->remove_base_expression_reference(META_TASK_REF))
-          delete it->first;
-      for (ExprInstanceViews::const_iterator it =
-            released_updates->begin(); it != released_updates->end(); it++)
-        if (it->first->remove_base_expression_reference(META_TASK_REF))
-          delete it->first;
     }
 
     //--------------------------------------------------------------------------
@@ -20272,7 +20246,11 @@ namespace Legion {
             Runtime::merge_events(applied_events));
       else
         Runtime::trigger_event(dargs->done_event);
-      dargs->release_references();
+      for (std::set<IndexSpaceExpression*>::const_iterator it =
+            dargs->expr_references->begin(); it !=
+            dargs->expr_references->end(); it++)
+        if ((*it)->remove_base_expression_reference(META_TASK_REF))
+          delete (*it);
       delete dargs->valid_updates;
       delete dargs->initialized_updates;
       delete dargs->invalidated_updates;
@@ -20281,6 +20259,7 @@ namespace Legion {
       delete dargs->released_updates;
       delete dargs->read_only_updates;
       delete dargs->reduction_fill_updates;
+      delete dargs->expr_references;
     }
 
     //--------------------------------------------------------------------------
