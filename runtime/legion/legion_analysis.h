@@ -3311,6 +3311,7 @@ namespace Legion {
         TraceViewSet *precondition_updates;
         TraceViewSet *anticondition_updates;
         TraceViewSet *postcondition_updates;
+        std::set<IndexSpaceExpression*> *const expr_references;
         const RtUserEvent done_event;
         const bool forward_to_owner;
         const bool filter_invalidations;
