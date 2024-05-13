@@ -262,8 +262,7 @@ namespace Realm {
     if(need_refcount) {
       unsigned old_references = references.load();
       while(true) {
-        unsigned new_references =
-            std::max(0, static_cast<int>(old_references) - static_cast<int>(count));
+        unsigned new_references = (old_references > count) ? (old_references - count) : 0;
         if(references.compare_exchange(old_references, new_references)) {
           if(new_references == 0) {
             if(map_impl.load() != nullptr) {
