@@ -9055,7 +9055,9 @@ namespace Legion {
         // operations to add to the queue
         FenceOp *complete = initialize_trace_completion(
             ready_operations.front()->get_provenance());
-        ready_operations.push_back(complete);
+        // This actually needs to be pushed onto the front of the queue to
+        // make sure that it is done before any of the unordered operations
+        ready_operations.insert(ready_operations.begin(), complete);
         previous_trace = NULL;
       }
       if (runtime->program_order_execution)
