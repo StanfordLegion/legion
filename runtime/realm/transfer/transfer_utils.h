@@ -30,11 +30,19 @@ namespace Realm {
                     const Rect<N, T> &restriction, const int *dim_order,
                     Rect<N, T> &subrect, Point<N, T> &next_start);
 
-  // Computes an intersection between cur_rect and a given layout
-  // bounds starting from cur_point. Can be used iteratively to walk
-  // over the layout bounds.
+  /**
+   * Computes an intersection between cur_rect and a given layout
+   * bounds starting from cur_point. Can be used iteratively to walk
+   * over the layout bounds.
+   * \param layout_bounds - boundaries of the source data layout
+   * \param cur_rect - rectangle used to interesect with boundaries
+   * \param cur_point - starting point inside cur_rect
+   * \param target_subrect - the result of an intersection
+   * \param dim_order - dimension order of the source layout bounds
+   * \return true if target subrectangle was successfully computed
+   */
   template <int N, typename T>
-  bool compute_target_subrect(const Rect<N, T> &layout_bounds, Rect<N, T> &cur_rect,
+  bool compute_target_subrect(const Rect<N, T> &layout_bounds, const Rect<N, T> &cur_rect,
                               Point<N, T> &cur_point, Rect<N, T> &target_subrect,
                               const int dim_order[N]);
 
