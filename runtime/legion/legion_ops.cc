@@ -87,7 +87,7 @@ namespace Legion {
     {
       rez.serialize<size_t>(full.size());
       if (!full.empty())
-        rez.serialize(full.c_str(), full.size());
+        rez.serialize(full.c_str(), full.size() + 1/*null terminator*/);
     }
 
     //--------------------------------------------------------------------------
@@ -106,7 +106,7 @@ namespace Legion {
       if (length < SIZE_MAX)
       {
         Provenance *result = implicit_runtime->find_or_create_provenance(
-            (const char*)derez.get_current_pointer(), length);
+            (const char*)derez.get_current_pointer(), length - 1);
         derez.advance_pointer(length);
         return result;
       }
