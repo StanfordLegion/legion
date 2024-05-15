@@ -1044,7 +1044,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::string& TaskOp::get_provenance_string(bool human) const
+    const std::string_view& TaskOp::get_provenance_string(bool human) const
     //--------------------------------------------------------------------------
     {
       Provenance *provenance = get_provenance();
@@ -2029,7 +2029,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::string& RemoteTaskOp::get_provenance_string(bool human) const
+    const std::string_view& RemoteTaskOp::get_provenance_string(
+                                                               bool human) const
     //--------------------------------------------------------------------------
     {
       Provenance *provenance = get_provenance();

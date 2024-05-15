@@ -27,6 +27,7 @@
 #include "legion/legion_analysis.h"
 #include "legion/mapper_manager.h"
 #include <utility>
+#include <string_view>
 
 namespace Legion {
   namespace Internal {
@@ -36,27 +37,29 @@ namespace Legion {
      */
     class Provenance : public Collectable {
     public:
-      Provenance(const char *prov);
-      Provenance(const void *buffer, size_t size);
-      Provenance(const std::string &prov);
+      Provenance(ProvenanceID pid, const char *prov);
+      Provenance(ProvenanceID pid, const void *buffer, size_t size);
+      Provenance(ProvenanceID pid, const std::string &prov);
       Provenance(const Provenance &rhs) = delete;
       ~Provenance(void) { }
     public:
       Provenance& operator=(const Provenance &rhs) = delete;
     public:
-      void initialize(const char *prov, size_t size);
-      char* clone(void) const;
+      void initialize(void);
       void serialize(Serializer &rez) const;
       static void serialize_null(Serializer &rez);
       static Provenance* deserialize(Deserializer &derez);
     public:
-      inline const char* human_str(void) const { return human.c_str(); }
-      inline const char* machine_str(void) const { return machine.c_str(); }
+      inline const char* human_str(void) const { return human.data(); }
+      inline const char* machine_str(void) const { return machine.data(); }
+    public:
+      const ProvenanceID pid;
+      const std::string full;
     public:
       // Keep the human and machine parts of the provenance string
-      std::string human, machine;
+      std::string_view human, machine;
       // Useful for cases where interfaces want a string
-      static const std::string no_provenance;
+      static constexpr std::string_view no_provenance;
       // Delimiter for the machine readable part of the string
       static constexpr char delimeter = '$';
     };
@@ -70,11 +73,15 @@ namespace Legion {
     class AutoProvenance {
     public:
       AutoProvenance(const char *prov)
-        : provenance((prov == NULL) ? NULL : new Provenance(prov))
-        { if (provenance != NULL) provenance->add_reference(); }
+        : provenance((prov == NULL) ? NULL :
+            implicit_runtime->find_or_create_provenance(
+              prov, strlen(prov)))
+        { }
       AutoProvenance(const std::string &prov)
-        : provenance(prov.empty() ? NULL : new Provenance(prov))
-        { if (provenance != NULL) provenance->add_reference(); }
+        : provenance(prov.empty() ? NULL : 
+            implicit_runtime->find_or_create_provenance(
+              prov.c_str(), prov.size()))
+        { }
       AutoProvenance(Provenance *prov)
         : provenance(prov)
         { if (provenance != NULL) provenance->add_reference(); }
@@ -1263,7 +1270,8 @@ namespace Legion {
       virtual void set_context_index(uint64_t index);
       virtual int get_depth(void) const;
       virtual const Task* get_parent_task(void) const;
-      virtual const std::string& get_provenance_string(bool human = true) const;
+      virtual const std::string_view& get_provenance_string(
+          bool human = true) const;
     protected:
       void check_privilege(void);
       void compute_parent_index(void);
@@ -1444,7 +1452,8 @@ namespace Legion {
       virtual void set_context_index(uint64_t index);
       virtual int get_depth(void) const;
       virtual const Task* get_parent_task(void) const;
-      virtual const std::string& get_provenance_string(bool human = true) const;
+      virtual const std::string_view& get_provenance_string(
+          bool human = true) const;
     protected:
       void check_copy_privileges(const bool permit_projection) const;
       void check_copy_privilege(const RegionRequirement &req, unsigned idx,
@@ -2065,7 +2074,8 @@ namespace Legion {
       virtual void set_context_index(uint64_t index);
       virtual int get_depth(void) const;
       virtual const Task* get_parent_task(void) const;
-      virtual const std::string& get_provenance_string(bool human = true) const;
+      virtual const std::string_view& get_provenance_string(
+          bool human = true) const;
       virtual Mappable* get_mappable(void);
     public:
       // This is for post and virtual close ops
@@ -2336,7 +2346,8 @@ namespace Legion {
       virtual void set_context_index(uint64_t index);
       virtual int get_depth(void) const;
       virtual const Task* get_parent_task(void) const;
-      virtual const std::string& get_provenance_string(bool human = true) const;
+      virtual const std::string_view& get_provenance_string(
+          bool human = true) const;
     public:
       // From MemoizableOp
       virtual void trigger_replay(void);
@@ -2451,7 +2462,8 @@ namespace Legion {
       virtual void set_context_index(uint64_t index);
       virtual int get_depth(void) const;
       virtual const Task* get_parent_task(void) const;
-      virtual const std::string& get_provenance_string(bool human = true) const;
+      virtual const std::string_view& get_provenance_string(
+          bool human = true) const;
     public:
       // From MemoizableOp
       virtual void trigger_replay(void);
@@ -2759,7 +2771,8 @@ namespace Legion {
       virtual uint64_t get_context_index(void) const;
       virtual int get_depth(void) const;
       virtual const Task* get_parent_task(void) const;
-      virtual const std::string& get_provenance_string(bool human = true) const;
+      virtual const std::string_view& get_provenance_string(
+          bool human = true) const;
     public:
       FutureMap initialize(InnerContext *ctx,const MustEpochLauncher &launcher,
                            Provenance *provenance);
@@ -3463,7 +3476,8 @@ namespace Legion {
       virtual void set_context_index(uint64_t index);
       virtual int get_depth(void) const;
       virtual const Task* get_parent_task(void) const;
-      virtual const std::string& get_provenance_string(bool human = true) const;
+      virtual const std::string_view& get_provenance_string(
+          bool human = true) const;
       virtual Mappable* get_mappable(void);
     public:
       virtual void activate(void);
@@ -3631,7 +3645,8 @@ namespace Legion {
       virtual void set_context_index(uint64_t index);
       virtual int get_depth(void) const;
       virtual const Task* get_parent_task(void) const;
-      virtual const std::string& get_provenance_string(bool human = true) const;
+      virtual const std::string_view& get_provenance_string(
+          bool human = true) const;
       virtual std::map<PhysicalManager*,unsigned>*
                                        get_acquired_instances_ref(void);
       virtual int add_copy_profiling_request(const PhysicalTraceInfo &info,
@@ -4408,7 +4423,8 @@ namespace Legion {
       virtual void set_context_index(uint64_t index);
       virtual int get_depth(void) const;
       virtual const Task* get_parent_task(void) const;
-      virtual const std::string& get_provenance_string(bool human = true) const;
+      virtual const std::string_view& get_provenance_string(
+          bool human = true) const;
     public:
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
@@ -4440,7 +4456,8 @@ namespace Legion {
       virtual void set_context_index(uint64_t index);
       virtual int get_depth(void) const;
       virtual const Task* get_parent_task(void) const;
-      virtual const std::string& get_provenance_string(bool human = true) const;
+      virtual const std::string_view& get_provenance_string(
+          bool human = true) const;
     public:
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
@@ -4472,7 +4489,8 @@ namespace Legion {
       virtual void set_context_index(uint64_t index);
       virtual int get_depth(void) const;
       virtual const Task* get_parent_task(void) const;
-      virtual const std::string& get_provenance_string(bool human = true) const;
+      virtual const std::string_view& get_provenance_string(
+          bool human = true) const;
     public:
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
@@ -4504,7 +4522,8 @@ namespace Legion {
       virtual void set_context_index(uint64_t index);
       virtual int get_depth(void) const;
       virtual const Task* get_parent_task(void) const;
-      virtual const std::string& get_provenance_string(bool human = true) const;
+      virtual const std::string_view& get_provenance_string(
+          bool human = true) const;
     public:
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
@@ -4532,7 +4551,8 @@ namespace Legion {
       virtual void set_context_index(uint64_t index);
       virtual int get_depth(void) const;
       virtual const Task* get_parent_task(void) const;
-      virtual const std::string& get_provenance_string(bool human = true) const;
+      virtual const std::string_view& get_provenance_string(
+          bool human = true) const;
     public:
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
@@ -4564,7 +4584,8 @@ namespace Legion {
       virtual void set_context_index(uint64_t index);
       virtual int get_depth(void) const;
       virtual const Task* get_parent_task(void) const;
-      virtual const std::string& get_provenance_string(bool human = true) const;
+      virtual const std::string_view& get_provenance_string(
+          bool human = true) const;
     public:
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
@@ -4618,7 +4639,8 @@ namespace Legion {
       virtual void set_context_index(uint64_t index);
       virtual int get_depth(void) const;
       virtual const Task* get_parent_task(void) const;
-      virtual const std::string& get_provenance_string(bool human = true) const;
+      virtual const std::string_view& get_provenance_string(
+          bool human = true) const;
       virtual PartitionKind get_partition_kind(void) const;
     public:
       virtual const char* get_logging_name(void) const;

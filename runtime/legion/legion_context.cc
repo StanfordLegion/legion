@@ -649,6 +649,11 @@ namespace Legion {
       // task execution to the output regions' physical managers
       if (!output_regions.empty())
         finalize_output_regions(); 
+      if (!user_profiling_ranges.empty())
+        REPORT_LEGION_ERROR(ERROR_MISMATCHED_PROFILING_RANGE,
+            "Detected mismatched profiling range calls, missing %zd stop calls "
+            "at the end of the task %s (UID %lld)",user_profiling_ranges.size(),
+            get_task_name(), get_unique_id())
       // See if we need to pull the data in from a callback in the case
       // where we are going to be doing a reduction immediately, if we
       // are then we're going to overwrite 'owned' so save it to callback_owned
@@ -902,6 +907,43 @@ namespace Legion {
 #endif
       overhead_profiler = new OverheadProfiler();
     } 
+
+    //--------------------------------------------------------------------------
+    void TaskContext::start_profiling_range(void)
+    //--------------------------------------------------------------------------
+    {
+      if (runtime->profiler != NULL)
+      {
+        const long long start = Realm::Clock::current_time_in_nanoseconds();
+        user_profiling_ranges.push_back(start);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void TaskContext::stop_profiling_range(const char *prov)
+    //--------------------------------------------------------------------------
+    {
+      if (prov == NULL)
+        REPORT_LEGION_ERROR(ERROR_MISSING_PROFILING_PROVENANCE,
+            "Missing provenance string for application profiling range "
+            "in task %s (UID %lld)", get_task_name(), get_unique_id())
+      if (runtime->profiler != NULL)
+      {
+        Provenance *provenance = 
+          runtime->find_or_create_provenance(prov, strlen(prov));
+        if (user_profiling_ranges.empty())
+          REPORT_LEGION_ERROR(ERROR_MISMATCHED_PROFILING_RANGE,
+              "Detected mismatched profiling range calls, received a stop call "
+              "without a corresponding start call in task %s (UID %lld) at %s",
+              get_task_name(), get_unique_id(), provenance->human_str())
+        const long long stop = Realm::Clock::current_time_in_nanoseconds();
+        runtime->profiler->record_application_range(provenance->pid,
+            user_profiling_ranges.back(), stop);
+        user_profiling_ranges.pop_back();
+        if (provenance->remove_reference())
+          delete provenance;
+      }
+    }
 
     //--------------------------------------------------------------------------
     void TaskContext::remap_unmapped_regions(LogicalTrace *trace,
@@ -6264,7 +6306,7 @@ namespace Legion {
               "in task tree rooted by %s (provenance %s)", 
               it->region.index_space.id, it->region.field_space.id, 
               it->region.tree_id, get_task_name(), (it->provenance != NULL) ?
-              it->provenance->human.c_str() : "unknown")
+              it->provenance->human_str() : "unknown")
         deleted_regions.clear();
       }
       if (!deleted_fields.empty())
@@ -6275,7 +6317,7 @@ namespace Legion {
               "Duplicate deletions were performed on field %d of "
               "field space %x in task tree rooted by %s (provenance %s)", 
               it->fid, it->space.id, get_task_name(), 
-              (it->provenance != NULL) ? it->provenance->human.c_str() :
+              (it->provenance != NULL) ? it->provenance->human_str() :
               "unknown")
         deleted_fields.clear();
       }
@@ -6288,7 +6330,7 @@ namespace Legion {
               "Duplicate deletions were performed on field space %x "
               "in task tree rooted by %s (provenance %s)", it->space.id,
               get_task_name(), (it->provenance != NULL) ?
-              it->provenance->human.c_str() : "unknown")
+              it->provenance->human_str() : "unknown")
         deleted_field_spaces.clear();
       }
       if (!deleted_index_spaces.empty())
@@ -6300,7 +6342,7 @@ namespace Legion {
               "Duplicate deletions were performed on index space %x "
               "in task tree rooted by %s (provenance %s)", it->space.id,
               get_task_name(), (it->provenance != NULL) ?
-              it->provenance->human.c_str() : "unknown")
+              it->provenance->human_str() : "unknown")
         deleted_index_spaces.clear();
       }
       if (!deleted_index_partitions.empty())
@@ -6312,7 +6354,7 @@ namespace Legion {
               "Duplicate deletions were performed on index partition %x "
               "in task tree rooted by %s (provenance %s)", it->partition.id,
               get_task_name(), (it->provenance != NULL) ?
-              it->provenance->human.c_str() : "unknown")
+              it->provenance->human_str() : "unknown")
         deleted_index_partitions.clear();
       }
       // Now we go through and delete anything that the user leaked
@@ -22466,7 +22508,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::string& RemoteTask::get_provenance_string(bool human) const
+    const std::string_view& RemoteTask::get_provenance_string(bool human) const
     //--------------------------------------------------------------------------
     {
       Provenance *provenance = owner->get_provenance();

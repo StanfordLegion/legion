@@ -1937,10 +1937,7 @@ namespace Legion {
       pause_mapper_call(ctx);
       Provenance *provenance = NULL;
       if (prov != NULL)
-      {
-        provenance = new Provenance(prov);
-        provenance->add_reference();
-      }
+        provenance = runtime->find_or_create_provenance(prov, strlen(prov));
       const IndexSpace result(runtime->get_unique_index_space_id(),
                     runtime->get_unique_index_tree_id(), type_tag);
       const DistributedID did = runtime->get_available_distributed_id();

@@ -2594,6 +2594,7 @@ namespace Legion {
   typedef ::legion_task_id_t TaskID;
   typedef ::legion_layout_constraint_id_t LayoutConstraintID;
   typedef ::legion_shard_id_t ShardID;
+  typedef ::legion_provenance_id_t ProvenanceID;
   typedef ::legion_internal_color_t LegionColor;
   typedef void (*RegistrationCallbackFnptr)(Machine machine, 
                 Runtime *rt, const std::set<Processor> &local_procs);

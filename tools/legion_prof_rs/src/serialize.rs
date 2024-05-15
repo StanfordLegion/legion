@@ -21,7 +21,7 @@ use serde::Serialize;
 
 use crate::state::{
     EventID, FSpaceID, FieldID, IPartID, ISpaceID, InstID, InstUID, MapperCallKindID, MapperID,
-    MemID, NodeID, OpID, ProcID, RuntimeCallKindID, State, TaskID, Timestamp, TreeID, VariantID,
+    MemID, NodeID, OpID, ProcID, ProvenanceID, RuntimeCallKindID, State, TaskID, Timestamp, TreeID, VariantID,
 };
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -41,6 +41,7 @@ pub enum ValueFormat {
     Uuid,
     ProcID,
     ProcKind,
+    ProvenanceID,
     RuntimeCallKind,
     String,
     TaskID,
@@ -97,6 +98,7 @@ pub enum Record {
     RuntimeConfig { debug: bool, spy: bool, gc: bool, inorder: bool, safe_mapper: bool, safe_runtime: bool, safe_ctrlrepl: bool, part_checks: bool, bounds_checks: bool, resilient: bool },
     MachineDesc { node_id: NodeID, num_nodes: u32, version: u32, hostname: String, host_id: u64, process_id: u32 },
     ZeroTime { zero_time: i64 },
+    Provenance { pid: ProvenanceID, provenance: String },
     ProcDesc { proc_id: ProcID, kind: ProcKind, cuda_device_uuid: Uuid },
     MemDesc { mem_id: MemID, kind: MemKind, capacity: u64 },
     ProcMDesc { proc_id: ProcID, mem_id: MemID, bandwidth: u32, latency: u32 },
@@ -117,7 +119,7 @@ pub enum Record {
     PhysicalInstanceUsage { inst_uid: InstUID, op_id: OpID, index_id: u32, field_id: FieldID },
     TaskKind { task_id: TaskID, name: String, overwrite: bool },
     TaskVariant { task_id: TaskID, variant_id: VariantID, name: String },
-    OperationInstance { op_id: OpID, parent_id: Option<OpID>, kind: u32, provenance: String },
+    OperationInstance { op_id: OpID, parent_id: Option<OpID>, kind: u32, provenance: ProvenanceID },
     MultiTask { op_id: OpID, task_id: TaskID },
     SliceOwner { parent_id: UniqueID, op_id: OpID },
     TaskWaitInfo { op_id: OpID, task_id: TaskID, variant_id: VariantID, wait_start: Timestamp, wait_ready: Timestamp, wait_end: Timestamp },
@@ -133,6 +135,7 @@ pub enum Record {
     PartitionInfo { op_id: OpID, part_op: DepPartOpKind, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp, creator: EventID },
     MapperCallInfo { mapper_id: MapperID, mapper_proc: ProcID, kind: MapperCallKindID, op_id: OpID, start: Timestamp, stop: Timestamp, proc_id: ProcID, fevent: EventID },
     RuntimeCallInfo { kind: RuntimeCallKindID, start: Timestamp, stop: Timestamp, proc_id: ProcID, fevent: EventID },
+    ApplicationCallInfo { provenance: ProvenanceID, start: Timestamp, stop: Timestamp, proc_id: ProcID, fevent: EventID },
     ProfTaskInfo { proc_id: ProcID, op_id: OpID, start: Timestamp, stop: Timestamp, creator: EventID, fevent: EventID  },
     CalibrationErr { calibration_err: i64 },
 }
@@ -341,6 +344,9 @@ fn parse_proc_id(input: &[u8]) -> IResult<&[u8], ProcID> {
 fn parse_runtime_call_kind_id(input: &[u8]) -> IResult<&[u8], RuntimeCallKindID> {
     map(le_u32, RuntimeCallKindID)(input)
 }
+fn parse_provenance_id(input: &[u8]) -> IResult<&[u8], ProvenanceID> {
+    map(le_u64, ProvenanceID)(input)
+}
 fn parse_task_id(input: &[u8]) -> IResult<&[u8], TaskID> {
     map(le_u32, TaskID)(input)
 }
@@ -439,6 +445,11 @@ fn parse_machine_desc(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
 fn parse_zero_time(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, zero_time) = le_i64(input)?;
     Ok((input, Record::ZeroTime { zero_time }))
+}
+fn parse_provenance(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
+    let (input, pid) = parse_provenance_id(input)?;
+    let (input, provenance) = parse_string(input)?;
+    Ok((input, Record::Provenance { pid, provenance }))
 }
 fn parse_proc_desc(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, proc_id) = parse_proc_id(input)?;
@@ -693,7 +704,7 @@ fn parse_operation(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, op_id) = parse_op_id(input)?;
     let (input, parent_id) = parse_option_op_id(input)?;
     let (input, kind) = le_u32(input)?;
-    let (input, provenance) = parse_string(input)?;
+    let (input, provenance) = parse_provenance_id(input)?;
     Ok((
         input,
         Record::OperationInstance {
@@ -1020,6 +1031,23 @@ fn parse_runtime_call_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record
         },
     ))
 }
+fn parse_application_call_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
+    let (input, provenance) = parse_provenance_id(input)?;
+    let (input, start) = parse_timestamp(input)?;
+    let (input, stop) = parse_timestamp(input)?;
+    let (input, proc_id) = parse_proc_id(input)?;
+    let (input, fevent) = parse_event_id(input)?;
+    Ok((
+        input,
+        Record::ApplicationCallInfo {
+            provenance,
+            start,
+            stop,
+            proc_id,
+            fevent,
+        },
+    ))
+}
 fn parse_proftask_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, proc_id) = parse_proc_id(input)?;
     let (input, op_id) = parse_op_id(input)?;
@@ -1134,6 +1162,7 @@ fn parse<'a>(
     parsers.insert(ids["RuntimeConfig"], parse_runtime_config);
     parsers.insert(ids["MachineDesc"], parse_machine_desc);
     parsers.insert(ids["ZeroTime"], parse_zero_time);
+    parsers.insert(ids["Provenance"], parse_provenance);
     parsers.insert(ids["ProcDesc"], parse_proc_desc);
     parsers.insert(ids["MemDesc"], parse_mem_desc);
     parsers.insert(ids["ProcMDesc"], parse_mem_proc_affinity_desc);
@@ -1180,6 +1209,7 @@ fn parse<'a>(
     parsers.insert(ids["PartitionInfo"], parse_partition_info);
     parsers.insert(ids["MapperCallInfo"], parse_mapper_call_info);
     parsers.insert(ids["RuntimeCallInfo"], parse_runtime_call_info);
+    parsers.insert(ids["ApplicationCallInfo"], parse_application_call_info);
     parsers.insert(ids["ProfTaskInfo"], parse_proftask_info);
 
     let mut input = input;

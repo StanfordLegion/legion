@@ -2648,7 +2648,7 @@ namespace Legion {
                 context->get_unique_id(), consumer_context->get_task_name(), 
                 consumer_context->get_unique_id(),
                 consumer_op->get_logging_name(),
-                consumer_op->get_unique_op_id(), provenance->human.c_str())
+                consumer_op->get_unique_op_id(), provenance->human_str())
           }
         }
       }
@@ -16994,6 +16994,7 @@ namespace Legion {
              (unique - (LEGION_MAX_APPLICATION_LAYOUT_ID % runtime_stride)))),
         unique_is_expr_id((unique == 0) ? runtime_stride : unique),
         unique_top_level_task_id((unique == 0) ? runtime_stride : unique),
+        unique_provenance_id((unique == 0) ? runtime_stride : unique),
         unique_implicit_top_level_task_id(0),
 #ifdef LEGION_SPY
         unique_indirections_id((unique == 0) ? runtime_stride : unique),
@@ -17371,6 +17372,13 @@ namespace Legion {
         delete it->second;
       }
       memory_managers.clear();
+      for (std::map<size_t,std::vector<Provenance*> >::const_iterator pit =
+            provenances.begin(); pit != provenances.end(); pit++)
+        for (std::vector<Provenance*>::const_iterator it =
+              pit->second.begin(); it != pit->second.end(); it++)
+          if ((*it)->remove_reference())
+            delete (*it);
+      provenances.clear();
 #ifdef DEBUG_LEGION
       if (logging_region_tree_state)
 	delete tree_state_logger;
@@ -27556,7 +27564,7 @@ namespace Legion {
       forest->create_index_space(result, &domain, did, provenance);
       if (legion_spy_enabled)
         LegionSpy::log_top_index_space(result.id, address_space,
-            (provenance == NULL) ? NULL : provenance->human.c_str());
+            (provenance == NULL) ? NULL : provenance->human_str());
       // Overwrite and leak for now, don't care too much as this 
       // should occur infrequently
       AutoLock is_lock(is_slice_lock);
@@ -29346,6 +29354,59 @@ namespace Legion {
       return result;
     }
 #endif
+
+    //--------------------------------------------------------------------------
+    Provenance* Runtime::find_or_create_provenance(const char *prov,size_t size)
+    //--------------------------------------------------------------------------
+    {
+      if ((prov == NULL) || (size == 0))
+        return NULL;
+      // Check to see if we can find it in read-only mode first
+      {
+        AutoLock prov_lock(provenance_lock,1,false/*exclusive*/);
+        std::map<size_t,std::vector<Provenance*> >::const_iterator finder =
+          provenances.find(size);
+        if (finder != provenances.end())
+        {
+          for (std::vector<Provenance*>::const_iterator it =
+                finder->second.begin(); it != finder->second.end(); it++)
+          {
+            if ((*it)->full.compare(0, size, prov) != 0)
+              continue;
+            (*it)->add_reference();
+            return (*it);
+          }
+        }
+      }
+      // Retake the lock in exclusive mode
+      AutoLock prov_lock(provenance_lock);
+      // Check to make sure we didn't lose the race
+      std::map<size_t,std::vector<Provenance*> >::iterator finder =
+        provenances.find(size);
+      if (finder != provenances.end())
+      {
+        for (std::vector<Provenance*>::const_iterator it =
+              finder->second.begin(); it != finder->second.end(); it++)
+        {
+          if ((*it)->full.compare(0, size, prov) != 0)
+            continue;
+          (*it)->add_reference();
+          return (*it);
+        }
+      }
+      else
+        finder = provenances.emplace(
+            std::make_pair(size, std::vector<Provenance*>())).first;
+      // Generate a new provenance object
+      Provenance *result = new Provenance(unique_provenance_id, prov, size);
+      result->add_reference(2); // one for ourself and one for the caller
+      finder->second.push_back(result);
+      // If we have a profiler, then record this provenance
+      if (profiler != NULL)
+        profiler->record_provenance(unique_provenance_id, prov, size);
+      unique_provenance_id += runtime_stride;
+      return result;
+    }
 
     //--------------------------------------------------------------------------
     LegionErrorType Runtime::verify_requirement(
