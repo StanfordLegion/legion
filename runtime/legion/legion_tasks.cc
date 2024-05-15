@@ -9205,7 +9205,7 @@ namespace Legion {
             RtEvent instantiated;
             index_part->get_child(*itr, &instantiated);
             if (instantiated.exists())
-              complete_preconditions.insert(instantiated);
+              commit_preconditions.insert(instantiated);
           }
 
           // Create an output region and a partition
