@@ -7214,7 +7214,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(shard_manager == NULL);
       assert(runtime->address_space > 0);
-      assert(shard_points.size() == shards_per_address_space);
 #endif
       Serializer rez;
       {
@@ -7240,9 +7239,6 @@ namespace Legion {
     void ImplicitShardManager::process_implicit_rendezvous(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(runtime->address_space == 0);
-#endif
       AutoLock m_lock(manager_lock);
       size_t num_points = 0;
       derez.deserialize(num_points);
@@ -14454,7 +14450,7 @@ namespace Legion {
               dummy_size, true/*can fail*/, false/*wait until*/))
         {
           const char *result = NULL;
-          static_assert(sizeof(result) == sizeof(ptr), "Fuck c++");
+          static_assert(sizeof(result) == sizeof(ptr));
           memcpy(&result, &ptr, sizeof(result));
           return result;
         }
@@ -14468,8 +14464,7 @@ namespace Legion {
         if (finder != semantic_infos.end())
         {
           const char *result = NULL;
-          static_assert(sizeof(result) == 
-              sizeof(finder->second.buffer), "Fuck c++");
+          static_assert(sizeof(result) == sizeof(finder->second.buffer));
           memcpy(&result, &finder->second.buffer, sizeof(result)); 
           return result;
         }

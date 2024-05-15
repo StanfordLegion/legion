@@ -1453,7 +1453,7 @@ typedef enum legion_privilege_mode_t
 } legion_privilege_mode_t;
 
 #ifdef __cplusplus
-static_assert(sizeof(legion_privilege_mode_t) == sizeof(unsigned), "");
+static_assert(sizeof(legion_privilege_mode_t) == sizeof(unsigned));
 #endif
 
 typedef enum legion_allocate_mode_t {

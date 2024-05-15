@@ -426,6 +426,9 @@ namespace Legion {
        * @param provenance an optional string describing the provenance 
        *                   information for this index space
        */
+      LEGION_DEPRECATED("We are considering removing support for freeing fields"
+          "in a future Legion release. Please contact the Legion developer's "
+          "list if field deletion is important for your application.") 
       void free_field(FieldID fid, const bool unordered = false,
                       const char *provenance = NULL);
 
@@ -476,6 +479,9 @@ namespace Legion {
        * @param provenance an optional string describing the provenance 
        *                   information for this index space
        */
+      LEGION_DEPRECATED("We are considering removing support for freeing fields"
+          "in a future Legion release. Please contact the Legion developer's "
+          "list if field deletion is important for your application.")
       void free_fields(const std::set<FieldID> &to_free, 
                        const bool unordered = false,
                        const char *provenance = NULL);
