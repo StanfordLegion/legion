@@ -218,6 +218,8 @@ namespace Legion {
       // e.g. do we need to see all stage 0 messages before stage 1
       AllGatherCollective(CollectiveIndexLocation loc, ReplicateContext *ctx);
       AllGatherCollective(ReplicateContext *ctx, CollectiveID id);
+      AllGatherCollective(ReplicateContext *ctx, CollectiveID id,
+                          const std::vector<ShardID> &participants);
       virtual ~AllGatherCollective(void);
     public:
       virtual MessageKind get_message_kind(void) const = 0;
@@ -242,13 +244,16 @@ namespace Legion {
       void complete_exchange(void);
       virtual RtEvent post_complete_exchange(void) 
         { return RtEvent::NO_RT_EVENT; }
-    public: 
-      const int shard_collective_radix;
-      const int shard_collective_log_radix;
-      const int shard_collective_stages;
-      const int shard_collective_participating_shards;
-      const int shard_collective_last_radix;
-      const bool participating; 
+    protected:
+      const std::vector<ShardID> *const participants; // can be NULL
+      const size_t total_shards;
+      int local_index;
+      int shard_collective_radix;
+      int shard_collective_log_radix;
+      int shard_collective_stages;
+      int shard_collective_participating_shards;
+      int shard_collective_last_radix;
+      bool participating; 
     private:
       RtUserEvent done_event;
       std::vector<int> stage_notifications;
@@ -1486,26 +1491,29 @@ namespace Legion {
      * concurrent index space task launches to ensure that all the point
      * tasks have been mapped to different processors.
      */
-    class ConcurrentMappingRendezvous : public GatherCollective {
+    class ConcurrentMappingRendezvous : public AllGatherCollective<true> {
     public:
       ConcurrentMappingRendezvous(ReplIndexTask *owner,
-          CollectiveIndexLocation loc, ReplicateContext *ctx,
-          ShardID target, size_t expected_points);
+          CollectiveIndexLocation loc, ReplicateContext *ctx);
       virtual ~ConcurrentMappingRendezvous(void) { }
     public:
       virtual MessageKind get_message_kind(void) const
         { return SEND_CONTROL_REPLICATION_CONCURRENT_MAPPING_RENDEZVOUS; }
-      virtual void pack_collective(Serializer &rez) const;
-      virtual void unpack_collective(Deserializer &derez);
+      virtual void pack_collective_stage(ShardID target,
+                                         Serializer &rez, int stage);
+      virtual void unpack_collective_stage(Deserializer &derez, int stage);
+      virtual RtEvent post_complete_exchange(void);
     public:
+      void set_trace_barrier(RtBarrier barrier);
       void perform_rendezvous(std::map<Processor,DomainPoint> &processors,
-                              ApUserEvent all_mapped_event);
+          RtEvent precondition);
     public:
       ReplIndexTask *const owner;
-      const size_t expected_points;
     protected:
       std::map<Processor,DomainPoint> concurrent_processors;
-      ApUserEvent all_mapped_event;
+      std::vector<ShardID> nonempty_shards;
+      std::vector<RtEvent> preconditions;
+      RtBarrier barrier;
     };
     
     /**
@@ -1520,8 +1528,8 @@ namespace Legion {
      */
     class ConcurrentAllreduce : public AllGatherCollective<true> {
     public:
-      ConcurrentAllreduce(CollectiveIndexLocation loc, ReplicateContext *ctx,
-                          size_t expected_points);
+      ConcurrentAllreduce(ReplicateContext *ctx, CollectiveID id,
+                          const std::vector<ShardID> &participants);
       ConcurrentAllreduce(const ConcurrentAllreduce &rhs) = delete;
       virtual ~ConcurrentAllreduce(void);
     public:
@@ -1535,17 +1543,14 @@ namespace Legion {
     public:
       void exchange(std::vector<std::pair<SliceTask*,AddressSpaceID> > &slices,
         uint64_t lamport_clock, bool poisoned, RtBarrier collective_kernel_bar,
-        VariantID variant, size_t points);
+        VariantID variant);
     protected:
-      void notify_concurrent_slices(void);
-    public:
-      const size_t expected_points;
+      virtual RtEvent post_complete_exchange(void);
     protected:
       std::vector<std::pair<SliceTask*,AddressSpaceID> > concurrent_slices;
       RtBarrier collective_kernel_barrier;
       uint64_t concurrent_lamport_clock;
       VariantID concurrent_variant;
-      size_t total_points;
       bool concurrent_poisoned;
     };
 
@@ -2010,10 +2015,12 @@ namespace Legion {
       void set_sharding_function(ShardingID functor,ShardingFunction *function);
       virtual FutureMap create_future_map(TaskContext *ctx,
                     IndexSpace launch_space, IndexSpace shard_space);
-      virtual ApEvent rendezvous_concurrent_mapped(
-          const DomainPoint &point, Processor target);
-      virtual ApEvent rendezvous_concurrent_mapped(
+      virtual void rendezvous_concurrent_mapped(
+          const DomainPoint &point, Processor target, RtEvent precondition);
+      virtual void rendezvous_concurrent_mapped(RtEvent precondition,
           std::vector<std::pair<Processor,DomainPoint> > &targets);
+      void finish_concurrent_mapped(RtEvent precondition, RtBarrier barrier,
+          const std::vector<ShardID> &participants);
       virtual void concurrent_allreduce(SliceTask *slice,
           AddressSpaceID slice_space, size_t points, uint64_t lamport_clock,
           VariantID vid, bool poisoned);
@@ -2050,6 +2057,7 @@ namespace Legion {
       // For setting up concurrent execution
       ConcurrentMappingRendezvous *concurrent_mapping_rendezvous;
       ConcurrentAllreduce *concurrent_exchange;
+      CollectiveID concurrent_exchange_id;
 #ifdef DEBUG_LEGION
     public:
       inline void set_sharding_collective(ShardingGatherCollective *collective)
