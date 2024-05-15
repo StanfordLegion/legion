@@ -550,7 +550,7 @@ namespace Realm {
       //  the current piece
       Rect<N, T> target_subrect;
       have_rect = compute_target_subrect(layout_piece->bounds, cur_rect, cur_point,
-                                         target_subrect, dim_order);
+                                         target_subrect, &dim_order[0]);
 
       log_dma.debug() << "step: cur_rect=" << cur_rect
                       << " layout_bounds=" << layout_piece->bounds

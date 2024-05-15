@@ -44,7 +44,7 @@ namespace Realm {
   template <int N, typename T>
   bool compute_target_subrect(const Rect<N, T> &layout_bounds, const Rect<N, T> &cur_rect,
                               Point<N, T> &cur_point, Rect<N, T> &target_subrect,
-                              const int dim_order[N]);
+                              const int *dim_order);
 
 } // namespace Realm
 
