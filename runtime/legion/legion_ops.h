@@ -27,7 +27,6 @@
 #include "legion/legion_analysis.h"
 #include "legion/mapper_manager.h"
 #include <utility>
-#include <string_view>
 
 namespace Legion {
   namespace Internal {
