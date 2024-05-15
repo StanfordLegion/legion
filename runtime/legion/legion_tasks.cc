@@ -9133,6 +9133,18 @@ namespace Legion {
               LEGION_DISJOINT_COMPLETE_KIND, LEGION_AUTO_GENERATE_ID, 
               provenance, true/*trust partitioning*/);
 
+          // Instantiate all local children to ensure that others can refer
+          // to them even before they've been computed if necessary
+          IndexPartNode *index_part = runtime->forest->get_node(pid);
+          for (ColorSpaceIterator itr(index_part, true/*local*/); itr; itr++)
+          {
+            // This will force the instantiation of the child without blocking
+            RtEvent instantiated;
+            index_part->get_child(*itr, &instantiated);
+            if (instantiated.exists())
+              complete_preconditions.insert(instantiated);
+          }
+
           // Create an output region and a partition
           LogicalRegion region = parent_ctx->create_logical_region(
               index_space, req.field_space, false/*local region*/,
