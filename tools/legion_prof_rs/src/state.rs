@@ -706,7 +706,9 @@ impl Proc {
         let mut subcalls = BTreeMap::new();
         for (uid, entry) in self.entries.iter() {
             match entry.kind {
-                ProcEntryKind::MapperCall(..) | ProcEntryKind::RuntimeCall(_) | ProcEntryKind::ApplicationCall(_) => {
+                ProcEntryKind::MapperCall(..)
+                | ProcEntryKind::RuntimeCall(_)
+                | ProcEntryKind::ApplicationCall(_) => {
                     let task_uid = fevents.get(&entry.fevent).unwrap();
                     let call_start = entry.time_range.start.unwrap();
                     let call_stop = entry.time_range.stop.unwrap();
@@ -2854,7 +2856,11 @@ impl State {
     }
 
     fn find_op_provenance(&self, op_id: OpID) -> Option<&str> {
-        self.find_op(op_id).and_then(|op| self.provenances.get(&op.provenance).map(|x| x.name.as_str()))
+        self.find_op(op_id).and_then(|op| {
+            self.provenances
+                .get(&op.provenance)
+                .map(|x| x.name.as_str())
+        })
     }
 
     pub fn get_op_color(&self, op_id: OpID) -> Color {
@@ -3401,7 +3407,7 @@ impl State {
             kind.set_color(compute_color(lfsr.next(), num_colors));
         }
         for prov in self.provenances.values_mut() {
-            prov.set_color(compute_color(lfsr.next(), num_colors)); 
+            prov.set_color(compute_color(lfsr.next(), num_colors));
         }
     }
 

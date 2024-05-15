@@ -91,7 +91,7 @@ fn accumulate_statistics(
                     .or_insert(ProcEntryStats::new());
                 update_stats(&entry, stats);
             }
-            ProcEntryKind::ApplicationCall(_) => { }
+            ProcEntryKind::ApplicationCall(_) => {}
         }
     }
 }
@@ -170,7 +170,7 @@ fn print_statistics(
                         state.variants.get(&key).unwrap().name
                     );
                 }
-                ProcEntryKind::ApplicationCall(_) => { }
+                ProcEntryKind::ApplicationCall(_) => {}
             }
             let threshold = Timestamp::from_us(1000000);
             let stats = statistics.get(&entry).unwrap();

@@ -21,7 +21,8 @@ use serde::Serialize;
 
 use crate::state::{
     EventID, FSpaceID, FieldID, IPartID, ISpaceID, InstID, InstUID, MapperCallKindID, MapperID,
-    MemID, NodeID, OpID, ProcID, ProvenanceID, RuntimeCallKindID, State, TaskID, Timestamp, TreeID, VariantID,
+    MemID, NodeID, OpID, ProcID, ProvenanceID, RuntimeCallKindID, State, TaskID, Timestamp, TreeID,
+    VariantID,
 };
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]

@@ -59,7 +59,7 @@ namespace Legion {
       // Keep the human and machine parts of the provenance string
       std::string_view human, machine;
       // Useful for cases where interfaces want a string
-      static constexpr std::string_view no_provenance;
+      static constexpr std::string_view no_provenance = std::string_view();
       // Delimiter for the machine readable part of the string
       static constexpr char delimeter = '$';
     };
