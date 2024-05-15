@@ -360,12 +360,14 @@ def size_pretty(size: Optional[int]) -> str:
 
 class Provenance(object):
     __slots__ = ['string', 'color']
-    @typecheck
-    def __init__(self, string) -> None:
-        self.string = string
-        self.color = None
 
-    def assign_color(self, color):
+    @typecheck
+    def __init__(self, string: str) -> None:
+        self.string = string
+        self.color: Optional[str] = None
+
+    @typecheck
+    def assign_color(self, color: str) -> None:
         assert self.color is None
         self.color = color
 
