@@ -45,6 +45,7 @@ void node_task_0(const void *args, size_t arglen, const void *userdata, size_t u
 
   SparsityMap<1> local_sparsity =
       SparsityMap<1>::construct({Rect<1>(Point<1>(0), Point<1>(50000))}, true, true);
+  local_sparsity.add_references();
   local_sparsity.destroy(task_args.wait_on);
 
   task_args.wait_on.wait();
