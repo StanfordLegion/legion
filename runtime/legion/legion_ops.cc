@@ -67,6 +67,9 @@ namespace Legion {
     void Provenance::initialize(void)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(!full.empty());
+#endif
       const char *prov = full.c_str();
       unsigned split = 0;
       while (split < full.size())
@@ -85,16 +88,18 @@ namespace Legion {
     void Provenance::serialize(Serializer &rez) const
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(!full.empty());
+#endif
       rez.serialize<size_t>(full.size());
-      if (!full.empty())
-        rez.serialize(full.c_str(), full.size() + 1/*null terminator*/);
+      rez.serialize(full.c_str(), full.size() + 1/*null terminator*/);
     }
 
     //--------------------------------------------------------------------------
     /*static*/ void Provenance::serialize_null(Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      rez.serialize<size_t>(SIZE_MAX);
+      rez.serialize<size_t>(0);
     }
 
     //--------------------------------------------------------------------------
@@ -103,11 +108,11 @@ namespace Legion {
     {
       size_t length;
       derez.deserialize(length);
-      if (length < SIZE_MAX)
+      if (length > 0)
       {
         Provenance *result = implicit_runtime->find_or_create_provenance(
-            (const char*)derez.get_current_pointer(), length - 1);
-        derez.advance_pointer(length);
+            (const char*)derez.get_current_pointer(), length);
+        derez.advance_pointer(length + 1/*null terminator*/);
         return result;
       }
       else
