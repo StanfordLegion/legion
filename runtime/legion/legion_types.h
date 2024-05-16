@@ -2579,6 +2579,7 @@ namespace Legion {
   typedef ::legion_type_handle TypeHandle;
   typedef ::legion_projection_id_t ProjectionID;
   typedef ::legion_sharding_id_t ShardingID;
+  typedef ::legion_concurrent_id_t ConcurrentID;
   typedef ::legion_region_tree_id_t RegionTreeID;
   typedef ::legion_distributed_id_t DistributedID;
   typedef ::legion_address_space_t AddressSpaceID;

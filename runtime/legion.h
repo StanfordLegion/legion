@@ -1697,7 +1697,8 @@ namespace Legion {
       // deadlock with other concurrent index launches which requires 
       // additional analysis. Currently concurrent index space launches
       // will only be allowed to map to leaf task variants currently.
-      bool                               concurrent;
+      ConcurrentID                       concurrent_functor; // = 0
+      bool                               concurrent; // = false
       // This will convert this index space launch into a must
       // epoch launch which supports interfering region requirements
       bool                               must_parallelism;
@@ -4935,6 +4936,24 @@ namespace Legion {
                           const Domain &index_domain,
                           const Domain &sharding_domain,
                           std::vector<DomainPoint> &index_points);
+    };
+
+    /**
+     * \class ConcurrentColoringFunctor
+     * A concurrent coloring functor provides a functor object for
+     * grouping together points in a concurrent index space task
+     * launch. All the point tasks mapped by the functor to the 
+     * same color will be grouped together and are guaranteed
+     * to execute concurrently. Point tasks mapped to different 
+     * colors will have no guarantee of concurrency.
+     */
+    class ConcurrentColoringFunctor {
+    public:
+      ConcurrentColoringFunctor(void);
+      virtual ~ConcurrentColoringFunctor(void);
+    public:
+      virtual Color color(const DomainPoint &index_point,
+                          const Domain &index_domain);
     };
 
     /**
@@ -9040,6 +9059,73 @@ namespace Legion {
        * @return a pointer o the sharding functor if it exists
        */
       static ShardingFunctor* get_sharding_functor(ShardingID sid);
+
+      /**
+       * Dynamically generate a unique concurrent ID for use across the machine
+       * @return a ConcurrentID that is globally unique across the machine
+       */
+      ConcurrentID generate_dynamic_concurrent_id(void);
+
+      /** 
+       * Generate a contiguous set of ConcurrentIDs for use by a library.
+       * This call will always generate the same answer for the same library
+       * name no many how many times it is called or on how many nodes it
+       * is called. If the count passed in to this method differs for the 
+       * same library name the runtime will raise an error.
+       * @param name a unique null-terminated string that names the library
+       * @param count the number of concurrent IDs that should be generated
+       * @return the first concurrent ID that is allocated to the library
+       */
+      ConcurrentID generate_library_concurrent_ids(const char *name, 
+                                                   size_t count);
+
+      /**
+       * Statically generate a unique Concurrent ID for use across the machine.
+       * This can only be called prior to the runtime starting. It must be
+       * invoked symmetrically across all the nodes in the machine prior
+       * to starting the runtime.
+       * @return ConcurrentID that is globally unique across the machine
+       */
+      static ConcurrentID generate_static_concurrent_id(void);
+
+      /**
+       * Register a concurrent coloring functor for handling grouping of
+       * concurrent index space task launches into subsets of points that
+       * can execute concurrently. The ConcurrentID must be non-zero because
+       * zero is the special built-in "map all points to the same color"
+       * functor which should be the default for most concurrent index
+       * space task launches. The runtime takes ownership of the functor and
+       * will delete it upon runtime shutdown.
+       * @param cid the concurrent ID to use for the registration
+       * @param functor the object to register for handling concurrent grouping 
+       * @param silence_warnings disable warnings about dynamic registration
+       * @param warning_string a string to be reported with any warnings
+       */
+      void register_concurrent_coloring_functor(ConcurrentID cid,
+                                     ConcurrentColoringFunctor *functor,
+                                     bool silence_warnings = false,
+                                     const char *warning_string = NULL);
+
+      /**
+       * Register a concurrent coloring functor before the runtime has 
+       * started only. The concurrent coloring functor will be invoked to
+       * group points in a concurrent index space task launch into 
+       * subsets of points that can be executed concurrently. The runtime
+       * take ownership for the functor and will delete it upon shutdown. 
+       * @param cid the concurrent ID to use for the registration
+       * @param functor the object to register for handling concurrent grouping
+       */
+      static void preregister_concurrent_coloring_functor(ConcurrentID cid,
+                                       ConcurrentColoringFunctor *functor);
+
+      /**
+       * Return a pointer to a given concurrent coloring functor object.
+       * The runtime retains ownership of this object.
+       * @param cid ID of the concurrent coloring functor to find
+       * @return a pointer to the concurrent coloring functor if it exists
+       */
+      static ConcurrentColoringFunctor* get_concurrent_color_functor(
+                                                    ConcurrentID cid);
     public:
       /**
        * Dynamically generate a unique reduction ID for use across the machine
