@@ -68,6 +68,32 @@ TEST(IntrusiveListTest, SingleEntryPushFrontPopFront)
   }
 }
 
+TEST(IntrusiveListTest, PushFrontSameEntry)
+{
+  TestEntry::TestEntryList list;
+  TestEntry object(42);
+  list.push_back(&object);
+  list.push_back(&object);
+
+  EXPECT_FALSE(list.empty());
+
+  {
+    TestEntry *entry = list.pop_front();
+    EXPECT_NE(entry, nullptr);
+    EXPECT_EQ(entry->value, object.value);
+  }
+
+  EXPECT_FALSE(list.empty());
+
+  {
+    TestEntry *entry = list.pop_front();
+    EXPECT_NE(entry, nullptr);
+    EXPECT_EQ(entry->value, object.value);
+  }
+
+  EXPECT_TRUE(list.empty());
+}
+
 TEST(IntrusiveListTest, EraseEntry)
 {
   TestEntry::TestEntryList list;
