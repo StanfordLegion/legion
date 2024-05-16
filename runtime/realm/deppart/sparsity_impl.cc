@@ -253,14 +253,14 @@ namespace Realm {
   void SparsityMapImplWrapper::add_references(unsigned count)
   {
     if(need_refcount) {
-      references.fetch_add(count);
+      references.fetch_add_acqrel(count);
     }
   }
 
   void SparsityMapImplWrapper::remove_references(unsigned count)
   {
     if(need_refcount) {
-      if(references.fetch_sub_acqrel(count) == static_cast<int>(count)) {
+      if(references.fetch_sub_acqrel(count) == count) {
         void *impl = map_impl.load();
         if(impl != nullptr) {
           assert(map_deleter);
