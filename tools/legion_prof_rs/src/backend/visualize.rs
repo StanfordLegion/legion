@@ -1107,10 +1107,9 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
             .from_path(filename)?;
         for (op_id, op) in &state.operations {
             let parent_id = op.parent_id;
-            let provenance = state
-                .provenances
-                .get(&op.provenance)
-                .map(|x| x.name.as_str());
+            let provenance = op
+                .provenance
+                .and_then(|pid| state.provenances.get(&pid).map(|p| p.name.as_str()));
             if let Some(proc_id) = state.tasks.get(op_id) {
                 let proc = state.procs.get(proc_id).unwrap();
                 let proc_full_text = format!("{:?} Processor 0x{:x}", proc.kind, proc.proc_id);

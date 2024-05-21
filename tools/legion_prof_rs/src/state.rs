@@ -2,6 +2,7 @@ use std::cmp::{max, Ordering, Reverse};
 use std::collections::{BTreeMap, BTreeSet, BinaryHeap};
 use std::convert::TryFrom;
 use std::fmt;
+use std::num::NonZeroU64;
 use std::sync::OnceLock;
 
 use derive_more::{Add, From, LowerHex, Sub};
@@ -2072,7 +2073,7 @@ impl RuntimeCallKind {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
-pub struct ProvenanceID(pub u64);
+pub struct ProvenanceID(pub NonZeroU64);
 
 #[derive(Debug)]
 pub struct Provenance {
@@ -2343,7 +2344,7 @@ pub struct Operation {
     pub base: Base,
     pub parent_id: Option<OpID>,
     pub kind: Option<OpKindID>,
-    pub provenance: ProvenanceID,
+    pub provenance: Option<ProvenanceID>,
     pub operation_inst_infos: Vec<OperationInstInfo>,
 }
 
@@ -2353,7 +2354,7 @@ impl Operation {
             base,
             parent_id: None,
             kind: None,
-            provenance: ProvenanceID(0),
+            provenance: None,
             operation_inst_infos: Vec::new(),
         }
     }
@@ -2367,7 +2368,8 @@ impl Operation {
         self.kind = Some(kind);
         self
     }
-    fn set_provenance(&mut self, provenance: ProvenanceID) -> &mut Self {
+    fn set_provenance(&mut self, provenance: Option<ProvenanceID>) -> &mut Self {
+        assert!(self.provenance.is_none());
         self.provenance = provenance;
         self
     }
@@ -2857,9 +2859,8 @@ impl State {
 
     fn find_op_provenance(&self, op_id: OpID) -> Option<&str> {
         self.find_op(op_id).and_then(|op| {
-            self.provenances
-                .get(&op.provenance)
-                .map(|x| x.name.as_str())
+            op.provenance
+                .and_then(|pid| self.provenances.get(&pid).map(|p| p.name.as_str()))
         })
     }
 

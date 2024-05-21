@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::fs::File;
 use std::io;
 use std::io::Read;
+use std::num::NonZeroU64;
 use std::path::Path;
 
 use flate2::read::GzDecoder;
@@ -120,7 +121,7 @@ pub enum Record {
     PhysicalInstanceUsage { inst_uid: InstUID, op_id: OpID, index_id: u32, field_id: FieldID },
     TaskKind { task_id: TaskID, name: String, overwrite: bool },
     TaskVariant { task_id: TaskID, variant_id: VariantID, name: String },
-    OperationInstance { op_id: OpID, parent_id: Option<OpID>, kind: u32, provenance: ProvenanceID },
+    OperationInstance { op_id: OpID, parent_id: Option<OpID>, kind: u32, provenance: Option<ProvenanceID> },
     MultiTask { op_id: OpID, task_id: TaskID },
     SliceOwner { parent_id: UniqueID, op_id: OpID },
     TaskWaitInfo { op_id: OpID, task_id: TaskID, variant_id: VariantID, wait_start: Timestamp, wait_ready: Timestamp, wait_end: Timestamp },
@@ -345,8 +346,11 @@ fn parse_proc_id(input: &[u8]) -> IResult<&[u8], ProcID> {
 fn parse_runtime_call_kind_id(input: &[u8]) -> IResult<&[u8], RuntimeCallKindID> {
     map(le_u32, RuntimeCallKindID)(input)
 }
+fn parse_option_provenance_id(input: &[u8]) -> IResult<&[u8], Option<ProvenanceID>> {
+    map(le_u64, |x| NonZeroU64::new(x).map(ProvenanceID))(input)
+}
 fn parse_provenance_id(input: &[u8]) -> IResult<&[u8], ProvenanceID> {
-    map(le_u64, ProvenanceID)(input)
+    map(le_u64, |x| ProvenanceID(NonZeroU64::new(x).unwrap()))(input)
 }
 fn parse_task_id(input: &[u8]) -> IResult<&[u8], TaskID> {
     map(le_u32, TaskID)(input)
@@ -705,7 +709,7 @@ fn parse_operation(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, op_id) = parse_op_id(input)?;
     let (input, parent_id) = parse_option_op_id(input)?;
     let (input, kind) = le_u32(input)?;
-    let (input, provenance) = parse_provenance_id(input)?;
+    let (input, provenance) = parse_option_provenance_id(input)?;
     Ok((
         input,
         Record::OperationInstance {
