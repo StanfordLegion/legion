@@ -5139,14 +5139,11 @@ namespace Legion {
       reduction_metasize = 0;
       reduction_instance = NULL;
       first_mapping = true;
-      concurrent_precondition.interpreted = RtUserEvent::NO_RT_USER_EVENT;
-      concurrent_task_barrier = RtBarrier::NO_RT_BARRIER;
+      concurrent_functor = 0;
+      concurrent_points = 0;
       children_commit_invoked = false;
       predicate_false_result = NULL;
       predicate_false_size = 0;
-      concurrent_lamport_clock = 0;
-      concurrent_variant = 0;
-      concurrent_poisoned = false;
     }
 
     //--------------------------------------------------------------------------
@@ -5179,8 +5176,7 @@ namespace Legion {
           delete it->second.first;
         temporary_futures.clear();
       }
-      concurrent_preconditions.clear();
-      concurrent_processors.clear();
+      concurrent_groups.clear();
       // Remove our reference to the point arguments 
       point_arguments = FutureMap();
       point_futures.clear();
@@ -5422,13 +5418,21 @@ namespace Legion {
       }
       if (rhs->concurrent_task)
       {
-        if (rhs->is_replaying())
-          this->concurrent_precondition.traced = 
-            rhs->concurrent_precondition.traced;
-        else
-          this->concurrent_precondition.interpreted =
-            rhs->concurrent_precondition.interpreted;
+        this->concurrent_functor = rhs->concurrent_functor;
+        this->concurrent_groups = rhs->concurrent_groups;
       }
+    }
+
+    //--------------------------------------------------------------------------
+    RtBarrier MultiTask::get_concurrent_task_barrier(Color color) const
+    //--------------------------------------------------------------------------
+    {
+      std::map<Color,ConcurrentGroup>::const_iterator finder =
+        concurrent_groups.find(color);
+#ifdef DEBUG_LEGION
+      assert(finder != concurrent_groups.end());
+#endif
+      return finder->second.task_barrier;
     }
 
     //--------------------------------------------------------------------------
@@ -5580,10 +5584,18 @@ namespace Legion {
         rez.serialize<size_t>(0); 
       if (concurrent_task)
       {
-        if (is_replaying())
-          rez.serialize(concurrent_precondition.traced);
-        else
-          rez.serialize(concurrent_precondition.interpreted);
+        rez.serialize(concurrent_functor);
+        rez.serialize<size_t>(concurrent_groups.size());
+        for (std::map<Color,ConcurrentGroup>::const_iterator it =
+              concurrent_groups.begin(); it !=
+              concurrent_groups.end(); it++)
+        {
+          rez.serialize(it->first);
+          if (is_replaying())
+            rez.serialize(it->second.precondition.traced);
+          else
+            rez.serialize(it->second.precondition.interpreted);
+        }
       }
     }
 
@@ -5648,10 +5660,19 @@ namespace Legion {
       }
       if (concurrent_task)
       {
-        if (is_replaying())
-          derez.deserialize(concurrent_precondition.traced);
-        else
-          derez.deserialize(concurrent_precondition.interpreted);
+        derez.deserialize(concurrent_functor);
+        size_t num_colors;
+        derez.deserialize(num_colors);
+        for (unsigned idx = 0; idx < num_colors; idx++)
+        {
+          Color color;
+          derez.deserialize(color);
+          if (is_replaying())
+            derez.deserialize(concurrent_groups[color].precondition.traced);
+          else
+            derez.deserialize(
+                concurrent_groups[color].precondition.interpreted);
+        }
       }
     }
 
@@ -6842,6 +6863,7 @@ namespace Legion {
       SingleTask::activate();
       orig_task = this;
       slice_owner = NULL;
+      concurrent_color = 0;
       concurrent_task_barrier = RtBarrier::NO_RT_BARRIER;
     }
 
@@ -7067,10 +7089,10 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(target_proc.exists());
         assert(concurrent_postcondition.exists());
-#endif
+#endif 
         concurrent_precondition.interpreted = Runtime::create_rt_user_event();
         slice_owner->rendezvous_concurrent_mapped(index_point, target_proc,
-            concurrent_precondition.interpreted);
+            concurrent_color, concurrent_precondition.interpreted);
       }
       // For point tasks we use the point termination event which as the
       // end event for this task since point tasks can be moved and
@@ -7419,7 +7441,8 @@ namespace Legion {
             get_task_name(), get_unique_id())
       if (!concurrent_task_barrier.exists())
       {
-        concurrent_task_barrier = slice_owner->get_concurrent_task_barrier();
+        concurrent_task_barrier =
+          slice_owner->get_concurrent_task_barrier(concurrent_color);
         if (!concurrent_task_barrier.exists())
           REPORT_LEGION_ERROR(ERROR_ILLEGAL_CONCURRENT_TASK_BARRIER,
             "Illegal concurrent task barrier in task %s (UID %lld) which is "
@@ -8383,7 +8406,6 @@ namespace Legion {
       mapped_points = 0;
       completed_points = 0;
       committed_points = 0;
-      concurrent_points = 0;
       profiling_reported = RtUserEvent::NO_RT_USER_EVENT;
       profiling_priority = LG_THROUGHPUT_WORK_PRIORITY;
       copy_fill_priority = 0;
@@ -8397,6 +8419,10 @@ namespace Legion {
     {
       DETAILED_PROFILER(runtime, INDEX_DEACTIVATE_CALL);
       reduction_instance = NULL; // we don't own this so clear it
+      for (std::map<Color,ConcurrentGroup>::iterator it =
+            concurrent_groups.begin(); it != concurrent_groups.end(); it++)
+        if (it->second.task_barrier.exists())
+          it->second.task_barrier.destroy_barrier();
       MultiTask::deactivate(false/*free*/);
       if (!origin_mapped_slices.empty())
       {
@@ -8429,9 +8455,6 @@ namespace Legion {
       }
       interfering_requirements.clear();
       point_requirements.clear();
-      concurrent_slices.clear();
-      if (concurrent_task_barrier.exists())
-        concurrent_task_barrier.destroy_barrier();
 #ifdef DEBUG_LEGION
       assert(pending_intra_space_dependences.empty());
 #endif
@@ -8754,6 +8777,7 @@ namespace Legion {
             launcher.point_futures[idx].impl->freeze(parent_ctx, provenance);
       }
       concurrent_task = launcher.concurrent;
+      concurrent_functor = launcher.concurrent_functor;
       map_id = launcher.map_id;
       tag = launcher.tag;
       mapper_data_size = launcher.map_arg.get_size();
@@ -8884,6 +8908,7 @@ namespace Legion {
             launcher.point_futures[idx].impl->freeze(parent_ctx, provenance);
       }
       concurrent_task = launcher.concurrent;
+      concurrent_functor = launcher.concurrent_functor;
       map_id = launcher.map_id;
       tag = launcher.tag;
       mapper_data_size = launcher.map_arg.get_size();
@@ -9298,16 +9323,35 @@ namespace Legion {
           enumerate_futures(index_domain);
         if (concurrent_task)
         {
-          if (is_recording())
+          // Instantiate preconditions for each of the colors
+          ConcurrentColoringFunctor *functor =
+            runtime->find_concurrent_coloring_functor(concurrent_functor);
+          if (functor->supports_max_color())
           {
-            // Set up a barrier for use with tracing
-            RtBarrier barrier(Realm::Barrier::create_barrier(total_points));
-            std::vector<ShardID> participants(1,0);
-            tpl->record_concurrent_barrier(this, barrier, 
-                participants, total_points);
+            Color max_color = functor->max_color(index_domain);
+            for (Color color = 0; color <= max_color; color++)
+              concurrent_groups[color].precondition.interpreted =
+                Runtime::create_rt_user_event();
           }
-          concurrent_precondition.interpreted =
-            Runtime::create_rt_user_event();
+          else
+          {
+            // If we're recording we need to iterate all the points to
+            // count how many points are associated with each color so
+            // we can make the barrier to be used later
+            for (Domain::DomainPointIterator itr(index_domain); itr; itr++)
+            {
+              Color color = functor->color(*itr, index_domain);
+              std::map<Color,ConcurrentGroup>::iterator finder =
+                concurrent_groups.find(color);
+              if (finder == concurrent_groups.end())
+              {
+                finder = concurrent_groups.emplace(
+                    std::make_pair(color, ConcurrentGroup())).first;
+                finder->second.precondition.interpreted =
+                  Runtime::create_rt_user_event();
+              }
+            }
+          }
         }
         Operation::trigger_ready();
       }
@@ -9340,108 +9384,178 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void IndexTask::rendezvous_concurrent_mapped(const DomainPoint &point,
-                                         Processor target, RtEvent precondition)
+                            Processor target, Color color, RtEvent precondition)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(concurrent_task);
 #endif
-      AutoLock o_lock(op_lock);
-      if (precondition.exists())
-        concurrent_preconditions.push_back(precondition);
-      std::map<Processor,DomainPoint>::const_iterator finder =
-        concurrent_processors.find(target);
-      if (finder != concurrent_processors.end())
-        report_concurrent_mapping_failure(target, point, finder->second);
+      bool done = false;
+      std::map<Color,ConcurrentGroup>::iterator finder =
+        concurrent_groups.find(color);
 #ifdef DEBUG_LEGION
-      assert(concurrent_processors.size() < total_points);
+      assert(finder != concurrent_groups.end());
 #endif
-      concurrent_processors[target] = point;
-      if (concurrent_processors.size() == total_points)
       {
+        AutoLock o_lock(op_lock);
+        if (precondition.exists())
+          finder->second.preconditions.push_back(precondition);
+        std::map<Processor,DomainPoint>::const_iterator proc_finder =
+          finder->second.processors.find(target);
+        if (proc_finder != finder->second.processors.end())
+          report_concurrent_mapping_failure(target, point, proc_finder->second);
+        finder->second.processors[target] = point;
+        finder->second.group_points++;
 #ifdef DEBUG_LEGION
-        assert(concurrent_precondition.interpreted.exists());
+        assert(concurrent_points < total_points);
 #endif
-        if (!concurrent_preconditions.empty())
-          Runtime::trigger_event(concurrent_precondition.interpreted,
-              Runtime::merge_events(concurrent_preconditions));
-        else
-          Runtime::trigger_event(concurrent_precondition.interpreted);
+        done = (++concurrent_points == total_points);
       }
+      if (done)
+        finalize_concurrent_mapped();
     }
 
     //--------------------------------------------------------------------------
-    void IndexTask::rendezvous_concurrent_mapped(RtEvent precondition,
-        std::vector<std::pair<Processor,DomainPoint> > &points)
+    void IndexTask::rendezvous_concurrent_mapped(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(concurrent_task);
 #endif
-      AutoLock o_lock(op_lock);
-      if (precondition.exists())
-        concurrent_preconditions.push_back(precondition);
-#ifdef DEBUG_LEGION
-      assert((concurrent_processors.size() + points.size()) <= total_points); 
-#endif
-      for (std::vector<std::pair<Processor,DomainPoint> >::iterator it =
-            points.begin(); it != points.end(); it++)
+      bool done = false; 
       {
-        std::map<Processor,DomainPoint>::const_iterator finder =
-          concurrent_processors.find(it->first);
-        if (finder != concurrent_processors.end())
-          report_concurrent_mapping_failure(it->first,
-              it->second, finder->second);
-        concurrent_processors.emplace(*it);
+        size_t num_colors;
+        derez.deserialize(num_colors);
+        AutoLock o_lock(op_lock);
+        for (unsigned idx1 = 0; idx1 < num_colors; idx1++)
+        {
+          Color color;
+          derez.deserialize(color);
+          std::map<Color,ConcurrentGroup>::iterator finder =
+            concurrent_groups.find(color);
+#ifdef DEBUG_LEGION
+          assert(finder != concurrent_groups.end());
+#endif
+          RtEvent precondition;
+          derez.deserialize(precondition);
+          if (precondition.exists())
+            finder->second.preconditions.push_back(precondition);
+          size_t num_points;
+          derez.deserialize(num_points);
+          for (unsigned idx2 = 0; idx2 < num_points; idx2++)
+          {
+            Processor target;
+            derez.deserialize(target);
+            DomainPoint point;
+            derez.deserialize(point);
+            std::map<Processor,DomainPoint>::const_iterator proc_finder =
+              finder->second.processors.find(target);
+            if (proc_finder != finder->second.processors.end())
+              report_concurrent_mapping_failure(target, point,
+                                                proc_finder->second);
+            finder->second.processors[target] = point;
+          }
+          finder->second.group_points += num_points;
+          concurrent_points += num_points;
+#ifdef DEBUG_LEGION
+          assert(concurrent_points <= total_points);
+#endif
+        }
+        done = (concurrent_points == total_points);
       }
-      if (concurrent_processors.size() == total_points)
+      if (done)
+        finalize_concurrent_mapped();
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexTask::finalize_concurrent_mapped(void)
+    //--------------------------------------------------------------------------
+    {
+      for (std::map<Color,ConcurrentGroup>::iterator it =
+            concurrent_groups.begin(); it != concurrent_groups.end(); it++)
       {
 #ifdef DEBUG_LEGION
-        assert(concurrent_precondition.interpreted.exists());
+        assert(it->second.precondition.interpreted.exists());
 #endif
-        if (!concurrent_preconditions.empty())
-          Runtime::trigger_event(concurrent_precondition.interpreted,
-              Runtime::merge_events(concurrent_preconditions));
+        if (is_recording())
+        {
+          // Create and record the barrier with the right number of arrivals
+          // for this concurrent group for later iterations
+          it->second.color_points = it->second.group_points;
+          const RtBarrier barrier(
+              Realm::Barrier::create_barrier(it->second.color_points));
+          it->second.shards.resize(1, 0);
+          tpl->record_concurrent_group(this, it->first, 
+              it->second.group_points, it->second.color_points,
+              barrier, it->second.shards);
+        }
+        if (!it->second.preconditions.empty())
+          Runtime::trigger_event(it->second.precondition.interpreted,
+              Runtime::merge_events(it->second.preconditions));
         else
-          Runtime::trigger_event(concurrent_precondition.interpreted);
+          Runtime::trigger_event(it->second.precondition.interpreted);
       }
     }
 
     //--------------------------------------------------------------------------
-    void IndexTask::concurrent_allreduce(SliceTask *slice,
+    void IndexTask::initialize_concurrent_group(Color color, size_t local,
+        size_t global, RtBarrier barrier, const std::vector<ShardID> &shards)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(concurrent_groups.find(color) == concurrent_groups.end());
+#endif
+      ConcurrentGroup &group = concurrent_groups[color];
+      group.group_points = local;
+      group.color_points = global;
+      group.precondition.traced = barrier;
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexTask::concurrent_allreduce(Color color, SliceTask *slice,
         AddressSpaceID slice_space, size_t points, uint64_t lamport_clock,
         VariantID vid, bool poisoned)
     //--------------------------------------------------------------------------
     {
       bool done = false;
+      std::map<Color,ConcurrentGroup>::iterator finder =
+        concurrent_groups.find(color);
+#ifdef DEBUG_LEGION
+      assert(finder != concurrent_groups.end());
+#endif
       {
         AutoLock o_lock(op_lock);
-        if (concurrent_lamport_clock < lamport_clock)
-          concurrent_lamport_clock = lamport_clock;
+        if (finder->second.lamport_clock < lamport_clock)
+          finder->second.lamport_clock = lamport_clock;
         if (poisoned)
-          concurrent_poisoned = true;
-        concurrent_slices.push_back(std::make_pair(slice, slice_space));
-        if (concurrent_points == 0)
-          concurrent_variant = vid;
-        else if (concurrent_variant != vid)
-          concurrent_variant = std::min(concurrent_variant, vid);
-        concurrent_points += points;
-        done = (concurrent_points == total_points);
+          finder->second.poisoned = true;
+        if (finder->second.slice_tasks.empty())
+          finder->second.variant = vid;
+        else if (finder->second.variant != vid)
+          finder->second.variant = std::min(finder->second.variant, vid);
+        finder->second.slice_tasks.emplace_back(
+            std::make_pair(slice, slice_space));
+#ifdef DEBUG_LEGION
+        assert(points <= finder->second.group_points);
+#endif
+        finder->second.group_points -= points;
+        done = (finder->second.group_points == 0);
       }
       if (done)
       {
-        if (concurrent_variant > 0)
+        if (finder->second.variant > 0)
         {
+          // Check to see if this variant needs a task barrier
           VariantImpl *variant = 
-            runtime->find_variant_impl(task_id, concurrent_variant);
+            runtime->find_variant_impl(task_id, finder->second.variant);
           if (variant->needs_barrier())
-            concurrent_task_barrier =
-              RtBarrier(Realm::Barrier::create_barrier(total_points));
+            finder->second.task_barrier = RtBarrier(
+                Realm::Barrier::create_barrier(finder->second.color_points));
         }
         // Swap this vector onto the stack in case the slice task gets deleted
         // out from under us while we are finalizing things
         std::vector<std::pair<SliceTask*,AddressSpaceID> > local_copy;
-        local_copy.swap(concurrent_slices);
+        local_copy.swap(finder->second.slice_tasks);
         for (std::vector<std::pair<SliceTask*,AddressSpaceID> >::const_iterator
               it = local_copy.begin(); it != local_copy.end(); it++)
         {
@@ -9451,17 +9565,18 @@ namespace Legion {
             {
               RezCheck z(rez);
               rez.serialize(it->first);
-              rez.serialize(concurrent_task_barrier);
-              rez.serialize(concurrent_lamport_clock);
-              rez.serialize(concurrent_variant);
-              rez.serialize(concurrent_poisoned);
+              rez.serialize(color);
+              rez.serialize(finder->second.task_barrier);
+              rez.serialize(finder->second.lamport_clock);
+              rez.serialize(finder->second.variant);
+              rez.serialize(finder->second.poisoned);
             }
             runtime->send_slice_concurrent_allreduce_response(it->second, rez);
           }
           else
-            it->first->finish_concurrent_allreduce(
-                concurrent_lamport_clock, concurrent_poisoned, 
-                concurrent_variant, concurrent_task_barrier);
+            it->first->finish_concurrent_allreduce(color,
+                finder->second.lamport_clock, finder->second.poisoned, 
+                finder->second.variant, finder->second.task_barrier);
         }
       }
     }
@@ -10593,7 +10708,7 @@ namespace Legion {
         enumerate_futures(internal_domain);
       }
       if (concurrent_task)
-        concurrent_precondition.traced = tpl->get_concurrent_barrier(this);
+        tpl->initialize_concurrent_groups(this);
       // Mark that this is origin mapped effectively in case we
       // have any remote tasks, do this before we clone it
       map_origin = true;
@@ -11012,7 +11127,6 @@ namespace Legion {
       created_index_spaces.clear();
       created_index_partitions.clear();
       unique_intra_space_deps.clear();
-      concurrent_points.clear();
       if (freeop)
         runtime->free_slice_task(this);
     }
@@ -11626,15 +11740,31 @@ namespace Legion {
                                inline_task, point_futures);
       if (concurrent_task)
       {
+        // Find the color for this point task
+        ConcurrentColoringFunctor *functor = 
+          runtime->find_concurrent_coloring_functor(concurrent_functor);
+        result->concurrent_color = functor->color(point, index_domain);
         if (is_replaying())
         {
-          result->concurrent_precondition.traced =
-            concurrent_precondition.traced;
-          result->concurrent_postcondition = concurrent_precondition.traced;
+          std::map<Color,ConcurrentGroup>::const_iterator finder =
+            concurrent_groups.find(result->concurrent_color);
+#ifdef DEBUG_LEGION
+          assert(finder != concurrent_groups.end());
+#endif
+          result->concurrent_precondition.traced = 
+            finder->second.precondition.traced;
+          result->concurrent_postcondition = finder->second.precondition.traced;
         }
         else
-          result->concurrent_postcondition = 
-            concurrent_precondition.interpreted;
+        {
+          std::map<Color,ConcurrentGroup>::const_iterator finder =
+            concurrent_groups.find(result->concurrent_color);
+#ifdef DEBUG_LEGION
+          assert(finder != concurrent_groups.end());
+#endif
+          result->concurrent_postcondition =
+            finder->second.precondition.interpreted;
+        }
       }
       if (runtime->legion_spy_enabled)
         LegionSpy::log_slice_point(get_unique_id(), 
@@ -12017,49 +12147,77 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void SliceTask::rendezvous_concurrent_mapped(const DomainPoint &point,
-                                         Processor target, RtEvent precondition)
+                            Processor target, Color color, RtEvent precondition)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(concurrent_task);
 #endif
+      std::map<Color,ConcurrentGroup>::iterator finder =
+        concurrent_groups.find(color);
+#ifdef DEBUG_LEGION
+      assert(finder != concurrent_groups.end());
+#endif
       if (is_remote())
       {
         AutoLock o_lock(op_lock);
         if (precondition.exists())
-          concurrent_preconditions.push_back(precondition);
-        std::map<Processor,DomainPoint>::const_iterator finder =
-          concurrent_processors.find(target);
-        if (finder != concurrent_processors.end())
-          report_concurrent_mapping_failure(target, point, finder->second);
+          finder->second.preconditions.push_back(precondition);
+        std::map<Processor,DomainPoint>::const_iterator proc_finder =
+          finder->second.processors.find(target);
+        if (proc_finder != finder->second.processors.end())
+          report_concurrent_mapping_failure(target, point, proc_finder->second);
+        finder->second.group_points++;
 #ifdef DEBUG_LEGION
-        assert(concurrent_processors.size() < points.size());
+        assert(concurrent_points < points.size());
 #endif
-        concurrent_processors[target] = point;
-        if (concurrent_processors.size() == points.size())
+        if (++concurrent_points == points.size())
         {
           Serializer rez;
           {
             RezCheck z(rez);
             rez.serialize(index_owner);
-            rez.serialize<size_t>(points.size());
-            for (std::map<Processor,DomainPoint>::const_iterator it =
-                  concurrent_processors.begin(); it != 
-                  concurrent_processors.end(); it++)
+            // Count how many colors have "interesting" results
+            size_t num_colors = 0;
+            for (std::map<Color,ConcurrentGroup>::const_iterator it =
+                  concurrent_groups.begin(); it !=
+                  concurrent_groups.end(); it++)
+              if (!it->second.preconditions.empty())
+                num_colors++;
+            rez.serialize(num_colors);
+            for (std::map<Color,ConcurrentGroup>::const_iterator it =
+                  concurrent_groups.begin(); it !=
+                  concurrent_groups.end(); it++)
             {
+              if (it->second.processors.empty())
+                continue;
               rez.serialize(it->first);
-              rez.serialize(it->second);
+              if (it->second.preconditions.empty())
+                rez.serialize(RtEvent::NO_RT_EVENT);
+              else
+                rez.serialize(Runtime::merge_events(it->second.preconditions));
+              rez.serialize<size_t>(it->second.processors.size());
+              for (std::map<Processor,DomainPoint>::const_iterator pit =
+                    it->second.processors.begin(); pit !=
+                    it->second.processors.end(); pit++)
+              {
+                rez.serialize(pit->first);
+                rez.serialize(pit->second);
+              }
             }
-            if (!concurrent_preconditions.empty())
-              rez.serialize(Runtime::merge_events(concurrent_preconditions));
-            else
-              rez.serialize(RtEvent::NO_RT_EVENT);
           }
           runtime->send_slice_rendezvous_concurrent_mapped(orig_proc, rez);
         }
       }
       else
-        index_owner->rendezvous_concurrent_mapped(point, target, precondition);
+      {
+        {
+          AutoLock o_lock(op_lock);
+          finder->second.group_points++;
+        }
+        index_owner->rendezvous_concurrent_mapped(point, target, color,
+                                                  precondition);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -12069,18 +12227,24 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       bool done = false;
+      std::map<Color,ConcurrentGroup>::iterator finder =
+        concurrent_groups.find(task->concurrent_color);
+#ifdef DEBUG_LEGION
+      assert(finder != concurrent_groups.end());
+#endif
       {
         AutoLock o_lock(op_lock);
-        if (concurrent_lamport_clock < lamport_clock)
-          concurrent_lamport_clock = lamport_clock;
+        if (finder->second.lamport_clock < lamport_clock)
+          finder->second.lamport_clock = lamport_clock;
         if (poisoned)
-          concurrent_poisoned = true;
-        if (concurrent_points.empty())
-          concurrent_variant = vid;
-        else if (concurrent_variant != vid)
-          concurrent_variant = std::min(concurrent_variant, vid);
-        concurrent_points.push_back(std::make_pair(task, manager));
-        done = (concurrent_points.size() == points.size());
+          finder->second.poisoned = true;
+        if (finder->second.point_tasks.empty())
+          finder->second.variant = vid;
+        else if (finder->second.variant != vid)
+          finder->second.variant= std::min(finder->second.variant, vid);
+        finder->second.point_tasks.push_back(std::make_pair(task, manager));
+        done = (finder->second.point_tasks.size() ==
+                finder->second.group_points);
       }
       if (done)
       {
@@ -12091,30 +12255,39 @@ namespace Legion {
             RezCheck z(rez);
             rez.serialize(index_owner);
             rez.serialize(this);
-            rez.serialize(points.size());
-            rez.serialize(concurrent_lamport_clock);
-            rez.serialize(concurrent_variant);
-            rez.serialize(concurrent_poisoned);
+            rez.serialize(finder->first);
+            rez.serialize(finder->second.group_points);
+            rez.serialize(finder->second.lamport_clock);
+            rez.serialize(finder->second.variant);
+            rez.serialize(finder->second.poisoned);
           }
           runtime->send_slice_concurrent_allreduce_request(orig_proc, rez);
         }
         else
-          index_owner->concurrent_allreduce(this,runtime->address_space,
-              points.size(), concurrent_lamport_clock, concurrent_variant,
-              concurrent_poisoned);
+          index_owner->concurrent_allreduce(finder->first, this,
+              runtime->address_space, finder->second.group_points,
+              finder->second.lamport_clock, finder->second.variant,
+              finder->second.poisoned);
       }
     }
 
     //--------------------------------------------------------------------------
-    void SliceTask::finish_concurrent_allreduce(uint64_t lamport_clock,
-                     bool poisoned, VariantID vid, RtBarrier concurrent_barrier)
+    void SliceTask::finish_concurrent_allreduce(Color color,
+        uint64_t lamport_clock, bool poisoned, VariantID vid,
+        RtBarrier concurrent_barrier)
     //--------------------------------------------------------------------------
     {
-      concurrent_task_barrier = concurrent_barrier;
+      std::map<Color,ConcurrentGroup>::iterator finder =
+        concurrent_groups.find(color);
+#ifdef DEBUG_LEGION
+      assert(finder != concurrent_groups.end());
+#endif
+      if (concurrent_barrier.exists())
+        finder->second.task_barrier = concurrent_barrier;
       // Swap this vector onto the stack in case the slice task gets deleted
       // out from under us while we are finalizing things
       std::vector<std::pair<PointTask*,ProcessorManager*> > local_copy;
-      local_copy.swap(concurrent_points);
+      local_copy.swap(finder->second.point_tasks);
       for (std::vector<std::pair<PointTask*,ProcessorManager*> >::const_iterator
             it = local_copy.begin(); it != local_copy.end(); it++)
         if (it->first->check_concurrent_variant(vid))
@@ -12130,17 +12303,7 @@ namespace Legion {
       DerezCheck z(derez);
       IndexTask *owner;
       derez.deserialize(owner);
-      size_t num_points;
-      derez.deserialize(num_points);
-      std::vector<std::pair<Processor,DomainPoint> > points(num_points);
-      for (unsigned idx = 0; idx < num_points; idx++)
-      {
-        derez.deserialize(points[idx].first);
-        derez.deserialize(points[idx].second);
-      }
-      RtEvent precondition;
-      derez.deserialize(precondition);
-      owner->rendezvous_concurrent_mapped(precondition, points); 
+      owner->rendezvous_concurrent_mapped(derez);
     }
 
     //--------------------------------------------------------------------------
@@ -12153,6 +12316,8 @@ namespace Legion {
       derez.deserialize(owner);
       SliceTask *slice;
       derez.deserialize(slice);
+      Color color;
+      derez.deserialize(color);
       size_t total_points;
       derez.deserialize(total_points);
       uint64_t lamport_clock;
@@ -12161,7 +12326,7 @@ namespace Legion {
       derez.deserialize(variant);
       bool poisoned;
       derez.deserialize<bool>(poisoned);
-      owner->concurrent_allreduce(slice, source, total_points,
+      owner->concurrent_allreduce(color, slice, source, total_points,
                                   lamport_clock, variant, poisoned);
     }
 
@@ -12173,6 +12338,8 @@ namespace Legion {
       DerezCheck z(derez);
       SliceTask *slice;
       derez.deserialize(slice);
+      Color color;
+      derez.deserialize(color);
       RtBarrier barrier;
       derez.deserialize(barrier);
       uint64_t lamport_clock;
@@ -12181,7 +12348,8 @@ namespace Legion {
       derez.deserialize(vid);
       bool poisoned;
       derez.deserialize<bool>(poisoned);
-      slice->finish_concurrent_allreduce(lamport_clock, poisoned, vid, barrier);
+      slice->finish_concurrent_allreduce(color, lamport_clock, poisoned, 
+                                         vid, barrier);
     }
 
     //--------------------------------------------------------------------------
@@ -12400,6 +12568,15 @@ namespace Legion {
         new_owner->num_unmapped_points = 1;
         new_owner->num_uncompleted_points.store(1);
         new_owner->num_uncommitted_points = 1;
+        if (concurrent_task)
+        {
+          std::map<Color,ConcurrentGroup>::iterator finder =
+            new_owner->concurrent_groups.find(point->concurrent_color);
+#ifdef DEBUG_LEGION
+          assert(finder != new_owner->concurrent_groups.end());
+#endif
+          finder->second.group_points = 1;
+        }
         slices.push_back(new_owner);
       }
       // Always add ourselves as the last point
@@ -12407,6 +12584,15 @@ namespace Legion {
       num_unmapped_points = points.size();
       num_uncompleted_points.store(points.size());
       num_uncommitted_points = points.size();
+      if (concurrent_task)
+      {
+        std::map<Color,ConcurrentGroup>::iterator finder =
+          concurrent_groups.find(points.back()->concurrent_color);
+#ifdef DEBUG_LEGION
+        assert(finder != concurrent_groups.end());
+#endif
+        finder->second.group_points = 1;
+      }
     }
 
     //--------------------------------------------------------------------------

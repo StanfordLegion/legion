@@ -13559,6 +13559,17 @@ namespace Legion {
               runtime->handle_library_sharding_response(derez);
               break;
             }
+          case SEND_LIBRARY_CONCURRENT_REQUEST:
+            {
+              runtime->handle_library_concurrent_request(derez,
+                                                         remote_address_space);
+              break;
+            }
+          case SEND_LIBRARY_CONCURRENT_RESPONSE:
+            {
+              runtime->handle_library_concurrent_response(derez);
+              break;
+            }
           case SEND_LIBRARY_TASK_REQUEST:
             {
               runtime->handle_library_task_request(derez, remote_address_space);
@@ -17003,12 +17014,14 @@ namespace Legion {
         unique_trace_id(get_current_static_trace_id()+unique),
         unique_projection_id(get_current_static_projection_id()+unique),
         unique_sharding_id(get_current_static_sharding_id()+unique),
+        unique_concurrent_id(get_current_static_concurrent_id()+ unique),
         unique_redop_id(get_current_static_reduction_id()+unique),
         unique_serdez_id(get_current_static_serdez_id()+unique),
         unique_library_mapper_id(LEGION_INITIAL_LIBRARY_ID_OFFSET),
         unique_library_trace_id(LEGION_INITIAL_LIBRARY_ID_OFFSET),
         unique_library_projection_id(LEGION_INITIAL_LIBRARY_ID_OFFSET),
         unique_library_sharding_id(LEGION_INITIAL_LIBRARY_ID_OFFSET),
+        unique_library_concurrent_id(LEGION_INITIAL_LIBRARY_ID_OFFSET),
         unique_library_task_id(LEGION_INITIAL_LIBRARY_ID_OFFSET),
         unique_library_redop_id(LEGION_INITIAL_LIBRARY_ID_OFFSET),
         unique_library_serdez_id(LEGION_INITIAL_LIBRARY_ID_OFFSET),
@@ -17235,6 +17248,10 @@ namespace Legion {
           delete it->second;
         }
         sharding_functors.clear();
+        for (std::map<ConcurrentID,ConcurrentColoringFunctor*>::iterator it =
+              concurrent_functors.begin(); it !=
+              concurrent_functors.end(); it++)
+          delete it->second;
       }
       for (std::map<Processor,ProcessorManager*>::const_iterator it = 
             proc_managers.begin(); it != proc_managers.end(); it++)
@@ -17494,6 +17511,22 @@ namespace Legion {
       ReplicateContext::register_attach_detach_sharding_functor(this);
       // Register the universal sharding functor
       ReplicateContext::register_universal_sharding_functor(this);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::register_static_concurrent_functors(void)
+    //--------------------------------------------------------------------------
+    {
+      std::map<ConcurrentID,ConcurrentColoringFunctor*> 
+        &pending_concurrent_functors = get_pending_concurrent_table();
+      for (std::map<ConcurrentID,ConcurrentColoringFunctor*>::const_iterator 
+            it = pending_concurrent_functors.begin(); it !=
+            pending_concurrent_functors.end(); it++)
+        register_concurrent_functor(it->first, it->second, true/*zero check*/,
+                    true/*was preregistered*/, NULL, true/*preregistered*/);
+      register_concurrent_functor(0,
+          new ZeroColoringFunctor(), false/*need check*/,
+          true/*was preregistered*/, NULL, true/*preregistered*/);
     }
 
     //--------------------------------------------------------------------------
@@ -17840,6 +17873,7 @@ namespace Legion {
       register_static_variants();
       register_static_projections();
       register_static_sharding_functors();
+      register_static_concurrent_functors();
       // Has to come after registring the static constraints
       initialize_virtual_manager(next_static_did, virtual_layout_id, mapping);
       // Initialize the mappers
@@ -20128,7 +20162,7 @@ namespace Legion {
       // Check for hitting the library limit
       if (result >= LEGION_INITIAL_LIBRARY_ID_OFFSET)
         REPORT_LEGION_FATAL(LEGION_FATAL_EXCEEDED_LIBRARY_ID_OFFSET,
-            "Dynamic Shardinging IDs exceeded library ID offset %d",
+            "Dynamic Sharding IDs exceeded library ID offset %d",
             LEGION_INITIAL_LIBRARY_ID_OFFSET)
       return result;
     }
@@ -20369,6 +20403,261 @@ namespace Legion {
       }
       else
         return the_runtime->find_sharding_functor(sid, true/*can fail*/);
+    }
+
+    //--------------------------------------------------------------------------
+    ConcurrentID Runtime::generate_dynamic_concurrent_id(
+                                                     bool check_context/*true*/)
+    //--------------------------------------------------------------------------
+    {
+      if (check_context && (implicit_context != NULL))
+        return implicit_context->generate_dynamic_concurrent_id();
+      ConcurrentID result = unique_concurrent_id.fetch_add(runtime_stride);
+      // Check for hitting the library limit
+      if (result >= LEGION_INITIAL_LIBRARY_ID_OFFSET)
+        REPORT_LEGION_FATAL(LEGION_FATAL_EXCEEDED_LIBRARY_ID_OFFSET,
+            "Dynamic Concurrent Coloring IDs exceeded library ID offset %d",
+            LEGION_INITIAL_LIBRARY_ID_OFFSET)
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    ConcurrentID Runtime::generate_library_concurrent_ids(const char *name,
+                                                          size_t cnt)
+    //--------------------------------------------------------------------------
+    {
+      // Easy case if the user asks for no IDs
+      if (cnt == 0)
+        return LEGION_AUTO_GENERATE_ID;
+      const std::string library_name(name); 
+      // Take the lock in read only mode and see if we can find the result
+      RtEvent wait_on;
+      {
+        AutoLock l_lock(library_lock,1,false/*exclusive*/);
+        std::map<std::string,LibraryConcurrentIDs>::const_iterator finder = 
+          library_concurrent_ids.find(library_name);
+        if (finder != library_concurrent_ids.end())
+        {
+          // First do a check to see if the counts match
+          if (finder->second.count != cnt)
+            REPORT_LEGION_ERROR(ERROR_LIBRARY_COUNT_MISMATCH,
+               "ConcurrentID generation counts %zd and %zd differ for "
+               "library %s", finder->second.count, cnt, name)
+          if (finder->second.result_set)
+            return finder->second.result;
+          // This should never happen unless we are on a node other than 0
+#ifdef DEBUG_LEGION
+          assert(address_space > 0);
+#endif
+          wait_on = finder->second.ready;
+        }
+      }
+      RtUserEvent request_event;
+      if (!wait_on.exists())
+      {
+        AutoLock l_lock(library_lock);
+        // Check to make sure we didn't lose the race
+        std::map<std::string,LibraryConcurrentIDs>::const_iterator finder = 
+          library_concurrent_ids.find(library_name);
+        if (finder != library_concurrent_ids.end())
+        {
+          // First do a check to see if the counts match
+          if (finder->second.count != cnt)
+            REPORT_LEGION_ERROR(ERROR_LIBRARY_COUNT_MISMATCH,
+               "ConcurrentID generation counts %zd and %zd differ for "
+               "library %s", finder->second.count, cnt, name)
+          if (finder->second.result_set)
+            return finder->second.result;
+          // This should never happen unless we are on a node other than 0
+#ifdef DEBUG_LEGION
+          assert(address_space > 0);
+#endif
+          wait_on = finder->second.ready;
+        }
+        if (!wait_on.exists())
+        {
+          LibraryConcurrentIDs &record = library_concurrent_ids[library_name];
+          record.count = cnt;
+          if (address_space == 0)
+          {
+            // We're going to make the result
+            record.result = unique_library_concurrent_id;
+            unique_library_concurrent_id += cnt;
+#ifdef DEBUG_LEGION
+            assert(unique_library_concurrent_id > record.result);
+#endif
+            record.result_set = true;
+            return record.result;
+          }
+          else
+          {
+            // We're going to request the result
+            request_event = Runtime::create_rt_user_event();
+            record.ready = request_event;
+            record.result_set = false;
+            wait_on = request_event;
+          }
+        }
+      }
+      // Should only get here on nodes other than 0
+#ifdef DEBUG_LEGION
+      assert(address_space > 0);
+      assert(wait_on.exists());
+#endif
+      if (request_event.exists())
+      {
+        // Include the null terminator in length
+        const size_t string_length = strlen(name) + 1;
+        // Send the request to node 0 for the result
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize<size_t>(string_length);
+          rez.serialize(name, string_length);
+          rez.serialize<size_t>(cnt);
+          rez.serialize(request_event);
+        }
+        send_library_concurrent_request(0/*target*/, rez);
+      }
+      wait_on.wait();
+      // When we wake up we should be able to find the result
+      AutoLock l_lock(library_lock,1,false/*exclusive*/);
+      std::map<std::string,LibraryConcurrentIDs>::const_iterator finder =
+          library_concurrent_ids.find(library_name);
+#ifdef DEBUG_LEGION
+      assert(finder != library_concurrent_ids.end());
+      assert(finder->second.result_set);
+#endif
+      return finder->second.result;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ ConcurrentID& Runtime::get_current_static_concurrent_id(void)
+    //--------------------------------------------------------------------------
+    {
+      static ConcurrentID current_concurrent_id =
+        LEGION_MAX_APPLICATION_CONCURRENT_ID;
+      return current_concurrent_id;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ ConcurrentID Runtime::generate_static_concurrent_id(void)
+    //--------------------------------------------------------------------------
+    {
+      ConcurrentID &next_concurrent = get_current_static_concurrent_id();
+      if (runtime_started)
+        REPORT_LEGION_ERROR(ERROR_STATIC_CALL_POST_RUNTIME_START,
+            "Illegal call to 'generate_static_concurrent_colorin_id' after "
+            "the runtime has been started!")
+      return next_concurrent++;
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::register_concurrent_functor(ConcurrentID cid,
+                                            ConcurrentColoringFunctor *functor,
+                                            bool need_zero_check,
+                                            bool silence_warnings,
+                                            const char *warning_string,
+                                            bool preregistered)
+    //--------------------------------------------------------------------------
+    {
+      if (cid == UINT_MAX)
+        REPORT_LEGION_ERROR(ERROR_RESERVED_CONCURRENT_ID,
+            "ERROR: %d (UINT_MAX) is a reserved concurrent ID.", UINT_MAX)
+      else if (need_zero_check && (cid == 0))
+        REPORT_LEGION_ERROR(ERROR_RESERVED_CONCURRENT_ID,
+                            "ERROR: ConcurrentID zero is reserved.")
+      if (!preregistered && !inside_registration_callback && !silence_warnings)
+        REPORT_LEGION_WARNING(LEGION_WARNING_NON_CALLBACK_REGISTRATION,
+            "Concurrent coloring functor %d was dynamically registered outside "
+            "of a registration callback invocation. In the near future this "
+            "will become an error in order to support task subprocesses. Please"
+            " use 'perform_registration_callback' to generate a callback where "
+            "it will be safe to perform dynamic registrations.", cid)
+      if (!silence_warnings && (total_address_spaces > 1) &&
+          (inside_registration_callback != GLOBAL_REGISTRATION_CALLBACK))
+        REPORT_LEGION_WARNING(LEGION_WARNING_DYNAMIC_CONCURRENT_REG,
+                        "WARNING: Concurrent coloring functor %d is being "
+                        "dynamically registered for a multi-node run with %d "
+                        "nodes. It is currently the responsibility of the "
+                        "application to ensure that this concurrent coloring "
+                        "functor is registered on all nodes where it will be "
+                        "required. Warning string: %s", cid, 
+                        total_address_spaces,
+                        (warning_string == NULL) ? "" : warning_string)
+      AutoLock s_lock(concurrent_lock);
+      std::map<ConcurrentID,ConcurrentColoringFunctor*>::const_iterator finder = 
+        concurrent_functors.find(cid);
+      if (finder != concurrent_functors.end())
+        REPORT_LEGION_ERROR(ERROR_DUPLICATE_CONCURRENT_ID,
+                      "ERROR: ConcurrentID %d has already been used by another "
+                      "concurrent coloring functor.", cid)
+      concurrent_functors[cid] = functor;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void Runtime::preregister_concurrent_functor(ConcurrentID cid,
+                                             ConcurrentColoringFunctor *functor)
+    //--------------------------------------------------------------------------
+    {
+      if (runtime_started)
+        REPORT_LEGION_ERROR(ERROR_STATIC_CALL_POST_RUNTIME_START,
+                      "Illegal call to 'preregister_concurrent_colorin_functor'"
+                      " after the runtime has started!");
+      if (cid == UINT_MAX)
+        REPORT_LEGION_ERROR(ERROR_RESERVED_CONCURRENT_ID,
+            "ERROR: %d (UINT_MAX) is a reserved concurrent ID.", UINT_MAX)
+      else if (cid == 0)
+        REPORT_LEGION_ERROR(ERROR_RESERVED_CONCURRENT_ID,
+                            "ERROR: ConcurrentID zero is reserved.")
+      std::map<ConcurrentID,ConcurrentColoringFunctor*> 
+        &pending_concurrent_functors = get_pending_concurrent_table();
+      std::map<ConcurrentID,ConcurrentColoringFunctor*>::const_iterator finder =
+        pending_concurrent_functors.find(cid);
+      if (finder != pending_concurrent_functors.end())
+        REPORT_LEGION_ERROR(ERROR_DUPLICATE_CONCURRENT_ID,
+                      "ERROR: ConcurrentID %d has already been used by another "
+                      "concurrent coloring functor.", cid)
+      pending_concurrent_functors[cid] = functor;
+    }
+
+    //--------------------------------------------------------------------------
+    ConcurrentColoringFunctor* Runtime::find_concurrent_coloring_functor(
+                                                ConcurrentID cid, bool can_fail)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock c_lock(concurrent_lock,1,false/*exclusive*/);
+      std::map<ConcurrentID,ConcurrentColoringFunctor*>::const_iterator finder =
+        concurrent_functors.find(cid);
+      if (finder == concurrent_functors.end())
+      {
+        if (can_fail)
+          return NULL;
+        REPORT_LEGION_ERROR(ERROR_INVALID_CONCURRENT_ID,
+          "Unable to find registered concurrent coloring functor ID %d.", cid)
+      }
+      return finder->second;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ ConcurrentColoringFunctor* Runtime::get_concurrent_functor(
+                                                               ConcurrentID cid)
+    //--------------------------------------------------------------------------
+    {
+      if (!runtime_started)
+      {
+        std::map<ConcurrentID,ConcurrentColoringFunctor*> 
+          &pending_concurrent_functors = get_pending_concurrent_table();
+        std::map<ConcurrentID,ConcurrentColoringFunctor*>::const_iterator
+          finder = pending_concurrent_functors.find(cid);
+        if (finder == pending_concurrent_functors.end())
+          return NULL;
+        else
+          return finder->second;
+      }
+      else
+        return the_runtime->find_concurrent_coloring_functor(cid,
+                                                true/*can fail*/);
     }
 
     //--------------------------------------------------------------------------
@@ -23827,6 +24116,24 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_library_concurrent_request(AddressSpaceID target, 
+                                                  Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(SEND_LIBRARY_CONCURRENT_REQUEST,
+                                                       rez, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_library_concurrent_response(AddressSpaceID target,
+                                                   Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(SEND_LIBRARY_CONCURRENT_RESPONSE,
+                                       rez, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_library_task_request(AddressSpaceID target, 
                                             Serializer &rez)
     //--------------------------------------------------------------------------
@@ -26408,6 +26715,63 @@ namespace Legion {
           library_sharding_ids.find(library_name);
 #ifdef DEBUG_LEGION
         assert(finder != library_sharding_ids.end());
+        assert(!finder->second.result_set);
+        assert(finder->second.ready == done);
+#endif
+        finder->second.result = result;
+        finder->second.result_set = true;
+      }
+      Runtime::trigger_event(done);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_library_concurrent_request(Deserializer &derez,
+                                                    AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      size_t string_length;
+      derez.deserialize(string_length);
+      const char *name = (const char*)derez.get_current_pointer();
+      derez.advance_pointer(string_length);
+      size_t count;
+      derez.deserialize(count);
+      RtUserEvent done;
+      derez.deserialize(done);
+      
+      ConcurrentID result = generate_library_concurrent_ids(name, count);
+      Serializer rez;
+      {
+        RezCheck z2(rez);
+        rez.serialize(string_length);
+        rez.serialize(name, string_length);
+        rez.serialize(result);
+        rez.serialize(done);
+      }
+      send_library_concurrent_response(source, rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_library_concurrent_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      size_t string_length;
+      derez.deserialize(string_length);
+      const char *name = (const char*)derez.get_current_pointer();
+      derez.advance_pointer(string_length);
+      ConcurrentID result;
+      derez.deserialize(result);
+      RtUserEvent done;
+      derez.deserialize(done);
+
+      const std::string library_name(name);
+      {
+        AutoLock l_lock(library_lock); 
+        std::map<std::string,LibraryConcurrentIDs>::iterator finder = 
+          library_concurrent_ids.find(library_name);
+#ifdef DEBUG_LEGION
+        assert(finder != library_concurrent_ids.end());
         assert(!finder->second.result_set);
         assert(finder->second.ready == done);
 #endif
@@ -32013,6 +32377,16 @@ namespace Legion {
     {
       static std::map<ShardingID,ShardingFunctor*> pending_sharding_table;
       return pending_sharding_table;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ std::map<ConcurrentID,ConcurrentColoringFunctor*>&
+                                     Runtime::get_pending_concurrent_table(void)
+    //--------------------------------------------------------------------------
+    {
+      static std::map<ConcurrentID,
+        ConcurrentColoringFunctor*> pending_concurrent_table;
+      return pending_concurrent_table;
     }
 
     //--------------------------------------------------------------------------

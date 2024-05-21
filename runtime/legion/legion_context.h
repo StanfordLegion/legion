@@ -112,6 +112,7 @@ namespace Legion {
       virtual MapperID generate_dynamic_mapper_id(void);
       virtual ProjectionID generate_dynamic_projection_id(void);
       virtual ShardingID generate_dynamic_sharding_id(void);
+      virtual ConcurrentID generate_dynamic_concurrent_id(void);
       virtual TaskID generate_dynamic_task_id(void);
       virtual ReductionOpID generate_dynamic_reduction_id(void);
       virtual CustomSerdezID generate_dynamic_serdez_id(void);
@@ -2204,6 +2205,7 @@ namespace Legion {
         REPLICATE_GENERATE_DYNAMIC_MAPPER_ID,
         REPLICATE_GENERATE_DYNAMIC_PROJECTION_ID,
         REPLICATE_GENERATE_DYNAMIC_SHARDING_ID,
+        REPLICATE_GENERATE_DYNAMIC_CONCURRENT_ID,
         REPLICATE_GENERATE_DYNAMIC_TASK_ID,
         REPLICATE_GENERATE_DYNAMIC_REDUCTION_ID,
         REPLICATE_GENERATE_DYNAMIC_SERDEZ_ID,
@@ -2482,6 +2484,7 @@ namespace Legion {
       virtual MapperID generate_dynamic_mapper_id(void);
       virtual ProjectionID generate_dynamic_projection_id(void);
       virtual ShardingID generate_dynamic_sharding_id(void);
+      virtual ConcurrentID generate_dynamic_concurrent_id(void);
       virtual TaskID generate_dynamic_task_id(void);
       virtual ReductionOpID generate_dynamic_reduction_id(void);
       virtual CustomSerdezID generate_dynamic_serdez_id(void);

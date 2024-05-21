@@ -3864,7 +3864,23 @@ namespace Legion {
           "Invocation of 'ShardingFunctor::invert_points' method "
           "without a user-provided override");
     }
-    
+
+    /////////////////////////////////////////////////////////////
+    // Concurrent Coloring Functor
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ConcurrentColoringFunctor::ConcurrentColoringFunctor(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ConcurrentColoringFunctor::~ConcurrentColoringFunctor(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
     /////////////////////////////////////////////////////////////
     // Legion Runtime 
     /////////////////////////////////////////////////////////////
@@ -6669,6 +6685,55 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return Internal::Runtime::get_sharding_functor(sid);
+    }
+
+    //--------------------------------------------------------------------------
+    ConcurrentID Runtime::generate_dynamic_concurrent_id(void)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->generate_dynamic_concurrent_id();
+    }
+
+    //--------------------------------------------------------------------------
+    ConcurrentID Runtime::generate_library_concurrent_ids(const char *name,
+                                                          size_t count)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->generate_library_concurrent_ids(name, count);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ ConcurrentID Runtime::generate_static_concurrent_id(void)
+    //--------------------------------------------------------------------------
+    {
+      return Internal::Runtime::generate_static_concurrent_id();
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::register_concurrent_coloring_functor(ConcurrentID cid,
+                                            ConcurrentColoringFunctor *functor,
+                                            bool silence_warnings,
+                                            const char *warning_string)
+    //--------------------------------------------------------------------------
+    {
+      runtime->register_concurrent_functor(cid, functor, silence_warnings,
+                                           warning_string);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void Runtime::preregister_concurrent_coloring_functor(
+                           ConcurrentID cid, ConcurrentColoringFunctor *functor)
+    //--------------------------------------------------------------------------
+    {
+      Internal::Runtime::preregister_concurrent_functor(cid, functor);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ ConcurrentColoringFunctor* 
+                      Runtime::get_concurrent_coloring_functor(ConcurrentID cid)
+    //--------------------------------------------------------------------------
+    {
+      return Internal::Runtime::get_concurrent_functor(cid);
     }
 
     //--------------------------------------------------------------------------

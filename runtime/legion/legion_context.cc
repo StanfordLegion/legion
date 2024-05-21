@@ -256,6 +256,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ConcurrentID TaskContext::generate_dynamic_concurrent_id(void)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->generate_dynamic_concurrent_id(false/*check context*/);
+    }
+
+    //--------------------------------------------------------------------------
     TaskID TaskContext::generate_dynamic_task_id(void)
     //--------------------------------------------------------------------------
     {
@@ -12886,6 +12893,40 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ConcurrentID ReplicateContext::generate_dynamic_concurrent_id(void)
+    //--------------------------------------------------------------------------
+    {
+      // If we're inside a registration callback we don't care
+      if (inside_registration_callback)
+        return TaskContext::generate_dynamic_concurrent_id();
+      for (int i = 0; runtime->safe_control_replication && (i < 2) &&
+            ((current_trace == NULL) || !current_trace->is_fixed()); i++)
+      {
+        HashVerifier hasher(this, runtime->safe_control_replication > 1, i > 0);
+        hasher.hash(REPLICATE_GENERATE_DYNAMIC_CONCURRENT_ID, __func__);
+        if (hasher.verify(__func__))
+          break;
+      }
+      // Otherwise have one shard make it and broadcast it to everyone else
+      ConcurrentID result;
+      if (owner_shard->shard_id == dynamic_id_allocator_shard)
+      {
+        ValueBroadcast<ConcurrentID> collective(this, COLLECTIVE_LOC_68);
+        result = runtime->generate_dynamic_sharding_id(false/*check context*/);
+        collective.broadcast(result);
+      }
+      else
+      {
+        ValueBroadcast<ConcurrentID> collective(this,dynamic_id_allocator_shard,
+                                                COLLECTIVE_LOC_68);
+        result = collective.get_value();
+      }
+      if (++dynamic_id_allocator_shard == total_shards)
+        dynamic_id_allocator_shard = 0;
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     TaskID ReplicateContext::generate_dynamic_task_id(void)
     //--------------------------------------------------------------------------
     {
@@ -13287,6 +13328,8 @@ namespace Legion {
             launcher.argument_map.impl->freeze(this, hasher.provenance),
                         "argument_map");
       hash_predicate(hasher, launcher.predicate, "predicate");
+      hasher.hash(launcher.concurrent, "concurrent");
+      hasher.hash(launcher.concurrent_functor, "concurrent_functor");
       hasher.hash(launcher.must_parallelism, "must_parallelism");
       hasher.hash(launcher.map_id, "map_id");
       hasher.hash(launcher.tag, "tag");

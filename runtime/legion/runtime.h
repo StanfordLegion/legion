@@ -2463,6 +2463,22 @@ namespace Legion {
     };
 
     /**
+     * \class ZeroColoringFunctor
+     * The zero coloring functor maps all points to color zero
+     * so that they all have to be concurrent with each other
+     */
+    class ZeroColoringFunctor : public ConcurrentColoringFunctor {
+    public:
+      ZeroColoringFunctor(void) { }
+      virtual ~ZeroColoringFunctor(void) { }
+    public:
+      virtual Color color(const DomainPoint &point, 
+                          const Domain &index_domain) override { return 0; }
+      virtual bool supports_max_color(void) override { return true; }
+      virtual Color max_color(const Domain &index_domain) override { return 0; }
+    };
+
+    /**
      * \class Runtime 
      * This is the actual implementation of the Legion runtime functionality
      * that implements the underlying interface for the Runtime 
@@ -2719,6 +2735,7 @@ namespace Legion {
           uint64_t &next_static_did, LayoutConstraintID &virtual_layout_id);
       void register_static_projections(void);
       void register_static_sharding_functors(void);
+      void register_static_concurrent_functors(void);
       void initialize_legion_prof(const LegionConfiguration &config);
       void log_local_machine(void) const;
       void initialize_mappers(void);
@@ -2977,6 +2994,23 @@ namespace Legion {
       ShardingFunctor* find_sharding_functor(ShardingID sid, 
                                              bool can_fail = false);
       static ShardingFunctor* get_sharding_functor(ShardingID sid);
+    public:
+      ConcurrentID generate_dynamic_concurrent_id(bool check_context = true);
+      ConcurrentID generate_library_concurrent_ids(const char *name,
+                                                   size_t count);
+      static ConcurrentID& get_current_static_concurrent_id(void);
+      static ConcurrentID generate_static_concurrent_id(void);
+      void register_concurrent_functor(ConcurrentID cid,
+                                     ConcurrentColoringFunctor *functor,
+                                     bool need_zero_check = true,
+                                     bool silence_warnings= false,
+                                     const char *warning_string = NULL,
+                                     bool preregistered = false);
+      static void preregister_concurrent_functor(ConcurrentID cid,
+                                     ConcurrentColoringFunctor *functor);
+      ConcurrentColoringFunctor* find_concurrent_coloring_functor(
+                                     ConcurrentID cid, bool can_fail = false);
+      static ConcurrentColoringFunctor* get_concurrent_functor(ConcurrentID id);
     public:
       void register_reduction(ReductionOpID redop_id,
                               ReductionOp *redop,
@@ -3498,6 +3532,10 @@ namespace Legion {
       void send_library_sharding_request(AddressSpaceID target,Serializer &rez);
       void send_library_sharding_response(AddressSpaceID target, 
                                           Serializer &rez);
+      void send_library_concurrent_request(AddressSpaceID target,
+                                           Serializer &rez);
+      void send_library_concurrent_response(AddressSpaceID target,
+                                            Serializer &rez);
       void send_library_task_request(AddressSpaceID target, Serializer &rez);
       void send_library_task_response(AddressSpaceID target, Serializer &rez);
       void send_library_redop_request(AddressSpaceID target, Serializer &rez);
@@ -3889,6 +3927,9 @@ namespace Legion {
       void handle_library_sharding_request(Deserializer &derez,
                                            AddressSpaceID source);
       void handle_library_sharding_response(Deserializer &derez);
+      void handle_library_concurrent_request(Deserializer &derez,
+                                             AddressSpaceID source);
+      void handle_library_concurrent_response(Deserializer &derez);
       void handle_library_task_request(Deserializer &derez,
                                        AddressSpaceID source);
       void handle_library_task_response(Deserializer &derez);
@@ -4380,6 +4421,7 @@ namespace Legion {
       std::atomic<unsigned> unique_trace_id;
       std::atomic<unsigned> unique_projection_id;
       std::atomic<unsigned> unique_sharding_id;
+      std::atomic<unsigned> unique_concurrent_id;
       std::atomic<unsigned> unique_redop_id;
       std::atomic<unsigned> unique_serdez_id;
     protected:
@@ -4426,6 +4468,17 @@ namespace Legion {
       std::map<std::string,LibraryShardingIDs> library_sharding_ids;
       // This is only valid on node 0
       unsigned unique_library_sharding_id;
+    protected:
+      struct LibraryConcurrentIDs {
+      public:
+        ConcurrentID result;
+        size_t count;
+        RtEvent ready;
+        bool result_set;
+      };
+      std::map<std::string,LibraryConcurrentIDs> library_concurrent_ids;
+      // This is only valid on node 0
+      unsigned unique_library_concurrent_id;
     protected:
       struct LibraryTaskIDs {
       public:
@@ -4499,6 +4552,9 @@ namespace Legion {
     protected:
       mutable LocalLock sharding_lock;
       std::map<ShardingID,ShardingFunctor*> sharding_functors;
+    protected:
+      mutable LocalLock concurrent_lock;
+      std::map<ConcurrentID,ConcurrentColoringFunctor*> concurrent_functors;
     protected:
       mutable LocalLock group_lock;
       LegionMap<uint64_t,LegionDeque<ProcessorGroupInfo>,
@@ -4781,6 +4837,8 @@ namespace Legion {
                                 get_pending_projection_table(void);
       static std::map<ShardingID,ShardingFunctor*>&
                                 get_pending_sharding_table(void);
+      static std::map<ConcurrentID,ConcurrentColoringFunctor*>&
+                                get_pending_concurrent_table(void);
       static std::vector<LegionHandshake>&
                                 get_pending_handshake_table(void);
       struct RegistrationCallback {
@@ -6268,6 +6326,10 @@ namespace Legion {
         case SEND_LIBRARY_SHARDING_REQUEST:
           break;
         case SEND_LIBRARY_SHARDING_RESPONSE:
+          break;
+        case SEND_LIBRARY_CONCURRENT_REQUEST:
+          break;
+        case SEND_LIBRARY_CONCURRENT_RESPONSE:
           break;
         case SEND_LIBRARY_TASK_REQUEST:
           break;

@@ -4953,7 +4953,14 @@ namespace Legion {
       virtual ~ConcurrentColoringFunctor(void);
     public:
       virtual Color color(const DomainPoint &index_point,
-                          const Domain &index_domain);
+                          const Domain &index_domain) = 0;
+    public:
+      // You can optionally implement these methods for better performance,
+      // but they are not required for correctness. If 'has_max_color' 
+      // returns 'true' then you must implement the 'max_color' method.
+      virtual bool supports_max_color(void) { return false; }
+      virtual Color max_color(const Domain &index_domain)
+        { return std::numeric_limits<Color>::max(); }
     };
 
     /**
@@ -9124,8 +9131,8 @@ namespace Legion {
        * @param cid ID of the concurrent coloring functor to find
        * @return a pointer to the concurrent coloring functor if it exists
        */
-      static ConcurrentColoringFunctor* get_concurrent_color_functor(
-                                                    ConcurrentID cid);
+      static ConcurrentColoringFunctor* get_concurrent_coloring_functor(
+                                                        ConcurrentID cid);
     public:
       /**
        * Dynamically generate a unique reduction ID for use across the machine

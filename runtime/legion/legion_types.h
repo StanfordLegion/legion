@@ -1012,6 +1012,8 @@ namespace Legion {
       SEND_LIBRARY_PROJECTION_RESPONSE,
       SEND_LIBRARY_SHARDING_REQUEST,
       SEND_LIBRARY_SHARDING_RESPONSE,
+      SEND_LIBRARY_CONCURRENT_REQUEST,
+      SEND_LIBRARY_CONCURRENT_RESPONSE,
       SEND_LIBRARY_TASK_REQUEST,
       SEND_LIBRARY_TASK_RESPONSE,
       SEND_LIBRARY_REDOP_REQUEST,
@@ -1341,6 +1343,8 @@ namespace Legion {
         "Send Library Projection Response",                           \
         "Send Library Sharding Request",                              \
         "Send Library Sharding Response",                             \
+        "Send Library Concurrent Request",                            \
+        "Send Library Concurrent Response",                           \
         "Send Library Task Request",                                  \
         "Send Library Task Response",                                 \
         "Send Library Redop Request",                                 \
@@ -1964,7 +1968,7 @@ namespace Legion {
       COLLECTIVE_LOC_65 = 65,
       COLLECTIVE_LOC_66 = 66,
       COLLECTIVE_LOC_67 = 67,
-      //COLLECTIVE_LOC_68 = 68,
+      COLLECTIVE_LOC_68 = 68,
       //COLLECTIVE_LOC_69 = 69,
       COLLECTIVE_LOC_70 = 70,
       COLLECTIVE_LOC_71 = 71,
@@ -2334,6 +2338,7 @@ namespace Legion {
     class ShardRendezvous;
     class ProjectionTreeExchange;
     class TimeoutMatchExchange;
+    class ConcurrentAllreduce;
 
     // Nasty global variable for TLS support of figuring out
     // our context implicitly

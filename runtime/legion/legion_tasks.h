@@ -620,6 +620,33 @@ namespace Legion {
       public:
         std::map<DomainPoint,DistributedID> handles;
       };
+      struct ConcurrentGroup {
+        ConcurrentGroup(void)
+          : exchange(NULL), group_points(0), color_points(0),
+            lamport_clock(0), variant(0), poisoned(false) { }
+        union ConcurrentPrecondition {
+          ConcurrentPrecondition(void)
+            : interpreted(RtUserEvent::NO_RT_USER_EVENT) { }
+          RtUserEvent interpreted;
+          RtBarrier traced;
+        } precondition;
+        std::vector<RtEvent> preconditions;
+        std::map<Processor,DomainPoint> processors;
+        std::vector<std::pair<PointTask*,ProcessorManager*> > point_tasks;
+        std::vector<std::pair<SliceTask*,AddressSpace> > slice_tasks;
+        std::vector<ShardID> shards;
+        ConcurrentAllreduce *exchange;
+        size_t group_points; // local points for this shard
+        size_t color_points; // global points across all shards
+        // This barrier is only here to help with a bug that currently
+        // exists in the CUDA driver between collective kernel launches
+        // and invocations of cudaMalloc, once it is fixed then we should
+        // be able to remove it
+        RtBarrier task_barrier;
+        uint64_t lamport_clock;
+        VariantID variant;
+        bool poisoned;
+      };
     public:
       MultiTask(Runtime *rt);
       virtual ~MultiTask(void);
@@ -629,8 +656,7 @@ namespace Legion {
       void trigger_slices(void);
       void clone_multi_from(MultiTask *task, IndexSpace is, Processor p,
                             bool recurse, bool stealable); 
-      inline RtBarrier get_concurrent_task_barrier(void) const
-        { return concurrent_task_barrier; }
+      RtBarrier get_concurrent_task_barrier(Color color) const;
     public:
       virtual void activate(void);
       virtual void deactivate(bool free = true);
@@ -720,17 +746,9 @@ namespace Legion {
       // on the same node but moved it to a different processor
       bool first_mapping;
     protected:
-      union ConcurrentPrecondition {
-        ConcurrentPrecondition(void) 
-          : interpreted(RtUserEvent::NO_RT_USER_EVENT) { }
-        RtUserEvent interpreted;
-        RtBarrier traced;
-      } concurrent_precondition;
-      std::vector<RtEvent> concurrent_preconditions;
-      std::map<Processor,DomainPoint> concurrent_processors;
-      uint64_t concurrent_lamport_clock;
-      VariantID concurrent_variant;
-      bool concurrent_poisoned;
+      ConcurrentID concurrent_functor;
+      unsigned concurrent_points; 
+      std::map<Color,ConcurrentGroup> concurrent_groups;
     protected:
       bool children_commit_invoked;
     protected:
@@ -738,13 +756,7 @@ namespace Legion {
       void *predicate_false_result;
       size_t predicate_false_size;
     protected:
-      std::map<DomainPoint,RtEvent> intra_space_dependences;
-    protected:
-      // This barrier is only here to help with a bug that currently
-      // exists in the CUDA driver between collective kernel launches
-      // and invocations of cudaMalloc, once it is fixed then we should
-      // be able to remove it
-      RtBarrier concurrent_task_barrier;
+      std::map<DomainPoint,RtEvent> intra_space_dependences; 
     };
 
     /**
@@ -991,6 +1003,7 @@ namespace Legion {
     protected:
       std::map<AddressSpaceID,RemoteTask*> remote_instances;
     protected:
+      Color concurrent_color;
       RtBarrier concurrent_task_barrier;
       // This is the concurrent precondition event that we need to signal
       // when the preconditions are met for this point task. For non-traced
@@ -1268,12 +1281,14 @@ namespace Legion {
       // create a different type of future map for the task
       virtual FutureMap create_future_map(TaskContext *ctx,
                     IndexSpace launch_space, IndexSpace shard_space);
+      void rendezvous_concurrent_mapped(const DomainPoint &point, 
+          Processor target, Color color, RtEvent precondition); 
+      void rendezvous_concurrent_mapped(Deserializer &derez);
       // Also virtual for control replication override
-      virtual void rendezvous_concurrent_mapped(
-          const DomainPoint &point, Processor target, RtEvent precondition);
-      virtual void rendezvous_concurrent_mapped(RtEvent precondition,
-          std::vector<std::pair<Processor,DomainPoint> > &targets);
-      virtual void concurrent_allreduce(SliceTask *slice,
+      virtual void finalize_concurrent_mapped(void);
+      virtual void initialize_concurrent_group(Color color, size_t local,
+          size_t global, RtBarrier barrier, const std::vector<ShardID> &shards);
+      virtual void concurrent_allreduce(Color color, SliceTask *slice,
           AddressSpaceID slice_space, size_t points, uint64_t lamport_clock,
           VariantID vid, bool poisoned);
     public:
@@ -1320,7 +1335,6 @@ namespace Legion {
       unsigned mapped_points;
       unsigned completed_points;
       unsigned committed_points;
-      unsigned concurrent_points;
     protected:
       std::vector<SliceTask*> origin_mapped_slices;
       std::vector<FutureInstance*> reduction_instances;
@@ -1355,8 +1369,6 @@ namespace Legion {
       void check_point_requirements(
           const std::map<DomainPoint,std::vector<LogicalRegion> > &point_reqs);
 #endif
-    protected:
-      std::vector<std::pair<SliceTask*,AddressSpace> > concurrent_slices;
     };
 
     /**
@@ -1440,11 +1452,11 @@ namespace Legion {
       void record_output_registered(RtEvent registered,
                                     std::set<RtEvent> &applied_events);
       void rendezvous_concurrent_mapped(const DomainPoint &point,
-          Processor target, RtEvent precondition);
+          Processor target, Color color, RtEvent precondition);
       void concurrent_allreduce(PointTask *point, ProcessorManager *manager,
           uint64_t lamport_clock, VariantID vid, bool poisoned);
-      void finish_concurrent_allreduce(uint64_t lamport_clock, bool poisoned,
-                            VariantID vid, RtBarrier concurrent_task_barrier);
+      void finish_concurrent_allreduce(Color color, uint64_t lamport_clock,
+          bool poisoned, VariantID vid, RtBarrier concurrent_task_barrier);
     protected:
       void trigger_slice_mapped(void);
       void forward_completion_effects(void);
@@ -1534,8 +1546,6 @@ namespace Legion {
       std::set<RtEvent> commit_preconditions;
     protected:
       std::set<std::pair<DomainPoint,DomainPoint> > unique_intra_space_deps;
-    protected:
-      std::vector<std::pair<PointTask*,ProcessorManager*> > concurrent_points; 
     };
 
   }; // namespace Internal
