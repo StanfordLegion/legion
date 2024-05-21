@@ -1876,6 +1876,8 @@ namespace Legion {
       virtual void deactivate(bool free = true);
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
+      virtual bool invalidates_physical_trace_template(bool &exec_fence) const
+        { return false; }
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_mapping(void);
@@ -1953,6 +1955,8 @@ namespace Legion {
         { return deletion_requirements.size(); }
       virtual const RegionRequirement &get_requirement(unsigned idx) const
         { return deletion_requirements[idx]; }
+      virtual bool invalidates_physical_trace_template(bool &exec_fence) const
+        { return false; }
     protected:
       void create_deletion_requirements(void);
       void log_deletion_requirements(void);
@@ -2526,6 +2530,8 @@ namespace Legion {
         { assert(false); return *(new VersionInfo()); }
       virtual const RegionRequirement& get_requirement(unsigned idx) const
         { assert(false); return *(new RegionRequirement()); }
+      virtual bool invalidates_physical_trace_template(bool &exec_fence) const
+        { return false; }
     public:
       // From MemoizableOp
       virtual void trigger_replay(void);
@@ -2566,6 +2572,8 @@ namespace Legion {
       virtual void deactivate(bool free = true);
       const char* get_logging_name(void) const;
       OpKind get_operation_kind(void) const;
+      virtual bool invalidates_physical_trace_template(bool &exec_fence) const
+        { return false; }
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_mapping(void);
@@ -2597,6 +2605,8 @@ namespace Legion {
       virtual void deactivate(bool free = true);
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
+      virtual bool invalidates_physical_trace_template(bool &exec_fence) const
+        { return false; }
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
@@ -2627,6 +2637,8 @@ namespace Legion {
       virtual void deactivate(bool free = true);
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
+      virtual bool invalidates_physical_trace_template(bool &exec_fence) const
+        { return false; }
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
@@ -2658,6 +2670,8 @@ namespace Legion {
       virtual void deactivate(bool free = true);
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
+      virtual bool invalidates_physical_trace_template(bool &exec_fence) const
+        { return false; }
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
@@ -3216,6 +3230,8 @@ namespace Legion {
       virtual void deactivate(bool free = true);
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
+      virtual bool invalidates_physical_trace_template(bool &exec_fence) const
+        { return false; }
     protected:
       virtual void populate_sources(const FutureMap &fm,
           IndexPartition pid, bool need_all_futures);
@@ -3474,6 +3490,8 @@ namespace Legion {
       virtual void trigger_commit(void);
       virtual IndexSpaceNode* get_shard_points(void) const 
         { return launch_space; }
+      virtual bool invalidates_physical_trace_template(bool &exec_fence) const
+        { return false; }
     public:
       void activate_dependent(void);
       void deactivate_dependent(void);
