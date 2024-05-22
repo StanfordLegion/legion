@@ -150,7 +150,8 @@ namespace Legion {
       virtual void set_context_index(uint64_t index);
       virtual bool has_parent_task(void) const;
       virtual const Task* get_parent_task(void) const;
-      virtual const std::string& get_provenance_string(bool human = true) const;
+      virtual const std::string_view& get_provenance_string(
+          bool human = true) const;
       virtual const char* get_task_name(void) const;
       virtual bool is_reducing_future(void) const;
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
@@ -337,7 +338,8 @@ namespace Legion {
       virtual int get_depth(void) const;
       virtual bool has_parent_task(void) const;
       virtual const Task* get_parent_task(void) const;
-      virtual const std::string& get_provenance_string(bool human = true) const;
+      virtual const std::string_view& get_provenance_string(
+          bool human = true) const;
       virtual const char* get_task_name(void) const;
       virtual Domain get_slice_domain(void) const;
       virtual ShardID get_shard_id(void) const;

@@ -106,6 +106,12 @@ cache: &global_cache
 .cxx17_normal: &cxx17_normal
   CXXFLAGS: ""
   CXX_STANDARD: "17"
+.cxx17_external: &cxx17_external
+  CXXFLAGS: ""
+  CXX_STANDARD: "17"
+  # Extra flags here for external projects that don't enforce C++ versions correctly
+  CXX_FLAGS: "-std=c++17"
+  NVCC_FLAGS: "-std=c++17"
 .cxx17_hardened: &cxx17_hardened
   CXXFLAGS: "-D_FORTIFY_SOURCE=2 -D_GLIBCXX_ASSERTIONS"
   CXX_STANDARD: "17"
@@ -942,7 +948,7 @@ gcc9_cxx17_debug_external1:
 gcc9_cxx17_debug_maxdim4_external2:
   <<: [*linux_compute, *image_2004, *external_tests]
   variables:
-    <<: [*gcc9, *terra12, *debug, *cxx17_normal, *maxdim4, *openmp, *hdf5, *external2, *short, *libdw]
+    <<: [*gcc9, *terra12, *debug, *cxx17_external, *maxdim4, *openmp, *hdf5, *external2, *short, *libdw]
 gcc9_cxx17_debug_private:
   <<: [*linux_compute, *image_2004, *external_tests]
   variables:
@@ -1124,7 +1130,7 @@ clang12_cxx17_debug_external1:
 clang12_cxx12_debug_maxdim4_external2:
   <<: [*linux_compute, *image_2004, *external_tests]
   variables:
-    <<: [*clang12, *terra12, *debug, *cxx17_normal, *maxdim4, *openmp, *hdf5, *external2, *libdw]
+    <<: [*clang12, *terra12, *debug, *cxx17_external, *maxdim4, *openmp, *hdf5, *external2, *libdw]
 clang12_cxx17_debug_private:
   <<: [*linux_compute, *image_2004, *external_tests]
   variables:
@@ -1272,7 +1278,7 @@ nvidia_cuda124_clang12_cxx20_release_cmake_cuda_regent:
 nvidia_cuda124_gcc11_cxx17_debug_maxdim4_external2:
   <<: [*nvidia, *external_tests]
   variables:
-    <<: [*gcc11, *llvm12, *debug, *cxx17_normal, *cuda124, *maxdim4, *openmp, *hdf5, *external2, *short]
+    <<: [*gcc11, *llvm12, *debug, *cxx17_external, *cuda124, *maxdim4, *openmp, *hdf5, *external2, *short]
 
 # CUDA+GASNet tests:
 nvidia_cuda121_gcc11_cxx17_debug_gasnetex_mpi_cmake_cuda_legion:

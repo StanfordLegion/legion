@@ -358,6 +358,19 @@ def size_pretty(size: Optional[int]) -> str:
         size_pretty = 'Unknown'
     return size_pretty
 
+class Provenance(object):
+    __slots__ = ['string', 'color']
+
+    @typecheck
+    def __init__(self, string: str) -> None:
+        self.string = string
+        self.color: Optional[str] = None
+
+    @typecheck
+    def assign_color(self, color: str) -> None:
+        assert self.color is None
+        self.color = color
+
 class PathRange(object):
     __slots__ = ['start', 'stop', 'path']
     @typecheck
@@ -472,7 +485,7 @@ class HasInitiationDependencies(Dependencies):
         """
         Add the dependencies from the initiation to us
         """
-        if isinstance(self, (MetaTask, MapperCall, Copy, Fill, DepPart, Instance, RuntimeCall)):
+        if isinstance(self, (MetaTask, MapperCall, Copy, Fill, DepPart, Instance, RuntimeCall, ApplicationCall)):
             unique_tuple = self.get_unique_tuple()
             if self.initiation in state.operations:
                 op = state.find_or_create_op(self.initiation)
@@ -1344,7 +1357,7 @@ class Base(ABC):
         self.level_ready = level
 
 # Operations rendering on Processors
-# Including: Operation, Task, MetaTask, ProfTask, MapperCall, and RuntimeCall
+# Including: Operation, Task, MetaTask, ProfTask, MapperCall, RuntimeCall, and ApplicationCall
 class ProcOperation(Base):
     __slots__ = ["proc", "fevent"]
 
@@ -1885,6 +1898,61 @@ class RuntimeCall(HasWaiters, ProcOperation, TimeRange, HasNoDependencies): # ty
     @typecheck
     def __repr__(self) -> str:
         return str(self.kind)
+
+class ApplicationCall(HasWaiters, ProcOperation, TimeRange, HasNoDependencies): # type: ignore
+    __slots__ = HasWaiters._abstract_slots + TimeRange._abstract_slots + HasNoDependencies._abstract_slots + ['kind']
+    
+    @typecheck
+    def __init__(self, provenance: Provenance, 
+                 start: int, stop: int, fevent: int
+    ) -> None:
+        HasWaiters.__init__(self)
+        ProcOperation.__init__(self, fevent)
+        TimeRange.__init__(self, None, None, start, stop)
+        HasNoDependencies.__init__(self)
+        self.provenance = provenance
+
+    @typecheck
+    def get_color(self) -> str:
+        assert self.provenance.color is not None
+        return self.provenance.color
+
+    @typeassert(base_level=int, max_levels=int,
+                max_levels_ready=int, level=int,
+                level_ready=Optional[int])
+    def emit_tsv(self, 
+                 tsv_file: "_csv._writer", 
+                 base_level: int, 
+                 max_levels: int,
+                 max_levels_ready: int,
+                 level: int, 
+                 level_ready: Optional[int]
+    ) -> None:
+        self.ready = self.start
+        return HasWaiters.emit_tsv(self, tsv_file, base_level, max_levels,
+                                   max_levels_ready,
+                                   level,
+                                   level_ready, None, None)
+
+    @typecheck
+    def active_time(self) -> int:
+        return self.total_time()
+
+    @typecheck
+    def application_time(self) -> int:
+        return self.total_time()
+
+    @typecheck
+    def meta_time(self) -> int:
+        return 0
+
+    @typecheck
+    def mapper_time(self) -> int:
+        return 0
+
+    @typecheck
+    def __repr__(self) -> str:
+        return self.provenance.string
 
 class UserMarker(ProcOperation, TimeRange, HasNoDependencies):
     __slots__ = TimeRange._abstract_slots + HasNoDependencies._abstract_slots + ['name', 'color', 'is_task']
@@ -2647,7 +2715,7 @@ class TimePoint(object):
     @typecheck
     def __init__(self, 
                  time: int, 
-                 thing: Union[Task, ProfTask, MetaTask, Instance, DepPart, MapperCall, Copy, Fill, RuntimeCall], 
+                 thing: Union[Task, ProfTask, MetaTask, Instance, DepPart, MapperCall, Copy, Fill, RuntimeCall, ApplicationCall], 
                  first: bool, 
                  secondary_sort_key: int
     ) -> None:
@@ -2692,7 +2760,7 @@ class Processor(object):
         self.kind = kind
         self.visible = True
         self.last_time: Optional[int] = None
-        self.tasks: List[Union[MetaTask, ProfTask, Task, MapperCall, RuntimeCall]] = list()
+        self.tasks: List[Union[MetaTask, ProfTask, Task, MapperCall, RuntimeCall, ApplicationCall]] = list()
         self.max_levels = 0
         self.max_levels_ready = 0
         self.time_points: List[TimePoint] = list()
@@ -2711,7 +2779,7 @@ class Processor(object):
         self.fevents[task.fevent] = task
 
     @typecheck
-    def add_call(self, call: Union[MapperCall, RuntimeCall]) -> None:
+    def add_call(self, call: Union[MapperCall, RuntimeCall, ApplicationCall]) -> None:
         call.proc = self
         self.tasks.append(call)
 
@@ -2720,7 +2788,7 @@ class Processor(object):
                         start: Optional[int],
                         stop: Optional[int]
     ) -> None:
-        trimmed_tasks: List[Union[MetaTask, ProfTask, Task, MapperCall, RuntimeCall]] = list()
+        trimmed_tasks: List[Union[MetaTask, ProfTask, Task, MapperCall, RuntimeCall, ApplicationCall]] = list()
         for task in self.tasks:
             if task.trim_time_range(start, stop):
                 trimmed_tasks.append(task)
@@ -2728,9 +2796,9 @@ class Processor(object):
 
     @typecheck
     def sort_calls_and_waits(self) -> None:
-        subcalls: Dict[Union[MetaTask, ProfTask, Task], List[Union[MapperCall, RuntimeCall]]] = dict()
+        subcalls: Dict[Union[MetaTask, ProfTask, Task], List[Union[MapperCall, RuntimeCall, ApplicationCall]]] = dict()
         for call in self.tasks:
-            if isinstance(call,MapperCall) or isinstance(call,RuntimeCall):
+            if isinstance(call,MapperCall) or isinstance(call,RuntimeCall) or isinstance(call,ApplicationCall):
                 task = self.fevents.get(call.fevent)
                 assert task is not None
                 if task not in subcalls:
@@ -3563,10 +3631,10 @@ class State(object):
         'task_kinds', 'variants', 'meta_variants', 'op_kinds', 'operations',
         'prof_uid_map', 'multi_tasks', 'first_times', 'last_times', 'last_time', 
         'minimum_call_threshold', 'mapper_call_kinds', 'mapper_calls', 'runtime_call_kinds', 
-        'runtime_calls', 'instances', 'index_spaces', 'partitions', 'logical_regions', 
+        'instances', 'index_spaces', 'partitions', 'logical_regions', 
         'field_spaces', 'fields', 'has_spy_data', 'spy_state', 'callbacks', 'copy_map',
         'fill_map', 'visible_nodes', 'always_parsed_callbacks', 'current_node_id', 'version',
-        'hostname', 'host_id', 'process_id', 'calibration_err',
+        'hostname', 'host_id', 'process_id', 'calibration_err', 'provenances',
     ]
     def __init__(self, call_threshold: int) -> None:
         self.max_dim = 3
@@ -3581,7 +3649,7 @@ class State(object):
         self.meta_variants: Dict[int, Variant] = {}
         self.op_kinds: Dict[int, str] = {}
         self.operations: Dict[int, Operation] = {}
-        self.prof_uid_map: Dict[int, Union[MapperCall, Operation, Task, MetaTask, Copy, Fill, DepPart, UserMarker, Instance, RuntimeCall]] = {}
+        self.prof_uid_map: Dict[int, Union[MapperCall, Operation, Task, MetaTask, Copy, Fill, DepPart, UserMarker, Instance, RuntimeCall, ApplicationCall]] = {}
         self.multi_tasks: Dict[int, Any] = {} # type: ignore # TODO: check if used
         self.first_times: Dict[int, Any] = {} # type: ignore # TODO: check if used
         self.last_times: Dict[int, Any] = {} # type: ignore # TODO: check if used
@@ -3590,7 +3658,6 @@ class State(object):
         self.mapper_call_kinds: Dict[int, MapperCallKind] = {}
         self.mapper_calls: Dict[int, MapperCall] = {}
         self.runtime_call_kinds: Dict[int, RuntimeCallKind] = {}
-        self.runtime_calls: Dict[int, RuntimeCall] = {}
         self.instances: Dict[int, Instance] = {}
         self.index_spaces: Dict[int, IndexSpace] = {}
         self.partitions: Dict[int, Partition] = {}
@@ -3599,6 +3666,7 @@ class State(object):
         self.fields: Dict[Tuple[int, int], Field] = {}
         self.copy_map: Dict[int, Copy] = {}
         self.fill_map: Dict[int, Fill] = {}
+        self.provenances: Dict[int, Provenance] = {}
         self.has_spy_data = False
         self.spy_state: Optional[legion_spy.State] = None
         self.visible_nodes: Optional[List[int]] = None
@@ -3612,6 +3680,7 @@ class State(object):
             "RuntimeConfig": self.log_runtime_config,
             "MachineDesc": self.log_machine_desc,
             "ZeroTime": self.log_zero_time,
+            "Provenance": self.log_provenance,
             "ProcDesc": self.log_proc_desc,
             "MemDesc": self.log_mem_desc,
             "TaskKind": self.log_kind,
@@ -3632,6 +3701,7 @@ class State(object):
             "PartitionInfo": self.log_partition_info,
             "MapperCallInfo": self.log_mapper_call_info,
             "RuntimeCallInfo": self.log_runtime_call_info,
+            "ApplicationCallInfo": self.log_application_call_info,
             "ProfTaskInfo": self.log_proftask_info,
             "ProcMDesc": self.log_mem_proc_affinity_desc,
             "IndexSpacePointDesc": self.log_index_space_point_desc,
@@ -3700,6 +3770,12 @@ class State(object):
     @typecheck
     def log_zero_time(self, zero_time: int) -> None:
         self.zero_time = zero_time
+
+    # Provenance
+    @typecheck
+    def log_provenance(self, provenance: int, prov: str) -> None:
+        assert provenance not in self.provenances
+        self.provenances[provenance] = Provenance(prov)
 
     # IndexSpacePointDesc
     @typecheck
@@ -4035,7 +4111,7 @@ class State(object):
 
     # OperationInstance
     @typecheck
-    def log_operation(self, op_id: int, parent_id: int, kind: int, provenance: str) -> None:
+    def log_operation(self, op_id: int, parent_id: int, kind: int, provenance: int) -> None:
         op = self.find_or_create_op(op_id)
         if parent_id == UINT_MAX:
             op.parent_id = None
@@ -4046,10 +4122,10 @@ class State(object):
         op.kind = self.op_kinds[kind]
         # the provenance is passed as "" by binary serializer
         #   when it is not set
-        if provenance == "":
+        if provenance == 0:
             op.provenance = None
         else:
-            op.provenance = provenance
+            op.provenance = self.provenances[provenance].string
 
     # MultiTask
     @typecheck
@@ -4170,6 +4246,18 @@ class State(object):
             call = RuntimeCall(self.runtime_call_kinds[kind], start, stop, fevent)
             proc = self.find_or_create_processor(proc_id)
             proc.add_call(call)
+
+    # ApplicationCallInfo
+    @typecheck
+    def log_application_call_info(self, provenance: int, proc_id: int,
+                                  start: int, stop: int, fevent: int
+    ) -> None:
+        assert start <= stop
+        # We don't filter application calls at all right now since we don't
+        # want to confuse users, they should always see everything they asked for
+        call = ApplicationCall(self.provenances[provenance], start, stop, fevent)
+        proc = self.find_or_create_processor(proc_id)
+        proc.add_call(call)
 
     # ProfTaskInfo
     @typecheck
@@ -4711,7 +4799,8 @@ class State(object):
         # Subtract out some colors for which we have special colors
         num_colors = len(self.variants) + len(self.meta_variants) + \
                      len(self.op_kinds) + \
-                     len(self.mapper_call_kinds) + len(self.runtime_call_kinds)
+                     len(self.mapper_call_kinds) + len(self.runtime_call_kinds) + \
+                     len(self.provenances)
         # Use a LFSR to randomize these colors
         lsfr = LFSR(num_colors)
         num_colors = lsfr.get_max_value()
@@ -4743,6 +4832,8 @@ class State(object):
             mapper_call_kind.assign_color(color_helper(lsfr.get_next(), num_colors))
         for runtime_call_kind in sorted(self.runtime_call_kinds.values(), key=lambda k: k.runtime_call_kind):
             runtime_call_kind.assign_color(color_helper(lsfr.get_next(), num_colors))
+        for pid,provenance in sorted(self.provenances.items(), key=lambda k: k[0]):
+            provenance.assign_color(color_helper(lsfr.get_next(), num_colors))
 
     @typecheck
     def show_copy_matrix(self, output_prefix: str) -> None:
