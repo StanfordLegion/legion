@@ -1125,6 +1125,8 @@ namespace Legion {
                               bool silence_warnings, const char *warning_string)
     //--------------------------------------------------------------------------
     {
+      // Make sure that we've subscribed
+      const RtEvent subscribed = subscribe();
       Processor proc = implicit_context->get_executing_processor();
       // A heuristic to help out applications that are unsure of themselves
       if (memkind == Memory::NO_MEMKIND)
@@ -1150,6 +1152,8 @@ namespace Legion {
       }
       // Wait to make sure that the future is complete first
       wait(silence_warnings, warning_string);
+      // Do this wait after everything is ready for pipelining of communication
+      subscribed.wait();
       ApEvent inst_ready;
       FutureInstance *instance = find_or_create_instance(memory,
           (implicit_context != NULL) ? implicit_context->owner_task : NULL,
