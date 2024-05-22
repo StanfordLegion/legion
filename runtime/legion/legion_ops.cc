@@ -1747,7 +1747,6 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void Operation::report_uninitialized_usage(const unsigned index,
-                                 LogicalRegion handle, const RegionUsage usage, 
                                  const char *field_string, RtUserEvent reported)
     //--------------------------------------------------------------------------
     {
@@ -1762,8 +1761,9 @@ namespace Legion {
         prov_ss << ", provenance: " << provenance->human_str();
         prov_str = prov_ss.str();
       }
+      const RegionRequirement &req = get_requirement(index); 
       // Read-only or reduction usage of uninitialized data is always an error
-      if (IS_READ_ONLY(usage))
+      if (IS_READ_ONLY(req))
         REPORT_LEGION_ERROR(ERROR_UNINITIALIZED_USE,
                       "Region requirement %d of operation %s (UID %lld%s) in "
                       "parent task %s (UID %lld) is using uninitialized data "
@@ -1771,10 +1771,10 @@ namespace Legion {
                       "read-only privileges", index, get_logging_name(), 
                       get_unique_op_id(), prov_str.c_str(),
                       parent_ctx->get_task_name(), parent_ctx->get_unique_id(),
-                      field_string, handle.get_index_space().get_id(),
-                      handle.get_field_space().get_id(), 
-                      handle.get_tree_id())
-      else if (IS_REDUCE(usage))
+                      field_string, req.region.get_index_space().get_id(),
+                      req.region.get_field_space().get_id(), 
+                      req.region.get_tree_id())
+      else if (IS_REDUCE(req))
         REPORT_LEGION_ERROR(ERROR_UNINITIALIZED_USE,
                       "Region requirement %d of operation %s (UID %lld%s) in "
                       "parent task %s (UID %lld) is using uninitialized data "
@@ -1782,19 +1782,20 @@ namespace Legion {
                       "reduction privileges", index, get_logging_name(), 
                       get_unique_op_id(), prov_str.c_str(),
                       parent_ctx->get_task_name(), parent_ctx->get_unique_id(),
-                      field_string, handle.get_index_space().get_id(),
-                      handle.get_field_space().get_id(), 
-                      handle.get_tree_id())
-      else // Read-write usage is just a warning
+                      field_string, req.region.get_index_space().get_id(),
+                      req.region.get_field_space().get_id(), 
+                      req.region.get_tree_id())
+      // Read-write usage is just a warning
+      else if ((req.flags & LEGION_SUPPRESS_WARNINGS_FLAG) == 0)
         REPORT_LEGION_WARNING(LEGION_WARNING_UNINITIALIZED_USE,
                       "Region requirement %d of operation %s (UID %lld%s) in "
                       "parent task %s (UID %lld) is using uninitialized data "
                       "for field(s) %s of logical region (%d,%d,%d)", index, 
                       get_logging_name(), get_unique_op_id(), prov_str.c_str(),
                       parent_ctx->get_task_name(), parent_ctx->get_unique_id(),
-                      field_string, handle.get_index_space().get_id(),
-                      handle.get_field_space().get_id(), 
-                      handle.get_tree_id())
+                      field_string, req.region.get_index_space().get_id(),
+                      req.region.get_field_space().get_id(), 
+                      req.region.get_tree_id())
       Runtime::trigger_event(reported);
     }
 
@@ -22788,8 +22789,6 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RemoteOp::report_uninitialized_usage(const unsigned index,
-                                              LogicalRegion handle,
-                                              const RegionUsage usage,
                                               const char *field_string,
                                               RtUserEvent reported)
     //--------------------------------------------------------------------------
@@ -22797,8 +22796,7 @@ namespace Legion {
       if (source == runtime->address_space)
       {
         // If we're on the owner node we can just do this
-        remote_ptr->report_uninitialized_usage(index, handle, usage,
-                                               field_string, reported);
+        remote_ptr->report_uninitialized_usage(index, field_string, reported);
         return;
       }
       // Ship this back to the owner node to report it there 
@@ -22808,8 +22806,6 @@ namespace Legion {
         rez.serialize(remote_ptr);
         rez.serialize(reported);
         rez.serialize(index);
-        rez.serialize(handle);
-        rez.serialize(usage);
         // Include the null terminator character
         const size_t length = strlen(field_string) + 1;
         rez.serialize<size_t>(length);
@@ -23019,16 +23015,11 @@ namespace Legion {
       derez.deserialize(reported);
       unsigned index;
       derez.deserialize(index);
-      LogicalRegion handle;
-      derez.deserialize(handle);
-      RegionUsage usage;
-      derez.deserialize(usage);
       size_t length;
       derez.deserialize(length);
       const char *field_string = (const char*)derez.get_current_pointer();
       derez.advance_pointer(length);
-      op->report_uninitialized_usage(index, handle, usage, 
-                                     field_string, reported);
+      op->report_uninitialized_usage(index, field_string, reported);
     }
 
     //--------------------------------------------------------------------------
