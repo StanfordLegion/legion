@@ -489,9 +489,7 @@ impl ContainerEntry for ProcEntry {
             ProcEntryKind::RuntimeCall(kind) => {
                 state.runtime_call_kinds.get(&kind).unwrap().name.clone()
             }
-            ProcEntryKind::ApplicationCall(prov) => {
-                state.provenances.get(&prov).unwrap().name.clone()
-            }
+            ProcEntryKind::ApplicationCall(prov) => state.find_provenance(prov).unwrap().to_owned(),
             ProcEntryKind::GPUKernel(task_id, variant_id) => {
                 let task_name = &state.task_kinds.get(&task_id).unwrap().name;
                 let variant_name = &state.variants.get(&(task_id, variant_id)).unwrap().name;
@@ -2858,10 +2856,8 @@ impl State {
     }
 
     fn find_op_provenance(&self, op_id: OpID) -> Option<&str> {
-        self.find_op(op_id).and_then(|op| {
-            op.provenance
-                .and_then(|pid| self.provenances.get(&pid).map(|p| p.name.as_str()))
-        })
+        self.find_op(op_id)
+            .and_then(|op| op.provenance.and_then(|pid| self.find_provenance(pid)))
     }
 
     pub fn get_op_color(&self, op_id: OpID) -> Color {
@@ -2886,6 +2882,10 @@ impl State {
         }
 
         Color::BLACK
+    }
+
+    pub fn find_provenance(&self, pid: ProvenanceID) -> Option<&str> {
+        self.provenances.get(&pid).map(|p| p.name.as_str())
     }
 
     fn create_task(
