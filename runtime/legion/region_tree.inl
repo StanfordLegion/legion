@@ -1122,7 +1122,6 @@ namespace Legion {
       // We can unpack the index space here directly
       derez.deserialize(this->realm_index_space);
       this->tight_index_space = this->realm_index_space;
-      derez.deserialize(this->realm_index_space_ready);
       // Request that we make the valid index space valid
       this->tight_index_space_ready = 
         RtEvent(this->realm_index_space.make_valid());
@@ -1186,6 +1185,8 @@ namespace Legion {
           if (tight_index_space_ready.exists() && 
               !tight_index_space_ready.has_triggered())
             tight_index_space_ready.wait();
+          // In case the reason we had a tight event was because we are remote
+          is_index_space_tight.store(true);
           space = tight_index_space;
           return ApEvent::NO_AP_EVENT;
         }
@@ -1710,9 +1711,8 @@ namespace Legion {
       rez.serialize(this->origin_expr); // unpacked by IndexSpaceOperation
       // unpacked by IndexSpaceOperationT
       Realm::IndexSpace<DIM,T> temp;
-      ApEvent ready = this->get_realm_index_space(temp, true/*tight*/);
+      this->get_realm_index_space(temp, true/*tight*/);
       rez.serialize(temp);
-      rez.serialize(ready);
     }
 
     //--------------------------------------------------------------------------
@@ -1861,9 +1861,8 @@ namespace Legion {
       rez.serialize(this->origin_expr); // unpacked by IndexSpaceOperation
       // unpacked by IndexSpaceOperationT
       Realm::IndexSpace<DIM,T> temp;
-      ApEvent ready = this->get_realm_index_space(temp, true/*tight*/);
+      this->get_realm_index_space(temp, true/*tight*/);
       rez.serialize(temp);
-      rez.serialize(ready);
     }
 
     //--------------------------------------------------------------------------
@@ -2020,9 +2019,8 @@ namespace Legion {
       rez.serialize(this->origin_expr); // unpacked by IndexSpaceOperation
       // unpacked by IndexSpaceOperationT
       Realm::IndexSpace<DIM,T> temp;
-      ApEvent ready = this->get_realm_index_space(temp, true/*tight*/);
+      this->get_realm_index_space(temp, true/*tight*/);
       rez.serialize(temp);
-      rez.serialize(ready);
     }
 
     //--------------------------------------------------------------------------
@@ -2167,9 +2165,8 @@ namespace Legion {
       rez.serialize(this->origin_expr); // unpacked by IndexSpaceOperation
       // unpacked by IndexSpaceOperationT
       Realm::IndexSpace<DIM,T> temp;
-      ApEvent ready = this->get_realm_index_space(temp, true/*tight*/);
+      this->get_realm_index_space(temp, true/*tight*/);
       rez.serialize(temp);
-      rez.serialize(ready);
     }
 
     //--------------------------------------------------------------------------
