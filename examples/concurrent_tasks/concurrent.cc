@@ -37,29 +37,36 @@ void top_level_task(const Task *task,
                     const std::vector<PhysicalRegion> &regions,
                     Context ctx, Runtime *runtime)
 {
+  unsigned num_iters = 3;
   unsigned num_points = 4;
   // See how many points to run
   const InputArgs &command_args = Runtime::get_input_args();
   for (int i = 1; i < command_args.argc; i++) {
     if (!strcmp(command_args.argv[i],"-p"))
       num_points = atoi(command_args.argv[++i]);
+    if (!strcmp(command_args.argv[i],"-i"))
+      num_iters = atoi(command_args.argv[++i]);
   }
+  assert(num_iters > 0);
   assert(num_points > 0);
   // Need even number of points for partial concurrent index tasks
   assert((num_points % 2) == 0);
   printf("Running concurrent for %d points...\n", num_points);
 
-  // Create some phase barriers for each number of points
-  std::vector<PhaseBarrier> barriers(num_points);
-  for (unsigned idx = 0; idx < num_points; idx++)
-    barriers[idx] = runtime->create_phase_barrier(ctx, idx+1);
+  // Create some phase barriers, make sure we have separate phase barriers
+  // for each iteration since Realm phase barriers have the unfortunate
+  // property of needing to trigger in order and we don't want that aliasing
+  std::vector<PhaseBarrier> barriers(num_points*num_iters);
+  for (unsigned iter = 0; iter < num_iters; iter++)
+    for (unsigned idx = 0; idx < num_points; idx++)
+      barriers[iter*num_points+idx] = runtime->create_phase_barrier(ctx, idx+1);
 
   IndexTaskLauncher concurrent_launcher;
   concurrent_launcher.task_id = CONCURRENT_TASK_ID;
   concurrent_launcher.concurrent = true;
 
   // Do three iterations so we can replay the trace twice
-  for (unsigned iter = 0; iter < 3; iter++)
+  for (unsigned iter = 0; iter < num_iters; iter++)
   {
     runtime->begin_trace(ctx, 0);
     // Launch an index space for each number of points from 1 up to num_points 
@@ -68,10 +75,9 @@ void top_level_task(const Task *task,
       // Update the argument and the launch bounds
       concurrent_launcher.launch_domain = Rect<1>(0,idx);
       concurrent_launcher.global_arg = 
-        UntypedBuffer(&barriers[idx], sizeof(barriers[idx]));
+        UntypedBuffer(&barriers[iter*num_points+idx], 
+            sizeof(barriers[iter*num_points+idx]));
       runtime->execute_index_space(ctx, concurrent_launcher);
-      // Advance the phase barrier at this level too
-      barriers[idx] = runtime->advance_phase_barrier(ctx, barriers[idx]);
     }
     runtime->end_trace(ctx, 0);
   }
@@ -83,8 +89,10 @@ void top_level_task(const Task *task,
   // index space task launch. All point tasks assigned the same color
   // will be guaranteed to execute concurrently. Point tasks assigned
   // different colors will have no such guarantee.
-  std::vector<PhaseBarrier> divmod_barriers(num_points);
+  std::vector<PhaseBarrier> divmod_barriers(num_iters*num_points);
   // Each barrier will synchronize two points in the launch
+  // Make sure all barriers are independent to avoid issues with 
+  // Realm phase barriers needing to trigger in order
   for (unsigned idx = 0; idx < divmod_barriers.size(); idx++)
     divmod_barriers[idx] = runtime->create_phase_barrier(ctx, 2);
 
@@ -93,35 +101,32 @@ void top_level_task(const Task *task,
   div_concurrent_launcher.launch_domain = Rect<1>(0,num_points-1);
   div_concurrent_launcher.concurrent = true;
   div_concurrent_launcher.concurrent_functor = DIV_CONCURRENT_FUNCTOR;
-  div_concurrent_launcher.global_arg =
-    UntypedBuffer(&divmod_barriers.front(),
-        (divmod_barriers.size()/2)*sizeof(PhaseBarrier));
 
   IndexTaskLauncher mod_concurrent_launcher;
   mod_concurrent_launcher.task_id = MOD_CONCURRENT_TASK_ID;
   mod_concurrent_launcher.launch_domain = Rect<1>(0,num_points-1);
   mod_concurrent_launcher.concurrent = true;
   mod_concurrent_launcher.concurrent_functor = MOD_CONCURRENT_FUNCTOR;
-  mod_concurrent_launcher.global_arg =
-    UntypedBuffer(&divmod_barriers[divmod_barriers.size()/2],
-        (divmod_barriers.size()/2)*sizeof(PhaseBarrier));
 
   for (unsigned iter = 0; iter < 3; iter++)
   {
     runtime->begin_trace(ctx, 1);
+    div_concurrent_launcher.global_arg =
+      UntypedBuffer(&divmod_barriers[iter*num_points],
+          (num_points/2)*sizeof(PhaseBarrier));
     runtime->execute_index_space(ctx, div_concurrent_launcher);
+    mod_concurrent_launcher.global_arg =
+      UntypedBuffer(&divmod_barriers[iter*num_points+num_points/2],
+          (num_points/2)*sizeof(PhaseBarrier));
     runtime->execute_index_space(ctx, mod_concurrent_launcher);
     runtime->end_trace(ctx, 1);
-    // Advance the barriers
-    for (unsigned idx = 0; idx < divmod_barriers.size(); idx++)
-      divmod_barriers[idx] = runtime->advance_phase_barrier(ctx, divmod_barriers[idx]);
   }
 
   // Execution fence to make sure we're done
   runtime->issue_execution_fence(ctx).wait();
 
   // Now we can delete our phase barriers
-  for (unsigned idx = 0; idx < num_points; idx++)
+  for (unsigned idx = 0; idx < barriers.size(); idx++)
     runtime->destroy_phase_barrier(ctx, barriers[idx]);
   for (unsigned idx = 0; idx < divmod_barriers.size(); idx++)
     runtime->destroy_phase_barrier(ctx, divmod_barriers[idx]);
