@@ -10607,7 +10607,14 @@ namespace Legion {
           }
           continue;
         }
+#ifdef LEGION_SPY
+        RegionUsage usage(req);
+        // Make this read-write so that users always pick up a dependence on it
+        // for Legion Spy. This is a major hack and should be removed eventually
+        usage.privilege = LEGION_READ_WRITE;
+#else
         const RegionUsage usage(req);
+#endif
 #ifdef DEBUG_LEGION
         assert(req.handle_type == LEGION_SINGULAR_PROJECTION);
 #endif
@@ -10657,6 +10664,10 @@ namespace Legion {
                  view_mask, region_node->row_source, context_uid, idx1);
           }
         }
+#ifdef LEGION_SPY
+        // Restore the normal usage now that we've added the users
+        usage = RegionUsage(req); 
+#endif
         // Only need to do the initialization if we're the logical owner
         if (eq_set->is_logical_owner())
         {
