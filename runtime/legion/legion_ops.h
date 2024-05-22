@@ -1955,8 +1955,6 @@ namespace Legion {
         { return deletion_requirements.size(); }
       virtual const RegionRequirement &get_requirement(unsigned idx) const
         { return deletion_requirements[idx]; }
-      virtual bool invalidates_physical_trace_template(bool &exec_fence) const
-        { return false; }
     protected:
       void create_deletion_requirements(void);
       void log_deletion_requirements(void);
