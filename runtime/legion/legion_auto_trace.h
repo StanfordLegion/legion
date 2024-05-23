@@ -597,13 +597,12 @@ namespace Legion {
       // InnerContext::begin_trace ->
       // AutoTracingContext::add_to_dependence_queue -> HERE.
       switch (op->get_operation_kind()) {
-        case Operation::OpKind::TRACE_BEGIN_OP_KIND: // Fallthrough.
-        case Operation::OpKind::TRACE_REPLAY_OP_KIND: {
+        case Operation::OpKind::TRACE_BEGIN_OP_KIND: {
           assert(op->get_trace()->tid >= LEGION_MAX_APPLICATION_TRACE_ID && op->get_trace()->tid < LEGION_INITIAL_LIBRARY_ID_OFFSET);
           assert(dependences == NULL);
           return this->issue_operation(op);
         }
-        case Operation::OpKind::TRACE_CAPTURE_OP_KIND: // Fallthrough.
+        case Operation::OpKind::TRACE_RECURRENT_OP_KIND: // Fallthrough.
         case Operation::OpKind::TRACE_COMPLETE_OP_KIND: {
           assert(dependences == NULL);
           return this->issue_operation(op);
