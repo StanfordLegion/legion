@@ -8,6 +8,7 @@ variables:
   CONDUIT: "ofi"
 
   CXXFLAGS: "-std=c++17"
+  HIPCC_FLAGS: "-std=c++17"
   CXX_STANDARD: "17"
 
   OLCF_SERVICE_ACCOUNT: ums036_auser

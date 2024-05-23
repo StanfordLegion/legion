@@ -919,6 +919,8 @@ endif
 ifneq ($(findstring -std=c++,$(CC_FLAGS)),-std=c++)
 ifeq ($(shell $(CXX) -x c++ -std=c++17 -c /dev/null -o /dev/null 2> /dev/null; echo $$?),0)
 CC_FLAGS += -std=c++17
+NVCC_FLAGS += -std=c++17
+HIPCC_FLAGS += -std=c++17
 else ifeq ($(findstring nvc++,$(CXX)),nvc++)
 # nvc++ is dumb and will give you an error if you try to overwrite the input
 # file with the output file and so errors at our test above, we'll just assume
