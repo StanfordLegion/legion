@@ -4724,6 +4724,11 @@ namespace Legion {
 #ifdef LEGION_SPY
         LegionSpy::log_operation_events(unique_op_id, start_condition,
                                         single_task_termination);
+        // Chain the start event into the unmap events so Legion Spy can see
+        // the dependences between child operations the start of the parent task
+        for (unsigned idx = 0; idx < unmap_events.size(); idx++)
+          if (unmap_events[idx].exists())
+            LegionSpy::log_event_dependence(start_condition, unmap_events[idx]);
 #endif
         LegionSpy::log_task_priority(unique_op_id, task_priority);
         for (unsigned idx = 0; idx < futures.size(); idx++)
@@ -4803,13 +4808,6 @@ namespace Legion {
           MispredicationTaskArgs::TASK_ID].fetch_sub(1);
 #endif
       }
-#ifdef LEGION_SPY
-      // Chain the start event into the unmap events so Legion Spy can see
-      // the dependences between child operations the start of the parent task
-      for (unsigned idx = 0; idx < unmap_events.size(); idx++)
-        if (unmap_events[idx].exists())
-          LegionSpy::log_event_dependence(start_condition, unmap_events[idx]);
-#endif
     }
 
     //--------------------------------------------------------------------------
