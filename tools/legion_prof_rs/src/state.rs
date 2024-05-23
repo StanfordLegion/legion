@@ -2,6 +2,7 @@ use std::cmp::{max, Ordering, Reverse};
 use std::collections::{BTreeMap, BTreeSet, BinaryHeap};
 use std::convert::TryFrom;
 use std::fmt;
+use std::num::NonZeroU64;
 use std::sync::OnceLock;
 
 use derive_more::{Add, From, LowerHex, Sub};
@@ -380,8 +381,9 @@ pub trait ContainerEntry {
 pub enum ProcEntryKind {
     Task(TaskID, VariantID),
     MetaTask(VariantID),
-    MapperCall(MapperCallKindID),
+    MapperCall(MapperID, ProcID, MapperCallKindID),
     RuntimeCall(RuntimeCallKindID),
+    ApplicationCall(ProvenanceID),
     GPUKernel(TaskID, VariantID),
     ProfTask,
 }
@@ -476,7 +478,7 @@ impl ContainerEntry for ProcEntry {
             ProcEntryKind::MetaTask(variant_id) => {
                 state.meta_variants.get(&variant_id).unwrap().name.clone()
             }
-            ProcEntryKind::MapperCall(kind) => {
+            ProcEntryKind::MapperCall(_, _, kind) => {
                 let name = &state.mapper_call_kinds.get(&kind).unwrap().name;
                 if let Some(initiation_op_id) = initiation_op {
                     format!("Mapper Call {} for {}", name, initiation_op_id.0)
@@ -487,6 +489,7 @@ impl ContainerEntry for ProcEntry {
             ProcEntryKind::RuntimeCall(kind) => {
                 state.runtime_call_kinds.get(&kind).unwrap().name.clone()
             }
+            ProcEntryKind::ApplicationCall(prov) => state.find_provenance(prov).unwrap().to_owned(),
             ProcEntryKind::GPUKernel(task_id, variant_id) => {
                 let task_name = &state.task_kinds.get(&task_id).unwrap().name;
                 let variant_name = &state.variants.get(&(task_id, variant_id)).unwrap().name;
@@ -524,11 +527,14 @@ impl ContainerEntry for ProcEntry {
             ProcEntryKind::MetaTask(variant_id) => {
                 state.meta_variants.get(&variant_id).unwrap().color.unwrap()
             }
-            ProcEntryKind::MapperCall(kind) => {
+            ProcEntryKind::MapperCall(_, _, kind) => {
                 state.mapper_call_kinds.get(&kind).unwrap().color.unwrap()
             }
             ProcEntryKind::RuntimeCall(kind) => {
                 state.runtime_call_kinds.get(&kind).unwrap().color.unwrap()
+            }
+            ProcEntryKind::ApplicationCall(prov) => {
+                state.provenances.get(&prov).unwrap().color.unwrap()
             }
             ProcEntryKind::ProfTask => {
                 // FIXME don't hardcode this here
@@ -699,7 +705,9 @@ impl Proc {
         let mut subcalls = BTreeMap::new();
         for (uid, entry) in self.entries.iter() {
             match entry.kind {
-                ProcEntryKind::MapperCall(_) | ProcEntryKind::RuntimeCall(_) => {
+                ProcEntryKind::MapperCall(..)
+                | ProcEntryKind::RuntimeCall(_)
+                | ProcEntryKind::ApplicationCall(_) => {
                     let task_uid = fevents.get(&entry.fevent).unwrap();
                     let call_start = entry.time_range.start.unwrap();
                     let call_stop = entry.time_range.stop.unwrap();
@@ -1334,72 +1342,30 @@ impl ContainerEntry for ChanEntry {
 
 pub type ChanPoint = TimePoint<ProfUID, Timestamp>;
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, TryFromPrimitive)]
-#[repr(u32)]
-pub enum ChanKind {
-    Copy = 0,
-    Fill = 1,
-    Gather = 2,
-    Scatter = 3,
-    DepPart = 4,
-}
-
-impl fmt::Display for ChanKind {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", self)
-    }
-}
-
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct ChanID {
-    pub src: Option<MemID>,
-    pub dst: Option<MemID>,
-    pub channel_kind: ChanKind,
+pub enum ChanID {
+    Copy { src: MemID, dst: MemID },
+    Fill { dst: MemID },
+    Gather { dst: MemID },
+    Scatter { src: MemID },
+    DepPart { node_id: NodeID },
 }
 
 impl ChanID {
     fn new_copy(src: MemID, dst: MemID) -> Self {
-        ChanID {
-            src: Some(src),
-            dst: Some(dst),
-            channel_kind: ChanKind::Copy,
-        }
+        ChanID::Copy { src, dst }
     }
     fn new_fill(dst: MemID) -> Self {
-        ChanID {
-            src: None,
-            dst: Some(dst),
-            channel_kind: ChanKind::Fill,
-        }
+        ChanID::Fill { dst }
     }
     fn new_gather(dst: MemID) -> Self {
-        ChanID {
-            src: None,
-            dst: Some(dst),
-            channel_kind: ChanKind::Gather,
-        }
+        ChanID::Gather { dst }
     }
     fn new_scatter(src: MemID) -> Self {
-        ChanID {
-            src: Some(src),
-            dst: None,
-            channel_kind: ChanKind::Scatter,
-        }
+        ChanID::Scatter { src }
     }
-    fn new_deppart() -> Self {
-        ChanID {
-            src: None,
-            dst: None,
-            channel_kind: ChanKind::DepPart,
-        }
-    }
-
-    pub fn node_id(&self) -> Option<NodeID> {
-        if self.src.is_some() {
-            self.src.map(|src| src.node_id())
-        } else {
-            self.dst.map(|dst| dst.node_id())
-        }
+    fn new_deppart(node_id: NodeID) -> Self {
+        ChanID::DepPart { node_id }
     }
 }
 
@@ -2037,6 +2003,26 @@ impl Color {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+pub struct MapperID(pub u32);
+
+#[derive(Debug)]
+pub struct Mapper {
+    pub mapper_id: MapperID,
+    pub proc_id: ProcID,
+    pub name: String,
+}
+
+impl Mapper {
+    fn new(mapper_id: MapperID, proc_id: ProcID, name: &str) -> Self {
+        Mapper {
+            mapper_id,
+            proc_id,
+            name: name.to_owned(),
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct MapperCallKindID(pub u32);
 
 #[derive(Debug)]
@@ -2074,6 +2060,28 @@ impl RuntimeCallKind {
     fn new(kind: RuntimeCallKindID, name: &str) -> Self {
         RuntimeCallKind {
             kind,
+            name: name.to_owned(),
+            color: None,
+        }
+    }
+    fn set_color(&mut self, color: Color) -> &mut Self {
+        self.color = Some(color);
+        self
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+pub struct ProvenanceID(pub NonZeroU64);
+
+#[derive(Debug)]
+pub struct Provenance {
+    pub name: String,
+    pub color: Option<Color>,
+}
+
+impl Provenance {
+    fn new(name: &str) -> Self {
+        Provenance {
             name: name.to_owned(),
             color: None,
         }
@@ -2334,7 +2342,7 @@ pub struct Operation {
     pub base: Base,
     pub parent_id: Option<OpID>,
     pub kind: Option<OpKindID>,
-    pub provenance: Option<String>,
+    pub provenance: Option<ProvenanceID>,
     pub operation_inst_infos: Vec<OperationInstInfo>,
 }
 
@@ -2358,8 +2366,9 @@ impl Operation {
         self.kind = Some(kind);
         self
     }
-    fn set_provenance(&mut self, provenance: &str) -> &mut Self {
-        self.provenance = Some(provenance.to_owned());
+    fn set_provenance(&mut self, provenance: Option<ProvenanceID>) -> &mut Self {
+        assert!(self.provenance.is_none());
+        self.provenance = provenance;
         self
     }
 }
@@ -2595,7 +2604,6 @@ impl Fill {
     }
 
     fn add_channel(&mut self) {
-        // sanity check
         assert!(self.chan_id.is_none());
         assert!(!self.fill_inst_infos.is_empty());
         let chan_dst = self.fill_inst_infos[0]._dst;
@@ -2738,10 +2746,67 @@ impl ProfUIDAllocator {
 }
 
 #[derive(Debug, Default)]
+pub struct RuntimeConfig {
+    pub debug: bool,
+    pub spy: bool,
+    pub gc: bool,
+    pub inorder: bool,
+    pub safe_mapper: bool,
+    pub safe_runtime: bool,
+    pub safe_ctrlrepl: bool,
+    pub part_checks: bool,
+    pub bounds_checks: bool,
+    pub resilient: bool,
+}
+
+impl RuntimeConfig {
+    pub fn any(&self) -> bool {
+        self.debug
+            || self.spy
+            || self.gc
+            || self.inorder
+            || self.safe_mapper
+            || self.safe_runtime
+            || self.safe_ctrlrepl
+            || self.part_checks
+            || self.bounds_checks
+            || self.resilient
+    }
+}
+
+impl fmt::Display for RuntimeConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut first = true;
+        let mut conf = |cond, name| {
+            if cond {
+                if !first {
+                    write!(f, ", ")?;
+                }
+                write!(f, "{}", name)?;
+                first = false;
+            }
+            Ok(())
+        };
+
+        conf(self.debug, "Debug Mode")?;
+        conf(self.spy, "Legion Spy")?;
+        conf(self.gc, "Legion GC")?;
+        conf(self.inorder, "-lg:inorder")?;
+        conf(self.safe_mapper && !self.debug, "-lg:safe_mapper")?;
+        conf(self.safe_runtime && !self.debug, "Safe Runtime")?;
+        conf(self.safe_ctrlrepl, "-lg:safe_ctrlrepl")?;
+        conf(self.part_checks, "-lg:partcheck")?;
+        conf(self.bounds_checks, "Bounds Checks")?;
+        conf(self.resilient, "Resilience")
+    }
+}
+
+#[derive(Debug, Default)]
 pub struct State {
     prof_uid_allocator: ProfUIDAllocator,
     max_dim: i32,
     pub num_nodes: u32,
+    pub runtime_config: RuntimeConfig,
     pub zero_time: TimestampDelta,
     pub _calibration_err: i64,
     pub procs: BTreeMap<ProcID, Proc>,
@@ -2759,6 +2824,7 @@ pub struct State {
     pub tasks: BTreeMap<OpID, ProcID>,
     pub multi_tasks: BTreeMap<OpID, MultiTask>,
     pub last_time: Timestamp,
+    pub mappers: BTreeMap<(MapperID, ProcID), Mapper>,
     pub mapper_call_kinds: BTreeMap<MapperCallKindID, MapperCallKind>,
     pub runtime_call_kinds: BTreeMap<RuntimeCallKindID, RuntimeCallKind>,
     pub insts: BTreeMap<InstUID, MemID>,
@@ -2770,6 +2836,7 @@ pub struct State {
     pub visible_nodes: Vec<NodeID>,
     pub source_locator: Vec<String>,
     pub fevents: BTreeMap<EventID, ProfUID>,
+    pub provenances: BTreeMap<ProvenanceID, Provenance>,
 }
 
 impl State {
@@ -2789,7 +2856,8 @@ impl State {
     }
 
     fn find_op_provenance(&self, op_id: OpID) -> Option<&str> {
-        self.find_op(op_id).and_then(|op| op.provenance.as_deref())
+        self.find_op(op_id)
+            .and_then(|op| op.provenance.and_then(|pid| self.find_provenance(pid)))
     }
 
     pub fn get_op_color(&self, op_id: OpID) -> Color {
@@ -2814,6 +2882,10 @@ impl State {
         }
 
         Color::BLACK
+    }
+
+    pub fn find_provenance(&self, pid: ProvenanceID) -> Option<&str> {
+        self.provenances.get(&pid).map(|p| p.name.as_str())
     }
 
     fn create_task(
@@ -2894,6 +2966,8 @@ impl State {
 
     fn create_mapper_call(
         &mut self,
+        mapper_id: MapperID,
+        mapper_proc: ProcID,
         kind: MapperCallKindID,
         proc_id: ProcID,
         op_id: OpID,
@@ -2911,7 +2985,7 @@ impl State {
             } else {
                 None
             },
-            ProcEntryKind::MapperCall(kind),
+            ProcEntryKind::MapperCall(mapper_id, mapper_proc, kind),
             time_range,
             fevent,
             fevent,
@@ -2935,6 +3009,30 @@ impl State {
             None,
             None,
             ProcEntryKind::RuntimeCall(kind),
+            time_range,
+            fevent,
+            fevent,
+            &mut self.op_prof_uid,
+            &mut self.prof_uid_proc,
+            &mut self.fevents,
+        )
+    }
+
+    fn create_application_call(
+        &mut self,
+        provenance: ProvenanceID,
+        proc_id: ProcID,
+        time_range: TimeRange,
+        fevent: EventID,
+    ) -> &mut ProcEntry {
+        assert!(self.provenances.contains_key(&provenance));
+        let alloc = &mut self.prof_uid_allocator;
+        let proc = self.procs.get_mut(&proc_id).unwrap();
+        proc.create_proc_entry(
+            Base::new(alloc),
+            None,
+            None,
+            ProcEntryKind::ApplicationCall(provenance),
             time_range,
             fevent,
             fevent,
@@ -3036,6 +3134,7 @@ impl State {
 
     fn create_deppart(
         &mut self,
+        node_id: NodeID,
         op_id: OpID,
         part_op: DepPartKind,
         time_range: TimeRange,
@@ -3043,7 +3142,7 @@ impl State {
     ) {
         self.create_op(op_id);
         let base = Base::new(&mut self.prof_uid_allocator); // FIXME: construct here to avoid mutability conflict
-        let chan = self.find_deppart_chan_mut();
+        let chan = self.find_deppart_chan_mut(node_id);
         chan.add_deppart(DepPart::new(base, part_op, time_range, op_id, creator));
     }
 
@@ -3053,8 +3152,8 @@ impl State {
             .or_insert_with(|| Chan::new(chan_id))
     }
 
-    fn find_deppart_chan_mut(&mut self) -> &mut Chan {
-        let chan_id = ChanID::new_deppart();
+    fn find_deppart_chan_mut(&mut self, node_id: NodeID) -> &mut Chan {
+        let chan_id = ChanID::new_deppart(node_id);
         self.chans
             .entry(chan_id)
             .or_insert_with(|| Chan::new(chan_id))
@@ -3104,6 +3203,7 @@ impl State {
         // immediately linked to their associated memory from the
         // logs. Therefore we defer this process until all records
         // have been processed.
+        let mut node = None;
         let mut insts = BTreeMap::new();
         let mut copies = BTreeMap::new();
         let mut fills = BTreeMap::new();
@@ -3111,12 +3211,14 @@ impl State {
             process_record(
                 record,
                 self,
+                &mut node,
                 &mut insts,
                 &mut copies,
                 &mut fills,
                 call_threshold,
             );
         }
+
         // put inst into memories
         for inst in insts.into_values() {
             if let Some(mem_id) = inst.mem_id {
@@ -3278,7 +3380,8 @@ impl State {
             + self.meta_variants.len()
             + self.op_kinds.len()
             + self.mapper_call_kinds.len()
-            + self.runtime_call_kinds.len()) as u64;
+            + self.runtime_call_kinds.len()
+            + self.provenances.len()) as u64;
         let mut lfsr = LFSR::new(num_colors);
         let num_colors = lfsr.max_value;
         for variant in self.variants.values_mut() {
@@ -3304,6 +3407,9 @@ impl State {
         for kind in self.runtime_call_kinds.values_mut() {
             kind.set_color(compute_color(lfsr.next(), num_colors));
         }
+        for prov in self.provenances.values_mut() {
+            prov.set_color(compute_color(lfsr.next(), num_colors));
+        }
     }
 
     pub fn filter_output(&mut self) {
@@ -3317,39 +3423,44 @@ impl State {
             }
         }
 
-        let mut memid_to_be_deleted: Vec<MemID> = Vec::new();
+        let mut memid_to_be_deleted = BTreeSet::new();
         for (mem_id, mem) in self.mems.iter_mut() {
             let node_id = mem.mem_id.node_id();
             if !self.visible_nodes.contains(&node_id) {
                 mem.visible = false;
-                memid_to_be_deleted.push(*mem_id);
+                memid_to_be_deleted.insert(*mem_id);
             }
         }
 
         for (_, chan) in self.chans.iter_mut() {
-            let mut src_node_id: Option<NodeID> = None;
-            let mut dst_node_id: Option<NodeID> = None;
-            if let Some(src_mem) = chan.chan_id.src {
-                src_node_id = Some(src_mem.node_id());
-            }
-            if let Some(dst_mem) = chan.chan_id.dst {
-                dst_node_id = Some(dst_mem.node_id());
-            }
-            // DepPart
-            if src_node_id.is_none() && dst_node_id.is_none() {
-                continue;
-            } else {
-                if !src_node_id.map_or(false, |n| self.visible_nodes.contains(&n))
-                    && !dst_node_id.map_or(false, |n| self.visible_nodes.contains(&n))
-                {
-                    chan.visible = false;
-                } else {
-                    // we need to keep memory if it is chan.src/dst
-                    if let Some(src_mem) = chan.chan_id.src {
-                        memid_to_be_deleted.retain(|value| *value != src_mem);
+            match chan.chan_id {
+                ChanID::Copy { src, dst } => {
+                    if !self.visible_nodes.contains(&src.node_id())
+                        && !self.visible_nodes.contains(&dst.node_id())
+                    {
+                        chan.visible = false;
+                    } else {
+                        memid_to_be_deleted.remove(&src);
+                        memid_to_be_deleted.remove(&dst);
                     }
-                    if let Some(dst_mem) = chan.chan_id.dst {
-                        memid_to_be_deleted.retain(|value| *value != dst_mem);
+                }
+                ChanID::Fill { dst } | ChanID::Gather { dst } => {
+                    if !self.visible_nodes.contains(&dst.node_id()) {
+                        chan.visible = false;
+                    } else {
+                        memid_to_be_deleted.remove(&dst);
+                    }
+                }
+                ChanID::Scatter { src } => {
+                    if !self.visible_nodes.contains(&src.node_id()) {
+                        chan.visible = false;
+                    } else {
+                        memid_to_be_deleted.remove(&src);
+                    }
+                }
+                ChanID::DepPart { node_id } => {
+                    if !self.visible_nodes.contains(&node_id) {
+                        chan.visible = false;
                     }
                 }
             }
@@ -3405,24 +3516,26 @@ impl SpyState {
     }
 
     fn create_spy_op(&mut self, op: OpID, pre: EventID, post: EventID) {
-        let old = self.spy_ops.insert(op, SpyOp::new(pre, post));
-        // Apparently we can end up with duplicate logging containing NO_EVENTs
-        if let Some(SpyOp {
-            precondition,
-            postcondition,
-        }) = old
-        {
-            assert!(precondition == pre || precondition.0 == 0);
-            assert!(postcondition == post || postcondition.0 == 0);
+        let entry = self
+            .spy_ops
+            .entry(op)
+            .or_insert_with(|| SpyOp::new(pre, post));
+        if pre.0 != 0 {
+            assert!(entry.precondition == pre || entry.precondition.0 == 0);
+            entry.precondition = pre;
+            self.spy_op_by_precondition
+                .entry(pre)
+                .or_insert_with(BTreeSet::new)
+                .insert(op);
         }
-        self.spy_op_by_precondition
-            .entry(pre)
-            .or_insert_with(BTreeSet::new)
-            .insert(op);
-        self.spy_op_by_postcondition
-            .entry(post)
-            .or_insert_with(BTreeSet::new)
-            .insert(op);
+        if post.0 != 0 {
+            assert!(entry.postcondition == post || entry.postcondition.0 == 0);
+            entry.postcondition = post;
+            self.spy_op_by_postcondition
+                .entry(post)
+                .or_insert_with(BTreeSet::new)
+                .insert(op);
+        }
     }
 
     fn create_spy_op_parent(&mut self, parent: OpID, child: OpID) {
@@ -3753,12 +3866,23 @@ impl SpyState {
 fn process_record(
     record: &Record,
     state: &mut State,
+    node: &mut Option<NodeID>,
     insts: &mut BTreeMap<InstUID, Inst>,
     copies: &mut BTreeMap<EventID, Copy>,
     fills: &mut BTreeMap<EventID, Fill>,
     call_threshold: Timestamp,
 ) {
     match record {
+        Record::MapperName {
+            mapper_id,
+            mapper_proc,
+            name,
+        } => {
+            state
+                .mappers
+                .entry((*mapper_id, *mapper_proc))
+                .or_insert_with(|| Mapper::new(*mapper_id, *mapper_proc, name));
+        }
         Record::MapperCallDesc { kind, name } => {
             state
                 .mapper_call_kinds
@@ -3792,11 +3916,42 @@ fn process_record(
         Record::MaxDimDesc { max_dim } => {
             state.max_dim = *max_dim;
         }
-        Record::MachineDesc { num_nodes, .. } => {
+        Record::RuntimeConfig {
+            debug,
+            spy,
+            gc,
+            inorder,
+            safe_mapper,
+            safe_runtime,
+            safe_ctrlrepl,
+            part_checks,
+            bounds_checks,
+            resilient,
+        } => {
+            state.runtime_config = RuntimeConfig {
+                debug: *debug,
+                spy: *spy,
+                gc: *gc,
+                inorder: *inorder,
+                safe_mapper: *safe_mapper,
+                safe_runtime: *safe_runtime,
+                safe_ctrlrepl: *safe_ctrlrepl,
+                part_checks: *part_checks,
+                bounds_checks: *bounds_checks,
+                resilient: *resilient,
+            };
+        }
+        Record::MachineDesc {
+            node_id, num_nodes, ..
+        } => {
+            *node = Some(*node_id);
             state.num_nodes = *num_nodes;
         }
         Record::ZeroTime { zero_time } => {
             state.zero_time = TimestampDelta(*zero_time);
+        }
+        Record::Provenance { pid, provenance } => {
+            state.provenances.insert(*pid, Provenance::new(provenance));
         }
         Record::CalibrationErr { calibration_err } => {
             state._calibration_err = *calibration_err;
@@ -4014,7 +4169,7 @@ fn process_record(
                 .create_op(*op_id)
                 .set_parent_id(*parent_id)
                 .set_kind(kind)
-                .set_provenance(provenance);
+                .set_provenance(*provenance);
             // Hack: we have to do this in two places, because we don't know what
             // order the logger calls are going to come in. If the task gets
             // logged first, this will come back Some(_) and we'll store it below.
@@ -4247,10 +4402,12 @@ fn process_record(
                 Err(_) => panic!("bad deppart kind"),
             };
             let time_range = TimeRange::new_full(*create, *ready, *start, *stop);
-            state.create_deppart(*op_id, part_op, time_range, *creator);
+            state.create_deppart(node.unwrap(), *op_id, part_op, time_range, *creator);
             state.update_last_time(*stop);
         }
         Record::MapperCallInfo {
+            mapper_id,
+            mapper_proc,
             kind,
             op_id,
             start,
@@ -4262,7 +4419,15 @@ fn process_record(
             if call_threshold <= (*stop - *start) {
                 assert!(state.mapper_call_kinds.contains_key(kind));
                 let time_range = TimeRange::new_start(*start, *stop);
-                state.create_mapper_call(*kind, *proc_id, *op_id, time_range, *fevent);
+                state.create_mapper_call(
+                    *mapper_id,
+                    *mapper_proc,
+                    *kind,
+                    *proc_id,
+                    *op_id,
+                    time_range,
+                    *fevent,
+                );
                 state.update_last_time(*stop);
             }
         }
@@ -4280,6 +4445,17 @@ fn process_record(
                 state.create_runtime_call(*kind, *proc_id, time_range, *fevent);
                 state.update_last_time(*stop);
             }
+        }
+        Record::ApplicationCallInfo {
+            provenance,
+            start,
+            stop,
+            proc_id,
+            fevent,
+        } => {
+            let time_range = TimeRange::new_start(*start, *stop);
+            state.create_application_call(*provenance, *proc_id, time_range, *fevent);
+            state.update_last_time(*stop);
         }
         Record::ProfTaskInfo {
             proc_id,

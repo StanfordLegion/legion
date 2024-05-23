@@ -426,6 +426,9 @@ namespace Legion {
        * @param provenance an optional string describing the provenance 
        *                   information for this index space
        */
+      LEGION_DEPRECATED("We are considering removing support for freeing fields"
+          "in a future Legion release. Please contact the Legion developer's "
+          "list if field deletion is important for your application.") 
       void free_field(FieldID fid, const bool unordered = false,
                       const char *provenance = NULL);
 
@@ -476,6 +479,9 @@ namespace Legion {
        * @param provenance an optional string describing the provenance 
        *                   information for this index space
        */
+      LEGION_DEPRECATED("We are considering removing support for freeing fields"
+          "in a future Legion release. Please contact the Legion developer's "
+          "list if field deletion is important for your application.")
       void free_fields(const std::set<FieldID> &to_free, 
                        const bool unordered = false,
                        const char *provenance = NULL);
@@ -4273,7 +4279,7 @@ namespace Legion {
       // Get the provenance string for this mappable
       // By default we return the human readable component but
       // you can also get the machine component as well
-      virtual const std::string& get_provenance_string(
+      virtual const std::string_view& get_provenance_string(
                                 bool human = true) const = 0;
     public:
       virtual MappableType get_mappable_type(void) const = 0;
@@ -8471,6 +8477,20 @@ namespace Legion {
        * to GPU driver (be very careful with non-blocking communicators).
        */
       void concurrent_task_barrier(Context ctx);
+
+      /**
+       * Start an application profiling range in this context. This must be
+       * matched with a corresponding stop application profiling range
+       * call in the same context. You can nest application profiling ranges
+       * but it is up to the user to make sure that no ABAB patterns occur
+       * or the boxes will not appear the way the user intended. If profiling
+       * is not enabled then these calls will be no-ops. The provenance string
+       * passed to the stop call is a normal provenance string and can have
+       * both a human and machine components separated by a delimiter that will
+       * be parsed by the profiler.
+       */
+      void start_profiling_range(Context ctx);
+      void stop_profiling_range(Context ctx, const char *provenance);
     public:
       //------------------------------------------------------------------------
       // MPI Interoperability 
@@ -9283,6 +9303,8 @@ namespace Legion {
        *              Level 0: no checks
        *              Level 1: sound but incomplete checks (no false positives)
        *              Level 2: unsound but complete checks (no false negatives)
+       * -lg:safe_tracing Request that the runtime check the invariants
+       *              required for using tracing.
        * -lg:local <int> Specify the maximum number of local fields
        *              permitted in any field space within a context.
        * ---------------------

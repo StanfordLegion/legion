@@ -51,7 +51,7 @@ endif()
 if(Kokkos_ENABLE_HIP)
   # have to use Kokkos' choice of compiler for cuda-related options to work
   set(CMAKE_CXX_COMPILER ${KOKKOS_CXX_COMPILER})
-  target_compile_options(kokkos_saxpy PRIVATE "${kokkos_compile_options}-std=c++17")
+  target_compile_options(kokkos_saxpy PRIVATE "${kokkos_compile_options}")
 endif()
 
 if(Legion_ENABLE_TESTING)

@@ -467,8 +467,7 @@ namespace Legion {
         // We know that they are already completed 
         DistributedID did = runtime->get_available_distributed_id();
         future_map = FutureMap(new FutureMapImpl(ctx, runtime, point_set, did,
-              InnerContext::NO_FUTURE_COORDINATE, ApEvent::NO_AP_EVENT, 
-              provenance, true/*reg now*/));
+              InnerContext::NO_FUTURE_COORDINATE, provenance, true/*reg now*/));
         future_map.impl->set_all_futures(arguments);
       }
       else
@@ -975,6 +974,26 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool FutureImpl::is_ready(bool do_subscribe)
+    //--------------------------------------------------------------------------
+    {
+      if (do_subscribe)
+        subscribe();
+      if (producer_op == NULL)
+        return true;
+      const int context_depth = (implicit_context == NULL) ? producer_depth :
+        implicit_context->get_depth();
+#ifdef DEBUG_LEGION
+      assert(producer_depth <= context_depth);
+#endif
+      if (producer_depth < context_depth)
+        return true;
+      // This is not fully accurate since we might still need to wait across
+      // the shards for control replication but it is close enough
+      return producer_op->get_commit_event(op_gen).has_triggered();
+    }
+
+    //--------------------------------------------------------------------------
     void FutureImpl::wait(bool silence_warnings, const char *warning_string)
     //--------------------------------------------------------------------------
     {
@@ -991,15 +1010,25 @@ namespace Legion {
              implicit_context->get_unique_id(),
              (warning_string == NULL) ? "" : warning_string)
       }
-      if ((context != NULL) && (context == implicit_context))
-        context->record_blocking_call(coordinate.context_index);
-      bool poisoned = false;
-      const ApEvent complete = get_ready_event();
-      if (!complete.has_triggered_faultaware(poisoned))
-        complete.wait_faultaware(poisoned);
-      if (poisoned)
-        implicit_context->raise_poison_exception();
       mark_sampled();
+      // We only need to wait for the commit opertion for this future if we're
+      // outside of the task tree or at the same level as the depth of the 
+      // context that produced the future (note this handles control
+      // replication correctly as well since all the shards will appear to 
+      // be at the same depth). It should be impossible to have a depth above
+      // the level where the future was created because futures cannot 
+      // escape back up the task tree
+      if (producer_op == NULL)
+        return;
+      const int context_depth = (implicit_context == NULL) ? producer_depth :
+        implicit_context->get_depth();
+#ifdef DEBUG_LEGION
+      assert(producer_depth <= context_depth);
+#endif
+      if (producer_depth < context_depth)
+        return;
+      context->record_blocking_call(coordinate.context_index);
+      context->wait_on_future(this, producer_op->get_commit_event(op_gen));
     }
     
     //--------------------------------------------------------------------------
@@ -1042,8 +1071,12 @@ namespace Legion {
            bool check_extent, bool silence_warnings, const char *warning_string)
     //--------------------------------------------------------------------------
     {
+      // Make sure that we've subscribed
+      const RtEvent subscribed = subscribe();
       // Wait to make sure that the future is complete first
       wait(silence_warnings, warning_string);
+      // Do this wait after everything is ready for pipelining of communication
+      subscribed.wait();
       ApEvent inst_ready;
       FutureInstance *instance = find_or_create_instance(memory,
           (implicit_context != NULL) ? implicit_context->owner_task : NULL,
@@ -1094,6 +1127,8 @@ namespace Legion {
                               bool silence_warnings, const char *warning_string)
     //--------------------------------------------------------------------------
     {
+      // Make sure that we've subscribed
+      const RtEvent subscribed = subscribe();
       Processor proc = implicit_context->get_executing_processor();
       // A heuristic to help out applications that are unsure of themselves
       if (memkind == Memory::NO_MEMKIND)
@@ -1119,6 +1154,8 @@ namespace Legion {
       }
       // Wait to make sure that the future is complete first
       wait(silence_warnings, warning_string);
+      // Do this wait after everything is ready for pipelining of communication
+      subscribed.wait();
       ApEvent inst_ready;
       FutureInstance *instance = find_or_create_instance(memory,
           (implicit_context != NULL) ? implicit_context->owner_task : NULL,
@@ -1417,7 +1454,7 @@ namespace Legion {
       AutoLock f_lock(future_lock);
       // Handle the case where we have a future with no payload
       if (!empty.load() && instances.empty())
-        return get_ready_event(false/*need lock*/);
+        return future_complete;
       std::map<Memory,FutureInstanceTracker>::const_iterator finder =
         instances.find(target);
       if (finder != instances.end())
@@ -1434,10 +1471,52 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    RtEvent FutureImpl::find_runtime_instance_ready(void)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock f_lock(future_lock);
+      if (future_size_set && (future_size == 0))
+        return RtEvent::NO_RT_EVENT;
+      if (local_visible_memory.exists())
+      {
+        std::map<Memory,FutureInstanceTracker>::iterator finder =
+          instances.find(local_visible_memory);
+#ifdef DEBUG_LEGION
+        assert(finder != instances.end());
+#endif
+        if (!finder->second.ready_event.exists())
+          return RtEvent::NO_RT_EVENT;
+        if (!finder->second.safe_ready_event.exists())
+          finder->second.safe_ready_event =
+            Runtime::protect_event(finder->second.ready_event);
+        return finder->second.safe_ready_event;
+      }
+      else
+      {
+        for (std::map<Memory,PendingInstance>::iterator it =
+              pending_instances.begin(); it != pending_instances.end(); it++)
+        {
+          if (!FutureInstance::check_meta_visible(it->first))
+            continue;
+          if (!it->second.inst_ready.exists())
+            it->second.inst_ready = Runtime::create_ap_user_event(NULL);
+          if (!it->second.safe_inst_ready.exists())
+            it->second.safe_inst_ready = 
+              Runtime::protect_event(it->second.inst_ready);
+          return it->second.safe_inst_ready;
+        }
+      }
+      // Should never get here because we should have called
+      // request_runtime_instance first
+      assert(false);
+      return RtEvent::NO_RT_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
     const void* FutureImpl::find_runtime_buffer(TaskContext *ctx, size_t &size)
     //--------------------------------------------------------------------------
     {
-      ApEvent ready_event;
+      RtEvent ready_event;
       FutureInstance *instance = NULL;
       {
         AutoLock f_lock(future_lock);
@@ -1455,13 +1534,17 @@ namespace Legion {
         size = future_size;
         if (local_visible_memory.exists())
         {
-          std::map<Memory,FutureInstanceTracker>::const_iterator finder =
+          std::map<Memory,FutureInstanceTracker>::iterator finder =
             instances.find(local_visible_memory);
 #ifdef DEBUG_LEGION
           assert(finder != instances.end());
 #endif
           instance = finder->second.instance;
-          ready_event = finder->second.ready_event;
+          if (finder->second.ready_event.exists() &&
+              !finder->second.safe_ready_event.exists())
+            finder->second.safe_ready_event =
+              Runtime::protect_event(finder->second.ready_event);
+          ready_event = finder->second.safe_ready_event;
         }
         else
         {
@@ -1475,7 +1558,10 @@ namespace Legion {
             instance = it->second.instance;
             if (!it->second.inst_ready.exists())
               it->second.inst_ready = Runtime::create_ap_user_event(NULL);
-            ready_event = it->second.inst_ready;
+            if (!it->second.safe_inst_ready.exists())
+              it->second.safe_inst_ready =
+                Runtime::protect_event(it->second.inst_ready);
+            ready_event = it->second.safe_inst_ready;
             break;
           }
         }
@@ -1484,19 +1570,13 @@ namespace Legion {
       assert(instance != NULL);
 #endif
       // Make sure the instance is safe to use
-      if (ready_event.exists())
-      {
-        bool poisoned = false;
-        if (!ready_event.has_triggered_faultaware(poisoned))
-          ready_event.wait_faultaware(poisoned);
-        if (poisoned)
-          ctx->raise_poison_exception();
-      }
+      ready_event.wait();
       return instance->get_data();
     }
 
     //--------------------------------------------------------------------------
-    ApEvent FutureImpl::copy_to(FutureInstance *target, Operation *op)
+    ApEvent FutureImpl::copy_to(FutureInstance *target, Operation *op, 
+                                ApEvent precondition)
     //--------------------------------------------------------------------------
     {
       AutoLock f_lock(future_lock);
@@ -1505,8 +1585,16 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(tracker.instance != NULL);
 #endif
-      const ApEvent ready_event = 
-        target->copy_from(tracker.instance, op, tracker.ready_event);
+      if (tracker.ready_event.exists())
+      {
+        if (precondition.exists())
+          precondition =
+            Runtime::merge_events(NULL, precondition, tracker.ready_event);
+        else
+          precondition = tracker.ready_event;
+      }
+      const ApEvent ready_event =
+        target->copy_from(tracker.instance, op, precondition);
       if (ready_event.exists())
         tracker.read_events.push_back(ready_event);
       return ready_event;
@@ -1596,8 +1684,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void FutureImpl::save_metadata(const void *meta, size_t size)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(size > 0);
+      assert(metadata == NULL);
+#endif
+      metasize = size;
+      metadata = malloc(metasize);
+      memcpy(metadata, meta, metasize);
+    }
+
+    //--------------------------------------------------------------------------
     void FutureImpl::set_result(ApEvent complete, FutureInstance *instance,
-                                void *meta, size_t size)
+                                const void *meta, size_t size)
     //--------------------------------------------------------------------------
     {
       AutoLock f_lock(future_lock);
@@ -1619,14 +1720,14 @@ namespace Legion {
         if (instance->is_meta_visible)
           local_visible_memory = instance->memory;
       }
-      metadata = meta;
-      metasize = size;
+      if (size > 0)
+        save_metadata(meta, size);
       finish_set_future(complete);
     }
 
     //--------------------------------------------------------------------------
     void FutureImpl::set_results(ApEvent complete,
-             const std::vector<FutureInstance*> &insts, void *meta, size_t size)
+       const std::vector<FutureInstance*> &insts, const void *meta, size_t size)
     //--------------------------------------------------------------------------
     {
       AutoLock f_lock(future_lock);
@@ -1653,8 +1754,8 @@ namespace Legion {
         if (!local_visible_memory.exists() && (*it)->is_meta_visible)
           local_visible_memory = (*it)->memory;
       }
-      metadata = meta;
-      metasize = size;
+      if (size > 0)
+        save_metadata(meta, size);
       finish_set_future(complete);
     }
 
@@ -1688,7 +1789,7 @@ namespace Legion {
       if (subscribed.exists() && !subscribed.has_triggered())
         subscribed.wait();
       const size_t size = previous->get_untyped_size();
-      const ApEvent complete = previous->get_ready_event();
+      ApEvent complete = previous->get_complete_event();
       AutoLock f_lock(future_lock);
       if (!empty.load() || (callback_functor != NULL))
         REPORT_LEGION_ERROR(ERROR_DUPLICATE_FUTURE_SET,
@@ -1707,17 +1808,14 @@ namespace Legion {
           runtime->find_memory_manager(runtime->runtime_system_memory); 
         FutureInstance *instance = manager->create_future_instance(op,
             op->get_unique_op_id(), size, false/*eager*/);
-        ApEvent ready = previous->copy_to(instance, op);
+        ApEvent ready = previous->copy_to(instance, op, ApEvent::NO_AP_EVENT);
         instances.emplace(std::make_pair(instance->memory,
               FutureInstanceTracker(instance, ready)));
         local_visible_memory = instance->memory;
       }
       const void *meta = previous->get_metadata(&metasize);
       if (metasize > 0)
-      {
-        metadata = malloc(metasize);
-        memcpy(metadata, meta, metasize);
-      }
+        save_metadata(meta, metasize);
       finish_set_future(complete);
     }
 
@@ -2302,8 +2400,7 @@ namespace Legion {
       derez.deserialize(metasize);
       if (metasize > 0)
       {
-        metadata = malloc(metasize);
-        memcpy(metadata, derez.get_current_pointer(), metasize);
+        save_metadata(derez.get_current_pointer(), metasize);
         derez.advance_pointer(metasize);
       }
       if (!pending_instances.empty())
@@ -2330,14 +2427,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent FutureImpl::get_ready_event(bool need_lock)
+    ApEvent FutureImpl::get_complete_event(void)
     //--------------------------------------------------------------------------
     {
-      if (need_lock)
-      {
-        AutoLock f_lock(future_lock);
-        return get_ready_event(false/*need lock*/);
-      }
+      AutoLock f_lock(future_lock);
       if (empty.load())
       {
         if (!future_complete.exists())
@@ -2561,7 +2654,7 @@ namespace Legion {
                 context->get_unique_id(), consumer_context->get_task_name(), 
                 consumer_context->get_unique_id(),
                 consumer_op->get_logging_name(),
-                consumer_op->get_unique_op_id(), provenance->human.c_str())
+                consumer_op->get_unique_op_id(), provenance->human_str())
           }
         }
       }
@@ -2865,15 +2958,20 @@ namespace Legion {
         {
           // Pack our local visible copy by value so that the subscriber
           // will have it's own local copy of the data
-          FutureInstanceTracker &tracker = instances[local_visible_memory];
-          if (!tracker.instance->pack_instance(rez, tracker.ready_event,
-                                               false/*move ownership*/))
+          std::map<Memory,FutureInstanceTracker>::iterator finder =
+            local_visible_memory.exists() ?
+              instances.find(local_visible_memory) : instances.begin();
+#ifdef DEBUG_LEGION
+          assert(finder != instances.end());
+#endif
+          if (!finder->second.instance->pack_instance(rez,
+                finder->second.ready_event, false/*move ownership*/))
           {
             // Couldn't pack this by value so we need to pack up events
-            rez.serialize(tracker.ready_event);
+            rez.serialize(finder->second.ready_event);
             const ApUserEvent read_done = Runtime::create_ap_user_event(NULL);
             rez.serialize(read_done);
-            tracker.read_events.push_back(read_done);
+            finder->second.read_events.push_back(read_done);
           }
         }
       }
@@ -3123,7 +3221,6 @@ namespace Legion {
           if (target_space != implicit_runtime->address_space)
           {
 #ifdef DEBUG_LEGION
-            assert(instance.exists());
             assert(!freeproc.exists() || 
                 freeproc.address_space() == target_space);
 #endif
@@ -3188,11 +3285,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent FutureInstance::initialize(const ReductionOp *redop, Operation *op)
+    ApEvent FutureInstance::initialize(const ReductionOp *redop, Operation *op,
+                                       ApEvent precondition)
     //--------------------------------------------------------------------------
     {
       // Check to see if this is visible or not
-      if (!is_meta_visible)
+      if (!is_meta_visible || (precondition.exists() && 
+           !precondition.has_triggered_faultignorant()))
       {
         Realm::CopySrcDstField src, dst;
         src.set_fill(redop->identity, redop->sizeof_rhs);
@@ -3224,7 +3323,7 @@ namespace Legion {
         }
         const Point<1,coord_t> zero(0);
         const Rect<1,coord_t> rect(zero, zero);
-        const ApEvent result(rect.copy(srcs, dsts, requests));
+        const ApEvent result(rect.copy(srcs, dsts, requests, precondition));
         if (own_inst)
         {
           if (result.exists())
@@ -3350,7 +3449,11 @@ namespace Legion {
 #endif
 #ifdef DEBUG_LEGION
         // Should only be reducing to instances that this future instance owns
-        assert(own_instance);
+        // Might also happen if we have an "external" (not really external but
+        // made-using-malloc instance) that is bigger than the copy and we 
+        // make an intermediate instance to handle that.
+        assert(own_instance ||
+            (own_dst && external_allocation && (redop->sizeof_rhs < size)));
 #endif
         std::vector<Realm::CopySrcDstField> srcs(1);
         std::vector<Realm::CopySrcDstField> dsts(1);
@@ -3844,8 +3947,7 @@ namespace Legion {
         context(ctx), op(o), op_gen(o->get_generation()),
         op_depth(o->get_context()->get_depth()), op_uid(o->get_unique_op_id()),
         future_coordinate(o->get_context()->get_next_future_coordinate()),
-        provenance(prov), future_map_domain(domain),
-        completion_event(o->get_completion_event())
+        provenance(prov), future_map_domain(domain)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3863,14 +3965,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FutureMapImpl::FutureMapImpl(TaskContext *ctx,Runtime *rt,IndexSpaceNode *d,
                                  DistributedID did, uint64_t coordinate,
-                                 ApEvent completion, Provenance *prov,
+                                 Provenance *prov,
                                  bool register_now, CollectiveMapping *mapping)
       : DistributedCollectable(rt, 
           LEGION_DISTRIBUTED_HELP_ENCODE(did, FUTURE_MAP_DC),
           register_now, mapping),
         context(ctx), op(NULL), op_gen(0), op_depth(0), op_uid(0),
-        future_coordinate(coordinate), provenance(prov), future_map_domain(d), 
-        completion_event(completion)
+        future_coordinate(coordinate), provenance(prov), future_map_domain(d)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3889,13 +3990,11 @@ namespace Legion {
     FutureMapImpl::FutureMapImpl(TaskContext *ctx, Operation *o, uint64_t coord,
                                  GenerationID gen, int depth, UniqueID uid,
                                  IndexSpaceNode *domain, Runtime *rt,
-                                 DistributedID did, ApEvent completion,
-                                 Provenance *prov)
+                                 DistributedID did, Provenance *prov)
       : DistributedCollectable(rt, 
           LEGION_DISTRIBUTED_HELP_ENCODE(did, FUTURE_MAP_DC)), 
         context(ctx), op(o), op_gen(gen), op_depth(depth), op_uid(uid),
-        future_coordinate(coord), provenance(prov), future_map_domain(domain),
-        completion_event(completion)
+        future_coordinate(coord), provenance(prov), future_map_domain(domain)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -4048,7 +4147,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(is_owner());
       assert(implicit_context != NULL);
       assert(implicit_context == context);
 #endif
@@ -4063,11 +4161,8 @@ namespace Legion {
             context->get_unique_id(),
             (warning_string == NULL) ? "" : warning_string)
       context->record_blocking_call(future_coordinate);
-      bool poisoned = false;
-      if (!completion_event.has_triggered_faultaware(poisoned))
-        completion_event.wait_faultaware(poisoned);
-      if (poisoned)
-        implicit_context->raise_poison_exception();
+      if (op != NULL)
+        context->wait_on_future_map(this, op->get_commit_event(op_gen));
     }
 
     //--------------------------------------------------------------------------
@@ -4097,7 +4192,6 @@ namespace Legion {
       {
         rez.serialize<bool>(true); // can create
         rez.serialize(future_map_domain->handle);
-        rez.serialize(completion_event);
         rez.serialize(future_coordinate);
         if (provenance != NULL)
           provenance->serialize(rez);
@@ -4130,13 +4224,11 @@ namespace Legion {
       }
       IndexSpace future_map_domain;
       derez.deserialize(future_map_domain);
-      ApEvent completion;
-      derez.deserialize(completion);
       uint64_t coordinate;
       derez.deserialize(coordinate);
       AutoProvenance provenance(Provenance::deserialize(derez));
       FutureMap result(runtime->find_or_create_future_map(future_map_did, ctx, 
-                      coordinate, future_map_domain, completion, provenance));
+                      coordinate, future_map_domain, provenance));
       result.impl->unpack_global_ref();
       return result;
     }
@@ -4358,7 +4450,7 @@ namespace Legion {
       : FutureMapImpl(prev->context, prev->op, prev->future_coordinate,
           prev->op_gen, prev->op_depth, prev->op_uid,
           domain, prev->runtime, prev->runtime->get_available_distributed_id(),
-          prev->completion_event, prov),
+          prov),
         previous(prev), own_functor(false), is_functor(false)
     //--------------------------------------------------------------------------
     {
@@ -4373,7 +4465,7 @@ namespace Legion {
       : FutureMapImpl(prev->context, prev->op, prev->future_coordinate,
           prev->op_gen, prev->op_depth, prev->op_uid,
           domain, prev->runtime, prev->runtime->get_available_distributed_id(),
-          prev->completion_event, prov),
+          prov),
         previous(prev), own_functor(own_func), is_functor(true)
     //--------------------------------------------------------------------------
     {
@@ -4602,9 +4694,9 @@ namespace Legion {
     ReplFutureMapImpl::ReplFutureMapImpl(TaskContext *ctx, ShardManager *man,
                             Runtime *rt, IndexSpaceNode *domain,
                             IndexSpaceNode *shard_dom, DistributedID did, 
-                            uint64_t coord, ApEvent completion,
+                            uint64_t coord,
                             Provenance *prov, CollectiveMapping *mapping)
-      : FutureMapImpl(ctx, rt, domain, did, coord, completion, prov, 
+      : FutureMapImpl(ctx, rt, domain, did, coord, prov, 
                       false/*register now*/, mapping),
         shard_manager(man), shard_domain(shard_dom),
         op_depth(ctx->get_depth()), sharding_function(NULL),
@@ -4728,7 +4820,7 @@ namespace Legion {
 #endif
         for (int i = 0; runtime->safe_control_replication && (i < 2); i++)
         {
-          InnerContext::HashVerifier hasher(repl_ctx, 
+          ReplicateContext::HashVerifier hasher(repl_ctx, 
               runtime->safe_control_replication > 1, i > 0);
           hasher.hash(
               ReplicateContext::REPLICATE_FUTURE_MAP_GET_ALL_FUTURES, __func__);
@@ -4754,50 +4846,6 @@ namespace Legion {
       }
       // No need for the lock now that we know that we have all of them
       others = futures;
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplFutureMapImpl::wait_all_results(bool silence_warnings,
-                                             const char *warning_string)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(implicit_context != NULL);
-      assert(implicit_context == context);
-      ReplicateContext *repl_ctx =
-        dynamic_cast<ReplicateContext*>(implicit_context);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx =
-        static_cast<ReplicateContext*>(implicit_context);
-#endif
-      if (runtime->runtime_warnings && !silence_warnings && 
-          (context != NULL) && !context->is_leaf_context())
-        REPORT_LEGION_WARNING(LEGION_WARNING_WAITING_ALL_FUTURES, 
-            "Waiting for all futures in a future map in "
-            "non-leaf task %s (UID %lld) is a violation of Legion's deferred "
-            "execution model best practices. You may notice a severe "
-            "performance degredation. Warning string: %s", 
-            context->get_task_name(), context->get_unique_id(),
-            (warning_string == NULL) ? "" : warning_string)
-      context->record_blocking_call(future_coordinate);
-      for (int i = 0; runtime->safe_control_replication && (i < 2); i++)
-      {
-        InnerContext::HashVerifier hasher(repl_ctx, 
-            runtime->safe_control_replication > 1, i > 0);
-        hasher.hash(
-            ReplicateContext::REPLICATE_FUTURE_MAP_WAIT_ALL_FUTURES, __func__);
-        repl_ctx->hash_future_map(hasher, FutureMap(this), "future map");
-        if (hasher.verify(__func__))
-          break;
-      }
-      const ApBarrier wait_bar = repl_ctx->get_next_future_map_wait_barrier();
-      Runtime::phase_barrier_arrive(wait_bar, 1/*count*/, completion_event);
-      bool poisoned = false;
-      if (!wait_bar.has_triggered_faultaware(poisoned))
-        wait_bar.wait_faultaware(poisoned);
-      if (poisoned)
-        implicit_context->raise_poison_exception();
     }
 
     //--------------------------------------------------------------------------
@@ -7207,7 +7255,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(shard_manager == NULL);
       assert(runtime->address_space > 0);
-      assert(shard_points.size() == shards_per_address_space);
 #endif
       Serializer rez;
       {
@@ -7233,9 +7280,6 @@ namespace Legion {
     void ImplicitShardManager::process_implicit_rendezvous(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(runtime->address_space == 0);
-#endif
       AutoLock m_lock(manager_lock);
       size_t num_points = 0;
       derez.deserialize(num_points);
@@ -12489,9 +12533,9 @@ namespace Legion {
               runtime->handle_slice_remote_commit(derez);
               break;
             }
-          case SLICE_VERIFY_CONCURRENT_EXECUTION:
+          case SLICE_RENDEZVOUS_CONCURRENT_MAPPED:
             {
-              runtime->handle_slice_verify_concurrent_execution(derez);
+              runtime->handle_slice_rendezvous_concurrent_mapped(derez);
               break;
             }
           case SLICE_CONCURRENT_ALLREDUCE_REQUEST:
@@ -12969,6 +13013,11 @@ namespace Legion {
               runtime->handle_control_replicate_trace_event_response(derez);
               break;
             }
+          case SEND_REPL_TRACE_EVENT_TRIGGER:
+            {
+              runtime->handle_control_replicate_trace_event_trigger(derez);
+              break;
+            }
           case SEND_REPL_TRACE_FRONTIER_REQUEST:
             {
               runtime->handle_control_replicate_trace_frontier_request(derez,
@@ -12984,6 +13033,12 @@ namespace Legion {
             {
               runtime->handle_control_replicate_trace_update(derez,
                                                     remote_address_space);
+              break;
+            }
+          case SEND_REPL_FIND_TRACE_SETS:
+            {
+              runtime->handle_control_replicate_find_trace_local_sets(derez,
+                                                  remote_address_space);
               break;
             }
           case SEND_REPL_IMPLICIT_RENDEZVOUS:
@@ -13120,6 +13175,23 @@ namespace Legion {
             {
               runtime->handle_remote_context_find_collective_view_response(
                                                                     derez);
+              break;
+            }
+          case SEND_REMOTE_CONTEXT_REFINE_EQUIVALENCE_SETS:
+            {
+              runtime->handle_remote_context_refine_equivalence_sets(derez);
+              break;
+            }
+          case SEND_REMOTE_CONTEXT_FIND_TRACE_LOCAL_SETS_REQUEST:
+            {
+              runtime->handle_remote_context_find_trace_local_sets_request(
+                  derez, remote_address_space);
+              break;
+            }
+          case SEND_REMOTE_CONTEXT_FIND_TRACE_LOCAL_SETS_RESPONSE:
+            {
+              runtime->handle_remote_context_find_trace_local_sets_response(
+                  derez);
               break;
             }
           case SEND_COMPUTE_EQUIVALENCE_SETS_REQUEST: 
@@ -13279,12 +13351,6 @@ namespace Legion {
                                               remote_address_space);
               break;
             }
-          case SEND_EQUIVALENCE_SET_REMOTE_CLONES:
-            {
-              runtime->handle_equivalence_set_remote_clones(derez,
-                                            remote_address_space);
-              break;
-            }
           case SEND_EQUIVALENCE_SET_REMOTE_INSTANCES:
             {
               runtime->handle_equivalence_set_remote_instances(derez);
@@ -13431,14 +13497,14 @@ namespace Legion {
               runtime->handle_replicate_virtual_rendezvous(derez);
               break;
             }
+          case SEND_REPLICATE_STARTUP_COMPLETE:
+            {
+              runtime->handle_replicate_startup_complete(derez);
+              break;
+            }
           case SEND_REPLICATE_POST_MAPPED:
             {
               runtime->handle_replicate_post_mapped(derez);
-              break;
-            }
-          case SEND_REPLICATE_POST_EXECUTION:
-            {
-              runtime->handle_replicate_post_execution(derez);
               break;
             }
           case SEND_REPLICATE_TRIGGER_COMPLETE:
@@ -13629,13 +13695,14 @@ namespace Legion {
           case SEND_CONTROL_REPLICATION_CREATE_FILL_VIEW:
           case SEND_CONTROL_REPLICATION_VERSIONING_RENDEZVOUS:
           case SEND_CONTROL_REPLICATION_VIEW_RENDEZVOUS:
-          case SEND_CONTROL_REPLICATION_CONCURRENT_EXECUTION_VALIDATION:
+          case SEND_CONTROL_REPLICATION_CONCURRENT_MAPPING_RENDEZVOUS:
           case SEND_CONTROL_REPLICATION_CONCURRENT_ALLREDUCE:
           case SEND_CONTROL_REPLICATION_PROJECTION_TREE_EXCHANGE:
           case SEND_CONTROL_REPLICATION_TIMEOUT_MATCH_EXCHANGE:
           case SEND_CONTROL_REPLICATION_MASK_EXCHANGE:
           case SEND_CONTROL_REPLICATION_PREDICATE_EXCHANGE:
           case SEND_CONTROL_REPLICATION_CROSS_PRODUCT_EXCHANGE:
+          case SEND_CONTROL_REPLICATION_TRACING_SET_DEDUPLICATION:
           case SEND_CONTROL_REPLICATION_SLOW_BARRIER:
             {
               ShardManager::handle_collective_message(derez, runtime);
@@ -14424,7 +14491,7 @@ namespace Legion {
               dummy_size, true/*can fail*/, false/*wait until*/))
         {
           const char *result = NULL;
-          static_assert(sizeof(result) == sizeof(ptr), "Fuck c++");
+          static_assert(sizeof(result) == sizeof(ptr));
           memcpy(&result, &ptr, sizeof(result));
           return result;
         }
@@ -14438,8 +14505,7 @@ namespace Legion {
         if (finder != semantic_infos.end())
         {
           const char *result = NULL;
-          static_assert(sizeof(result) == 
-              sizeof(finder->second.buffer), "Fuck c++");
+          static_assert(sizeof(result) == sizeof(finder->second.buffer));
           memcpy(&result, &finder->second.buffer, sizeof(result)); 
           return result;
         }
@@ -16907,6 +16973,7 @@ namespace Legion {
 #else
         unsafe_mapper(!config.safe_mapper),
 #endif
+        safe_tracing(config.safe_tracing),
         disable_independence_tests(config.disable_independence_tests),
         legion_spy_enabled(config.legion_spy_enabled),
         supply_default_mapper(default_mapper),
@@ -16945,6 +17012,7 @@ namespace Legion {
              (unique - (LEGION_MAX_APPLICATION_LAYOUT_ID % runtime_stride)))),
         unique_is_expr_id((unique == 0) ? runtime_stride : unique),
         unique_top_level_task_id((unique == 0) ? runtime_stride : unique),
+        unique_provenance_id((unique == 0) ? runtime_stride : unique),
         unique_implicit_top_level_task_id(0),
 #ifdef LEGION_SPY
         unique_indirections_id((unique == 0) ? runtime_stride : unique),
@@ -17126,6 +17194,7 @@ namespace Legion {
         resilient_mode(rhs.resilient_mode),
         unsafe_launch(rhs.unsafe_launch),
         unsafe_mapper(rhs.unsafe_mapper),
+        safe_tracing(rhs.safe_tracing),
         disable_independence_tests(rhs.disable_independence_tests),
         legion_spy_enabled(rhs.legion_spy_enabled),
         supply_default_mapper(rhs.supply_default_mapper),
@@ -17216,7 +17285,6 @@ namespace Legion {
       free_available(available_deletion_ops);
       free_available(available_merge_close_ops);
       free_available(available_post_close_ops);
-      free_available(available_virtual_close_ops);
       free_available(available_refinement_ops);
       free_available(available_reset_ops);
       free_available(available_dynamic_collective_ops);
@@ -17226,11 +17294,9 @@ namespace Legion {
       free_available(available_or_pred_ops);
       free_available(available_acquire_ops);
       free_available(available_release_ops);
-      free_available(available_capture_ops);
-      free_available(available_trace_ops);
-      free_available(available_replay_ops);
       free_available(available_begin_ops);
-      free_available(available_summary_ops);
+      free_available(available_recurrent_ops);
+      free_available(available_complete_ops);
       free_available(available_epoch_ops);
       free_available(available_pending_partition_ops);
       free_available(available_dependent_partition_ops);
@@ -17248,7 +17314,6 @@ namespace Legion {
       free_available(available_repl_individual_tasks);
       free_available(available_repl_index_tasks);
       free_available(available_repl_merge_close_ops);
-      free_available(available_repl_virtual_close_ops);
       free_available(available_repl_refinement_ops);
       free_available(available_repl_reset_ops);
       free_available(available_repl_fill_ops);
@@ -17271,11 +17336,9 @@ namespace Legion {
       free_available(available_repl_index_detach_ops);
       free_available(available_repl_acquire_ops);
       free_available(available_repl_release_ops);
-      free_available(available_repl_capture_ops);
-      free_available(available_repl_trace_ops);
-      free_available(available_repl_replay_ops);
       free_available(available_repl_begin_ops);
-      free_available(available_repl_summary_ops);
+      free_available(available_repl_recurrent_ops);
+      free_available(available_repl_complete_ops);
       for (std::map<TaskID,TaskImpl*>::const_iterator it = 
             task_table.begin(); it != task_table.end(); it++)
       {
@@ -17339,6 +17402,13 @@ namespace Legion {
         delete it->second;
       }
       memory_managers.clear();
+      for (std::map<size_t,std::vector<Provenance*> >::const_iterator pit =
+            provenances.begin(); pit != provenances.end(); pit++)
+        for (std::vector<Provenance*>::const_iterator it =
+              pit->second.begin(); it != pit->second.end(); it++)
+          if ((*it)->remove_reference())
+            delete (*it);
+      provenances.clear();
 #ifdef DEBUG_LEGION
       if (logging_region_tree_state)
 	delete tree_state_logger;
@@ -18122,24 +18192,17 @@ namespace Legion {
                           NULL/*provenance*/, true/*top level*/);
       mapper_task->set_current_proc(proc);
       mapper_task->select_task_options(false/*prioritize*/);
-      // Create a temporary event to name the result since we 
-      // have to pack it in the task that runs, but it also depends
-      // on the task being reported back to the mapper
-      ApUserEvent result = Runtime::create_ap_user_event(NULL);
       // Add a reference to the future impl to prevent it being collected
       f.impl->add_base_gc_ref(META_TASK_REF);
       // Create a meta-task to return the results to the mapper
-      MapperTaskArgs args(f.impl, map_id, proc, result, map_context);
-      ApEvent pre = f.impl->get_ready_event();
+      MapperTaskArgs args(f.impl, map_id, proc, map_context);
       ApEvent post(issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY,
-                                           Runtime::protect_event(pre)));
-      // Chain the events properly
-      Runtime::trigger_event(NULL, result, post);
+                                           mapper_task->get_commit_event()));
       // Mark that we have another outstanding top level task
       increment_outstanding_top_level_tasks();
       // Now we can put it on the queue
       add_to_ready_queue(proc, mapper_task);
-      return result;
+      return post;
     }
 
     //--------------------------------------------------------------------------
@@ -22115,11 +22178,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_slice_verify_concurrent_execution(Processor target,
-                                                         Serializer &rez)
+    void Runtime::send_slice_rendezvous_concurrent_mapped(Processor target,
+                                                          Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_message(SLICE_VERIFY_CONCURRENT_EXECUTION,
+      find_messenger(target)->send_message(SLICE_RENDEZVOUS_CONCURRENT_MAPPED,
                                                             rez, true/*flush*/);
     }
 
@@ -22914,6 +22977,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_control_replicate_trace_event_trigger(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(SEND_REPL_TRACE_EVENT_TRIGGER,
+                                      rez, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_control_replicate_trace_frontier_request(
                                          AddressSpaceID target, Serializer &rez) 
     //--------------------------------------------------------------------------
@@ -22937,6 +23009,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(SEND_REPL_TRACE_UPDATE,
+                                                rez, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_control_replicate_find_trace_local_sets(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(SEND_REPL_FIND_TRACE_SETS,
                                                 rez, true/*flush*/);
     }
 
@@ -23147,6 +23228,35 @@ namespace Legion {
           SEND_REMOTE_CONTEXT_FIND_COLLECTIVE_VIEW_RESPONSE, rez, 
               true/*flush*/, true/*response*/);
     } 
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_remote_context_refine_equivalence_sets(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(
+          SEND_REMOTE_CONTEXT_REFINE_EQUIVALENCE_SETS, rez, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_remote_context_find_trace_local_sets_request(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(
+          SEND_REMOTE_CONTEXT_FIND_TRACE_LOCAL_SETS_REQUEST,
+          rez, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_remote_context_find_trace_local_sets_response(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(
+          SEND_REMOTE_CONTEXT_FIND_TRACE_LOCAL_SETS_RESPONSE,
+          rez, true/*flush*/, true/*response*/);
+    }
 
     //--------------------------------------------------------------------------
     void Runtime::send_compute_equivalence_sets_request(AddressSpaceID target,
@@ -23402,15 +23512,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_equivalence_set_remote_clones(AddressSpaceID target,
-                                                     Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(SEND_EQUIVALENCE_SET_REMOTE_CLONES,
-                                                            rez, true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::send_equivalence_set_remote_instances(AddressSpaceID target,
                                                         Serializer &rez)
     //--------------------------------------------------------------------------
@@ -23646,21 +23747,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_replicate_startup_complete(AddressSpaceID target, 
+                                                  Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(SEND_REPLICATE_STARTUP_COMPLETE,
+                                                    rez, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_replicate_post_mapped(AddressSpaceID target, 
                                              Serializer &rez)
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(SEND_REPLICATE_POST_MAPPED,
                                                     rez, true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_replicate_post_execution(AddressSpaceID target, 
-                                                Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(SEND_REPLICATE_POST_EXECUTION,
-                                                        rez, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -24665,10 +24766,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_slice_verify_concurrent_execution(Deserializer &derez)
+    void Runtime::handle_slice_rendezvous_concurrent_mapped(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      SliceTask::handle_verify_concurrent_execution(derez);
+      SliceTask::handle_rendezvous_concurrent_mapped(derez);
     }
 
     //--------------------------------------------------------------------------
@@ -25302,6 +25403,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::handle_control_replicate_trace_event_trigger(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      ShardManager::handle_trace_event_trigger(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::handle_control_replicate_trace_frontier_request(
                                      Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
@@ -25323,6 +25432,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       ShardManager::handle_trace_update(derez, this, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_control_replicate_find_trace_local_sets(
+        Deserializer &derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      ShardManager::handle_find_trace_local_sets(derez, this, source);
     }
 
     //--------------------------------------------------------------------------
@@ -25582,6 +25699,30 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
+    void Runtime::handle_remote_context_refine_equivalence_sets(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      RemoteContext::handle_refine_equivalence_sets(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_remote_context_find_trace_local_sets_request(
+        Deserializer &derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      RemoteContext::handle_find_trace_local_sets_request(derez, this, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_remote_context_find_trace_local_sets_response(
+        Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      RemoteContext::handle_find_trace_local_sets_response(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::handle_compute_equivalence_sets_request(Deserializer &derez,
                                                           AddressSpaceID source)
     //--------------------------------------------------------------------------
@@ -25794,14 +25935,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       FilterAnalysis::handle_remote_filters(derez, this, source);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_equivalence_set_remote_clones(Deserializer &derez,
-                                                       AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      CloneAnalysis::handle_remote_clones(derez, this, source);
     }
 
     //--------------------------------------------------------------------------
@@ -26059,19 +26192,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::handle_replicate_startup_complete(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      ShardManager::handle_startup_complete(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::handle_replicate_post_mapped(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       ShardManager::handle_post_mapped(derez, this);
     }
 
-    //--------------------------------------------------------------------------
-    void Runtime::handle_replicate_post_execution(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      ShardManager::handle_post_execution(derez, this);
-    }
-    
     //--------------------------------------------------------------------------
     void Runtime::handle_replicate_trigger_complete(Deserializer &derez)
     //--------------------------------------------------------------------------
@@ -27388,7 +27521,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FutureMapImpl* Runtime::find_or_create_future_map(DistributedID did,
                           TaskContext *ctx, uint64_t coord, IndexSpace domain,
-                          ApEvent completion, Provenance *provenance)
+                          Provenance *provenance)
     //--------------------------------------------------------------------------
     {
       did &= LEGION_DISTRIBUTED_ID_MASK;
@@ -27412,7 +27545,7 @@ namespace Legion {
 #endif
       IndexSpaceNode *domain_node = forest->get_node(domain);
       FutureMapImpl *result = new FutureMapImpl(ctx, this, domain_node, did,
-           coord, completion, provenance, false/*register now*/);
+           coord, provenance, false/*register now*/);
       // Retake the lock and see if we lost the race
       RtEvent ready;
       {
@@ -27461,7 +27594,7 @@ namespace Legion {
       forest->create_index_space(result, &domain, did, provenance);
       if (legion_spy_enabled)
         LegionSpy::log_top_index_space(result.id, address_space,
-            (provenance == NULL) ? NULL : provenance->human.c_str());
+            (provenance == NULL) ? NULL : provenance->human_str());
       // Overwrite and leak for now, don't care too much as this 
       // should occur infrequently
       AutoLock is_lock(is_slice_lock);
@@ -27871,13 +28004,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    VirtualCloseOp* Runtime::get_available_virtual_close_op(void)
-    //--------------------------------------------------------------------------
-    {
-      return get_available(virtual_close_op_lock, available_virtual_close_ops);
-    }
-
-    //--------------------------------------------------------------------------
     RefinementOp* Runtime::get_available_refinement_op(void)
     //--------------------------------------------------------------------------
     {
@@ -27954,27 +28080,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    TraceCaptureOp* Runtime::get_available_capture_op(void)
-    //--------------------------------------------------------------------------
-    {
-      return get_available(capture_op_lock, available_capture_ops);
-    }
-
-    //--------------------------------------------------------------------------
-    TraceCompleteOp* Runtime::get_available_trace_op(void)
-    //--------------------------------------------------------------------------
-    {
-      return get_available(trace_op_lock, available_trace_ops);
-    }
-
-    //--------------------------------------------------------------------------
-    TraceReplayOp* Runtime::get_available_replay_op(void)
-    //--------------------------------------------------------------------------
-    {
-      return get_available(replay_op_lock, available_replay_ops);
-    }
-
-    //--------------------------------------------------------------------------
     TraceBeginOp* Runtime::get_available_begin_op(void)
     //--------------------------------------------------------------------------
     {
@@ -27982,10 +28087,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    TraceSummaryOp* Runtime::get_available_summary_op(void)
+    TraceCompleteOp* Runtime::get_available_complete_op(void)
     //--------------------------------------------------------------------------
     {
-      return get_available(summary_op_lock, available_summary_ops);
+      return get_available(complete_op_lock, available_complete_ops);
+    }
+
+    //--------------------------------------------------------------------------
+    TraceRecurrentOp* Runtime::get_available_recurrent_op(void)
+    //--------------------------------------------------------------------------
+    {
+      return get_available(recurrent_op_lock, available_recurrent_ops);
     }
 
     //--------------------------------------------------------------------------
@@ -28151,14 +28263,6 @@ namespace Legion {
       return get_available(merge_close_op_lock, available_repl_merge_close_ops);
     }
 
-    //--------------------------------------------------------------------------
-    ReplVirtualCloseOp* Runtime::get_available_repl_virtual_close_op(void)
-    //-------------------------------------------------------------------------- 
-    {
-      return get_available(virtual_close_op_lock,
-                available_repl_virtual_close_ops);
-    }
-    
     //--------------------------------------------------------------------------
     ReplRefinementOp* Runtime::get_available_repl_refinement_op(void)
     //-------------------------------------------------------------------------- 
@@ -28344,27 +28448,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ReplTraceCaptureOp* Runtime::get_available_repl_capture_op(void)
-    //--------------------------------------------------------------------------
-    {
-      return get_available(capture_op_lock, available_repl_capture_ops);
-    }
-
-    //--------------------------------------------------------------------------
-    ReplTraceCompleteOp* Runtime::get_available_repl_trace_op(void)
-    //--------------------------------------------------------------------------
-    {
-      return get_available(trace_op_lock, available_repl_trace_ops);
-    }
-
-    //--------------------------------------------------------------------------
-    ReplTraceReplayOp* Runtime::get_available_repl_replay_op(void)
-    //--------------------------------------------------------------------------
-    {
-      return get_available(replay_op_lock, available_repl_replay_ops);
-    }
-
-    //--------------------------------------------------------------------------
     ReplTraceBeginOp* Runtime::get_available_repl_begin_op(void)
     //--------------------------------------------------------------------------
     {
@@ -28372,10 +28455,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ReplTraceSummaryOp* Runtime::get_available_repl_summary_op(void)
+    ReplTraceCompleteOp* Runtime::get_available_repl_complete_op(void)
     //--------------------------------------------------------------------------
     {
-      return get_available(summary_op_lock, available_repl_summary_ops);
+      return get_available(complete_op_lock, available_repl_complete_ops);
+    }
+
+    //--------------------------------------------------------------------------
+    ReplTraceRecurrentOp* Runtime::get_available_repl_recurrent_op(void)
+    //--------------------------------------------------------------------------
+    {
+      return get_available(recurrent_op_lock, available_repl_recurrent_ops);
     }
 
     //--------------------------------------------------------------------------
@@ -28511,14 +28601,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::free_virtual_close_op(VirtualCloseOp *op)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock v_lock(virtual_close_op_lock);
-      release_operation<false>(available_virtual_close_ops, op);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::free_refinement_op(RefinementOp *op)
     //--------------------------------------------------------------------------
     {
@@ -28588,31 +28670,7 @@ namespace Legion {
     {
       AutoLock r_lock(release_op_lock);
       release_operation<false>(available_release_ops, op);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::free_capture_op(TraceCaptureOp *op)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock c_lock(capture_op_lock);
-      release_operation<false>(available_capture_ops, op);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::free_trace_op(TraceCompleteOp *op)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock t_lock(trace_op_lock);
-      release_operation<false>(available_trace_ops, op);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::free_replay_op(TraceReplayOp *op)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock t_lock(replay_op_lock);
-      release_operation<false>(available_replay_ops, op);
-    }
+    } 
 
     //--------------------------------------------------------------------------
     void Runtime::free_begin_op(TraceBeginOp *op)
@@ -28623,11 +28681,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::free_summary_op(TraceSummaryOp *op)
+    void Runtime::free_complete_op(TraceCompleteOp *op)
     //--------------------------------------------------------------------------
     {
-      AutoLock t_lock(summary_op_lock);
-      release_operation<false>(available_summary_ops, op);
+      AutoLock t_lock(complete_op_lock);
+      release_operation<false>(available_complete_ops, op);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::free_recurrent_op(TraceRecurrentOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock t_lock(recurrent_op_lock);
+      release_operation<false>(available_recurrent_ops, op);
     }
 
     //--------------------------------------------------------------------------
@@ -28772,14 +28838,6 @@ namespace Legion {
     {
       AutoLock m_lock(merge_close_op_lock);
       release_operation<false>(available_repl_merge_close_ops, op);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::free_repl_virtual_close_op(ReplVirtualCloseOp *op)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock v_lock(virtual_close_op_lock);
-      release_operation<false>(available_repl_virtual_close_ops, op);
     }
 
     //--------------------------------------------------------------------------
@@ -28959,30 +29017,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::free_repl_capture_op(ReplTraceCaptureOp *op)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock c_lock(capture_op_lock);
-      release_operation<false>(available_repl_capture_ops, op);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::free_repl_trace_op(ReplTraceCompleteOp *op)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock t_lock(trace_op_lock);
-      release_operation<false>(available_repl_trace_ops, op);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::free_repl_replay_op(ReplTraceReplayOp *op)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock t_lock(replay_op_lock);
-      release_operation<false>(available_repl_replay_ops, op);
-    } 
-
-    //--------------------------------------------------------------------------
     void Runtime::free_repl_begin_op(ReplTraceBeginOp *op)
     //--------------------------------------------------------------------------
     {
@@ -28991,11 +29025,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::free_repl_summary_op(ReplTraceSummaryOp *op)
+    void Runtime::free_repl_complete_op(ReplTraceCompleteOp *op)
     //--------------------------------------------------------------------------
     {
-      AutoLock t_lock(summary_op_lock);
-      release_operation<false>(available_repl_summary_ops, op);
+      AutoLock t_lock(complete_op_lock);
+      release_operation<false>(available_repl_complete_ops, op);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::free_repl_recurrent_op(ReplTraceRecurrentOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock t_lock(recurrent_op_lock);
+      release_operation<false>(available_repl_recurrent_ops, op);
     }
 
     //--------------------------------------------------------------------------
@@ -29344,6 +29386,59 @@ namespace Legion {
 #endif
 
     //--------------------------------------------------------------------------
+    Provenance* Runtime::find_or_create_provenance(const char *prov,size_t size)
+    //--------------------------------------------------------------------------
+    {
+      if ((prov == NULL) || (size == 0))
+        return NULL;
+      // Check to see if we can find it in read-only mode first
+      {
+        AutoLock prov_lock(provenance_lock,1,false/*exclusive*/);
+        std::map<size_t,std::vector<Provenance*> >::const_iterator finder =
+          provenances.find(size);
+        if (finder != provenances.end())
+        {
+          for (std::vector<Provenance*>::const_iterator it =
+                finder->second.begin(); it != finder->second.end(); it++)
+          {
+            if ((*it)->full.compare(0, size, prov) != 0)
+              continue;
+            (*it)->add_reference();
+            return (*it);
+          }
+        }
+      }
+      // Retake the lock in exclusive mode
+      AutoLock prov_lock(provenance_lock);
+      // Check to make sure we didn't lose the race
+      std::map<size_t,std::vector<Provenance*> >::iterator finder =
+        provenances.find(size);
+      if (finder != provenances.end())
+      {
+        for (std::vector<Provenance*>::const_iterator it =
+              finder->second.begin(); it != finder->second.end(); it++)
+        {
+          if ((*it)->full.compare(0, size, prov) != 0)
+            continue;
+          (*it)->add_reference();
+          return (*it);
+        }
+      }
+      else
+        finder = provenances.emplace(
+            std::make_pair(size, std::vector<Provenance*>())).first;
+      // Generate a new provenance object
+      Provenance *result = new Provenance(unique_provenance_id, prov, size);
+      result->add_reference(2); // one for ourself and one for the caller
+      finder->second.push_back(result);
+      // If we have a profiler, then record this provenance
+      if (profiler != NULL)
+        profiler->record_provenance(unique_provenance_id, prov, size);
+      unique_provenance_id += runtime_stride;
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     LegionErrorType Runtime::verify_requirement(
                                const RegionRequirement &req, FieldID &bad_field)
     //--------------------------------------------------------------------------
@@ -29595,16 +29690,12 @@ namespace Legion {
           return "Acquire Op";
         case RELEASE_OP_ALLOC:
           return "Release Op";
-        case TRACE_CAPTURE_OP_ALLOC:
-          return "Trace Capture Op";
-        case TRACE_COMPLETE_OP_ALLOC:
-          return "Trace Complete Op";
-        case TRACE_REPLAY_OP_ALLOC:
-          return "Trace Replay";
         case TRACE_BEGIN_OP_ALLOC:
           return "Trace Begin";
-        case TRACE_SUMMARY_OP_ALLOC:
-          return "Trace Summary";
+        case TRACE_RECURRENT_OP_ALLOC:
+          return "Trace Recurrent";
+        case TRACE_COMPLETE_OP_ALLOC:
+          return "Trace Complete Op";
         case MUST_EPOCH_OP_ALLOC:
           return "Must Epoch Op";
         case PENDING_PARTITION_OP_ALLOC:
@@ -30446,6 +30537,7 @@ namespace Legion {
         .add_option_bool("-lg:unsafe_launch",config.unsafe_launch,!filter)
         .add_option_bool("-lg:unsafe_mapper",config.unsafe_mapper,!filter)
         .add_option_bool("-lg:safe_mapper",config.safe_mapper,!filter)
+        .add_option_bool("-lg:safe_tracing", config.safe_tracing, !filter)
         .add_option_int("-lg:safe_ctrlrepl",
                          config.safe_control_replication, !filter)
         .add_option_bool("-lg:inorder",config.program_order_execution,!filter)
@@ -30849,9 +30941,8 @@ namespace Legion {
       // Launch a task to deactivate the top-level context
       // when the top-level task is done
       TopFinishArgs args(top_context);
-      ApEvent pre = top_task->get_completion_event();
-      issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY,
-                              Runtime::protect_event(pre));
+      RtEvent pre = top_task->get_commit_event();
+      issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY, pre);
       add_to_ready_queue(target, top_task);
       // Now we can restore the previous implicit context
       implicit_context = previous_implicit;
@@ -30899,9 +30990,8 @@ namespace Legion {
       // Launch a task to deactivate the top-level context
       // when the top-level task is done
       TopFinishArgs args(top_context);
-      ApEvent pre = top_task->get_completion_event();
-      issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY,
-                              Runtime::protect_event(pre));
+      RtEvent pre = top_task->get_commit_event();
+      issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY, pre);
       return top_task;
     }
 
@@ -32325,19 +32415,9 @@ namespace Legion {
             runtime->process_message_task(data, arglen);
             break;
           }
-        case LG_POST_END_ID:
-          {
-            InnerContext::handle_post_end_task(args); 
-            break;
-          }
         case LG_TRIGGER_READY_ID:
           {
             InnerContext::handle_ready_queue(args);
-            break;
-          }
-        case LG_TRIGGER_RESOLUTION_ID:
-          {
-            InnerContext::handle_resolution_queue(args);
             break;
           }
         case LG_TRIGGER_COMMIT_ID:
@@ -32375,9 +32455,9 @@ namespace Legion {
             InnerContext::handle_dependence_stage(args);
             break;
           }
-        case LG_TRIGGER_COMPLETION_ID:
+        case LG_DEFERRED_MAPPED_ID:
           {
-            InnerContext::handle_trigger_completion_queue(args);
+            InnerContext::handle_deferred_mapped_queue(args);
             break;
           }
         case LG_TRIGGER_OP_ID:
@@ -32465,12 +32545,9 @@ namespace Legion {
             IndexPartNode::handle_disjointness_computation(args, forest);
             break;
           }
-        case LG_ISSUE_FRAME_TASK_ID:
+        case LG_DEFER_TIMING_MEASUREMENT_TASK_ID:
           {
-            InnerContext::IssueFrameArgs *fargs = 
-              (InnerContext::IssueFrameArgs*)args;
-            fargs->parent_ctx->perform_frame_issue(fargs->frame, 
-                                                   fargs->frame_termination);
+            TimingOp::handle_deferred_measurement(args);
             break;
           }
         case LG_TASK_IMPL_SEMANTIC_INFO_REQ_TASK_ID:
@@ -32607,9 +32684,9 @@ namespace Legion {
             targs->task->handle_mispredication();
             break;
           }
-        case LG_DEFER_TRIGGER_TASK_COMPLETE_TASK_ID:
+        case LG_DEFER_TRIGGER_CHILDREN_COMMIT_TASK_ID:
           {
-            SingleTask::handle_deferred_task_complete(args);
+            TaskOp::handle_deferred_children_commit(args);
             break;
           }
         case LG_ORDER_CONCURRENT_LAUNCH_TASK_ID:
@@ -32765,16 +32842,6 @@ namespace Legion {
             break;
           }
 #endif
-        case LG_DEFER_TRACE_PRECONDITION_TASK_ID:
-          {
-            TraceConditionSet::handle_precondition_test(args);
-            break;
-          }
-        case LG_DEFER_TRACE_POSTCONDITION_TASK_ID:
-          {
-            TraceConditionSet::handle_postcondition_test(args);
-            break;
-          }
         case LG_DEFER_TRACE_UPDATE_TASK_ID:
           {
             ShardedPhysicalTemplate::handle_deferred_trace_update(args,runtime);
@@ -32788,11 +32855,6 @@ namespace Legion {
         case LG_DEFER_COLLECTIVE_TASK_ID:
           {
             ShardCollective::handle_deferred_collective(args);
-            break;
-          }
-        case LG_DEFER_RECORD_COMPLETE_REPLAY_TASK_ID:
-          {
-            MemoizableOp::handle_record_complete_replay(args);
             break;
           }
         case LG_DEFER_ISSUE_FILL_TASK_ID:
@@ -32813,6 +32875,11 @@ namespace Legion {
         case LG_FREE_EXTERNAL_TASK_ID:
           {
             FutureInstance::handle_free_external(args);
+            break;
+          }
+        case LG_DEFER_DELETION_COMMIT_TASK_ID:
+          {
+            ReplDeletionOp::handle_defer_commit(args);
             break;
           }
         case LG_YIELD_TASK_ID:

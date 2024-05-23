@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::fs::File;
 use std::io;
 use std::io::Read;
+use std::num::NonZeroU64;
 use std::path::Path;
 
 use flate2::read::GzDecoder;
@@ -20,8 +21,9 @@ use nom::{
 use serde::Serialize;
 
 use crate::state::{
-    EventID, FSpaceID, FieldID, IPartID, ISpaceID, InstID, InstUID, MapperCallKindID, MemID,
-    NodeID, OpID, ProcID, RuntimeCallKindID, State, TaskID, Timestamp, TreeID, VariantID,
+    EventID, FSpaceID, FieldID, IPartID, ISpaceID, InstID, InstUID, MapperCallKindID, MapperID,
+    MemID, NodeID, OpID, ProcID, ProvenanceID, RuntimeCallKindID, State, TaskID, Timestamp, TreeID,
+    VariantID,
 };
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -31,6 +33,7 @@ pub enum ValueFormat {
     DepPartOpKind,
     IDType,
     InstID,
+    MapperID,
     MappingCallKind,
     MaxDim,
     MemID,
@@ -40,6 +43,7 @@ pub enum ValueFormat {
     Uuid,
     ProcID,
     ProcKind,
+    ProvenanceID,
     RuntimeCallKind,
     String,
     TaskID,
@@ -87,13 +91,16 @@ pub struct Uuid(pub Vec<u8>);
 #[rustfmt::skip]
 #[derive(Debug, Clone, Serialize)]
 pub enum Record {
+    MapperName { mapper_id: MapperID, mapper_proc: ProcID, name: String },
     MapperCallDesc { kind: MapperCallKindID, name: String },
     RuntimeCallDesc { kind: RuntimeCallKindID, name: String },
     MetaDesc { kind: VariantID, message: bool, ordered_vc: bool, name: String },
     OpDesc { kind: u32, name: String },
     MaxDimDesc { max_dim: MaxDim },
+    RuntimeConfig { debug: bool, spy: bool, gc: bool, inorder: bool, safe_mapper: bool, safe_runtime: bool, safe_ctrlrepl: bool, part_checks: bool, bounds_checks: bool, resilient: bool },
     MachineDesc { node_id: NodeID, num_nodes: u32, version: u32, hostname: String, host_id: u64, process_id: u32 },
     ZeroTime { zero_time: i64 },
+    Provenance { pid: ProvenanceID, provenance: String },
     ProcDesc { proc_id: ProcID, kind: ProcKind, cuda_device_uuid: Uuid },
     MemDesc { mem_id: MemID, kind: MemKind, capacity: u64 },
     ProcMDesc { proc_id: ProcID, mem_id: MemID, bandwidth: u32, latency: u32 },
@@ -114,7 +121,7 @@ pub enum Record {
     PhysicalInstanceUsage { inst_uid: InstUID, op_id: OpID, index_id: u32, field_id: FieldID },
     TaskKind { task_id: TaskID, name: String, overwrite: bool },
     TaskVariant { task_id: TaskID, variant_id: VariantID, name: String },
-    OperationInstance { op_id: OpID, parent_id: Option<OpID>, kind: u32, provenance: String },
+    OperationInstance { op_id: OpID, parent_id: Option<OpID>, kind: u32, provenance: Option<ProvenanceID> },
     MultiTask { op_id: OpID, task_id: TaskID },
     SliceOwner { parent_id: UniqueID, op_id: OpID },
     TaskWaitInfo { op_id: OpID, task_id: TaskID, variant_id: VariantID, wait_start: Timestamp, wait_ready: Timestamp, wait_end: Timestamp },
@@ -128,8 +135,9 @@ pub enum Record {
     FillInstInfo { dst: MemID, fid: FieldID, dst_inst: InstUID, fevent: EventID },
     InstTimelineInfo { inst_uid: InstUID, inst_id: InstID, mem_id: MemID, size: u64, op_id: OpID, create: Timestamp, ready: Timestamp, destroy: Timestamp, creator: EventID },
     PartitionInfo { op_id: OpID, part_op: DepPartOpKind, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp, creator: EventID },
-    MapperCallInfo { kind: MapperCallKindID, op_id: OpID, start: Timestamp, stop: Timestamp, proc_id: ProcID, fevent: EventID },
+    MapperCallInfo { mapper_id: MapperID, mapper_proc: ProcID, kind: MapperCallKindID, op_id: OpID, start: Timestamp, stop: Timestamp, proc_id: ProcID, fevent: EventID },
     RuntimeCallInfo { kind: RuntimeCallKindID, start: Timestamp, stop: Timestamp, proc_id: ProcID, fevent: EventID },
+    ApplicationCallInfo { provenance: ProvenanceID, start: Timestamp, stop: Timestamp, proc_id: ProcID, fevent: EventID },
     ProfTaskInfo { proc_id: ProcID, op_id: OpID, start: Timestamp, stop: Timestamp, creator: EventID, fevent: EventID  },
     CalibrationErr { calibration_err: i64 },
 }
@@ -141,6 +149,7 @@ fn convert_value_format(name: String) -> Option<ValueFormat> {
         "DepPartOpKind" => Some(ValueFormat::DepPartOpKind),
         "IDType" => Some(ValueFormat::IDType),
         "InstID" => Some(ValueFormat::InstID),
+        "MapperID" => Some(ValueFormat::MapperID),
         "MappingCallKind" => Some(ValueFormat::MappingCallKind),
         "maxdim" => Some(ValueFormat::MaxDim),
         "MemID" => Some(ValueFormat::MemID),
@@ -316,6 +325,9 @@ fn parse_field_id(input: &[u8]) -> IResult<&[u8], FieldID> {
 fn parse_tree_id(input: &[u8]) -> IResult<&[u8], TreeID> {
     map(le_u32, TreeID)(input)
 }
+fn parse_mapper_id(input: &[u8]) -> IResult<&[u8], MapperID> {
+    map(le_u32, MapperID)(input)
+}
 fn parse_mapper_call_kind_id(input: &[u8]) -> IResult<&[u8], MapperCallKindID> {
     map(le_u32, MapperCallKindID)(input)
 }
@@ -333,6 +345,12 @@ fn parse_proc_id(input: &[u8]) -> IResult<&[u8], ProcID> {
 }
 fn parse_runtime_call_kind_id(input: &[u8]) -> IResult<&[u8], RuntimeCallKindID> {
     map(le_u32, RuntimeCallKindID)(input)
+}
+fn parse_option_provenance_id(input: &[u8]) -> IResult<&[u8], Option<ProvenanceID>> {
+    map(le_u64, |x| NonZeroU64::new(x).map(ProvenanceID))(input)
+}
+fn parse_provenance_id(input: &[u8]) -> IResult<&[u8], ProvenanceID> {
+    map(le_u64, |x| ProvenanceID(NonZeroU64::new(x).unwrap()))(input)
 }
 fn parse_task_id(input: &[u8]) -> IResult<&[u8], TaskID> {
     map(le_u32, TaskID)(input)
@@ -382,6 +400,33 @@ fn parse_max_dim_desc(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, max_dim) = le_i32(input)?;
     Ok((input, Record::MaxDimDesc { max_dim }))
 }
+fn parse_runtime_config(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
+    let (input, debug) = parse_bool(input)?;
+    let (input, spy) = parse_bool(input)?;
+    let (input, gc) = parse_bool(input)?;
+    let (input, inorder) = parse_bool(input)?;
+    let (input, safe_mapper) = parse_bool(input)?;
+    let (input, safe_runtime) = parse_bool(input)?;
+    let (input, safe_ctrlrepl) = parse_bool(input)?;
+    let (input, part_checks) = parse_bool(input)?;
+    let (input, bounds_checks) = parse_bool(input)?;
+    let (input, resilient) = parse_bool(input)?;
+    Ok((
+        input,
+        Record::RuntimeConfig {
+            debug,
+            spy,
+            gc,
+            inorder,
+            safe_mapper,
+            safe_runtime,
+            safe_ctrlrepl,
+            part_checks,
+            bounds_checks,
+            resilient,
+        },
+    ))
+}
 fn parse_machine_desc(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, nodeid) = le_u32(input)?;
     let (input, num_nodes) = le_u32(input)?;
@@ -405,6 +450,11 @@ fn parse_machine_desc(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
 fn parse_zero_time(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, zero_time) = le_i64(input)?;
     Ok((input, Record::ZeroTime { zero_time }))
+}
+fn parse_provenance(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
+    let (input, pid) = parse_provenance_id(input)?;
+    let (input, provenance) = parse_string(input)?;
+    Ok((input, Record::Provenance { pid, provenance }))
 }
 fn parse_proc_desc(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, proc_id) = parse_proc_id(input)?;
@@ -659,7 +709,7 @@ fn parse_operation(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, op_id) = parse_op_id(input)?;
     let (input, parent_id) = parse_option_op_id(input)?;
     let (input, kind) = le_u32(input)?;
-    let (input, provenance) = parse_string(input)?;
+    let (input, provenance) = parse_option_provenance_id(input)?;
     Ok((
         input,
         Record::OperationInstance {
@@ -933,7 +983,22 @@ fn parse_partition_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
         },
     ))
 }
+fn parse_mapper_name(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
+    let (input, mapper_id) = parse_mapper_id(input)?;
+    let (input, mapper_proc) = parse_proc_id(input)?;
+    let (input, name) = parse_string(input)?;
+    Ok((
+        input,
+        Record::MapperName {
+            mapper_id,
+            mapper_proc,
+            name,
+        },
+    ))
+}
 fn parse_mapper_call_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
+    let (input, mapper_id) = parse_mapper_id(input)?;
+    let (input, mapper_proc) = parse_proc_id(input)?;
     let (input, kind) = parse_mapper_call_kind_id(input)?;
     let (input, op_id) = parse_op_id(input)?;
     let (input, start) = parse_timestamp(input)?;
@@ -943,6 +1008,8 @@ fn parse_mapper_call_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record>
     Ok((
         input,
         Record::MapperCallInfo {
+            mapper_id,
+            mapper_proc,
             kind,
             op_id,
             start,
@@ -962,6 +1029,23 @@ fn parse_runtime_call_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record
         input,
         Record::RuntimeCallInfo {
             kind,
+            start,
+            stop,
+            proc_id,
+            fevent,
+        },
+    ))
+}
+fn parse_application_call_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
+    let (input, provenance) = parse_provenance_id(input)?;
+    let (input, start) = parse_timestamp(input)?;
+    let (input, stop) = parse_timestamp(input)?;
+    let (input, proc_id) = parse_proc_id(input)?;
+    let (input, fevent) = parse_event_id(input)?;
+    Ok((
+        input,
+        Record::ApplicationCallInfo {
+            provenance,
             start,
             stop,
             proc_id,
@@ -995,41 +1079,48 @@ fn filter_record<'a>(
     node_id: Option<NodeID>,
 ) -> bool {
     assert!(!visible_nodes.is_empty());
-    if let Some(nodeid) = node_id {
-        if !visible_nodes.contains(&nodeid) {
-            match record {
-                Record::ProcDesc { .. } => true,
-                Record::MemDesc { .. } => true,
-                Record::ProcMDesc { .. } => true,
-                Record::TaskInfo { proc_id, .. } => {
-                    State::is_on_visible_nodes(visible_nodes, proc_id.node_id())
-                }
-                Record::GPUTaskInfo { proc_id, .. } => {
-                    State::is_on_visible_nodes(visible_nodes, proc_id.node_id())
-                }
-                Record::MetaInfo { proc_id, .. } => {
-                    State::is_on_visible_nodes(visible_nodes, proc_id.node_id())
-                }
-                Record::CopyInfo { .. } => true,
-                Record::CopyInstInfo { src, dst, .. } => {
-                    State::is_on_visible_nodes(visible_nodes, src.node_id())
-                        || State::is_on_visible_nodes(visible_nodes, dst.node_id())
-                }
-                Record::FillInfo { .. } => true,
-                Record::FillInstInfo { dst, .. } => {
-                    State::is_on_visible_nodes(visible_nodes, dst.node_id())
-                }
-                Record::InstTimelineInfo { mem_id, .. } => {
-                    State::is_on_visible_nodes(visible_nodes, mem_id.node_id())
-                }
-                Record::PartitionInfo { .. } => true,
-                _ => false,
-            }
-        } else {
-            true
+    let Some(node_id) = node_id else {
+        return true;
+    };
+    if visible_nodes.contains(&node_id) {
+        return true;
+    }
+
+    match record {
+        Record::MapperCallDesc { .. }
+        | Record::RuntimeCallDesc { .. }
+        | Record::MetaDesc { .. }
+        | Record::OpDesc { .. }
+        | Record::MaxDimDesc { .. }
+        | Record::RuntimeConfig { .. }
+        | Record::MachineDesc { .. }
+        | Record::ZeroTime { .. }
+        | Record::ProcDesc { .. }
+        | Record::MemDesc { .. }
+        | Record::ProcMDesc { .. } => true,
+        Record::TaskInfo { proc_id, .. } => {
+            State::is_on_visible_nodes(visible_nodes, proc_id.node_id())
         }
-    } else {
-        true
+        Record::GPUTaskInfo { proc_id, .. } => {
+            State::is_on_visible_nodes(visible_nodes, proc_id.node_id())
+        }
+        Record::MetaInfo { proc_id, .. } => {
+            State::is_on_visible_nodes(visible_nodes, proc_id.node_id())
+        }
+        Record::CopyInfo { .. } => true,
+        Record::CopyInstInfo { src, dst, .. } => {
+            State::is_on_visible_nodes(visible_nodes, src.node_id())
+                || State::is_on_visible_nodes(visible_nodes, dst.node_id())
+        }
+        Record::FillInfo { .. } => true,
+        Record::FillInstInfo { dst, .. } => {
+            State::is_on_visible_nodes(visible_nodes, dst.node_id())
+        }
+        Record::InstTimelineInfo { mem_id, .. } => {
+            State::is_on_visible_nodes(visible_nodes, mem_id.node_id())
+        }
+        Record::PartitionInfo { .. } => true,
+        _ => false,
     }
 }
 
@@ -1067,13 +1158,16 @@ fn parse<'a>(
     let (input, _) = newline(input)?;
 
     let mut parsers = BTreeMap::<u32, fn(&[u8], i32) -> IResult<&[u8], Record>>::new();
+    parsers.insert(ids["MapperName"], parse_mapper_name);
     parsers.insert(ids["MapperCallDesc"], parse_mapper_call_desc);
     parsers.insert(ids["RuntimeCallDesc"], parse_runtime_call_desc);
     parsers.insert(ids["MetaDesc"], parse_meta_desc);
     parsers.insert(ids["OpDesc"], parse_op_desc);
     parsers.insert(ids["MaxDimDesc"], parse_max_dim_desc);
+    parsers.insert(ids["RuntimeConfig"], parse_runtime_config);
     parsers.insert(ids["MachineDesc"], parse_machine_desc);
     parsers.insert(ids["ZeroTime"], parse_zero_time);
+    parsers.insert(ids["Provenance"], parse_provenance);
     parsers.insert(ids["ProcDesc"], parse_proc_desc);
     parsers.insert(ids["MemDesc"], parse_mem_desc);
     parsers.insert(ids["ProcMDesc"], parse_mem_proc_affinity_desc);
@@ -1120,6 +1214,7 @@ fn parse<'a>(
     parsers.insert(ids["PartitionInfo"], parse_partition_info);
     parsers.insert(ids["MapperCallInfo"], parse_mapper_call_info);
     parsers.insert(ids["RuntimeCallInfo"], parse_runtime_call_info);
+    parsers.insert(ids["ApplicationCallInfo"], parse_application_call_info);
     parsers.insert(ids["ProfTaskInfo"], parse_proftask_info);
 
     let mut input = input;

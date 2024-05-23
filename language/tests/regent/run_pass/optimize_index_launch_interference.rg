@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 -- runs-with:
--- [["-fflow", "0", "-foverride-demand-index-launch", "1"]]
+-- [["-foverride-demand-index-launch", "1"]]
 
 import "regent"
 
@@ -25,6 +25,7 @@ task g(r : region(ispace(int1d), int), s : region(ispace(int1d), int))
 where reads(r), reads writes(s) do
 end
 
+__demand(__replicable)
 task main()
   var r = region(ispace(int1d, 10), int)
   var N = 4

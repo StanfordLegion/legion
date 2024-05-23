@@ -12,11 +12,6 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- runs-with:
--- [["-fflow", "0"]]
-
--- FIXME: This test is broken by RDIR.
-
 import "regent"
 
 -- This tests a fix for bug #558.

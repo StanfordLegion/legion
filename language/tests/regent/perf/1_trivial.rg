@@ -12,14 +12,11 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- runs-with:
--- [
---   ["-ll:cpu", "4", "-fflow-spmd", "0"],
---   ["-ll:cpu", "4", "-fflow-spmd", "1", "-fflow-spmd-shardsize", "4"]
--- ]
-
 import "regent"
 
+local format = require("std/format")
+
+__demand(__leaf)
 task inc(r : region(ispace(int1d), int), v : int)
 where reads writes(r) do
   for x in r do
@@ -27,8 +24,9 @@ where reads writes(r) do
   end
 end
 
+__demand(__replicable, __inner)
 task main()
-  regentlib.c.printf("Main running...\n")
+  format.println("Main running...")
   var num_elts = 1024
   var num_colors = 16
   var colors = ispace(int1d, num_colors)
@@ -36,12 +34,10 @@ task main()
   var r = region(ispace(int1d, num_elts), int)
   var p = partition(equal, r, colors)
 
-  __demand(__spmd)
-  do
-    for i in colors do
-      inc(p[i], 1)
-    end
+  __demand(__constant_time_launch)
+  for i in colors do
+    inc(p[i], 1)
   end
-  regentlib.c.printf("Main complete.\n")
+  format.println("Main complete.")
 end
 regentlib.start(main)

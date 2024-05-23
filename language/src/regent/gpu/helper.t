@@ -32,6 +32,9 @@
 local ast = require("regent/ast")
 local base = require("regent/std_base")
 local data = require("common/data")
+local log = require("common/log")
+
+local log_gpu = log.make_logger("gpu")
 
 local gpuhelper = {}
 
@@ -131,6 +134,10 @@ local barrier = impl.barrier
 -- ## Code generation for scalar reduction
 -- #################
 
+local function get_provenance(node)
+  return node.span.source .. ":" .. node.span.start.line
+end
+
 local supported_scalar_red_ops = {
   ["+"]   = true,
   ["*"]   = true,
@@ -214,7 +221,7 @@ gpuhelper.generate_buffer_reduction_kernel = terralib.memoize(function(type, op)
   return red
 end)
 
-function gpuhelper.generate_reduction_preamble(cx, reductions)
+function gpuhelper.generate_reduction_preamble(cx, node, reductions)
   local preamble = terralib.newlist()
   local device_ptrs = terralib.newlist()
   local buffer_cleanups = terralib.newlist()
@@ -230,6 +237,10 @@ function gpuhelper.generate_reduction_preamble(cx, reductions)
     local host_buffer =
       terralib.newsymbol(c.legion_deferred_buffer_char_1d_t,
                          "__h_buffer_" .. red_var.displayname)
+    local device_bufsize = sizeof(red_var.type) * GLOBAL_RED_BUFFER
+    local host_bufsize = sizeof(red_var.type)
+    log_gpu:info("%s: Generating deferred buffer for reduction %s of size %s on device", get_provenance(node), device_buffer, device_bufsize)
+    log_gpu:info("%s: Generating deferred buffer for reduction %s of size %s on host", get_provenance(node), host_buffer, host_bufsize)
     local init_kernel = gpuhelper.generate_buffer_init_kernel(red_var.type, red_op)
     local init_args = terralib.newlist({device_ptr})
     preamble:insert(quote
@@ -240,7 +251,7 @@ function gpuhelper.generate_reduction_preamble(cx, reductions)
       do
         var bounds : c.legion_rect_1d_t
         bounds.lo.x[0] = 0
-        bounds.hi.x[0] = [sizeof(red_var.type) * GLOBAL_RED_BUFFER - 1]
+        bounds.hi.x[0] = [device_bufsize - 1]
         [device_buffer] = c.legion_deferred_buffer_char_1d_create(bounds, c.GPU_FB_MEM, [&int8](nil))
         [device_ptr] =
           [&red_var.type]([&opaque](c.legion_deferred_buffer_char_1d_ptr([device_buffer], bounds.lo)))
@@ -249,7 +260,7 @@ function gpuhelper.generate_reduction_preamble(cx, reductions)
       do
         var bounds : c.legion_rect_1d_t
         bounds.lo.x[0] = 0
-        bounds.hi.x[0] = [sizeof(red_var.type) - 1]
+        bounds.hi.x[0] = [host_bufsize - 1]
         [host_buffer] = c.legion_deferred_buffer_char_1d_create(bounds, c.Z_COPY_MEM, [&int8](nil))
         [host_ptr] =
           [&red_var.type]([&opaque](c.legion_deferred_buffer_char_1d_ptr([host_buffer], bounds.lo)))
@@ -1074,7 +1085,7 @@ function gpuhelper.check_arguments_need_spill(args)
   return param_size > MAX_SIZE_INLINE_KERNEL_PARAMS
 end
 
-function gpuhelper.generate_argument_spill(args)
+function gpuhelper.generate_argument_spill(node, args)
   local arg_type = terralib.types.newstruct("cuda_kernel_arg")
   arg_type.entries = terralib.newlist()
   local mapping = {}
@@ -1089,6 +1100,7 @@ function gpuhelper.generate_argument_spill(args)
   local buffer = terralib.newsymbol(c.legion_deferred_buffer_char_1d_t, "__spill_buf")
   local buffer_size = sizeof(arg_type)
   buffer_size = (buffer_size + 7) / 8 * 8
+  log_gpu:info("%s: Generating deferred buffer for argument spill %s of size %s on host", get_provenance(node), buffer, buffer_size)
 
   local param_pack = terralib.newlist()
   local param_unpack = terralib.newlist()

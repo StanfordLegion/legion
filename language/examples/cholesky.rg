@@ -14,8 +14,8 @@
 
 -- runs-with:
 -- [
---   ["-verify", "-ll:cpu", "4", "-fflow", "0"],
---   ["-p", "1", "-verify", "-fflow", "0"]
+--   ["-verify", "-ll:cpu", "4"],
+--   ["-p", "1", "-verify"]
 -- ]
 
 -- FIXME: Breaks RDIR

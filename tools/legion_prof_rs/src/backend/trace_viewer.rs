@@ -59,11 +59,14 @@ pub fn emit_trace<P: AsRef<Path>>(state: &State, path: P, force: bool) -> io::Re
                     ProcEntryKind::MetaTask(variant_id) => {
                         state.meta_variants.get(&variant_id).unwrap().name.clone()
                     }
-                    ProcEntryKind::MapperCall(kind) => {
+                    ProcEntryKind::MapperCall(_, _, kind) => {
                         state.mapper_call_kinds.get(&kind).unwrap().name.clone()
                     }
                     ProcEntryKind::RuntimeCall(kind) => {
                         state.runtime_call_kinds.get(&kind).unwrap().name.clone()
+                    }
+                    ProcEntryKind::ApplicationCall(prov) => {
+                        state.find_provenance(prov).unwrap().to_owned()
                     }
                     ProcEntryKind::ProfTask => "ProfTask".to_owned(),
                 };

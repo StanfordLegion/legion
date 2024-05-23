@@ -89,7 +89,7 @@ namespace Legion {
       void record_instance_name(PhysicalInstance inst, LgEvent name);
       virtual LgEvent find_instance_name(PhysicalInstance inst) const;
     private:
-      static_assert(ENTRIES > 0, "Must be positive");
+      static_assert(ENTRIES > 0);
       // Optimize for the common case of there being one or two entries
       PhysicalInstance instances[ENTRIES];
       LgEvent names[ENTRIES];
@@ -109,6 +109,11 @@ namespace Legion {
 
     class LegionProfDesc {
     public:
+      struct MapperName {
+        MapperID mapper_id;
+        ProcID mapper_proc;
+        const char *name;
+      };
       struct MapperCallDesc {
       public:
         unsigned kind;
@@ -134,6 +139,18 @@ namespace Legion {
       struct MaxDimDesc {
 	unsigned max_dim;
       };
+      struct RuntimeConfig {
+        bool debug;
+        bool spy;
+        bool gc;
+        bool inorder;
+        bool safe_mapper;
+        bool safe_runtime;
+        bool safe_ctrlrepl;
+        bool part_checks;
+        bool bounds_checks;
+        bool resilient;
+      };
       struct MachineDesc {
         unsigned node_id;
         unsigned num_nodes;
@@ -148,7 +165,12 @@ namespace Legion {
       public:
         long long zero_time;
       };
-
+      struct Provenance {
+      public:
+        ProvenanceID pid;
+        const char *provenance;
+        size_t size;
+      };
     };
 
     class LegionProfInstance {
@@ -170,7 +192,7 @@ namespace Legion {
         UniqueID op_id;
         UniqueID parent_id;
         unsigned kind;
-        const char *provenance;
+        ProvenanceID provenance;
       };
       struct MultiTask {
       public:
@@ -365,6 +387,8 @@ namespace Legion {
       };
       struct MapperCallInfo {
       public:
+        MapperID mapper;
+        ProcID mapper_proc;
         MappingCallKind kind;
         UniqueID op_id;
         timestamp_t start, stop;
@@ -374,6 +398,12 @@ namespace Legion {
       struct RuntimeCallInfo {
       public:
         RuntimeCallKind kind;
+        timestamp_t start, stop;
+        ProcID proc_id;
+        LgEvent finish_event;
+      };
+      struct ApplicationCallInfo {
+        ProvenanceID pid;
         timestamp_t start, stop;
         ProcID proc_id;
         LgEvent finish_event;
@@ -504,12 +534,16 @@ namespace Legion {
       void process_proc_mem_aff_desc(const Memory &m);
       void process_proc_mem_aff_desc(const Processor &p);
     public:
-      void record_mapper_call(Processor proc, MappingCallKind kind, 
+      void record_mapper_call(Processor proc, MapperID mapper,
+                              Processor mapper_proc, MappingCallKind kind,
                               UniqueID uid, timestamp_t start,
                               timestamp_t stop, LgEvent finish_event);
       void record_runtime_call(Processor proc, RuntimeCallKind kind,
                                timestamp_t start, timestamp_t stop,
                                LgEvent finish_event);
+      void record_application_range(Processor proc, ProvenanceID pid,
+                                    timestamp_t start, timestamp_t stop,
+                                    LgEvent finish_event);
 #ifdef LEGION_PROF_SELF_PROFILE
     public:
       void record_proftask(Processor p, UniqueID op_id, timestamp_t start,
@@ -550,6 +584,7 @@ namespace Legion {
       std::deque<PartitionInfo> partition_infos;
       std::deque<MapperCallInfo> mapper_call_infos;
       std::deque<RuntimeCallInfo> runtime_call_infos;
+      std::deque<ApplicationCallInfo> application_call_infos;
       std::deque<MemDesc> mem_desc_infos;
       std::deque<ProcDesc> proc_desc_infos;
       std::deque<ProcMemDesc> proc_mem_aff_desc_infos;
@@ -690,15 +725,20 @@ namespace Legion {
                                    sparse_size,
                                    bool is_sparse);
     public:
+      void record_mapper_name(MapperID mapper, Processor p, const char *name);
       void record_mapper_call_kinds(const char *const *const mapper_call_names,
                                     unsigned int num_mapper_call_kinds);
-      void record_mapper_call(MappingCallKind kind, UniqueID uid,
-                              timestamp_t start, timestamp_t stop);
+      void record_mapper_call(MapperID mapper, Processor mapper_proc,
+       MappingCallKind kind, UniqueID uid, timestamp_t start, timestamp_t stop);
     public:
       void record_runtime_call_kinds(const char *const *const runtime_calls,
                                      unsigned int num_runtime_call_kinds);
       void record_runtime_call(RuntimeCallKind kind, timestamp_t start,
                                timestamp_t stop);
+      void record_provenance(ProvenanceID pid, 
+                             const char *provenance, size_t size);
+      void record_application_range(ProvenanceID pid,
+                                    timestamp_t start, timestamp_t stop);
     public:
       void record_implicit(UniqueID op_id, TaskID tid, Processor proc,
                            long long start, long long stop,

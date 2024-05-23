@@ -62,19 +62,17 @@ cache: &global_cache
   # cmake gets confused and can't figure out library arch
   EXTRA_CMAKE_ARGS: "-DCMAKE_LIBRARY_ARCHITECTURE=x86_64-linux-gnu"
 .icc212: &icc212
-  CC: "/opt/intel/oneapi/compiler/2023.1.0/linux/bin/intel64/icc"
-  CXX: "/opt/intel/oneapi/compiler/2023.1.0/linux/bin/intel64/icpc"
-  F90: "/opt/intel/oneapi/compiler/2023.1.0/linux/bin/intel64/ifort"
+  CC: "/opt/intel/oneapi/compiler/2023.1.0/linux/bin/icx"
+  CXX: "/opt/intel/oneapi/compiler/2023.1.0/linux/bin/icpx"
+  F90: "/opt/intel/oneapi/compiler/2023.1.0/linux/bin/ifx"
+  # work around obnoxious warnings about -g without -O0
+  EXTRA_CMAKE_ARGS: "-DCMAKE_CXX_FLAGS_DEBUG='-g -O0'"
+  # for libsvml.so, auto-linked by newer Intel compilers
+  LD_LIBRARY_PATH: "/opt/intel/oneapi/compiler/2023.1.0/linux/compiler/lib/intel64_lin"
 .macos_clang: &macos_clang # on macOS, we don't control the compiler version
   CC:  "clang"
   CXX: "clang++"
 
-.terra70: &terra70
-  TERRA_DIR: "/usr/local/terra70"
-.terra9: &terra9
-  TERRA_DIR: "/usr/local/terra9"
-.terra10: &terra10
-  TERRA_DIR: "/usr/local/terra10"
 .terra12: &terra12
   TERRA_DIR: "/usr/local/terra12"
 .terra13: &terra13 # macOS only
@@ -82,10 +80,6 @@ cache: &global_cache
 .terra14: &terra14
   TERRA_DIR: "/usr/local/terra14"
 
-.llvm7: &llvm7
-  LLVM_CONFIG: "llvm-config-7"
-.llvm9: &llvm9
-  LLVM_CONFIG: "llvm-config-9"
 .llvm12: &llvm12
   LLVM_CONFIG: "llvm-config-12"
 .llvm14: &llvm14
@@ -109,26 +103,30 @@ cache: &global_cache
   BOUNDS_CHECKS: "1"
   PRIVILEGE_CHECKS: "1"
 
-.cxx11_normal: &cxx11_normal
-  CXXFLAGS: ""
-  CXX_STANDARD: "11"
-.cxx11_hardened: &cxx11_hardened
-  CXXFLAGS: "-D_FORTIFY_SOURCE=2 -D_GLIBCXX_ASSERTIONS"
-  CXX_STANDARD: "11"
-.cxx14_normal: &cxx14_normal
-  CXXFLAGS: ""
-  CXX_STANDARD: "14"
 .cxx17_normal: &cxx17_normal
   CXXFLAGS: ""
+  CXX_STANDARD: "17"
+.cxx17_external: &cxx17_external
+  CXXFLAGS: ""
+  CXX_STANDARD: "17"
+  # Extra flags here for external projects that don't enforce C++ versions correctly
+  CXX_FLAGS: "-std=c++17"
+  NVCC_FLAGS: "-std=c++17"
+.cxx17_hardened: &cxx17_hardened
+  CXXFLAGS: "-D_FORTIFY_SOURCE=2 -D_GLIBCXX_ASSERTIONS"
+  CXX_STANDARD: "17"
+.cxx17_precise: &cxx17_precise
+  # Intel compilers turn on some overly aggressive optimizations by default
+  CXXFLAGS: "-fp-model=precise -no-ansi-alias"
   CXX_STANDARD: "17"
 .cxx20_normal: &cxx20_normal
   CXXFLAGS: ""
   CXX_STANDARD: "20"
-.cxx11_32bit_normal: &cxx11_32bit_normal
+.cxx17_32bit_normal: &cxx17_32bit_normal
   CXXFLAGS: "-m32"
   LDFLAGS: "-m32 -latomic"
   MARCH: "i686"
-  CXX_STANDARD: "11"
+  CXX_STANDARD: "17"
 .shared: &shared
   SHARED_OBJECTS: "1"
 
@@ -211,7 +209,6 @@ cache: &global_cache
 .kokkos: &kokkos
   USE_KOKKOS: "1"
   KOKKOS_TAG: "4.0.01"
-  KOKKOS_CUDA_ARCH: "PASCAL60"
   KKERNELS_BRANCH: "4.0.01"
 
 .prof: &prof
@@ -224,6 +221,10 @@ cache: &global_cache
 
 .ctest: &ctest
   TEST_CTEST: "1"
+
+# The realm unit tests only works on single node
+.realm_unit_ctest: &realm_unit_ctest
+  TEST_REALM_UNIT_CTEST: "1"
 
 .regent: &regent
   TEST_LEGION_CXX: "0"
@@ -317,7 +318,7 @@ before_script:
     fi
     if [[ "$REALM_NETWORKS" != "" ]]; then
       # OpenMPI:
-      # export LAUNCHER="mpirun -n 2 -x TERRA_PATH -x INCLUDE_PATH -x LD_LIBRARY_PATH -x LG_RT_DIR -x USE_RDIR"
+      # export LAUNCHER="mpirun -n 2 -x TERRA_PATH -x INCLUDE_PATH -x LD_LIBRARY_PATH -x LG_RT_DIR"
       # MPICH:
       export LAUNCHER="mpirun -n 2"
       export MPICH_CXX=${CXX}
@@ -385,8 +386,6 @@ before_script:
       fi
       if [[ "$USE_CUDA" -eq 1 ]]; then
         KOKKOS_CMAKE_OPTS="$KOKKOS_CMAKE_OPTS -DKokkos_ENABLE_CUDA=ON -DKokkos_ENABLE_CUDA_LAMBDA=ON -DKokkos_ENABLE_CUDA_UVM=OFF"
-        # Pick a base CUDA architecture to enable
-        KOKKOS_CMAKE_OPTS="$KOKKOS_CMAKE_OPTS -DKokkos_ARCH_${KOKKOS_CUDA_ARCH}=ON"
         # Force Kokkos build to always use the nvcc wrapper (even for clang)
         # This allows kokkos to build SASS and PTX in a forward compatible way,
         # allowing older toolkits to work on newer GPUs in CI
@@ -479,13 +478,6 @@ before_script:
   # docker puts both 32 and 64 bit libcuda.so's in LD_LIBRARY_PATH, but that confuses Kokkos's cmake
   LD_LIBRARY_PATH: "/usr/local/nvidia/lib64"
 
-.cuda112: &cuda112
-  <<: *cuda_base
-  CUDA: "/usr/local/cuda-11.2"
-  CUDA_TOOLKIT_ROOT: "$CUDA"
-  CUDA_HOME: "$CUDA"
-  USE_NVTX: "1"
-
 .cuda117: &cuda117
   <<: *cuda_base
   CUDA: "/usr/local/cuda-11.7"
@@ -496,6 +488,13 @@ before_script:
 .cuda121: &cuda121
   <<: *cuda_base
   CUDA: "/usr/local/cuda-12.1"
+  CUDA_TOOLKIT_ROOT: "$CUDA"
+  CUDA_HOME: "$CUDA"
+  USE_NVTX: "1"
+
+.cuda124: &cuda124
+  <<: *cuda_base
+  CUDA: "/usr/local/cuda-12.4"
   CUDA_TOOLKIT_ROOT: "$CUDA"
   CUDA_HOME: "$CUDA"
   USE_NVTX: "1"
@@ -579,11 +578,16 @@ before_script:
       if [[ "$USE_CCACHE" -eq 1 ]]; then
         ccache --show-stats
       fi
-  retry:
-    max: 0
-    when:
-      - runner_system_failure
-      - unknown_failure
+  artifacts:
+    name: "$CI_JOB_NAME"
+    when: always
+    paths:
+      - language/test_output/
+  # retry:
+  #   max: 0
+  #   when:
+  #     - runner_system_failure
+  #     - unknown_failure
 
 # Some additional tests are only run on certain configurations.
 .external_tests: &external_tests
@@ -680,514 +684,487 @@ before_script:
 # Linux with GCC 9
 # * Basic configurations
 #   * Release
-gcc9_cxx11_release_legion_fortran:
+gcc9_cxx17_release_legion_fortran:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *release, *cxx11_normal, *legion, *fortran, *libdw]
-gcc9_cxx11_release_llvm_cmake_regent_pretty:
+    <<: [*gcc9, *terra12, *release, *cxx17_normal, *legion, *fortran, *libdw]
+gcc9_cxx17_release_llvm_cmake_regent_pretty:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *release, *cxx11_normal, *llvm, *llvm12, *cmake, *regent_pretty, *incremental, *short, *shared]
+    <<: [*gcc9, *terra12, *release, *cxx17_normal, *llvm, *llvm12, *cmake, *regent_pretty, *incremental, *short, *shared]
 #   * Debug (Privilege and Bounds Checks)
-gcc9_cxx11_debug_checks_legion:
+gcc9_cxx17_debug_checks_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *checks, *legion, *libdw]
+    <<: [*gcc9, *terra12, *debug, *cxx17_normal, *checks, *legion, *libdw]
 #   * Spy
-gcc9_cxx11_debug_spy_legion:
+gcc9_cxx17_debug_spy_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *spy, *legion, *libdw]
-gcc9_cxx11_debug_spy_python3_regent:
+    <<: [*gcc9, *terra12, *debug, *cxx17_normal, *spy, *legion, *libdw]
+gcc9_cxx17_debug_spy_python3_regent:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *spy, *python3, *regent, *parallel, *libdw]
+    <<: [*gcc9, *terra12, *debug, *cxx17_normal, *spy, *python3, *regent, *parallel, *libdw]
 #   * Prof
-gcc9_cxx11_release_prof_regent:
+gcc9_cxx17_release_prof_regent:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *release, *cxx11_normal, *prof, *regent, *parallel, *libdw]
-#   * C++11
-gcc9_cxx11_release_legion:
-  <<: [*linux, *image_2004, *tests]
-  variables:
-    <<: [*gcc9, *terra12, *release, *cxx11_normal, *legion, *libdw]
+    <<: [*gcc9, *terra12, *release, *cxx17_normal, *prof, *regent, *parallel, *libdw]
 #   * higher dimension support (5-D)
-gcc9_cxx11_release_maxdim5_regent:
+gcc9_cxx17_release_maxdim5_regent:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *release, *cxx11_normal, *maxdim5, *regent, *parallel, *libdw]
-gcc9_cxx11_release_maxdim5_regent_pretty:
+    <<: [*gcc9, *terra12, *release, *cxx17_normal, *maxdim5, *regent, *parallel, *libdw]
+gcc9_cxx17_release_maxdim5_regent_pretty:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *release, *cxx11_normal, *maxdim5, *regent_pretty, *parallel, *libdw]
+    <<: [*gcc9, *terra12, *release, *cxx17_normal, *maxdim5, *regent_pretty, *parallel, *libdw]
 # * Features: one test per feature
 #   * OpenMP
-gcc9_cxx11_debug_openmp_legion:
+gcc9_cxx17_debug_openmp_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *openmp, *legion, *libdw]
-gcc9_cxx11_debug_openmp_regent:
+    <<: [*gcc9, *terra12, *debug, *cxx17_normal, *openmp, *legion, *libdw]
+gcc9_cxx17_debug_openmp_regent:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *openmp, *regent, *libdw]
-gcc9_cxx11_debug_openmp_system_regent:
+    <<: [*gcc9, *terra12, *debug, *cxx17_normal, *openmp, *regent, *libdw]
+gcc9_cxx17_debug_openmp_system_regent:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *openmp, *openmp_system, *regent, *libdw, *short]
+    <<: [*gcc9, *terra12, *debug, *cxx17_normal, *openmp, *openmp_system, *regent, *libdw, *short]
 #   * Python
-gcc9_cxx11_debug_python3_cmake_prof_legion:
+gcc9_cxx17_debug_python3_cmake_prof_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *python3, *cmake, *legion, *ctest, *prof, *shared, *short]
+    <<: [*gcc9, *terra12, *debug, *cxx17_normal, *python3, *cmake, *legion, *ctest, *realm_unit_ctest, *prof, *shared, *short]
 #   * LLVM
-gcc9_cxx11_debug_llvm_cmake_legion:
+gcc9_cxx17_debug_llvm_cmake_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *llvm, *llvm12, *cmake, *legion, *ctest, *shared, *libdw]
-gcc9_cxx11_debug_llvm_regent:
+    <<: [*gcc9, *terra12, *debug, *cxx17_normal, *llvm, *llvm12, *cmake, *legion, *ctest, *realm_unit_ctest, *shared, *libdw]
+gcc9_cxx17_debug_llvm_regent:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *llvm, *llvm12, *regent, *libdw]
+    <<: [*gcc9, *terra12, *debug, *cxx17_normal, *llvm, *llvm12, *regent, *libdw]
 #   * HDF5
-gcc9_cxx11_debug_hdf5_cmake_legion:
+gcc9_cxx17_debug_hdf5_cmake_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *hdf5, *cmake, *legion, *ctest, *libdw]
-gcc9_cxx11_debug_hdf5_regent_pretty:
+    <<: [*gcc9, *terra12, *debug, *cxx17_normal, *hdf5, *cmake, *legion, *ctest, *libdw]
+gcc9_cxx17_debug_hdf5_regent_pretty:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *hdf5, *regent_pretty, *libdw]
+    <<: [*gcc9, *terra12, *debug, *cxx17_normal, *hdf5, *regent_pretty, *libdw]
 #   * GASNet-1 (legacy API)
-gcc9_cxx11_release_gasnet1_mpi_legion:
+gcc9_cxx17_release_gasnet1_mpi_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *release, *cxx11_normal, *gasnet1_mpi, *legion, *libdw]
-gcc9_cxx11_debug_gasnet1_mpi_cmake_legion:
+    <<: [*gcc9, *terra12, *release, *cxx17_normal, *gasnet1_mpi, *legion, *libdw]
+gcc9_cxx17_debug_gasnet1_mpi_cmake_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *gasnet1_mpi, *cmake, *legion, *ctest, *shared, *libdw]
-gcc9_cxx11_debug_gasnet1_mpi_regent:
+    <<: [*gcc9, *terra12, *debug, *cxx17_normal, *gasnet1_mpi, *cmake, *legion, *ctest, *shared, *libdw]
+gcc9_cxx17_debug_gasnet1_mpi_regent:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *gasnet1_mpi, *regent, *incremental, *libdw]
+    <<: [*gcc9, *terra12, *debug, *cxx17_normal, *gasnet1_mpi, *regent, *incremental, *libdw]
 #   * Embedded GASNet builds (local and remote, static and shared)
-gcc9_cxx11_release_gasnet1_mpi_embedlocal_cmake_legion:
+gcc9_cxx17_release_gasnet1_mpi_embedlocal_cmake_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *release, *cxx11_normal, *gasnet1_mpi, *gasnet_embed_local, *cmake, *ctest, *legion, *shared, *libdw]
-gcc9_cxx11_release_gasnet1_mpi_embedremote_cmake_legion:
+    <<: [*gcc9, *terra12, *release, *cxx17_normal, *gasnet1_mpi, *gasnet_embed_local, *cmake, *ctest, *legion, *shared, *libdw]
+gcc9_cxx17_release_gasnet1_mpi_embedremote_cmake_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *release, *cxx11_normal, *gasnet1_mpi, *gasnet_embed_remote, *cmake, *ctest, *legion, *shared, *libdw]
-gcc9_cxx11_release_shared_gasnet1_mpi_embedlocal_cmake_legion:
+    <<: [*gcc9, *terra12, *release, *cxx17_normal, *gasnet1_mpi, *gasnet_embed_remote, *cmake, *ctest, *legion, *shared, *libdw]
+gcc9_cxx17_release_shared_gasnet1_mpi_embedlocal_cmake_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *release, *shared, *cxx11_normal, *gasnet1_mpi, *gasnet_embed_local, *cmake, *ctest, *legion, *shared, *libdw]
-gcc9_cxx11_release_shared_gasnet1_mpi_embedremote_cmake_legion:
+    <<: [*gcc9, *terra12, *release, *shared, *cxx17_normal, *gasnet1_mpi, *gasnet_embed_local, *cmake, *ctest, *legion, *shared, *libdw]
+gcc9_cxx17_release_shared_gasnet1_mpi_embedremote_cmake_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *release, *shared, *cxx11_normal, *gasnet1_mpi, *gasnet_embed_remote, *cmake, *ctest, *legion, *shared, *libdw]
+    <<: [*gcc9, *terra12, *release, *shared, *cxx17_normal, *gasnet1_mpi, *gasnet_embed_remote, *cmake, *ctest, *legion, *shared, *libdw]
 #   * GASNet-EX (native API, 2020.11.0+)
-gcc9_cxx11_release_gasnetex_mpi_legion:
+gcc9_cxx17_release_gasnetex_mpi_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *release, *cxx11_normal, *gasnetex_mpi, *legion, *libdw]
-gcc9_cxx11_debug_gasnetex_mpi_cmake_legion:
+    <<: [*gcc9, *terra12, *release, *cxx17_normal, *gasnetex_mpi, *legion, *libdw]
+gcc9_cxx17_debug_gasnetex_mpi_cmake_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *gasnetex_mpi, *cmake, *legion, *ctest, *short, *shared, *libdw]
-gcc9_cxx11_debug_gasnetex_mpi_regent:
+    <<: [*gcc9, *terra12, *debug, *cxx17_normal, *gasnetex_mpi, *cmake, *legion, *ctest, *short, *shared, *libdw]
+gcc9_cxx17_debug_gasnetex_mpi_regent:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *gasnetex_mpi, *regent, *incremental, *short, *libdw]
-gcc9_cxx11_debug_gasnetex_mpi_debug_regent:
+    <<: [*gcc9, *terra12, *debug, *cxx17_normal, *gasnetex_mpi, *regent, *incremental, *short, *libdw]
+gcc9_cxx17_debug_gasnetex_mpi_debug_regent:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *gasnetex_mpi_debug, *regent, *incremental, *libdw]
-gcc9_cxx11_debug_gasnetex_mpi_nightly_regent:
+    <<: [*gcc9, *terra12, *debug, *cxx17_normal, *gasnetex_mpi_debug, *regent, *incremental, *libdw]
+gcc9_cxx17_debug_gasnetex_mpi_nightly_regent:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *gasnetex_mpi_nightly, *regent, *incremental, *libdw]
+    <<: [*gcc9, *terra12, *debug, *cxx17_normal, *gasnetex_mpi_nightly, *regent, *incremental, *libdw]
 #   * GASNet (UCX conduit)
-gcc9_cxx11_release_gasnet1_ucx_legion:
+gcc9_cxx17_release_gasnet1_ucx_legion:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *release, *cxx11_normal, *gasnet1_ucx, *legion, *short, *libdw]
-gcc9_cxx11_release_gasnet1_ucx_cmake_legion:
+    <<: [*gcc9, *terra12, *release, *cxx17_normal, *gasnet1_ucx, *legion, *short, *libdw]
+gcc9_cxx17_release_gasnet1_ucx_cmake_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *release, *cxx11_normal, *gasnet1_ucx, *cmake, *legion, *ctest, *shared, *libdw]
-gcc9_cxx11_release_gasnet1_ucx_regent:
+    <<: [*gcc9, *terra12, *release, *cxx17_normal, *gasnet1_ucx, *cmake, *legion, *ctest, *shared, *libdw]
+gcc9_cxx17_release_gasnet1_ucx_regent:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *release, *cxx11_normal, *gasnet1_ucx, *regent, *incremental, *libdw]
-gcc9_cxx11_release_gasnetex_ucx_legion:
+    <<: [*gcc9, *terra12, *release, *cxx17_normal, *gasnet1_ucx, *regent, *incremental, *libdw]
+gcc9_cxx17_release_gasnetex_ucx_legion:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *release, *cxx11_normal, *gasnetex_ucx, *legion, *libdw]
-gcc9_cxx11_debug_gasnetex_ucx_cmake_legion:
+    <<: [*gcc9, *terra12, *release, *cxx17_normal, *gasnetex_ucx, *legion, *libdw]
+gcc9_cxx17_debug_gasnetex_ucx_cmake_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *gasnetex_ucx, *cmake, *legion, *ctest, *shared, *libdw]
-gcc9_cxx11_release_gasnetex_ucx_regent:
+    <<: [*gcc9, *terra12, *debug, *cxx17_normal, *gasnetex_ucx, *cmake, *legion, *ctest, *shared, *libdw]
+gcc9_cxx17_release_gasnetex_ucx_regent:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *release, *cxx11_normal, *gasnetex_ucx, *regent, *incremental,  *short, *libdw]
+    <<: [*gcc9, *terra12, *release, *cxx17_normal, *gasnetex_ucx, *regent, *incremental,  *short, *libdw]
 #   * MPI and multi-node legion prof
-gcc9_cxx11_release_mpi_legion:
+gcc9_cxx17_release_mpi_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *release, *cxx11_normal, *mpi, *legion, *libdw]
-gcc9_cxx11_debug_mpi_cmake_legion:
+    <<: [*gcc9, *terra12, *release, *cxx17_normal, *mpi, *legion, *libdw]
+gcc9_cxx17_debug_mpi_cmake_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *mpi, *cmake, *legion, *ctest, *shared, *libdw]
-gcc9_cxx11_release_mpi_prof_regent:
+    <<: [*gcc9, *terra12, *debug, *cxx17_normal, *mpi, *cmake, *legion, *ctest, *shared, *libdw]
+gcc9_cxx17_release_mpi_prof_regent:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *release, *cxx11_normal, *mpi, *regent, *incremental, *prof, *short, *libdw]
+    <<: [*gcc9, *terra12, *release, *cxx17_normal, *mpi, *regent, *incremental, *prof, *short, *libdw]
 #   * UCX
-gcc9_cxx11_release_ucx_legion:
+gcc9_cxx17_release_ucx_legion:
  <<: [*linux, *image_2004, *tests]
  variables:
-   <<: [*gcc9, *terra12, *release, *cxx11_normal, *ucx, *legion, *libdw]
-gcc9_cxx11_debug_ucx_dynamic_cmake_legion:
+   <<: [*gcc9, *terra12, *release, *cxx17_normal, *ucx, *legion, *libdw]
+gcc9_cxx17_debug_ucx_dynamic_cmake_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *ucx, *ucx_dynamic, *cmake, *legion, *ctest, *short, *libdw]
-gcc9_cxx11_debug_ucx_regent:
+    <<: [*gcc9, *terra12, *debug, *cxx17_normal, *ucx, *ucx_dynamic, *cmake, *legion, *ctest, *short, *libdw]
+gcc9_cxx17_debug_ucx_regent:
  <<: [*linux_compute, *image_2004, *tests]
  variables:
-   <<: [*gcc9, *terra12, *debug, *cxx11_normal, *ucx, *regent, *incremental, *libdw]
+   <<: [*gcc9, *terra12, *debug, *cxx17_normal, *ucx, *regent, *incremental, *libdw]
 # * Integration: Python + Regent
-gcc9_cxx11_debug_python3_regent:
+gcc9_cxx17_debug_python3_regent:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *python3, *regent, *libdw]
+    <<: [*gcc9, *terra12, *debug, *cxx17_normal, *python3, *regent, *libdw]
 # * Integration: LLVM + GASNet
-gcc9_cxx11_debug_llvm_gasnetex_mpi_legion:
+gcc9_cxx17_debug_llvm_gasnetex_mpi_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *llvm, *llvm12, *gasnetex_mpi, *legion, *libdw]
-gcc9_cxx11_debug_llvm_gasnetex_mpi_regent:
+    <<: [*gcc9, *terra12, *debug, *cxx17_normal, *llvm, *llvm12, *gasnetex_mpi, *legion, *libdw]
+gcc9_cxx17_debug_llvm_gasnetex_mpi_regent:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *llvm, *llvm12, *gasnetex_mpi, *regent, *incremental, *libdw]
+    <<: [*gcc9, *terra12, *debug, *cxx17_normal, *llvm, *llvm12, *gasnetex_mpi, *regent, *incremental, *libdw]
 # * Integration: LLVM + MPI
-gcc9_cxx11_debug_llvm_mpi_legion:
+gcc9_cxx17_debug_llvm_mpi_legion:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *llvm, *llvm12, *mpi, *legion, *libdw]
-gcc9_cxx11_debug_llvm_mpi_regent:
+    <<: [*gcc9, *terra12, *debug, *cxx17_normal, *llvm, *llvm12, *mpi, *legion, *libdw]
+gcc9_cxx17_debug_llvm_mpi_regent:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *llvm, *llvm12, *mpi, *regent, *incremental, *libdw]
+    <<: [*gcc9, *terra12, *debug, *cxx17_normal, *llvm, *llvm12, *mpi, *regent, *incremental, *libdw]
 # * Integration: LLVM + UCX
-#gcc9_cxx11_debug_llvm_ucx_legion:
+#gcc9_cxx17_debug_llvm_ucx_legion:
 #  <<: [*linux_compute, *image_2004, *tests]
 #  variables:
-#    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *llvm, *llvm12, *ucx, *legion]
-#gcc9_cxx11_debug_llvm_ucx_regent:
+#    <<: [*gcc9, *terra12, *debug, *cxx17_normal, *llvm, *llvm12, *ucx, *legion]
+#gcc9_cxx17_debug_llvm_ucx_regent:
 #  <<: [*linux_compute, *image_2004, *tests]
 #  variables:
-#    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *llvm, *llvm12, *ucx, *regent, *incremental]
+#    <<: [*gcc9, *terra12, *debug, *cxx17_normal, *llvm, *llvm12, *ucx, *regent, *incremental]
 # * Integration: HDF5 + GASNet
-gcc9_cxx11_debug_hdf5_gasnetex_mpi_legion:
+gcc9_cxx17_debug_hdf5_gasnetex_mpi_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *hdf5, *gasnetex_mpi, *legion, *libdw]
-gcc9_cxx11_debug_hdf5_gasnetex_mpi_regent:
+    <<: [*gcc9, *terra12, *debug, *cxx17_normal, *hdf5, *gasnetex_mpi, *legion, *libdw]
+gcc9_cxx17_debug_hdf5_gasnetex_mpi_regent:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *hdf5, *gasnetex_mpi, *regent, *libdw]
+    <<: [*gcc9, *terra12, *debug, *cxx17_normal, *hdf5, *gasnetex_mpi, *regent, *libdw]
 # * Integration: HDF5 + MPI
-gcc9_cxx11_debug_hdf5_mpi_legion:
+gcc9_cxx17_debug_hdf5_mpi_legion:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *hdf5, *mpi, *legion, *libdw]
-gcc9_cxx11_debug_hdf5_mpi_regent:
+    <<: [*gcc9, *terra12, *debug, *cxx17_normal, *hdf5, *mpi, *legion, *libdw]
+gcc9_cxx17_debug_hdf5_mpi_regent:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *hdf5, *mpi, *regent, *libdw]
+    <<: [*gcc9, *terra12, *debug, *cxx17_normal, *hdf5, *mpi, *regent, *libdw]
 # * Integration: HDF5 + UCX
-#gcc9_cxx11_debug_hdf5_ucx_legion:
+#gcc9_cxx17_debug_hdf5_ucx_legion:
 #  <<: [*linux_compute, *image_2004, *tests]
 #  variables:
-#    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *hdf5, *ucx, *legion]
-#gcc9_cxx11_debug_hdf5_ucx_regent:
+#    <<: [*gcc9, *terra12, *debug, *cxx17_normal, *hdf5, *ucx, *legion]
+#gcc9_cxx17_debug_hdf5_ucx_regent:
 #  <<: [*linux, *image_2004, *tests]
 #  variables:
-#    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *hdf5, *ucx, *regent]
+#    <<: [*gcc9, *terra12, *debug, *cxx17_normal, *hdf5, *ucx, *regent]
 # Multi-node Legion Spy
-gcc9_cxx11_debug_spy_gasnet1_mpi_regent:
+gcc9_cxx17_debug_spy_gasnet1_mpi_regent:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *cxx11_normal, *spy, *gasnet1_mpi, *regent, *short, *libdw]
-gcc9_cxx11_debug_spy_mpi_regent:
+    <<: [*gcc9, *terra12, *cxx17_normal, *spy, *gasnet1_mpi, *regent, *short, *libdw]
+gcc9_cxx17_debug_spy_mpi_regent:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *cxx11_normal, *spy, *mpi, *regent, *libdw]
-#gcc9_cxx11_debug_spy_ucx_regent:
+    <<: [*gcc9, *terra12, *cxx17_normal, *spy, *mpi, *regent, *libdw]
+#gcc9_cxx17_debug_spy_ucx_regent:
 #  <<: [*linux_compute, *image_2004, *tests]
 #  variables:
-#    <<: [*gcc9, *terra12, *cxx11_normal, *spy, *ucx, *regent]
+#    <<: [*gcc9, *terra12, *cxx17_normal, *spy, *ucx, *regent]
 # * Different architectures
-gcc9_cxx11_32bit_debug_legion:
+gcc9_cxx17_32bit_debug_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *debug, *cxx11_32bit_normal, *legion]
-gcc9_cxx11_32bit_release_legion:
+    <<: [*gcc9, *terra12, *debug, *cxx17_32bit_normal, *legion]
+gcc9_cxx17_32bit_release_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *release, *cxx11_32bit_normal, *legion]
+    <<: [*gcc9, *terra12, *release, *cxx17_32bit_normal, *legion]
 # * External tests
-gcc9_cxx11_debug_external1:
+gcc9_cxx17_debug_external1:
   <<: [*linux_compute, *image_2004, *external_tests]
   variables:
-    <<: [*gcc9, *debug, *cxx11_normal, *openmp, *hdf5, *external1, *short, *libdw]
+    <<: [*gcc9, *terra12, *debug, *cxx17_normal, *openmp, *hdf5, *external1, *short, *libdw]
 gcc9_cxx17_debug_maxdim4_external2:
   <<: [*linux_compute, *image_2004, *external_tests]
   variables:
-    <<: [*gcc9, *terra12, *debug, *cxx17_normal, *maxdim4, *openmp, *hdf5, *external2, *short, *libdw]
-gcc9_cxx11_debug_private:
+    <<: [*gcc9, *terra12, *debug, *cxx17_external, *maxdim4, *openmp, *hdf5, *external2, *short, *libdw]
+gcc9_cxx17_debug_private:
   <<: [*linux_compute, *image_2004, *external_tests]
   variables:
-    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *openmp, *hdf5, *private, *short, *libdw]
+    <<: [*gcc9, *terra12, *debug, *cxx17_normal, *openmp, *hdf5, *private, *short, *libdw]
 # * Test multi-node remote mapping without control replication in Regent
-gcc9_cxx11_debug_gasnetex_mpi_regent_nocr:
+gcc9_cxx17_debug_gasnetex_mpi_regent_nocr:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *gasnetex_mpi, *regent, *incremental, *libdw, *nocr]
+    <<: [*gcc9, *terra12, *debug, *cxx17_normal, *gasnetex_mpi, *regent, *incremental, *libdw, *nocr]
+
 # Linux with Clang 12
 # * Basic configurations
 #   * Release
-clang12_cxx11_release_legion_fortran:
+clang12_cxx17_release_legion_fortran:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*clang12, *terra12, *release, *cxx11_normal, *legion, *fortran, *libdw]
-clang12_cxx11_release_llvm_cmake_regent:
+    <<: [*clang12, *terra12, *release, *cxx17_normal, *legion, *fortran, *libdw]
+clang12_cxx17_release_llvm_cmake_regent:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
-    <<: [*clang12, *terra12, *release, *cxx11_normal, *llvm, *llvm12, *cmake, *regent, *incremental, *libdw]
+    <<: [*clang12, *terra12, *release, *cxx17_normal, *llvm, *llvm12, *cmake, *regent, *incremental, *libdw]
 #   * Debug (Privilege and Bounds Checks)
-clang12_cxx11_debug_checks_legion:
+clang12_cxx17_debug_checks_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*clang12, *terra12, *debug, *cxx11_normal, *checks, *legion, *libdw]
+    <<: [*clang12, *terra12, *debug, *cxx17_normal, *checks, *legion, *libdw]
 #   * Spy
-clang12_cxx11_debug_spy_legion:
+clang12_cxx17_debug_spy_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*clang12, *terra12, *debug, *cxx11_normal, *spy, *legion, *libdw]
-clang12_cxx11_debug_spy_python3_regent:
+    <<: [*clang12, *terra12, *debug, *cxx17_normal, *spy, *legion, *libdw]
+clang12_cxx17_debug_spy_python3_regent:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
-    <<: [*clang12, *terra12, *debug, *cxx11_normal, *spy, *python3, *regent, *parallel, *short]
+    <<: [*clang12, *terra12, *debug, *cxx17_normal, *spy, *python3, *regent, *parallel, *short]
 #   * Prof
-clang12_cxx11_release_prof_regent:
+clang12_cxx17_release_prof_regent:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
-    <<: [*clang12, *terra12, *release, *cxx11_normal, *prof, *regent, *parallel, *short]
-#   * C++11
-clang12_cxx11_release_legion:
-  <<: [*linux, *image_2004, *tests]
-  variables:
-    <<: [*clang12, *terra12, *release, *cxx11_normal, *legion, *libdw]
+    <<: [*clang12, *terra12, *release, *cxx17_normal, *prof, *regent, *parallel, *short]
 # * Features: one test per feature
 #   * OpenMP
-clang12_cxx11_debug_openmp_legion:
+clang12_cxx17_debug_openmp_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*clang12, *terra12, *debug, *cxx11_normal, *openmp, *legion, *libdw]
-clang12_cxx11_debug_openmp_regent:
+    <<: [*clang12, *terra12, *debug, *cxx17_normal, *openmp, *legion, *libdw]
+clang12_cxx17_debug_openmp_regent:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
-    <<: [*clang12, *terra12, *debug, *cxx11_normal, *openmp, *regent, *libdw]
+    <<: [*clang12, *terra12, *debug, *cxx17_normal, *openmp, *regent, *libdw]
 #   * Python
-clang12_cxx11_debug_python3_legion:
+clang12_cxx17_debug_python3_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*clang12, *terra12, *debug, *cxx11_normal, *python3, *jupyter, *legion, *libdw]
+    <<: [*clang12, *terra12, *debug, *cxx17_normal, *python3, *jupyter, *legion, *libdw]
 #   * LLVM
-clang12_cxx11_debug_llvm_cmake_legion:
+clang12_cxx17_debug_llvm_cmake_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*clang12, *terra12, *debug, *cxx11_normal, *llvm, *llvm12, *cmake, *legion, *ctest, *libdw]
-clang12_cxx11_debug_llvm_regent:
+    <<: [*clang12, *terra12, *debug, *cxx17_normal, *llvm, *llvm12, *cmake, *legion, *ctest, *realm_unit_ctest, *libdw]
+clang12_cxx17_debug_llvm_regent:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
-    <<: [*clang12, *terra12, *debug, *cxx11_normal, *llvm, *llvm12, *regent, *libdw]
+    <<: [*clang12, *terra12, *debug, *cxx17_normal, *llvm, *llvm12, *regent, *libdw]
 #   * HDF5
-clang12_cxx11_debug_hdf5_cmake_legion:
+clang12_cxx17_debug_hdf5_cmake_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*clang12, *terra12, *debug, *cxx11_normal, *hdf5, *cmake, *legion, *ctest, *libdw]
-clang12_cxx11_debug_hdf5_regent:
+    <<: [*clang12, *terra12, *debug, *cxx17_normal, *hdf5, *cmake, *legion, *ctest, *libdw]
+clang12_cxx17_debug_hdf5_regent:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
-    <<: [*clang12, *terra12, *debug, *cxx11_normal, *hdf5, *regent, *libdw]
+    <<: [*clang12, *terra12, *debug, *cxx17_normal, *hdf5, *regent, *libdw]
 #   * GASNet
-clang12_cxx11_debug_gasnetex_mpi_cmake_legion:
+clang12_cxx17_debug_gasnetex_mpi_cmake_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*clang12, *terra12, *debug, *cxx11_normal, *gasnetex_mpi, *cmake, *legion, *ctest, *libdw]
-clang12_cxx11_debug_gasnetex_mpi_regent:
+    <<: [*clang12, *terra12, *debug, *cxx17_normal, *gasnetex_mpi, *cmake, *legion, *ctest, *libdw]
+clang12_cxx17_debug_gasnetex_mpi_regent:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
-    <<: [*clang12, *terra12, *debug, *cxx11_normal, *gasnetex_mpi, *regent, *incremental, *libdw]
+    <<: [*clang12, *terra12, *debug, *cxx17_normal, *gasnetex_mpi, *regent, *incremental, *libdw]
 #   * MPI
-clang12_cxx11_debug_mpi_cmake_legion:
+clang12_cxx17_debug_mpi_cmake_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*clang12, *terra12, *debug, *cxx11_normal, *mpi, *cmake, *legion, *ctest, *libdw]
-clang12_cxx11_debug_mpi_regent:
+    <<: [*clang12, *terra12, *debug, *cxx17_normal, *mpi, *cmake, *legion, *ctest, *libdw]
+clang12_cxx17_debug_mpi_regent:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
-    <<: [*clang12, *terra12, *debug, *cxx11_normal, *mpi, *regent, *incremental, *libdw]
+    <<: [*clang12, *terra12, *debug, *cxx17_normal, *mpi, *regent, *incremental, *libdw]
 #   * UCX
-clang12_cxx11_debug_ucx_cmake_legion:
+clang12_cxx17_debug_ucx_cmake_legion:
  <<: [*linux, *image_2004, *tests]
  variables:
-   <<: [*clang12, *terra12, *debug, *cxx11_normal, *ucx, *cmake, *legion, *ctest, *libdw]
-clang12_cxx11_debug_ucx_regent:
+   <<: [*clang12, *terra12, *debug, *cxx17_normal, *ucx, *cmake, *legion, *ctest, *libdw]
+clang12_cxx17_debug_ucx_regent:
  <<: [*linux_compute, *image_2004, *tests]
  variables:
-   <<: [*clang12, *terra12, *debug, *cxx11_normal, *ucx, *regent, *incremental, *libdw]
+   <<: [*clang12, *terra12, *debug, *cxx17_normal, *ucx, *regent, *incremental, *libdw]
 # * Integration: Python + Regent
-clang12_cxx11_debug_python3_regent:
+clang12_cxx17_debug_python3_regent:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*clang12, *terra12, *debug, *cxx11_normal, *python3, *regent, *libdw]
+    <<: [*clang12, *terra12, *debug, *cxx17_normal, *python3, *regent, *libdw]
 # * Integration: LLVM + GASNet
-clang12_cxx11_debug_llvm_gasnetex_mpi_legion:
+clang12_cxx17_debug_llvm_gasnetex_mpi_legion:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
-    <<: [*clang12, *terra12, *debug, *cxx11_normal, *llvm, *llvm12, *gasnetex_mpi, *legion, *libdw]
-clang12_cxx11_debug_llvm_gasnetex_mpi_regent:
+    <<: [*clang12, *terra12, *debug, *cxx17_normal, *llvm, *llvm12, *gasnetex_mpi, *legion, *libdw]
+clang12_cxx17_debug_llvm_gasnetex_mpi_regent:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
-    <<: [*clang12, *terra12, *debug, *cxx11_normal, *llvm, *llvm12, *gasnetex_mpi, *regent, *incremental, *libdw]
+    <<: [*clang12, *terra12, *debug, *cxx17_normal, *llvm, *llvm12, *gasnetex_mpi, *regent, *incremental, *libdw]
 # * Integration: LLVM + MPI
-clang12_cxx11_debug_llvm_mpi_legion:
+clang12_cxx17_debug_llvm_mpi_legion:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
-    <<: [*clang12, *terra12, *debug, *cxx11_normal, *llvm, *llvm12, *mpi, *legion, *libdw]
-clang12_cxx11_debug_llvm_mpi_regent:
+    <<: [*clang12, *terra12, *debug, *cxx17_normal, *llvm, *llvm12, *mpi, *legion, *libdw]
+clang12_cxx17_debug_llvm_mpi_regent:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
-    <<: [*clang12, *terra12, *debug, *cxx11_normal, *llvm, *llvm12, *mpi, *regent, *incremental, *libdw]
+    <<: [*clang12, *terra12, *debug, *cxx17_normal, *llvm, *llvm12, *mpi, *regent, *incremental, *libdw]
 # * Integration: LLVM + UCX
-#clang12_cxx11_debug_llvm_ucx_legion:
+#clang12_cxx17_debug_llvm_ucx_legion:
 #  <<: [*linux_compute, *image_2004, *tests]
 #  variables:
-#    <<: [*clang12, *terra12, *debug, *cxx11_normal, *llvm, *llvm12, *ucx, *legion]
-#clang12_cxx11_debug_llvm_ucx_regent:
+#    <<: [*clang12, *terra12, *debug, *cxx17_normal, *llvm, *llvm12, *ucx, *legion]
+#clang12_cxx17_debug_llvm_ucx_regent:
 #  <<: [*linux_compute, *image_2004, *tests]
 #  variables:
-#    <<: [*clang12, *terra12, *debug, *cxx11_normal, *llvm, *llvm12, *ucx, *regent, *incremental]
+#    <<: [*clang12, *terra12, *debug, *cxx17_normal, *llvm, *llvm12, *ucx, *regent, *incremental]
 # * Integration: HDF5 + GASNet
-clang12_cxx11_debug_hdf5_gasnetex_mpi_legion:
+clang12_cxx17_debug_hdf5_gasnetex_mpi_legion:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
-    <<: [*clang12, *terra12, *debug, *cxx11_normal, *hdf5, *gasnetex_mpi, *legion, *libdw]
-clang12_cxx11_debug_hdf5_gasnetex_mpi_regent:
+    <<: [*clang12, *terra12, *debug, *cxx17_normal, *hdf5, *gasnetex_mpi, *legion, *libdw]
+clang12_cxx17_debug_hdf5_gasnetex_mpi_regent:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*clang12, *terra12, *debug, *cxx11_normal, *hdf5, *gasnetex_mpi, *regent, *incremental, *libdw]
+    <<: [*clang12, *terra12, *debug, *cxx17_normal, *hdf5, *gasnetex_mpi, *regent, *incremental, *libdw]
 # * Integration: HDF5 + MPI
-clang12_cxx11_debug_hdf5_mpi_legion:
+clang12_cxx17_debug_hdf5_mpi_legion:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
-    <<: [*clang12, *terra12, *debug, *cxx11_normal, *hdf5, *mpi, *legion, *libdw]
-clang12_cxx11_debug_hdf5_mpi_regent:
+    <<: [*clang12, *terra12, *debug, *cxx17_normal, *hdf5, *mpi, *legion, *libdw]
+clang12_cxx17_debug_hdf5_mpi_regent:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*clang12, *terra12, *debug, *cxx11_normal, *hdf5, *mpi, *regent, *incremental, *libdw]
+    <<: [*clang12, *terra12, *debug, *cxx17_normal, *hdf5, *mpi, *regent, *incremental, *libdw]
 # * Integration: HDF5 + UCX
-#clang12_cxx11_debug_hdf5_ucx_legion:
+#clang12_cxx17_debug_hdf5_ucx_legion:
 #  <<: [*linux_compute, *image_2004, *tests]
 #  variables:
-#    <<: [*clang12, *terra12, *debug, *cxx11_normal, *hdf5, *ucx, *legion]
-#clang12_cxx11_debug_hdf5_ucx_regent:
+#    <<: [*clang12, *terra12, *debug, *cxx17_normal, *hdf5, *ucx, *legion]
+#clang12_cxx17_debug_hdf5_ucx_regent:
 #  <<: [*linux, *image_2004, *tests]
 #  variables:
-#    <<: [*clang12, *terra12, *debug, *cxx11_normal, *hdf5, *ucx, *regent, *incremental]
+#    <<: [*clang12, *terra12, *debug, *cxx17_normal, *hdf5, *ucx, *regent, *incremental]
 # * Integration: HDF5 + GASNet
-# clang12_cxx11_debug_spy_gasnet_regent:
+# clang12_cxx17_debug_spy_gasnet_regent:
 #   <<: [*linux_compute, *image_2004, *tests]
 #   variables:
-#     <<: [*clang12, *terra12, *debug, *cxx11_normal, *spy, *gasnet, *regent]
+#     <<: [*clang12, *terra12, *debug, *cxx17_normal, *spy, *gasnet, *regent]
 # * Different architectures
-clang12_cxx11_32bit_debug_legion:
+clang12_cxx17_32bit_debug_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*clang12, *terra12, *debug, *cxx11_32bit_normal, *legion]
-clang12_cxx11_32bit_release_legion:
+    <<: [*clang12, *terra12, *debug, *cxx17_32bit_normal, *legion]
+clang12_cxx17_32bit_release_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*clang12, *terra12, *release, *cxx11_32bit_normal, *legion, *short]
+    <<: [*clang12, *terra12, *release, *cxx17_32bit_normal, *legion, *short]
 # * External tests
-clang12_cxx11_debug_external1:
+clang12_cxx17_debug_external1:
   <<: [*linux_compute, *image_2004, *external_tests]
   variables:
-    <<: [*clang12, *debug, *cxx11_normal, *openmp, *hdf5, *external1, *libdw]
+    <<: [*clang12, *terra12, *debug, *cxx17_normal, *openmp, *hdf5, *external1, *libdw]
 clang12_cxx12_debug_maxdim4_external2:
   <<: [*linux_compute, *image_2004, *external_tests]
   variables:
-    <<: [*clang12, *terra12, *debug, *cxx17_normal, *maxdim4, *openmp, *hdf5, *external2, *libdw]
-clang12_cxx11_debug_private:
+    <<: [*clang12, *terra12, *debug, *cxx17_external, *maxdim4, *openmp, *hdf5, *external2, *libdw]
+clang12_cxx17_debug_private:
   <<: [*linux_compute, *image_2004, *external_tests]
   variables:
-    <<: [*clang12, *terra12, *debug, *cxx11_normal, *openmp, *hdf5, *private, *libdw]
+    <<: [*clang12, *terra12, *debug, *cxx17_normal, *openmp, *hdf5, *private, *libdw]
 
 # macOS with Clang
-macos_clang_cxx11_debug_legion:
+macos_clang_cxx17_debug_legion:
   <<: [*macos, *tests]
   variables:
-    <<: [*macos_clang, *debug, *cxx11_normal, *legion, *short, *no_ccache]
-macos_clang_cxx14_release_legion:
+    <<: [*macos_clang, *debug, *cxx17_normal, *legion, *short, *no_ccache]
+macos_clang_cxx17_release_legion:
   <<: [*macos, *tests]
   variables:
-    <<: [*macos_clang, *release, *cxx14_normal, *legion, *short, *no_ccache]
-macos_clang_cxx17_release_cmake_legion:
+    <<: [*macos_clang, *release, *cxx17_normal, *legion, *short, *no_ccache]
+macos_clang_cxx20_release_cmake_legion:
   <<: [*macos, *tests]
   variables:
-    <<: [*macos_clang, *release, *cxx17_normal, *cmake, *legion, *ctest, *short, *no_ccache]
-# macos_clang_cxx11_debug_cmake_regent:
+    <<: [*macos_clang, *release, *cxx20_normal, *cmake, *legion, *ctest, *realm_unit_ctest, *short, *no_ccache]
+# macos_clang_cxx17_debug_cmake_regent:
 #   <<: [*macos, *tests]
 #   variables:
-#     <<: [*macos_clang, *debug, *cxx11_normal, *cmake, *regent, *short, *no_ccache]
+#     <<: [*macos_clang, *debug, *cxx17_normal, *cmake, *regent, *short, *no_ccache]
 
 # Run minimal tests on other compilers.
 
 # GCC 9 with extra hardening
-gcc9_cxx11_hardened_legion:
+gcc9_cxx17_hardened_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *release, *cxx11_hardened, *legion, *libdw]
-gcc9_cxx11_hardened_regent:
+    <<: [*gcc9, *terra12, *release, *cxx17_hardened, *legion, *libdw]
+gcc9_cxx17_hardened_regent:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *release, *cxx11_hardened, *regent, *parallel, *libdw]
-
-# GCC 9 with C++ 14
-gcc9_cxx14_debug_legion:
-  <<: [*linux, *image_2004, *tests]
-  variables:
-    <<: [*gcc9, *terra12, *debug, *cxx14_normal, *legion, *libdw]
-gcc9_cxx14_release_legion:
-  <<: [*linux, *image_2004, *tests]
-  variables:
-    <<: [*gcc9, *terra12, *release, *cxx14_normal, *legion, *libdw]
-gcc9_cxx14_debug_regent:
-  <<: [*linux, *image_2004, *tests]
-  variables:
-    <<: [*gcc9, *terra12, *debug, *cxx14_normal, *regent]
-gcc9_cxx14_release_regent_pretty:
-  <<: [*linux, *image_2004, *tests]
-  variables:
-    <<: [*gcc9, *terra12, *release, *cxx14_normal, *regent_pretty]
+    <<: [*gcc9, *terra12, *release, *cxx17_hardened, *regent, *parallel, *libdw]
 
 # GCC 10 with C++ 17
 gcc10_cxx17_debug_legion:
@@ -1243,89 +1220,85 @@ gcc12_cxx20_release_regent_pretty:
   variables:
     <<: [*gcc12, *terra14, *release, *cxx20_normal, *regent_pretty]
 
-# Clang 14 with C++ 17/20
-clang14_cxx17_debug_legion:
+# Clang 14 with C++ 20
+clang14_cxx20_debug_legion:
   <<: [*linux, *image_2204, *tests]
   variables:
-    <<: [*clang14, *terra14, *debug, *cxx17_normal, *legion, *libdw]
-clang14_cxx17_release_legion:
+    <<: [*clang14, *terra14, *debug, *cxx20_normal, *legion, *libdw]
+clang14_cxx20_release_legion:
   <<: [*linux, *image_2204, *tests]
   variables:
-    <<: [*clang14, *terra14, *release, *cxx17_normal, *legion, *libdw]
-clang14_cxx17_debug_regent:
-  <<: [*linux, *image_2204, *tests]
-  variables:
-    <<: [*clang14, *terra14, *debug, *cxx17_normal, *regent]
-clang14_cxx17_release_regent:
-  <<: [*linux, *image_2204, *tests]
-  variables:
-    <<: [*clang14, *terra14, *release, *cxx17_normal, *regent]
+    <<: [*clang14, *terra14, *release, *cxx20_normal, *legion, *libdw]
 clang14_cxx20_debug_regent:
   <<: [*linux, *image_2204, *tests]
   variables:
     <<: [*clang14, *terra14, *debug, *cxx20_normal, *regent]
+clang14_cxx20_release_regent:
+  <<: [*linux, *image_2204, *tests]
+  variables:
+    <<: [*clang14, *terra14, *release, *cxx20_normal, *regent]
 
 # CUDA tests:
-nvidia_cuda112_gcc9_cxx14_debug_cmake_cuda_dynamic_legion:
+nvidia_cuda117_gcc10_cxx17_debug_cmake_cuda_dynamic_legion:
   <<: [*nvidia, *tests]
   variables:
-    <<: [*gcc9, *debug, *cxx14_normal, *cuda112, *cmake, *legion, *cuda_dynamic, *ctest, *short, *shared, *libdw]
-nvidia_cuda112_gcc9_cxx14_release_cuda_legion:
+    <<: [*gcc10, *debug, *cxx17_normal, *cuda117, *cmake, *legion, *cuda_dynamic, *ctest, *realm_unit_ctest, *short, *shared, *libdw]
+nvidia_cuda117_gcc10_cxx17_release_cmake_cuda_legion:
   <<: [*nvidia, *tests]
   variables:
-    <<: [*gcc9, *release, *cxx14_normal, *cuda112, *legion, *cmake, *ctest, *shared]
-nvidia_cuda117_gcc9_cxx17_debug_cuda_legion:
+    <<: [*gcc10, *release, *cxx17_normal, *cuda117, *legion, *cmake, *ctest, *realm_unit_ctest, *shared]
+nvidia_cuda121_gcc11_cxx17_debug_cmake_cuda_legion:
   <<: [*nvidia, *tests]
   variables:
-    <<: [*gcc9, *debug, *cxx17_normal, *cuda117, *legion, *short, *cmake, *ctest, *shared, *libdw]
-nvidia_cuda117_gcc9_cxx17_release_cmake_cuda_legion:
+    <<: [*gcc11, *debug, *cxx17_normal, *cuda121, *legion, *short, *cmake, *ctest, *realm_unit_ctest, *shared, *libdw]
+nvidia_cuda121_gcc11_cxx17_release_cmake_cuda_legion:
   <<: [*nvidia, *tests]
   variables:
-    <<: [*gcc9, *release, *cxx17_normal, *cuda117, *cmake, *legion, *ctest, *shared]
-nvidia_cuda121_gcc9_cxx14_release_cuda_legion:
+    <<: [*gcc11, *release, *cxx17_normal, *cuda121, *cmake, *legion, *ctest, *realm_unit_ctest, *shared]
+nvidia_cuda124_gcc11_cxx17_release_cmake_cuda_legion:
   <<: [*nvidia, *tests]
   variables:
-    <<: [*gcc9, *release, *cxx14_normal, *cuda121, *legion, *cmake, *ctest, *shared]
-nvidia_cuda121_gcc9_cxx14_debug_checks_cuda_legion:
+    <<: [*gcc11, *release, *cxx17_normal, *cuda124, *legion, *cmake, *ctest, *realm_unit_ctest, *shared]
+nvidia_cuda124_gcc11_cxx20_debug_checks_cmake_cuda_legion:
   <<: [*nvidia, *tests]
   variables:
-    <<: [*gcc9, *debug, *cxx14_normal, *checks, *cuda121, *legion, *short, *cmake, *ctest, *shared, *libdw]
-nvidia_cuda121_gcc9_cxx14_release_cmake_cuda_legion:
+    <<: [*gcc11, *debug, *cxx20_normal, *checks, *cuda124, *legion, *short, *cmake, *ctest, *realm_unit_ctest, *shared, *libdw]
+nvidia_cuda124_gcc11_cxx20_release_cmake_cuda_legion:
   <<: [*nvidia, *tests]
   variables:
-    <<: [*gcc9, *release, *cxx14_normal, *cuda121, *cmake, *legion, *ctest, *shared]
-nvidia_cuda121_clang12_cxx14_release_cuda_regent:
+    <<: [*gcc11, *release, *cxx20_normal, *cuda124, *cmake, *legion, *ctest, *realm_unit_ctest, *shared]
+nvidia_cuda124_clang12_cxx17_release_cmake_cuda_regent:
   <<: [*nvidia, *tests]
   variables:
-    <<: [*clang12, *llvm12, *release, *cxx14_normal, *cuda121, *regent, *cmake, *ctest, *short]
-nvidia_cuda121_clang12_cxx14_release_cmake_cuda_regent:
+    <<: [*clang12, *llvm12, *release, *cxx17_normal, *cuda124, *regent, *cmake, *ctest, *realm_unit_ctest, *short]
+nvidia_cuda124_clang12_cxx20_release_cmake_cuda_regent:
   <<: [*nvidia, *tests]
   variables:
-    <<: [*clang12, *llvm12, *release, *cxx14_normal, *cuda121, *cmake, *ctest, *regent, *shared]
-nvidia_cuda121_gcc9_cxx17_debug_maxdim4_external2:
+    <<: [*clang12, *llvm12, *release, *cxx20_normal, *cuda124, *cmake, *ctest, *realm_unit_ctest, *regent, *shared]
+nvidia_cuda124_gcc11_cxx17_debug_maxdim4_external2:
   <<: [*nvidia, *external_tests]
   variables:
-    <<: [*gcc9, *llvm12, *debug, *cxx17_normal, *cuda121, *maxdim4, *openmp, *hdf5, *external2, *short]
+    <<: [*gcc11, *llvm12, *debug, *cxx17_external, *cuda124, *maxdim4, *openmp, *hdf5, *external2, *short]
 
 # CUDA+GASNet tests:
-nvidia_cuda117_gcc9_cxx14_debug_gasnetex_mpi_cmake_cuda_legion:
+nvidia_cuda121_gcc11_cxx17_debug_gasnetex_mpi_cmake_cuda_legion:
   <<: [*nvidia, *tests]
   variables:
-    <<: [*gcc9, *debug, *cxx14_normal, *cuda117, *cmake, *gasnetex_mpi, *legion, *ctest, *short, *libdw]
-nvidia_cuda121_gcc9_cxx14_release_gasnetex_mpi_cuda_regent:
+    <<: [*gcc11, *debug, *cxx17_normal, *cuda121, *cmake, *gasnetex_mpi, *legion, *ctest, *short, *libdw]
+nvidia_cuda124_gcc11_cxx17_release_gasnetex_mpi_cuda_regent:
   <<: [*nvidia, *tests]
   variables:
-    <<: [*gcc9, *llvm12, *release, *cxx14_normal, *cuda121, *gasnetex_mpi, *regent]
+    <<: [*gcc11, *llvm12, *release, *cxx17_normal, *cuda124, *gasnetex_mpi, *regent]
 
 # CUDA+UCX tests:
-nvidia_cuda117_gcc9_cxx14_debug_ucx_cmake_cuda_legion:
+nvidia_cuda121_gcc11_cxx17_debug_ucx_cmake_cuda_legion:
  <<: [*nvidia, *tests]
  variables:
-   <<: [*gcc9, *debug, *cxx14_normal, *cuda117, *cmake, *ucx, *legion, *ctest, *short, *libdw]
-nvidia_cuda121_gcc9_cxx14_release_ucx_cuda_regent:
+   <<: [*gcc11, *debug, *cxx17_normal, *cuda121, *cmake, *ucx, *legion, *ctest, *short, *libdw]
+nvidia_cuda124_gcc11_cxx17_release_ucx_cuda_regent:
   <<: [*nvidia, *tests]
   variables:
-    <<: [*gcc9, *llvm12, *release, *cxx14_normal, *cuda121, *ucx, *regent]
+    <<: [*gcc11, *llvm12, *release, *cxx17_normal, *cuda124, *ucx, *regent]
 
 # Kokkos tests:
 clang12_cxx17_debug_kokkos_legion:
@@ -1341,45 +1314,42 @@ clang10_cxx17_debug_kokkos_openmp_legion:
 #   <<: [*linux, *image_2204, *tests]
 #   variables:
 #     <<: [*clang14, *terra14, *debug, *cxx17_normal, *kokkos, *openmp, *cmake, *legion, *ctest]
-nvidia_cuda112_clang10_cxx17_debug_kokkos_cuda_legion:
+nvidia_cuda117_clang10_cxx17_debug_kokkos_cuda_legion:
   <<: [*nvidia, *tests]
   variables:
-    <<: [*clang10, *debug, *cxx17_normal, *cuda112, *kokkos, *cmake, *legion, *ctest, *libdw]
-nvidia_cuda121_clang12_cxx17_debug_kokkos_cuda_openmp_legion:
+    <<: [*clang10, *debug, *cxx17_normal, *cuda117, *kokkos, *cmake, *legion, *ctest, *libdw]
+nvidia_cuda124_clang12_cxx17_debug_kokkos_cuda_openmp_legion:
   <<: [*nvidia, *tests]
   variables:
-    <<: [*clang12, *debug, *cxx17_normal, *cuda121, *kokkos, *openmp, *cmake, *legion, *ctest, *short, *libdw]
-nvidia_cuda117_gcc9_cxx17_debug_kokkos_cuda_openmp_legion:
+    <<: [*clang12, *debug, *cxx17_normal, *cuda124, *kokkos, *openmp, *cmake, *legion, *ctest, *short, *libdw]
+nvidia_cuda121_gcc11_cxx17_debug_kokkos_cuda_openmp_legion:
   <<: [*nvidia, *tests]
   variables:
-    <<: [*gcc9, *debug, *cxx17_normal, *cuda117, *kokkos, *openmp, *cmake, *legion, *ctest, *libdw]
-nvidia_cuda121_gcc9_cxx17_debug_shared_kokkos_cuda_openmp_legion:
+    <<: [*gcc11, *debug, *cxx17_normal, *cuda121, *kokkos, *openmp, *cmake, *legion, *ctest, *libdw]
+nvidia_cuda124_gcc11_cxx17_debug_shared_kokkos_cuda_openmp_legion:
   <<: [*nvidia, *tests]
   variables:
-    <<: [*gcc9, *debug, *shared, *cxx17_normal, *cuda121, *kokkos, *openmp, *cmake, *legion, *ctest, *short, *libdw]
+    <<: [*gcc11, *debug, *shared, *cxx17_normal, *cuda124, *kokkos, *openmp, *cmake, *legion, *ctest, *short, *libdw]
 
 # HPCSDK (nvc++) tests:
-# Make all HPC SDK tests use cmake since nvc++ is really slow and can't handle doing compile+link
-# for all tests without exceeding the two hour timeout, this means we're missing coverage of building
-# with make for nvc++ but we'll just have to live with that
-hpcsdk2211_cxx11_release_cmake_legion:
+hpcsdk2211_cxx17_release_cmake_legion:
   <<: [*linux_avx, *image_hpcsdk, *tests]
   variables:
-    <<: [*hpcsdk2211, *release, *cxx11_normal, *cmake, *legion, *ctest, *libdw]
-hpcsdk2211_cxx11_debug_cmake_legion:
+    <<: [*hpcsdk2211, *release, *cxx17_normal, *cmake, *legion, *ctest, *libdw]
+hpcsdk2211_cxx17_debug_cmake_legion:
   <<: [*linux_avx, *image_hpcsdk, *tests]
   variables:
-    <<: [*hpcsdk2211, *debug, *cxx11_normal, *cmake, *legion, *ctest, *short, *libdw]
+    <<: [*hpcsdk2211, *debug, *cxx17_normal, *cmake, *legion, *ctest, *short, *libdw]
 
-# Intel compiler (icc/icpc) tests:
-icc212_cxx11_release_legion:
+# Intel compiler (icx/icpx) tests:
+icc212_cxx17_release_legion:
   <<: [*linux, *image_icc, *tests]
   variables:
-    <<: [*icc212, *release, *cxx11_normal, *legion]
-icc212_cxx11_debug_cmake_legion:
+    <<: [*icc212, *release, *cxx17_precise, *legion]
+icc212_cxx17_debug_cmake_legion:
   <<: [*linux, *image_icc, *tests]
   variables:
-    <<: [*icc212, *debug, *cxx11_normal, *cmake, *legion, *ctest, *libdw]
+    <<: [*icc212, *debug, *cxx17_precise, *cmake, *legion, *ctest, *realm_unit_ctest, *short, *libdw]
 
 # MSVC (Realm only):
 msvc169_realm:
@@ -1391,15 +1361,15 @@ msvc169_realm:
 gcc12_tsan_realm:
   <<: [*linux, *image_2204, *realm_sanitizer_tests]
   variables:
-    <<: [*gcc12, *cxx11_normal, *tsan, *short, *libdw]
+    <<: [*gcc12, *cxx17_normal, *tsan, *short, *libdw]
 gcc12_ubsan_realm:
   <<: [*linux, *image_2204, *realm_sanitizer_tests]
   variables:
-    <<: [*gcc12, *cxx11_normal, *ubsan, *short, *libdw]
+    <<: [*gcc12, *cxx17_normal, *ubsan, *short, *libdw]
 gcc12_asan_realm:
   <<: [*linux, *image_2204, *realm_sanitizer_tests]
   variables:
-    <<: [*gcc12, *cxx11_normal, *asan, *short, *libdw]
+    <<: [*gcc12, *cxx17_normal, *asan, *short, *libdw]
 clang_format_realm:
   rules:
     # Always during a merge request update
@@ -1409,4 +1379,4 @@ clang_format_realm:
     - when: never
   <<: [*linux, *image_2204, *realm_clang_format]
   variables:
-    <<: [*gcc12, *cxx11_normal, *short]
+    <<: [*gcc12, *cxx17_normal, *short]

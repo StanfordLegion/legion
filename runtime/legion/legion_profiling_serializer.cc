@@ -48,6 +48,13 @@ namespace Legion {
 
       std::string delim = ", ";
 
+      ss << "MapperName {"
+         << "id:" << MAPPER_NAME_ID << delim
+         << "mapper_id:MapperID:" << sizeof(MapperID) << delim
+         << "mapper_proc:ProcID:" << sizeof(ProcID) << delim
+         << "name:string:" << "-1"
+         << "}" << std::endl;
+
       ss << "MapperCallDesc {" 
          << "id:" << MAPPER_CALL_DESC_ID            << delim
          << "kind:unsigned:"     << sizeof(unsigned) << delim
@@ -87,6 +94,20 @@ namespace Legion {
          << "max_dim:maxdim:" << sizeof(unsigned)
          << "}" << std::endl;
 
+      ss << "RuntimeConfig {"
+         << "id:" << RUNTIME_CONFIG_ID << delim
+         << "debug:bool:" << sizeof(bool) << delim
+         << "spy:bool:" << sizeof(bool) << delim
+         << "gc:bool:" << sizeof(bool) << delim
+         << "inorder:bool:" << sizeof(bool) << delim
+         << "safe_mapper:bool:" << sizeof(bool) << delim
+         << "safe_runtime:bool:" << sizeof(bool) << delim
+         << "safe_ctrlrepl:bool:" << sizeof(bool) << delim
+         << "part_checks:bool:" << sizeof(bool) << delim
+         << "bounds_checks:bool:" << sizeof(bool) << delim
+         << "resilient:bool:" << sizeof(bool)
+         << "}" << std::endl;
+
       ss << "MachineDesc {"
          << "id:" << MACHINE_DESC_ID                  << delim
          << "node_id:unsigned:"   << sizeof(unsigned) << delim
@@ -105,6 +126,12 @@ namespace Legion {
       ss << "ZeroTime {"
          << "id:" << ZERO_TIME_ID  << delim
          << "zero_time:long long:" << sizeof(long long)
+         << "}" << std::endl;
+
+      ss << "Provenance {"
+         << "id:" << PROVENANCE_ID << delim
+         << "provenance:unsigned long long:" <<sizeof(unsigned long long) << delim
+         << "prov:string:" << "-1"
          << "}" << std::endl;
 
       ss << "MemDesc {" 
@@ -251,7 +278,7 @@ namespace Legion {
          << "op_id:UniqueID:" << sizeof(UniqueID) << delim
          << "parent_id:UniqueID:" << sizeof(UniqueID) << delim
          << "kind:unsigned:"  << sizeof(unsigned) << delim
-         << "provenance:string:" << "-1"
+         << "provenance:unsigned long long:" << sizeof(unsigned long long)
          << "}" << std::endl;
 
       ss << "MultiTask {"
@@ -400,6 +427,8 @@ namespace Legion {
 
       ss << "MapperCallInfo {"
          << "id:" << MAPPER_CALL_INFO_ID                          << delim
+         << "mapper_id:MapperID:"   << sizeof(MapperID)           << delim
+         << "mapper_proc:ProcID:"   << sizeof(ProcID)             << delim
          << "kind:MappingCallKind:" << sizeof(MappingCallKind)    << delim
          << "op_id:UniqueID:"       << sizeof(UniqueID)           << delim
          << "start:timestamp_t:"    << sizeof(timestamp_t)        << delim
@@ -411,6 +440,15 @@ namespace Legion {
       ss << "RuntimeCallInfo {"
          << "id:" << RUNTIME_CALL_INFO_ID                      << delim
          << "kind:RuntimeCallKind:" << sizeof(RuntimeCallKind) << delim
+         << "start:timestamp_t:"    << sizeof(timestamp_t)     << delim
+         << "stop:timestamp_t:"     << sizeof(timestamp_t)     << delim
+         << "proc_id:ProcID:"       << sizeof(ProcID)          << delim
+         << "fevent:unsigned long long:" << sizeof(LgEvent)
+         << "}" << std::endl;
+
+      ss << "ApplicationCallInfo {"
+         << "id:" << APPLICATION_CALL_INFO_ID                  << delim
+         << "provenance:unsigned long long:" << sizeof(unsigned long long) << delim
          << "start:timestamp_t:"    << sizeof(timestamp_t)     << delim
          << "stop:timestamp_t:"     << sizeof(timestamp_t)     << delim
          << "proc_id:ProcID:"       << sizeof(ProcID)          << delim
@@ -436,6 +474,19 @@ namespace Legion {
       lp_fwrite(f, preamble.c_str(), strlen(preamble.c_str()));
     }
 
+    //--------------------------------------------------------------------------
+    void LegionProfBinarySerializer::serialize(
+                                  const LegionProfDesc::MapperName &mapper_name)
+    //--------------------------------------------------------------------------
+    {
+      int ID = MAPPER_NAME_ID;
+      lp_fwrite(f, (char*)&ID, sizeof(ID));
+      lp_fwrite(f, (char*)&(mapper_name.mapper_id),
+          sizeof(mapper_name.mapper_id));
+      lp_fwrite(f, (char*)&(mapper_name.mapper_proc),
+          sizeof(mapper_name.mapper_proc));
+      lp_fwrite(f, mapper_name.name, strlen(mapper_name.name) + 1);
+    }
 
     //--------------------------------------------------------------------------
     void LegionProfBinarySerializer::serialize(
@@ -501,6 +552,25 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LegionProfBinarySerializer::serialize(
+                                    const LegionProfDesc::RuntimeConfig &config)
+    //--------------------------------------------------------------------------
+    {
+      int ID = RUNTIME_CONFIG_ID;
+      lp_fwrite(f, (char*)&ID, sizeof(ID));
+      lp_fwrite(f, (char*)&config.debug, sizeof(config.debug));
+      lp_fwrite(f, (char*)&config.spy, sizeof(config.spy));
+      lp_fwrite(f, (char*)&config.gc, sizeof(config.gc));
+      lp_fwrite(f, (char*)&config.inorder, sizeof(config.inorder));
+      lp_fwrite(f, (char*)&config.safe_mapper, sizeof(config.safe_mapper));
+      lp_fwrite(f, (char*)&config.safe_runtime, sizeof(config.safe_runtime));
+      lp_fwrite(f, (char*)&config.safe_ctrlrepl, sizeof(config.safe_ctrlrepl));
+      lp_fwrite(f, (char*)&config.part_checks, sizeof(config.part_checks));
+      lp_fwrite(f, (char*)&config.bounds_checks, sizeof(config.bounds_checks));
+      lp_fwrite(f, (char*)&config.resilient, sizeof(config.resilient));
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfBinarySerializer::serialize(
                                       const LegionProfDesc::MachineDesc
 				      &machine_desc)
     //--------------------------------------------------------------------------
@@ -530,6 +600,17 @@ namespace Legion {
       lp_fwrite(f, (char*)&ID, sizeof(ID));
       lp_fwrite(f, (char*)&(calibration_err.calibration_err),
 		sizeof(calibration_err.calibration_err));
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfBinarySerializer::serialize(
+                                         const LegionProfDesc::Provenance &prov)
+    //--------------------------------------------------------------------------
+    {
+      int ID = PROVENANCE_ID;
+      lp_fwrite(f, (char*)&ID, sizeof(ID));
+      lp_fwrite(f, (char*)&(prov.pid), sizeof(prov.pid));
+      lp_fwrite(f, prov.provenance, prov.size + 1);
     }
 
     //--------------------------------------------------------------------------
@@ -798,11 +879,8 @@ namespace Legion {
                 sizeof(operation_instance.parent_id));
       lp_fwrite(f, (char*)&(operation_instance.kind),
                 sizeof(operation_instance.kind));
-      if (operation_instance.provenance != NULL)
-        lp_fwrite(f, operation_instance.provenance,
-            strlen(operation_instance.provenance) + 1);
-      else
-        lp_fwrite(f, "", 1);
+      lp_fwrite(f, (char*)&(operation_instance.provenance),
+                sizeof(operation_instance.provenance));
     }
 
     //--------------------------------------------------------------------------
@@ -1071,6 +1149,10 @@ namespace Legion {
     {
       int ID = MAPPER_CALL_INFO_ID;
       lp_fwrite(f, (char*)&ID, sizeof(ID));
+      lp_fwrite(f, (char*)&(mapper_call_info.mapper),
+                sizeof(mapper_call_info.mapper));
+      lp_fwrite(f, (char*)&(mapper_call_info.mapper_proc),
+                sizeof(mapper_call_info.mapper_proc));
       lp_fwrite(f, (char*)&(mapper_call_info.kind),    
                 sizeof(mapper_call_info.kind));
       lp_fwrite(f, (char*)&(mapper_call_info.op_id),   
@@ -1102,6 +1184,25 @@ namespace Legion {
                 sizeof(runtime_call_info.proc_id));
       lp_fwrite(f, (char*)&(runtime_call_info.finish_event),
                 sizeof(runtime_call_info.finish_event));
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfBinarySerializer::serialize(
+           const LegionProfInstance::ApplicationCallInfo& application_call_info)
+    //--------------------------------------------------------------------------
+    {
+      int ID = APPLICATION_CALL_INFO_ID;
+      lp_fwrite(f, (char*)&ID, sizeof(ID));
+      lp_fwrite(f, (char*)&(application_call_info.pid), 
+                sizeof(application_call_info.pid));
+      lp_fwrite(f, (char*)&(application_call_info.start),   
+                sizeof(application_call_info.start));
+      lp_fwrite(f, (char*)&(application_call_info.stop),    
+                sizeof(application_call_info.stop));
+      lp_fwrite(f, (char*)&(application_call_info.proc_id), 
+                sizeof(application_call_info.proc_id));
+      lp_fwrite(f, (char*)&(application_call_info.finish_event),
+                sizeof(application_call_info.finish_event));
     }
 
     //--------------------------------------------------------------------------
@@ -1586,6 +1687,15 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LegionProfASCIISerializer::serialize(
+                                  const LegionProfDesc::MapperName &mapper_name)
+    //--------------------------------------------------------------------------
+    {
+      log_prof.print("Prof Mapper Name %u " IDFMT "%s",
+          mapper_name.mapper_id, mapper_name.mapper_proc, mapper_name.name);
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfASCIISerializer::serialize(
                          const LegionProfDesc::MapperCallDesc &mapper_call_desc)
     //--------------------------------------------------------------------------
     {
@@ -1631,6 +1741,19 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LegionProfASCIISerializer::serialize(
+                                    const LegionProfDesc::RuntimeConfig &config)
+    //--------------------------------------------------------------------------
+    {
+      log_prof.print("Runtime Config %d %d %d %d %d %d %d %d %d %d",
+          config.debug ? 1 : 0, config.spy ? 1 : 0, config.gc ? 1 : 0,
+          config.inorder ? 1 : 0, config.safe_mapper ? 1 : 0,
+          config.safe_runtime ? 1 : 0, config.safe_ctrlrepl ? 1 : 0,
+          config.part_checks ? 1 : 0, config.bounds_checks ? 1 : 0,
+          config.resilient ? 1 : 0);
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfASCIISerializer::serialize(
                                       const LegionProfDesc::MachineDesc
 				      &machine_desc)
     //--------------------------------------------------------------------------
@@ -1663,6 +1786,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LegionProfASCIISerializer::serialize(
+                                         const LegionProfDesc::Provenance &prov)
+    //--------------------------------------------------------------------------
+    {
+      log_prof.print("Provenance %lld %s", prov.pid, prov.provenance);
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfASCIISerializer::serialize(
                                   const LegionProfInstance::TaskKind &task_kind)
     //--------------------------------------------------------------------------
     {
@@ -1684,9 +1815,8 @@ namespace Legion {
                            const LegionProfInstance::OperationInstance& op_inst)
     //--------------------------------------------------------------------------
     {
-      log_prof.print("Prof Operation %llu %llu %u %s", 
-          op_inst.op_id, op_inst.parent_id, op_inst.kind,
-          op_inst.provenance == NULL ? "" : op_inst.provenance);
+      log_prof.print("Prof Operation %llu %llu %u %lld", 
+          op_inst.op_id, op_inst.parent_id, op_inst.kind, op_inst.provenance);
     }
 
     //--------------------------------------------------------------------------
@@ -1863,9 +1993,12 @@ namespace Legion {
                      const LegionProfInstance::MapperCallInfo& mapper_call_info)
     //--------------------------------------------------------------------------
     {
-      log_prof.print("Prof Mapper Call Info %u " IDFMT " %llu %llu %llu",
+      log_prof.print("Prof Mapper Call Info %u " IDFMT " %u " IDFMT 
+                     " %llu %llu %llu " IDFMT,
+        mapper_call_info.mapper, mapper_call_info.proc_id,
         mapper_call_info.kind, mapper_call_info.proc_id, mapper_call_info.op_id,
-        mapper_call_info.start, mapper_call_info.stop);
+        mapper_call_info.start, mapper_call_info.stop, 
+        mapper_call_info.finish_event.id);
     }
 
     //--------------------------------------------------------------------------
@@ -1873,9 +2006,22 @@ namespace Legion {
                    const LegionProfInstance::RuntimeCallInfo& runtime_call_info)
     //--------------------------------------------------------------------------
     {
-      log_prof.print("Prof Runtime Call Info %u " IDFMT " %llu %llu",
+      log_prof.print("Prof Runtime Call Info %u " IDFMT " %llu %llu " IDFMT,
                      runtime_call_info.kind, runtime_call_info.proc_id, 
-                     runtime_call_info.start, runtime_call_info.stop);
+                     runtime_call_info.start, runtime_call_info.stop,
+                     runtime_call_info.finish_event.id);
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfASCIISerializer::serialize(
+           const LegionProfInstance::ApplicationCallInfo& application_call_info)
+    //--------------------------------------------------------------------------
+    {
+      log_prof.print("Prof Application Call Info %llu " IDFMT 
+                     " %llu %llu " IDFMT,
+                     application_call_info.pid, application_call_info.proc_id,
+                     application_call_info.start, application_call_info.stop,
+                     application_call_info.finish_event.id);
     }
 
     //--------------------------------------------------------------------------

@@ -27,10 +27,6 @@ namespace Legion {
     };
 
     // Make sure all the handle types are trivially copyable.
-
-    // Note: GCC 4.9 breaks even with C++11, so for now peg this on
-    // C++14 until we deprecate GCC 4.9 support.
-#if !defined(__GNUC__) || (__GNUC__ >= 5)
     static_assert(std::is_trivially_copyable<IndexSpace>::value,
                   "IndexSpace is not trivially copyable");
     static_assert(std::is_trivially_copyable<IndexPartition>::value,
@@ -52,7 +48,6 @@ namespace Legion {
                   "LogicalPartitionT is not trivially copyable");
     LEGION_FOREACH_N(DIMFUNC)
 #undef DIMFUNC
-#endif
 
     const LogicalRegion LogicalRegion::NO_REGION = LogicalRegion();
     const LogicalPartition LogicalPartition::NO_PART = LogicalPartition();  
@@ -2401,21 +2396,9 @@ namespace Legion {
     bool Future::is_ready(bool subscribe) const
     //--------------------------------------------------------------------------
     {
-      if (impl != NULL)
-      {
-        if (subscribe)
-          impl->subscribe();
-        const Internal::ApEvent ready = impl->get_ready_event();
-        // Always subscribe to the Realm event to know when it triggers
-        ready.subscribe();
-        bool poisoned = false;
-        if (ready.has_triggered_faultaware(poisoned))
-          return true;
-        if (poisoned && (Internal::implicit_context != NULL))
-          Internal::implicit_context->raise_poison_exception();
-        return false;
-      }
-      return true; // Empty futures are always ready
+      if ((impl == NULL) || (Internal::implicit_context != impl->context))
+        return true;
+      return impl->is_ready(subscribe);
     }
 
     //--------------------------------------------------------------------------
@@ -2938,7 +2921,9 @@ namespace Legion {
     {
       Machine machine = Realm::Machine::get_machine();
       Machine::MemoryQuery finder(machine);
-      const Processor exec_proc = Processor::get_executing_processor();
+      Runtime *runtime = Runtime::get_runtime();
+      Context ctx = Runtime::get_context();
+      const Processor exec_proc = runtime->get_executing_processor(ctx);
       finder.best_affinity_to(exec_proc);
       finder.only_kind(memkind);
       if (finder.count() == 0)
@@ -2959,7 +2944,6 @@ namespace Legion {
           REALM_PROCESSOR_KINDS(PROC_NAMES)
 #undef PROC_NAMES
         };
-        Context ctx = Runtime::get_context();
         REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
             "Unable to find associated %s memory for %s processor when "
             "performing an UntypedDeferredValue creation in task %s (UID %lld)",
@@ -2977,7 +2961,6 @@ namespace Legion {
         Realm::InstanceLayoutGeneric::choose_instance_layout(bounds, 
             constraints, dim_order);
       layout->alignment_reqd = alignment;
-      Runtime *runtime = Runtime::get_runtime();
       instance = runtime->create_task_local_instance(memory, layout);
       if (initial_value != NULL)
       {
@@ -4317,9 +4300,14 @@ namespace Legion {
                  PartitionKind part_kind, Color color, const char *prov)
     //--------------------------------------------------------------------------
     {
-      Internal::AutoProvenance provenance(prov);
-      return ctx->create_partition_by_domain(parent, domains, color_space,
-                      perform_intersections, part_kind, color, provenance);
+      // Convert this into a future map and call that version of this method
+      std::map<DomainPoint,Future> futures;
+      for (std::map<DomainPoint,Domain>::const_iterator it =
+            domains.begin(); it != domains.end(); it++)
+        futures[it->first] = Future::from_value(it->second);
+      FutureMap fm = construct_future_map(ctx, color_space, futures);
+      return create_partition_by_domain(ctx, parent, fm, color_space,
+          perform_intersections, part_kind, color, prov);
     }
 
     //--------------------------------------------------------------------------
@@ -6514,6 +6502,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::start_profiling_range(Context ctx)
+    //--------------------------------------------------------------------------
+    {
+      ctx->start_profiling_range();
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::stop_profiling_range(Context ctx, const char *provenance)
+    //--------------------------------------------------------------------------
+    {
+      ctx->stop_profiling_range(provenance);
+    }
+
+    //--------------------------------------------------------------------------
     bool Runtime::is_MPI_interop_configured(void)
     //--------------------------------------------------------------------------
     {
@@ -6909,7 +6911,7 @@ namespace Legion {
       const void* dummy_ptr; size_t dummy_size;
       Runtime::retrieve_semantic_information(task_id, LEGION_NAME_SEMANTIC_TAG,
                                          dummy_ptr, dummy_size, false, false);
-      static_assert(sizeof(dummy_ptr) == sizeof(result), "Fuck c++");
+      static_assert(sizeof(dummy_ptr) == sizeof(result));
       memcpy(&result, &dummy_ptr, sizeof(result));
     }
 
@@ -6920,7 +6922,7 @@ namespace Legion {
       const void* dummy_ptr; size_t dummy_size;
       Runtime::retrieve_semantic_information(handle,
           LEGION_NAME_SEMANTIC_TAG, dummy_ptr, dummy_size, false, false);
-      static_assert(sizeof(dummy_ptr) == sizeof(result), "Fuck c++");
+      static_assert(sizeof(dummy_ptr) == sizeof(result));
       memcpy(&result, &dummy_ptr, sizeof(result));
     }
 
@@ -6931,7 +6933,7 @@ namespace Legion {
       const void* dummy_ptr; size_t dummy_size;
       Runtime::retrieve_semantic_information(handle,
           LEGION_NAME_SEMANTIC_TAG, dummy_ptr, dummy_size, false, false);
-      static_assert(sizeof(dummy_ptr) == sizeof(result), "Fuck c++");
+      static_assert(sizeof(dummy_ptr) == sizeof(result));
       memcpy(&result, &dummy_ptr, sizeof(result));
     }
 
@@ -6942,7 +6944,7 @@ namespace Legion {
       const void* dummy_ptr; size_t dummy_size;
       Runtime::retrieve_semantic_information(handle,
           LEGION_NAME_SEMANTIC_TAG, dummy_ptr, dummy_size, false, false);
-      static_assert(sizeof(dummy_ptr) == sizeof(result), "Fuck c++");
+      static_assert(sizeof(dummy_ptr) == sizeof(result));
       memcpy(&result, &dummy_ptr, sizeof(result));
     }
 
@@ -6955,7 +6957,7 @@ namespace Legion {
       const void* dummy_ptr; size_t dummy_size;
       Runtime::retrieve_semantic_information(handle, fid,
           LEGION_NAME_SEMANTIC_TAG, dummy_ptr, dummy_size, false, false);
-      static_assert(sizeof(dummy_ptr) == sizeof(result), "Fuck c++");
+      static_assert(sizeof(dummy_ptr) == sizeof(result));
       memcpy(&result, &dummy_ptr, sizeof(result));
     }
 
@@ -6967,7 +6969,7 @@ namespace Legion {
       const void* dummy_ptr; size_t dummy_size;
       Runtime::retrieve_semantic_information(handle,
           LEGION_NAME_SEMANTIC_TAG, dummy_ptr, dummy_size, false, false);
-      static_assert(sizeof(dummy_ptr) == sizeof(result), "Fuck c++");
+      static_assert(sizeof(dummy_ptr) == sizeof(result));
       memcpy(&result, &dummy_ptr, sizeof(result));
     }
 
@@ -6979,7 +6981,7 @@ namespace Legion {
       const void* dummy_ptr; size_t dummy_size;
       Runtime::retrieve_semantic_information(part,
           LEGION_NAME_SEMANTIC_TAG, dummy_ptr, dummy_size, false, false);
-      static_assert(sizeof(dummy_ptr) == sizeof(result), "Fuck c++");
+      static_assert(sizeof(dummy_ptr) == sizeof(result));
       memcpy(&result, &dummy_ptr, sizeof(result));
     }
 

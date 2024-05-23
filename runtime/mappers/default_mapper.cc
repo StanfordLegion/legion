@@ -27,7 +27,7 @@
 #define STATIC_BREADTH_FIRST          false
 #define STATIC_STEALING_ENABLED       false
 #define STATIC_MAX_SCHEDULE_COUNT     8
-#define STATIC_MEMOIZE                false
+#define STATIC_MEMOIZE                true
 #define STATIC_MAP_LOCALLY            false
 #define STATIC_EXACT_REGION           false
 #define STATIC_REPLICATION_ENABLED    true
@@ -87,6 +87,7 @@ namespace Legion {
       {
         int argc = HighLevelRuntime::get_input_args().argc;
         char **argv = HighLevelRuntime::get_input_args().argv;
+        bool no_memoize = false;
         // Parse the input arguments looking for ones for the default mapper
         for (int i=1; i < argc; i++)
         {
@@ -106,6 +107,7 @@ namespace Legion {
           BOOL_ARG("-dm:bft", breadth_first_traversal);
           INT_ARG("-dm:sched", max_schedule_count);
           BOOL_ARG("-dm:memoize", memoize);
+          BOOL_ARG("-dm:no-memoize", no_memoize);
           BOOL_ARG("-dm:map_locally", map_locally);
           BOOL_ARG("-dm:exact_region", exact_region);
           INT_ARG("-dm:replicate", replication_enabled);
@@ -113,6 +115,8 @@ namespace Legion {
 #undef BOOL_ARG
 #undef INT_ARG
         }
+        if (no_memoize)
+          memoize = false;
       }
       if (stealing_enabled)
       {
@@ -917,6 +921,8 @@ namespace Legion {
         }
         result.is_inner = runtime->is_inner_variant(ctx, task.task_id,
                                                     result.variant);
+        result.is_leaf = runtime->is_leaf_variant(ctx, task.task_id,
+                                                    result.variant);
         result.is_replicable = 
             runtime->is_replicable_variant(ctx, task.task_id, result.variant);
         if (result.is_inner)
@@ -1273,6 +1279,8 @@ namespace Legion {
           chosen.tight_bound = true;
           chosen.is_inner =
             runtime->is_inner_variant(ctx, task.task_id, input.shard_variant);
+          chosen.is_leaf =
+            runtime->is_leaf_variant(ctx, task.task_id, input.shard_variant);
           chosen.is_replicable = true;
           preferred_variants.emplace(std::make_pair(key, chosen));
         }
@@ -1308,46 +1316,9 @@ namespace Legion {
         }
         if (!has_relaxed_coherence)
         {
-          std::vector<unsigned> reduction_indexes;
           for (unsigned idx = 0; idx < task.regions.size(); idx++)
-          {
-            // As long as this isn't a reduction-only region requirement
-            // we will do a virtual mapping, for reduction-only instances
-            // we will actually make a physical instance because the runtime
-            // doesn't allow virtual mappings for reduction-only privileges
-            if (task.regions[idx].privilege == LEGION_REDUCE)
-              reduction_indexes.push_back(idx);
-            else
-              output.chosen_instances[idx].push_back(
+            output.chosen_instances[idx].push_back(
                   PhysicalInstance::get_virtual_instance());
-          }
-          if (!reduction_indexes.empty())
-          {
-            const TaskLayoutConstraintSet &layout_constraints =
-                runtime->find_task_layout_constraints(ctx,
-                                      task.task_id, output.chosen_variant);
-            for (std::vector<unsigned>::const_iterator it =
-                  reduction_indexes.begin(); it !=
-                  reduction_indexes.end(); it++)
-            {
-              MemoryConstraint mem_constraint =
-                find_memory_constraint(ctx, task, output.chosen_variant, *it);
-              Memory target_memory = default_policy_select_target_memory(ctx,
-                                                         target_proc,
-                                                         task.regions[*it],
-                                                         mem_constraint);
-              std::set<FieldID> copy = task.regions[*it].privilege_fields;
-              size_t footprint;
-              if (!default_create_custom_instances(ctx, target_proc,
-                  target_memory, task.regions[*it], *it, copy,
-                  layout_constraints, false/*needs constraint check*/,
-                  output.chosen_instances[*it], &footprint))
-              {
-                default_report_failed_instance_creation(task, *it,
-                      target_proc, target_memory, footprint);
-              }
-            }
-          }
           return;
         }
       }
@@ -1438,14 +1409,23 @@ namespace Legion {
                                                          mem_constraint);
         if (task.regions[idx].privilege == LEGION_REDUCE)
         {
-          size_t footprint;
-          if (!default_create_custom_instances(ctx, target_proc,
-                  target_memory, task.regions[idx], idx, missing_fields[idx],
-                  layout_constraints, needs_field_constraint_check,
-                  output.chosen_instances[idx], &footprint))
+          // Only leaf tasks should map their reduction regions to instances
+          if (chosen.is_leaf)
           {
-            default_report_failed_instance_creation(task, idx,
-                  target_proc, target_memory, footprint);
+            size_t footprint;
+            if (!default_create_custom_instances(ctx, target_proc,
+                    target_memory, task.regions[idx], idx, missing_fields[idx],
+                    layout_constraints, needs_field_constraint_check,
+                    output.chosen_instances[idx], &footprint))
+            {
+              default_report_failed_instance_creation(task, idx,
+                    target_proc, target_memory, footprint);
+            }
+          }
+          else
+          {
+            PhysicalInstance virt_inst = PhysicalInstance::get_virtual_instance();
+            output.chosen_instances[idx].push_back(virt_inst);
           }
           continue;
         }

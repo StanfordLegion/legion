@@ -311,6 +311,7 @@ namespace Legion {
         UniqueID uid;
         RtUserEvent alloc_ready;
         ApUserEvent inst_ready;
+        RtEvent safe_inst_ready;
         std::set<AddressSpaceID> can_fail_remote_requests;
         bool eager;
       };
@@ -323,6 +324,7 @@ namespace Legion {
       public:
         FutureInstance *const instance;
         const ApEvent ready_event;
+        RtEvent safe_ready_event;
         ApUserEvent remote_postcondition;
         std::vector<ApEvent> read_events;
       };
@@ -347,6 +349,8 @@ namespace Legion {
     public:
       // Finalize the future before everything shuts down
       void prepare_for_shutdown(void);
+      ApEvent get_complete_event(void);
+      bool is_ready(bool subscribe);
       // Wait without subscribing to the payload
       void wait(bool silence_warnings, const char *warning_string);
       const void* get_buffer(Processor proc, Memory::Kind memory,
@@ -371,8 +375,10 @@ namespace Legion {
                        size_t known_upper_bound_size = SIZE_MAX);
       ApEvent find_application_instance_ready(Memory target, SingleTask *task);
       RtEvent request_runtime_instance(Operation *op, bool eager);
+      RtEvent find_runtime_instance_ready(void);
       const void *find_runtime_buffer(TaskContext *ctx, size_t &expected_size);
-      ApEvent copy_to(FutureInstance *target, Operation *op);
+      ApEvent copy_to(FutureInstance *target, Operation *op,
+                      ApEvent precondition);
       ApEvent reduce_to(FutureInstance *target, AllReduceOp *op,
                         const ReductionOpID redop_id, const ReductionOp *redop,
                         bool exclusive, ApEvent precondition);
@@ -381,18 +387,17 @@ namespace Legion {
                     bool internal = false);
       size_t get_untyped_size(void);
       const void *get_metadata(size_t *metasize);
-      ApEvent get_ready_event(bool need_lock = true);
       // A special function for predicates to peek
       // at the boolean value of a future if it is set
       // Must have called request internal buffer first and event must trigger
       bool get_boolean_value(TaskContext *ctx);
     public:
       // This will simply save the value of the future
-      void set_result(ApEvent complete, FutureInstance *instance, 
-                      void *metadata = NULL, size_t metasize = 0);
+      void set_result(ApEvent complete, FutureInstance *instance = NULL, 
+                      const void *metadata = NULL, size_t metasize = 0);
       void set_results(ApEvent complete,
                       const std::vector<FutureInstance*> &instances,
-                      void *metadata = NULL, size_t metasize = 0);
+                      const void *metadata = NULL, size_t metasize = 0);
       void set_result(ApEvent complete, FutureFunctor *callback_functor,
                       bool own, Processor functor_proc);
       void set_result(FutureImpl *previous, Operation *op);
@@ -402,6 +407,7 @@ namespace Legion {
       void set_local(const void *value, size_t size, bool own = false);
       // This will save the value of the future locally
       void unpack_future_result(Deserializer &derez);
+      void save_metadata(const void *meta, size_t size);
       // Reset the future in case we need to restart the
       // computation for resiliency reasons
       bool reset_future(void);
@@ -574,7 +580,8 @@ namespace Legion {
     public:
       FutureInstance& operator=(const FutureInstance &rhs) = delete;
     public:
-      ApEvent initialize(const ReductionOp *redop, Operation *op);
+      ApEvent initialize(const ReductionOp *redop, Operation *op,
+                         ApEvent precondition);
       ApEvent copy_from(FutureInstance *source, Operation *op,
                         ApEvent precondition);
       ApEvent reduce_from(FutureInstance *source, Operation *op,
@@ -655,13 +662,12 @@ namespace Legion {
                     CollectiveMapping *mapping = NULL);
       FutureMapImpl(TaskContext *ctx, Runtime *rt, IndexSpaceNode *domain,
                     DistributedID did, uint64_t future_coordinate,
-                    ApEvent completion, Provenance *provenance,
-                    bool register_now = true, 
+                    Provenance *provenance, bool register_now = true, 
                     CollectiveMapping *mapping = NULL); // remote
       FutureMapImpl(TaskContext *ctx, Operation *op, uint64_t future_coordinate,
                     GenerationID gen, int depth, UniqueID uid,
                     IndexSpaceNode *domain, Runtime *rt, DistributedID did,
-                    ApEvent completion, Provenance *provenance);
+                    Provenance *provenance);
       FutureMapImpl(const FutureMapImpl &rhs) = delete;
       virtual ~FutureMapImpl(void);
     public:
@@ -712,7 +718,6 @@ namespace Legion {
       const uint64_t future_coordinate;
       Provenance *const provenance;
       IndexSpaceNode *const future_map_domain;
-      const ApEvent completion_event;
     protected:
       mutable LocalLock future_map_lock;
       std::map<DomainPoint,FutureImpl*> futures;
@@ -775,7 +780,7 @@ namespace Legion {
       ReplFutureMapImpl(TaskContext *ctx, ShardManager *man, Runtime *rt,
                         IndexSpaceNode *domain, IndexSpaceNode *shard_domain,
                         DistributedID did, uint64_t index,
-                        ApEvent completion, Provenance *provenance,
+                        Provenance *provenance,
                         CollectiveMapping *collective_mapping);
       ReplFutureMapImpl(const ReplFutureMapImpl &rhs) = delete;
       virtual ~ReplFutureMapImpl(void);
@@ -787,8 +792,6 @@ namespace Legion {
       virtual Future get_future(const DomainPoint &point,
                                 bool internal, RtEvent *wait_on = NULL);
       virtual void get_all_futures(std::map<DomainPoint,FutureImpl*> &futures);
-      virtual void wait_all_results(bool silence_warnings = true,
-                                    const char *warning_string = NULL);
     public:
       // Will return NULL if it does not exist
       virtual void get_shard_local_futures(ShardID shard,
@@ -2522,6 +2525,7 @@ namespace Legion {
             unsafe_launch(false),
             unsafe_mapper(false),
             safe_mapper(false),
+            safe_tracing(false),
             disable_independence_tests(false),
 #ifdef LEGION_SPY
             legion_spy_enabled(true),
@@ -2592,6 +2596,7 @@ namespace Legion {
         bool unsafe_launch;
         bool unsafe_mapper;
         bool safe_mapper;
+        bool safe_tracing;
         bool disable_independence_tests;
         bool legion_spy_enabled;
         bool enable_test_mapper;
@@ -2633,14 +2638,13 @@ namespace Legion {
         static const LgTaskID TASK_ID = LG_MAPPER_TASK_ID;
       public:
         MapperTaskArgs(FutureImpl *f, MapperID mid, Processor p,
-                       ApEvent ae, TopLevelContext *c)
+                       TopLevelContext *c)
           : LgTaskArgs<MapperTaskArgs>(implicit_provenance),
-            future(f), map_id(mid), proc(p), event(ae), ctx(c) { }
+            future(f), map_id(mid), proc(p), ctx(c) { }
       public:
         FutureImpl *const future;
         const MapperID map_id;
         const Processor proc;
-        const ApEvent event;
         TopLevelContext *const ctx;
       }; 
     public:
@@ -2749,6 +2753,7 @@ namespace Legion {
       const bool resilient_mode;
       const bool unsafe_launch;
       const bool unsafe_mapper;
+      const bool safe_tracing;
       const bool disable_independence_tests;
       const bool legion_spy_enabled;
       const bool supply_default_mapper;
@@ -3231,8 +3236,8 @@ namespace Legion {
       void send_slice_remote_mapped(Processor target, Serializer &rez);
       void send_slice_remote_complete(Processor target, Serializer &rez);
       void send_slice_remote_commit(Processor target, Serializer &rez);
-      void send_slice_verify_concurrent_execution(Processor target,
-                                                  Serializer &rez);
+      void send_slice_rendezvous_concurrent_mapped(Processor target,
+                                                   Serializer &rez);
       void send_slice_concurrent_allreduce_request(Processor target,
                                                    Serializer &rez);
       void send_slice_concurrent_allreduce_response(AddressSpaceID target,
@@ -3384,12 +3389,16 @@ namespace Legion {
                                                       Serializer &rez);
       void send_control_replicate_trace_event_response(AddressSpaceID target,
                                                        Serializer &rez);
+      void send_control_replicate_trace_event_trigger(AddressSpaceID target,
+                                                      Serializer &rez);
       void send_control_replicate_trace_frontier_request(AddressSpaceID target,
                                                       Serializer &rez);
       void send_control_replicate_trace_frontier_response(AddressSpaceID target,
                                                        Serializer &rez);
       void send_control_replicate_trace_update(AddressSpaceID target,
                                                Serializer &rez);
+      void send_control_replicate_find_trace_local_sets(AddressSpaceID target,
+                                                        Serializer &rez);
       void send_control_replicate_implicit_rendezvous(AddressSpaceID target,
                                                       Serializer &rez);
       void send_control_replicate_find_collective_view(AddressSpaceID target,
@@ -3436,6 +3445,14 @@ namespace Legion {
                                                   Serializer &rez);
       void send_remote_context_collective_rendezvous(AddressSpaceID target,
                                                      Serializer &rez);
+      void send_remote_context_refine_equivalence_sets(AddressSpaceID target,
+                                                       Serializer &rez);
+      void send_remote_context_find_trace_local_sets_request(
+                                                  AddressSpaceID target,
+                                                  Serializer &rez);
+      void send_remote_context_find_trace_local_sets_response(
+                                                  AddressSpaceID target,
+                                                  Serializer &rez); 
       void send_compute_equivalence_sets_request(AddressSpaceID target, 
                                                  Serializer &rez);
       void send_compute_equivalence_sets_response(AddressSpaceID target,
@@ -3487,8 +3504,6 @@ namespace Legion {
                                                   Serializer &rez);
       void send_equivalence_set_remote_filters(AddressSpaceID target,
                                                Serializer &rez);
-      void send_equivalence_set_remote_clones(AddressSpaceID target,
-                                              Serializer &rez);
       void send_equivalence_set_remote_instances(AddressSpaceID target,
                                                  Serializer &rez);
       void send_instance_request(AddressSpaceID target, Serializer &rez);
@@ -3521,9 +3536,9 @@ namespace Legion {
                                              Serializer &rez);
       void send_replicate_rendezvous_virtual_mappings(AddressSpaceID target,
                                                       Serializer &rez);
+      void send_replicate_startup_complete(AddressSpaceID target, 
+                                           Serializer &rez);
       void send_replicate_post_mapped(AddressSpaceID target, Serializer &rez);
-      void send_replicate_post_execution(AddressSpaceID target,
-                                         Serializer &rez);
       void send_replicate_trigger_complete(AddressSpaceID target, 
                                            Serializer &rez);
       void send_replicate_trigger_commit(AddressSpaceID target,
@@ -3655,7 +3670,7 @@ namespace Legion {
                                       AddressSpaceID source);
       void handle_slice_remote_complete(Deserializer &derez);
       void handle_slice_remote_commit(Deserializer &derez);
-      void handle_slice_verify_concurrent_execution(Deserializer &derez);
+      void handle_slice_rendezvous_concurrent_mapped(Deserializer &derez);
       void handle_slice_concurrent_allreduce_request(Deserializer &derez,
                                                      AddressSpaceID source);
       void handle_slice_concurrent_allreduce_response(Deserializer &derez);
@@ -3807,6 +3822,12 @@ namespace Legion {
                                                       AddressSpaceID source);
       void handle_remote_context_find_collective_view_response(
                                                       Deserializer &derez);
+      void handle_remote_context_refine_equivalence_sets(
+                                                      Deserializer &derez);
+      void handle_remote_context_find_trace_local_sets_request(
+          Deserializer &derez, AddressSpaceID source);
+      void handle_remote_context_find_trace_local_sets_response(
+          Deserializer &derez);
       void handle_compute_equivalence_sets_request(Deserializer &derez, 
                                                    AddressSpaceID source);
       void handle_compute_equivalence_sets_response(Deserializer &derez);
@@ -3853,8 +3874,6 @@ namespace Legion {
                                                     AddressSpaceID source);
       void handle_equivalence_set_remote_filters(Deserializer &derez,
                                                  AddressSpaceID source);
-      void handle_equivalence_set_remote_clones(Deserializer &derez,
-                                                AddressSpaceID source);
       void handle_equivalence_set_remote_instances(Deserializer &derez);
       void handle_instance_request(Deserializer &derez, AddressSpaceID source);
       void handle_instance_response(Deserializer &derez,AddressSpaceID source);
@@ -3887,8 +3906,8 @@ namespace Legion {
       void handle_replicate_collective_versioning(Deserializer &derez);
       void handle_replicate_collective_mapping(Deserializer &derez);
       void handle_replicate_virtual_rendezvous(Deserializer &derez);
+      void handle_replicate_startup_complete(Deserializer &derez);
       void handle_replicate_post_mapped(Deserializer &derez);
-      void handle_replicate_post_execution(Deserializer &derez);
       void handle_replicate_trigger_complete(Deserializer &derez);
       void handle_replicate_trigger_commit(Deserializer &derez);
       void handle_control_replicate_rendezvous_message(Deserializer &derez);
@@ -3905,12 +3924,15 @@ namespace Legion {
       void handle_control_replicate_trace_event_request(Deserializer &derez,
                                                         AddressSpaceID source);
       void handle_control_replicate_trace_event_response(Deserializer &derez);
+      void handle_control_replicate_trace_event_trigger(Deserializer &derez);
       void handle_control_replicate_trace_frontier_request(Deserializer &derez,
                                                         AddressSpaceID source);
       void handle_control_replicate_trace_frontier_response(
                                                         Deserializer &derez);
       void handle_control_replicate_trace_update(Deserializer &derez,
                                                  AddressSpaceID source);
+      void handle_control_replicate_find_trace_local_sets(Deserializer &derez,
+                                                    AddressSpaceID source);
       void handle_control_replicate_implicit_rendezvous(Deserializer &derez);
       void handle_control_replicate_find_collective_view(Deserializer &derez);
       void handle_library_mapper_request(Deserializer &derez,
@@ -4073,7 +4095,7 @@ namespace Legion {
                                         CollectiveMapping *mapping = NULL);
       FutureMapImpl* find_or_create_future_map(DistributedID did, 
                           TaskContext *ctx, uint64_t coord, IndexSpace domain,
-                          ApEvent completion, Provenance *provenance);
+                          Provenance *provenance);
       IndexSpace find_or_create_index_slice_space(const Domain &launch_domain,
                                     TypeTag type_tag, Provenance *provenance);
     public:
@@ -4122,7 +4144,6 @@ namespace Legion {
       DeletionOp*           get_available_deletion_op(void);
       MergeCloseOp*         get_available_merge_close_op(void);
       PostCloseOp*          get_available_post_close_op(void);
-      VirtualCloseOp*       get_available_virtual_close_op(void);
       RefinementOp*         get_available_refinement_op(void);
       ResetOp*              get_available_reset_op(void);
       DynamicCollectiveOp*  get_available_dynamic_collective_op(void);
@@ -4132,11 +4153,9 @@ namespace Legion {
       OrPredOp*             get_available_or_pred_op(void);
       AcquireOp*            get_available_acquire_op(void);
       ReleaseOp*            get_available_release_op(void);
-      TraceCaptureOp*       get_available_capture_op(void);
-      TraceCompleteOp*      get_available_trace_op(void);
-      TraceReplayOp*        get_available_replay_op(void);
       TraceBeginOp*         get_available_begin_op(void);
-      TraceSummaryOp*       get_available_summary_op(void);
+      TraceRecurrentOp*     get_available_recurrent_op(void);
+      TraceCompleteOp*      get_available_complete_op(void);
       MustEpochOp*          get_available_epoch_op(void);
       PendingPartitionOp*   get_available_pending_partition_op(void);
       DependentPartitionOp* get_available_dependent_partition_op(void);
@@ -4158,7 +4177,6 @@ namespace Legion {
       ReplIndividualTask*   get_available_repl_individual_task(void);
       ReplIndexTask*        get_available_repl_index_task(void);
       ReplMergeCloseOp*     get_available_repl_merge_close_op(void);
-      ReplVirtualCloseOp*   get_available_repl_virtual_close_op(void);
       ReplRefinementOp*     get_available_repl_refinement_op(void);
       ReplResetOp*          get_available_repl_reset_op(void);
       ReplFillOp*           get_available_repl_fill_op(void);
@@ -4181,11 +4199,9 @@ namespace Legion {
       ReplIndexDetachOp*    get_available_repl_index_detach_op(void);
       ReplAcquireOp*        get_available_repl_acquire_op(void);
       ReplReleaseOp*        get_available_repl_release_op(void);
-      ReplTraceCaptureOp*   get_available_repl_capture_op(void);
-      ReplTraceCompleteOp*  get_available_repl_trace_op(void);
-      ReplTraceReplayOp*    get_available_repl_replay_op(void);
       ReplTraceBeginOp*     get_available_repl_begin_op(void);
-      ReplTraceSummaryOp*   get_available_repl_summary_op(void);
+      ReplTraceRecurrentOp* get_available_repl_recurrent_op(void);
+      ReplTraceCompleteOp*  get_available_repl_complete_op(void);
     public:
       void free_individual_task(IndividualTask *task);
       void free_point_task(PointTask *task);
@@ -4201,7 +4217,6 @@ namespace Legion {
       void free_deletion_op(DeletionOp *op);
       void free_merge_close_op(MergeCloseOp *op); 
       void free_post_close_op(PostCloseOp *op);
-      void free_virtual_close_op(VirtualCloseOp *op);
       void free_refinement_op(RefinementOp *op);
       void free_reset_op(ResetOp *op);
       void free_dynamic_collective_op(DynamicCollectiveOp *op);
@@ -4211,11 +4226,9 @@ namespace Legion {
       void free_or_predicate_op(OrPredOp *op);
       void free_acquire_op(AcquireOp *op);
       void free_release_op(ReleaseOp *op);
-      void free_capture_op(TraceCaptureOp *op);
-      void free_trace_op(TraceCompleteOp *op);
-      void free_replay_op(TraceReplayOp *op);
       void free_begin_op(TraceBeginOp *op);
-      void free_summary_op(TraceSummaryOp *op);
+      void free_recurrent_op(TraceRecurrentOp *op);
+      void free_complete_op(TraceCompleteOp *op);
       void free_epoch_op(MustEpochOp *op);
       void free_pending_partition_op(PendingPartitionOp *op);
       void free_dependent_partition_op(DependentPartitionOp* op);
@@ -4237,7 +4250,6 @@ namespace Legion {
       void free_repl_individual_task(ReplIndividualTask *task);
       void free_repl_index_task(ReplIndexTask *task);
       void free_repl_merge_close_op(ReplMergeCloseOp *op);
-      void free_repl_virtual_close_op(ReplVirtualCloseOp *op);
       void free_repl_refinement_op(ReplRefinementOp *op);
       void free_repl_reset_op(ReplResetOp *op);
       void free_repl_fill_op(ReplFillOp *op);
@@ -4260,11 +4272,9 @@ namespace Legion {
       void free_repl_index_detach_op(ReplIndexDetachOp *op);
       void free_repl_acquire_op(ReplAcquireOp *op);
       void free_repl_release_op(ReplReleaseOp *op);
-      void free_repl_capture_op(ReplTraceCaptureOp *op);
-      void free_repl_trace_op(ReplTraceCompleteOp *op);
-      void free_repl_replay_op(ReplTraceReplayOp *op);
       void free_repl_begin_op(ReplTraceBeginOp *op);
-      void free_repl_summary_op(ReplTraceSummaryOp *op);
+      void free_repl_recurrent_op(ReplTraceRecurrentOp *op);
+      void free_repl_complete_op(ReplTraceCompleteOp *op);
     public:
       ContextID allocate_region_tree_context(void);
       void free_region_tree_context(ContextID tree_ctx); 
@@ -4291,6 +4301,8 @@ namespace Legion {
 #ifdef LEGION_SPY
       unsigned           get_unique_indirections_id(void);
 #endif
+    public:
+      Provenance* find_or_create_provenance(const char *prov, size_t length);
     public:
       // Verify that a region requirement is valid
       LegionErrorType verify_requirement(const RegionRequirement &req,
@@ -4419,6 +4431,7 @@ namespace Legion {
       std::atomic<unsigned long long> unique_constraint_id;
       std::atomic<unsigned long long> unique_is_expr_id;
       std::atomic<uint64_t> unique_top_level_task_id;
+      uint64_t unique_provenance_id;
       uint64_t unique_implicit_top_level_task_id;
 #ifdef LEGION_SPY
       std::atomic<unsigned> unique_indirections_id;
@@ -4430,6 +4443,9 @@ namespace Legion {
       std::atomic<unsigned> unique_sharding_id;
       std::atomic<unsigned> unique_redop_id;
       std::atomic<unsigned> unique_serdez_id;
+    protected:
+      mutable LocalLock provenance_lock;
+      std::map<size_t,std::vector<Provenance*> > provenances;
     protected:
       mutable LocalLock library_lock;
       struct LibraryMapperIDs {
@@ -4619,11 +4635,9 @@ namespace Legion {
       mutable LocalLock or_pred_op_lock;
       mutable LocalLock acquire_op_lock;
       mutable LocalLock release_op_lock;
-      mutable LocalLock capture_op_lock;
-      mutable LocalLock trace_op_lock;
-      mutable LocalLock replay_op_lock;
       mutable LocalLock begin_op_lock;
-      mutable LocalLock summary_op_lock;
+      mutable LocalLock recurrent_op_lock;
+      mutable LocalLock complete_op_lock;
       mutable LocalLock epoch_op_lock;
       mutable LocalLock pending_partition_op_lock;
       mutable LocalLock dependent_partition_op_lock;
@@ -4649,7 +4663,6 @@ namespace Legion {
       std::deque<DeletionOp*>           available_deletion_ops;
       std::deque<MergeCloseOp*>         available_merge_close_ops;
       std::deque<PostCloseOp*>          available_post_close_ops;
-      std::deque<VirtualCloseOp*>       available_virtual_close_ops;
       std::deque<RefinementOp*>         available_refinement_ops;
       std::deque<ResetOp*>              available_reset_ops;
       std::deque<DynamicCollectiveOp*>  available_dynamic_collective_ops;
@@ -4659,11 +4672,9 @@ namespace Legion {
       std::deque<OrPredOp*>             available_or_pred_ops;
       std::deque<AcquireOp*>            available_acquire_ops;
       std::deque<ReleaseOp*>            available_release_ops;
-      std::deque<TraceCaptureOp*>       available_capture_ops;
-      std::deque<TraceCompleteOp*>      available_trace_ops;
-      std::deque<TraceReplayOp*>        available_replay_ops;
       std::deque<TraceBeginOp*>         available_begin_ops;
-      std::deque<TraceSummaryOp*>       available_summary_ops;
+      std::deque<TraceRecurrentOp*>     available_recurrent_ops;
+      std::deque<TraceCompleteOp*>      available_complete_ops;
       std::deque<MustEpochOp*>          available_epoch_ops;
       std::deque<PendingPartitionOp*>   available_pending_partition_ops;
       std::deque<DependentPartitionOp*> available_dependent_partition_ops;
@@ -4685,7 +4696,6 @@ namespace Legion {
       std::deque<ReplIndividualTask*>   available_repl_individual_tasks;
       std::deque<ReplIndexTask*>        available_repl_index_tasks;
       std::deque<ReplMergeCloseOp*>     available_repl_merge_close_ops;
-      std::deque<ReplVirtualCloseOp*>   available_repl_virtual_close_ops;
       std::deque<ReplRefinementOp*>     available_repl_refinement_ops;
       std::deque<ReplResetOp*>          available_repl_reset_ops;
       std::deque<ReplFillOp*>           available_repl_fill_ops;
@@ -4710,11 +4720,9 @@ namespace Legion {
       std::deque<ReplIndexDetachOp*>    available_repl_index_detach_ops;
       std::deque<ReplAcquireOp*>        available_repl_acquire_ops;
       std::deque<ReplReleaseOp*>        available_repl_release_ops;
-      std::deque<ReplTraceCaptureOp*>   available_repl_capture_ops;
-      std::deque<ReplTraceCompleteOp*>  available_repl_trace_ops;
-      std::deque<ReplTraceReplayOp*>    available_repl_replay_ops;
       std::deque<ReplTraceBeginOp*>     available_repl_begin_ops;
-      std::deque<ReplTraceSummaryOp*>   available_repl_summary_ops;
+      std::deque<ReplTraceRecurrentOp*> available_repl_recurrent_ops;
+      std::deque<ReplTraceCompleteOp*>  available_repl_complete_ops;
 #ifdef DEBUG_LEGION
       TreeStateLogger *tree_state_logger;
       // For debugging purposes keep track of
@@ -5283,7 +5291,7 @@ namespace Legion {
       // Fuck C++
       const std::set<ApEvent> *legion_events = &events;
       const std::set<Realm::Event> *realm_events;
-      static_assert(sizeof(legion_events) == sizeof(realm_events), "Fuck C++");
+      static_assert(sizeof(legion_events) == sizeof(realm_events));
       memcpy(&realm_events, &legion_events, sizeof(legion_events));
       ApEvent result(Realm::Event::merge_events(*realm_events));
 #ifdef LEGION_DISABLE_EVENT_PRUNING
@@ -5341,7 +5349,7 @@ namespace Legion {
       // Fuck C++
       const std::vector<ApEvent> *legion_events = &events;
       const std::vector<Realm::Event> *realm_events;
-      static_assert(sizeof(legion_events) == sizeof(realm_events), "Fuck C++");
+      static_assert(sizeof(legion_events) == sizeof(realm_events));
       memcpy(&realm_events, &legion_events, sizeof(legion_events));
       ApEvent result(Realm::Event::merge_events(*realm_events));
 #ifdef LEGION_DISABLE_EVENT_PRUNING 
@@ -5406,7 +5414,7 @@ namespace Legion {
       // Fuck C++
       const std::set<RtEvent> *legion_events = &events;
       const std::set<Realm::Event> *realm_events;
-      static_assert(sizeof(legion_events) == sizeof(realm_events), "Fuck C++");
+      static_assert(sizeof(legion_events) == sizeof(realm_events));
       memcpy(&realm_events, &legion_events, sizeof(legion_events));
       // No logging for runtime operations currently
       return RtEvent(Realm::Event::merge_events(*realm_events));
@@ -5426,7 +5434,7 @@ namespace Legion {
       // Fuck C++
       const std::vector<RtEvent> *legion_events = &events;
       const std::vector<Realm::Event> *realm_events;
-      static_assert(sizeof(legion_events) == sizeof(realm_events), "Fuck C++");
+      static_assert(sizeof(legion_events) == sizeof(realm_events));
       memcpy(&realm_events, &legion_events, sizeof(legion_events));
       // No logging for runtime operations currently
       return RtEvent(Realm::Event::merge_events(*realm_events));
@@ -5619,7 +5627,7 @@ namespace Legion {
     {
       const std::set<ApEvent> *ptr = &events;
       const std::set<Realm::Event> *realm_events = NULL;
-      static_assert(sizeof(realm_events) == sizeof(ptr), "Fuck c++");
+      static_assert(sizeof(realm_events) == sizeof(ptr));
       memcpy(&realm_events, &ptr, sizeof(realm_events));
       return RtEvent(Realm::Event::merge_events_ignorefaults(*realm_events));
     }
@@ -5921,7 +5929,7 @@ namespace Legion {
           return TASK_VIRTUAL_CHANNEL;
         case SLICE_REMOTE_COMMIT:
           return TASK_VIRTUAL_CHANNEL;
-        case SLICE_VERIFY_CONCURRENT_EXECUTION:
+        case SLICE_RENDEZVOUS_CONCURRENT_MAPPED:
           break;
         case SLICE_CONCURRENT_ALLREDUCE_REQUEST:
           break;
@@ -6118,11 +6126,15 @@ namespace Legion {
           break;
         case SEND_REPL_TRACE_EVENT_RESPONSE:
           break;
+        case SEND_REPL_TRACE_EVENT_TRIGGER:
+          break;
         case SEND_REPL_TRACE_FRONTIER_REQUEST:
           break;
         case SEND_REPL_TRACE_FRONTIER_RESPONSE:
           break;
         case SEND_REPL_TRACE_UPDATE:
+          break;
+        case SEND_REPL_FIND_TRACE_SETS:
           break;
         case SEND_REPL_IMPLICIT_RENDEZVOUS:
           break;
@@ -6171,6 +6183,12 @@ namespace Legion {
         case SEND_REMOTE_CONTEXT_FIND_COLLECTIVE_VIEW_REQUEST:
           break;
         case SEND_REMOTE_CONTEXT_FIND_COLLECTIVE_VIEW_RESPONSE:
+          break;
+        case SEND_REMOTE_CONTEXT_REFINE_EQUIVALENCE_SETS:
+          break;
+        case SEND_REMOTE_CONTEXT_FIND_TRACE_LOCAL_SETS_REQUEST:
+          break;
+        case SEND_REMOTE_CONTEXT_FIND_TRACE_LOCAL_SETS_RESPONSE:
           break;
         case SEND_COMPUTE_EQUIVALENCE_SETS_REQUEST:
           break;
@@ -6227,8 +6245,6 @@ namespace Legion {
         case SEND_EQUIVALENCE_SET_REMOTE_OVERWRITES:
           return THROUGHPUT_VIRTUAL_CHANNEL;
         case SEND_EQUIVALENCE_SET_REMOTE_FILTERS:
-          return THROUGHPUT_VIRTUAL_CHANNEL;
-        case SEND_EQUIVALENCE_SET_REMOTE_CLONES:
           return THROUGHPUT_VIRTUAL_CHANNEL;
         case SEND_EQUIVALENCE_SET_REMOTE_INSTANCES:
           break;
@@ -6290,9 +6306,9 @@ namespace Legion {
           break;
         case SEND_REPLICATE_VIRTUAL_RENDEZVOUS:
           break;
-        case SEND_REPLICATE_POST_MAPPED:
+        case SEND_REPLICATE_STARTUP_COMPLETE:
           break;
-        case SEND_REPLICATE_POST_EXECUTION:
+        case SEND_REPLICATE_POST_MAPPED:
           break;
         case SEND_REPLICATE_TRIGGER_COMPLETE:
           break;
@@ -6390,13 +6406,14 @@ namespace Legion {
         case SEND_CONTROL_REPLICATION_CREATE_FILL_VIEW:
         case SEND_CONTROL_REPLICATION_VERSIONING_RENDEZVOUS:
         case SEND_CONTROL_REPLICATION_VIEW_RENDEZVOUS:
-        case SEND_CONTROL_REPLICATION_CONCURRENT_EXECUTION_VALIDATION:
+        case SEND_CONTROL_REPLICATION_CONCURRENT_MAPPING_RENDEZVOUS:
         case SEND_CONTROL_REPLICATION_CONCURRENT_ALLREDUCE:
         case SEND_CONTROL_REPLICATION_PROJECTION_TREE_EXCHANGE:
         case SEND_CONTROL_REPLICATION_TIMEOUT_MATCH_EXCHANGE:
         case SEND_CONTROL_REPLICATION_MASK_EXCHANGE:
         case SEND_CONTROL_REPLICATION_PREDICATE_EXCHANGE:
         case SEND_CONTROL_REPLICATION_CROSS_PRODUCT_EXCHANGE:
+        case SEND_CONTROL_REPLICATION_TRACING_SET_DEDUPLICATION:
         case SEND_CONTROL_REPLICATION_SLOW_BARRIER:
           break;
         case SEND_SHUTDOWN_NOTIFICATION:
