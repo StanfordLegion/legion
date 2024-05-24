@@ -571,6 +571,8 @@ if(Legion_USE_HIP)
       list(APPEND HIPCC_FLAGS -fPIC)
     endif()
 
+    list(APPEND HIPCC_FLAGS -std=c++${CMAKE_CXX_STANDARD})
+
     install(FILES ${Legion_SOURCE_DIR}/cmake/FindHIP.cmake
       DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake
     )
