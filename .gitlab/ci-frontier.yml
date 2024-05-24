@@ -7,8 +7,6 @@ variables:
   GASNET_CONDUIT: "ofi-slingshot11"
   CONDUIT: "ofi"
 
-  CXXFLAGS: "-std=c++17"
-  HIPCC_FLAGS: "-std=c++17"
   CXX_STANDARD: "17"
 
   OLCF_SERVICE_ACCOUNT: ums036_auser
@@ -41,7 +39,7 @@ variables:
   TEST_REALM: "0"
   TEST_FUZZER: "0"
   NO_PRETTY: "1"
-  CXXFLAGS: "-std=c++17 -D__HIP_PLATFORM_AMD__"
+  CXXFLAGS: "-D__HIP_PLATFORM_AMD__"
 
 .cmake: &cmake
   USE_CMAKE: "1"
