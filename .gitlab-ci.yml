@@ -167,13 +167,10 @@ cache: &global_cache
   GASNET_DEBUG: "1"
   # GASNet headers are not guaranteed to be warning-free in debug mode
   WARN_AS_ERROR: "0"
-.gasnetex_mpi_nightly: &gasnetex_mpi_nightly
+.gasnetex_mpi_stable: &gasnetex_mpi_stable
   REALM_NETWORKS: "gasnetex"
   CONDUIT: "mpi"
-  GASNET_VERSION: "GASNet-EX-snapshot"
-  # source URL is set by a GitLab CI variable as the GASNet-EX team prefers
-  #  it not to be public at this time
-  #GASNETEX_SNAPSHOT_SOURCE_URL: ...
+  GASNET_VERSION: "GASNet-stable"
 .gasnetex_ucx : &gasnetex_ucx
   REALM_NETWORKS: "gasnetex"
   CONDUIT: "ucx"
@@ -804,10 +801,10 @@ gcc9_cxx17_debug_gasnetex_mpi_debug_regent:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
     <<: [*gcc9, *terra12, *debug, *cxx17_normal, *gasnetex_mpi_debug, *regent, *incremental, *libdw]
-gcc9_cxx17_debug_gasnetex_mpi_nightly_regent:
+gcc9_cxx17_debug_gasnetex_mpi_stable_regent:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *debug, *cxx17_normal, *gasnetex_mpi_nightly, *regent, *incremental, *libdw]
+    <<: [*gcc9, *terra12, *debug, *cxx17_normal, *gasnetex_mpi_stable, *regent, *incremental, *libdw]
 #   * GASNet (UCX conduit)
 gcc9_cxx17_release_gasnet1_ucx_legion:
   <<: [*linux_compute, *image_2004, *tests]
