@@ -1040,7 +1040,7 @@ def report_mode(debug, max_dim, launcher,
     print('###   * NVTX:       %s' % use_nvtx)
     print('###   * LIBDW:      %s' % use_libdw)
     print('###   * Max DIM:    %s' % max_dim)
-    print('###   * CXX STD:    %s' % cxx_standard)
+    print('###   * C++ STD:    %s' % cxx_standard)
     print('#'*60)
     print()
     sys.stdout.flush()
@@ -1141,14 +1141,15 @@ def run_tests(test_modules=None,
     launcher = launcher.split() if launcher is not None else []
 
     # CXX Standard
-    cxx_standard = os.environ['CXX_STANDARD'] if 'CXX_STANDARD' in os.environ else ''
+    cxx_standard = os.environ.get('CXX_STANDARD', '')
     # if not use cmake, let's add -std=c++NN to CXXFLAGS
-    if use_cmake == False:
-        if cxx_standard != '':
-            if 'CXX_STANDARD' in os.environ:
-                os.environ['CXXFLAGS'] += " -std=c++" + os.environ['CXX_STANDARD']
-            else:
-                os.environ['CXXFLAGS'] = " -std=c++" + os.environ['CXX_STANDARD']
+    if not use_cmake and cxx_standard != '':
+        cxx_std_flag = " -std=c++" + cxx_standard
+        os.environ['CXXFLAGS'] = os.environ.get('CXXFLAGS', '') + cxx_std_flag
+        if use_cuda:
+            os.environ['NVCC_FLAGS'] = os.environ.get('NVCC_FLAGS', '') + cxx_std_flag
+        if use_hip:
+            os.environ['HIPCC_FLAGS'] = os.environ.get('HIPCC_FLAGS', '') + cxx_std_flag
 
     gcov_flags = ' -ftest-coverage -fprofile-arcs'
 
