@@ -29,6 +29,10 @@ task main()
   var w : double = 3.45
   format.println("Floats: {} {}", z, w)
 
+  var c32 : complex32 = {3, -4}
+  var c64 : complex64 = {-5, 6}
+  format.println("Complex32 and Complex64: {} | {}", c32, c64)
+
   format.println("Formatted: {x} {e}", d, 1.234)
   format.println("Padding/Precision: {08x} {.15} {10.3e}", d, 1.234, 3.456)
 
