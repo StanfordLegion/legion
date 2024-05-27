@@ -17456,13 +17456,10 @@ namespace Legion {
       virtual_layout_id = LEGION_MAX_APPLICATION_LAYOUT_ID + ++already_used;
       register_layout(virtual_registrar, virtual_layout_id,
           get_next_static_distributed_id(next_static_did), mapping);
-      // Round this up to the nearest number of nodes
-      unsigned remainder = already_used % total_address_spaces;
-      if (remainder == 0)
-        unique_constraint_id += already_used;
-      else
-        unique_constraint_id += 
-          (already_used + total_address_spaces - remainder);
+      // Bump up our unique constraint ID if we already used the IDs statically
+      while (unique_constraint_id <=
+          (LEGION_MAX_APPLICATION_LAYOUT_ID + already_used))
+        unique_constraint_id += runtime_stride;
       // avoid races if we are doing separate runtime creation
       if (!separate_runtime_instances)
         pending_constraints.clear();
