@@ -90,42 +90,54 @@ TEST(IntrusiveListTest, EraseEntry)
   EXPECT_TRUE(list.empty());
 }
 
-TEST(IntrusiveListTest, SwapLists)
+class IntrusiveListTestWithParams
+  : public testing::TestWithParam<std::vector<TestEntry>> {};
+
+TEST_P(IntrusiveListTestWithParams, SwapLists)
 {
   TestEntry::TestEntryList list;
   TestEntry::TestEntryList new_list;
-  TestEntry object1(42);
-  TestEntry object2(43);
-  TestEntry object3(44);
+  std::vector<TestEntry> orig_entries = GetParam();
+  std::vector<TestEntry *> list_entries;
+  for(size_t i = 0; i < orig_entries.size() - 1; i++) {
+    list.push_back(&orig_entries[i]);
+  }
+  new_list.push_back(&orig_entries.back());
 
-  list.push_back(&object1);
-  list.push_back(&object2);
-  new_list.push_back(&object3);
   new_list.swap(list);
-  TestEntry *entry1 = new_list.pop_front();
-  TestEntry *entry2 = new_list.pop_front();
-  TestEntry *entry3 = list.pop_front();
+  for(size_t i = 0; i < orig_entries.size() - 1; i++) {
+    list_entries.push_back(new_list.pop_front());
+  }
+  TestEntry *last_entry = list.pop_front();
 
-  EXPECT_EQ(entry1->value, object1.value);
-  EXPECT_EQ(entry2->value, object2.value);
-  EXPECT_EQ(entry3->value, object3.value);
+  for(size_t i = 0; i < orig_entries.size() - 1; i++) {
+    EXPECT_EQ(list_entries[i]->value, orig_entries[i].value);
+  }
+  EXPECT_EQ(last_entry->value, orig_entries.back().value);
 }
 
-TEST(IntrusiveListTest, AbsortAppend)
+TEST_P(IntrusiveListTestWithParams, AbsortAppend)
 {
   TestEntry::TestEntryList list;
   TestEntry::TestEntryList new_list;
+  std::vector<TestEntry> orig_entries = GetParam();
+  std::vector<TestEntry *> list_entries;
+  for(size_t i = 0; i < orig_entries.size(); i++) {
+    list.push_back(&orig_entries[i]);
+  }
 
-  TestEntry object1(42);
-  TestEntry object2(43);
-
-  list.push_back(&object1);
-  list.push_back(&object2);
   new_list.absorb_append(list);
-  TestEntry *entry1 = new_list.pop_front();
-  TestEntry *entry2 = new_list.pop_front();
+  for(size_t i = 0; i < orig_entries.size(); i++) {
+    list_entries.push_back(new_list.pop_front());
+  }
 
-  EXPECT_EQ(entry1->value, object1.value);
-  EXPECT_EQ(entry2->value, object2.value);
+  for(size_t i = 0; i < orig_entries.size() - 1; i++) {
+    EXPECT_EQ(list_entries[i]->value, orig_entries[i].value);
+  }
   EXPECT_TRUE(list.empty());
 }
+
+INSTANTIATE_TEST_SUITE_P(
+    ListTest, IntrusiveListTestWithParams,
+    ::testing::Values(std::vector<TestEntry>{TestEntry(42), TestEntry(43), TestEntry(44)},
+                      std::vector<TestEntry>{TestEntry(44), TestEntry(43)}));
