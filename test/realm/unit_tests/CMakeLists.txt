@@ -28,6 +28,7 @@ list(APPEND REALM_TESTS
   cmdline_parser_test.cc
   sequence_assembler_test.cc
   range_allocator_test.cc
+  pri_queue_test.cc
  )
 
 include(FetchContent)
@@ -50,7 +51,7 @@ foreach(ITEM IN LISTS REALM_UNIT_TESTS_LIST)
     set_target_properties(${ITEM} PROPERTIES CXX_VISIBILITY_PRESET hidden)
     set_target_properties(${ITEM} PROPERTIES VISIBILITY_INLINES_HIDDEN 1)
   endif()
-  target_link_libraries(${ITEM} Legion::RealmTests GTest::gtest_main ${CMAKE_DL_LIBS})
+  target_link_libraries(${ITEM} Legion::RealmTests GTest::gmock_main ${CMAKE_DL_LIBS})
   target_compile_options(${ITEM} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
   include(GoogleTest)
   gtest_discover_tests(${ITEM})
