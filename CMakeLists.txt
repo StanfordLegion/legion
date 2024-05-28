@@ -389,8 +389,9 @@ if("${Legion_NETWORKS}" MATCHES ".*gasnet(1|ex).*")
     set(Legion_EMBED_GASNet_GITREF
       "034ada74927746e8bfa21d43b527a052118e2def" # master as of 2024-05-28
       CACHE STRING "Branch/tag/commit to use from StanfordLegion/gasnet repository")
-    set(Legion_EMBED_GASNet_LOCALSRC "" CACHE STRING "Path to local clone of stanfordlegion/gasnet repository")
+    set(Legion_EMBED_GASNet_LOCALSRC "" CACHE STRING "Path to local clone of StanfordLegion/gasnet repository")
     set(Legion_EMBED_GASNet_VERSION "" CACHE STRING "Override GASNet version to build")
+    option(Legion_EMBED_GASNet_ENABLE_GPU_MEMORY_KINDS "Enable GASNet memory kinds when Realm has been built with CUDA/HIP/etc." ON)
     set(Legion_EMBED_GASNet_CONFIGURE_ARGS "" CACHE STRING "Extra configuration arguments for GASNet")
   else()
     set(GASNet_THREADING par)
