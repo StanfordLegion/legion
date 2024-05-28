@@ -48,10 +48,10 @@ variables:
   TEST_CTEST: "1"
 
 .nodes1: &nodes1
-  SCHEDULER_PARAMETERS: "-A UMS036 -t 0:40:00 -N 1 -n 1 -c 56 -p batch --exclusive"
+  SCHEDULER_PARAMETERS: "-A UMS036 -t 0:30:00 -N 1 -n 1 -c 56 -p batch --exclusive"
 
 .nodes2: &nodes2
-  SCHEDULER_PARAMETERS: "-A UMS036 -t 0:40:00 -N 2 -n 2 -c 56 -p batch --exclusive"
+  SCHEDULER_PARAMETERS: "-A UMS036 -t 0:30:00 -N 2 -n 2 -c 56 -p batch --exclusive"
 
 .tests: &tests
   script:

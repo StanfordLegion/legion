@@ -11,11 +11,9 @@ export REALM_NETWORKS="gasnetex"
 export GASNET_CONDUIT="ofi-slingshot11"
 export CONDUIT="ofi"
 
-export CXXFLAGS="-std=c++17"
-export HIPCC_FLAGS="-std=c++17"
 export CXX_STANDARD="17"
 
-export SCHEDULER_PARAMETERS="-A UMS036 -t 1:30:00 -N 1 -p batch"
+export SCHEDULER_PARAMETERS="-A UMS036 -t 0:30:00 -N 1 -p batch"
 export EXTERNAL_WORKDIR=/lustre/orion/proj-shared/ums036/ci/${CI_PIPELINE_ID}
 export GIT_SUBMODULE_STRATEGY=recursive
 
