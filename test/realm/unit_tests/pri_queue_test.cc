@@ -12,6 +12,7 @@ struct Entry {
   int value;
 };
 
+// TODO(apryakhin): Test lock/unlock.
 class DummyLock {
 public:
   void lock(void) {}
@@ -62,6 +63,7 @@ TEST(PriorityQueueTest, SingleEntryPutPeek)
   EXPECT_FALSE(queue.empty());
 }
 
+// TODO(apryakhin): Consider making a parameterized data-driven test.
 TEST(PriorityQueueTest, MultipEntriesSamePriority)
 {
   PriorityQueue<Entry *, DummyLock> queue;
