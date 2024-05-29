@@ -99,6 +99,7 @@ legion_cxx_tests = [
     ['test/ctrl_repl_safety/ctrl_repl_safety', [':0:1', '-ll:cpu', '4', '-lg:safe_ctrlrepl', '1']],
     ['test/ctrl_repl_safety/ctrl_repl_safety', [':1:0', '-ll:cpu', '4']],
     ['test/ctrl_repl_safety/ctrl_repl_safety', [':1:1', '-ll:cpu', '4', '-lg:safe_ctrlrepl', '1']],
+    ['test/mapper/mapper', []],
 
     # Tutorial/realm
     ['tutorial/realm/hello_world/realm_hello_world', []],

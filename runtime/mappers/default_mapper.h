@@ -473,6 +473,29 @@ namespace Legion {
       MemoryConstraint find_memory_constraint(const MapperContext ctx,
                                               const Task& task, VariantID vid,
                                               unsigned index);
+    private:
+      void partition_task_layout_constraint_sets(
+			   const MapperContext ctx,
+			   const unsigned index,
+			   std::set<FieldID> &needed_fields,
+			   const TaskLayoutConstraintSet &layout_constraints,
+		           std::vector<std::vector<FieldID> >&field_arrays,
+			   std::vector<std::vector<FieldID> >&leftover_fields,
+			   std::vector<LayoutConstraintID> &field_layout_ids,
+		           std::vector<LayoutConstraintID> &non_field_layout_ids);
+      bool create_instances_from_partitioned_task_layout_constraint_set(
+			   const MapperContext ctx,
+			   const Memory target_memory,
+			   const std::vector<std::vector<FieldID> > &field_arrays,
+			   const std::vector<LayoutConstraintID> &layout_ids,
+			   const unsigned int layout_ids_size,
+			   std::vector<PhysicalInstance> &instances,
+			   const RegionRequirement &req,
+			   const bool force_new_instances,
+			   size_t *footprint,
+			   const bool is_field_constraints,
+			   const bool all_fields_opts=false);
+
     protected: // static helper methods
       static const char* create_default_name(Processor p);
       template<int DIM>
