@@ -151,9 +151,9 @@ void worker_task(const void *args, size_t arglen, const void *userdata, size_t u
                    << " inst:" << inst;
 
     std::vector<RegionInstance> insts(2);
-    InstanceLayoutGeneric *ilg_a = create_layout(next_bounds);
-    InstanceLayoutGeneric *ilg_b = create_layout(next_bounds);
-    std::vector<InstanceLayoutGeneric *> layouts{ilg_a, ilg_b};
+    const InstanceLayoutGeneric *ilg_a = create_layout(next_bounds);
+    const InstanceLayoutGeneric *ilg_b = create_layout(next_bounds);
+    std::vector<const InstanceLayoutGeneric *> layouts{ilg_a, ilg_b};
 
     std::vector<ProfilingRequestSet> prs(2);
     for(int i = 0; i < 2; i++) {
