@@ -152,6 +152,7 @@ namespace Realm {
     size_t cfg_outbuf_count, cfg_outbuf_size;
     bool cfg_force_rma;
     bool cfg_use_rma_put;
+    int cfg_am_limit;  // upper bound on AMs in flight to any given peer
 
   protected:
     GASNetEXInternal *internal;

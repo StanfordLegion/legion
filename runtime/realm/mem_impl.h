@@ -90,6 +90,13 @@ namespace Realm {
       ALLOC_CANCELLED
     };
 
+    virtual AllocationResult
+    reuse_allocated_range(RegionInstanceImpl *old_inst,
+                          std::vector<RegionInstanceImpl *> &new_insts)
+    {
+      return AllocationResult::ALLOC_INSTANT_SUCCESS;
+    }
+
     // default implementation falls through (directly or indirectly) to
     //  allocate_storage_immediate -  method need only be overridden by
     //  memories that support deferred allocation
@@ -247,6 +254,8 @@ namespace Realm {
     bool allocate(TT tag, RT size, RT alignment, RT& first);
     void deallocate(TT tag, bool missing_ok = false);
     bool lookup(TT tag, RT& first, RT& size);
+    bool split_range(TT old_tag, const std::vector<TT> &new_tags,
+                     const std::vector<RT> &sizes, const std::vector<RT> &alignment);
 
   protected:
     unsigned first_free_range;
@@ -278,6 +287,10 @@ namespace Realm {
       virtual void release_storage_immediate(RegionInstanceImpl *inst,
 					     bool poisoned,
 					     TimeLimit work_until);
+
+      virtual AllocationResult
+      reuse_allocated_range(RegionInstanceImpl *old_inst,
+                            std::vector<RegionInstanceImpl *> &new_insts);
 
     protected:
       // for internal use by allocation routines - must be called with
