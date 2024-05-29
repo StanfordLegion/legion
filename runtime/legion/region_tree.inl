@@ -640,8 +640,8 @@ namespace Legion {
         // details see https://github.com/StanfordLegion/legion/issues/1384
         // Cap at a maximum of 128 byte alignment for GPUs
         const size_t field_alignment =
-          (alignment_finder != alignments.end()) ? alignment_finder->second : 1;
-          //std::min<size_t>(it->first & ~(it->first - 1), 128/*max alignment*/);
+          (alignment_finder != alignments.end()) ? alignment_finder->second :
+          std::min<size_t>(it->first & ~(it->first - 1), 128/*max alignment*/);
         if (field_alignment > 1)
         {
           offset = round_up(offset, field_alignment);
