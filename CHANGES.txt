@@ -1,6 +1,31 @@
 This file lists the major changes as they appear in the stable branch.  No
 attempt is made to keep this list accurate for the master branch.
 
+Version 24.06.0 (June ??, 2024)
+  * Build
+    - Minimum required C++ standard is now 17
+    - Embedded GASNet build in CMake now automatically enables GPU memory kinds
+  * Legion
+    - Support for nonidempotent traces (where the postconditions do
+       not imply the preconditions of the trace)
+    - Deletions are now issued in program order, making it easier for
+       users to reason about when their effects take place
+    - Improvements to Legion's internal algorithm for virtual
+       instances, fixing various correctness bugs in the implementation
+    - Improvements to the `DefaultMapper` handling of task layout constraints
+  * Regent
+    - Improvements to make compiler more deterministic
+    - Improvements to auto-detect CUDA
+    - Support for complex numbers in `std/format`
+    - Static control replication (SCR) and RDIR have been completely
+       removed. All SCR and RDIR related flags (`-fflow-*`) have been
+       removed, except for `-fflow 0` which is permitted (but no
+       longer does anything, and now issues a warning)
+  * Tools
+    - Restore profiler's ability to render dependent partitioning channels
+    - Render mapper information on mapper calls in the profiler
+    - Render user-provided profiling information in the profiler
+
 Version 24.03.0 (March 27, 2024)
   * Build
     - ROCm 6.0 is now supported, and support for ROCm 4.x has been removed
