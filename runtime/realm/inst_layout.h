@@ -233,6 +233,13 @@ namespace Realm {
     InstanceLayoutOpaque(size_t _bytes_used, size_t _alignment_reqd);
 
     virtual InstanceLayoutGeneric *clone(void) const;
+
+    virtual void relocate(size_t adjust_amt);
+
+    virtual void print(std::ostream& os) const;
+
+    REALM_INTERNAL_API_EXTERNAL_LINKAGE
+    virtual void compile_lookup_program(PieceLookup::CompiledProgram& p) const;
   };
 
   namespace PieceLayoutTypes {

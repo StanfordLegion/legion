@@ -163,6 +163,35 @@ namespace Realm {
     }
   }
 
+  ////////////////////////////////////////////////////////////////////////
+  // class InstanceLayoutOpaque
+  //
+
+  InstanceLayoutOpaque::InstanceLayoutOpaque(size_t _bytes_used, size_t _alignment_reqd)
+  {
+    bytes_used = _bytes_used;
+    alignment_reqd = _alignment_reqd;
+  }
+
+  InstanceLayoutGeneric* InstanceLayoutOpaque::clone(void) const
+  {
+    return new InstanceLayoutOpaque(bytes_used, alignment_reqd);
+  }
+
+  void InstanceLayoutOpaque::relocate(size_t base_offset)
+  {
+    // Nothing to do
+  }
+
+  void InstanceLayoutOpaque::print(std::ostream& os) const
+  {
+    os << "OpaqueLayout(bytes=" << bytes_used << ", align=" << alignment_reqd << ")";
+  }
+
+  void InstanceLayoutOpaque::compile_lookup_program(PieceLookup::CompiledProgram& p) const
+  {
+    assert(0); // This should never be called on opaque layouts
+  }
 
   ////////////////////////////////////////////////////////////////////////
   //
