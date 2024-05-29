@@ -15,36 +15,15 @@
 #------------------------------------------------------------------------------#
 
 cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
+project(LegionTest_mapper)
 
+# Only search if were building stand-alone and not as part of Legion
 if(NOT Legion_SOURCE_DIR)
   find_package(Legion REQUIRED)
 endif()
 
-add_subdirectory(attach_file_mini)
-add_subdirectory(output_requirements)
-add_subdirectory(reduce_future)
-add_subdirectory(ctrl_repl_safety)
-add_subdirectory(rendering)
-add_subdirectory(realm)
-add_subdirectory(gather_perf)
-add_subdirectory(performance/realm/event_latency)
-add_subdirectory(performance/realm/task_throughput)
-add_subdirectory(performance/realm/event_ubench)
-add_subdirectory(performance/realm/task_ubench)
-add_subdirectory(performance/realm/memcpy)
-add_subdirectory(legion_redop_test)
-add_subdirectory(disjoint_complete)
-add_subdirectory(nested_replication)
-add_subdirectory(mapper)
-
-if(Legion_USE_HDF5)
-  add_subdirectory(hdf_attach_subregion_parallel)
-endif()
-
-if(Legion_USE_Python)
-  add_subdirectory(python_bindings)
-endif()
-
-if(Legion_NETWORKS)
-  add_subdirectory(bug954)
+add_executable(mapper mapper.cc)
+target_link_libraries(mapper Legion::Legion)
+if(Legion_ENABLE_TESTING)
+  add_test(NAME mapper COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:mapper> ${Legion_TEST_ARGS})
 endif()
