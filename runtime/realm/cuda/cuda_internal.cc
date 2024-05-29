@@ -1093,8 +1093,8 @@ namespace Realm {
       // is_directt=false means we gather/scatter to the buffer which
       // won't be correct if ib smaller that overall size of
       // gather/scatter
-      if(channel_copy_info.addr_size > sizeof(size_t) ||
-         channel_copy_info.is_ranges == true || channel_copy_info.num_spaces > 1) {
+      if(channel_copy_info.addr_size > sizeof(size_t) || channel_copy_info.is_ranges ||
+         channel_copy_info.num_spaces > 1 || channel_copy_info.oor_possible) {
         return false;
       }
 
