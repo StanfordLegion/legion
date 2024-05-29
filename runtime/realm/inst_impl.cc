@@ -439,7 +439,7 @@ namespace Realm {
     }
 
     Event RegionInstance::redistrict(RegionInstance *instances,
-                                     const InstanceLayoutGeneric *const *layouts,
+                                     const InstanceLayoutGeneric **layouts,
                                      size_t num_layouts, const ProfilingRequestSet *prs,
                                      Event wait_on)
     {
@@ -953,7 +953,7 @@ namespace Realm {
     }
 
     Event RegionInstanceImpl::redistrict(RegionInstance *instances,
-                                         const InstanceLayoutGeneric *const *layouts,
+                                         const InstanceLayoutGeneric **layouts,
                                          size_t num_layouts,
                                          const ProfilingRequestSet *prs, Event wait_on)
     {

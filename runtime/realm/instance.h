@@ -169,9 +169,9 @@ namespace Realm {
      * \return The event to wait on before using the new instance.
      */
     // TODO(apryakhin@): Add deferred execution
-    Event redistrict(RegionInstance *instances,
-                     const InstanceLayoutGeneric *const *layouts, size_t num_layouts,
-                     const ProfilingRequestSet *prs, Event wait_on = Event::NO_EVENT);
+    Event redistrict(RegionInstance *instances, const InstanceLayoutGeneric **layouts,
+                     size_t num_layouts, const ProfilingRequestSet *prs,
+                     Event wait_on = Event::NO_EVENT);
 
     /**
      * Create a new region instance. Calls to create_instance return immediately
