@@ -3,6 +3,7 @@
 #include "realm/lists.h"
 
 #include <gtest/gtest.h>
+#include <gmock/gmock.h>
 
 using namespace Realm;
 
@@ -43,15 +44,37 @@ TEST(IntrusiveListTest, CheckNonEmptyList)
   EXPECT_FALSE(list.empty());
 }
 
-TEST(IntrusiveListTest, SingleEntryPushBackPopFront)
+struct MockEntryLock {
+  MOCK_METHOD(void, lock, ());
+  MOCK_METHOD(void, unlock, ());
+};
+
+struct MockTestEntry {
+  MockTestEntry(int _value = 0)
+    : value(_value)
+  {}
+
+  int value;
+  IntrusiveListLink<MockTestEntry> ew_list_link;
+  REALM_PMTA_DEFN(MockTestEntry, IntrusiveListLink<MockTestEntry>, ew_list_link);
+  typedef IntrusiveList<MockTestEntry, REALM_PMTA_USE(MockTestEntry, ew_list_link),
+                        MockEntryLock>
+      TestEntryList;
+};
+
+TEST(IntrusiveListTest, PushBackPopFrontWithLock)
 {
-  TestEntry::TestEntryList list;
-  TestEntry object(42);
+  MockTestEntry::TestEntryList list;
+  EXPECT_CALL(list.lock, lock()).Times(testing::AtLeast(2));
+  EXPECT_CALL(list.lock, unlock()).Times(testing::AtLeast(2));
+
+  MockTestEntry object(42);
 
   list.push_back(&object);
-  TestEntry *entry = list.pop_front();
+  MockTestEntry *entry = list.pop_front();
 
   EXPECT_EQ(entry->value, object.value);
+  EXPECT_TRUE(list.empty());
 }
 
 TEST(IntrusiveListTest, SingleEntryPushFrontPopFront)
