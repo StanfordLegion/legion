@@ -190,7 +190,9 @@ namespace Realm {
 
   void InstanceLayoutOpaque::compile_lookup_program(PieceLookup::CompiledProgram &p) const
   {
-    assert(0); // This should never be called on opaque layouts
+    // No fields to be accessed in this program so just allocate the memory
+    p.allocate_memory(bytes_used);
+    p.commit_updates();
   }
 
   ////////////////////////////////////////////////////////////////////////
