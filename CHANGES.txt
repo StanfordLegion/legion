@@ -8,8 +8,11 @@ Version 24.06.0 (June ??, 2024)
   * Legion
     - Support for nonidempotent traces (where the postconditions do
        not imply the preconditions of the trace)
-    - Deletions are now issued in program order, making it easier for
+    - Deletions are now committed in program order, making it easier for
        users to reason about when their effects take place
+    - All tasks (and other operations) are now committed in order (a
+       prerequisite for anticipated, but not yet implemented, precise
+       exception support)
     - Improvements to Legion's internal algorithm for virtual
        instances, fixing various correctness bugs in the implementation
     - Improvements to the `DefaultMapper` handling of task layout constraints
