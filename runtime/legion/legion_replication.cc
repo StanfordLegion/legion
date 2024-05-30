@@ -17292,8 +17292,20 @@ namespace Legion {
           std::map<Processor,DomainPoint>::const_iterator finder =
             group.processors.find(proc);
           if (finder != group.processors.end())
-            owner->report_concurrent_mapping_failure(proc,point,finder->second);
-          group.processors[proc] = point;
+          {
+            // If we are a non-participating shard we might get our
+            // own points sent back to us so we need to detect that
+            // case and not report an error for it
+#ifdef DEBUG_LEGION
+            assert((finder->second != point) || 
+                (!participating && (stage == -1)));
+#endif
+            if (finder->second != point)
+              owner->report_concurrent_mapping_failure(proc, point,
+                                                       finder->second);
+          }
+          else
+            group.processors.emplace(std::make_pair(proc, point));
         }
         size_t points;
         derez.deserialize(points);
