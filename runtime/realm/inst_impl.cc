@@ -1024,7 +1024,8 @@ namespace Realm {
         }
       }
 
-      notify_deallocation();
+      // TODO(apryakhin@): Consider deleting this instance
+      //notify_deallocation();
 
       return Event::NO_EVENT;
     }
