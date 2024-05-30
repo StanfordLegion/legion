@@ -1044,7 +1044,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::string& TaskOp::get_provenance_string(bool human) const
+    const std::string_view& TaskOp::get_provenance_string(bool human) const
     //--------------------------------------------------------------------------
     {
       Provenance *provenance = get_provenance();
@@ -1597,10 +1597,61 @@ namespace Legion {
       // Check the layout constraints first
       const TaskLayoutConstraintSet &layout_constraints = 
         impl->get_layout_constraints();
-      for (std::multimap<unsigned,LayoutConstraintID>::const_iterator it = 
-            layout_constraints.layouts.begin(); it != 
-            layout_constraints.layouts.end(); it++)
-      {
+      unsigned req_id = 0;
+      unsigned cur_id = 0;
+      // fields explicitly specified in any constraint for region requirement
+      std::set<FieldID> explicit_fields, align_fields, offset_fields;
+      for (auto it =
+	     layout_constraints.layouts.begin(); it !=
+	     layout_constraints.layouts.end(); it++) {
+	// obtain all fields explicitly specified in task layout constraints for
+	// a region requirement
+	cur_id = it->first;
+	if (req_id == cur_id) {
+	  explicit_fields.clear();
+	  align_fields.clear();
+	  offset_fields.clear();
+	  req_id++;
+	  for (auto lay_it =
+		 layout_constraints.layouts.lower_bound(it->first); lay_it !=
+		 layout_constraints.layouts.upper_bound(it->first); lay_it++) {
+	    // Get the layout constraints from the task layout set
+	    const LayoutConstraints *index_constraints =
+	      runtime->find_layout_constraints(lay_it->second);
+	    const std::vector<FieldID> &constraint_fields =
+	      index_constraints->field_constraint.get_field_set();
+	    // check if there are any field constraints in the current task layout constraint
+	    for (FieldID fid: constraint_fields) {
+	      // check if the field is included in the needed_fields
+	      auto finder = explicit_fields.find(fid);
+	      if (finder == explicit_fields.end()) {
+		explicit_fields.insert(fid);
+	      }
+	    }
+	    // alignment constraints may have an explicit field
+	    if (!index_constraints->alignment_constraints.empty()) {
+	      for (unsigned idx = 0; idx < index_constraints->alignment_constraints.size(); idx++) {
+		auto fid = index_constraints->alignment_constraints[idx].fid;
+		auto finder = explicit_fields.find(fid);
+		if (finder == explicit_fields.end()) {
+		  explicit_fields.insert(fid);
+		  align_fields.insert(fid);
+		}
+	      }
+	    }
+	    // offset constraints may have an explicit field
+	    if (!index_constraints->offset_constraints.empty()) {
+	      for (unsigned idx = 0; idx < index_constraints->offset_constraints.size(); idx++) {
+		auto fid = index_constraints->offset_constraints[idx].fid;
+		auto finder = explicit_fields.find(fid);
+		if (finder == explicit_fields.end()) {
+		  explicit_fields.insert(fid);
+		  offset_fields.insert(fid);
+		}
+	      }
+	    }
+	  }
+	}
         // Might have constraints for extra region requirements
         if (it->first >= physical_instances.size())
           continue;
@@ -1609,20 +1660,29 @@ namespace Legion {
           continue;
         LayoutConstraints *constraints = 
           runtime->find_layout_constraints(it->second);
-        // If we don't have any fields then this constraint isn't
-        // going to apply to any actual instances
+
+
         const std::vector<FieldID> &field_vec = 
           constraints->field_constraint.field_set;
         FieldMask constraint_mask;
-        if (!field_vec.empty())
-        {
-          FieldSpaceNode *field_node = runtime->forest->get_node(
-                              regions[it->first].region.get_field_space());
-          std::set<FieldID> field_set(field_vec.begin(), field_vec.end());
+	FieldSpaceNode *field_node = runtime->forest->get_node(
+                                     regions[it->first].region.get_field_space());
+	std::set<FieldID> field_set(field_vec.begin(), field_vec.end());
+	if (!field_vec.empty()) {
           constraint_mask = field_node->get_field_mask(field_set);
         }
-        else
-          constraint_mask = FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES);
+	else if (!constraints->alignment_constraints.empty()) {
+	  constraint_mask = field_node->get_field_mask(align_fields);
+	}
+	else if (!constraints->offset_constraints.empty()) {
+	  constraint_mask = field_node->get_field_mask(offset_fields);
+	}
+	else {
+	  // task layout constraint without explicit fields can
+	  // apply to remaining fields in the region requirement
+          constraint_mask = FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES) ^
+	    field_node->get_field_mask(explicit_fields);
+	}
         const LayoutConstraint *conflict_constraint = NULL;
         for (unsigned idx = 0; idx < instances.size(); idx++)
         {
@@ -2029,7 +2089,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::string& RemoteTaskOp::get_provenance_string(bool human) const
+    const std::string_view& RemoteTaskOp::get_provenance_string(
+                                                               bool human) const
     //--------------------------------------------------------------------------
     {
       Provenance *provenance = get_provenance();
@@ -4723,6 +4784,11 @@ namespace Legion {
 #ifdef LEGION_SPY
         LegionSpy::log_operation_events(unique_op_id, start_condition,
                                         single_task_termination);
+        // Chain the start event into the unmap events so Legion Spy can see
+        // the dependences between child operations the start of the parent task
+        for (unsigned idx = 0; idx < unmap_events.size(); idx++)
+          if (unmap_events[idx].exists())
+            LegionSpy::log_event_dependence(start_condition, unmap_events[idx]);
 #endif
         LegionSpy::log_task_priority(unique_op_id, task_priority);
         for (unsigned idx = 0; idx < futures.size(); idx++)
@@ -4802,13 +4868,6 @@ namespace Legion {
           MispredicationTaskArgs::TASK_ID].fetch_sub(1);
 #endif
       }
-#ifdef LEGION_SPY
-      // Chain the start event into the unmap events so Legion Spy can see
-      // the dependences between child operations the start of the parent task
-      for (unsigned idx = 0; idx < unmap_events.size(); idx++)
-        if (unmap_events[idx].exists())
-          LegionSpy::log_event_dependence(start_condition, unmap_events[idx]);
-#endif
     }
 
     //--------------------------------------------------------------------------

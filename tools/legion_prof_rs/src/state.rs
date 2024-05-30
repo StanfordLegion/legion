@@ -2,6 +2,7 @@ use std::cmp::{max, Ordering, Reverse};
 use std::collections::{BTreeMap, BTreeSet, BinaryHeap};
 use std::convert::TryFrom;
 use std::fmt;
+use std::num::NonZeroU64;
 use std::sync::OnceLock;
 
 use derive_more::{Add, From, LowerHex, Sub};
@@ -382,6 +383,7 @@ pub enum ProcEntryKind {
     MetaTask(VariantID),
     MapperCall(MapperID, ProcID, MapperCallKindID),
     RuntimeCall(RuntimeCallKindID),
+    ApplicationCall(ProvenanceID),
     GPUKernel(TaskID, VariantID),
     ProfTask,
 }
@@ -487,6 +489,7 @@ impl ContainerEntry for ProcEntry {
             ProcEntryKind::RuntimeCall(kind) => {
                 state.runtime_call_kinds.get(&kind).unwrap().name.clone()
             }
+            ProcEntryKind::ApplicationCall(prov) => state.find_provenance(prov).unwrap().to_owned(),
             ProcEntryKind::GPUKernel(task_id, variant_id) => {
                 let task_name = &state.task_kinds.get(&task_id).unwrap().name;
                 let variant_name = &state.variants.get(&(task_id, variant_id)).unwrap().name;
@@ -529,6 +532,9 @@ impl ContainerEntry for ProcEntry {
             }
             ProcEntryKind::RuntimeCall(kind) => {
                 state.runtime_call_kinds.get(&kind).unwrap().color.unwrap()
+            }
+            ProcEntryKind::ApplicationCall(prov) => {
+                state.provenances.get(&prov).unwrap().color.unwrap()
             }
             ProcEntryKind::ProfTask => {
                 // FIXME don't hardcode this here
@@ -699,7 +705,9 @@ impl Proc {
         let mut subcalls = BTreeMap::new();
         for (uid, entry) in self.entries.iter() {
             match entry.kind {
-                ProcEntryKind::MapperCall(..) | ProcEntryKind::RuntimeCall(_) => {
+                ProcEntryKind::MapperCall(..)
+                | ProcEntryKind::RuntimeCall(_)
+                | ProcEntryKind::ApplicationCall(_) => {
                     let task_uid = fevents.get(&entry.fevent).unwrap();
                     let call_start = entry.time_range.start.unwrap();
                     let call_stop = entry.time_range.stop.unwrap();
@@ -2063,6 +2071,28 @@ impl RuntimeCallKind {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+pub struct ProvenanceID(pub NonZeroU64);
+
+#[derive(Debug)]
+pub struct Provenance {
+    pub name: String,
+    pub color: Option<Color>,
+}
+
+impl Provenance {
+    fn new(name: &str) -> Self {
+        Provenance {
+            name: name.to_owned(),
+            color: None,
+        }
+    }
+    fn set_color(&mut self, color: Color) -> &mut Self {
+        self.color = Some(color);
+        self
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct TaskID(pub u32);
 
 #[derive(Debug)]
@@ -2312,7 +2342,7 @@ pub struct Operation {
     pub base: Base,
     pub parent_id: Option<OpID>,
     pub kind: Option<OpKindID>,
-    pub provenance: Option<String>,
+    pub provenance: Option<ProvenanceID>,
     pub operation_inst_infos: Vec<OperationInstInfo>,
 }
 
@@ -2336,8 +2366,9 @@ impl Operation {
         self.kind = Some(kind);
         self
     }
-    fn set_provenance(&mut self, provenance: &str) -> &mut Self {
-        self.provenance = Some(provenance.to_owned());
+    fn set_provenance(&mut self, provenance: Option<ProvenanceID>) -> &mut Self {
+        assert!(self.provenance.is_none());
+        self.provenance = provenance;
         self
     }
 }
@@ -2805,6 +2836,7 @@ pub struct State {
     pub visible_nodes: Vec<NodeID>,
     pub source_locator: Vec<String>,
     pub fevents: BTreeMap<EventID, ProfUID>,
+    pub provenances: BTreeMap<ProvenanceID, Provenance>,
 }
 
 impl State {
@@ -2824,7 +2856,8 @@ impl State {
     }
 
     fn find_op_provenance(&self, op_id: OpID) -> Option<&str> {
-        self.find_op(op_id).and_then(|op| op.provenance.as_deref())
+        self.find_op(op_id)
+            .and_then(|op| op.provenance.and_then(|pid| self.find_provenance(pid)))
     }
 
     pub fn get_op_color(&self, op_id: OpID) -> Color {
@@ -2849,6 +2882,10 @@ impl State {
         }
 
         Color::BLACK
+    }
+
+    pub fn find_provenance(&self, pid: ProvenanceID) -> Option<&str> {
+        self.provenances.get(&pid).map(|p| p.name.as_str())
     }
 
     fn create_task(
@@ -2972,6 +3009,30 @@ impl State {
             None,
             None,
             ProcEntryKind::RuntimeCall(kind),
+            time_range,
+            fevent,
+            fevent,
+            &mut self.op_prof_uid,
+            &mut self.prof_uid_proc,
+            &mut self.fevents,
+        )
+    }
+
+    fn create_application_call(
+        &mut self,
+        provenance: ProvenanceID,
+        proc_id: ProcID,
+        time_range: TimeRange,
+        fevent: EventID,
+    ) -> &mut ProcEntry {
+        assert!(self.provenances.contains_key(&provenance));
+        let alloc = &mut self.prof_uid_allocator;
+        let proc = self.procs.get_mut(&proc_id).unwrap();
+        proc.create_proc_entry(
+            Base::new(alloc),
+            None,
+            None,
+            ProcEntryKind::ApplicationCall(provenance),
             time_range,
             fevent,
             fevent,
@@ -3319,7 +3380,8 @@ impl State {
             + self.meta_variants.len()
             + self.op_kinds.len()
             + self.mapper_call_kinds.len()
-            + self.runtime_call_kinds.len()) as u64;
+            + self.runtime_call_kinds.len()
+            + self.provenances.len()) as u64;
         let mut lfsr = LFSR::new(num_colors);
         let num_colors = lfsr.max_value;
         for variant in self.variants.values_mut() {
@@ -3344,6 +3406,9 @@ impl State {
         }
         for kind in self.runtime_call_kinds.values_mut() {
             kind.set_color(compute_color(lfsr.next(), num_colors));
+        }
+        for prov in self.provenances.values_mut() {
+            prov.set_color(compute_color(lfsr.next(), num_colors));
         }
     }
 
@@ -3885,6 +3950,9 @@ fn process_record(
         Record::ZeroTime { zero_time } => {
             state.zero_time = TimestampDelta(*zero_time);
         }
+        Record::Provenance { pid, provenance } => {
+            state.provenances.insert(*pid, Provenance::new(provenance));
+        }
         Record::CalibrationErr { calibration_err } => {
             state._calibration_err = *calibration_err;
         }
@@ -4101,7 +4169,7 @@ fn process_record(
                 .create_op(*op_id)
                 .set_parent_id(*parent_id)
                 .set_kind(kind)
-                .set_provenance(provenance);
+                .set_provenance(*provenance);
             // Hack: we have to do this in two places, because we don't know what
             // order the logger calls are going to come in. If the task gets
             // logged first, this will come back Some(_) and we'll store it below.
@@ -4377,6 +4445,17 @@ fn process_record(
                 state.create_runtime_call(*kind, *proc_id, time_range, *fevent);
                 state.update_last_time(*stop);
             }
+        }
+        Record::ApplicationCallInfo {
+            provenance,
+            start,
+            stop,
+            proc_id,
+            fevent,
+        } => {
+            let time_range = TimeRange::new_start(*start, *stop);
+            state.create_application_call(*provenance, *proc_id, time_range, *fevent);
+            state.update_last_time(*stop);
         }
         Record::ProfTaskInfo {
             proc_id,

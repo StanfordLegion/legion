@@ -1108,6 +1108,7 @@ impl StateDataSource {
                 match entry.kind {
                     ProcEntryKind::MapperCall(..)
                     | ProcEntryKind::RuntimeCall(_)
+                    | ProcEntryKind::ApplicationCall(_)
                     | ProcEntryKind::GPUKernel(_, _) => {
                         if let Some(start_time) = entry.time_range.start {
                             fields.push((

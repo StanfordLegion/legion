@@ -4285,6 +4285,8 @@ namespace Legion {
       unsigned           get_unique_indirections_id(void);
 #endif
     public:
+      Provenance* find_or_create_provenance(const char *prov, size_t length);
+    public:
       // Verify that a region requirement is valid
       LegionErrorType verify_requirement(const RegionRequirement &req,
                                          FieldID &bad_field);
@@ -4412,6 +4414,7 @@ namespace Legion {
       std::atomic<unsigned long long> unique_constraint_id;
       std::atomic<unsigned long long> unique_is_expr_id;
       std::atomic<uint64_t> unique_top_level_task_id;
+      uint64_t unique_provenance_id;
       uint64_t unique_implicit_top_level_task_id;
 #ifdef LEGION_SPY
       std::atomic<unsigned> unique_indirections_id;
@@ -4424,6 +4427,9 @@ namespace Legion {
       std::atomic<unsigned> unique_concurrent_id;
       std::atomic<unsigned> unique_redop_id;
       std::atomic<unsigned> unique_serdez_id;
+    protected:
+      mutable LocalLock provenance_lock;
+      std::map<size_t,std::vector<Provenance*> > provenances;
     protected:
       mutable LocalLock library_lock;
       struct LibraryMapperIDs {

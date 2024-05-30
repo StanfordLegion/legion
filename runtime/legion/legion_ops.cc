@@ -36,90 +36,70 @@ namespace Legion {
     // Provenance
     /////////////////////////////////////////////////////////////
 
-    /*static*/ const std::string Provenance::no_provenance;
+    /*static*/ constexpr std::string_view Provenance::no_provenance;
     /*static*/ constexpr char Provenance::delimeter;
 
     //--------------------------------------------------------------------------
-    Provenance::Provenance(const char *prov)
+    Provenance::Provenance(ProvenanceID p, const char *prov)
+      : pid(p), full(prov)
     //--------------------------------------------------------------------------
     {
-      initialize(prov, strlen(prov));
+      initialize();
     }
 
     //--------------------------------------------------------------------------
-    Provenance::Provenance(const void *buffer, size_t size)
+    Provenance::Provenance(ProvenanceID p, const void *buffer, size_t size)
+      : pid(p), full((const char*)buffer, size)
     //--------------------------------------------------------------------------
     {
-      initialize((const char*)buffer, size);
+      initialize();
     }
 
     //--------------------------------------------------------------------------
-    Provenance::Provenance(const std::string &prov)
+    Provenance::Provenance(ProvenanceID p, const std::string &prov)
+      : pid(p), full(prov)
     //--------------------------------------------------------------------------
     {
-      initialize(prov.c_str(), prov.length());
+      initialize();
     }
 
     //--------------------------------------------------------------------------
-    void Provenance::initialize(const char *prov, size_t size)
+    void Provenance::initialize(void)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(!full.empty());
+#endif
+      const char *prov = full.c_str();
       unsigned split = 0;
-      while (split < size)
+      while (split < full.size())
       {
         if (prov[split] == delimeter)
           break;
         split++;
       }
       if (split > 0)
-        human.assign(prov, split);
-      if ((split+1) < size)
-        machine.assign(prov+split+1, size-(split+1));
-    }
-
-    //--------------------------------------------------------------------------
-    char* Provenance::clone(void) const
-    //--------------------------------------------------------------------------
-    {
-      char *result = (char*)malloc(
-          human.length() + (!machine.empty() ? machine.length() + 1 : 0) + 1);
-      unsigned offset = 0;
-      for (unsigned idx = 0; idx < human.length(); idx++)
-        result[offset++] = human[idx];
-      if (!machine.empty())
-      {
-        result[offset++] = delimeter; 
-        for (unsigned idx = 0; idx < machine.length(); idx++)
-          result[offset++] = machine[idx];
-      }
-      result[offset] = '\0';
-      return result;
+        human = std::string_view(prov, split);
+      if ((split+1) < full.size())
+        machine = std::string_view(prov+split+1);
     }
 
     //--------------------------------------------------------------------------
     void Provenance::serialize(Serializer &rez) const
     //--------------------------------------------------------------------------
     {
-      size_t strlen = human.length() + machine.length();
-      if (strlen > 0)
-      {
-        strlen++; // handle the delimeter
-        rez.serialize(strlen);
-        if (human.length() > 0)
-          rez.serialize(human.c_str(), human.length());
-        rez.serialize(delimeter);
-        if (machine.length() > 0)
-          rez.serialize(machine.c_str(), machine.length());
-      }
-      else
-        rez.serialize(strlen);
+#ifdef DEBUG_LEGION
+      assert(!full.empty());
+#endif
+      rez.serialize<size_t>(full.size());
+      rez.serialize(full.c_str(), full.size() + 1/*null terminator*/);
     }
 
     //--------------------------------------------------------------------------
     /*static*/ void Provenance::serialize_null(Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      rez.serialize<size_t>(SIZE_MAX);
+      rez.serialize<size_t>(0);
     }
 
     //--------------------------------------------------------------------------
@@ -128,10 +108,11 @@ namespace Legion {
     {
       size_t length;
       derez.deserialize(length);
-      if (length < SIZE_MAX)
+      if (length > 0)
       {
-        Provenance *result = new Provenance(derez.get_current_pointer(),length);
-        derez.advance_pointer(length);
+        Provenance *result = implicit_runtime->find_or_create_provenance(
+            (const char*)derez.get_current_pointer(), length);
+        derez.advance_pointer(length + 1/*null terminator*/);
         return result;
       }
       else
@@ -4929,7 +4910,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::string& MapOp::get_provenance_string(bool human) const
+    const std::string_view& MapOp::get_provenance_string(bool human) const
     //--------------------------------------------------------------------------
     {
       Provenance *provenance = get_provenance();
@@ -7493,7 +7474,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::string& CopyOp::get_provenance_string(bool human) const
+    const std::string_view& CopyOp::get_provenance_string(bool human) const
     //--------------------------------------------------------------------------
     {
       Provenance *provenance = get_provenance();
@@ -10869,7 +10850,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::string& CloseOp::get_provenance_string(bool human) const
+    const std::string_view& CloseOp::get_provenance_string(bool human) const
     //--------------------------------------------------------------------------
     {
       Provenance *provenance = get_provenance();
@@ -12311,7 +12292,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::string& AcquireOp::get_provenance_string(bool human) const
+    const std::string_view& AcquireOp::get_provenance_string(bool human) const
     //--------------------------------------------------------------------------
     {
       Provenance *provenance = get_provenance();
@@ -13160,7 +13141,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::string& ReleaseOp::get_provenance_string(bool human) const
+    const std::string_view& ReleaseOp::get_provenance_string(bool human) const
     //--------------------------------------------------------------------------
     {
       Provenance *provenance = get_provenance();
@@ -14299,7 +14280,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::string& MustEpochOp::get_provenance_string(bool human) const
+    const std::string_view& MustEpochOp::get_provenance_string(bool human) const
     //--------------------------------------------------------------------------
     {
       Provenance *provenance = get_provenance();
@@ -17289,7 +17270,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::string& DependentPartitionOp::get_provenance_string(
+    const std::string_view& DependentPartitionOp::get_provenance_string(
                                                                bool human) const
     //--------------------------------------------------------------------------
     {
@@ -18141,7 +18122,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::string& FillOp::get_provenance_string(bool human) const
+    const std::string_view& FillOp::get_provenance_string(bool human) const
     //--------------------------------------------------------------------------
     {
       Provenance *provenance = get_provenance();
@@ -23124,7 +23105,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::string& RemoteMapOp::get_provenance_string(bool human) const
+    const std::string_view& RemoteMapOp::get_provenance_string(bool human) const
     //--------------------------------------------------------------------------
     {
       Provenance *provenance = get_provenance();
@@ -23249,7 +23230,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::string& RemoteCopyOp::get_provenance_string(bool human) const
+    const std::string_view& RemoteCopyOp::get_provenance_string(
+                                                               bool human) const
     //--------------------------------------------------------------------------
     {
       Provenance *provenance = get_provenance();
@@ -23407,7 +23389,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::string& RemoteCloseOp::get_provenance_string(bool human) const
+    const std::string_view& RemoteCloseOp::get_provenance_string(
+                                                               bool human) const
     //--------------------------------------------------------------------------
     {
       Provenance *provenance = get_provenance();
@@ -23533,7 +23516,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::string& RemoteAcquireOp::get_provenance_string(bool human) const
+    const std::string_view& RemoteAcquireOp::get_provenance_string(
+                                                               bool human) const
     //--------------------------------------------------------------------------
     {
       Provenance *provenance = get_provenance();
@@ -23631,7 +23615,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::string& RemoteReleaseOp::get_provenance_string(bool human) const
+    const std::string_view& RemoteReleaseOp::get_provenance_string(
+                                                               bool human) const
     //--------------------------------------------------------------------------
     {
       Provenance *provenance = get_provenance();
@@ -23756,7 +23741,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::string& RemoteFillOp::get_provenance_string(bool human) const
+    const std::string_view& RemoteFillOp::get_provenance_string(
+                                                               bool human) const
     //--------------------------------------------------------------------------
     {
       Provenance *provenance = get_provenance();
@@ -23927,7 +23913,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::string& RemotePartitionOp::get_provenance_string(
+    const std::string_view& RemotePartitionOp::get_provenance_string(
                                                                bool human) const
     //--------------------------------------------------------------------------
     {

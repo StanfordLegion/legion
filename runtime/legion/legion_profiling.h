@@ -165,7 +165,12 @@ namespace Legion {
       public:
         long long zero_time;
       };
-
+      struct Provenance {
+      public:
+        ProvenanceID pid;
+        const char *provenance;
+        size_t size;
+      };
     };
 
     class LegionProfInstance {
@@ -187,7 +192,7 @@ namespace Legion {
         UniqueID op_id;
         UniqueID parent_id;
         unsigned kind;
-        const char *provenance;
+        ProvenanceID provenance;
       };
       struct MultiTask {
       public:
@@ -397,6 +402,12 @@ namespace Legion {
         ProcID proc_id;
         LgEvent finish_event;
       };
+      struct ApplicationCallInfo {
+        ProvenanceID pid;
+        timestamp_t start, stop;
+        ProcID proc_id;
+        LgEvent finish_event;
+      };
       struct ProcDesc {
       public:
         ProcID proc_id;
@@ -530,6 +541,9 @@ namespace Legion {
       void record_runtime_call(Processor proc, RuntimeCallKind kind,
                                timestamp_t start, timestamp_t stop,
                                LgEvent finish_event);
+      void record_application_range(Processor proc, ProvenanceID pid,
+                                    timestamp_t start, timestamp_t stop,
+                                    LgEvent finish_event);
 #ifdef LEGION_PROF_SELF_PROFILE
     public:
       void record_proftask(Processor p, UniqueID op_id, timestamp_t start,
@@ -570,6 +584,7 @@ namespace Legion {
       std::deque<PartitionInfo> partition_infos;
       std::deque<MapperCallInfo> mapper_call_infos;
       std::deque<RuntimeCallInfo> runtime_call_infos;
+      std::deque<ApplicationCallInfo> application_call_infos;
       std::deque<MemDesc> mem_desc_infos;
       std::deque<ProcDesc> proc_desc_infos;
       std::deque<ProcMemDesc> proc_mem_aff_desc_infos;
@@ -720,6 +735,10 @@ namespace Legion {
                                      unsigned int num_runtime_call_kinds);
       void record_runtime_call(RuntimeCallKind kind, timestamp_t start,
                                timestamp_t stop);
+      void record_provenance(ProvenanceID pid, 
+                             const char *provenance, size_t size);
+      void record_application_range(ProvenanceID pid,
+                                    timestamp_t start, timestamp_t stop);
     public:
       void record_implicit(UniqueID op_id, TaskID tid, Processor proc,
                            long long start, long long stop,

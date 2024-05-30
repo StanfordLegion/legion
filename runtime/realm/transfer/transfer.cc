@@ -4092,6 +4092,7 @@ namespace Realm {
   {
     info.is_ranges = is_ranges;
     info.addr_size = sizeof(T2);
+    info.oor_possible = oor_possible;
   }
 
   template <int N, typename T, int N2, typename T2>

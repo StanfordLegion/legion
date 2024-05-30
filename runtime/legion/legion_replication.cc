@@ -4900,6 +4900,10 @@ namespace Legion {
                          instances, &remote_targets, &deppart_results);
         }
       }
+      // If we don't have any points then we need to complete our execution
+      // now since we're not going to get any calls for it later
+      if (points.empty())
+        complete_execution();
     }
 
     //--------------------------------------------------------------------------
