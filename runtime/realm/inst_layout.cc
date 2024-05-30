@@ -173,7 +173,7 @@ namespace Realm {
     alignment_reqd = _alignment_reqd;
   }
 
-  InstanceLayoutGeneric* InstanceLayoutOpaque::clone(void) const
+  InstanceLayoutGeneric *InstanceLayoutOpaque::clone(void) const
   {
     return new InstanceLayoutOpaque(bytes_used, alignment_reqd);
   }
@@ -183,12 +183,12 @@ namespace Realm {
     // Nothing to do
   }
 
-  void InstanceLayoutOpaque::print(std::ostream& os) const
+  void InstanceLayoutOpaque::print(std::ostream &os) const
   {
     os << "OpaqueLayout(bytes=" << bytes_used << ", align=" << alignment_reqd << ")";
   }
 
-  void InstanceLayoutOpaque::compile_lookup_program(PieceLookup::CompiledProgram& p) const
+  void InstanceLayoutOpaque::compile_lookup_program(PieceLookup::CompiledProgram &p) const
   {
     assert(0); // This should never be called on opaque layouts
   }

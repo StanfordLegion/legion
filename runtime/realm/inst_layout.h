@@ -236,10 +236,10 @@ namespace Realm {
 
     virtual void relocate(size_t adjust_amt);
 
-    virtual void print(std::ostream& os) const;
+    virtual void print(std::ostream &os) const;
 
     REALM_INTERNAL_API_EXTERNAL_LINKAGE
-    virtual void compile_lookup_program(PieceLookup::CompiledProgram& p) const;
+    virtual void compile_lookup_program(PieceLookup::CompiledProgram &p) const;
   };
 
   namespace PieceLayoutTypes {
