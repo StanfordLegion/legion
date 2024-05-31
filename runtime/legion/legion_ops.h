@@ -3675,7 +3675,6 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
-      virtual void trigger_execution(void);
       virtual void trigger_complete(ApEvent effects_done);
     public:
       // This is a helper method for ReplFillOp

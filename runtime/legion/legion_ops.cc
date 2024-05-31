@@ -18320,31 +18320,10 @@ namespace Legion {
       {
         const RtEvent future_ready_event =
           future.impl->find_runtime_instance_ready(); 
-        if (!future_ready_event.has_triggered())
-          parent_ctx->add_to_trigger_execution_queue(this, future_ready_event);
-        else
-          trigger_execution(); // can do the completion now
+        complete_execution(future_ready_event);
       }
       else
-        trigger_execution();
-    }
-
-    //--------------------------------------------------------------------------
-    void FillOp::trigger_execution(void)
-    //--------------------------------------------------------------------------
-    {
-      if (set_view)
-      {
-#ifdef DEBUG_LEGION
-        assert(fill_view != NULL);
-#endif
-        size_t value_size = 0;
-        const void *value = 
-          future.impl->find_runtime_buffer(parent_ctx, value_size);
-        if (fill_view->set_value(value, value_size))
-          delete fill_view;
-      }
-      complete_execution();
+        complete_execution();
     }
 
     //--------------------------------------------------------------------------
@@ -18352,9 +18331,19 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Now that we've mapped we can remove the reference on our fill_view
-      if ((fill_view != NULL) && 
-          fill_view->remove_base_valid_ref(MAPPING_ACQUIRE_REF))
-        delete fill_view;
+      if (fill_view != NULL)
+      {
+        if (set_view)
+        {
+          size_t value_size = 0;
+          const void *value = 
+            future.impl->find_runtime_buffer(parent_ctx, value_size);
+          if (fill_view->set_value(value, value_size))
+            delete fill_view;
+        }
+        if (fill_view->remove_base_valid_ref(MAPPING_ACQUIRE_REF))
+          delete fill_view;
+      }
       // See if we have any arrivals to trigger
       if (!arrive_barriers.empty())
       {
@@ -18821,7 +18810,16 @@ namespace Legion {
       assert(received < points.size());
 #endif
       if ((received + 1) == points.size())
-        complete_execution();
+      {
+        if (set_view)
+        {
+          const RtEvent future_ready_event =
+            future.impl->find_runtime_instance_ready(); 
+          complete_execution(future_ready_event);
+        }
+        else
+          complete_execution();
+      }
     }
 
     //--------------------------------------------------------------------------
