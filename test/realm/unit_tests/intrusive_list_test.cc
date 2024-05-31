@@ -8,8 +8,9 @@
 using namespace Realm;
 
 struct TestEntryLock {
-  void lock(void) {}
-  void unlock(void) {}
+  void lock(void) { count++; }
+  void unlock(void) { count--; }
+  int count = 0;
 };
 
 struct TestEntry {
@@ -32,6 +33,7 @@ TEST(IntrusiveListTest, CheckEmptyList)
 
   EXPECT_EQ(entry, nullptr);
   EXPECT_TRUE(list.empty());
+  EXPECT_EQ(list.lock.count, 0);
 }
 
 TEST(IntrusiveListTest, CheckNonEmptyList)
@@ -42,39 +44,7 @@ TEST(IntrusiveListTest, CheckNonEmptyList)
   list.push_back(&object);
 
   EXPECT_FALSE(list.empty());
-}
-
-struct MockEntryLock {
-  MOCK_METHOD(void, lock, ());
-  MOCK_METHOD(void, unlock, ());
-};
-
-struct MockTestEntry {
-  MockTestEntry(int _value = 0)
-    : value(_value)
-  {}
-
-  int value;
-  IntrusiveListLink<MockTestEntry> ew_list_link;
-  REALM_PMTA_DEFN(MockTestEntry, IntrusiveListLink<MockTestEntry>, ew_list_link);
-  typedef IntrusiveList<MockTestEntry, REALM_PMTA_USE(MockTestEntry, ew_list_link),
-                        MockEntryLock>
-      TestEntryList;
-};
-
-TEST(IntrusiveListTest, PushBackPopFrontWithLock)
-{
-  MockTestEntry::TestEntryList list;
-  EXPECT_CALL(list.lock, lock()).Times(testing::AtLeast(2));
-  EXPECT_CALL(list.lock, unlock()).Times(testing::AtLeast(2));
-
-  MockTestEntry object(42);
-
-  list.push_back(&object);
-  MockTestEntry *entry = list.pop_front();
-
-  EXPECT_EQ(entry->value, object.value);
-  EXPECT_TRUE(list.empty());
+  EXPECT_EQ(list.lock.count, 0);
 }
 
 TEST(IntrusiveListTest, SingleEntryPushFrontPopFront)
@@ -100,6 +70,7 @@ TEST(IntrusiveListTest, PushFrontSameEntry)
 
   EXPECT_EQ(entry1->value, object.value);
   EXPECT_EQ(entry2->value, object.value);
+  EXPECT_EQ(list.lock.count, 0);
 }
 
 TEST(IntrusiveListTest, EraseEntry)
@@ -111,6 +82,21 @@ TEST(IntrusiveListTest, EraseEntry)
   list.erase(&object);
 
   EXPECT_TRUE(list.empty());
+  EXPECT_EQ(list.lock.count, 0);
+}
+
+TEST(IntrusiveListTest, PushBackPopFront)
+{
+  TestEntry::TestEntryList list;
+
+  TestEntry object(42);
+
+  list.push_back(&object);
+  TestEntry *entry = list.pop_front();
+
+  EXPECT_EQ(entry->value, object.value);
+  EXPECT_TRUE(list.empty());
+  EXPECT_EQ(list.lock.count, 0);
 }
 
 class IntrusiveListTestWithParams
