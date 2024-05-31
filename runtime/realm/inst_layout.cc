@@ -190,8 +190,7 @@ namespace Realm {
 
   void InstanceLayoutOpaque::compile_lookup_program(PieceLookup::CompiledProgram &p) const
   {
-    // No fields to be accessed in this program so just allocate the memory
-    p.allocate_memory(bytes_used);
+    // No fields to be accessed in this program so just commit no updates
     p.commit_updates();
   }
 
