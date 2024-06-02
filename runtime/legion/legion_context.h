@@ -526,10 +526,14 @@ namespace Legion {
                                       const ShardMapping *mapping = NULL,
                                       ShardID source_shard = 0) = 0;
     public:
-      const std::vector<PhysicalRegion>& begin_task(Processor proc);
+      virtual FutureInstance* create_task_local_future(Memory memory, 
+                                                       size_t size) = 0;
       virtual PhysicalInstance create_task_local_instance(Memory memory,
-                                        Realm::InstanceLayoutGeneric *layout);
-      virtual void destroy_task_local_instance(PhysicalInstance instance);
+                                      Realm::InstanceLayoutGeneric *layout) = 0;
+      virtual void destroy_task_local_instance(PhysicalInstance instance) = 0;
+      virtual size_t query_available_memory(Memory target) = 0;
+    public:
+      const std::vector<PhysicalRegion>& begin_task(Processor proc);
       virtual void end_task(const void *res, size_t res_size, bool owned,
                       PhysicalInstance inst, FutureFunctor *callback_functor,
                       const Realm::ExternalInstanceResource *resource,
@@ -616,7 +620,6 @@ namespace Legion {
                                    void (*destructor)(void*));
     public:
       void yield(void);
-      size_t query_available_memory(Memory target);
       void concurrent_task_barrier(void);
       void release_task_local_instances(void);
     public:
@@ -690,7 +693,7 @@ namespace Legion {
     protected:
       // Map of task local instances including their unique events
       // from the profilters perspective
-      std::map<PhysicalInstance,LgEvent> task_local_instances;
+      std::map<PhysicalInstance,LgEvent> task_local_instances; 
     protected:
       std::vector<long long> user_profiling_ranges;
     protected:
@@ -1677,6 +1680,13 @@ namespace Legion {
         { add_nested_resource_ref(manager->did); }
       virtual bool remove_subscriber_reference(PhysicalManager *manager)
         { return remove_nested_resource_ref(manager->did); }
+    public:
+      virtual FutureInstance* create_task_local_future(Memory memory, 
+                                                       size_t size);
+      virtual PhysicalInstance create_task_local_instance(Memory memory,
+                                        Realm::InstanceLayoutGeneric *layout);
+      virtual void destroy_task_local_instance(PhysicalInstance instance);
+      virtual size_t query_available_memory(Memory target);
     public:
       virtual void end_task(const void *res, size_t res_size, bool owned,
                       PhysicalInstance inst, FutureFunctor *callback_functor,
@@ -3464,7 +3474,8 @@ namespace Legion {
     class LeafContext : public TaskContext,
                         public LegionHeapify<LeafContext> {
     public:
-      LeafContext(Runtime *runtime, SingleTask *owner,bool inline_task = false);
+      LeafContext(Runtime *runtime, SingleTask *owner,
+          std::map<Memory,MemoryPool*> &&pools, bool inline_task = false);
       LeafContext(const LeafContext &rhs) = delete;
       virtual ~LeafContext(void);
     public:
@@ -3878,6 +3889,13 @@ namespace Legion {
                                       const ShardMapping *mapping = NULL,
                                       ShardID source_shard = 0);
     public:
+      virtual FutureInstance* create_task_local_future(Memory memory, 
+                                                       size_t size);
+      virtual PhysicalInstance create_task_local_instance(Memory memory,
+                                        Realm::InstanceLayoutGeneric *layout);
+      virtual void destroy_task_local_instance(PhysicalInstance instance);
+      virtual size_t query_available_memory(Memory target);
+    public:
       virtual void end_task(const void *res, size_t res_size, bool owned,
                       PhysicalInstance inst, FutureFunctor *callback_functor,
                       const Realm::ExternalInstanceResource *resource,
@@ -3885,6 +3903,7 @@ namespace Legion {
                       const void *metadataptr, size_t metadatasize,
                       ApEvent effects);
       virtual void post_end_task(void);
+      virtual void handle_mispredication(void);
     public:
       virtual void destroy_lock(Lock l);
       virtual Grant acquire_grant(const std::vector<LockRequest> &requests);
@@ -3907,12 +3926,20 @@ namespace Legion {
                                                    Provenance *provenance);
       virtual DynamicCollective advance_dynamic_collective(
                                                    DynamicCollective dc);
-    protected:
-      mutable LocalLock                            leaf_lock;
-      size_t                                       inlined_tasks;
     public:
       virtual TaskPriority get_current_priority(void) const;
       virtual void set_current_priority(TaskPriority priority);
+    protected:
+      // These are the memory pools for doing immediate allocations since
+      // this leaf task has already considered itself as mapped and therefore
+      // cannot use the normal allocation pathway
+#ifndef DEBUG_LEGION
+      const 
+#endif
+        std::map<Memory,MemoryPool*>               memory_pools;
+    protected:
+      mutable LocalLock                            leaf_lock;
+      size_t                                       inlined_tasks;
     };
 
     //--------------------------------------------------------------------------

@@ -17652,15 +17652,7 @@ namespace Legion {
       DeferredBuffer<T,DIM,COORD_T,CHECK_BOUNDS> buffer(
         bounds, target_memory(), ord, initial_value, alignment);
       if (return_buffer)
-      {
-#ifdef DEBUG_LEGION
-        return_data(extents, field_id, buffer);
-#else
-        // In release mode, we don't check the constraints, as we already know
-        // that the instance satisfies them.
-        return_data(extents, field_id, buffer.instance, NULL, false);
-#endif
-      }
+        return_data(extents, field_id, buffer.instance, false);
       return buffer;
     }
 

@@ -62,6 +62,9 @@ namespace Legion {
     TaskContext::~TaskContext(void)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(task_local_instances.empty());
+#endif
       // Clean up any local variables that we have
       if (!task_local_variables.empty())
       {
@@ -565,6 +568,7 @@ namespace Legion {
       return physical_regions;
     }
 
+#if 0
     //--------------------------------------------------------------------------
     PhysicalInstance TaskContext::create_task_local_instance(Memory memory, 
                                            Realm::InstanceLayoutGeneric *layout)
@@ -632,9 +636,10 @@ namespace Legion {
 #ifdef LEGION_MALLOC_INSTANCES
       manager->free_legion_instance(RtEvent::NO_RT_EVENT, instance);
 #else
-      manager->free_eager_instance(instance, RtEvent::NO_RT_EVENT);
+      manager->free_task_local_instance(instance);
 #endif
     }
+#endif
 
     //--------------------------------------------------------------------------
     void TaskContext::end_task(const void *res, size_t res_size, bool owned,
@@ -684,7 +689,7 @@ namespace Legion {
 #endif
         // escape this task local instance
         LgEvent unique = escape_task_local_instance(deferred_result_instance);
-        instance = new FutureInstance(res, res_size, true/*eager*/,
+        instance = new FutureInstance(res, res_size,
             false/*external*/, true/*own alloc*/,
             unique, deferred_result_instance);
       }
@@ -693,7 +698,7 @@ namespace Legion {
         if (!owned)
         {
           void *buffer = malloc(res_size);
-          instance = new FutureInstance(buffer, res_size, false/*eager*/,
+          instance = new FutureInstance(buffer, res_size,
               true/*external*/, true/*own allocation*/);
           if (!FutureInstance::check_meta_visible(resource->suggested_memory()))
           {
@@ -750,7 +755,7 @@ namespace Legion {
         // therefore going to make a copy of it
         release_callback = !owned;
         owned = callback_owned;
-      }
+      } 
       // Once there are no more escaping instances we can release the rest
       if (!task_local_instances.empty())
       {
@@ -761,13 +766,12 @@ namespace Legion {
              task_local_instances.begin(); it !=
              task_local_instances.end(); ++it)
         {
-          PhysicalInstance inst = it->first;
           MemoryManager *manager =
-            runtime->find_memory_manager(inst.get_location());
+            runtime->find_memory_manager(it->first.get_location());
 #ifdef LEGION_MALLOC_INSTANCES
-          manager->free_legion_instance(done, inst);
+          manager->free_legion_instance(done, it->first);
 #else
-          manager->free_eager_instance(inst, done);
+          manager->free_task_local_instance(it->first, done);
 #endif
         }
         task_local_instances.clear();
@@ -811,11 +815,8 @@ namespace Legion {
       // Make a simple memory copy here now
       if (size > LEGION_MAX_RETURN_SIZE)
       {
-        MemoryManager *manager = 
-          runtime->find_memory_manager(runtime->runtime_system_memory);
         FutureInstance *instance = 
-          manager->create_future_instance(owner_task,
-            owner_task->get_unique_op_id(), size, true/*eager*/);
+          create_task_local_future(runtime->runtime_system_memory, size);
         memcpy(const_cast<void*>(instance->get_data()), value, size);
         return instance;
       }
@@ -823,7 +824,7 @@ namespace Legion {
       {
         void *buffer = malloc(size);
         memcpy(buffer, value, size);
-        return new FutureInstance(buffer, size, false/*eager*/,
+        return new FutureInstance(buffer, size,
             true/*external*/, true/*own allocation*/);
       }
     }
@@ -1036,6 +1037,7 @@ namespace Legion {
         std::this_thread::yield();
     }
 
+#if 0
     //--------------------------------------------------------------------------
     size_t TaskContext::query_available_memory(Memory target)
     //--------------------------------------------------------------------------
@@ -1045,6 +1047,7 @@ namespace Legion {
       MemoryManager *manager = runtime->find_memory_manager(target); 
       return manager->query_available_eager_memory();
     }
+#endif
 
     //--------------------------------------------------------------------------
     void TaskContext::concurrent_task_barrier(void)
@@ -1136,7 +1139,7 @@ namespace Legion {
         for (Domain::DomainPointIterator itr(launch_domain); itr; itr++)
         {
           Future f = result->get_future(itr.p, true/*internal*/);
-          f.impl->set_result(launcher.predicate_false_future.impl, owner_task);
+          f.impl->set_result(this, launcher.predicate_false_future.impl);
         }
       }
       else if (launcher.predicate_false_result.get_size() == 0)
@@ -11693,6 +11696,121 @@ namespace Legion {
       }
       if (removed->remove_nested_gc_ref(did))
         delete removed;
+    }
+
+#if 0
+    //--------------------------------------------------------------------------
+    void InnerContext::sync_for_task_local_allocation(Memory memory,size_t size)
+    //--------------------------------------------------------------------------
+    {
+      if (size == 0)
+        return;
+      // If we have a memory pool with enough size then there is nothing for
+      // us to wait for before trying to do our allocation since we'll know
+      // that it will succeed
+      std::map<Memory,MemoryPool*>::const_iterator finder = 
+        memory_pools.find(memory);
+      if ((finder != memory_pools.end()) &&
+          (size <= finder->second->query_available_memory(false/*leaf*/)))
+        return;
+      // Go through and find the mapping events for all the outstanding
+      // operations which are not complete yet
+      std::vector<RtEvent> mapped_events;
+      {
+        AutoLock child_lock(child_op_lock,1,false/*exclusive*/);
+        for (std::deque<ReorderBufferEntry>::const_iterator it =
+              reorder_buffer.begin(); it != reorder_buffer.end(); it++)
+        {
+          if (it->complete)
+            continue;
+          RtEvent mapped = it->operation->get_mapped_event();
+          if (mapped.exists())
+            mapped_events.push_back(mapped);
+        }
+      }
+      if (!mapped_events.empty())
+        Runtime::merge_events(mapped_events).wait();
+    }
+#endif
+
+    //--------------------------------------------------------------------------
+    FutureInstance* InnerContext::create_task_local_future(Memory memory,
+                                                           size_t size)
+    //--------------------------------------------------------------------------
+    {
+      MemoryManager *manager = runtime->find_memory_manager(memory);
+      FutureInstance *instance = 
+        manager->create_future_instance(get_unique_id(), size);
+      if (instance == NULL)
+        REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
+            "Failed to allocate space for a future for task %s (UID %lld) "
+            "in %s memory of size %zd bytes. If you receive this error then "
+            "you really are out of memory. You have two options: either "
+            "increase the size of this memory when configuring Realm, or "
+            "find a bigger machine.", get_task_name(), get_unique_id(),
+            manager->get_name(), size)
+      return instance;
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalInstance InnerContext::create_task_local_instance(Memory memory,
+                                           Realm::InstanceLayoutGeneric *layout)
+    //--------------------------------------------------------------------------
+    {
+      LgEvent unique_event;
+      if (runtime->profiler != NULL)
+      {
+        // If we're profiling then each of these needs a unique event
+        const RtUserEvent unique = Runtime::create_rt_user_event();
+        Runtime::trigger_event(unique);
+        unique_event = unique;
+      }
+      MemoryManager *manager = runtime->find_memory_manager(memory);
+      RtEvent use_event;
+      PhysicalInstance instance = manager->create_task_local_instance(
+          get_unique_id(), unique_event, layout, use_event);
+      if (!instance.exists())
+        REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
+            "Failed to allocate DeferredBuffer/Value/Reduction for task %s "
+            "(UID %lld) in %s memory of size %zd bytes. If you receive this "
+            "error then you  really are out of memory. You have two options: "
+            "increase the size of this memory when configuring Realm, or "
+            "find a bigger machine.", get_task_name(), get_unique_id(), 
+            manager->get_name(), layout->bytes_used)
+      task_local_instances[instance] = unique_event;
+      // Make sure that it is safe to use this instance before handing it back
+      if (use_event.exists())
+        use_event.wait();
+      return instance;
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::destroy_task_local_instance(PhysicalInstance instance)
+    //--------------------------------------------------------------------------
+    {
+      std::map<PhysicalInstance,LgEvent>::iterator finder =
+        task_local_instances.find(instance);
+      if (finder == task_local_instances.end())
+        REPORT_LEGION_ERROR(ERROR_DEFERRED_BUFFER_DOUBLE_DELETE,
+            "Detected double deletion of deferred buffer " IDFMT
+            "in parent task %s (UID %lld).",
+            instance.id, get_task_name(), get_unique_id())
+      task_local_instances.erase(finder);
+      MemoryManager *manager = 
+        runtime->find_memory_manager(instance.get_location());
+#ifdef LEGION_MALLOC_INSTANCES
+      manager->free_legion_instance(RtEvent::NO_RT_EVENT, instance);
+#else
+      manager->free_task_local_instance(instance);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    size_t InnerContext::query_available_memory(Memory memory)
+    //--------------------------------------------------------------------------
+    {
+      MemoryManager *manager = runtime->find_memory_manager(memory);
+      return manager->query_available_memory();
     }
 
     //--------------------------------------------------------------------------
@@ -23451,12 +23569,13 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    LeafContext::LeafContext(Runtime *rt, SingleTask *owner, bool inline_task)
+    LeafContext::LeafContext(Runtime *rt, SingleTask *owner, 
+        std::map<Memory,MemoryPool*> &&pools, bool inline_task)
       : TaskContext(rt, owner, owner->get_depth(), owner->regions,
                     owner->output_regions, LEGION_DISTRIBUTED_HELP_ENCODE(
                       rt->get_available_distributed_id(), LEAF_CONTEXT_DC),
                     false/*perform registration*/, inline_task),
-        inlined_tasks(0)
+        memory_pools(pools), inlined_tasks(0)
     //--------------------------------------------------------------------------
     {
 #ifdef LEGION_GC
@@ -23469,6 +23588,9 @@ namespace Legion {
     LeafContext::~LeafContext(void)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(memory_pools.empty());
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -24758,12 +24880,8 @@ namespace Legion {
     {
       if (f.impl == NULL)
         return Predicate::FALSE_PRED;
-      f.impl->request_runtime_instance(owner_task, true/*eager*/);
-      const RtEvent ready = f.impl->subscribe(); 
-      if (ready.exists() && !ready.has_triggered())
-        ready.wait();
-      // Always eagerly evaluate predicates in leaf contexts
-      const bool value = f.impl->get_boolean_value(this);
+      const bool value = *(const bool*)f.impl->get_buffer(
+          runtime->runtime_system_memory);
       if (value)
         return Predicate::TRUE_PRED;
       else
@@ -24933,6 +25051,141 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    FutureInstance* LeafContext::create_task_local_future(Memory memory,
+                                                          size_t size)
+    //--------------------------------------------------------------------------
+    {
+      std::map<Memory,MemoryPool*>::const_iterator finder =
+        memory_pools.find(memory);
+      if (finder == memory_pools.end())
+      {
+        MemoryManager *manager = runtime->find_memory_manager(memory);
+        // A tiny bit of backwards compatibility here for system level
+        // futures in which case we know this will go to the fast path of
+        // just calling malloc without relying on Realm's allocator
+        if ((memory == runtime->runtime_system_memory) &&
+            (size <= LEGION_MAX_RETURN_SIZE))
+          return manager->create_future_instance(get_unique_id(), size);
+        REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
+            "Failed to allocate %zd bytes for a future needed by leaf task %s "
+            "(UID %lld) in %s memory because there was no space reserved at "
+            "the point of mapping the task for dynamic allocations. If you "
+            "designate a task as a leaf task variant then it is your "
+            "responsibility to tell Legion how much memory needs to be "
+            "reserved for satisfying dynamic allocations during the "
+            "execution of the task.", size, get_task_name(),
+            get_unique_id(), manager->get_name())
+      }
+      FutureInstance *instance = 
+        finder->second->allocate_future(get_unique_id(), size);
+      if (instance == NULL)
+      {
+        MemoryManager *manager = runtime->find_memory_manager(memory);
+        REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
+            "Failed to allocate %zd bytes for future needed by leaf task %s "
+            "(UID %lld) in %s memory because there was insufficient space "
+            "reserved for dynamic allocations. This means that you set your "
+            "upper bound for the amount of dynamic memory required for this "
+            "task too low.", size, get_task_name(), get_unique_id(), 
+            manager->get_name())
+      }
+      return instance;
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalInstance LeafContext::create_task_local_instance(Memory memory,
+                                           Realm::InstanceLayoutGeneric *layout)
+    //--------------------------------------------------------------------------
+    {
+      std::map<Memory,MemoryPool*>::const_iterator finder =
+        memory_pools.find(memory);
+      if (finder == memory_pools.end())
+      {
+        MemoryManager *manager = runtime->find_memory_manager(memory);
+        REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
+            "Failed to allocate DeferredBuffer/Value/Reduction of %zd bytes "
+            "for leaf task %s (UID %lld) in %s memory because there was no "
+            "space reserved at the point of mapping the task for dynamic "
+            "allocations. If you designate a task as a leaf task variant "
+            "then it is your responsibility to tell Legion how much memory "
+            "needs to be allocated for satisfying dynamic allocations during "
+            "the execution of the task.", layout->bytes_used,
+            get_task_name(), get_unique_id(), manager->get_name())
+      }
+      if (finder->second->max_alignment < layout->alignment_reqd)
+      {
+        MemoryManager *manager = runtime->find_memory_manager(memory);
+        REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
+            "Failed to allocate DeferredBuffer/Value/Reduction of %zd bytes "
+            "for leaf task %s (UID %lld) in %s memory because the maximum "
+            "alignment required by the instance of %zd bytes is larger the "
+            "reserved alignment for the pool of %zd bytes. You need to ask "
+            "for a larger maximum alignment for the pool if you plan to do "
+            "dynamic allocations that require it.", layout->bytes_used,
+            get_task_name(), get_unique_id(), manager->get_name(),
+            layout->alignment_reqd, finder->second->max_alignment)
+      }
+      LgEvent unique_event;
+      if (runtime->profiler != NULL)
+      {
+        // If we're profiling then each of these needs a unique event
+        const RtUserEvent unique = Runtime::create_rt_user_event();
+        Runtime::trigger_event(unique);
+        unique_event = unique;
+      }
+      RtEvent use_event;
+      PhysicalInstance instance = finder->second->allocate_instance(
+          get_unique_id(), unique_event, layout, use_event);
+      if (!instance.exists())
+      {
+        MemoryManager *manager = runtime->find_memory_manager(memory);
+        REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
+            "Failed to allocate DeferredBuffer/Value/Reduction of %zd bytes "
+            "for leaf task %s (UID %lld) in %s memory because there was "
+            "insufficient space reserved for dynamic allocations. This means "
+            "that you set your upper bound for the amount of dynamic memory "
+            "required for this task too low.", layout->bytes_used,
+            get_task_name(), get_unique_id(), manager->get_name())
+      }
+      task_local_instances[instance] = unique_event;
+      if (use_event.exists())
+        use_event.wait();
+      return instance;
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::destroy_task_local_instance(PhysicalInstance instance)
+    //--------------------------------------------------------------------------
+    {
+      std::map<PhysicalInstance,LgEvent>::iterator finder =
+        task_local_instances.find(instance);
+      if (finder == task_local_instances.end())
+        REPORT_LEGION_ERROR(ERROR_DEFERRED_BUFFER_DOUBLE_DELETE,
+            "Detected double deletion of deferred buffer " IDFMT
+            "in parent task %s (UID %lld).",
+            instance.id, get_task_name(), get_unique_id())
+      task_local_instances.erase(finder);
+      std::map<Memory,MemoryPool*>::const_iterator pool_finder =
+        memory_pools.find(instance.get_location());
+#ifdef DEBUG_LEGION
+      assert(pool_finder != memory_pools.end());
+#endif
+      pool_finder->second->free_instance(instance);
+    }
+
+    //--------------------------------------------------------------------------
+    size_t LeafContext::query_available_memory(Memory memory)
+    //--------------------------------------------------------------------------
+    {
+      std::map<Memory,MemoryPool*>::const_iterator finder =
+        memory_pools.find(memory);
+      if (finder == memory_pools.end())
+        return 0;
+      else
+        return finder->second->query_available_memory();
+    }
+
+    //--------------------------------------------------------------------------
     void LeafContext::end_task(const void *res, size_t res_size, bool owned,
                                PhysicalInstance deferred_result_instance,
                                FutureFunctor *callback_functor,
@@ -24958,6 +25211,15 @@ namespace Legion {
         if (owner_task->is_concurrent())
           runtime->end_concurrent_task(executing_processor);
       }
+      if (!memory_pools.empty())
+      {
+        for (std::map<Memory,MemoryPool*>::const_iterator it =
+              memory_pools.begin(); it != memory_pools.end(); it++)
+          delete it->second;
+#ifdef DEBUG_LEGION
+        memory_pools.clear();
+#endif
+      }
       // No need to unmap the physical regions, they never had events
       TaskContext::end_task(res, res_size, owned, deferred_result_instance,
           callback_functor,resource,freefunc,metadataptr,metadatasize,effects);
@@ -24969,6 +25231,22 @@ namespace Legion {
     {
       // We don't have any children so we can just record them committed
       owner_task->trigger_children_committed();
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::handle_mispredication(void)
+    //--------------------------------------------------------------------------
+    {
+      if (!memory_pools.empty())
+      {
+        for (std::map<Memory,MemoryPool*>::const_iterator it =
+              memory_pools.begin(); it != memory_pools.end(); it++)
+          delete it->second;
+#ifdef DEBUG_LEGION
+        memory_pools.clear();
+#endif
+      }
+      TaskContext::handle_mispredication();
     }
 
     //--------------------------------------------------------------------------

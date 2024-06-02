@@ -10035,8 +10035,7 @@ namespace Legion {
               // Have to request internal buffers before completing mapping
               // in case we have to make an instance as part of it
               FutureImpl *impl = futures[0].impl;
-              const RtEvent mapped = 
-                impl->request_runtime_instance(this, false/*eager*/);
+              const RtEvent mapped = impl->request_runtime_instance(this);
               if (mapped.exists())
                 complete_mapping(mapped);
               else
@@ -10061,8 +10060,7 @@ namespace Legion {
               for (unsigned idx = 0; idx < futures.size(); idx++)
               {
                 FutureImpl *impl = futures[idx].impl;
-                const RtEvent mapped =
-                  impl->request_runtime_instance(this,false/*eager*/);
+                const RtEvent mapped = impl->request_runtime_instance(this);
                 if (mapped.exists())
                   mapped_events.push_back(mapped);
                 const RtEvent subscribed = impl->find_runtime_instance_ready();
@@ -13759,8 +13757,7 @@ namespace Legion {
       // Mark that we completed mapping this operation
       if (to_predicate)
       {
-        complete_mapping(
-            future.impl->request_runtime_instance(this, false/*eager*/));
+        complete_mapping(future.impl->request_runtime_instance(this));
         const RtEvent ready = future.impl->find_runtime_instance_ready();
         if (ready.exists() && !ready.has_triggered())
           parent_ctx->add_to_trigger_execution_queue(this, ready);
@@ -15822,8 +15819,7 @@ namespace Legion {
       for (std::map<DomainPoint,FutureImpl*>::const_iterator it =
             sources.begin(); it != sources.end(); it++)
       {
-        const RtEvent mapped =
-          it->second->request_runtime_instance(this, false/*eager*/);
+        const RtEvent mapped = it->second->request_runtime_instance(this);
         if (mapped.exists())
           mapped_events.insert(mapped);
         const RtEvent ready = it->second->find_runtime_instance_ready();
@@ -18304,8 +18300,8 @@ namespace Legion {
         assert(future.impl != NULL);
 #endif
         // This will make sure we have a mapping locally
-        const RtEvent buffer_ready = 
-          future.impl->request_runtime_instance(this, false/*eager*/);
+        const RtEvent buffer_ready =
+          future.impl->request_runtime_instance(this);
         if (buffer_ready.exists())
           map_applied_conditions.insert(buffer_ready);
       }
@@ -18790,7 +18786,7 @@ namespace Legion {
 #endif
         // This will make sure we have a mapping locally
         const RtEvent buffer_ready = 
-          future.impl->request_runtime_instance(this, false/*eager*/);
+          future.impl->request_runtime_instance(this);
         if (buffer_ready.exists())
           mapped_preconditions.push_back(buffer_ready);
       }
@@ -22061,7 +22057,7 @@ namespace Legion {
             futures.begin(); it != futures.end(); it++)
       {
         const RtEvent mapped = 
-          it->impl->request_runtime_instance(this, false/*eager*/);
+          it->impl->request_runtime_instance(this);
         if (mapped.exists())
           mapped_events.push_back(mapped);
         const RtEvent ready = it->impl->find_runtime_instance_ready();
@@ -22076,8 +22072,8 @@ namespace Legion {
       {
         MemoryManager *manager = 
           runtime->find_memory_manager(runtime->runtime_system_memory);
-        instance = manager->create_future_instance(this, unique_op_id,
-                                      return_type_size, false/*eager*/);
+        instance =
+          manager->create_future_instance(unique_op_id, return_type_size);
         complete_mapping(futures_mapped);
       }
       // Also make sure we wait for any execution fences that we have
@@ -22129,7 +22125,7 @@ namespace Legion {
               return_type_size)
         // Copy the result into the instance
         FutureInstance *local = 
-            new FutureInstance(output.value, output.size, false/*eager*/,
+            new FutureInstance(output.value, output.size,
                 true/*external*/, output.take_ownership);
         const ApEvent done = 
           instance->copy_from(local, this, ApEvent::NO_AP_EVENT);
@@ -22260,7 +22256,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const RtEvent ready =
-        future->request_runtime_instance(this, false/*eager*/);
+        future->request_runtime_instance(this);
       if (ready.exists() && !ready.has_triggered())
         preconditions.push_back(ready);
     }
@@ -22316,7 +22312,7 @@ namespace Legion {
       // create an external instance for the current allocation
       FutureInstance *serdez_redop_instance = 
         new FutureInstance(serdez_redop_buffer, future_result_size,
-          false/*eager*/, true/*external*/, false/*own allocation*/);
+          true/*external*/, false/*own allocation*/);
       std::vector<ApEvent> done_events;
       for (std::vector<FutureInstance*>::const_iterator it =
             targets.begin(); it != targets.end(); it++)
@@ -22554,8 +22550,8 @@ namespace Legion {
             FutureInstance::check_meta_visible(*it))
           runtime_visible = targets.size();
         MemoryManager *manager = runtime->find_memory_manager(*it);
-        FutureInstance *instance = manager->create_future_instance(this, 
-            unique_op_id, result_size, false/*eager*/);
+        FutureInstance *instance =
+          manager->create_future_instance(unique_op_id, result_size);
         targets.push_back(instance);
       }
       // This is an important optimization: if we're doing a small

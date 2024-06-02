@@ -586,6 +586,19 @@ namespace Legion {
        * indicates with which priority the profiling results should
        * be send back to the mapper.
        *
+       * When selecting a leaf-task variant for the task, the mapper can
+       * use the 'leaf_pool_bounds' to specify sizes of memory pools for
+       * the runtime to allocate to handle dynamic memory allocations during
+       * the execution of the task. These must be big enough to handle all
+       * such dynamic memory allocations in each kind of memory. The mapper
+       * can use the value of zero to indicate that an "unbound" pool should
+       * be created which will block all future memory allocations in that 
+       * memory until the task is done running (this will likely result in
+       * severe performance degradations). If the task variant also has
+       * statically specified pool bounds, then the dynamically sized upper
+       * bound provided by the mapper will override the static bound 
+       * provided at the time of task variant registration.
+       *
        * Finally, the mapper can requrest a postmap_task mapper call be
        * performed to make additional copies of any output regions of the
        * task for resilience purposes by setting the 'postmap_task' flag
@@ -609,6 +622,7 @@ namespace Legion {
         std::set<unsigned>                          untracked_valid_regions;
         std::vector<Memory>                         future_locations;
         std::vector<Processor>                      target_procs;
+        std::map<Memory,PoolBounds>                 leaf_pool_bounds;
         VariantID                                   chosen_variant; // = 0 
         TaskPriority                                task_priority;  // = 0
         RealmPriority                               copy_fill_priority;

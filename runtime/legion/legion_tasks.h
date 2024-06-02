@@ -452,6 +452,8 @@ namespace Legion {
                               const DeferMappingArgs *defer_args);
       void perform_post_mapping(const TraceInfo &trace_info);
       void check_future_return_bounds(FutureInstance *instance) const;
+      void create_leaf_memory_pools(VariantImpl *impl,
+          std::map<Memory,PoolBounds> &dynamic_pool_bounds);
     protected:
       void pack_single_task(Serializer &rez, AddressSpaceID target);
       void unpack_single_task(Deserializer &derez,
@@ -552,6 +554,7 @@ namespace Legion {
       std::vector<ApEvent>                        region_preconditions;
       std::vector<std::vector<PhysicalManager*> > source_instances;
       std::vector<Memory>                         future_memories;
+      std::map<Memory,MemoryPool*>                leaf_memory_pools;
     protected: // Mapper choices 
       std::vector<unsigned>                       untracked_valid_regions;
       VariantID                                   selected_variant;
@@ -954,7 +957,7 @@ namespace Legion {
       virtual const Mappable* as_mappable(void) const { return this; }
     public:
       void initialize_point(SliceTask *owner, const DomainPoint &point,
-                            const FutureMap &point_arguments, bool eager,
+                            const FutureMap &point_arguments, bool inline_task,
                             const std::vector<FutureMap> &point_futures);
     public:
       // From MemoizableOp
@@ -1420,7 +1423,8 @@ namespace Legion {
       PointTask* clone_as_point_task(const DomainPoint &point,
                                      bool inline_task);
       size_t enumerate_points(bool inline_task);
-      void set_predicate_false_result(const DomainPoint &point);
+      void set_predicate_false_result(const DomainPoint &point,
+                                      TaskContext *execution_context);
     public:
       void check_target_processors(void) const;
       void update_target_processor(void);

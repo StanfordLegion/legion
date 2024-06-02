@@ -229,6 +229,8 @@ int main(int argc, char** argv) {
     TaskVariantRegistrar registrar(TID_WORKER, "worker");
     registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
     registrar.set_leaf();
+    registrar.leaf_pool_bounds.emplace(std::make_pair(Memory::Kind::SYSTEM_MEM,
+          PoolBounds(500001*sizeof(double), 16)));
     Runtime::preregister_task_variant<worker>(registrar, "worker");
   }
   Runtime::add_registration_callback(register_mapper);

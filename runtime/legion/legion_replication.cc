@@ -1435,9 +1435,8 @@ namespace Legion {
         {
           MemoryManager *manager = 
             runtime->find_memory_manager(reduction_instance.load()->memory);
-          FutureInstance *shadow_instance = 
-            manager->create_future_instance(this, unique_op_id,
-                reduction_op->sizeof_rhs, false/*eager*/);
+          FutureInstance *shadow_instance = manager->create_future_instance(
+              unique_op_id, reduction_op->sizeof_rhs);
           all_reduce_collective->set_shadow_instance(shadow_instance);
         }
       }
@@ -5925,9 +5924,8 @@ namespace Legion {
             (target->size > LEGION_MAX_RETURN_SIZE))
         {
           MemoryManager *manager = runtime->find_memory_manager(target->memory);
-          FutureInstance *shadow_instance = 
-            manager->create_future_instance(this, unique_op_id,
-                redop->sizeof_rhs, false/*eager*/);
+          FutureInstance *shadow_instance = manager->create_future_instance(
+              unique_op_id, redop->sizeof_rhs);
           all_reduce_collective->set_shadow_instance(shadow_instance);
         }
       }

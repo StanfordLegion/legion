@@ -991,6 +991,8 @@ int main(int argc, char **argv)
     registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
     registrar.set_leaf(true);
     registrar.set_inner(false);
+    registrar.leaf_pool_bounds.emplace(Memory::Kind::SYSTEM_MEM,
+        PoolBounds(SIZE*SIZE*sizeof(int64_t)));x
     Runtime::preregister_task_variant<producer_local_task>(registrar, "producer_local");
   }
   {

@@ -950,7 +950,7 @@ namespace Legion {
         use_event(Runtime::create_ap_user_event(NULL)),
         instance_ready((k == UNBOUND_INSTANCE_KIND) ? 
             Runtime::create_rt_user_event() : RtUserEvent::NO_RT_USER_EVENT),
-        kind(k), external_pointer(-1UL), producer_event(p_event),
+        kind(k), producer_event(p_event),
         gc_state(COLLECTABLE_GC_STATE), pending_changes(0),
         failed_collection_count(0), min_gc_priority(0), added_gc_events(0),
         valid_references(0), sent_valid_references(0),
@@ -1599,7 +1599,7 @@ namespace Legion {
       if (finder->second == 0)
         detailed_base_valid_references.erase(finder);
       if (valid_references == 0)
-        return notify_invalid(i_lock);
+        return notify_invalid();
       else
         return false;
     }
@@ -1622,7 +1622,7 @@ namespace Legion {
       if (finder->second == 0)
         detailed_nested_valid_references.erase(finder);
       if (valid_references == 0)
-        return notify_invalid(i_lock);
+        return notify_invalid();
       else
         return false;
     } 
@@ -1655,7 +1655,7 @@ namespace Legion {
       assert(valid_references.load() >= cnt);
 #endif
       if (valid_references.fetch_sub(cnt) == cnt)
-        return notify_invalid(i_lock);
+        return notify_invalid();
       else
         return false;
     }
@@ -1770,7 +1770,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool PhysicalManager::notify_invalid(AutoLock &i_lock)
+    bool PhysicalManager::notify_invalid(void)
     //--------------------------------------------------------------------------
     {
       // No need for the lock it is held by the caller
@@ -1781,16 +1781,7 @@ namespace Legion {
       // If we're an external instance that has already been detached and
       // therfore deleted then we don't ever want to go back to collectable
       if (!is_external_instance() || (gc_state != COLLECTED_GC_STATE))
-      {
         gc_state = COLLECTABLE_GC_STATE;
-        // If we're an eagerly allocated instance start the collection
-        // immediately since there's no point in re-use
-        if (kind == EAGER_INSTANCE_KIND)
-        {
-          RtEvent dummy_ready;
-          collect(dummy_ready, &i_lock);
-        }
-      }
       return remove_base_gc_ref(INTERNAL_VALID_REF);
     }
 
@@ -3207,15 +3198,10 @@ namespace Legion {
       if (kind == INTERNAL_INSTANCE_KIND)
         memory_manager->free_legion_instance(this, deferred_deletion);
 #else
-      if (kind == EAGER_INSTANCE_KIND)
-        memory_manager->free_eager_instance(instance, deferred_deletion);
+      if (!serdez_fields.empty())
+        instance.destroy(serdez_fields, deferred_deletion);
       else
-      {
-        if (!serdez_fields.empty())
-          instance.destroy(serdez_fields, deferred_deletion);
-        else
-          instance.destroy(deferred_deletion);
-      }
+        instance.destroy(deferred_deletion);
 #endif
 #else
       // Release the i_lock since we're done with the atomic updates
@@ -3255,16 +3241,10 @@ namespace Legion {
       if (kind == INTERNAL_INSTANCE_KIND)
         memory_manager->free_legion_instance(this, RtEvent::NO_RT_EVENT);
 #else
-      // If this is an eager allocation, return it back to the eager pool
-      if (kind == EAGER_INSTANCE_KIND)
-        memory_manager->free_eager_instance(instance, RtEvent::NO_RT_EVENT);
+      if (!serdez_fields.empty())
+        instance.destroy(serdez_fields);
       else
-      {
-        if (!serdez_fields.empty())
-          instance.destroy(serdez_fields);
-        else
-          instance.destroy();
-      }
+        instance.destroy();
 #endif
 #endif
     }
@@ -3338,8 +3318,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     bool PhysicalManager::update_physical_instance(
                                                   PhysicalInstance new_instance,
-                                                  size_t new_footprint,
-                                                  uintptr_t new_pointer)
+                                                  size_t new_footprint)
     //--------------------------------------------------------------------------
     {
       {
@@ -3349,13 +3328,8 @@ namespace Legion {
         assert(instance_footprint == -1U);
 #endif
         instance = new_instance;
-        kind = EAGER_INSTANCE_KIND;
-        external_pointer = new_pointer;
-#ifdef DEBUG_LEGION
-        assert(external_pointer != -1UL);
-#endif
-
-        update_instance_footprint(new_footprint);
+        kind = INTERNAL_INSTANCE_KIND;
+        instance_footprint = new_footprint;
 
         Runtime::trigger_event(instance_ready);
 

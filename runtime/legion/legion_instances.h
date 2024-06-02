@@ -245,8 +245,6 @@ namespace Legion {
         INTERNAL_INSTANCE_KIND,
         // External allocations imported by attach operations
         EXTERNAL_ATTACHED_INSTANCE_KIND,
-        // Allocations drawn from the eager pool
-        EAGER_INSTANCE_KIND,
         // Instance not yet bound
         UNBOUND_INSTANCE_KIND,
       };
@@ -378,7 +376,7 @@ namespace Legion {
       bool remove_valid_reference(int cnt);
 #endif
       void notify_valid(bool need_check);
-      bool notify_invalid(AutoLock &i_lock);
+      bool notify_invalid(void);
     public:
       virtual void send_manager(AddressSpaceID target);
       static void handle_manager_request(Deserializer &derez, Runtime *runtime);
@@ -402,12 +400,9 @@ namespace Legion {
       bool has_visible_from(const std::set<Memory> &memories) const;
       uintptr_t get_instance_pointer(void) const; 
       size_t get_instance_size(void) const;
-      void update_instance_footprint(size_t footprint)
-        { instance_footprint = footprint; }
     public:
       bool update_physical_instance(PhysicalInstance new_instance,
-                                    size_t new_footprint,
-                                    uintptr_t new_pointer = 0);
+                                    size_t new_footprint);
       void broadcast_manager_update(void);
       static void handle_send_manager_update(Runtime *runtime,
                                              AddressSpaceID source,
@@ -518,8 +513,6 @@ namespace Legion {
       // Event that signifies if the instance name is available
       RtUserEvent instance_ready;
       InstanceKind kind;
-      // Keep the pointer for owned external instances
-      uintptr_t external_pointer;
       // Completion event of the task that sets a realm instance
       // to this manager. Valid only when the kind is UNBOUND
       // initially, otherwise NO_AP_EVENT.

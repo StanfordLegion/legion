@@ -451,7 +451,6 @@ namespace Legion {
       LG_DEFER_RELEASE_ACQUIRED_TASK_ID,
       LG_DEFER_COPY_ACROSS_TASK_ID,
       LG_DEFER_COLLECTIVE_MESSAGE_TASK_ID,
-      LG_FREE_EAGER_INSTANCE_TASK_ID,
       LG_MALLOC_INSTANCE_TASK_ID,
       LG_FREE_INSTANCE_TASK_ID,
       LG_DEFER_TRACE_UPDATE_TASK_ID,
@@ -560,7 +559,6 @@ namespace Legion {
         "Defer Release Acquired Instances",                       \
         "Defer Copy-Across Execution for Preimages",              \
         "Defer Collective Instance Message",                      \
-        "Free Eager Instance",                                    \
         "Malloc Instance",                                        \
         "Free Instance",                                          \
         "Defer Trace Update",                                     \
@@ -1026,6 +1024,8 @@ namespace Legion {
       SEND_REMOTE_TRACE_RESPONSE,
       SEND_FREE_EXTERNAL_ALLOCATION,
       SEND_NOTIFY_COLLECTED_INSTANCES,
+      SEND_CREATE_MEMORY_POOL_REQUEST,
+      SEND_CREATE_MEMORY_POOL_RESPONSE,
       SEND_CREATE_FUTURE_INSTANCE_REQUEST,
       SEND_CREATE_FUTURE_INSTANCE_RESPONSE,
       SEND_FREE_FUTURE_INSTANCE,
@@ -1355,6 +1355,8 @@ namespace Legion {
         "Send Remote Trace Response",                                 \
         "Send Free External Allocation",                              \
         "Send Notify Collected Instances",                            \
+        "Send Create Memory Pool Request",                            \
+        "Send Create Memory Pool Response",                           \
         "Send Create Future Instance Request",                        \
         "Send Create Future Instance Response",                       \
         "Send Free Future Instance",                                  \
@@ -2040,6 +2042,7 @@ namespace Legion {
     class LegionHandshakeImpl;
     class ProcessorManager;
     class MemoryManager;
+    class MemoryPool;
     class VirtualChannel;
     class MessageManager;
     class ShutdownManager;

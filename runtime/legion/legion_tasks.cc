@@ -2274,6 +2274,10 @@ namespace Legion {
       if ((shard_manager != NULL) && 
           shard_manager->remove_base_gc_ref(SINGLE_TASK_REF))
         delete shard_manager;
+      for (std::map<Memory,MemoryPool*>::const_iterator it =
+            leaf_memory_pools.begin(); it != leaf_memory_pools.end(); it++)
+        delete it->second;
+      leaf_memory_pools.clear();
 #ifdef DEBUG_LEGION
       premapped_instances.clear();
       assert(remote_trace_recorder == NULL);
@@ -2385,6 +2389,13 @@ namespace Legion {
         rez.serialize<size_t>(untracked_valid_regions.size());
         for (unsigned idx = 0; idx < untracked_valid_regions.size(); idx++)
           rez.serialize(untracked_valid_regions[idx]); 
+        rez.serialize<size_t>(leaf_memory_pools.size());
+        for (std::map<Memory,MemoryPool*>::const_iterator it =
+              leaf_memory_pools.begin(); it != leaf_memory_pools.end(); it++)
+        {
+          rez.serialize(it->first);
+          it->second->serialize(rez);
+        }
       }
       else
       { 
@@ -2472,6 +2483,14 @@ namespace Legion {
         untracked_valid_regions.resize(num_untracked_valid_regions);
         for (unsigned idx = 0; idx < num_untracked_valid_regions; idx++)
           derez.deserialize(untracked_valid_regions[idx]); 
+        size_t num_pools;
+        derez.deserialize(num_pools);
+        for (unsigned idx = 0; idx < num_pools; idx++)
+        {
+          Memory memory;
+          derez.deserialize(memory);
+          leaf_memory_pools[memory] = MemoryPool::deserialize(derez, runtime);
+        }
       }
       else
       {
@@ -2960,6 +2979,12 @@ namespace Legion {
             mapper->get_mapper_name(), output.chosen_variant, get_task_name(),
             get_unique_id(), trace->tid, parent_ctx->get_task_name(),
             parent_ctx->get_unique_id())
+      // Create ny memory pools if this is a leaf task variant
+      // Note this has to come AFTER we create the future instances or we
+      // could accidentally end up blocking ourselves from doing memory 
+      // allocations if we have an unbounded pool
+      if (variant_impl->is_leaf())
+        create_leaf_memory_pools(variant_impl, output.leaf_pool_bounds); 
       // Save variant validation until we know which instances we'll be using 
 #ifdef DEBUG_LEGION
       // Check to see if any premapped region mappings changed
@@ -4537,6 +4562,71 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void SingleTask::create_leaf_memory_pools(VariantImpl *variant,
+                               std::map<Memory,PoolBounds> &dynamic_pool_bounds)
+    //--------------------------------------------------------------------------
+    {
+      if (dynamic_pool_bounds.empty() && variant->leaf_pool_bounds.empty())
+        return;
+      // Fill in the dynamic pool bounds with the static versions and take
+      // the max if they already exist
+      for (std::map<Memory::Kind,PoolBounds>::const_iterator it =
+            variant->leaf_pool_bounds.begin(); it !=
+            variant->leaf_pool_bounds.end(); it++)
+      {
+        // This might occur if we're doing origin mapping on a remote node
+        // from where the task is going to ultimately run
+        Machine::MemoryQuery query(runtime->machine);
+        query.only_kind(it->first);
+        query.best_affinity_to(target_proc);
+        if (query.count() == 0)
+        {
+          const char *mem_names[] = {
+#define MEM_NAMES(name, desc) desc,
+            REALM_MEMORY_KINDS(MEM_NAMES) 
+#undef MEM_NAMES
+          };
+          REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
+              "Unable to find a visible %s memory for task %s (UID %lld) "
+              "for creating dynamic memory pool.", mem_names[it->first],
+              get_task_name(), get_unique_id());
+        }
+        const Memory target = query.first();
+        // The dynamic pool bounds override any static registrations so
+        // if we have a bound provided by the mapper then we use that
+        // instead of this bound
+        if (dynamic_pool_bounds.find(target) == dynamic_pool_bounds.end())
+          dynamic_pool_bounds.emplace(std::make_pair(target, it->second));
+      }
+      // Now we can go through and create the pools for use by this task
+      for (std::map<Memory,PoolBounds>::const_iterator it =
+            dynamic_pool_bounds.begin(); it != dynamic_pool_bounds.end(); it++)
+      {
+        MemoryManager *manager = runtime->find_memory_manager(it->first);
+        // We might want to relax this restriction in the future to allow tasks
+        // to make deferred buffers on memories that are "remote" from where
+        // they are executing
+        if (it->first.address_space() != target_proc.address_space())
+          REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
+                "%s memory " IDFMT " is not visible from the target processor "
+                "of task %s (UID %lld) for creating dynamic memory pool.", 
+                manager->get_name(), it->first.id, get_task_name(),
+                get_unique_id());
+        MemoryPool *pool =
+          manager->create_memory_pool(get_unique_id(), it->second);
+        if (pool == NULL)
+          REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
+              "Failed to reserve a dynamic memory pool of %zd bytes for "
+              "leaf task %s (UID %lld) in %s memory. You are actually out "
+              "of memory here so you'll need to either allocate more memory "
+              "for this kind of memory when you configure Realm which may "
+              "necessitate finding a bigger machine.", it->second.size,
+              get_task_name(), get_unique_id(), manager->get_name())
+        leaf_memory_pools.emplace(std::make_pair(it->first, pool));
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void SingleTask::launch_task(bool inline_task)
     //--------------------------------------------------------------------------
     {
@@ -5134,7 +5224,9 @@ namespace Legion {
       }
       else
       {
-        LeafContext *leaf_ctx = new LeafContext(runtime, this, inline_task);
+        LeafContext *leaf_ctx = new LeafContext(runtime, this, 
+            std::move(leaf_memory_pools), inline_task);
+        leaf_memory_pools.clear();
         leaf_ctx->add_base_gc_ref(SINGLE_TASK_REF);
         return leaf_ctx;
       }
@@ -6193,7 +6285,6 @@ namespace Legion {
     void IndividualTask::predicate_false(void)
     //--------------------------------------------------------------------------
     {
-      complete_mapping();
       if (!elide_future_return)
       {
         // Set the future to the false result
@@ -6206,8 +6297,9 @@ namespace Legion {
             result.impl->set_result(ApEvent::NO_AP_EVENT, NULL);
         }
         else
-          result.impl->set_result(predicate_false_future.impl, this);
+          result.impl->set_result(this, predicate_false_future.impl);
       }
+      complete_mapping();
       complete_execution();
       trigger_children_committed();
     }
@@ -6544,8 +6636,9 @@ namespace Legion {
             result.impl->set_result(ApEvent::NO_AP_EVENT, NULL);
         }
         else
-          result.impl->set_result(predicate_false_future.impl, this);
-      }
+          result.impl->set_result(execution_context,
+              predicate_false_future.impl);
+       }
       // Pretend like we executed the task
       execution_context->handle_mispredication();
     }
@@ -7385,7 +7478,7 @@ namespace Legion {
 #ifdef DEBUG_SHUTDOWN_HANG
       runtime->outstanding_counts[MispredicationTaskArgs::TASK_ID].fetch_add(1);
 #endif
-      slice_owner->set_predicate_false_result(index_point);
+      slice_owner->set_predicate_false_result(index_point, execution_context);
       // Pretend like we executed the task
       execution_context->handle_mispredication();
     }
@@ -7526,8 +7619,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PointTask::initialize_point(SliceTask *owner, const DomainPoint &point,
-                                    const FutureMap &point_arguments,bool eager,
-                                    const std::vector<FutureMap> &point_futures)
+                             const FutureMap &point_arguments, bool inline_task,
+                             const std::vector<FutureMap> &point_futures)
     //--------------------------------------------------------------------------
     {
       slice_owner = owner;
@@ -7539,19 +7632,33 @@ namespace Legion {
         Future f = point_arguments.impl->get_future(point, true/*internal*/);
         if (f.impl != NULL)
         {
-          // Request the local buffer
-          f.impl->request_runtime_instance(this, eager);
-          // Make sure that it is ready
-          const RtEvent ready = f.impl->subscribe();
-          if (ready.exists() && !ready.has_triggered())
-            ready.wait();
-          const void *buffer =
-            f.impl->find_runtime_buffer(parent_ctx, local_arglen);
-          // Have to make a local copy since the point takes ownership
-          if (local_arglen > 0)
+          if (inline_task)
           {
-            local_args = malloc(local_arglen);
-            memcpy(local_args, buffer, local_arglen); 
+            const void *buffer = f.impl->get_buffer(
+                runtime->runtime_system_memory, &local_arglen);
+            // Have to make a local copy since the point takes ownership
+            if (local_arglen > 0)
+            {
+              local_args = malloc(local_arglen);
+              memcpy(local_args, buffer, local_arglen); 
+            }
+          }
+          else
+          {
+            // Request the local buffer
+            f.impl->request_runtime_instance(this);
+            // Make sure that it is ready
+            const RtEvent ready = f.impl->subscribe();
+            if (ready.exists() && !ready.has_triggered())
+              ready.wait();
+            const void *buffer =
+              f.impl->find_runtime_buffer(parent_ctx, local_arglen);
+            // Have to make a local copy since the point takes ownership
+            if (local_arglen > 0)
+            {
+              local_args = malloc(local_arglen);
+              memcpy(local_args, buffer, local_arglen); 
+            }
           }
         }
       }
@@ -8193,7 +8300,8 @@ namespace Legion {
       }
       else
       {
-        execution_context = new LeafContext(runtime, this, inline_task);
+        execution_context = new LeafContext(runtime, this, 
+            std::move(leaf_memory_pools), inline_task);
         execution_context->add_base_gc_ref(SINGLE_TASK_REF);
       }
       return execution_context;
@@ -9550,7 +9658,7 @@ namespace Legion {
               {
                 Future f = future_map.impl->get_future(itr.p,
                                             true/*internal*/);
-                f.impl->set_result(predicate_false_future.impl, this);
+                f.impl->set_result(this, predicate_false_future.impl);
               }
             }
             else
@@ -9574,7 +9682,7 @@ namespace Legion {
             reduction_future.impl->set_local(&reduction_op->identity,
                                              reduction_op->sizeof_rhs);
           else
-            reduction_future.impl->set_result(redop_initial_value.impl, this);
+            reduction_future.impl->set_result(this, redop_initial_value.impl);
         }
       }
       // Then clean up this task execution
@@ -9670,9 +9778,8 @@ namespace Legion {
               FutureInstance::check_meta_visible(*it))
             runtime_visible_index = reduction_instances.size();
           MemoryManager *manager = runtime->find_memory_manager(*it);
-          reduction_instances.push_back(
-              manager->create_future_instance(this, unique_op_id,
-                reduction_op->sizeof_rhs, false/*eager*/));
+          reduction_instances.push_back(manager->create_future_instance(
+                unique_op_id,reduction_op->sizeof_rhs));
         }
         // This is an important optimization: if we're doing a small
         // reduction value we always want the reduction instance to
@@ -9684,9 +9791,8 @@ namespace Legion {
           runtime_visible_index = reduction_instances.size();
           MemoryManager *manager = 
             runtime->find_memory_manager(runtime->runtime_system_memory);
-          reduction_instances.push_back(
-              manager->create_future_instance(this, unique_op_id,
-                reduction_op->sizeof_rhs, false/*eager*/));
+          reduction_instances.push_back(manager->create_future_instance(
+                unique_op_id, reduction_op->sizeof_rhs));
         }
         if (runtime_visible_index > 0)
           std::swap(reduction_instances.front(), 
@@ -9711,8 +9817,8 @@ namespace Legion {
         if ((redop_initial_value.impl != NULL) &&
             (parent_ctx->get_task()->get_shard_id() == 0))
         {
-          const RtEvent ready = 
-            redop_initial_value.impl->request_runtime_instance(this, false);
+          const RtEvent ready =
+            redop_initial_value.impl->request_runtime_instance(this);
           if (ready.exists() && !ready.has_triggered())
             ready.wait();
           const void *value = redop_initial_value.impl->find_runtime_buffer(
@@ -10336,9 +10442,8 @@ namespace Legion {
           else
           {
             MemoryManager *manager = runtime->find_memory_manager(*it);
-            reduction_instances.push_back(
-                manager->create_future_instance(this, unique_op_id,
-                  serdez_redop_state_size, false/*eager*/));
+            reduction_instances.push_back(manager->create_future_instance(
+                  unique_op_id, serdez_redop_state_size));
           }
         }
         if (runtime_visible_index < 0)
@@ -10490,7 +10595,7 @@ namespace Legion {
             if (reduc_size > 0)
             {
               const void *reduc_ptr = derez.get_current_pointer();
-              FutureInstance instance(reduc_ptr, reduc_size, false/*eager*/,
+              FutureInstance instance(reduc_ptr, reduc_size,
                   true/*external*/, false/*own allocation*/);
               fold_reduction_future(&instance, ApEvent::NO_AP_EVENT);
               // Advance the pointer on the deserializer
@@ -11740,7 +11845,8 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    void SliceTask::set_predicate_false_result(const DomainPoint &point)
+    void SliceTask::set_predicate_false_result(const DomainPoint &point,
+                                               TaskContext *execution_context)
     //--------------------------------------------------------------------------
     {
       if (elide_future_return || (redop > 0))
@@ -11765,7 +11871,7 @@ namespace Legion {
           impl->set_result(ApEvent::NO_AP_EVENT, NULL);
       }
       else
-        impl->set_result(predicate_false_future.impl, this);
+        impl->set_result(execution_context, predicate_false_future.impl);
     }
 
     //--------------------------------------------------------------------------
