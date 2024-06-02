@@ -149,6 +149,19 @@ namespace Realm {
     first_free_range = index;
   }
 
+  template <typename RT>
+  static RT calculate_offset(size_t start, RT alignment)
+  {
+    RT offset = 0;
+    if(alignment) {
+      RT rem = start % alignment;
+      if(rem > 0) {
+        offset = alignment - rem;
+      }
+    }
+    return offset;
+  }
+
   template <typename RT, typename TT>
   inline bool BasicRangeAllocator<RT, TT>::split_range(TT old_tag,
                                                        const std::vector<TT> &new_tags,
@@ -168,48 +181,43 @@ namespace Realm {
       alloc_size += sizes[i];
     }
 
-    unsigned del_idx = it->second;
-    Range &del_r = ranges[del_idx];
+    unsigned reuse_idx = it->second;
+    Range &reuse_r = ranges[reuse_idx];
 
-    if((del_r.last - del_r.first) < alloc_size) {
+    if((reuse_r.last - reuse_r.first) < alloc_size) {
       return false;
     }
 
-    unsigned next_idx = del_r.next;
-    unsigned prev_idx = del_r.prev;
+    unsigned next_idx = reuse_r.next;
+    unsigned prev_idx = reuse_r.prev;
 
-    Range *prev = &ranges[prev_idx];
-    for(size_t i = 0; i < n; i++) {
+    RT offset = calculate_offset(reuse_r.first, alignments[0]);
 
+    reuse_r.last = reuse_r.first + sizes[0] + offset;
+    allocated[new_tags[0]] = reuse_idx;
+    Range *prev = &ranges[reuse_idx];
+    prev_idx = reuse_idx;
+
+    for(size_t i = 1; i < n; i++) {
       size_t start = prev_idx > 0 ? prev->first : 0;
-
-      RT offset = 0;
-      if(alignments[i]) {
-        RT rem = start % alignments[i];
-        if(rem > 0) {
-          offset = alignments[i] - rem;
-        }
-      }
+      RT offset = calculate_offset(start, alignments[i]);
 
       unsigned new_idx = alloc_range(prev->last, prev->last + sizes[i] + offset);
-      prev = &ranges[prev_idx];
+      allocated[new_tags[i]] = new_idx;
 
       Range *new_prev = &ranges[new_idx];
-
       new_prev->prev = prev_idx;
+      prev = &ranges[prev_idx];
       prev->next = new_idx;
-
       new_prev->prev_free = prev->prev_free;
       prev->next_free = new_idx;
-
-      allocated[new_tags[i]] = new_idx;
 
       prev_idx = new_idx;
       prev = new_prev;
     }
 
     prev->next = next_idx;
-    free_range(del_idx);
+    ranges[next_idx].prev = prev_idx;
 
     return true;
   }

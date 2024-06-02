@@ -249,6 +249,16 @@ namespace Realm {
 
     void swap(BasicRangeAllocator<RT, TT>& swap_with);
 
+    void dump_ranges()
+    {
+      for(int i = 0; i < ranges.size(); i++) {
+        std::cout << "i:" << i << " first:" << ranges[i].first
+                  << " last:" << ranges[i].last << " prev:" << ranges[i].prev
+                  << " next:" << ranges[i].next << " prevf:" << ranges[i].prev_free
+                  << " nextf:" << ranges[i].next_free << std::endl;
+      }
+    }
+
     void add_range(RT first, RT last);
     bool can_allocate(TT tag, RT size, RT alignment);
     bool allocate(TT tag, RT size, RT alignment, RT& first);

@@ -49,6 +49,44 @@ TEST(RangeAllocatorTestsWithParams, SplitRangeInvalidSize)
   EXPECT_FALSE(range_alloc.split_range(0, tags, sizes, alignment));
 }
 
+TEST(RangeAllocatorTestsWithParams, SplitSingleRange)
+{
+  BasicRangeAllocator<size_t, int> range_alloc;
+  range_alloc.add_range(0, 1024);
+  EXPECT_TRUE(range_alloc.can_allocate(0, 1024, 16));
+
+  size_t offset = 0;
+  EXPECT_TRUE(range_alloc.allocate(0, 512, 16, offset));
+
+  //range_alloc.dump_ranges();
+
+  {
+    size_t start, size;
+    EXPECT_TRUE(range_alloc.lookup(0, start, size));
+    EXPECT_EQ(start, 0);
+    EXPECT_EQ(size, 512);
+  }
+
+  std::vector<int> tags{4};
+  std::vector<size_t> sizes{512};
+  std::vector<size_t> alignment{16};
+
+  EXPECT_TRUE(range_alloc.split_range(0, tags, sizes, alignment));
+
+  ///range_alloc.dump_ranges();
+
+  EXPECT_EQ(range_alloc.ranges.size(), 3);
+
+  size_t exp_start = 0;
+  for(size_t i = 0; i < tags.size(); i++) {
+    size_t start, size;
+    EXPECT_TRUE(range_alloc.lookup(tags[i], start, size));
+    EXPECT_EQ(start, exp_start);
+    EXPECT_EQ(size, sizes[i]);
+    exp_start += size;
+  }
+}
+
 TEST(RangeAllocatorTestsWithParams, SplitRangeValid)
 {
   BasicRangeAllocator<size_t, int> range_alloc;
@@ -57,6 +95,8 @@ TEST(RangeAllocatorTestsWithParams, SplitRangeValid)
 
   size_t offset = 0;
   EXPECT_TRUE(range_alloc.allocate(0, 512, 16, offset));
+
+  //range_alloc.dump_ranges();
 
   {
     size_t start, size;
@@ -70,6 +110,10 @@ TEST(RangeAllocatorTestsWithParams, SplitRangeValid)
   std::vector<size_t> alignment{16, 48};
 
   EXPECT_TRUE(range_alloc.split_range(0, tags, sizes, alignment));
+
+  //range_alloc.dump_ranges();
+
+  EXPECT_EQ(range_alloc.ranges.size(), 4);
 
   size_t exp_start = 0;
   for(size_t i = 0; i < tags.size(); i++) {
