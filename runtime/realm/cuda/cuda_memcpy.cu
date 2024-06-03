@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -264,7 +264,7 @@ memcpy_indirect_points(Realm::Cuda::MemcpyIndirectInfo<3, Offset_t> info)
   }
 
 #define MEMCPY_INDIRECT_TEMPLATE_INST(addr_type, data_type, dim, offt, name)             \
-  extern "C" __global__ __launch_bounds__(256, 8) void memcpy_indirect##name(            \
+  extern "C" __global__ __launch_bounds__(256, 4) void memcpy_indirect##name(            \
       Realm::Cuda::MemcpyIndirectInfo<3, offt> info)                                     \
   {                                                                                      \
     memcpy_indirect_points<dim, addr_type, data_type, offt>(info);                       \

@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -362,7 +362,7 @@ namespace Legion {
                                             ApEvent remote_term_event,
                                             ApUserEvent remote_ready_event,
                                             RtUserEvent remote_registered,
-                                            RtUserEvent remote_applied);
+                                            std::set<RtEvent> &applied_events);
     public:
       static void handle_view_find_copy_pre_request(Deserializer &derez,
                         Runtime *runtime, AddressSpaceID source);
@@ -1800,7 +1800,8 @@ namespace Legion {
                        const PhysicalTraceInfo &trace_info,
                        const std::vector<CopySrcDstField> &dst_fields,
                        PhysicalManager *manager, ApEvent precondition,
-                       PredEvent pred_guard, CollectiveKind collective);
+                       PredEvent pred_guard, CollectiveKind collective,
+                       bool fill_restrict);
       public:
         FillView *const view;
         Operation *const op;
@@ -1812,6 +1813,7 @@ namespace Legion {
         const PredEvent pred_guard;
         const CollectiveKind collective;
         const ApUserEvent done;
+        const bool fill_restricted;
       };
     public:
       // Don't know the fill value yet, will be set later
@@ -1847,7 +1849,8 @@ namespace Legion {
                            EquivalenceSet *tracing_eq,
                            CopyAcrossHelper *helper); 
     public:
-      bool matches(const void *value, size_t size) const;
+      bool matches(FillView *other);
+      bool matches(const void *value, size_t size);
       bool set_value(const void *value, size_t size);
       ApEvent issue_fill(Operation *op, IndexSpaceExpression *fill_expr,
                          const PhysicalTraceInfo &trace_info,
@@ -1855,7 +1858,7 @@ namespace Legion {
                          std::set<RtEvent> &applied_events,
                          PhysicalManager *manager,
                          ApEvent precondition, PredEvent pred_guard,
-                         CollectiveKind collective = COLLECTIVE_NONE);
+                         CollectiveKind collective, bool fill_restricted);
       static void handle_defer_issue_fill(const void *args);
     public:
       static void handle_send_fill_view(Runtime *runtime, Deserializer &derez);

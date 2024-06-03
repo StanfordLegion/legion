@@ -1,4 +1,4 @@
--- Copyright 2023 Stanford University
+-- Copyright 2024 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
 
 import "regent"
 
-local launcher = require("launcher")
+local launcher = require("std/launcher")
 
 local cmapper = launcher.build_library("miniaero")
 
@@ -3396,7 +3396,6 @@ task toplevel()
 
   var ts_start = c.legion_get_current_time_in_micros()
   var ts_end = ts_start
-  __demand(__spmd)
   for time_it = 0, max_its do
 
     if time_it == prune then

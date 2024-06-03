@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -148,7 +148,72 @@ namespace Realm {
     ranges[index].next = first_free_range;
     first_free_range = index;
   }
-  
+
+  template <typename RT, typename TT>
+  inline bool BasicRangeAllocator<RT, TT>::split_range(TT old_tag,
+                                                       const std::vector<TT> &new_tags,
+                                                       const std::vector<RT> &sizes,
+                                                       const std::vector<RT> &alignments)
+  {
+    typename std::map<TT, unsigned>::iterator it = allocated.find(old_tag);
+    if(it == allocated.end()) {
+      return false;
+    }
+
+    size_t n = new_tags.size();
+    assert(n == sizes.size() && n == alignments.size());
+
+    RT alloc_size = 0;
+    for(size_t i = 0; i < n; i++) {
+      alloc_size += sizes[i];
+    }
+
+    unsigned del_idx = it->second;
+    Range &del_r = ranges[del_idx];
+
+    if((del_r.last - del_r.first) < alloc_size) {
+      return false;
+    }
+
+    unsigned next_idx = del_r.next;
+    unsigned prev_idx = del_r.prev;
+
+    Range *prev = &ranges[prev_idx];
+    for(size_t i = 0; i < n; i++) {
+
+      size_t start = prev_idx > 0 ? prev->first : 0;
+
+      RT offset = 0;
+      if(alignments[i]) {
+        RT rem = start % alignments[i];
+        if(rem > 0) {
+          offset = alignments[i] - rem;
+        }
+      }
+
+      unsigned new_idx = alloc_range(prev->last, prev->last + sizes[i] + offset);
+      prev = &ranges[prev_idx];
+
+      Range *new_prev = &ranges[new_idx];
+
+      new_prev->prev = prev_idx;
+      prev->next = new_idx;
+
+      new_prev->prev_free = prev->prev_free;
+      prev->next_free = new_idx;
+
+      allocated[new_tags[i]] = new_idx;
+
+      prev_idx = new_idx;
+      prev = new_prev;
+    }
+
+    prev->next = next_idx;
+    free_range(del_idx);
+
+    return true;
+  }
+
   template <typename RT, typename TT>
   inline bool BasicRangeAllocator<RT,TT>::can_allocate(TT tag,
 						       RT size, RT alignment)
@@ -165,13 +230,13 @@ namespace Realm {
 
       RT ofs = 0;
       if(alignment) {
-	RT rem = r->first % alignment;
-	if(rem > 0)
-	  ofs = alignment - rem;
+        RT rem = r->first % alignment;
+        if(rem > 0)
+          ofs = alignment - rem;
       }
       // do we have enough space?
       if((r->last - r->first) >= (size + ofs))
-	return true;
+        return true;
 
       // no, go to next one
       idx = r->next_free;
@@ -268,7 +333,8 @@ namespace Realm {
 	r->prev_free = r->next_free = idx;
 
 	allocated[tag] = idx;
-	return true;
+
+        return true;
       }
 
       // no, go to next one

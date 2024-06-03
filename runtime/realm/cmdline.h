@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,6 +19,8 @@
 #define REALM_CMDLINE_H
 
 #include "realm/realm_config.h"
+
+#include "realm/realm_c.h"
 
 #include <vector>
 #include <string>
@@ -54,6 +56,10 @@ namespace Realm {
     CommandLineParser& add_option_method(const std::string& optname, T *target,
 					 bool (T::*method)(const std::string&), bool keep = false);
 
+    RealmStatus parse_command_line_v2(std::vector<std::string> &cmdline);
+    RealmStatus parse_command_line_v2(int argc, const char *argv[]);
+    RealmStatus parse_command_line_v2(int argc, char *argv[]);
+
     bool parse_command_line(std::vector<std::string>& cmdline);
     bool parse_command_line(int argc, const char *argv[]);
     bool parse_command_line(int argc, char *argv[]);
@@ -70,9 +76,9 @@ namespace Realm {
     virtual bool match(const std::string& s);
     virtual bool keep_arg(void) const;
 
-    virtual bool parse_argument(std::vector<std::string>& cmdline,
-				std::vector<std::string>::iterator& pos) = 0;
-    virtual bool parse_argument(int& pos, int argc, const char *argv[]) = 0;
+    virtual int parse_argument(std::vector<std::string> &cmdline,
+                               std::vector<std::string>::iterator &pos) = 0;
+    virtual int parse_argument(int &pos, int argc, const char *argv[]) = 0;
 
   protected:
     std::string optname;
@@ -83,10 +89,10 @@ namespace Realm {
   class REALM_INTERNAL_API_EXTERNAL_LINKAGE IntegerCommandLineOption : public CommandLineOption {
   public:
     IntegerCommandLineOption(const std::string& _optname, bool _keep, T& _target);
-    
-    virtual bool parse_argument(std::vector<std::string>& cmdline,
-				std::vector<std::string>::iterator& pos);
-    virtual bool parse_argument(int& pos, int argc, const char *argv[]);
+
+    virtual int parse_argument(std::vector<std::string> &cmdline,
+                               std::vector<std::string>::iterator &pos);
+    virtual int parse_argument(int &pos, int argc, const char *argv[]);
 
   protected:
     T& target;
@@ -98,10 +104,10 @@ namespace Realm {
     IntegerUnitsCommandLineOption(const std::string& _optname,
 				  char _default_unit, bool _binary,
 				  bool _keep, T& _target);
-    
-    virtual bool parse_argument(std::vector<std::string>& cmdline,
-				std::vector<std::string>::iterator& pos);
-    virtual bool parse_argument(int& pos, int argc, const char *argv[]);
+
+    virtual int parse_argument(std::vector<std::string> &cmdline,
+                               std::vector<std::string>::iterator &pos);
+    virtual int parse_argument(int &pos, int argc, const char *argv[]);
 
   protected:
     char default_unit;
@@ -113,10 +119,10 @@ namespace Realm {
   public:
     StringCommandLineOption(const std::string& _optname, bool _keep, std::string& _target);
     StringCommandLineOption(const std::string& _optname, bool _keep, char *_target, size_t _maxlen);
-    
-    virtual bool parse_argument(std::vector<std::string>& cmdline,
-				std::vector<std::string>::iterator& pos);
-    virtual bool parse_argument(int& pos, int argc, const char *argv[]);
+
+    virtual int parse_argument(std::vector<std::string> &cmdline,
+                               std::vector<std::string>::iterator &pos);
+    virtual int parse_argument(int &pos, int argc, const char *argv[]);
 
   protected:
     std::string *target_str;
@@ -127,10 +133,10 @@ namespace Realm {
   class REALM_INTERNAL_API_EXTERNAL_LINKAGE StringListCommandLineOption : public CommandLineOption {
   public:
     StringListCommandLineOption(const std::string& _optname, bool _keep, std::vector<std::string>& _target);
-    
-    virtual bool parse_argument(std::vector<std::string>& cmdline,
-				std::vector<std::string>::iterator& pos);
-    virtual bool parse_argument(int& pos, int argc, const char *argv[]);
+
+    virtual int parse_argument(std::vector<std::string> &cmdline,
+                               std::vector<std::string>::iterator &pos);
+    virtual int parse_argument(int &pos, int argc, const char *argv[]);
 
   protected:
     std::vector<std::string>& target;
@@ -139,10 +145,10 @@ namespace Realm {
   class REALM_INTERNAL_API_EXTERNAL_LINKAGE BooleanCommandLineOption : public CommandLineOption {
   public:
     BooleanCommandLineOption(const std::string& _optname, bool _keep, bool& _target);
-    
-    virtual bool parse_argument(std::vector<std::string>& cmdline,
-				std::vector<std::string>::iterator& pos);
-    virtual bool parse_argument(int& pos, int argc, const char *argv[]);
+
+    virtual int parse_argument(std::vector<std::string> &cmdline,
+                               std::vector<std::string>::iterator &pos);
+    virtual int parse_argument(int &pos, int argc, const char *argv[]);
 
   protected:
     bool& target;
@@ -153,10 +159,10 @@ namespace Realm {
   public:
     MethodCommandLineOption(const std::string& _optname, bool _keep, T *_target,
 			     bool (T::*_method)(const std::string&));
-    
-    virtual bool parse_argument(std::vector<std::string>& cmdline,
-				std::vector<std::string>::iterator& pos);
-    virtual bool parse_argument(int& pos, int argc, const char *argv[]);
+
+    virtual int parse_argument(std::vector<std::string> &cmdline,
+                               std::vector<std::string>::iterator &pos);
+    virtual int parse_argument(int &pos, int argc, const char *argv[]);
 
   protected:
     T *target;

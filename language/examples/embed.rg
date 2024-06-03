@@ -1,4 +1,4 @@
--- Copyright 2023 Stanford University
+-- Copyright 2024 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -32,7 +32,14 @@ do
 
   local cxx = os.getenv('CXX') or 'c++'
 
-  local cxx_flags = "-O2 -Wall -Werror " .. (os.getenv('CXXFLAGS') or "")
+  local cxx_flags = os.getenv('CXXFLAGS') or ''
+
+  -- Add the C++ standard to the front of the flags so that if the user
+  -- overwrites it in CXXFLAGS, their value wins.
+  local cxx_standard = os.getenv('CXX_STANDARD') or '17'
+  cxx_flags = "-std=c++" .. cxx_standard .. " " .. cxx_flags
+
+  cxx_flags = cxx_flags .. " -O2 -Wall -Werror"
 
   local use_cmake = os.getenv("USE_CMAKE") == "1"
   local lib_dir = binding_dir

@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -35,11 +35,11 @@
 #include <vector>
 #include <typeinfo>
 #include <type_traits>
+#include <string_view>
 #include <unordered_set>
 #include <unordered_map>
 
 #include "legion/legion_config.h"
-#include "legion/legion_template_help.h"
 
 // Make sure we have the appropriate defines in place for including realm
 #include "realm.h"
@@ -56,7 +56,14 @@
 #endif
 
 // Macros for disabling and re-enabling deprecated warnings
-#if defined(__GNUC__)
+#if defined(__PGIC__)
+// PGI has to go first because it also responds to GCC defines
+#define LEGION_DISABLE_DEPRECATED_WARNINGS \
+  _Pragma("warning (push)") \
+  _Pragma("diag_suppress 1445")
+#define LEGION_REENABLE_DEPRECATED_WARNINGS \
+  _Pragma("warning (pop)")
+#elif defined(__GNUC__)
 #define LEGION_DISABLE_DEPRECATED_WARNINGS \
   _Pragma("GCC diagnostic push") \
   _Pragma("GCC diagnostic ignored \"-Wdeprecated-declarations\"")
@@ -68,12 +75,6 @@
   _Pragma("clang diagnostic ignored \"-Wdeprecated-declarations\"")
 #define LEGION_REENABLE_DEPRECATED_WARNINGS \
   _Pragma("clang diagnostic pop")
-#elif defined(__PGIC__)
-#define LEGION_DISABLE_DEPRECATED_WARNINGS \
-  _Pragma("warning (push)") \
-  _Pragma("diag_suppress 1445")
-#define LEGION_REENABLE_DEPRECATED_WARNINGS \
-  _Pragma("warning (pop)")
 #elif defined(__INTEL_COMPILER) || defined(__INTEL_LLVM_COMPILER)
 #define LEGION_DISABLE_DEPRECATED_WARNINGS \
   _Pragma("warning push") \
@@ -210,8 +211,6 @@ namespace Legion {
   class PieceIteratorT;
   template<PrivilegeMode,typename,int,typename>
   class SpanIterator;
-  class IndexIterator;
-  template<typename T> struct ColoredPoints; 
   struct InputArgs;
   struct RegistrationCallbackArgs;
   class ProjectionFunctor;
@@ -240,11 +239,6 @@ namespace Legion {
   using AffineAccessor = Realm::AffineAccessor<FT,N,T>;
   template<typename FT, int N, typename T = ::legion_coord_t>
   using MultiAffineAccessor = Realm::MultiAffineAccessor<FT,N,T>;
-
-  // Forward declarations for compiler level objects
-  // legion.h
-  class ColoringSerializer;
-  class DomainColoringSerializer;
 
   // Forward declarations for wrapper tasks
   // legion.h
@@ -375,17 +369,15 @@ namespace Legion {
     // Enumeration of Legion runtime tasks
     enum LgTaskID {
       LG_SCHEDULER_ID,
-      LG_POST_END_ID,
       LG_TRIGGER_READY_ID,
       LG_TRIGGER_EXECUTION_ID,
-      LG_TRIGGER_RESOLUTION_ID,
       LG_TRIGGER_COMMIT_ID,
       LG_DEFERRED_EXECUTION_ID,
       LG_DEFERRED_COMPLETION_ID,
       LG_DEFERRED_COMMIT_ID,
       LG_PRE_PIPELINE_ID,
       LG_TRIGGER_DEPENDENCE_ID,
-      LG_TRIGGER_COMPLETION_ID,
+      LG_DEFERRED_MAPPED_ID,
       LG_TRIGGER_OP_ID,
       LG_TRIGGER_TASK_ID,
       LG_DEFER_MAPPER_SCHEDULER_TASK_ID,
@@ -401,7 +393,7 @@ namespace Legion {
       LG_TOP_FINISH_TASK_ID,
       LG_MAPPER_TASK_ID,
       LG_DISJOINTNESS_TASK_ID,
-      LG_ISSUE_FRAME_TASK_ID,
+      LG_DEFER_TIMING_MEASUREMENT_TASK_ID,
       LG_TASK_IMPL_SEMANTIC_INFO_REQ_TASK_ID,
       LG_INDEX_SPACE_SEMANTIC_INFO_REQ_TASK_ID,
       LG_INDEX_PART_SEMANTIC_INFO_REQ_TASK_ID,
@@ -421,7 +413,7 @@ namespace Legion {
       LG_FINALIZE_OUTPUT_TREE_TASK_ID,
       LG_DEFERRED_LAUNCH_TASK_ID,
       LG_MISPREDICATION_TASK_ID,
-      LG_DEFER_TRIGGER_TASK_COMPLETE_TASK_ID,
+      LG_DEFER_TRIGGER_CHILDREN_COMMIT_TASK_ID,
       LG_ORDER_CONCURRENT_LAUNCH_TASK_ID,
       LG_DEFER_MATERIALIZED_VIEW_TASK_ID,
       LG_DEFER_REDUCTION_VIEW_TASK_ID,
@@ -462,17 +454,15 @@ namespace Legion {
       LG_FREE_EAGER_INSTANCE_TASK_ID,
       LG_MALLOC_INSTANCE_TASK_ID,
       LG_FREE_INSTANCE_TASK_ID,
-      LG_DEFER_TRACE_PRECONDITION_TASK_ID,
-      LG_DEFER_TRACE_POSTCONDITION_TASK_ID,
       LG_DEFER_TRACE_UPDATE_TASK_ID,
       LG_FINALIZE_OUTPUT_ID,
       LG_DEFER_DELETE_FUTURE_INSTANCE_TASK_ID,
       LG_FREE_EXTERNAL_TASK_ID,
       LG_DEFER_CONSENSUS_MATCH_TASK_ID,
       LG_DEFER_COLLECTIVE_TASK_ID,
-      LG_DEFER_RECORD_COMPLETE_REPLAY_TASK_ID,
       LG_DEFER_ISSUE_FILL_TASK_ID,
       LG_DEFER_MUST_EPOCH_RETURN_TASK_ID,
+      LG_DEFER_DELETION_COMMIT_TASK_ID,
       LG_YIELD_TASK_ID,
       // this marks the beginning of task IDs tracked by the shutdown algorithm
       LG_BEGIN_SHUTDOWN_TASK_IDS,
@@ -488,17 +478,15 @@ namespace Legion {
 #define LG_TASK_DESCRIPTIONS(name)                               \
       const char *name[LG_LAST_TASK_ID] = {                      \
         "Scheduler",                                              \
-        "Post-Task Execution",                                    \
         "Trigger Ready",                                          \
         "Trigger Execution",                                      \
-        "Trigger Resolution",                                     \
         "Trigger Commit",                                         \
         "Deferred Execution",                                     \
         "Deferred Completion",                                    \
         "Deferred Commit",                                        \
         "Prepipeline Stage",                                      \
         "Logical Dependence Analysis",                            \
-        "Trigger Completion",                                     \
+        "Deferred Mapped",                                        \
         "Trigger Operation Mapping",                              \
         "Trigger Task Mapping",                                   \
         "Defer Mapper Scheduler",                                 \
@@ -514,7 +502,7 @@ namespace Legion {
         "Top Finish",                                             \
         "Mapper Task",                                            \
         "Disjointness Test",                                      \
-        "Issue Frame",                                            \
+        "Defer Timing Measurement",                               \
         "Task Impl Semantic Request",                             \
         "Index Space Semantic Request",                           \
         "Index Partition Semantic Request",                       \
@@ -534,7 +522,7 @@ namespace Legion {
         "Finalize Output Regions Eq KD Tree",                     \
         "Deferred Task Launch",                                   \
         "Handle Mapping Mispredication",                          \
-        "Defer Trigger Task Complete",                            \
+        "Defer Trigger Children Commit",                          \
         "Order Concurrent Launch",                                \
         "Defer Materialized View Registration",                   \
         "Defer Reduction View Registration",                      \
@@ -575,17 +563,15 @@ namespace Legion {
         "Free Eager Instance",                                    \
         "Malloc Instance",                                        \
         "Free Instance",                                          \
-        "Defer Trace Precondition Test",                          \
-        "Defer Trace Postcondition Test",                         \
         "Defer Trace Update",                                     \
         "Finalize Output Region Instance",                        \
         "Defer Delete Future Instance",                           \
         "Free External Allocation",                               \
         "Defer Consensus Match",                                  \
         "Defer Collective Async",                                 \
-        "Defer Record Complete Replay",                           \
         "Defer Issue Fill",                                       \
         "Defer Must Epoch Return Resources",                      \
+        "Defer Deletion Commit",                                  \
         "Yield",                                                  \
         "Retry Shutdown",                                         \
         "Remote Message",                                         \
@@ -835,7 +821,7 @@ namespace Legion {
       SLICE_REMOTE_MAPPED,
       SLICE_REMOTE_COMPLETE,
       SLICE_REMOTE_COMMIT,
-      SLICE_VERIFY_CONCURRENT_EXECUTION,
+      SLICE_RENDEZVOUS_CONCURRENT_MAPPED,
       SLICE_CONCURRENT_ALLREDUCE_REQUEST,
       SLICE_CONCURRENT_ALLREDUCE_RESPONSE,
       SLICE_FIND_INTRA_DEP,
@@ -925,9 +911,11 @@ namespace Legion {
       SEND_REPL_CREATED_REGIONS,
       SEND_REPL_TRACE_EVENT_REQUEST,
       SEND_REPL_TRACE_EVENT_RESPONSE,
+      SEND_REPL_TRACE_EVENT_TRIGGER,
       SEND_REPL_TRACE_FRONTIER_REQUEST,
       SEND_REPL_TRACE_FRONTIER_RESPONSE,
       SEND_REPL_TRACE_UPDATE,
+      SEND_REPL_FIND_TRACE_SETS,
       SEND_REPL_IMPLICIT_RENDEZVOUS,
       SEND_REPL_FIND_COLLECTIVE_VIEW,
       SEND_MAPPER_MESSAGE,
@@ -952,6 +940,9 @@ namespace Legion {
       SEND_REMOTE_CONTEXT_PHYSICAL_RESPONSE,
       SEND_REMOTE_CONTEXT_FIND_COLLECTIVE_VIEW_REQUEST,
       SEND_REMOTE_CONTEXT_FIND_COLLECTIVE_VIEW_RESPONSE,
+      SEND_REMOTE_CONTEXT_REFINE_EQUIVALENCE_SETS,
+      SEND_REMOTE_CONTEXT_FIND_TRACE_LOCAL_SETS_REQUEST,
+      SEND_REMOTE_CONTEXT_FIND_TRACE_LOCAL_SETS_RESPONSE,
       SEND_COMPUTE_EQUIVALENCE_SETS_REQUEST,
       SEND_COMPUTE_EQUIVALENCE_SETS_RESPONSE,
       SEND_COMPUTE_EQUIVALENCE_SETS_PENDING,
@@ -980,7 +971,6 @@ namespace Legion {
       SEND_EQUIVALENCE_SET_REMOTE_COPIES_ACROSS,
       SEND_EQUIVALENCE_SET_REMOTE_OVERWRITES,
       SEND_EQUIVALENCE_SET_REMOTE_FILTERS,
-      SEND_EQUIVALENCE_SET_REMOTE_CLONES,
       SEND_EQUIVALENCE_SET_REMOTE_INSTANCES,
       SEND_INSTANCE_REQUEST,
       SEND_INSTANCE_RESPONSE,
@@ -1010,8 +1000,8 @@ namespace Legion {
       SEND_REPLICATE_COLLECTIVE_VERSIONING,
       SEND_REPLICATE_COLLECTIVE_MAPPING,
       SEND_REPLICATE_VIRTUAL_RENDEZVOUS,
+      SEND_REPLICATE_STARTUP_COMPLETE,
       SEND_REPLICATE_POST_MAPPED,
-      SEND_REPLICATE_POST_EXECUTION,
       SEND_REPLICATE_TRIGGER_COMPLETE,
       SEND_REPLICATE_TRIGGER_COMMIT,
       SEND_CONTROL_REPLICATE_RENDEZVOUS_MESSAGE,
@@ -1078,13 +1068,14 @@ namespace Legion {
       SEND_CONTROL_REPLICATION_CREATE_FILL_VIEW,
       SEND_CONTROL_REPLICATION_VERSIONING_RENDEZVOUS,
       SEND_CONTROL_REPLICATION_VIEW_RENDEZVOUS,
-      SEND_CONTROL_REPLICATION_CONCURRENT_EXECUTION_VALIDATION,
+      SEND_CONTROL_REPLICATION_CONCURRENT_MAPPING_RENDEZVOUS,
       SEND_CONTROL_REPLICATION_CONCURRENT_ALLREDUCE,
       SEND_CONTROL_REPLICATION_PROJECTION_TREE_EXCHANGE,
       SEND_CONTROL_REPLICATION_TIMEOUT_MATCH_EXCHANGE,
       SEND_CONTROL_REPLICATION_MASK_EXCHANGE,
       SEND_CONTROL_REPLICATION_PREDICATE_EXCHANGE,
       SEND_CONTROL_REPLICATION_CROSS_PRODUCT_EXCHANGE,
+      SEND_CONTROL_REPLICATION_TRACING_SET_DEDUPLICATION,
       SEND_CONTROL_REPLICATION_SLOW_BARRIER,
       SEND_SHUTDOWN_NOTIFICATION,
       SEND_SHUTDOWN_RESPONSE,
@@ -1159,7 +1150,7 @@ namespace Legion {
         "Slice Remote Mapped",                                        \
         "Slice Remote Complete",                                      \
         "Slice Remote Commit",                                        \
-        "Slice Verify Concurrent Execution",                          \
+        "Slice Rendezvous Concurrent Mapped",                         \
         "Slice Concurrent Allreduce Request",                         \
         "Slice Concurrent Allreduce Response",                        \
         "Slice Find Intra-Space Dependence",                          \
@@ -1249,9 +1240,11 @@ namespace Legion {
         "Send Replicate Created Regions Return",                      \
         "Send Replicate Trace Event Request",                         \
         "Send Replicate Trace Event Response",                        \
+        "Send Replicate Trace Event Trigger",                         \
         "Send Replicate Trace Frontier Request",                      \
         "Send Replicate Trace Frontier Response",                     \
         "Send Replicate Trace Update",                                \
+        "Send Replicate Find Trace Local Sets",                       \
         "Send Replicate Implicit Rendezvous",                         \
         "Send Replicate Find or Create Collective View",              \
         "Send Mapper Message",                                        \
@@ -1276,6 +1269,9 @@ namespace Legion {
         "Send Remote Context Physical Response",                      \
         "Send Remote Context Find Collective View Request",           \
         "Send Remote Context Find Collective View Response",          \
+        "Send Remote Context Refine Equivalence Sets",                \
+        "Send Remote Context Find Trace Local Sets Request",          \
+        "Send Remote Context Find Trace Local Sets Response",         \
         "Send Compute Equivalence Sets Request",                      \
         "Send Compute Equivalence Sets Response",                     \
         "Send Compute Equivalence Sets Pending",                      \
@@ -1304,7 +1300,6 @@ namespace Legion {
         "Send Equivalence Set Remote Copies Across",                  \
         "Send Equivalence Set Remote Overwrites",                     \
         "Send Equivalence Set Remote Filters",                        \
-        "Send Equivalence Set Remote Clones",                         \
         "Send Equivalence Set Remote Instances",                      \
         "Send Instance Request",                                      \
         "Send Instance Response",                                     \
@@ -1334,8 +1329,8 @@ namespace Legion {
         "Send Replication Collective Versioning",                     \
         "Send Replication Collective Mapping",                        \
         "Send Replication Virtual Mapping Rendezvous",                \
+        "Send Replication Startup Complete",                          \
         "Send Replication Post Mapped",                               \
-        "Send Replication Post Execution",                            \
         "Send Replication Trigger Complete",                          \
         "Send Replication Trigger Commit",                            \
         "Send Control Replication Rendezvous Message",                \
@@ -1402,13 +1397,14 @@ namespace Legion {
         "Control Replication Collective Create Fill View",            \
         "Control Replication Collective Versioning Rendezvous",       \
         "Control Replication Collective View Rendezvous",             \
-        "Control Replication Collective Concurrent Execution Validation",\
+        "Control Replication Collective Concurrent Mapping Rendezvous",\
         "Control Replication Collective Concurrent Allreduce",        \
         "Control Replication Collective Projection Tree Exchange",    \
         "Control Replication Collective Timeout Match Exchange",      \
         "Control Replication Collective Mask Exchange",               \
         "Control Replication Collective Predicate Exchange",          \
         "Control Replication Collective Cross Product Exchange",      \
+        "Control Replication Collective Tracing Set Deduplication",   \
         "Control Replication Collective Slow Barrier",                \
         "Send Shutdown Notification",                                 \
         "Send Shutdown Response",                                     \
@@ -1968,7 +1964,7 @@ namespace Legion {
       COLLECTIVE_LOC_64 = 64,
       COLLECTIVE_LOC_65 = 65,
       COLLECTIVE_LOC_66 = 66,
-      //COLLECTIVE_LOC_67 = 67,
+      COLLECTIVE_LOC_67 = 67,
       //COLLECTIVE_LOC_68 = 68,
       //COLLECTIVE_LOC_69 = 69,
       COLLECTIVE_LOC_70 = 70,
@@ -2087,7 +2083,6 @@ namespace Legion {
     class CloseOp;
     class MergeCloseOp;
     class PostCloseOp;
-    class VirtualCloseOp;
     class RefinementOp;
     class ResetOp;
     class AcquireOp;
@@ -2154,11 +2149,9 @@ namespace Legion {
 
     // legion_trace.h
     class LogicalTrace;
-    class TraceCaptureOp;
-    class TraceCompleteOp;
-    class TraceReplayOp;
     class TraceBeginOp;
-    class TraceSummaryOp;
+    class TraceRecurrentOp;
+    class TraceCompleteOp;
     class PhysicalTrace;
     class TraceViewSet;
     class TraceConditionSet;
@@ -2292,7 +2285,6 @@ namespace Legion {
     class ReplIndividualTask;
     class ReplIndexTask;
     class ReplMergeCloseOp;
-    class ReplVirtualCloseOp;
     class ReplRefinementOp;
     class ReplResetOp;
     class ReplFillOp;
@@ -2316,11 +2308,9 @@ namespace Legion {
     class ReplAcquireOp;
     class ReplReleaseOp;
     class ReplTraceOp;
-    class ReplTraceCaptureOp;
-    class ReplTraceCompleteOp;
-    class ReplTraceReplayOp;
     class ReplTraceBeginOp;
-    class ReplTraceSummaryOp;
+    class ReplTraceRecurrentOp;
+    class ReplTraceCompleteOp;
     class ShardMapping;
     class CollectiveMapping;
     class ShardManager;
@@ -2330,7 +2320,7 @@ namespace Legion {
     class AllGatherCollective;
     template<typename T> class BarrierExchangeCollective;
     template<typename T> class ValueBroadcast;
-    template<typename T> class AllReduceCollective;
+    template<typename T, bool> class AllReduceCollective;
     class CrossProductCollective;
     class ShardingGatherCollective;
     class FieldDescriptorExchange;
@@ -2428,7 +2418,6 @@ namespace Legion {
     friend class Internal::CloseOp;                         \
     friend class Internal::MergeCloseOp;                    \
     friend class Internal::PostCloseOp;                     \
-    friend class Internal::VirtualCloseOp;                  \
     friend class Internal::RefinementOp;                    \
     friend class Internal::ResetOp;                         \
     friend class Internal::AcquireOp;                       \
@@ -2456,7 +2445,7 @@ namespace Legion {
     friend class Internal::TimingOp;                        \
     friend class Internal::TunableOp;                       \
     friend class Internal::AllReduceOp;                     \
-    friend class Internal::TraceSummaryOp;                  \
+    friend class Internal::TraceRecurrentOp;                \
     friend class Internal::ExternalMappable;                \
     friend class Internal::ExternalTask;                    \
     friend class Internal::TaskOp;                          \
@@ -2606,6 +2595,7 @@ namespace Legion {
   typedef ::legion_task_id_t TaskID;
   typedef ::legion_layout_constraint_id_t LayoutConstraintID;
   typedef ::legion_shard_id_t ShardID;
+  typedef ::legion_provenance_id_t ProvenanceID;
   typedef ::legion_internal_color_t LegionColor;
   typedef void (*RegistrationCallbackFnptr)(Machine machine, 
                 Runtime *rt, const std::set<Processor> &local_procs);
@@ -2618,7 +2608,7 @@ namespace Legion {
   typedef bool (*PredicateFnptr)(const void*, size_t, 
       const std::vector<Future> futures);
   typedef void (*RealmFnptr)(const void*,size_t,
-                             const void*,size_t,Processor);
+                             const void*,size_t,Processor); 
   // Magical typedefs 
   // (don't forget to update ones in old HighLevel namespace in legion.inl)
   typedef Internal::TaskContext* Context;
@@ -3420,20 +3410,5 @@ namespace Legion {
   };
 
 }; // Legion namespace
-
-// now that we have things like LgEvent defined, we can include accessor.h to
-// pick up ptr_t, which is used for compatibility-mode Coloring and friends
-#include "legion/accessor.h"
-
-namespace Legion {
-  typedef LegionRuntime::Accessor::ByteOffset ByteOffset;
-
-  typedef std::map<Color,ColoredPoints<ptr_t> > Coloring;
-  typedef std::map<Color,Domain> DomainColoring;
-  typedef std::map<Color,std::set<Domain> > MultiDomainColoring;
-  typedef std::map<DomainPoint,ColoredPoints<ptr_t> > PointColoring;
-  typedef std::map<DomainPoint,Domain> DomainPointColoring;
-  typedef std::map<DomainPoint,std::set<Domain> > MultiDomainPointColoring;
-};
 
 #endif // __LEGION_TYPES_H__

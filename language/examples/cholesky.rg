@@ -1,4 +1,4 @@
--- Copyright 2023 Stanford University
+-- Copyright 2024 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -14,8 +14,8 @@
 
 -- runs-with:
 -- [
---   ["-verify", "-ll:cpu", "4", "-fflow", "0"],
---   ["-p", "1", "-verify", "-fflow", "0"]
+--   ["-verify", "-ll:cpu", "4"],
+--   ["-p", "1", "-verify"]
 -- ]
 
 -- FIXME: Breaks RDIR

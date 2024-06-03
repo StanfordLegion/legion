@@ -1,4 +1,4 @@
--- Copyright 2023 Stanford University
+-- Copyright 2024 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -14,8 +14,11 @@
 
 import "regent"
 
+local format = require("std/format")
+
+__demand(__replicable)
 task main()
-  regentlib.c.printf("Main running...\n")
-  regentlib.c.printf("Main complete.\n")
+  format.println("Main running...")
+  format.println("Main complete.")
 end
 regentlib.start(main)

@@ -1,4 +1,4 @@
--- Copyright 2023 Stanford University
+-- Copyright 2024 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -12,16 +12,13 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- runs-with:
--- [
---   ["-ll:cpu", "2", "-fflow-spmd", "1"]
--- ]
-
 import "regent"
 
 -- This tests the SPMD optimization of the compiler with:
 --   * multiple top-level partition
 --   * multi-level region tree
+
+local format = require("std/format")
 
 task f(r0 : region(int), r1 : region(int))
 where reads writes(r0, r1) do
@@ -51,6 +48,7 @@ where reads writes(r0) do
   end
 end
 
+__demand(__replicable)
 task main()
   var grid = region(ispace(ptr, 24), int)
 
@@ -73,11 +71,10 @@ task main()
   end
 
   for x in grid do
-    regentlib.c.printf("x %2d %4d\n", int(x), @x)
+    format.println("x {} {}", int(x), @x)
   end
 
 
-  __demand(__spmd)
   for t = 0, 3 do
     for i in colors do
       f(L[i], R[i])
@@ -88,9 +85,9 @@ task main()
     end
   end
 
-  regentlib.c.printf("\n")
+  format.println("")
   for x in grid do
-    regentlib.c.printf("x %2d %5d\n", int(x), @x)
+    format.println("x {} {}", int(x), @x)
   end
 
   regentlib.assert(grid[0] ==  7420, "test failed")

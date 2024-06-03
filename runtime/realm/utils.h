@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -131,23 +131,6 @@ namespace Realm {
   protected:
     shortstringbuf<32, 64> strbuf;
     std::ostream os;
-  };
-
-  // little helper class that defines a default value for a member variable
-  //  in the header rather than in the containing object's constructor
-  //  implementation
-  template <typename T, T _DEFAULT>
-  struct WithDefault {
-  public:
-    static const T DEFAULT_VALUE = _DEFAULT;
-
-    WithDefault(void) : val(_DEFAULT) {}
-    WithDefault(T _val) : val(_val) {}
-
-    operator T(void) const { return val; }
-    WithDefault<T,_DEFAULT>& operator=(T newval) { val = newval; return *this; }
-
-    T val;
   };
 
   // behaves like static_cast, but uses dynamic_cast+assert when DEBUG_REALM

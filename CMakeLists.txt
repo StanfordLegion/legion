@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------#
-# Copyright 2023 Kitware, Inc.
+# Copyright 2024 Kitware, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -102,6 +102,20 @@ endif()
 set(SOVERSION 1)
 
 set(INSTALL_SUFFIX "" CACHE STRING "Suffix to add to installed libraries and binaries")
+
+#------------------------------------------------------------------------------#
+# C++ standard version
+#------------------------------------------------------------------------------#
+
+if(CMAKE_CXX_STANDARD)
+  # Legion requires a minimum of C++ 17
+  if(CMAKE_CXX_STANDARD LESS 17 OR CMAKE_CXX_STANDARD EQUAL 98)
+    message(FATAL_ERROR "Legion requires at least C++ 17")
+  endif()
+else()
+  set(CMAKE_CXX_STANDARD 17)
+endif()
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 #------------------------------------------------------------------------------#
 # Build type and shared vs static library
@@ -373,10 +387,11 @@ if("${Legion_NETWORKS}" MATCHES ".*gasnet(1|ex).*")
       "https://github.com/StanfordLegion/gasnet.git"
       CACHE STRING "URL for cloning StanfordLegion/gasnet repository")
     set(Legion_EMBED_GASNet_GITREF
-      "3d75a6ffb3c398a96f91248be29de06e475d029b" # master as of 2023-08-25
+      "034ada74927746e8bfa21d43b527a052118e2def" # master as of 2024-05-28
       CACHE STRING "Branch/tag/commit to use from StanfordLegion/gasnet repository")
-    set(Legion_EMBED_GASNet_LOCALSRC "" CACHE STRING "Path to local clone of stanfordlegion/gasnet repository")
+    set(Legion_EMBED_GASNet_LOCALSRC "" CACHE STRING "Path to local clone of StanfordLegion/gasnet repository")
     set(Legion_EMBED_GASNet_VERSION "" CACHE STRING "Override GASNet version to build")
+    option(Legion_EMBED_GASNet_ENABLE_GPU_MEMORY_KINDS "Enable GASNet memory kinds when Realm has been built with CUDA/HIP/etc." ON)
     set(Legion_EMBED_GASNet_CONFIGURE_ARGS "" CACHE STRING "Extra configuration arguments for GASNet")
   else()
     set(GASNet_THREADING par)
@@ -462,7 +477,7 @@ if(Legion_USE_CUDA OR Legion_USE_HIP)
     infer_cuda_standard(Legion_CUDA_STANDARD)
 
     set(Legion_CUDA_STANDARD "${Legion_CUDA_STANDARD}" CACHE STRING
-      "The CUDA C++ standard to use (14, 17, 20, etc.)"
+      "The CUDA C++ standard to use (17, 20, etc.)"
       FORCE)
 
     # Enable the CUDA language and find the CUDA toolkit
@@ -556,6 +571,8 @@ if(Legion_USE_HIP)
     if(BUILD_SHARED_LIBS)
       list(APPEND HIPCC_FLAGS -fPIC)
     endif()
+
+    list(APPEND HIPCC_FLAGS -std=c++${CMAKE_CXX_STANDARD})
 
     install(FILES ${Legion_SOURCE_DIR}/cmake/FindHIP.cmake
       DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake
@@ -922,7 +939,8 @@ elseif(Legion_BUILD_REALM_TESTS)
   # temporary hackery to just enable the realm tests
   add_library(Legion::Realm ALIAS Realm)
   add_subdirectory(test/realm)
-elseif(Legion_BUILD_REALM_UNIT_TESTS)
+endif()
+if(Legion_BUILD_REALM_UNIT_TESTS)
   if (BUILD_SHARED_LIBS)
     add_library(Legion::RealmTests ALIAS RealmStatic)
   else()

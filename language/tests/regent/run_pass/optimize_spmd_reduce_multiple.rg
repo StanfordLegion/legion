@@ -1,4 +1,4 @@
--- Copyright 2023 Stanford University
+-- Copyright 2024 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -11,12 +11,6 @@
 -- WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
-
--- runs-with:
--- [[]]
-
--- FIXME: Breaks SPMD optimization
--- [["-ll:cpu", "4", "-fflow-spmd", "1", "-fflow-spmd-shardsize", "3"]]
 
 -- This test triggered a bug in RDIR (even without SPMD) that caused a
 -- cycle due to the application of reductions to multiple partitions.
@@ -46,6 +40,7 @@ where
 do
 end
 
+__demand(__replicable)
 task main()
   var num_elems = 42
   var num_nodes = 137
@@ -58,7 +53,6 @@ task main()
   var p_ghost_nodes = p_owned_nodes | p_owned_nodes
   var p_owned_elems = partition(equal, re, colors)
 
-  __demand(__spmd)
   do
     for part_id = 0, 10 do
       init_nodes(p_owned_nodes[part_id])

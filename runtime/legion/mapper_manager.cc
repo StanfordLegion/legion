@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -65,6 +65,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(processor.exists());
 #endif
+      if (profile_mapper)
+        runtime->profiler->record_mapper_name(mapper_id, processor, 
+                                              get_mapper_name());
     }
 
     //--------------------------------------------------------------------------
@@ -1934,10 +1937,7 @@ namespace Legion {
       pause_mapper_call(ctx);
       Provenance *provenance = NULL;
       if (prov != NULL)
-      {
-        provenance = new Provenance(prov);
-        provenance->add_reference();
-      }
+        provenance = runtime->find_or_create_provenance(prov, strlen(prov));
       const IndexSpace result(runtime->get_unique_index_space_id(),
                     runtime->get_unique_index_tree_id(), type_tag);
       const DistributedID did = runtime->get_available_distributed_id();
@@ -2664,7 +2664,7 @@ namespace Legion {
       const void *name; size_t dummy_size;
       runtime->retrieve_semantic_information(task_id, LEGION_NAME_SEMANTIC_TAG,
                                              name, dummy_size, false, false);
-      static_assert(sizeof(result) == sizeof(name), "Fuck c++");
+      static_assert(sizeof(result) == sizeof(name));
       memcpy(&result, &name, sizeof(result));
       resume_mapper_call(ctx, MAPPER_RETRIEVE_NAME_CALL);
     }
@@ -2678,7 +2678,7 @@ namespace Legion {
       const void *name; size_t dummy_size;
       runtime->retrieve_semantic_information(handle, LEGION_NAME_SEMANTIC_TAG,
                                              name, dummy_size, false, false);
-      static_assert(sizeof(result) == sizeof(name), "Fuck c++");
+      static_assert(sizeof(result) == sizeof(name));
       memcpy(&result, &name, sizeof(result));
       resume_mapper_call(ctx, MAPPER_RETRIEVE_NAME_CALL);
     }
@@ -2692,7 +2692,7 @@ namespace Legion {
       const void *name; size_t dummy_size;
       runtime->retrieve_semantic_information(handle, LEGION_NAME_SEMANTIC_TAG,
                                              name, dummy_size, false, false);
-      static_assert(sizeof(result) == sizeof(name), "Fuck c++");
+      static_assert(sizeof(result) == sizeof(name));
       memcpy(&result, &name, sizeof(result));
       resume_mapper_call(ctx, MAPPER_RETRIEVE_NAME_CALL);
     }
@@ -2706,7 +2706,7 @@ namespace Legion {
       const void *name; size_t dummy_size;
       runtime->retrieve_semantic_information(handle, LEGION_NAME_SEMANTIC_TAG,
                                              name, dummy_size, false, false);
-      static_assert(sizeof(result) == sizeof(name), "Fuck c++");
+      static_assert(sizeof(result) == sizeof(name));
       memcpy(&result, &name, sizeof(result));
       resume_mapper_call(ctx, MAPPER_RETRIEVE_NAME_CALL);
     }
@@ -2720,7 +2720,7 @@ namespace Legion {
       const void *name; size_t dummy_size;
       runtime->retrieve_semantic_information(handle, fid, 
           LEGION_NAME_SEMANTIC_TAG, name, dummy_size, false, false);
-      static_assert(sizeof(result) == sizeof(name), "Fuck c++");
+      static_assert(sizeof(result) == sizeof(name));
       memcpy(&result, &name, sizeof(result));
       resume_mapper_call(ctx, MAPPER_RETRIEVE_NAME_CALL);
     }
@@ -2734,7 +2734,7 @@ namespace Legion {
       const void *name; size_t dummy_size;
       runtime->retrieve_semantic_information(handle, LEGION_NAME_SEMANTIC_TAG,
                                              name, dummy_size, false, false);
-      static_assert(sizeof(result) == sizeof(name), "Fuck c++");
+      static_assert(sizeof(result) == sizeof(name));
       memcpy(&result, &name, sizeof(result));
       resume_mapper_call(ctx, MAPPER_RETRIEVE_NAME_CALL);
     }
@@ -2748,7 +2748,7 @@ namespace Legion {
       const void *name; size_t dummy_size;
       runtime->retrieve_semantic_information(handle, LEGION_NAME_SEMANTIC_TAG,
                                              name, dummy_size, false, false);
-      static_assert(sizeof(result) == sizeof(name), "Fuck c++");
+      static_assert(sizeof(result) == sizeof(name));
       memcpy(&result, &name, sizeof(result));
       resume_mapper_call(ctx, MAPPER_RETRIEVE_NAME_CALL);
     }
@@ -3139,7 +3139,7 @@ namespace Legion {
 #endif
       // Record our finish time when we're done
       if (profile_mapper)
-        runtime->profiler->record_mapper_call(info->kind, 
+        runtime->profiler->record_mapper_call(mapper_id, processor, info->kind,
             (info->operation == NULL) ? 0 : info->operation->get_unique_op_id(),
             info->start_time, Realm::Clock::current_time_in_nanoseconds());
       // Set this flag asynchronously without the lock, there will
@@ -3429,7 +3429,7 @@ namespace Legion {
     {
       // Record our finish time when we are done
       if (profile_mapper)
-        runtime->profiler->record_mapper_call(info->kind, 
+        runtime->profiler->record_mapper_call(mapper_id, processor, info->kind,
             (info->operation == NULL) ? 0 : info->operation->get_unique_op_id(),
             info->start_time, Realm::Clock::current_time_in_nanoseconds());
       std::vector<RtUserEvent> to_trigger;

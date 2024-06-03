@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -233,6 +233,13 @@ namespace Realm {
     InstanceLayoutOpaque(size_t _bytes_used, size_t _alignment_reqd);
 
     virtual InstanceLayoutGeneric *clone(void) const;
+
+    virtual void relocate(size_t adjust_amt);
+
+    virtual void print(std::ostream &os) const;
+
+    REALM_INTERNAL_API_EXTERNAL_LINKAGE
+    virtual void compile_lookup_program(PieceLookup::CompiledProgram &p) const;
   };
 
   namespace PieceLayoutTypes {

@@ -1,4 +1,4 @@
--- Copyright 2023 Stanford University
+-- Copyright 2024 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -159,6 +159,12 @@ local function format_value(macro_name, node, value, value_type, modifiers)
     format_str = "{lo=" .. lo_format .. ", hi=" .. hi_format .. "}"
     format_args:insertall(lo_args)
     format_args:insertall(hi_args)
+  elseif std.is_complex_type(value_type) then
+    local real_format, real_args = format_value(macro_name, node, rexpr value.real end, value_type.base_type, modifiers)
+    local imag_format, imag_args = format_value(macro_name, node, rexpr value.imag end, value_type.base_type, modifiers)
+    format_str = real_format .. " + " .. imag_format .. "j"
+    format_args:insertall(real_args)
+    format_args:insertall(imag_args)
   elseif std.is_string(value_type) then
     return format_value(macro_name, node, rexpr [rawstring](value) end, rawstring, modifiers)
   else
@@ -229,6 +235,28 @@ local function format_arguments(macro_name, msg, args)
   return format_str, format_args
 end
 
+-- Hack: we wrap this in a Terra macro to hide it from the config
+-- option optimizer.
+local printf_once = macro(function(format_str, ...)
+  local format_args = terralib.newlist({...})
+  return quote
+    if regentlib.c.legion_runtime_local_shard_without_context() == 0 then
+      regentlib.c.printf(format_str, format_args)
+    end
+  in nil end
+end)
+printf_once.replicable = true
+
+local fprintf_once = macro(function(stream, format_str, ...)
+  local format_args = terralib.newlist({...})
+  return quote
+    if regentlib.c.legion_runtime_local_shard_without_context() == 0 then
+      regentlib.c.fprintf(stream, format_str, format_args)
+    end
+  in nil end
+end)
+fprintf_once.replicable = true
+
 --- Print formatted string (no automatic newline).
 -- @param msg Format string. Must be a literal constant.
 -- @param ... Arguments.
@@ -237,7 +265,7 @@ format.print = regentlib.macro(
     local args = terralib.newlist({...})
     local format_str, format_args = format_arguments("println", msg, args)
 
-    return rexpr regentlib.c.printf(format_str, format_args) end
+    return rexpr printf_once(format_str, format_args) end
   end)
 
 --- Print formatted string (with automatic newline).
@@ -248,7 +276,7 @@ format.println = regentlib.macro(
     local args = terralib.newlist({...})
     local format_str, format_args = format_arguments("println", msg, args)
 
-    return rexpr regentlib.c.printf([format_str .. "\n"], format_args) end
+    return rexpr printf_once([format_str .. "\n"], format_args) end
   end)
 
 --- Print formatted string to stream (no automatic newline).

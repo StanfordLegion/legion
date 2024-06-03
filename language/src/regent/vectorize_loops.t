@@ -1,4 +1,4 @@
--- Copyright 2023 Stanford University
+-- Copyright 2024 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -30,47 +30,43 @@ local bounds_checks = std.config["bounds-checks"]
 -- Check the vector ISA support of the underlying architecture
 -- TODO: Vector ISA must be configurable via command line argument (as in -fcuda-offline)
 
-local VEC_ARCH = "x86"
+local VEC_ARCH
 local SIMD_REG_SIZE
-
-if os.execute("bash -c \"[ `uname` == 'Linux' ]\"") == 0 and
-   os.execute("grep altivec /proc/cpuinfo > /dev/null") == 0
-then
-  VEC_ARCH = "power"
-end
 
 local ffi = require("ffi")
 if ffi.os == "OSX" then
   if os.execute("sysctl -a | grep machdep.cpu.features | grep AVX > /dev/null") == 0 then
     SIMD_REG_SIZE = 32
+    VEC_ARCH = "x86"
   elseif os.execute("sysctl -a | grep machdep.cpu.features | grep SSE > /dev/null") == 0 then
     SIMD_REG_SIZE = 16
+    VEC_ARCH = "x86"
   elseif os.execute("sysctl -a | grep hw.optional.neon > /dev/null") == 0 then
-    SIMD_REG_SIZE = 16
+    SIMD_REG_SIZE = 8
+    VEC_ARCH = "arm"
   else
     error("Unable to determine CPU architecture")
   end
 elseif os.execute("bash -c \"[ `uname` == 'FreeBSD' ]\"") == 0 then
   if os.execute("sysctl -a | grep -q 'hw.instruction_sse: 1'") == 0 then
     SIMD_REG_SIZE = 16
+    VEC_ARCH = "x86"
   else
     error("Unable to determine CPU architecture")
   end
 else
   if os.execute("grep avx /proc/cpuinfo > /dev/null") == 0 then
     SIMD_REG_SIZE = 32
+    VEC_ARCH = "x86"
   elseif os.execute("grep sse /proc/cpuinfo > /dev/null") == 0 then
     SIMD_REG_SIZE = 16
+    VEC_ARCH = "x86"
   elseif os.execute("grep altivec /proc/cpuinfo > /dev/null") == 0 then
     SIMD_REG_SIZE = 16
+    VEC_ARCH = "power"
   else
     error("Unable to determine CPU architecture")
   end
-end
-
--- Force SSE when the LLVM version is less than 3.8
-if terralib.llvmversion < 38 then
-  SIMD_REG_SIZE = 16
 end
 
 -- Only the following math functions have corresponding vector intrinsics in LLVM
@@ -98,6 +94,15 @@ elseif VEC_ARCH == "x86" then
   binary_intrinsic_names[vector(double, 2)] = "llvm.x86.sse2.%s.pd"
   binary_intrinsic_names[vector(float,  8)] = "llvm.x86.avx.%s.ps.256"
   binary_intrinsic_names[vector(double, 4)] = "llvm.x86.avx.%s.pd.256"
+elseif VEC_ARCH == "arm" then
+  -- TODO: support the ARM NEON instruction set
+  local vectorize_loops = {}
+  function vectorize_loops.entry(node)
+    print("WARNING: vectorization is not yet supported on ARM CPUs")
+    return node
+  end
+  vectorize_loops.pass_name = "vectorize_loops"
+  return vectorize_loops
 else
   assert(false, "Unsupported architecture")
 end

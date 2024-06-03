@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,7 +28,6 @@
 #include <functional>
 #include <stdlib.h>
 #include "legion/legion_config.h"
-#include "legion/legion_template_help.h" // StaticAssert
 #include <utility>
 
 namespace Legion {
@@ -84,11 +83,9 @@ namespace Legion {
       OR_PRED_OP_ALLOC,
       ACQUIRE_OP_ALLOC,
       RELEASE_OP_ALLOC,
-      TRACE_CAPTURE_OP_ALLOC,
-      TRACE_COMPLETE_OP_ALLOC,
-      TRACE_REPLAY_OP_ALLOC,
       TRACE_BEGIN_OP_ALLOC,
-      TRACE_SUMMARY_OP_ALLOC,
+      TRACE_RECURRENT_OP_ALLOC,
+      TRACE_COMPLETE_OP_ALLOC,
       MUST_EPOCH_OP_ALLOC,
       PENDING_PARTITION_OP_ALLOC,
       DEPENDENT_PARTITION_OP_ALLOC,
@@ -149,7 +146,7 @@ namespace Legion {
     inline void* legion_alloc_aligned(size_t cnt)
     //--------------------------------------------------------------------------
     {
-      LEGION_STATIC_ASSERT((SIZE % ALIGNMENT) == 0, 
+      static_assert((SIZE % ALIGNMENT) == 0, 
           "SIZE must be evenly divisible by ALIGNMENT");
       size_t alloc_size = cnt;
       if (!BYTES)
@@ -449,7 +446,7 @@ namespace Legion {
       inline T* allocate(std::size_t cnt) { 
         void *ptr = legion_alloc_aligned<T, false/*bytes*/>(cnt);
         pointer result = NULL;
-        static_assert(sizeof(result) == sizeof(ptr), "Fuck c++");
+        static_assert(sizeof(result) == sizeof(ptr));
         memcpy(&result, &ptr, sizeof(result));
 #ifdef LEGION_TRACE_ALLOCATION
         if (A != UNTRACKED_ALLOC)
@@ -473,7 +470,7 @@ namespace Legion {
 #endif
         void *ptr = legion_alloc_aligned<T, false/*bytes*/>(cnt);
         pointer result = NULL;
-        static_assert(sizeof(result) == sizeof(ptr), "Fuck c++");
+        static_assert(sizeof(result) == sizeof(ptr));
         memcpy(&result, &ptr, sizeof(result));
         return result;
       }

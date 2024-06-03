@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -43,6 +43,22 @@ namespace Realm {
   template <int N, typename T = int> class HierarchicalBitMap;
 
   template <int N, typename T> class SparsityMapPublicImpl;
+
+  /**
+   * SparsityMapUntyped is a public untyped handle that allows
+   * referrence counting of sparsity maps.
+   * */
+  class REALM_PUBLIC_API SparsityMapUntyped {
+  public:
+    typedef ::realm_id_t id_t;
+    id_t id;
+
+    SparsityMapUntyped() = default;
+    SparsityMapUntyped(::realm_id_t id);
+
+    void add_references(unsigned count = 1);
+    void remove_references(unsigned count = 1);
+  };
 
   /**
    * \class SparistyMap

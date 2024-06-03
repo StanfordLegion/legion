@@ -1,5 +1,5 @@
 #=============================================================================
-# Copyright 2023 Kitware, Inc.
+# Copyright 2024 Kitware, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -106,7 +106,6 @@ endif()
 if(LLVM_FOUND AND NOT TARGET LLVM::LLVM)
   add_library(LLVM::LLVM INTERFACE IMPORTED)
   set_target_properties(LLVM::LLVM PROPERTIES
-    INTERFACE_COMPILE_OPTIONS "--std=c++11"
     INTERFACE_INCLUDE_DIRECTORIES "${_LLVM_INCLUDE}"
     INTERFACE_LINK_LIBRARIES "${_LLVM_LIBS}"
   )

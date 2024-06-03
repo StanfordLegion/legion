@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -433,6 +433,10 @@ namespace Realm {
 
     long long time_since_failure() const;
 
+    // used when cfg_am_limit is nonzero
+    bool try_consume_am_credit();
+    void return_am_credits(int count);
+
     IntrusiveListLink<XmitSrcDestPair> xpair_list_link;
     REALM_PMTA_DEFN(XmitSrcDestPair,IntrusiveListLink<XmitSrcDestPair>,xpair_list_link);
     typedef IntrusiveList<XmitSrcDestPair, REALM_PMTA_USE(XmitSrcDestPair,xpair_list_link), DummyLock> XmitPairList;
@@ -490,6 +494,7 @@ namespace Realm {
     atomic<unsigned> comp_reply_count;  // read without mutex
     unsigned comp_reply_capacity;
     // TODO: track packets in flight to avoid clogging?
+    atomic<int> am_credits; // available end-to-end AM credits for this peer
   };
 
   class XmitSrc {

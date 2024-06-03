@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# Copyright 2023 Stanford University
+# Copyright 2024 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -21,7 +21,7 @@ import pygion
 from pygion import task, Region, Reduce
 import numpy
 
-@task(privileges=[Reduce('+')])
+@task(privileges=[Reduce('+')],leaf=True)
 def inc(R, step):
     numpy.add(R.x, step, out=R.x)
     numpy.add(R.y, step, out=R.y)

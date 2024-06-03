@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,7 +23,6 @@
 #include "legion/legion_analysis.h"
 #include "legion/legion_profiling.h"
 #include "legion/garbage_collection.h"
-#include "legion/field_tree.h"
 
 #include <algorithm>
 
@@ -793,10 +792,8 @@ namespace Legion {
       bool is_dominated_tree_only(IndexPartition test, IndexSpace dominator);
       bool is_dominated_tree_only(IndexPartition test,IndexPartition dominator);
     public:
-      bool compute_index_path(IndexSpace parent, IndexSpace child,
-                              std::vector<LegionColor> &path);
-      bool compute_partition_path(IndexSpace parent, IndexPartition child,
-                                  std::vector<LegionColor> &path); 
+      bool has_index_path(IndexSpace parent, IndexSpace child);
+      bool has_partition_path(IndexSpace parent, IndexPartition child);
    private:
       void initialize_path(IndexTreeNode *child,
                            IndexTreeNode *parent,
@@ -1358,7 +1355,7 @@ namespace Legion {
 #endif
                            ApEvent precondition, PredEvent pred_guard,
                            LgEvent unique_event,
-                           CollectiveKind collective = COLLECTIVE_NONE,
+                           CollectiveKind collective, bool record_effect,
                            int priority = 0, bool replay = false) = 0;
       virtual ApEvent issue_copy(Operation *op,
                            const PhysicalTraceInfo &trace_info,
@@ -1371,7 +1368,7 @@ namespace Legion {
 #endif
                            ApEvent precondition, PredEvent pred_guard,
                            LgEvent src_unique, LgEvent dst_unique,
-                           CollectiveKind collective = COLLECTIVE_NONE,
+                           CollectiveKind collective, bool record_effect,
                            int priority = 0, bool replay = false) = 0;
       virtual CopyAcrossUnstructured* create_across_unstructured(
                            const std::map<Reservation,bool> &reservations,
@@ -1456,7 +1453,7 @@ namespace Legion {
 #endif
                                ApEvent precondition, PredEvent pred_guard,
                                LgEvent unique_event, CollectiveKind collective,
-                               int priority, bool replay);
+                               bool record_effect, int priority, bool replay);
       template<int DIM, typename T>
       inline ApEvent issue_copy_internal(RegionTreeForest *forest,Operation*op,
                                const Realm::IndexSpace<DIM,T> &space,
@@ -1470,7 +1467,7 @@ namespace Legion {
 #endif
                                ApEvent precondition, PredEvent pred_guard,
                                LgEvent src_unique, LgEvent dst_unique,
-                               CollectiveKind collective,
+                               CollectiveKind collective, bool record_effect,
                                int priority, bool replay);
       template<int DIM, typename T>
       inline Realm::InstanceLayoutGeneric* create_layout_internal(
@@ -1689,7 +1686,7 @@ namespace Legion {
 #endif
                            ApEvent precondition, PredEvent pred_guard,
                            LgEvent unique_event,
-                           CollectiveKind collective = COLLECTIVE_NONE,
+                           CollectiveKind collective, bool record_effect,
                            int priority = 0, bool replay = false);
       virtual ApEvent issue_copy(Operation *op,
                            const PhysicalTraceInfo &trace_info,
@@ -1702,7 +1699,7 @@ namespace Legion {
 #endif
                            ApEvent precondition, PredEvent pred_guard,
                            LgEvent src_unique, LgEvent dst_unique,
-                           CollectiveKind collective = COLLECTIVE_NONE,
+                           CollectiveKind collective, bool record_effect,
                            int priority = 0, bool replay = false);
       virtual CopyAcrossUnstructured* create_across_unstructured(
                            const std::map<Reservation,bool> &reservations,
@@ -2392,6 +2389,19 @@ namespace Legion {
                                         std::vector<RtEvent> &invalidated,
           std::map<ShardID,LegionMap<Domain,FieldMask> > &remote_shard_rects,
                                         ShardID local_shard) = 0;
+      virtual void find_trace_local_sets_kd_tree(EqKDTree *tree,
+                                        LocalLock *tree_lock,
+                                        const FieldMask &mask,
+                                        unsigned req_index,
+                                        ShardID local_shard,
+          std::map<EquivalenceSet*,unsigned> &current_sets) = 0;
+      virtual void find_shard_trace_local_sets_kd_tree(EqKDTree *tree,
+                                        LocalLock *tree_lock,
+                                        const FieldMask &mask,
+                                        unsigned req_index,
+          std::map<EquivalenceSet*,unsigned> &current_sets,
+          LegionMap<ShardID,FieldMask> &remote_shards,
+                                        ShardID local_shard) = 0;
     public:
       const IndexSpace handle;
       IndexPartNode *const parent;
@@ -2640,7 +2650,7 @@ namespace Legion {
 #endif
                            ApEvent precondition, PredEvent pred_guard,
                            LgEvent unique_event,
-                           CollectiveKind collective = COLLECTIVE_NONE,
+                           CollectiveKind collective, bool record_effect,
                            int priority = 0, bool replay = false);
       virtual ApEvent issue_copy(Operation *op,
                            const PhysicalTraceInfo &trace_info,
@@ -2653,7 +2663,7 @@ namespace Legion {
 #endif
                            ApEvent precondition, PredEvent pred_guard,
                            LgEvent src_unique, LgEvent dst_unique,
-                           CollectiveKind collective = COLLECTIVE_NONE,
+                           CollectiveKind collective, bool record_effect,
                            int priority = 0, bool replay = false);
       virtual CopyAcrossUnstructured* create_across_unstructured(
                            const std::map<Reservation,bool> &reservations,
@@ -2730,6 +2740,19 @@ namespace Legion {
                                         const FieldMask &mask,
                                         std::vector<RtEvent> &invalidated,
           std::map<ShardID,LegionMap<Domain,FieldMask> > &remote_shard_rects,
+                                        ShardID local_shard);
+      virtual void find_trace_local_sets_kd_tree(EqKDTree *tree,
+                                        LocalLock *tree_lock,
+                                        const FieldMask &mask,
+                                        unsigned req_index,
+                                        ShardID local_shard,
+          std::map<EquivalenceSet*,unsigned> &current_sets);
+      virtual void find_shard_trace_local_sets_kd_tree(EqKDTree *tree,
+                                        LocalLock *tree_lock,
+                                        const FieldMask &mask,
+                                        unsigned req_index,
+          std::map<EquivalenceSet*,unsigned> &current_sets,
+          LegionMap<ShardID,FieldMask> &remote_shards,
                                         ShardID local_shard);
     public:
       bool contains_point(const Point<DIM,T> &point);
@@ -3233,6 +3256,13 @@ namespace Legion {
       virtual IndexSpaceExpression* create_from_rectangles(
                           RegionTreeForest *forest,
                           const std::vector<Domain> &rectangles) const;
+      virtual void find_trace_local_sets(const Rect<DIM,T> &rect,
+          const FieldMask &mask, unsigned req_index, ShardID local_shard,
+          std::map<EquivalenceSet*,unsigned> &current_sets) const = 0;
+      virtual void find_shard_trace_local_sets(const Rect<DIM,T> &rect,
+          const FieldMask &mask, unsigned req_index,
+          std::map<EquivalenceSet*,unsigned> &current_sets,
+          LegionMap<ShardID,FieldMask> &remote_shards, ShardID local_shard) = 0;
     public:
       const Rect<DIM,T> bounds;
     };
@@ -3299,6 +3329,13 @@ namespace Legion {
           ShardID local_shard = 0);
       virtual unsigned cancel_subscription(EqSetTracker *tracker,
                                  AddressSpaceID space, const FieldMask &mask);
+      virtual void find_trace_local_sets(const Rect<DIM,T> &rect,
+          const FieldMask &mask, unsigned req_index, ShardID local_shard,
+          std::map<EquivalenceSet*,unsigned> &current_sets) const;
+      virtual void find_shard_trace_local_sets(const Rect<DIM,T> &rect,
+          const FieldMask &mask, unsigned req_index,
+          std::map<EquivalenceSet*,unsigned> &current_sets,
+          LegionMap<ShardID,FieldMask> &remote_shards, ShardID local_shard);
     public:
       void find_all_previous_sets(FieldMask mask,
          std::map<EquivalenceSet*,LegionMap<Domain,FieldMask> > &creation_srcs);
@@ -3417,6 +3454,13 @@ namespace Legion {
           ShardID local_shard = 0);
       virtual unsigned cancel_subscription(EqSetTracker *tracker,
                                AddressSpaceID space, const FieldMask &mask);
+      virtual void find_trace_local_sets(const Rect<DIM,T> &rect,
+          const FieldMask &mask, unsigned req_index, ShardID local_shard,
+          std::map<EquivalenceSet*,unsigned> &current_sets) const;
+      virtual void find_shard_trace_local_sets(const Rect<DIM,T> &rect,
+          const FieldMask &mask, unsigned req_index,
+          std::map<EquivalenceSet*,unsigned> &current_sets,
+          LegionMap<ShardID,FieldMask> &remote_shards, ShardID local_shard);
     protected:
       std::vector<EqKDTreeT<DIM,T>*> children;
     };
@@ -3485,6 +3529,13 @@ namespace Legion {
           ShardID local_shard = 0);
       virtual unsigned cancel_subscription(EqSetTracker *tracker,
                                AddressSpaceID space, const FieldMask &mask);
+      virtual void find_trace_local_sets(const Rect<DIM,T> &rect,
+          const FieldMask &mask, unsigned req_index, ShardID local_shard,
+          std::map<EquivalenceSet*,unsigned> &current_sets) const;
+      virtual void find_shard_trace_local_sets(const Rect<DIM,T> &rect,
+          const FieldMask &mask, unsigned req_index,
+          std::map<EquivalenceSet*,unsigned> &current_sets,
+          LegionMap<ShardID,FieldMask> &remote_shards, ShardID local_shard);
     protected:
       // Make these methods virtual so they can be overloaded by the sparse
       // version of this class that inherits from this class as well
@@ -4363,6 +4414,7 @@ namespace Legion {
             const void *buffer, size_t size, bool is_mutable, bool local_only);
       bool retrieve_semantic_information(SemanticTag tag,
            const void *&result, size_t &size, bool can_fail, bool wait_until);
+      virtual AddressSpaceID find_semantic_owner(void) const = 0;
       virtual void send_semantic_request(AddressSpaceID target, 
         SemanticTag tag, bool can_fail, bool wait_until, RtUserEvent ready) = 0;
       virtual void send_semantic_info(AddressSpaceID target, SemanticTag tag,
@@ -4378,11 +4430,9 @@ namespace Legion {
                                  FieldMask &unopened_field_mask,
                                  FieldMask &refinement_mask,
                                  LogicalAnalysis &logical_analysis,
-                                 FieldMaskSet<RefinementOp> &refinements,
+                                 FieldMaskSet<RefinementOp,
+                                  UNTRACKED_ALLOC,true> &refinements,
                                  const bool root_node);
-      void register_local_user(LogicalState &state,
-                               LogicalUser &user,
-                               const FieldMask &user_mask);
       void add_open_field_state(LogicalState &state,
                                 const LogicalUser &user,
                                 const FieldMask &open_mask,
@@ -4399,10 +4449,11 @@ namespace Legion {
                                     OrderedFieldMaskChildren &children,
                                     LogicalRegion privilege_root,
                                     RegionTreeNode *path_node,
-                                    RegionTreeNode *next_child,
-                                    FieldMask &open_below,
                                     LogicalAnalysis &analysis,
-                                    const bool filter_next);
+                                    FieldMask &open_below,
+                                    RegionTreeNode *next_child = NULL,
+                                    FieldMask *next_child_fields = NULL,
+                                    const bool filter_next_child = false);
       void close_logical_node(const LogicalUser &user,
                               const FieldMask &closing_mask,
                               LogicalRegion privilege_root,
@@ -4422,8 +4473,6 @@ namespace Legion {
                                          LogicalRegion privilege_root,
                                          LogicalAnalysis &logical_analysis);
       void merge_new_field_state(LogicalState &state, FieldState &new_state);
-      void merge_new_field_states(LogicalState &state, 
-                                  LegionDeque<FieldState> &new_states);
       void filter_prev_epoch_users(LogicalState &state, const FieldMask &mask);
       void filter_curr_epoch_users(LogicalState &state, const FieldMask &mask);
       void report_uninitialized_usage(Operation *op, unsigned index,
@@ -4455,7 +4504,6 @@ namespace Legion {
       virtual RefinementTracker* create_refinement_tracker(void) = 0;
       virtual bool visit_node(PathTraverser *traverser) = 0;
       virtual bool visit_node(NodeTraverser *traverser) = 0;
-      virtual AddressSpaceID get_owner_space(void) const = 0;
     public:
       virtual bool are_children_disjoint(const LegionColor c1, 
                                          const LegionColor c2) = 0;
@@ -4549,7 +4597,7 @@ namespace Legion {
       void add_child(PartitionNode *child);
       void remove_child(const LegionColor p);
       void add_tracker(PartitionTracker *tracker);
-      void initialize_refined_fields(ContextID ctx, const FieldMask &m);
+      void initialize_no_refine_fields(ContextID ctx, const FieldMask &m);
     public:
       virtual unsigned get_depth(void) const;
       virtual LegionColor get_color(void) const;
@@ -4568,8 +4616,6 @@ namespace Legion {
       virtual RegionNode* as_region_node(void) const;
       virtual PartitionNode* as_partition_node(void) const;
 #endif
-      virtual AddressSpaceID get_owner_space(void) const;
-      static AddressSpaceID get_owner_space(LogicalRegion handle, Runtime *rt);
       virtual bool visit_node(PathTraverser *traverser);
       virtual bool visit_node(NodeTraverser *traverser);
       virtual bool is_complete(void);
@@ -4579,6 +4625,7 @@ namespace Legion {
       static void handle_node_creation(RegionTreeForest *context,
                             Deserializer &derez, AddressSpaceID source);
     public:
+      virtual AddressSpaceID find_semantic_owner(void) const;
       virtual void send_semantic_request(AddressSpaceID target, 
            SemanticTag tag, bool can_fail, bool wait_until, RtUserEvent ready);
       virtual void send_semantic_info(AddressSpaceID target, SemanticTag tag,
@@ -4689,9 +4736,6 @@ namespace Legion {
       virtual RegionNode* as_region_node(void) const;
       virtual PartitionNode* as_partition_node(void) const;
 #endif
-      virtual AddressSpaceID get_owner_space(void) const;
-      static AddressSpaceID get_owner_space(LogicalPartition handle, 
-                                            Runtime *runtime);
       virtual bool visit_node(PathTraverser *traverser);
       virtual bool visit_node(NodeTraverser *traverser);
       virtual bool is_complete(void);
@@ -4699,6 +4743,7 @@ namespace Legion {
       virtual size_t get_num_children(void) const;
       virtual void send_node(Serializer &rez, AddressSpaceID target);
     public:
+      virtual AddressSpaceID find_semantic_owner(void) const;
       virtual void send_semantic_request(AddressSpaceID target, 
            SemanticTag tag, bool can_fail, bool wait_until, RtUserEvent ready);
       virtual void send_semantic_info(AddressSpaceID target, SemanticTag tag,

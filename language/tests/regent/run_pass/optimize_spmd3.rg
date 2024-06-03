@@ -1,4 +1,4 @@
--- Copyright 2023 Stanford University
+-- Copyright 2024 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -12,12 +12,6 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- runs-with:
--- [
---   ["-ll:cpu", "4", "-fflow-spmd", "1"],
---   ["-ll:cpu", "2", "-fflow-spmd", "1", "-fflow-spmd-shardsize", "2"]
--- ]
-
 import "regent"
 
 -- This tests the SPMD optimization of the compiler with:
@@ -27,6 +21,7 @@ import "regent"
 --   * intra-loop region dependencies
 
 local c = regentlib.c
+local format = require("std/format")
 
 struct t {
   a : int,
@@ -65,6 +60,7 @@ where reads(r.c), reads writes(r.b) do
   end
 end
 
+__demand(__replicable)
 task main()
   var r = region(ispace(ptr, 4), t)
   var x0 = dynamic_cast(ptr(t, r), 0)
@@ -103,12 +99,11 @@ task main()
   end
 
   for x in r do
-    c.printf("x %d %d %d\n", x.a, x.b, x.c)
+    format.println("x {} {} {}", x.a, x.b, x.c)
   end
 
   var pieces = 4
 
-  __demand(__spmd)
   for t = 0, 3 do
     for i = 0, pieces do
       inc_ba(p[i])
@@ -123,7 +118,7 @@ task main()
   end
 
   for x in r do
-    c.printf("x %d %d %d\n", x.a, x.b, x.c)
+    format.println("x {} {} {}", x.a, x.b, x.c)
   end
 
   regentlib.assert(x0.a ==  9905, "test failed")

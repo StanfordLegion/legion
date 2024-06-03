@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University
+/* Copyright 2024 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -641,7 +641,7 @@ void top_level_task(const Task *task,
 					.add_flags(NO_ACCESS_FLAG));
       }
 #ifdef USE_SINGLE_TASK_LAUNCHES_IN_MUST_EPOCH
-      must.add_single_task(DomainPoint::from_point<1>(shard), launcher);
+      must.add_single_task(DomainPoint(Point<1>(shard)), launcher);
 #else
       must.add_index_task(launcher);
 #endif
@@ -656,7 +656,7 @@ void top_level_task(const Task *task,
     // make sure all shard returned successful results
     bool ok = true;
     for(int shard = 0; shard < num_shards; shard++) {
-      bool shard_ok = fm.get_result<bool>(DomainPoint::from_point<1>(shard));
+      bool shard_ok = fm.get_result<bool>(DomainPoint(Point<1>(shard)));
       if(!shard_ok) {
 	log_app.print() << "error returned from shard " << shard;
 	ok = false;
@@ -742,7 +742,7 @@ bool spmd_main_task(const Task *task,
 {
   const SpmdMainArgs& args = *(const SpmdMainArgs *)(task->args);
 
-  int shard = task->index_point.get_point<1>();
+  int shard = task->index_point[0];
 
   log_app.print() << "in spmd_main_task, shard=" << shard << ", proc=" << runtime->get_executing_processor(ctx) << ", regions=" << regions.size();
 
@@ -943,7 +943,7 @@ bool spmd_main_task(const Task *task,
     iter++;
 
     if(args.use_tracing)
-      runtime->begin_trace(ctx, TRACE_ID_CG_ITER);
+      runtime->begin_trace(ctx, TRACE_ID_CG_ITER, true/*logical only*/);
 
     // compute Ap = A * p
     for(std::map<Point<3>, BlockMetadata>::iterator it = myblocks.begin();

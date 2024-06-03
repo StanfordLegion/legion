@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University
+/* Copyright 2024 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -969,7 +969,7 @@ void generate_mesh_raw(
 
 #define SPMD_SHARD_USE_IO_PROC 0
 
-static LegionRuntime::Logger::Category log_pennant("pennant");
+static Logger log_pennant("pennant");
 
 class PennantMapper : public DefaultMapper
 {

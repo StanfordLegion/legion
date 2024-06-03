@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -1789,7 +1789,9 @@ namespace Realm {
       const PieceLookup::Instruction *i = start_inst;
       while(true) {
 #ifdef DEBUG_REALM
+#ifndef __HIP_DEVICE_COMPILE__
 	assert(i != 0);
+#endif
 #endif
 	if(i->opcode() == PieceLookup::Opcodes::OP_AFFINE_PIECE) {
 	  const PieceLookup::AffinePiece<N,T> *ap =

@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------#
-# Copyright 2023 Kitware, Inc.
+# Copyright 2024 Kitware, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -51,7 +51,7 @@ endif()
 if(Kokkos_ENABLE_HIP)
   # have to use Kokkos' choice of compiler for cuda-related options to work
   set(CMAKE_CXX_COMPILER ${KOKKOS_CXX_COMPILER})
-  target_compile_options(kokkos_saxpy PRIVATE "${kokkos_compile_options}-std=c++17")
+  target_compile_options(kokkos_saxpy PRIVATE "${kokkos_compile_options}")
 endif()
 
 if(Legion_ENABLE_TESTING)

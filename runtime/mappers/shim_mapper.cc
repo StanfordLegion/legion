@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -169,11 +169,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::string& ShimMapper::Task::get_provenance_string(bool human) const
+    const std::string_view& ShimMapper::Task::get_provenance_string(
+                                                               bool human) const
     //--------------------------------------------------------------------------
     {
       assert(false);
-      return *(new std::string());
+      return *(new std::string_view());
     }
 
     //--------------------------------------------------------------------------
@@ -302,12 +303,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::string& ShimMapper::Inline::get_provenance_string(
+    const std::string_view& ShimMapper::Inline::get_provenance_string(
                                                                bool human) const
     //--------------------------------------------------------------------------
     {
       assert(false);
-      return *(new std::string());
+      return *(new std::string_view());
     }
     
     //--------------------------------------------------------------------------
@@ -392,11 +393,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::string& ShimMapper::Copy::get_provenance_string(bool human) const
+    const std::string_view& ShimMapper::Copy::get_provenance_string(
+                                                               bool human) const
     //--------------------------------------------------------------------------
     {
       assert(false);
-      return *(new std::string());
+      return *(new std::string_view());
     }
 
     //--------------------------------------------------------------------------

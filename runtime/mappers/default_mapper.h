@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -93,12 +93,13 @@ namespace Legion {
       public:
         VariantInfo(void)
           : variant(0), tight_bound(false), 
-            is_inner(false), is_replicable(false) { }
+            is_inner(false), is_leaf(false), is_replicable(false) { }
       public:
         VariantID            variant;
         Processor::Kind      proc_kind;
         bool                 tight_bound;
         bool                 is_inner;
+        bool                 is_leaf;
         bool                 is_replicable;
       };
       enum CachedMappingPolicy
@@ -472,6 +473,29 @@ namespace Legion {
       MemoryConstraint find_memory_constraint(const MapperContext ctx,
                                               const Task& task, VariantID vid,
                                               unsigned index);
+    private:
+      void partition_task_layout_constraint_sets(
+			   const MapperContext ctx,
+			   const unsigned index,
+			   std::set<FieldID> &needed_fields,
+			   const TaskLayoutConstraintSet &layout_constraints,
+		           std::vector<std::vector<FieldID> >&field_arrays,
+			   std::vector<std::vector<FieldID> >&leftover_fields,
+			   std::vector<LayoutConstraintID> &field_layout_ids,
+		           std::vector<LayoutConstraintID> &non_field_layout_ids);
+      bool create_instances_from_partitioned_task_layout_constraint_set(
+			   const MapperContext ctx,
+			   const Memory target_memory,
+			   const std::vector<std::vector<FieldID> > &field_arrays,
+			   const std::vector<LayoutConstraintID> &layout_ids,
+			   const unsigned int layout_ids_size,
+			   std::vector<PhysicalInstance> &instances,
+			   const RegionRequirement &req,
+			   const bool force_new_instances,
+			   size_t *footprint,
+			   const bool is_field_constraints,
+			   const bool all_fields_opts=false);
+
     protected: // static helper methods
       static const char* create_default_name(Processor p);
       template<int DIM>
@@ -479,14 +503,6 @@ namespace Legion {
                             const DomainT<DIM,coord_t> &point_space,
                             const std::vector<Processor> &targets,
                             const Point<DIM,coord_t> &blocking,
-                            bool recurse, bool stealable,
-                            std::vector<TaskSlice> &slices);
-      // For some backwards compatibility with the old interface
-      template<int DIM>
-      static void default_decompose_points(
-                            const LegionRuntime::Arrays::Rect<DIM> &rect,
-                            const std::vector<Processor> &targets,
-                            const LegionRuntime::Arrays::Point<DIM> &blocking,
                             bool recurse, bool stealable,
                             std::vector<TaskSlice> &slices);
       template<int DIM>

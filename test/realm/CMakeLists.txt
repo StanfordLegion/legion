@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------#
-# Copyright 2023 Stanford University
+# Copyright 2024 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -53,6 +53,7 @@ list(APPEND REALM_TESTS
   multiaffine
   machine_config
   rsrv_acquire_poisoned
+  inst_chain_redistrict
   )
 
 if(Legion_USE_CUDA)
@@ -79,8 +80,7 @@ if(Legion_USE_HIP)
   # some tests have HIP source files too
   set(HIPSRC_memspeed memspeed_gpu.cu)
   set(HIPSRC_simple_reduce simple_reduce_gpu.cu)
-  # FIXME: https://github.com/StanfordLegion/legion/issues/1476
-  # set(HIPSRC_multiaffine multiaffine_gpu.cu)
+  set(HIPSRC_multiaffine multiaffine_gpu.cu)
 
   # FIXME: https://github.com/StanfordLegion/legion/issues/1308
   # list(APPEND REALM_TESTS cuda_arrays)

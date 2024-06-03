@@ -1,4 +1,4 @@
--- Copyright 2023 Stanford University, Los Alamos National Laboratory
+-- Copyright 2024 Stanford University, Los Alamos National Laboratory
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -86,48 +86,47 @@ local DriverAPI = {
 
 local RuntimeAPI = false
 do
-  if not terralib.cudacompile then
-    function cudahelper.check_gpu_available()
+  local function detect_cuda()
+    if not terralib.cudacompile then
       return false, "Terra is built without CUDA support"
     end
-  else
-    -- Try to load the CUDA runtime header
-    pcall(function() RuntimeAPI = terralib.includec("cuda_runtime.h") end)
 
-    if RuntimeAPI == nil then
-      function cudahelper.check_gpu_available()
-        return false, "cuda_runtime.h does not exist in INCLUDE_PATH"
-      end
-    elseif base.config["offline"] or base.config["gpu-offline"] then
-      function cudahelper.check_gpu_available()
-        return true
-      end
-    else
-      local dlfcn = terralib.includec("dlfcn.h")
-      local terra has_symbol(symbol : rawstring)
-        var lib = dlfcn.dlopen([&int8](0), dlfcn.RTLD_LAZY)
-        var has_symbol = dlfcn.dlsym(lib, symbol) ~= [&opaque](0)
-        dlfcn.dlclose(lib)
-        return has_symbol
-      end
-
-      if has_symbol("cuInit") then
-        local r = DriverAPI.cuInit(0)
-        if r == 0 then
-          function cudahelper.check_gpu_available()
-            return true
-          end
-        else
-          function cudahelper.check_gpu_available()
-            return false, "calling cuInit(0) failed for some reason (CUDA devices might not exist)"
-          end
-        end
-      else
-        function cudahelper.check_gpu_available()
-          return false, "the cuInit function is missing (Regent might have been installed without CUDA support)"
-        end
-      end
+    if base.c.REGENT_USE_CUDA ~= 1 then
+      return false, "Legion is built without CUDA support"
     end
+
+    -- Try to load the CUDA runtime header
+    local ok = pcall(function() RuntimeAPI = terralib.includec("cuda_runtime.h") end)
+    if not ok then
+      return false, "cuda_runtime.h does not exist in INCLUDE_PATH"
+    end
+
+    if base.config["offline"] or base.config["gpu-offline"] then
+      return true
+    end
+
+    -- Check if CUDA can actually be initialized
+    local dlfcn = terralib.includec("dlfcn.h")
+    local terra has_symbol(symbol : rawstring)
+      var lib = dlfcn.dlopen([&int8](0), dlfcn.RTLD_LAZY)
+      var has_symbol = dlfcn.dlsym(lib, symbol) ~= [&opaque](0)
+      dlfcn.dlclose(lib)
+      return has_symbol
+    end
+
+    if not has_symbol("cuInit") then
+      return false, "the cuInit function is missing (may indicate a broken build)"
+    end
+
+    if DriverAPI.cuInit(0) ~= 0 then
+      return false, "calling cuInit(0) failed for some reason (CUDA devices might not exist)"
+    end
+
+    return true
+  end
+  local enabled, message = detect_cuda()
+  function cudahelper.check_gpu_available()
+    return enabled, message
   end
 end
 

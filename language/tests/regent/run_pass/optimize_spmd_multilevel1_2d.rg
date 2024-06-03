@@ -1,4 +1,4 @@
--- Copyright 2023 Stanford University
+-- Copyright 2024 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -11,11 +11,6 @@
 -- WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
-
--- runs-with:
--- [
---   ["-ll:cpu", "2", "-fflow-spmd", "1"]
--- ]
 
 import "regent"
 
@@ -38,6 +33,7 @@ local x0y1 = terralib.constant(`int2d { __ptr = regentlib.__int2d { 0, 1 } })
 local x1y0 = terralib.constant(`int2d { __ptr = regentlib.__int2d { 1, 0 } })
 local x1y1 = terralib.constant(`int2d { __ptr = regentlib.__int2d { 1, 1 } })
 
+__demand(__replicable)
 task main()
   var grid = region(ispace(int2d, { 4, 4 }), int)
   fill(grid, 0)
@@ -56,7 +52,6 @@ task main()
   var T = partition(equal, T_all, colors)
   var B = partition(equal, B_all, colors)
 
-  __demand(__spmd)
   for t = 0, 3 do
     for i in colors do
       f(L[i], R[i])

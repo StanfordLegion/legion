@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -47,7 +47,7 @@ namespace Legion {
       static inline T* convert(void *p)
       {
         T *ptr = NULL;
-        static_assert(sizeof(ptr) == sizeof(p), "Fuck C++");
+        static_assert(sizeof(ptr) == sizeof(p));
         memcpy(&ptr, &p, sizeof(p));
         return ptr;
       }
@@ -65,18 +65,18 @@ namespace Legion {
       static inline T* convert(void *p, size_t off)
       {
         uint8_t *p1 = NULL;
-        static_assert(sizeof(p1) == sizeof(p), "Fuck C++");
+        static_assert(sizeof(p1) == sizeof(p));
         memcpy(&p1, &p, sizeof(p));
         p1 = p1 - off;
         T *p2 = NULL;
-        static_assert(sizeof(p1) == sizeof(p2), "Fuck C++");
+        static_assert(sizeof(p1) == sizeof(p2));
         memcpy(&p2, &p1, sizeof(p1));
         return p2;
       }
       static inline size_t align(void *p)
       {
         uintptr_t ptr;
-        static_assert(sizeof(ptr) == sizeof(p), "Fuck C++");
+        static_assert(sizeof(ptr) == sizeof(p));
         memcpy(&ptr, &p, sizeof(ptr));
         return ptr % ALIGNMENT;
       }
@@ -125,7 +125,7 @@ namespace Legion {
         memcpy(buffer, (void*)&rhs, sizeof(rhs));
         return *this;
       }
-      static_assert(sizeof(T1) == sizeof(T2), "Sizes must match");
+      static_assert(sizeof(T1) == sizeof(T2));
       uint8_t buffer[sizeof(T1)];
     };
   }; // TypePunning

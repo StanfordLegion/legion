@@ -1,4 +1,4 @@
--- Copyright 2023 Stanford University
+-- Copyright 2024 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -12,18 +12,13 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- runs-with:
--- [
---   ["-ll:cpu", "4", "-fflow-spmd", "1"],
---   ["-ll:cpu", "2", "-fflow-spmd", "1", "-fflow-spmd-shardsize", "2"]
--- ]
-
 import "regent"
 
 -- This tests the SPMD optimization of the compiler with:
 --   * multiple fields which require copies
 
 local c = regentlib.c
+local format = require("std/format")
 
 struct t {
   a1 : int,
@@ -74,6 +69,7 @@ where reads(r.{c1, c2}), reads writes(r.{b1, b2}) do
   end
 end
 
+__demand(__replicable)
 task main()
   var r = region(ispace(ptr, 4), t)
   var x0 = dynamic_cast(ptr(t, r), 0)
@@ -115,7 +111,7 @@ task main()
   end
 
   for x in r do
-    c.printf("x %d %d %d %d %d %d\n", x.a1, x.a2, x.b1, x.b2, x.c1, x.c2)
+    format.println("x {} {} {} {} {} {}", x.a1, x.a2, x.b1, x.b2, x.c1, x.c2)
   end
 
   var pieces = 4
@@ -124,7 +120,6 @@ task main()
     inc_ba(p[i])
   end
 
-  __demand(__spmd)
   for t = 0, 3 do
     for i = 0, pieces do
       avg_ac(p[i], q[i])
@@ -159,7 +154,7 @@ task main()
   end
 
   for x in r do
-    c.printf("x %d %d %d %d %d %d\n", x.a1, x.a2, x.b1, x.b2, x.c1, x.c2)
+    format.println("x {} {} {} {} {} {}", x.a1, x.a2, x.b1, x.b2, x.c1, x.c2)
   end
 
   regentlib.assert(x0.a1 ==  9550, "test failed")

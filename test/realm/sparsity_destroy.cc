@@ -17,8 +17,6 @@
 
 using namespace Realm;
 
-#define REALM_SPARSITY_DELETES
-
 Logger log_app("app");
 
 enum
@@ -37,12 +35,21 @@ void node_task_0(const void *args, size_t arglen, const void *userdata, size_t u
                  Processor p)
 {
   TaskArgs &task_args = *(TaskArgs *)args;
+  SparsityMapUntyped handle(task_args.sparsity_map.id);
+
   // add remote reference
-  task_args.sparsity_map.add_references(2);
+  handle.add_references(1);
   // remove remote reference
-  task_args.sparsity_map.remove_references(2);
+  handle.remove_references(2);
   // deferred remote destroy
-  task_args.sparsity_map.destroy(task_args.wait_on);
+
+  SparsityMap<1> local_sparsity =
+      SparsityMap<1>::construct({Rect<1>(Point<1>(0), Point<1>(50000))}, true, true);
+  local_sparsity.add_references();
+  local_sparsity.destroy(task_args.wait_on);
+
+  task_args.wait_on.wait();
+  assert(local_sparsity.impl()->is_valid() == 0);
 }
 
 void main_task(const void *args, size_t arglen, const void *userdata, size_t userlen,
@@ -91,7 +98,6 @@ void main_task(const void *args, size_t arglen, const void *userdata, size_t use
   Event::merge_events(events).wait();
 
   int errors = 0;
-#ifdef REALM_SPARSITY_DELETES
   for(auto &sparsity_map : sparsity_maps) {
     auto *impl = sparsity_map.impl();
     assert(impl);
@@ -104,7 +110,6 @@ void main_task(const void *args, size_t arglen, const void *userdata, size_t use
   if(errors > 0) {
     log_app.error() << "Test failed with erros=" << errors;
   }
-#endif
 
   usleep(100000);
   Runtime::get_runtime().shutdown(Processor::get_current_finish_event(), errors ? 1 : 0);
@@ -122,6 +127,9 @@ int main(int argc, char **argv)
                                    CodeDescriptor(node_task_0), ProfilingRequestSet(), 0,
                                    0)
       .wait();
+
+  ModuleConfig *core = Runtime::get_runtime().get_module_config("core");
+  assert(core->set_property("enable_sparsity_refcount", 1));
 
   Processor p = Machine::ProcessorQuery(Machine::get_machine())
                     .only_kind(Processor::LOC_PROC)

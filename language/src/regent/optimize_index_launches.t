@@ -1,4 +1,4 @@
--- Copyright 2023 Stanford University
+-- Copyright 2024 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -937,7 +937,12 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
     end
 
     if call_stat == nil then
-      if stat.value and not analyze_is_loop_invariant(loop_cx, stat.value) then
+      -- LICM interferes with optimizing some index launches so we
+      -- sometimes need to disable it.
+      if stat.value and
+        (not std.config["index-launch-licm"] or
+           not analyze_is_loop_invariant(loop_cx, stat.value))
+      then
         loop_cx:add_loop_variable(stat.symbol)
         loop_vars:insert(stat)
       end
@@ -1616,6 +1621,10 @@ end
 
 local function licm(cx, node)
   local hoisted = terralib.newlist()
+
+  if not std.config["index-launch-licm"] then
+    return node, hoisted
+  end
 
   if not maybe_index_launch(node) then
     return node, hoisted

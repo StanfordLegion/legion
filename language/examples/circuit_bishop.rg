@@ -1,4 +1,4 @@
--- Copyright 2023 Stanford University
+-- Copyright 2024 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -625,7 +625,7 @@ task toplevel()
 
   __fence(__execution, __block)
   var ts_start = c.legion_get_current_time_in_micros()
-  __demand(__spmd, __trace)
+  __demand(__trace)
   for j = 0, num_loops do
     for i = 0, num_pieces do
       calculate_new_currents(steps, rp_private[i], rp_shared[i], rp_ghost[i], rp_wires[i])

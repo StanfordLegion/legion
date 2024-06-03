@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -89,7 +89,12 @@ namespace Realm {
 				   const ExternalInstanceResource *res,
 				   const ProfilingRequestSet& prs,
 				   Event wait_on);
-      
+
+      // TODO(apryakhin@): Add deferred execution
+      Event redistrict(RegionInstance *instances, InstanceLayoutGeneric **layouts,
+                       size_t num_layouts, const ProfilingRequestSet *prs,
+                       Event wait_on = Event::NO_EVENT);
+
       // the life cycle of an instance is defined in part by when the
       //  allocation and deallocation of storage occurs, but that is managed
       //  by the memory, which uses these callbacks to notify us

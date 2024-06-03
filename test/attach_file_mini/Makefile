@@ -1,4 +1,4 @@
-# Copyright 2023 Stanford University
+# Copyright 2024 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -39,8 +39,6 @@ CC_FLAGS	?=
 NVCC_FLAGS	?=
 GASNET_FLAGS	?=
 LD_FLAGS	?=
-# For Point and Rect typedefs
-CC_FLAGS	+= -std=c++11
 
 ###########################################################################
 #

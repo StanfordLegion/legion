@@ -1,4 +1,4 @@
--- Copyright 2023 Stanford University
+-- Copyright 2024 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -15,20 +15,20 @@
 -- runs-with:
 -- [
 --   ["-ll:cpu", "4"],
---   ["-ll:cpu", "2", "-fflow-spmd", "1", "-fflow-spmd-shardsize", "2", "-ftrace", "0", "-freplicable", "0"],
+--   ["-ll:cpu", "2", "-ftrace", "0", "-freplicable", "0"],
 --   ["-ll:cpu", "4", "-dm:memoize", "-ffuture", "0"],
---   ["-ll:cpu", "2", "-fflow-spmd", "1", "-fflow-spmd-shardsize", "2", "-dm:memoize", "-freplicable", "0"],
---   ["-ll:cpu", "5", "-fflow-spmd", "1", "-fflow-spmd-shardsize", "5", "-p", "5", "-freplicable", "0"]
+--   ["-ll:cpu", "2", "-dm:memoize", "-freplicable", "0"],
+--   ["-ll:cpu", "5", "-p", "5", "-freplicable", "0"]
 -- ]
 
 import "regent"
 
 local format = require("std/format")
+local launcher = require("std/launcher")
 
 local use_python_main = rawget(_G, "circuit_use_python_main") == true
 
 -- Compile and link circuit_mapper.cc
-local launcher = require("launcher")
 local cmapper = launcher.build_library("circuit_mapper")
 
 local cconfig
@@ -737,7 +737,6 @@ task toplevel()
 
   var rp_ghost = image(aliased, all_shared, rp_ghost_ranges, ghost_ranges.rect)
 
-  __demand(__spmd)
   for j = 0, 1 do
     for i in launch_domain do
       init_pointers(rp_private[i], rp_shared[i], rp_ghost[i], rp_wires[i])
@@ -750,7 +749,7 @@ task toplevel()
   var num_loops = conf.num_loops + 2*prune
 
   __fence(__execution, __block)
-  __demand(__spmd, __trace)
+  __demand(__trace)
   for j = 0, num_loops do
     for i in launch_domain do
       calculate_new_currents(j == prune, steps, rp_private[i], rp_shared[i], rp_ghost[i], rp_wires[i], rp_times[i])

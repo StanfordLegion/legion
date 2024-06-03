@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -415,6 +415,7 @@ namespace Realm {
 #else
     , cfg_use_rma_put(true)
 #endif
+    , cfg_am_limit(0)
     , internal(nullptr)
   {}
 
@@ -500,7 +501,8 @@ namespace Realm {
       .add_option_int("-gex:obcount", cfg_outbuf_count)
       .add_option_int_units("-gex:obsize", cfg_outbuf_size)
       .add_option_int("-gex:forcerma", cfg_force_rma)
-      .add_option_int("-gex:rmaput", cfg_use_rma_put);
+      .add_option_int("-gex:rmaput", cfg_use_rma_put)
+      .add_option_int("-gex:amlimit", cfg_am_limit);
     size_t deprecated_gsize = 0;
     cp.add_option_int_units("-ll:gsize", deprecated_gsize, 'm');
 

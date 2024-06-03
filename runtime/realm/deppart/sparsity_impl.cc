@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -29,7 +29,23 @@ namespace Realm {
   extern Logger log_part;
   extern Logger log_dpops;
 
-#define REALM_SPARSITY_DELETES
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class SparsityMapUntyped
+
+  SparsityMapUntyped::SparsityMapUntyped(::realm_id_t _id)
+    : id(_id)
+  {}
+
+  void SparsityMapUntyped::add_references(unsigned count)
+  {
+    SparsityMapRefCounter(id).add_references(count);
+  }
+
+  void SparsityMapUntyped::remove_references(unsigned count)
+  {
+    SparsityMapRefCounter(id).remove_references(count);
+  }
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -93,6 +109,31 @@ namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
   //
+  // class DeferredDestroy
+
+  class DeferredDestroy : public EventWaiter {
+  public:
+    typedef ::realm_id_t id_t;
+    DeferredDestroy(id_t id)
+      : sparsity_map_id(id)
+    {}
+
+    virtual void event_triggered(bool poisoned, TimeLimit work_until)
+    {
+      if(NodeID(ID(sparsity_map_id).sparsity_creator_node()) == Network::my_node_id) {
+        get_runtime()->get_sparsity_impl(sparsity_map_id)->destroy();
+      }
+      delete this;
+    }
+
+    virtual void print(std::ostream &os) const {}
+    virtual Event get_finish_event(void) const { return Event::NO_EVENT; }
+
+    id_t sparsity_map_id;
+  };
+
+  ////////////////////////////////////////////////////////////////////////
+  //
   // class SparsityMap<N,T>
 
   // looks up the public subset of the implementation object
@@ -112,7 +153,7 @@ namespace Realm {
       if(wait_on.has_triggered()) {
         wrapper->destroy();
       } else {
-        wrapper->deferred_destroy.defer(wrapper, wait_on);
+        EventImpl::add_waiter(wait_on, new DeferredDestroy(id));
       }
     } else {
       ActiveMessage<typename SparsityMapRefCounter::SparsityMapRemoveReferencesMessage>
@@ -207,7 +248,10 @@ namespace Realm {
     , type_tag(0)
     , map_impl(0)
     , references(0)
-  {}
+  {
+    assert(get_runtime()->get_module_config("core")->get_property(
+        "enable_sparsity_refcount", need_refcount));
+  }
 
   SparsityMapImplWrapper::~SparsityMapImplWrapper(void)
   {
@@ -226,66 +270,27 @@ namespace Realm {
 
   void SparsityMapImplWrapper::add_references(unsigned count)
   {
-    AutoLock<> al(mutex);
-    if(map_impl.load() != 0) {
-      references += count;
+    if(need_refcount) {
+      references.fetch_add_acqrel(count);
     }
   }
 
   void SparsityMapImplWrapper::remove_references(unsigned count)
   {
-    AutoLock<> al(mutex);
-    if(map_impl.load() == 0) {
-      return;
+    if(need_refcount) {
+      if(references.fetch_sub_acqrel(count) == count) {
+        void *impl = map_impl.load();
+        if(impl != nullptr) {
+          assert(map_deleter);
+          (*map_deleter)(impl);
+          map_impl.store(0);
+          type_tag.store(0);
+        }
+        if(Network::my_node_id == NodeID(ID(me).sparsity_creator_node())) {
+          get_runtime()->free_sparsity_impl(this);
+        }
+      }
     }
-
-    if(references > 0) {
-      references -= std::min(references, count);
-    }
-
-    if(references == 0) {
-#ifdef REALM_SPARSITY_DELETES
-      (*map_deleter)(map_impl.load());
-
-      NodeID owner_node = ID(me).sparsity_creator_node();
-      assert(owner_node == Network::my_node_id);
-
-      get_runtime()->local_sparsity_map_free_lists[owner_node]->free_entry(this);
-
-      map_impl.store(0);
-      type_tag.store(0);
-#endif
-    }
-  }
-
-  ////////////////////////////////////////////////////////////////////////
-  //
-  // class SparsityMapImplWrapper::DeferredDestroy
-  //
-
-  void SparsityMapImplWrapper::DeferredDestroy::defer(SparsityMapImplWrapper *wrap,
-                                                      Event wait_on)
-  {
-    wrapper = wrap;
-    if(!wait_on.has_triggered()) {
-      EventImpl::add_waiter(wait_on, this);
-    }
-  }
-
-  void SparsityMapImplWrapper::DeferredDestroy::event_triggered(bool poisoned,
-                                                                TimeLimit work_until)
-  {
-    wrapper->destroy();
-  }
-
-  void SparsityMapImplWrapper::DeferredDestroy::print(std::ostream &os) const
-  {
-    os << "deferred instance destruction";
-  }
-
-  Event SparsityMapImplWrapper::DeferredDestroy::get_finish_event(void) const
-  {
-    return Event::NO_EVENT;
   }
 
   template <int N, typename T>
@@ -1819,7 +1824,7 @@ namespace Realm {
     if(msg.wait_on.has_triggered()) {
       wrapper->destroy();
     } else {
-      wrapper->deferred_destroy.defer(wrapper, msg.wait_on);
+      EventImpl::add_waiter(msg.wait_on, new DeferredDestroy(msg.sparsity_map.id));
     }
   }
 

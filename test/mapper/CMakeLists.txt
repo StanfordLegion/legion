@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------#
-# Copyright 2023 Stanford University
+# Copyright 2024 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -15,16 +15,15 @@
 #------------------------------------------------------------------------------#
 
 cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
-project(LegionTest_test_stl)
+project(LegionTest_mapper)
 
 # Only search if were building stand-alone and not as part of Legion
 if(NOT Legion_SOURCE_DIR)
   find_package(Legion REQUIRED)
 endif()
 
-add_executable(test_stl test_stl.cc)
-target_link_libraries(test_stl Legion::Legion)
-target_compile_options(test_stl PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
+add_executable(mapper mapper.cc)
+target_link_libraries(mapper Legion::Legion)
 if(Legion_ENABLE_TESTING)
-  add_test(NAME test_stl COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:test_stl> ${Legion_TEST_ARGS})
+  add_test(NAME mapper COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:mapper> ${Legion_TEST_ARGS})
 endif()

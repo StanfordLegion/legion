@@ -1,5 +1,5 @@
 
-/* Copyright 2023 NVIDIA Corporation
+/* Copyright 2024 NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -109,7 +109,7 @@ namespace UCP {
       int prog_itr_max{16};
       int rdesc_rel_max{16};
       bool mpool_leakcheck{false};
-      bool crc_check{false};
+      bool crc_check{true};
       bool hbuf_malloc{false};
       bool pbuf_malloc{false};
       bool use_wakeup{false};

@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -186,18 +186,6 @@ namespace Realm {
     SparsityMapImplWrapper(void);
     ~SparsityMapImplWrapper(void);
 
-    class DeferredDestroy : public EventWaiter {
-    public:
-      void defer(SparsityMapImplWrapper *wrap, Event wait_on);
-      virtual void event_triggered(bool poisoned, TimeLimit work_until);
-      virtual void print(std::ostream &os) const;
-      virtual Event get_finish_event(void) const;
-
-    protected:
-      SparsityMapImplWrapper *wrapper;
-    };
-    DeferredDestroy deferred_destroy;
-
     void init(ID _me, unsigned _init_owner);
     void destroy(void);
 
@@ -209,7 +197,9 @@ namespace Realm {
     SparsityMapImplWrapper *next_free;
     atomic<DynamicTemplates::TagType> type_tag;
     atomic<void *> map_impl;  // actual implementation
-    unsigned references;
+    atomic<unsigned> references;
+
+    bool need_refcount;
 
     Mutex mutex;
 

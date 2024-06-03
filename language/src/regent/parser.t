@@ -1,4 +1,4 @@
--- Copyright 2023 Stanford University, NVIDIA Corporation
+-- Copyright 2024 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -81,8 +81,6 @@ function parser.annotation_name(p, required)
     return "predicate"
   elseif p:nextif("__replicable") then
     return "replicable"
-  elseif p:nextif("__spmd") then
-    return "spmd"
   elseif p:nextif("__trace") then
     return "trace"
   elseif p:nextif("__vectorize") then

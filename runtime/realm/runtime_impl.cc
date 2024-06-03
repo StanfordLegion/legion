@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -747,6 +747,7 @@ namespace Realm {
     config_map.insert({"pin_util_procs", &pin_util_procs});
     config_map.insert({"use_ext_sysmem", &use_ext_sysmem});
     config_map.insert({"regmem", &reg_mem_size});
+    config_map.insert({"enable_sparsity_refcount", &enable_sparsity_refcount});
 
     resource_map.insert({"cpu", &res_num_cpus});
     resource_map.insert({"sysmem", &res_sysmem_size});
@@ -3022,6 +3023,14 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
       SparsityMapImplWrapper *wrap = local_sparsity_map_free_lists[target_node]->alloc_entry();
       wrap->me.sparsity_creator_node() = Network::my_node_id;
       return wrap;
+    }
+
+    void RuntimeImpl::free_sparsity_impl(SparsityMapImplWrapper *impl)
+    {
+      assert(
+          local_sparsity_map_free_lists[impl->me.sparsity_owner_node()]->table.has_entry(
+              impl->me.sparsity_sparsity_idx()));
+      local_sparsity_map_free_lists[impl->me.sparsity_owner_node()]->free_entry(impl);
     }
 
     SubgraphImpl *RuntimeImpl::get_subgraph_impl(ID id)

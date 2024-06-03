@@ -1,5 +1,5 @@
 
-/* Copyright 2023 Stanford University, NVIDIA Corporation, Argonne National Laboratory
+/* Copyright 2024 Stanford University, NVIDIA Corporation, Argonne National Laboratory
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -823,7 +823,7 @@ namespace Realm {
     sizes[0] = lengths[0];
     for(size_t i = 1; i < offsets.size(); i++) {
       sizes[i] = static_cast<int>(lengths[i]);
-      offsets[i] = offsets[i - 1] + static_cast<int>(lengths[i]);
+      offsets[i] = offsets[i - 1] + static_cast<int>(lengths[i - 1]);
       total += lengths[i];
     }
     vals_out.resize(total);

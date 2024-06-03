@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, Los Alamos National Laboratory
+/* Copyright 2024 Stanford University, Los Alamos National Laboratory
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -31,7 +31,7 @@ using namespace Legion::Mapping;
 /// Mapper
 ///
 
-static LegionRuntime::Logger::Category log_layout_test("layout_test");
+static Logger log_layout_test("layout_test");
 
 class layout_testMapper : public DefaultMapper
 {

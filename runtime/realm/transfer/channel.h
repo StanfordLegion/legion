@@ -1,5 +1,5 @@
-/* Copyright 2023 Stanford University
- * Copyright 2023 Los Alamos National Laboratory
+/* Copyright 2024 Stanford University
+ * Copyright 2024 Los Alamos National Laboratory
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -696,7 +696,8 @@ namespace Realm {
       ChannelCopyInfo(Memory _src_mem, Memory _dst_mem,
                       Memory _ind_mem = Memory::NO_MEMORY, size_t _num_spaces = 1,
                       bool _is_scatter = false, bool _is_ranges = false,
-                      bool _is_direct = true, size_t _addr_size = 0)
+                      bool _is_direct = true, bool _oor_possible = false,
+                      size_t _addr_size = 0)
         : src_mem(_src_mem)
         , dst_mem(_dst_mem)
         , ind_mem(_ind_mem)
@@ -704,6 +705,7 @@ namespace Realm {
         , is_scatter(_is_scatter)
         , is_ranges(_is_ranges)
         , is_direct(_is_direct)
+        , oor_possible(_oor_possible)
         , addr_size(_addr_size)
       {}
       Memory src_mem;
@@ -713,6 +715,7 @@ namespace Realm {
       bool is_scatter;
       bool is_ranges;
       bool is_direct;
+      bool oor_possible;
       size_t addr_size;
     };
 

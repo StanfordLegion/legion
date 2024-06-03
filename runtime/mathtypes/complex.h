@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -38,8 +38,8 @@
 // cuda 12 (https://github.com/StanfordLegion/legion/issues/1469#)
 // TODO: remove it once the bug is fixed in the future release of cuda.
 #include <cuda_runtime.h>
-#include <thrust/complex.h>
-#define COMPLEX_NAMESPACE thrust
+#include <cuda/std/complex>
+#define COMPLEX_NAMESPACE cuda::std
 #endif
 #elif defined(LEGION_USE_HIP)
 #include <thrust/complex.h>
@@ -209,4 +209,3 @@ inline complex<__half> operator/(const complex<__half> &one, const complex<__hal
 #endif // COMPLEX_HALF
 
 #endif // complex_H__ 
-

@@ -1,4 +1,4 @@
--- Copyright 2023 Stanford University
+-- Copyright 2024 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -12,16 +12,11 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- This file is not meant to be run directly.
-
--- runs-with:
--- []
-
 local launcher = {}
 
 local root_dir = arg[0]:match(".*/") or "./"
 
-function launcher.build_library(library_name)
+function launcher.build_library(library_name, source_files, cxx, additional_cxx_flags, additional_include_flags)
   local include_path = ""
   local include_dirs = terralib.newlist()
   include_dirs:insert("-I")
@@ -31,8 +26,14 @@ function launcher.build_library(library_name)
     include_dirs:insert("-I")
     include_dirs:insert(path)
   end
+  if additional_include_flags then
+    include_dirs:insertall(additional_include_flags)
+  end
 
-  local library_cc = root_dir .. library_name .. ".cc"
+  if source_files == nil then
+    source_files = terralib.newlist({root_dir .. library_name .. ".cc"})
+  end
+
   local library_so
   if os.getenv('OBJNAME') then
     local out_dir = os.getenv('OBJNAME'):match('.*/') or './'
@@ -43,9 +44,18 @@ function launcher.build_library(library_name)
     -- Make sure we don't collide if we're running this concurrently.
     library_so = os.tmpname() .. ".so"
   end
-  local cxx = os.getenv('CXX') or 'c++'
+
+  if cxx == nil then
+    cxx = os.getenv('CXX') or 'c++'
+  end
 
   local cxx_flags = os.getenv('CXXFLAGS') or ''
+
+  -- Add the C++ standard to the front of the flags so that if the user
+  -- overwrites it in CXXFLAGS, their value wins.
+  local cxx_standard = os.getenv('CXX_STANDARD') or '17'
+  cxx_flags = "-std=c++" .. cxx_standard .. " " .. cxx_flags
+
   cxx_flags = cxx_flags .. " -O2 -Wall -Werror"
   local ffi = require("ffi")
   if ffi.os == "OSX" then
@@ -55,11 +65,14 @@ function launcher.build_library(library_name)
   else
     cxx_flags = cxx_flags .. " -shared -fPIC"
   end
+  if additional_cxx_flags then
+    cxx_flags = cxx_flags .. " " .. table.concat(additional_cxx_flags, " ")
+  end
 
   local cmd = (cxx .. " " .. cxx_flags .. " " .. include_path .. " " ..
-                 library_cc .. " -o " .. library_so)
+                 table.concat(source_files, " ") .. " -o " .. library_so)
   if os.execute(cmd) ~= 0 then
-    print("Error: failed to compile " .. library_cc)
+    print("Error: command failed: " .. cmd)
     assert(false)
   end
   regentlib.linklibrary(library_so)

@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University
+/* Copyright 2024 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -710,6 +710,10 @@ bool CheckTask::cpu_impl(const Task *task,
                          const std::vector<PhysicalRegion> &regions,
                          Context ctx, Runtime *runtime)
 {
+  // In fast math mode, floating point values are assumed to be not NaN, so
+  // some compilers complain about this check. Since this is the entirety of
+  // our check below, we just shut it all off in fast math mode.
+#ifndef __FAST_MATH__
   const AccessorROfloat fa_check(regions[0], task->regions[0].instance_fields[0]);
   LogicalRegion lr = task->regions[0].region;
   bool success = true;
@@ -721,6 +725,9 @@ bool CheckTask::cpu_impl(const Task *task,
       success = false;
   }
   return success;
+#else
+  return true;
+#endif
 }
 
 /*static*/

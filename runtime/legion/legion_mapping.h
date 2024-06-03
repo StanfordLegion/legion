@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -1820,7 +1820,7 @@ namespace Legion {
         TraceID trace_id;
       };
       struct MemoizeOutput {
-        bool memoize;
+        bool memoize; // = true
       };
       //------------------------------------------------------------------------
       virtual void memoize_operation(MapperContext        ctx,
@@ -2550,10 +2550,8 @@ namespace Legion {
       template<typename T>
       void pack_tunable(const T &result, Mapper::SelectTunableOutput &output)
       {
-#if !defined(__GNUC__) || (__GNUC__ >= 5)
         static_assert(std::is_trivially_copyable<T>::value,
                       "tunable type must be trivially copyable");
-#endif  // !defined(__GNUC__) || (__GNUC__ >= 5)
         void *output_result = malloc(sizeof(T));
         memcpy(output_result, &result, sizeof(T));
         output.value = output_result;

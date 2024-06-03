@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------#
-# Copyright 2023 Stanford University
+# Copyright 2024 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -21,7 +21,6 @@ if(NOT Legion_SOURCE_DIR)
 endif()
 
 add_subdirectory(attach_file_mini)
-add_subdirectory(legion_stl)
 add_subdirectory(output_requirements)
 add_subdirectory(reduce_future)
 add_subdirectory(ctrl_repl_safety)
@@ -36,6 +35,7 @@ add_subdirectory(performance/realm/memcpy)
 add_subdirectory(legion_redop_test)
 add_subdirectory(disjoint_complete)
 add_subdirectory(nested_replication)
+add_subdirectory(mapper)
 
 if(Legion_USE_HDF5)
   add_subdirectory(hdf_attach_subregion_parallel)

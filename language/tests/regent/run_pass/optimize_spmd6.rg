@@ -1,4 +1,4 @@
--- Copyright 2023 Stanford University
+-- Copyright 2024 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -11,12 +11,6 @@
 -- WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
-
--- runs-with:
--- [
---   ["-ll:cpu", "4", "-fflow-spmd", "1"],
---   ["-ll:cpu", "2", "-fflow-spmd", "1", "-fflow-spmd-shardsize", "2"]
--- ]
 
 import "regent"
 
@@ -32,6 +26,7 @@ where reads(r), writes(r) do
   end
 end
 
+__demand(__replicable)
 task main()
   var r = region(ispace(ptr, 3), int)
   var x0 = dynamic_cast(ptr(int, r), 0)
@@ -52,7 +47,6 @@ task main()
   var tinit = 0
   var tfinal = 10
 
-  __demand(__spmd)
   for t = tinit + 1, tfinal + 2 do
     for i = 0, 3 do
       inc(p[i], 1)

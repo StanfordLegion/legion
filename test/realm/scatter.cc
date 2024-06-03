@@ -961,11 +961,9 @@ struct Pad {
 };
 
 template <int N, typename T, int N2, typename T2, typename DT>
-bool scatter_gather_test(const std::vector<Memory>& mems,
-			 T size1, T2 size2,
-			 int pieces1, int pieces2,
-			 Processor p,
-			 CustomSerdezID serdez_id = 0)
+bool scatter_gather_test(const std::vector<Memory> &mems, T size1, T2 size2, int pieces1,
+                         int pieces2, Processor p, CustomSerdezID serdez_id = 0,
+                         bool oor_possible = false)
 {
   Rect<N,T> r1;
   Rect<N2,T2> r2;
@@ -1007,26 +1005,27 @@ bool scatter_gather_test(const std::vector<Memory>& mems,
 				       Event::NO_EVENT).wait();
 
   if(TestConfig::do_gather) {
-    region1.template gather<DT>(is1, FID_PTR1, region2, FID_DATA1, FID_DATA1,
-				false /*!oor_possible*/,
-				serdez_id,
-				Event::NO_EVENT, p).wait();
+    region1
+        .template gather<DT>(is1, FID_PTR1, region2, FID_DATA1, FID_DATA1,
+                             oor_possible /*!oor_possible*/, serdez_id, Event::NO_EVENT,
+                             p)
+        .wait();
 
     if(!region1.template verify<DT>(is1, FID_DATA1, Event::NO_EVENT))
       return false;
   }
 
   if(TestConfig::do_scatter) {
-    region1.template scatter<DT>(is1, FID_PTR1, region2, FID_DATA2, FID_DATA2,
-				 false /*!oor_possible*/,
-				 true /*aliasing_possible*/,
-				 serdez_id,
-				 Event::NO_EVENT, p).wait();
+    region1
+        .template scatter<DT>(is1, FID_PTR1, region2, FID_DATA2, FID_DATA2,
+                              oor_possible /*!oor_possible*/, true /*aliasing_possible*/,
+                              serdez_id, Event::NO_EVENT, p)
+        .wait();
 
     if(!region2.template verify<DT>(is2, FID_DATA2, Event::NO_EVENT))
       return false;
   }
-  
+
   region1.destroy_instances(Event::NO_EVENT);
   region2.destroy_instances(Event::NO_EVENT);
 
@@ -1334,6 +1333,12 @@ void top_level_task(const void *args, size_t arglen,
     mems.erase(mems.begin());
 
   bool ok = true;
+
+  // normal-sized data
+  if(!scatter_gather_test<1, int, 2, int, float>(
+         mems, TestConfig::size1, TestConfig::size2, TestConfig::pieces1,
+         TestConfig::pieces2, p, /*serdez_id=*/0, /*oor_possible=*/true))
+    ok = false;
 
   // normal-sized data
   if(!scatter_gather_test<1, int, 2, int, float>(mems,

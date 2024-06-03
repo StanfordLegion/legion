@@ -1,4 +1,4 @@
-/* Copyright 2023 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -46,6 +46,7 @@ namespace Realm {
   Logger log_gex_msg("gexmsg");
   Logger log_gex_comp("gexcomp");
   Logger log_gex_bind("gexbind");
+  Logger log_gex_amcredit("gexamcredit");
 
   static const unsigned MSGID_BITS = 12;
 
@@ -1068,8 +1069,12 @@ namespace Realm {
     , comp_reply_rdptr(0)
     , comp_reply_count(0)
     , comp_reply_capacity(64)
+    , am_credits(0)
   {
     comp_reply_data = new gex_AM_Arg_t[comp_reply_capacity];
+
+    if(internal->module->cfg_am_limit > 0)
+      am_credits.store(internal->module->cfg_am_limit);
   }
 
   XmitSrcDestPair::~XmitSrcDestPair()
@@ -1986,7 +1991,8 @@ namespace Realm {
 						 2 * sizeof(gex_AM_Arg_t), /* header_size */
 						 lc_opt,
 						 GEX_FLAG_AM_PREPARE_LEAST_CLIENT);
-	  if(min_size <= max_payload) {
+	  if((min_size <= max_payload) &&
+	     (!internal->module->cfg_am_limit || try_consume_am_credit())) {
             batch_attempted = true;
 
 	    sd = GASNetEXHandlers::prepare_request_batch(internal->eps[src_ep_index],
@@ -2105,7 +2111,10 @@ namespace Realm {
               ev->set_pktbuf(realbuf);
               internal->poller.add_pending_event(ev);
             } else {
-              assert(immediate_mode);  // should not happen without immediate
+	      if(internal->module->cfg_am_limit)
+		return_am_credits(1);
+	      else
+		assert(immediate_mode);  // should not happen without immediate
               log_gex_xpair.info() << "xpair retry: xpair=" << this;
             }
           }
@@ -2133,13 +2142,20 @@ namespace Realm {
 		gex_Flags_t flags = 0;
 		if(immediate_mode) flags |= GEX_FLAG_IMMEDIATE;
 
-		int ret = GASNetEXHandlers::send_request_short(internal->eps[src_ep_index],
-							       tgt_rank,
-							       tgt_ep_index,
-							       arg0,
-							       hdr_data,
-							       hdr_bytes,
-							       flags);
+		int ret;
+		if(!internal->module->cfg_am_limit || try_consume_am_credit()) {
+		  ret = GASNetEXHandlers::send_request_short(internal->eps[src_ep_index],
+							     tgt_rank,
+							     tgt_ep_index,
+							     arg0,
+							     hdr_data,
+							     hdr_bytes,
+							     flags);
+		  if((ret != GASNET_OK) && internal->module->cfg_am_limit)
+		    return_am_credits(1);
+		} else
+		  ret = GASNET_ERR_NOT_READY;
+
 		if(ret == GASNET_OK) {
 		  pkt_sent = true;
 		  realbuf->pktbuf_pkt_types[head->pktbuf_sent_packets].store(OutbufMetadata::PKTTYPE_INVALID);
@@ -2148,7 +2164,7 @@ namespace Realm {
 		  // no need to increment use count for a short
 		  packets_sent.fetch_add(1);
 		} else {
-		  assert(immediate_mode);  // should not happen without immediate
+		  assert(immediate_mode || internal->module->cfg_am_limit);  // should not happen without immediate
 		  log_gex_xpair.info() << "xpair retry: xpair=" << this;
 		}
 	      } else {
@@ -2183,16 +2199,23 @@ namespace Realm {
                 }
 #endif
 
-		int ret = GASNetEXHandlers::send_request_medium(internal->eps[src_ep_index],
-								tgt_rank,
-								tgt_ep_index,
-								arg0,
-								hdr_data,
-								hdr_bytes,
-								payload_data,
-								payload_bytes,
-								lc_opt,
-								flags);
+		int ret;
+		if(!internal->module->cfg_am_limit || try_consume_am_credit()) {
+		  ret = GASNetEXHandlers::send_request_medium(internal->eps[src_ep_index],
+							      tgt_rank,
+							      tgt_ep_index,
+							      arg0,
+							      hdr_data,
+							      hdr_bytes,
+							      payload_data,
+							      payload_bytes,
+							      lc_opt,
+							      flags);
+		  if((ret != GASNET_OK) && internal->module->cfg_am_limit)
+		    return_am_credits(1);
+		} else
+		  ret = GASNET_ERR_NOT_READY;
+
 		if(ret == GASNET_OK) {
 		  pkt_sent = true;
 		  realbuf->pktbuf_pkt_types[head->pktbuf_sent_packets].store(OutbufMetadata::PKTTYPE_INVALID);
@@ -2206,7 +2229,7 @@ namespace Realm {
 		  ev->set_pktbuf(realbuf);
 		  internal->poller.add_pending_event(ev);
 		} else {
-		  assert(immediate_mode);  // should not happen without immediate
+		  assert(immediate_mode || internal->module->cfg_am_limit);  // should not happen without immediate
 		  log_gex_xpair.info() << "xpair retry: xpair=" << this;
 		}
 	      }
@@ -2262,17 +2285,24 @@ namespace Realm {
               }
 #endif
 
-	      int ret = GASNetEXHandlers::send_request_long(internal->eps[src_ep_index],
-							    tgt_rank,
-							    tgt_ep_index,
-							    arg0,
-							    hdr_data,
-							    hdr_bytes,
-							    extra->payload_base,
-							    extra->payload_bytes,
-							    lc_opt,
-							    flags,
-							    extra->dest_addr);
+	      int ret;
+	      if(!internal->module->cfg_am_limit || try_consume_am_credit()) {
+		ret = GASNetEXHandlers::send_request_long(internal->eps[src_ep_index],
+							  tgt_rank,
+							  tgt_ep_index,
+							  arg0,
+							  hdr_data,
+							  hdr_bytes,
+							  extra->payload_base,
+							  extra->payload_bytes,
+							  lc_opt,
+							  flags,
+							  extra->dest_addr);
+		if((ret != GASNET_OK) && internal->module->cfg_am_limit)
+		  return_am_credits(1);
+	      } else
+		ret = GASNET_ERR_NOT_READY;
+
 	      if(ret == GASNET_OK) {
 		pkt_sent = true;
 		realbuf->pktbuf_pkt_types[head->pktbuf_sent_packets].store(OutbufMetadata::PKTTYPE_INVALID);
@@ -2289,7 +2319,7 @@ namespace Realm {
 		  internal->poller.add_pending_event(ev);
 		}
 	      } else {
-		assert(immediate_mode);  // should not happen without immediate
+		assert(immediate_mode || internal->module->cfg_am_limit);  // should not happen without immediate
 		log_gex_xpair.info() << "xpair retry: xpair=" << this;
 	      }
 	      break;
@@ -2522,6 +2552,28 @@ namespace Realm {
       return -1;
     else
       return (Clock::current_time_in_nanoseconds() - first_fail_time);
+  }
+
+  bool XmitSrcDestPair::try_consume_am_credit()
+  {
+    int prev = am_credits.fetch_sub(1);
+    log_gex_amcredit.debug() << "try_consume: tgt=" << tgt_rank << "/"
+			     << tgt_ep_index << " prev=" << prev;
+    if(prev > 0) {
+      return true;
+    } else {
+      // failed - put the overdrafted credit back
+      am_credits.fetch_add(1);
+      return false;
+    }
+  }
+
+  void XmitSrcDestPair::return_am_credits(int count)
+  {
+    int prev = am_credits.fetch_add(count);
+    log_gex_amcredit.debug() << "return: tgt=" << tgt_rank << "/"
+			     << tgt_ep_index << " old=" << prev
+			     << " new=" << (prev + count);
   }
 
 
@@ -3354,7 +3406,13 @@ namespace Realm {
     assert(ep_index == xmitsrcs.size());
     xmitsrcs.push_back(new XmitSrc(this, ep_index));
 
+    gex_System_SetVerboseErrors(1);
     gex_EP_BindSegment(ep, segment, 0 /*flags*/);
+    if(gex_EP_QuerySegment(ep) != segment) {
+      log_gex_bind.fatal() << "failed to bind segment";
+      abort();
+    }
+    gex_System_SetVerboseErrors(0);
 
     uintptr_t base_as_uint = reinterpret_cast<uintptr_t>(base);
     segments_by_addr.push_back({ base_as_uint, base_as_uint+size,
@@ -3856,7 +3914,8 @@ namespace Realm {
 	do {
 	  // choice 1: negotiated payload
 #ifdef GASNET_NATIVE_NP_ALLOC_REQ_MEDIUM
-	  if(imm_ok && module->cfg_use_negotiated) {
+	  if(imm_ok && module->cfg_use_negotiated &&
+	     (!module->cfg_am_limit || xpair->try_consume_am_credit())) {
 	    // we want a GASNet-allocated buffer, so do NOT offer our own,
 	    //  even if we have it (TODO: get guidance on whether this is
 	    //  always the right choice)
@@ -3891,6 +3950,9 @@ namespace Realm {
 	      break;
 	    } else {
 	      // failure - fall through to the next choice(s)
+	      // give back the AM credit if we took one
+	      if(module->cfg_am_limit)
+		xpair->return_am_credits(1);
 	    }
 	  }
 #endif
@@ -4100,18 +4162,32 @@ namespace Realm {
 	// this is always done with immediate mode
 	gex_Flags_t flags = GEX_FLAG_IMMEDIATE;
 
-	int ret = GASNetEXHandlers::send_request_short(eps[0],
-						       msg->target,
-						       msg->target_ep_index,
-						       arg0,
-						       header_base,
-						       header_size,
-						       flags);
-	if(ret == GASNET_OK) {
-	  // success
-	  xpair->record_immediate_packet();
+	bool enqueue;
+	if(!module->cfg_am_limit || xpair->try_consume_am_credit()) {
+	  int ret = GASNetEXHandlers::send_request_short(eps[0],
+							 msg->target,
+							 msg->target_ep_index,
+							 arg0,
+							 header_base,
+							 header_size,
+							 flags);
+	  if(ret == GASNET_OK) {
+	    // success
+	    xpair->record_immediate_packet();
+	    enqueue = false;
+	  } else {
+	    log_gex_msg.info() << "immediate failed - queueing message";
+	    enqueue = true;
+	    if(module->cfg_am_limit)
+	      xpair->return_am_credits(1);
+	  }
 	} else {
-	  log_gex_msg.info() << "immediate failed - queueing message";
+	  // couldn't get AM credit
+	  log_gex_amcredit.debug() << "immediate not attempted - out of credits";
+	  enqueue = true;
+	}
+
+	if(enqueue) {
 	  // could not immediately inject it, so enqueue now
 	  void *act_hdr_base = header_base;
 	  void *act_payload_base = nullptr;
@@ -4211,21 +4287,35 @@ namespace Realm {
         }
 #endif
 
-	int ret = GASNetEXHandlers::send_request_medium(eps[0],
-							msg->target,
-							msg->target_ep_index,
-							arg0,
-							header_base,
-							header_size,
-							payload_base,
-							payload_size,
-							lc_opt,
-							flags);
-	if(ret == GASNET_OK) {
-	  // success
-	  xpair->record_immediate_packet();
+	bool enqueue;
+	if(!module->cfg_am_limit || xpair->try_consume_am_credit()) {
+	  int ret = GASNetEXHandlers::send_request_medium(eps[0],
+							  msg->target,
+							  msg->target_ep_index,
+							  arg0,
+							  header_base,
+							  header_size,
+							  payload_base,
+							  payload_size,
+							  lc_opt,
+							  flags);
+	  if(ret == GASNET_OK) {
+	    // success
+	    xpair->record_immediate_packet();
+	    enqueue = false;
+	  } else {
+	    log_gex_msg.info() << "immediate failed - queueing message";
+	    enqueue = true;
+	    if(module->cfg_am_limit)
+	      xpair->return_am_credits(1);
+	  }
 	} else {
-	  log_gex_msg.info() << "immediate failed - queueing message";
+	  // couldn't get AM credit
+	  log_gex_amcredit.debug() << "immediate not attempted - out of credits";
+	  enqueue = true;
+	}
+
+	if(enqueue) {
 	  // could not immediately inject it, so enqueue now
 	  void *act_hdr_base = header_base;
 	  void *act_payload_base = payload_base;
@@ -4430,29 +4520,43 @@ namespace Realm {
         }
 #endif
 
-	int ret = GASNetEXHandlers::send_request_long(eps[0],
-						      msg->target,
-						      msg->target_ep_index,
-						      arg0,
-						      header_base,
-						      header_size,
-						      payload_base,
-						      payload_size,
-						      lc_opt, flags,
-						      msg->dest_payload_addr);
-	if(ret == GASNET_OK) {
-	  xpair->record_immediate_packet();
+	bool enqueue;
+	if(!module->cfg_am_limit || xpair->try_consume_am_credit()) {
+	  int ret = GASNetEXHandlers::send_request_long(eps[0],
+							msg->target,
+							msg->target_ep_index,
+							arg0,
+							header_base,
+							header_size,
+							payload_base,
+							payload_size,
+							lc_opt, flags,
+							msg->dest_payload_addr);
+	  if(ret == GASNET_OK) {
+	    xpair->record_immediate_packet();
+	    enqueue = false;
 
-	  if(msg->databuf || has_local) {
-	    GASNetEXEvent *ev = event_alloc.alloc_obj();
-	    ev->set_event(done);
-	    ev->set_databuf(msg->databuf);
-	    if(has_local)
-	      ev->set_local_comp(comp);
-	    poller.add_pending_event(ev);
+	    if(msg->databuf || has_local) {
+	      GASNetEXEvent *ev = event_alloc.alloc_obj();
+	      ev->set_event(done);
+	      ev->set_databuf(msg->databuf);
+	      if(has_local)
+		ev->set_local_comp(comp);
+	      poller.add_pending_event(ev);
+	    }
+	  } else {
+	    log_gex_msg.info() << "immediate failed - queueing message";
+	    if(module->cfg_am_limit)
+	      xpair->return_am_credits(1);
+	    enqueue = true;
 	  }
 	} else {
-	  log_gex_msg.info() << "immediate failed - queueing message";
+	  // couldn't get AM credit
+	  log_gex_amcredit.debug() << "immediate not attempted - out of credits";
+	  enqueue = true;
+	}
+
+	if(enqueue) {
 	  // could not immediately inject it, so enqueue now
 	  void *act_hdr_base = header_base;
 	  OutbufMetadata *pktbuf;
@@ -5159,10 +5263,15 @@ namespace Realm {
     if(handled) {
       // if the message was handled immediately, we can use a reply for
       //  completion information
-      return comp_info;
+      // set MSB to indicate this is coming in a reply (for AM credit counting)
+      return comp_info | (1U << 31);
     } else {
       // remote isn't done and there's no local completion for shorts
-      return 0;
+      //  but we have to send a dummy response if we're counting AM credits
+      if(module->cfg_am_limit)
+	return ~0U;
+      else
+	return 0;
     }
   }
 
@@ -5213,14 +5322,19 @@ namespace Realm {
     if(handled) {
       // if the message was handled immediately, we can use a reply for
       //  completion information
-      return comp_info;
+      return comp_info | (1U << 31);
     } else {
       if((comp_info & PendingCompletion::LOCAL_PENDING_BIT) != 0) {
         // reply is allowed for local completion, but remote isn't done
         return (comp_info &
-                ~PendingCompletion::REMOTE_PENDING_BIT);
-      } else
-        return 0;
+                ~PendingCompletion::REMOTE_PENDING_BIT) | (1U << 31);
+      } else {
+	// we have to send a dummy response if we're counting AM credits
+	if(module->cfg_am_limit)
+	  return ~0U;
+	else
+	  return 0;
+      }
     }
   }
 
@@ -5270,14 +5384,19 @@ namespace Realm {
     if(handled) {
       // if the message was handled immediately, we can use a reply for
       //  completion information
-      return comp_info;
+      return comp_info | (1U << 31);
     } else {
       if((comp_info & PendingCompletion::LOCAL_PENDING_BIT) != 0) {
         // reply is allowed for local completion, but remote isn't done
         return (comp_info &
-                ~PendingCompletion::REMOTE_PENDING_BIT);
-      } else
-        return 0;
+                ~PendingCompletion::REMOTE_PENDING_BIT) | (1U << 31);
+      } else {
+	// we have to send a dummy response if we're counting AM credits
+	if(module->cfg_am_limit)
+	  return ~0U;
+	else
+	  return 0;
+      }
     }
   }
 
@@ -5356,7 +5475,7 @@ namespace Realm {
 	gex_AM_Arg_t comp = handle_short(srcrank, msg_arg0,
 					 hdr_data, hdr_bytes);
 	if(comp != 0)
-	  comps[ncomps++] = comp;
+	  comps[ncomps++] = comp | (1U << 31);
       } else if(payload_bytes < ((1U << 22) - 1)) {
 	// medium message
 
@@ -5370,7 +5489,7 @@ namespace Realm {
 					  hdr_data, hdr_bytes,
 					  payload_data, payload_bytes);
 	if(comp != 0)
-	  comps[ncomps++] = comp;
+	  comps[ncomps++] = comp | (1U << 31);
       } else {
 	// reverse get
 
@@ -5395,6 +5514,10 @@ namespace Realm {
     // when the dust settles, we should have used exactly all the data
     assert(ofs == data_bytes);
 
+    // if we're counting AM credits, make sure we have at least a dummy response
+    if(module->cfg_am_limit && (ncomps == 0))
+      comps[ncomps++] = ~0U;
+
     return ncomps;
   }
 
@@ -5404,18 +5527,36 @@ namespace Realm {
   {
     ThreadLocal::in_am_handler = true;
 
+    // if the responses have their msb set, this is a direct reply to an AM
+    //  and we can return a credit if we care
+    bool was_reply = false;
     for(size_t i = 0; i < nargs; i++) {
-      log_gex_comp.info() << "got comp: " << srcrank << " " << args[i];
+      unsigned comp_info = unsigned(args[i]);
+      if((comp_info >> 31) != 0) {
+	was_reply = true;
+	// a reply of all 1's is a dummy (i.e. no actual completion) - skip it
+	if(comp_info == ~0U) continue;
+	// strip off upper bit
+	comp_info -= (1U << 31);
+      }
+      log_gex_comp.info() << "got comp: " << srcrank << " " << comp_info;
 
-      int index = args[i] >> 2;
-      bool do_local = ((args[i] & PendingCompletion::LOCAL_PENDING_BIT) != 0);
-      bool do_remote = ((args[i] & PendingCompletion::REMOTE_PENDING_BIT) != 0);
+      int index = comp_info >> 2;
+      bool do_local = ((comp_info & PendingCompletion::LOCAL_PENDING_BIT) != 0);
+      bool do_remote = ((comp_info & PendingCompletion::REMOTE_PENDING_BIT) != 0);
 #ifdef DEBUG_REALM
       assert(do_local || do_remote);
 #endif
 
       PendingCompletion *comp = compmgr.lookup_completion(index);
       compmgr.invoke_completions(comp, do_local, do_remote);
+    }
+
+    if(was_reply && module->cfg_am_limit) {
+      log_gex_amcredit.debug() << "credit received: peer=" << srcrank;
+      // assume src and dest ep indices are 0 (current GASNetEX limitation)
+      XmitSrcDestPair *xpair = xmitsrcs[0]->lookup_pair(srcrank, 0);
+      xpair->return_am_credits(1);
     }
 
     ThreadLocal::in_am_handler = false;
