@@ -776,7 +776,7 @@ namespace Realm {
 	    if(triggered) {
 	      // we can apply the destruction directly to current state
 	      if(inst->metadata.inst_offset != RegionInstanceImpl::INSTOFFSET_FAILED)
-		current_allocator.deallocate(inst->me);
+		current_allocator.deallocate(inst->me, inst->is_redistricted);
 	    } else {
 	      // push the op, but we're not maintaining a future state yet
 	      pending_releases.push_back(PendingRelease(inst,
@@ -793,8 +793,8 @@ namespace Realm {
 		//  be deferred)
 	      } else {
 		// event is known to have triggered, so these must not fail
-		release_allocator.deallocate(inst->me);
-		future_allocator.deallocate(inst->me);
+		release_allocator.deallocate(inst->me, inst->is_redistricted);
+		future_allocator.deallocate(inst->me, inst->is_redistricted);
 		// see if we can reorder this (and maybe other) releases to
 		//  satisfy the pending allocs
 		if(attempt_release_reordering(successful_allocs)) {
@@ -1087,11 +1087,11 @@ namespace Realm {
 	  //  poisoned), we unclog things in the order we planned
 	  if(it->inst == inst) {
 	    if(!pending_allocs.empty())
-	      release_allocator.deallocate(it->inst->me);
+	      release_allocator.deallocate(it->inst->me, it->inst->is_redistricted);
 
 	    // catch up the current state
 	    do {
-	      current_allocator.deallocate(it->inst->me);
+	      current_allocator.deallocate(it->inst->me, it->inst->is_redistricted);
 	      //deallocs.push_back(it->inst);
 
 	      // did this unblock any allocations?
@@ -1161,7 +1161,7 @@ namespace Realm {
 		//if(it->seqid > pending_allocs.front().last_release_seqid)
 		//  break;
 		if(it->is_ready)
- 		  release_allocator.deallocate(it->inst->me);
+ 		  release_allocator.deallocate(it->inst->me, it->inst->is_redistricted);
 	      }
 	    }
 	  } else {
@@ -1174,14 +1174,14 @@ namespace Realm {
 
 	    if(pending_allocs.empty()) {
 	      // we can apply this delete to the current state
-	      current_allocator.deallocate(inst->me);
+	      current_allocator.deallocate(inst->me, inst->is_redistricted);
               //deallocs.push_back(inst);
 	      it = pending_releases.erase(it);
 	    } else {
 	      // apply this free to the release_allocator - we'll check below
 	      //  to see if it unblocks one or more allocations AND leaves the
 	      //  rest possible
-	      release_allocator.deallocate(inst->me);
+	      release_allocator.deallocate(inst->me, inst->is_redistricted);
 	    }
 	  }
 	

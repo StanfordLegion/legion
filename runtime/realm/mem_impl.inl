@@ -181,43 +181,66 @@ namespace Realm {
       alloc_size += sizes[i];
     }
 
-    unsigned reuse_idx = it->second;
-    Range &reuse_r = ranges[reuse_idx];
+    unsigned prev_idx = it->second;
+    Range *prev = &ranges[prev_idx];
+    unsigned next_idx = prev->next;
 
-    if((reuse_r.last - reuse_r.first) < alloc_size) {
+    if((prev->last - prev->first) < alloc_size) {
       return false;
     }
 
-    unsigned next_idx = reuse_r.next;
-    unsigned prev_idx = reuse_r.prev;
+    RT remaining_size = prev->last - prev->first;
 
-    RT offset = calculate_offset(reuse_r.first, alignments[0]);
+    // First part reuse existing allocated range for the first tag
+    RT offset = calculate_offset(prev->first, alignments[0]);
+    prev->last = prev->first + sizes[0] + offset;
+    allocated.erase(old_tag);
+    allocated[new_tags[0]] = prev_idx;
+    remaining_size -= sizes[0];
 
-    reuse_r.last = reuse_r.first + sizes[0] + offset;
-    allocated[new_tags[0]] = reuse_idx;
-    Range *prev = &ranges[reuse_idx];
-    prev_idx = reuse_idx;
-
+    // Second part create new ranges for the remaining requested tags
     for(size_t i = 1; i < n; i++) {
       size_t start = prev_idx > 0 ? prev->first : 0;
       RT offset = calculate_offset(start, alignments[i]);
 
       unsigned new_idx = alloc_range(prev->last, prev->last + sizes[i] + offset);
       allocated[new_tags[i]] = new_idx;
+      remaining_size -= sizes[i];
 
       Range *new_prev = &ranges[new_idx];
-      new_prev->prev = prev_idx;
       prev = &ranges[prev_idx];
+
+      new_prev->prev = prev_idx;
+      new_prev->prev_free = new_idx;
+      new_prev->next_free = new_idx;
+
       prev->next = new_idx;
-      new_prev->prev_free = prev->prev_free;
-      prev->next_free = new_idx;
 
       prev_idx = new_idx;
       prev = new_prev;
     }
 
+    // Last part create new free range for the remaining size
+    if(remaining_size > 0) {
+      RT alloc_last = prev->last;
+      unsigned after_idx = alloc_range(alloc_last, alloc_last + remaining_size);
+      Range *r_after = &ranges[after_idx];
+      r_after->prev = prev_idx;
+
+      ranges[r_after->next_free].prev_free = after_idx;
+      ranges[r_after->prev_free].next_free = after_idx;
+
+      prev_idx = after_idx;
+      prev->next = after_idx;
+      prev = r_after;
+
+      remaining_size = 0;
+    }
+
     prev->next = next_idx;
     ranges[next_idx].prev = prev_idx;
+
+    assert(remaining_size == 0);
 
     return true;
   }
