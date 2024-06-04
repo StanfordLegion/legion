@@ -151,9 +151,9 @@ void worker_task(const void *args, size_t arglen, const void *userdata, size_t u
                    << " inst:" << inst;
 
     std::vector<RegionInstance> insts(2);
-    InstanceLayoutGeneric *ilg_a = create_layout(next_bounds);
-    InstanceLayoutGeneric *ilg_b = create_layout(next_bounds);
-    std::vector<InstanceLayoutGeneric *> layouts{ilg_a, ilg_b};
+    const InstanceLayoutGeneric *ilg_a = create_layout(next_bounds);
+    const InstanceLayoutGeneric *ilg_b = create_layout(next_bounds);
+    std::vector<const InstanceLayoutGeneric *> layouts{ilg_a, ilg_b};
 
     std::vector<ProfilingRequestSet> prs(2);
     for(int i = 0; i < 2; i++) {
@@ -175,7 +175,16 @@ void worker_task(const void *args, size_t arglen, const void *userdata, size_t u
     }
     assert(poisoned == false);
 
-    int index = next_bounds.volume();
+    delete ilg_a;
+    delete ilg_b;
+
+    std::vector<CopySrcDstField> srcs(1), dsts(1);
+    srcs[0].set_field(insts[0], 0, sizeof(int));
+    dsts[0].set_field(insts[1], 0, sizeof(int));
+    e = IndexSpace<1>(next_bounds).copy(srcs, dsts, ProfilingRequestSet(), e);
+    e.wait();
+
+    int index = 0; /// next_bounds.volume();
     for(size_t i = 1; i < insts.size(); i++) {
       AffineAccessor<int, 1, int> acc(insts[i], 0);
       IndexSpaceIterator<1, int> it(next_bounds);
@@ -191,6 +200,7 @@ void worker_task(const void *args, size_t arglen, const void *userdata, size_t u
     }
 
     bounds = next_bounds;
+    inst.destroy();
     inst = insts[0];
     insts[1].destroy();
   }
