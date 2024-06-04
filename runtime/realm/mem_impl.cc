@@ -778,12 +778,12 @@ namespace Realm {
 	      if(inst->metadata.inst_offset != RegionInstanceImpl::INSTOFFSET_FAILED)
                 current_allocator.deallocate(inst->me, inst->is_redistricted);
             } else {
-	      // push the op, but we're not maintaining a future state yet
+              // push the op, but we're not maintaining a future state yet
 	      pending_releases.push_back(PendingRelease(inst,
 							false /*!triggered*/,
 							++cur_release_seqid));
-	    }
-	  } else {
+            }
+          } else {
 	    // even if this destruction is ready, we can't update current
 	    //  state because older pending ops exist
 	    // TODO: pushing past a single pending alloc should always be safe
@@ -796,8 +796,8 @@ namespace Realm {
                 release_allocator.deallocate(inst->me, inst->is_redistricted);
                 future_allocator.deallocate(inst->me, inst->is_redistricted);
                 // see if we can reorder this (and maybe other) releases to
-		//  satisfy the pending allocs
-		if(attempt_release_reordering(successful_allocs)) {
+                //  satisfy the pending allocs
+                if(attempt_release_reordering(successful_allocs)) {
 		  // we'll notify the successful allocations below, after we've
 		  //  released the mutex
 		} else {
@@ -1090,11 +1090,11 @@ namespace Realm {
               release_allocator.deallocate(it->inst->me, it->inst->is_redistricted);
 
             // catch up the current state
-	    do {
+            do {
               current_allocator.deallocate(it->inst->me, it->inst->is_redistricted);
-              //deallocs.push_back(it->inst);
+              // deallocs.push_back(it->inst);
 
-	      // did this unblock any allocations?
+              // did this unblock any allocations?
 	      std::vector<PendingAlloc>::iterator it2 = pending_allocs.begin();
 	      while(it2 != pending_allocs.end()) {
 		// if this alloc depends on further pending releases, we can't
@@ -1163,7 +1163,7 @@ namespace Realm {
 		if(it->is_ready)
                   release_allocator.deallocate(it->inst->me, it->inst->is_redistricted);
               }
-	    }
+            }
 	  } else {
 	    // find this destruction in the list and mark it ready
 	    do {
@@ -1183,7 +1183,7 @@ namespace Realm {
 	      //  rest possible
               release_allocator.deallocate(inst->me, inst->is_redistricted);
             }
-	  }
+          }
 	
 	  // a couple different ways to get to a state where the ready releases
 	  //  allow allocations to proceed but we could not be sure above, so
