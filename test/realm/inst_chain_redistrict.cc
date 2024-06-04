@@ -175,6 +175,9 @@ void worker_task(const void *args, size_t arglen, const void *userdata, size_t u
     }
     assert(poisoned == false);
 
+    delete ilg_a;
+    delete ilg_b;
+
     std::vector<CopySrcDstField> srcs(1), dsts(1);
     srcs[0].set_field(insts[0], 0, sizeof(int));
     dsts[0].set_field(insts[1], 0, sizeof(int));
