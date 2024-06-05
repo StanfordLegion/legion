@@ -77,6 +77,7 @@ TESTS += rect_transform_test
 TESTS += rsrv_acquire_poisoned
 TESTS += sparsity_destroy
 TESTS += refcount_image_test
+TESTS += inst_chain_redistrict
 
 ifeq ($(strip $(USE_CUDA)),1)
 TESTS += task_stream
@@ -91,6 +92,7 @@ TESTS += task_stream
 endif
 
 # can set arguments to be passed to a test when running
+#TESTARGS_inst_chain_redistrict := -ll:csize 1
 TESTARGS_ctxswitch := -ll:io 1 -t 30 -i 10000
 TESTARGS_proc_group := -ll:cpu 4
 TESTARGS_compqueue := -ll:cpu 4 -timeout 120

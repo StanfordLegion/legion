@@ -567,6 +567,42 @@ namespace Realm {
 #endif
     }
 
+    MemoryImpl::AllocationResult LocalManagedMemory::reuse_allocated_range(
+        RegionInstanceImpl *old_inst, std::vector<RegionInstanceImpl *> &new_insts)
+    {
+      AutoLock<> al(allocator_mutex);
+
+#ifdef DEBUG_REALM
+      for(const PendingAlloc &alloc : pending_allocs) {
+        if(alloc.inst == old_inst) {
+          return AllocationResult::ALLOC_INSTANT_FAILURE;
+        }
+      }
+
+      for(const PendingRelease &release : pending_releases) {
+        if(release.inst == old_inst) {
+          return AllocationResult::ALLOC_INSTANT_FAILURE;
+        }
+      }
+#endif
+
+      size_t num_insts = new_insts.size();
+      std::vector<RegionInstance> tags(num_insts);
+      std::vector<size_t> sizes(num_insts);
+      std::vector<size_t> alignments(num_insts);
+      for(size_t i = 0; i < num_insts; i++) {
+        sizes[i] = new_insts[i]->metadata.layout->bytes_used;
+        alignments[i] = new_insts[i]->metadata.layout->alignment_reqd;
+        tags[i] = new_insts[i]->me;
+      }
+
+      if(!current_allocator.split_range(old_inst->me, tags, sizes, alignments)) {
+        return AllocationResult::ALLOC_INSTANT_FAILURE;
+      }
+
+      return AllocationResult::ALLOC_INSTANT_SUCCESS;
+    }
+
     // attempt to allocate storage for the specified instance
     MemoryImpl::AllocationResult LocalManagedMemory::allocate_storage_deferrable(RegionInstanceImpl *inst,
 										 bool need_alloc_result,

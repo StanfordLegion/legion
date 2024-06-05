@@ -312,13 +312,20 @@ endif()
 find_package(Threads REQUIRED)
 cmake_policy(SET CMP0063 NEW) # visibility controls in all builds
 add_library(RealmRuntime ${REALM_SRC})
+add_library(RealmStatic STATIC EXCLUDE_FROM_ALL ${REALM_SRC}) # static library for realm unit test
 
 if(TARGET realm_cuda_fatbin)
   add_dependencies(RealmRuntime realm_cuda_fatbin)
+  # HACK: to avoid compiling two realm_cuda_fatbin concurrent, which causes errors
+  #  we create a control dependency between dynamic and static realm library, such that they will be built in order
+  add_dependencies(RealmStatic RealmRuntime)
 endif()
 
 add_library(Legion::RealmRuntime ALIAS RealmRuntime)
 target_compile_options(RealmRuntime PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
+
+add_library(Legion::RealmStatic ALIAS RealmStatic)
+target_compile_options(RealmStatic PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
 
 # turn on warnings about partially-overloaded methods, if supported
 check_cxx_compiler_flag("-Woverloaded-virtual" COMPILER_SUPORTS_OVERLOADED_VIRTUAL_WARNING)
@@ -340,6 +347,7 @@ endif()
 target_link_libraries(RealmRuntime PRIVATE ${CMAKE_THREAD_LIBS_INIT})
 if(UNIX AND NOT APPLE)
   target_link_libraries(RealmRuntime PRIVATE rt)
+  target_link_libraries(RealmStatic PRIVATE rt)
 endif()
 set_target_properties(RealmRuntime PROPERTIES POSITION_INDEPENDENT_CODE ON)
 set_target_properties(RealmRuntime PROPERTIES SOVERSION ${SOVERSION})
@@ -363,6 +371,8 @@ endif ()
 if(REALM_LIMIT_SYMBOL_VISIBILITY)
   set_target_properties(RealmRuntime PROPERTIES CXX_VISIBILITY_PRESET hidden)
   set_target_properties(RealmRuntime PROPERTIES VISIBILITY_INLINES_HIDDEN 1)
+  set_target_properties(RealmStatic PROPERTIES CXX_VISIBILITY_PRESET hidden)
+  set_target_properties(RealmStatic PROPERTIES VISIBILITY_INLINES_HIDDEN 1)
 endif()
 
 if(Legion_USE_PAPI)
@@ -399,6 +409,16 @@ if(REALM_USE_GASNET1 OR REALM_USE_GASNETEX)
       # make the source directory version-specific
       set(GASNet_SOURCE_DIR ${PROJECT_BINARY_DIR}/embed-gasnet/${Legion_EMBED_GASNet_VERSION})
       list(APPEND GASNet_CONFIG_SETTINGS "GASNET_VERSION=${Legion_EMBED_GASNet_VERSION}")
+    endif()
+    if(Legion_EMBED_GASNet_ENABLE_GPU_MEMORY_KINDS)
+      if(Legion_USE_CUDA)
+        list(APPEND GASNet_CONFIG_SETTINGS "USE_CUDA=1")
+      endif()
+      if(Legion_USE_HIP)
+        list(APPEND GASNet_CONFIG_SETTINGS "USE_HIP=1")
+      endif()
+    else()
+      list(APPEND GASNet_CONFIG_SETTINGS "GASNET_GPU_CONFIGURE_ARGS=")
     endif()
     if(EXISTS ${GASNet_CONFIG_FILE})
       file(READ ${GASNet_CONFIG_FILE} PREV_CONFIG_SETTINGS)
@@ -521,10 +541,12 @@ endif()
 if(Legion_USE_LLVM)
   if(Legion_LINK_LLVM_LIBS)
     target_link_libraries(RealmRuntime PRIVATE LLVM::LLVM)
+    target_link_libraries(RealmStatic PRIVATE LLVM::LLVM)
   else()
     # even if we dont link, we still need the LLVM include directories
     get_target_property(llvm_incdir LLVM::LLVM INTERFACE_INCLUDE_DIRECTORIES)
     target_include_directories(RealmRuntime PRIVATE ${llvm_incdir})
+    target_include_directories(RealmStatic PRIVATE ${llvm_incdir})
   endif()
 endif()
 
@@ -547,6 +569,7 @@ if(Legion_USE_CUDA)
                          PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
                                  ${PROJECT_BINARY_DIR}/runtime)
       target_link_libraries(RealmRuntime PRIVATE realm_cudarthijack)
+      target_link_libraries(RealmStatic PRIVATE realm_cudarthijack)
       install(TARGETS realm_cudarthijack EXPORT LegionTargets)
     else()
       # without Kokkos interop, we can just add the hijack directly
@@ -555,19 +578,26 @@ if(Legion_USE_CUDA)
   else()
     if(REALM_CUDA_DYNAMIC_LOAD)
       target_link_libraries(RealmRuntime INTERFACE CUDA::cudart)
+      target_link_libraries(RealmStatic INTERFACE CUDA::cudart)
     else()
       target_link_libraries(RealmRuntime INTERFACE CUDA::cudart_static)
+      target_link_libraries(RealmStatic INTERFACE CUDA::cudart_static)
     endif()
   endif()
 
   target_link_libraries(RealmRuntime PUBLIC CUDA::toolkit)
+  target_link_libraries(RealmStatic PUBLIC CUDA::toolkit)
   # Advertise our driver link to Realm consumers while ensuring libcuda.so isn't in Realm's RPATH
   target_link_libraries(RealmRuntime INTERFACE CUDA::cuda_driver)
+  target_link_libraries(RealmStatic INTERFACE CUDA::cuda_driver)
   # for backwards compatibility in applications
   target_compile_definitions(RealmRuntime INTERFACE USE_CUDA)
+  target_compile_definitions(RealmStatic INTERFACE USE_CUDA)
 
   set_target_cuda_standard(RealmRuntime STANDARD ${Legion_CUDA_STANDARD})
   set_target_cuda_architectures(RealmRuntime ARCHITECTURES ${Legion_CUDA_ARCH})
+  set_target_cuda_standard(RealmStatic STANDARD ${Legion_CUDA_STANDARD})
+  set_target_cuda_architectures(RealmStatic ARCHITECTURES ${Legion_CUDA_ARCH})
 
   # build cuda hook library
   add_library(realm_cuhook SHARED
@@ -753,11 +783,27 @@ endif()
 if(Legion_BACKTRACE_USE_LIBDW)
   target_include_directories(RealmRuntime PRIVATE ${LIBDW_INCLUDE_DIR})
   target_link_libraries(RealmRuntime PRIVATE ${LIBDW_LIBRARY})
+  target_include_directories(RealmStatic PRIVATE ${LIBDW_INCLUDE_DIR})
+  target_link_libraries(RealmStatic PRIVATE ${LIBDW_LIBRARY})
 endif()
 
 set_target_properties(RealmRuntime PROPERTIES OUTPUT_NAME "realm${INSTALL_SUFFIX}")
+set_target_properties(RealmStatic PROPERTIES OUTPUT_NAME "realm${INSTALL_SUFFIX}_static")
 
 target_include_directories(RealmRuntime
+  INTERFACE
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
+    $<INSTALL_INTERFACE:include>
+  PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
+
+  # Include paths for generated header files.
+  INTERFACE
+    $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/runtime>
+  PRIVATE
+    ${PROJECT_BINARY_DIR}/runtime
+)
+
+target_include_directories(RealmStatic
   INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
     $<INSTALL_INTERFACE:include>
@@ -775,26 +821,6 @@ install(TARGETS RealmRuntime EXPORT LegionTargets
   ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
-
-add_library(RealmStatic STATIC EXCLUDE_FROM_ALL ${REALM_SRC})
-add_library(Legion::RealmStatic ALIAS RealmStatic)
-target_compile_options(RealmStatic PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
-if(UNIX AND NOT APPLE)
-  target_link_libraries(RealmStatic PRIVATE rt)
-endif()
-set_target_properties(RealmStatic PROPERTIES OUTPUT_NAME "realm${INSTALL_SUFFIX}_static")
-target_include_directories(RealmStatic
-  INTERFACE
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
-    $<INSTALL_INTERFACE:include>
-  PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
-
-  # Include paths for generated header files.
-  INTERFACE
-    $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/runtime>
-  PRIVATE
-    ${PROJECT_BINARY_DIR}/runtime
-  )
 
 # Mapper objects
 list(APPEND MAPPER_SRC

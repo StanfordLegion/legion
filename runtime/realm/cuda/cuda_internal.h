@@ -1728,6 +1728,7 @@ namespace Realm {
   __op__(nvmlDeviceGetNvLinkVersion);                                                    \
   __op__(nvmlDeviceGetNvLinkRemotePciInfo);                                              \
   __op__(nvmlDeviceGetNvLinkRemoteDeviceType);                                           \
+  __op__(nvmlDeviceGetDeviceHandleFromMigDeviceHandle);                                  \
   NVML_11_APIS(__op__);
 
 #define DECL_FNPTR_EXTERN(name) extern decltype(&name) name##_fnptr;

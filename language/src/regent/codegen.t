@@ -692,6 +692,7 @@ local function physical_region_get_base_pointer(cx, region_type, index_type, fie
     fastest_index = ordering[1]
     expected_stride = stride
   end
+
   -- FIXME: The opt-compile-time code path improves compile time and
   -- has the same runtime performance, but has potential issues on
   -- non-x86 due to its use of an aggregate return value, so we can't
@@ -10921,6 +10922,9 @@ function codegen.top_task(cx, node)
       local field_constraint = dimensions[field_constraint_i[1]]
 
       local region_type = region_types[field_constraint.region_name]
+      if region_type == nil then
+        report.error(node, "field constraint on non-existant region " .. tostring(field_constraint.region_name))
+      end
       if not orderings[region_type] then
         orderings[region_type] = data.newmap()
       end
@@ -10928,20 +10932,42 @@ function codegen.top_task(cx, node)
       local absolute_field_paths =
         std.get_absolute_field_paths(region_type:fspace(), field_constraint.field_paths)
 
+      -- Legion aligns all fields by default
+      local function get_default_alignment(field_size)
+        return math.min(bit.band(field_size, bit.bnot(field_size - 1)), 128)
+      end
+      local function round_up(val, step)
+        local rem = val % step
+        if rem == 0 then
+          return val
+        else
+          return val + (step - rem)
+        end
+      end
+      local function align_to(field_size, align)
+        return round_up(field_size, align)
+      end
+
       if field_constraint_i[1] ~= 1 then
         absolute_field_paths:map(function(field_path)
           local field_type = std.get_field_path(region_type:fspace(), field_path)
-          local expected_stride = terralib.sizeof(field_type)
+          local field_size = terralib.sizeof(field_type)
+          local align = get_default_alignment(field_size)
+          local expected_stride = align_to(field_size, align)
           orderings[region_type][field_path] = data.newtuple(ordering, expected_stride)
         end)
       else
+        local max_align = 1
         local struct_size = data.reduce(function(a, b) return a + b end,
           absolute_field_paths:map(function(field_path)
-            return terralib.sizeof(std.get_field_path(region_type:fspace(), field_path))
+            local field_size = terralib.sizeof(std.get_field_path(region_type:fspace(), field_path))
+            max_align = math.max(max_align, get_default_alignment(field_size))
+            return field_size
           end),
           0)
+        local expected_stride = align_to(struct_size, max_align)
         absolute_field_paths:map(function(field_path)
-          orderings[region_type][field_path] = data.newtuple(ordering, struct_size)
+          orderings[region_type][field_path] = data.newtuple(ordering, expected_stride)
         end)
       end
     end)

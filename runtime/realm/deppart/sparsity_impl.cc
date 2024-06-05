@@ -29,6 +29,25 @@ namespace Realm {
   extern Logger log_part;
   extern Logger log_dpops;
 
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class SparsityMapUntyped
+
+  SparsityMapUntyped::SparsityMapUntyped(::realm_id_t _id)
+    : id(_id)
+  {}
+
+  void SparsityMapUntyped::add_references(unsigned count)
+  {
+    SparsityMapRefCounter(id).add_references(count);
+  }
+
+  void SparsityMapUntyped::remove_references(unsigned count)
+  {
+    SparsityMapRefCounter(id).remove_references(count);
+  }
+
   ////////////////////////////////////////////////////////////////////////
   //
   // class SparsityMapRefCounter
@@ -237,9 +256,7 @@ namespace Realm {
 
   SparsityMapImplWrapper::~SparsityMapImplWrapper(void)
   {
-    AutoLock<> al(mutex);
     if(map_impl.load() != 0) {
-      assert(!need_refcount || references == 0);
       (*map_deleter)(map_impl.load());
     }
   }
@@ -254,34 +271,26 @@ namespace Realm {
 
   void SparsityMapImplWrapper::add_references(unsigned count)
   {
-    if(!need_refcount)
-      return;
-    AutoLock<> al(mutex);
-    references += count;
+    if(need_refcount) {
+      references.fetch_add_acqrel(count);
+    }
   }
 
   void SparsityMapImplWrapper::remove_references(unsigned count)
   {
-    if(!need_refcount)
-      return;
-    AutoLock<> al(mutex);
-
-    assert(references > 0);
-
-    references -= std::min(references, count);
-
-    if(references == 0) {
-      if(map_impl.load() != 0) {
-        (*map_deleter)(map_impl.load());
+    if(need_refcount) {
+      if(references.fetch_sub_acqrel(count) == count) {
+        void *impl = map_impl.load();
+        if(impl != nullptr) {
+          assert(map_deleter);
+          (*map_deleter)(impl);
+          map_impl.store(0);
+          type_tag.store(0);
+        }
+        if(Network::my_node_id == NodeID(ID(me).sparsity_creator_node())) {
+          get_runtime()->free_sparsity_impl(this);
+        }
       }
-
-      NodeID owner_node = ID(me).sparsity_creator_node();
-      assert(owner_node == Network::my_node_id);
-
-      get_runtime()->local_sparsity_map_free_lists[owner_node]->free_entry(this);
-
-      map_impl.store(0);
-      type_tag.store(0);
     }
   }
 

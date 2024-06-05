@@ -1615,7 +1615,10 @@ namespace Legion {
         shard_proj = destination->compute_projection_summary(op, idx, req,
                                               logical_analysis, proj_info);
       }
-      LogicalUser *user = new LogicalUser(op, idx, RegionUsage(req),shard_proj);
+      LogicalUser *user = new LogicalUser(op, idx, RegionUsage(req),
+          shard_proj, (op->get_must_epoch_op() == NULL) ? UINT_MAX :
+          op->get_must_epoch_op()->find_operation_index(
+            op, op->get_generation()));
       user->add_reference();
 #ifdef DEBUG_LEGION
       InnerContext *context = op->get_context();
@@ -4775,9 +4778,7 @@ namespace Legion {
         return true;
       if (child.get_tree_id() != parent.get_tree_id())
         return false;
-      std::vector<LegionColor> path;
-      return compute_index_path(parent.get_index_space(),
-                                child.get_index_space(), path);
+      return has_index_path(parent.get_index_space(), child.get_index_space());
     }
 
     //--------------------------------------------------------------------------
@@ -5017,47 +5018,34 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool RegionTreeForest::compute_index_path(IndexSpace parent, 
-                               IndexSpace child, std::vector<LegionColor> &path)
+    bool RegionTreeForest::has_index_path(IndexSpace parent, 
+                                          IndexSpace child)
     //--------------------------------------------------------------------------
     {
       IndexSpaceNode *child_node = get_node(child); 
-      path.push_back(child_node->color);
       if (parent == child) 
         return true; // Early out
       IndexSpaceNode *parent_node = get_node(parent);
       while (parent_node != child_node)
       {
         if (parent_node->depth >= child_node->depth)
-        {
-          path.clear();
           return false;
-        }
         if (child_node->parent == NULL)
-        {
-          path.clear();
           return false;
-        }
-        path.push_back(child_node->parent->color);
-        path.push_back(child_node->parent->parent->color);
         child_node = child_node->parent->parent;
       }
       return true;
     }
 
     //--------------------------------------------------------------------------
-    bool RegionTreeForest::compute_partition_path(IndexSpace parent, 
-                           IndexPartition child, std::vector<LegionColor> &path)
+    bool RegionTreeForest::has_partition_path(IndexSpace parent, 
+                                              IndexPartition child)
     //--------------------------------------------------------------------------
     {
       IndexPartNode *child_node = get_node(child);
-      path.push_back(child_node->color);
       if (child_node->parent == NULL)
-      {
-        path.clear();
         return false;
-      }
-      return compute_index_path(parent, child_node->parent->handle, path);
+      return has_index_path(parent, child_node->parent->handle);
     }
 
     //--------------------------------------------------------------------------
@@ -5144,14 +5132,14 @@ namespace Legion {
       if (runtime->legion_spy_enabled && (LEGION_NAME_SEMANTIC_TAG == tag))
       {
         const char *ptr = NULL;
-        static_assert(sizeof(buffer) == sizeof(ptr), "Fuck c++");
+        static_assert(sizeof(buffer) == sizeof(ptr));
         memcpy(&ptr, &buffer, sizeof(ptr));
         LegionSpy::log_index_space_name(handle.id, ptr);
       }
       if (runtime->profiler && (LEGION_NAME_SEMANTIC_TAG == tag))
       {
         const char *ptr = NULL;
-        static_assert(sizeof(buffer) == sizeof(ptr), "Fuck c++");
+        static_assert(sizeof(buffer) == sizeof(ptr));
         memcpy(&ptr, &buffer, sizeof(ptr));
 	runtime->profiler->record_index_space(handle.id, ptr);
       }
@@ -5172,14 +5160,14 @@ namespace Legion {
       if (runtime->legion_spy_enabled && (LEGION_NAME_SEMANTIC_TAG == tag))
       {
         const char *ptr = NULL;
-        static_assert(sizeof(buffer) == sizeof(ptr), "Fuck c++");
+        static_assert(sizeof(buffer) == sizeof(ptr));
         memcpy(&ptr, &buffer, sizeof(ptr));
         LegionSpy::log_index_partition_name(handle.id, ptr);
       }
       if (runtime->profiler && (LEGION_NAME_SEMANTIC_TAG == tag))
       {
         const char *ptr = NULL;
-        static_assert(sizeof(buffer) == sizeof(ptr), "Fuck c++");
+        static_assert(sizeof(buffer) == sizeof(ptr));
         memcpy(&ptr, &buffer, sizeof(ptr));
 	runtime->profiler->record_index_part(handle.id, ptr);
       }
@@ -5200,14 +5188,14 @@ namespace Legion {
       if (runtime->legion_spy_enabled && (LEGION_NAME_SEMANTIC_TAG == tag))
       {
         const char *ptr = NULL;
-        static_assert(sizeof(buffer) == sizeof(ptr), "Fuck c++");
+        static_assert(sizeof(buffer) == sizeof(ptr));
         memcpy(&ptr, &buffer, sizeof(ptr));
         LegionSpy::log_field_space_name(handle.id, ptr);
       }
       if (runtime->profiler && (LEGION_NAME_SEMANTIC_TAG == tag))
       {
         const char *ptr = NULL;
-        static_assert(sizeof(buffer) == sizeof(ptr), "Fuck c++");
+        static_assert(sizeof(buffer) == sizeof(ptr));
         memcpy(&ptr, &buffer, sizeof(ptr));
 	runtime->profiler->record_field_space(handle.id, ptr);
       }
@@ -5229,14 +5217,14 @@ namespace Legion {
       if (runtime->legion_spy_enabled && (LEGION_NAME_SEMANTIC_TAG == tag))
       {
         const char *ptr = NULL;
-        static_assert(sizeof(buf) == sizeof(ptr), "Fuck c++");
+        static_assert(sizeof(buf) == sizeof(ptr));
         memcpy(&ptr, &buf, sizeof(ptr));
         LegionSpy::log_field_name(handle.id, fid, ptr);
       }
       if (runtime->profiler && (LEGION_NAME_SEMANTIC_TAG == tag))
       {
         const char *ptr = NULL;
-        static_assert(sizeof(buf) == sizeof(ptr), "Fuck c++");
+        static_assert(sizeof(buf) == sizeof(ptr));
         memcpy(&ptr, &buf, sizeof(ptr));
 	runtime->profiler->record_field(handle.id, fid, size, ptr); 
       }
@@ -5257,7 +5245,7 @@ namespace Legion {
       if (runtime->legion_spy_enabled && (LEGION_NAME_SEMANTIC_TAG == tag))
       {
         const char *ptr = NULL;
-        static_assert(sizeof(buffer) == sizeof(ptr), "Fuck c++");
+        static_assert(sizeof(buffer) == sizeof(ptr));
         memcpy(&ptr, &buffer, sizeof(ptr));
         LegionSpy::log_logical_region_name(handle.index_space.id,
             handle.field_space.id, handle.tree_id, ptr);
@@ -5265,7 +5253,7 @@ namespace Legion {
       if (runtime->profiler && (LEGION_NAME_SEMANTIC_TAG == tag))
       {
         const char *ptr = NULL;
-        static_assert(sizeof(buffer) == sizeof(ptr), "Fuck c++");
+        static_assert(sizeof(buffer) == sizeof(ptr));
         memcpy(&ptr, &buffer, sizeof(ptr));
 	runtime->profiler->record_logical_region(handle.index_space.id,
             handle.field_space.id, handle.tree_id, ptr);
@@ -5287,7 +5275,7 @@ namespace Legion {
       if (runtime->legion_spy_enabled && (LEGION_NAME_SEMANTIC_TAG == tag))
       {
         const char *ptr = NULL;
-        static_assert(sizeof(buffer) == sizeof(ptr), "Fuck c++");
+        static_assert(sizeof(buffer) == sizeof(ptr));
         memcpy(&ptr, &buffer, sizeof(ptr));
         LegionSpy::log_logical_partition_name(handle.index_partition.id,
             handle.field_space.id, handle.tree_id, ptr);
@@ -16567,8 +16555,6 @@ namespace Legion {
       // also keep track of the fields that we observe.  We'll use this
       // at the end when computing the final dominator mask.
       FieldMask observed_mask; 
-      const bool validates_local = arrived && (!proj_info.is_projecting() || 
-                                proj_info.is_complete_projection(this, user));
       if (!(check_mask * prev_users.get_valid_mask()))
       {
         bool tighten = false;
@@ -16598,7 +16584,6 @@ namespace Legion {
               observed_mask |= overlap;
             const DependenceType dtype = 
               check_dependence_type<true>(prev.usage, user.usage);
-            bool validate = validates_local;
             switch (dtype)
             {
               case LEGION_NO_DEPENDENCE:
@@ -16610,13 +16595,6 @@ namespace Legion {
               case LEGION_ANTI_DEPENDENCE:
               case LEGION_ATOMIC_DEPENDENCE:
               case LEGION_SIMULTANEOUS_DEPENDENCE:
-                {
-                  // Mark that these kinds of dependences are not allowed
-                  // to validate region inputs
-                  validate = false;
-                  // No break so we register dependences just like
-                  // a true dependence
-                }
               case LEGION_TRUE_DEPENDENCE:
                 {
                   // If we can validate a region record which of our
@@ -16624,7 +16602,7 @@ namespace Legion {
                   // just register a normal dependence
                   user.op->register_region_dependence(user.idx, prev.op,
                                                       prev.gen, prev.idx,
-                                                      dtype, validate, overlap);
+                                                      dtype, overlap);
 #ifdef LEGION_SPY
                   LegionSpy::log_mapping_dependence(
                       user.op->get_context()->get_unique_id(),

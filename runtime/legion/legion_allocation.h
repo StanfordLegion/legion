@@ -446,7 +446,7 @@ namespace Legion {
       inline T* allocate(std::size_t cnt) { 
         void *ptr = legion_alloc_aligned<T, false/*bytes*/>(cnt);
         pointer result = NULL;
-        static_assert(sizeof(result) == sizeof(ptr), "Fuck c++");
+        static_assert(sizeof(result) == sizeof(ptr));
         memcpy(&result, &ptr, sizeof(result));
 #ifdef LEGION_TRACE_ALLOCATION
         if (A != UNTRACKED_ALLOC)
@@ -470,7 +470,7 @@ namespace Legion {
 #endif
         void *ptr = legion_alloc_aligned<T, false/*bytes*/>(cnt);
         pointer result = NULL;
-        static_assert(sizeof(result) == sizeof(ptr), "Fuck c++");
+        static_assert(sizeof(result) == sizeof(ptr));
         memcpy(&result, &ptr, sizeof(result));
         return result;
       }

@@ -342,7 +342,7 @@
       public:
         // Number of bits in the bit vector based element
         static constexpr unsigned ELEMENT_SIZE = 8 * sizeof(ELEMENT_TYPE);
-        static_assert((MAX % ELEMENT_SIZE) == 0, "Bad bitmask size");
+        static_assert((MAX % ELEMENT_SIZE) == 0);
         ELEMENT_TYPE bit_vector[MAX/ELEMENT_SIZE];
         // Shift to get the upper bits for indexing assuming a 64-bit base type
         static constexpr unsigned SHIFT = STATIC_LOG2(ELEMENT_SIZE);
@@ -1418,7 +1418,7 @@
     inline void* alloc_aligned(size_t cnt)
     //--------------------------------------------------------------------------
     {
-      static_assert((SIZE % ALIGNMENT) == 0, "Bad size");
+      static_assert((SIZE % ALIGNMENT) == 0);
       size_t alloc_size = cnt;
       if (!BYTES)
         alloc_size *= SIZE;
@@ -1541,7 +1541,7 @@
     BitMask<T,MAX,SHIFT,MASK>::BitMask(T init /*= 0*/)
     //-------------------------------------------------------------------------
     {
-      static_assert((MAX % (8*sizeof(T))) == 0, "Bad MAX");
+      static_assert((MAX % (8*sizeof(T))) == 0);
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
         bit_vector[idx] = init;
@@ -1553,7 +1553,7 @@
     BitMask<T,MAX,SHIFT,MASK>::BitMask(const BitMask &rhs)
     //-------------------------------------------------------------------------
     {
-      static_assert((MAX % (8*sizeof(T))) == 0, "Bad MAX");
+      static_assert((MAX % (8*sizeof(T))) == 0);
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
         bit_vector[idx] = rhs[idx];
@@ -2247,7 +2247,7 @@
       : sum_mask(init)
     //-------------------------------------------------------------------------
     {
-      static_assert((MAX % (8*sizeof(T))) == 0, "Bad MAX");
+      static_assert((MAX % (8*sizeof(T))) == 0);
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
         bit_vector[idx] = init;
     }
@@ -2258,7 +2258,7 @@
       : sum_mask(rhs.sum_mask)
     //-------------------------------------------------------------------------
     {
-      static_assert((MAX % (8*sizeof(T))) == 0, "Bad MAX");
+      static_assert((MAX % (8*sizeof(T))) == 0);
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
         bit_vector[idx] = rhs[idx];
@@ -3022,7 +3022,7 @@
     SSEBitMask<MAX>::SSEBitMask(uint64_t init /*= 0*/)
     //-------------------------------------------------------------------------
     {
-      static_assert((MAX % 128) == 0, "Bad MAX");
+      static_assert((MAX % 128) == 0);
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
         bits.bit_vector[idx] = init;
@@ -3034,7 +3034,7 @@
     SSEBitMask<MAX>::SSEBitMask(const SSEBitMask &rhs)
     //-------------------------------------------------------------------------
     {
-      static_assert((MAX % 128) == 0, "Bad MAX");
+      static_assert((MAX % 128) == 0);
       for (unsigned idx = 0; idx < SSE_ELMTS; idx++)
       {
         bits.sse_view(idx) = rhs(idx);
@@ -3708,7 +3708,7 @@
       : sum_mask(init)
     //-------------------------------------------------------------------------
     {
-      static_assert((MAX % 128) == 0, "Bad MAX");
+      static_assert((MAX % 128) == 0);
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
         bits.bit_vector[idx] = init;
@@ -3721,7 +3721,7 @@
       : sum_mask(rhs.sum_mask)
     //-------------------------------------------------------------------------
     {
-      static_assert((MAX % 128) == 0, "Bad MAX");
+      static_assert((MAX % 128) == 0);
       for (unsigned idx = 0; idx < SSE_ELMTS; idx++)
       {
         bits.sse_view(idx) = rhs(idx);
@@ -4481,7 +4481,7 @@
     AVXBitMask<MAX>::AVXBitMask(uint64_t init /*= 0*/)
     //-------------------------------------------------------------------------
     {
-      static_assert((MAX % 256) == 0, "Bad MAX");
+      static_assert((MAX % 256) == 0);
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
         bits.bit_vector[idx] = init;
@@ -4493,7 +4493,7 @@
     AVXBitMask<MAX>::AVXBitMask(const AVXBitMask &rhs)
     //-------------------------------------------------------------------------
     {
-      static_assert((MAX % 256) == 0, "Bad MAX");
+      static_assert((MAX % 256) == 0);
       for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
       {
         bits.avx_view(idx) = rhs(idx);
@@ -5234,7 +5234,7 @@
       : sum_mask(init)
     //-------------------------------------------------------------------------
     {
-      static_assert((MAX % 256) == 0, "Bad MAX");
+      static_assert((MAX % 256) == 0);
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
         bits.bit_vector[idx] = init;
@@ -5247,7 +5247,7 @@
       : sum_mask(rhs.sum_mask)
     //-------------------------------------------------------------------------
     {
-      static_assert((MAX % 256) == 0, "Bad MAX");
+      static_assert((MAX % 256) == 0);
       for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
       {
         bits.avx_view(idx) = rhs(idx);
@@ -6107,7 +6107,7 @@
     PPCBitMask<MAX>::PPCBitMask(uint64_t init /*= 0*/)
     //-------------------------------------------------------------------------
     {
-      static_assert((MAX % 128) == 0, "Bad MAX");
+      static_assert((MAX % 128) == 0);
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
         bits.bit_vector[idx] = init;
@@ -6119,7 +6119,7 @@
     PPCBitMask<MAX>::PPCBitMask(const PPCBitMask &rhs)
     //-------------------------------------------------------------------------
     {
-      static_assert((MAX % 128) == 0, "Bad MAX");
+      static_assert((MAX % 128) == 0);
       for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
       {
         bits.ppc_view(idx) = rhs(idx);
@@ -6811,7 +6811,7 @@
       : sum_mask(init)
     //-------------------------------------------------------------------------
     {
-      static_assert((MAX % 128) == 0, "Bad MAX");
+      static_assert((MAX % 128) == 0);
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
         bits.bit_vector[idx] = init;
@@ -6824,7 +6824,7 @@
       : sum_mask(rhs.sum_mask)
     //-------------------------------------------------------------------------
     {
-      static_assert((MAX % 128) == 0, "Bad MAX");
+      static_assert((MAX % 128) == 0);
       for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
       {
         bits.ppc_view(idx) = rhs(idx);
@@ -7603,7 +7603,7 @@
     NeonBitMask<MAX>::NeonBitMask(uint64_t init /*= 0*/)
     //-------------------------------------------------------------------------
     {
-      static_assert((MAX % 128) == 0, "Bad MAX");
+      static_assert((MAX % 128) == 0);
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
         bits.bit_vector[idx] = init;
@@ -7615,7 +7615,7 @@
     NeonBitMask<MAX>::NeonBitMask(const NeonBitMask &rhs)
     //-------------------------------------------------------------------------
     {
-      static_assert((MAX % 128) == 0, "Bad MAX");
+      static_assert((MAX % 128) == 0);
       for (unsigned idx = 0; idx < NEON_ELMTS; idx++)
       {
         bits.neon_view(idx) = rhs(idx);
@@ -8312,7 +8312,7 @@
       : sum_mask(init)
     //-------------------------------------------------------------------------
     {
-      static_assert((MAX % 128) == 0, "Bad MAX");
+      static_assert((MAX % 128) == 0);
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
         bits.bit_vector[idx] = init;
@@ -8325,7 +8325,7 @@
       : sum_mask(rhs.sum_mask)
     //-------------------------------------------------------------------------
     {
-      static_assert((MAX % 128) == 0, "Bad MAX");
+      static_assert((MAX % 128) == 0);
       for (unsigned idx = 0; idx < NEON_ELMTS; idx++)
       {
         bits.neon_view(idx) = rhs(idx);

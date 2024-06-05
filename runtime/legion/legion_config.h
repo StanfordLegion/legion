@@ -1157,7 +1157,8 @@ typedef enum legion_error_t {
   ERROR_UNABLE_ALLOCATE_LOCAL_FIELD = 388,
   ERROR_TASK_ATTEMPTED_ALLOCATE_FIELD = 389,
   ERROR_DEFERRED_BUFFER_DOUBLE_DELETE = 390,
-  //ERROR_PREDICATED_TASK_LAUNCH_FOR_TASK = 392,
+  ERROR_MISMATCHED_PROFILING_RANGE = 391,
+  ERROR_MISSING_PROFILING_PROVENANCE = 392,
   ERROR_PREDICATED_INDEX_TASK_LAUNCH = 393,
   ERROR_ATTEMPTED_INLINE_MAPPING_REGION = 395,
   ERROR_ATTEMPTED_EXTERNAL_ATTACH = 397,
@@ -1453,7 +1454,7 @@ typedef enum legion_privilege_mode_t
 } legion_privilege_mode_t;
 
 #ifdef __cplusplus
-static_assert(sizeof(legion_privilege_mode_t) == sizeof(unsigned), "");
+static_assert(sizeof(legion_privilege_mode_t) == sizeof(unsigned));
 #endif
 
 typedef enum legion_allocate_mode_t {
@@ -2163,6 +2164,7 @@ typedef unsigned long legion_semantic_tag_t;
 typedef unsigned long long legion_unique_id_t;
 typedef unsigned long long legion_version_id_t;
 typedef unsigned long long legion_projection_epoch_id_t;
+typedef unsigned long long legion_provenance_id_t;
 typedef realm_task_func_id_t legion_task_id_t;
 typedef unsigned long legion_layout_constraint_id_t;
 typedef long long legion_internal_color_t;

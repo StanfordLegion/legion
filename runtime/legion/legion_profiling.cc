@@ -201,16 +201,10 @@ namespace Legion {
       inst.kind = op->get_operation_kind();
       Provenance *prov = op->get_provenance();
       if (prov != NULL)
-      {
-        inst.provenance = prov->clone();
-        owner->update_footprint(
-            sizeof(OperationInstance) + strlen(inst.provenance), this);
-      }
+        inst.provenance = prov->pid;
       else
-      {
-        inst.provenance = NULL;
-        owner->update_footprint(sizeof(OperationInstance), this);
-      }
+        inst.provenance = 0;
+      owner->update_footprint(sizeof(OperationInstance), this);
     }
 
     //--------------------------------------------------------------------------
@@ -1033,10 +1027,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LegionProfInstance::record_mapper_call(Processor proc, 
-                              MappingCallKind kind, UniqueID uid,
-                              unsigned long long start, unsigned long long stop,
-                              LgEvent finish_event)
+    void LegionProfInstance::record_mapper_call(Processor proc, MapperID mapper,
+                              Processor mapper_proc, MappingCallKind kind, 
+                              UniqueID uid, unsigned long long start,
+                              unsigned long long stop, LgEvent finish_event)
     //--------------------------------------------------------------------------
     {
       // Check to see if it exceeds the call threshold
@@ -1044,6 +1038,8 @@ namespace Legion {
         return;
       mapper_call_infos.emplace_back(MapperCallInfo());
       MapperCallInfo &info = mapper_call_infos.back();
+      info.mapper = mapper;
+      info.mapper_proc = mapper_proc.id;
       info.kind = kind;
       info.op_id = uid;
       info.start = start;
@@ -1070,6 +1066,23 @@ namespace Legion {
       info.proc_id = proc.id;
       info.finish_event = finish_event;
       owner->update_footprint(sizeof(RuntimeCallInfo), this);
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfInstance::record_application_range(Processor proc,
+        ProvenanceID pid, timestamp_t start, timestamp_t stop, LgEvent finish)
+    //--------------------------------------------------------------------------
+    {
+      // We don't filter application call ranges currently since presumably 
+      // the application knows what its doing and wants to see everything 
+      application_call_infos.emplace_back(ApplicationCallInfo());
+      ApplicationCallInfo &info = application_call_infos.back();
+      info.pid = pid;
+      info.start = start;
+      info.stop = stop;
+      info.proc_id = proc.id;
+      info.finish_event = finish;
+      owner->update_footprint(sizeof(ApplicationCallInfo), this);
     }
 
 #ifdef LEGION_PROF_SELF_PROFILE
@@ -1130,8 +1143,6 @@ namespace Legion {
             operation_instances.begin(); it != operation_instances.end(); it++)
       {
         serializer->serialize(*it);
-        if (it->provenance != NULL)
-          free(const_cast<char*>(it->provenance));
       }
       for (std::deque<MultiTask>::const_iterator it = 
             multi_tasks.begin(); it != multi_tasks.end(); it++)
@@ -1286,6 +1297,12 @@ namespace Legion {
       {
         serializer->serialize(*it);
       }
+      for (std::deque<ApplicationCallInfo>::const_iterator it =
+            application_call_infos.begin(); it != 
+            application_call_infos.end(); it++)
+      {
+        serializer->serialize(*it);
+      }
 
 #ifdef LEGION_PROF_SELF_PROFILE
       for (std::deque<ProfTaskInfo>::const_iterator it = 
@@ -1392,11 +1409,6 @@ namespace Legion {
         OperationInstance &front = operation_instances.front();
         serializer->serialize(front);
         diff += sizeof(front);
-        if (front.provenance != NULL)
-        {
-          diff += strlen(front.provenance);
-          free(const_cast<char*>(front.provenance));
-        }
         operation_instances.pop_front();
         const long long t_curr = Realm::Clock::current_time_in_microseconds();
         if (t_curr >= t_stop)
@@ -1656,6 +1668,16 @@ namespace Legion {
         serializer->serialize(front);
         diff += sizeof(front);
         runtime_call_infos.pop_front();
+        const long long t_curr = Realm::Clock::current_time_in_microseconds();
+        if (t_curr >= t_stop)
+          return diff;
+      }
+      while (!application_call_infos.empty())
+      {
+        ApplicationCallInfo &front = application_call_infos.front();
+        serializer->serialize(front);
+        diff += sizeof(front);
+        application_call_infos.pop_front();
         const long long t_curr = Realm::Clock::current_time_in_microseconds();
         if (t_curr >= t_stop)
           return diff;
@@ -2579,6 +2601,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void LegionProfiler::record_mapper_name(MapperID mapper, Processor proc,
+                                            const char *name)
+    //--------------------------------------------------------------------------
+    {
+      LegionProfDesc::MapperName mapper_name = { mapper, proc.id, name };
+      if (!serializer->is_thread_safe())
+      {
+        // Need a lock to protect the serializer
+        AutoLock p_lock(profiler_lock);
+        serializer->serialize(mapper_name);
+      }
+      else
+        serializer->serialize(mapper_name);
+    }
+
+    //--------------------------------------------------------------------------
     void LegionProfiler::record_mapper_call_kinds(const char *const *const
                                mapper_call_names, unsigned int num_mapper_calls)
     //--------------------------------------------------------------------------
@@ -2593,8 +2631,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LegionProfiler::record_mapper_call(MappingCallKind kind, UniqueID uid,
-                              unsigned long long start, unsigned long long stop)
+    void LegionProfiler::record_mapper_call(MapperID map, Processor mapper_proc,
+        MappingCallKind kind, UniqueID uid, unsigned long long start,
+        unsigned long long stop)
     //--------------------------------------------------------------------------
     {
       LgEvent finish_event;
@@ -2620,8 +2659,8 @@ namespace Legion {
       if (thread_local_profiling_instance == NULL)
         create_thread_local_profiling_instance();
       thread_local_profiling_instance->process_proc_desc(current);
-      thread_local_profiling_instance->record_mapper_call(current, kind, uid, 
-                                                   start, stop, finish_event);
+      thread_local_profiling_instance->record_mapper_call(current, map,
+          mapper_proc, kind, uid, start, stop, finish_event);
     }
 
     //--------------------------------------------------------------------------
@@ -2666,6 +2705,50 @@ namespace Legion {
       thread_local_profiling_instance->process_proc_desc(current);
       thread_local_profiling_instance->record_runtime_call(current, kind, start,
                                                            stop, finish_event);
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfiler::record_provenance(ProvenanceID pid,
+                                           const char *provenance, size_t size)
+    //--------------------------------------------------------------------------
+    {
+      LegionProfDesc::Provenance prov = { pid, provenance, size };
+      // This one cannot be buffered, we need to log it right away so that it is
+      // available to the profiler for all logging statements that come after it
+      if (!serializer->is_thread_safe())
+      {
+        // Need a lock to protect the serializer
+        AutoLock p_lock(profiler_lock);
+        serializer->serialize(prov);
+      }
+      else
+        serializer->serialize(prov);
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfiler::record_application_range(ProvenanceID pid,
+        timestamp_t start, timestamp_t stop)
+    //--------------------------------------------------------------------------
+    {
+      LgEvent finish_event;
+      Processor current = Processor::get_executing_processor();
+      if (!current.exists())
+      {
+        // Implicit top-level task case where we're not actually running
+        // on a Realm processor so we need to get the proxy processor
+        // for the context instead
+#ifdef DEBUG_LEGION
+        assert(implicit_context != NULL);
+#endif
+        current = implicit_context->get_executing_processor();
+        finish_event = implicit_context->owner_task->get_completion_event();
+      }
+      else
+        finish_event = LgEvent(Processor::get_current_finish_event());
+      if (thread_local_profiling_instance == NULL)
+        create_thread_local_profiling_instance();
+      thread_local_profiling_instance->record_application_range(current,
+          pid, start, stop, finish_event);
     }
 
     //--------------------------------------------------------------------------

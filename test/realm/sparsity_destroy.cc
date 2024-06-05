@@ -36,13 +36,13 @@ void node_task_0(const void *args, size_t arglen, const void *userdata, size_t u
 {
   TaskArgs &task_args = *(TaskArgs *)args;
 
-  // add remote reference
-  task_args.sparsity_map.add_references(2);
-  // remove remote reference
-  task_args.sparsity_map.remove_references(2);
-  // deferred remote destroy
+  SparsityMapUntyped handle(task_args.sparsity_map.id);
 
-  task_args.sparsity_map.destroy(task_args.wait_on);
+  // add remote reference
+  handle.add_references(1);
+  // remove remote reference
+  handle.remove_references(2);
+  // deferred remote destroy
 
   SparsityMap<1> local_sparsity =
       SparsityMap<1>::construct({Rect<1>(Point<1>(0), Point<1>(50000))}, true, true);

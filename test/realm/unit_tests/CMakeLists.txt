@@ -25,14 +25,10 @@ list(APPEND REALM_TESTS
   path_cache_test.cc
   transfer_utils_test.cc
   address_list_test.cc
-  index_space_iterator_test.cc
-  sparsity_map_test.cc
   cmdline_parser_test.cc
   sequence_assembler_test.cc
- )
-
-list(APPEND REALM_MEMORY_QUERY_TEST
-  memory_query_test.cc
+  range_allocator_test.cc
+  pri_queue_test.cc
  )
 
 include(FetchContent)
@@ -45,16 +41,21 @@ FetchContent_MakeAvailable(googletest)
 
 enable_testing()
 add_executable(realm_tests ${REALM_TESTS})
-add_executable(realm_memory_query_test ${REALM_MEMORY_QUERY_TEST})
 
 list(APPEND REALM_UNIT_TESTS_LIST
   realm_tests
-  realm_memory_query_test
 )
 
 foreach(ITEM IN LISTS REALM_UNIT_TESTS_LIST)
-  target_link_libraries(${ITEM} Legion::RealmTests GTest::gtest_main ${CMAKE_DL_LIBS})
+  if(REALM_LIMIT_SYMBOL_VISIBILITY)
+    set_target_properties(${ITEM} PROPERTIES CXX_VISIBILITY_PRESET hidden)
+    set_target_properties(${ITEM} PROPERTIES VISIBILITY_INLINES_HIDDEN 1)
+  endif()
+  target_link_libraries(${ITEM} Legion::RealmTests GTest::gmock_main ${CMAKE_DL_LIBS})
   target_compile_options(${ITEM} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
   include(GoogleTest)
   gtest_discover_tests(${ITEM})
+  if(Legion_ENABLE_TESTING)
+    add_test(NAME ${ITEM} COMMAND $<TARGET_FILE:${ITEM}> ${Legion_TEST_ARGS} ${TESTARGS_${ITEM}})
+  endif()
 endforeach()

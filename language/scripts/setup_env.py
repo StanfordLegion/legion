@@ -259,6 +259,16 @@ def install_llvm(llvm_dir, llvm_install_dir, scratch_dir, llvm_version, cmake_ex
         llvm_source_dir = os.path.join(llvm_dir, 'llvm-project-13.0.0.src', 'llvm')
         clang_tarball = None
         download(llvm_tarball, '%s/llvmorg-13.0.0/llvm-project-13.0.0.src.tar.xz' % mirror, '6075ad30f1ac0e15f07c1bf062c1e1268c241d674f11bd32cdf0e040c71f2bf3', insecure=insecure)
+    elif llvm_version == '160':
+        llvm_tarball = os.path.join(llvm_dir, 'llvm-project-16.0.6.src.tar.xz')
+        llvm_source_dir = os.path.join(llvm_dir, 'llvm-project-16.0.6.src', 'llvm')
+        clang_tarball = None
+        download(llvm_tarball, '%s/llvmorg-16.0.6/llvm-project-16.0.6.src.tar.xz' % mirror, 'ce5e71081d17ce9e86d7cbcfa28c4b04b9300f8fb7e78422b1feb6bc52c3028e', insecure=insecure)
+    elif llvm_version == '170':
+        llvm_tarball = os.path.join(llvm_dir, 'llvm-project-17.0.6.src.tar.xz')
+        llvm_source_dir = os.path.join(llvm_dir, 'llvm-project-17.0.6.src', 'llvm')
+        clang_tarball = None
+        download(llvm_tarball, '%s/llvmorg-17.0.6/llvm-project-17.0.6.src.tar.xz' % mirror, '58a8818c60e6627064f312dbf46c02d9949956558340938b71cf731ad8bc0813', insecure=insecure)
     else:
         assert False
 
@@ -589,7 +599,7 @@ if __name__ == '__main__':
         default=[],
         help='Extra flags for Make/CMake command.')
     parser.add_argument(
-        '--llvm-version', dest='llvm_version', required=False, choices=('60', '110', '130'),
+        '--llvm-version', dest='llvm_version', required=False, choices=('60', '110', '130', '160', '170'),
         default=discover_llvm_version(),
         help='Select LLVM version.')
     parser.add_argument(
@@ -622,7 +632,7 @@ if __name__ == '__main__':
         help='Select GASNet version.')
     parser.add_argument(
         '--gasnet-config-version', dest='gasnet_config_version', required=False,
-        default='0fb5a0556e76d1988ea5b59df2789a25d4e1ad99', # master as of 2024-03-11
+        default='034ada74927746e8bfa21d43b527a052118e2def', # master as of 2024-05-28
         help='Select version of the GASNet configuration/build tool.')
     parser.add_argument(
         '-j', dest='thread_count', nargs='?', type=int,
