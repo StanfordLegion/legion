@@ -503,11 +503,13 @@ namespace Realm {
 	target_node = ID(domain_transform.range_data[sources.size() % domain_transform.range_data.size()].inst).instance_owner_node();
     SparsityMap<N,T> sparsity = get_runtime()->get_available_sparsity_impl(target_node)->me.convert<SparsityMap<N,T> >();
     image.sparsity = sparsity;
+    sparsity.add_references();
     // TODO(apryakhin): Handle and test this ref-counting path
 
     sources.push_back(source);
     diff_rhss.push_back(diff_rhs);
     images.push_back(sparsity);
+    sparsity.add_references();
 
     return image;
   }

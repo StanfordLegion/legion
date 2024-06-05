@@ -35,16 +35,34 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
                Processor p)
 {
   TaskArgs &task_args = *(TaskArgs *)args;
-  std::vector<IndexSpace<1>> images;
-  Event e2 = task_args.parent.create_subspaces_by_image(
-      std::vector<FieldDataDescriptor<IndexSpace<1>, Point<1>>>{
-          std::begin(task_args.ptr_data), std::end(task_args.ptr_data)},
-      std::vector<IndexSpace<1>>{std::begin(task_args.sources),
-                                 std::end(task_args.sources)},
-      images, ProfilingRequestSet());
-  e2.wait();
-  for(size_t i = 0; i < images.size(); i++) {
-    images[i].sparsity.remove_references();
+
+  {
+    std::vector<IndexSpace<1>> images;
+    Event e2 = task_args.parent.create_subspaces_by_image(
+        std::vector<FieldDataDescriptor<IndexSpace<1>, Point<1>>>{
+            std::begin(task_args.ptr_data), std::end(task_args.ptr_data)},
+        std::vector<IndexSpace<1>>{std::begin(task_args.sources),
+                                   std::end(task_args.sources)},
+        images, ProfilingRequestSet());
+    e2.wait();
+    for(size_t i = 0; i < images.size(); i++) {
+      images[i].sparsity.remove_references();
+    }
+  }
+
+  {
+    std::vector<IndexSpace<1>> images;
+    std::vector<IndexSpace<1>> sources{std::begin(task_args.sources),
+                                       std::end(task_args.sources)};
+    // TODO(apryakhin): Consider passing diff_rhss
+    Event e2 = task_args.parent.create_subspaces_by_image_with_difference(
+        std::vector<FieldDataDescriptor<IndexSpace<1>, Point<1>>>{
+            std::begin(task_args.ptr_data), std::end(task_args.ptr_data)},
+        sources, sources, images, ProfilingRequestSet());
+    e2.wait();
+    for(size_t i = 0; i < images.size(); i++) {
+      images[i].sparsity.remove_references();
+    }
   }
 }
 
