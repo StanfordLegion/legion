@@ -442,7 +442,7 @@ namespace Realm {
   ImageOperation<N,T,N2,T2>::~ImageOperation(void)
   {
     for(size_t i = 0; i < images.size(); i++) {
-      images[i].remove_references();
+      images[i].destroy();
     }
   }
 
@@ -470,11 +470,11 @@ namespace Realm {
 
     SparsityMap<N,T> sparsity = get_runtime()->get_available_sparsity_impl(target_node)->me.convert<SparsityMap<N,T> >();
     image.sparsity = sparsity;
-    image.sparsity.add_references();
+    sparsity.add_references();
 
     sources.push_back(source);
     images.push_back(sparsity);
-    images.back().add_references();
+    sparsity.add_references();
 
     return image;
   }
@@ -503,6 +503,7 @@ namespace Realm {
 	target_node = ID(domain_transform.range_data[sources.size() % domain_transform.range_data.size()].inst).instance_owner_node();
     SparsityMap<N,T> sparsity = get_runtime()->get_available_sparsity_impl(target_node)->me.convert<SparsityMap<N,T> >();
     image.sparsity = sparsity;
+    // TODO(apryakhin): Handle and test this ref-counting path
 
     sources.push_back(source);
     diff_rhss.push_back(diff_rhs);
@@ -701,6 +702,7 @@ namespace Realm {
   void StructuredImageMicroOp<N, T, N2, T2>::add_sparsity_output(
       IndexSpace<N2, T2> _source, SparsityMap<N, T> _sparsity) {
    sources.push_back(_source);
+   // TODO(apryakhin): Handle and test this sparsity ref-count path.
    sparsity_outputs.push_back(_sparsity);
   }
 
