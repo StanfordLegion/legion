@@ -256,7 +256,10 @@ namespace Realm {
   SparsityMapImplWrapper::~SparsityMapImplWrapper(void)
   {
     if(map_impl.load() != 0) {
-      assert(need_refcount);
+      if(need_refcount) {
+        log_dpops.fatal() << "Leaking sparsity map me:" << me;
+        assert(0);
+      }
       (*map_deleter)(map_impl.load());
     }
   }
