@@ -22,9 +22,8 @@ enum
 constexpr int NUM_INSTS = 1;
 
 struct TaskArgs {
-  IndexSpace<1> sources[NUM_INSTS];
-  FieldDataDescriptor<IndexSpace<1>, Point<1>> ptr_data[NUM_INSTS];
-  IndexSpace<1> parent;
+  IndexSpace<1> lhs[NUM_INSTS];
+  IndexSpace<1> rhs[NUM_INSTS];
 };
 
 namespace TestConfig {
@@ -36,32 +35,17 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
 {
   TaskArgs &task_args = *(TaskArgs *)args;
 
+  // intersection lhs==rhs
   {
-    std::vector<IndexSpace<1>> images;
-    Event e2 = task_args.parent.create_subspaces_by_image(
-        std::vector<FieldDataDescriptor<IndexSpace<1>, Point<1>>>{
-            std::begin(task_args.ptr_data), std::end(task_args.ptr_data)},
-        std::vector<IndexSpace<1>>{std::begin(task_args.sources),
-                                   std::end(task_args.sources)},
-        images, ProfilingRequestSet());
+    std::vector<IndexSpace<1>> results;
+    assert(!task_args.lhs[0].dense());
+    Event e2 = IndexSpace<1>::compute_intersections(
+        std::vector<IndexSpace<1>>{std::begin(task_args.lhs), std::end(task_args.lhs)},
+        std::vector<IndexSpace<1>>{std::begin(task_args.rhs), std::end(task_args.rhs)},
+        results, ProfilingRequestSet());
     e2.wait();
-    for(size_t i = 0; i < images.size(); i++) {
-      images[i].sparsity.remove_references();
-    }
-  }
-
-  {
-    std::vector<IndexSpace<1>> images;
-    std::vector<IndexSpace<1>> sources{std::begin(task_args.sources),
-                                       std::end(task_args.sources)};
-    // TODO(apryakhin): Consider passing diff_rhss
-    Event e2 = task_args.parent.create_subspaces_by_image_with_difference(
-        std::vector<FieldDataDescriptor<IndexSpace<1>, Point<1>>>{
-            std::begin(task_args.ptr_data), std::end(task_args.ptr_data)},
-        sources, sources, images, ProfilingRequestSet());
-    e2.wait();
-    for(size_t i = 0; i < images.size(); i++) {
-      images[i].sparsity.remove_references();
+    for(size_t i = 0; i < results.size(); i++) {
+      results[i].sparsity.remove_references();
     }
   }
 }
@@ -83,33 +67,7 @@ void main_task(const void *args, size_t arglen, const void *userdata, size_t use
     }
   }
 
-  IndexSpace<1, int> root1(rects[0]);
-  IndexSpace<1> parent(rects[0]);
-
-  std::vector<IndexSpace<1>> sources;
-  root1.create_equal_subspaces(NUM_INSTS, 1, sources, Realm::ProfilingRequestSet())
-      .wait();
-
-  std::vector<size_t> field_sizes;
-  field_sizes.push_back(sizeof(int));
-  field_sizes.push_back(sizeof(Point<1>));
-
-  std::vector<FieldDataDescriptor<IndexSpace<1>, Point<1>>> ptr_data(NUM_INSTS);
-
-  for(int i = 0; i < NUM_INSTS; i++) {
-    int mem_idx = i % memories.size();
-    RegionInstance ri;
-    RegionInstance::create_instance(ri, memories[mem_idx], sources[i], field_sizes, 0,
-                                    Realm::ProfilingRequestSet())
-        .wait();
-    ptr_data[i].index_space = sources[i];
-    ptr_data[i].inst = ri;
-    ptr_data[i].field_offset = 0;
-    AffineAccessor<int, 1> a_vals(ri, 0);
-    for(PointInRectIterator<1, int> pir(root1.bounds); pir.valid; pir.step()) {
-      a_vals.write(pir.p, pir.p[0]);
-    }
-  }
+  std::vector<IndexSpace<1>> roots;
 
   std::vector<Event> events;
   for(std::vector<Memory>::const_iterator it = memories.begin(); it != memories.end();
@@ -119,23 +77,34 @@ void main_task(const void *args, size_t arglen, const void *userdata, size_t use
                           .same_address_space_as(*it)
                           .begin();
 
-    if((TestConfig::remote_create) &&
+    roots.push_back(IndexSpace<1>(rects));
+    roots.back().sparsity.add_references();
+
+    std::vector<IndexSpace<1>> lhs;
+    roots.back()
+        .create_equal_subspaces(NUM_INSTS, 1, lhs, Realm::ProfilingRequestSet())
+        .wait();
+    std::vector<IndexSpace<1>> rhs = lhs;
+
+    /*if((TestConfig::remote_create) &&
        NodeID(ID(*it).memory_owner_node()) ==
            NodeID(ID(ptr_data[0].inst).instance_owner_node())) {
       continue;
-    }
+    }*/
 
     TaskArgs args;
     for(int i = 0; i < NUM_INSTS; i++) {
-      args.sources[0] = sources[0];
-      args.ptr_data[0] = ptr_data[0];
+      args.lhs[i] = lhs[i];
+      args.rhs[i] = rhs[i];
     }
-    args.parent = parent;
     Event e = proc.spawn(NODE_TASK, &args, sizeof(args));
     events.push_back(e);
   }
 
   Event::merge_events(events).wait();
+  for(size_t i = 0; i < roots.size(); i++) {
+    roots[i].sparsity.destroy();
+  }
   usleep(100000);
   Runtime::get_runtime().shutdown(Processor::get_current_finish_event(), 0);
 }
