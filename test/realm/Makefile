@@ -77,6 +77,7 @@ TESTS += rect_transform_test
 TESTS += rsrv_acquire_poisoned
 TESTS += sparsity_destroy
 TESTS += inst_chain_redistrict
+TESTS += refcount_setops_test
 
 ifeq ($(strip $(USE_CUDA)),1)
 TESTS += task_stream
