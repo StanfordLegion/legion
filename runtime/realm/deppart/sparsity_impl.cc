@@ -253,10 +253,13 @@ namespace Realm {
         "enable_sparsity_refcount", need_refcount));
   }
 
-  SparsityMapImplWrapper::~SparsityMapImplWrapper(void)
+  sparsitymapimplwrapper::~sparsitymapimplwrapper(void)
   {
     if(map_impl.load() != 0) {
-      assert(need_refcount);
+      if(need_refcount) {
+        log_dpops.fatal() << "leaking sparsity map me:" << me;
+        assert(0);
+      }
       (*map_deleter)(map_impl.load());
     }
   }
