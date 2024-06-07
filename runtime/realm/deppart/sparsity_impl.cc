@@ -266,6 +266,23 @@ namespace Realm {
     owner = _init_owner;
   }
 
+  void SparsityMapImplWrapper::recycle(void)
+  {
+    //assert(subscribers.empty());
+
+    void *impl = map_impl.load();
+    if(impl != nullptr) {
+      assert(map_deleter);
+      (*map_deleter)(impl);
+      map_impl.store(0);
+      type_tag.store(0);
+    }
+
+    if(Network::my_node_id == NodeID(ID(me).sparsity_creator_node())) {
+      get_runtime()->free_sparsity_impl(this);
+    }
+  }
+
   void SparsityMapImplWrapper::destroy(void) { remove_references(/*count=*/1); }
 
   void SparsityMapImplWrapper::add_references(unsigned count)
@@ -279,7 +296,8 @@ namespace Realm {
   {
     if(need_refcount) {
       if(references.fetch_sub_acqrel(count) == count) {
-        void *impl = map_impl.load();
+        recycle();
+        /*void *impl = map_impl.load();
         if(impl != nullptr) {
           assert(map_deleter);
           (*map_deleter)(impl);
@@ -288,7 +306,7 @@ namespace Realm {
         }
         if(Network::my_node_id == NodeID(ID(me).sparsity_creator_node())) {
           get_runtime()->free_sparsity_impl(this);
-        }
+        }*/
       }
     }
   }
@@ -329,6 +347,17 @@ namespace Realm {
       delete new_impl;
       return static_cast<SparsityMapImpl<N,T> *>(impl);
     }
+  }
+
+  void SparsityMapImplWrapper::subscribe(NodeID node)
+  {
+    assert(NodeID(ID(me).sparsity_creator_node()) == Network::my_node_id);
+  }
+
+  void SparsityMapImplWrapper::unsubscribe(NodeID node)
+  {
+    AutoLock<> al(mutex);
+    assert(NodeID(ID(me).sparsity_creator_node()) == Network::my_node_id);
   }
 
 

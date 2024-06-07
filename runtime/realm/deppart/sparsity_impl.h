@@ -188,6 +188,9 @@ namespace Realm {
 
     void init(ID _me, unsigned _init_owner);
     void destroy(void);
+    void recycle(void);
+    void subscribe(NodeID node);
+    void unsubscribe(NodeID node);
 
     void add_references(unsigned count);
     void remove_references(unsigned count);
