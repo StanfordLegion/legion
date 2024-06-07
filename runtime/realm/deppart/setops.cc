@@ -205,7 +205,8 @@ namespace Realm {
       if((l.sparsity == r.sparsity) && union_is_rect(l.bounds, r.bounds)) {
 	results[i] = IndexSpace<N,T>(l.bounds.union_bbox(r.bounds),
 				      l.sparsity);
-	continue;
+        results[i].sparsity.add_references();
+        continue;
       }
 
       // general case - create op if needed
@@ -360,8 +361,9 @@ namespace Realm {
       if(r.dense() || (l.sparsity == r.sparsity)) {
 	Rect<N,T> sdiff;
 	if(attempt_simple_diff(l.bounds, r.bounds, sdiff)) {
-	  results[i] = IndexSpace<N,T>(sdiff, l.sparsity);
-	  continue;
+          results[i] = IndexSpace<N, T>(sdiff, l.sparsity);
+          results[i].sparsity.add_references(1);
+          continue;
 	}
       }
 
@@ -409,14 +411,15 @@ namespace Realm {
       result = subspaces[0];
 
       for(size_t i = 1; i < subspaces.size(); i++) {
-	// empty rhs - skip
+        // empty rhs - skip
 	if(subspaces[i].empty())
 	  continue;
 
-	// lhs dense or subspace match, and containment - skip
+        // lhs dense or subspace match, and containment - skip
 	if((result.dense() || (result.sparsity == subspaces[i].sparsity)) &&
-	   result.bounds.contains(subspaces[i].bounds))
+	   result.bounds.contains(subspaces[i].bounds)) {
 	  continue;
+        }
 
 	// TODO: subspace match ought to be sufficient here - also handle
 	//  merge-into-rectangle case?
@@ -434,7 +437,7 @@ namespace Realm {
 							  ID(e).event_generation());
 
 	result = op->add_union(subspaces);
-	op->launch(wait_on);
+        op->launch(wait_on);
 	was_inline = false;
 	break;
       }
@@ -506,6 +509,7 @@ namespace Realm {
 	if(result.dense()) {
 	  result.bounds = result.bounds.intersection(subspaces[i].bounds);
 	  result.sparsity = subspaces[i].sparsity;
+          result.sparsity.add_references();
 	  continue;	  
 	}
 
@@ -1552,6 +1556,7 @@ namespace Realm {
     ops[1] = rhs;
     inputs.push_back(ops);
     outputs.push_back(sparsity);
+    outputs.back().add_references();
 
     return output;
   }
@@ -1588,6 +1593,7 @@ namespace Realm {
 
     inputs.push_back(ops);
     outputs.push_back(sparsity);
+    sparsity.add_references();
 
     return output;
   }
