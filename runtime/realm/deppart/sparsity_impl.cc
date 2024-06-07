@@ -360,6 +360,20 @@ namespace Realm {
     assert(NodeID(ID(me).sparsity_creator_node()) == Network::my_node_id);
   }
 
+    void SparsityMapImplWrapper::SubscribeDeleteMessage::handle_message(
+      NodeID sender, const SubscribeDeleteMessage &msg, const void *data, size_t datalen)
+  {
+    SparsityMapImplWrapper *wrapper = get_runtime()->get_sparsity_impl(msg.id);
+    if(wrapper) {
+      assert(sender != Network::my_node_id);
+      wrapper->subscribe(sender);
+    }
+  }
+
+  /*static*/ ActiveMessageHandlerReg<
+      typename SparsityMapImplWrapper::SubscribeDeleteMessage>
+      SparsityMapImplWrapper::subscribe_delete_message_handler_reg;
+
 
   ////////////////////////////////////////////////////////////////////////
   //

@@ -212,8 +212,15 @@ namespace Realm {
 
     template <int N, typename T>
     SparsityMapImpl<N, T> *get_or_create(SparsityMap<N, T> me);
-  };
 
+    struct SubscribeDeleteMessage {
+      ::realm_id_t id;
+      static void handle_message(NodeID sender, const SubscribeDeleteMessage &msg,
+                                 const void *data, size_t datalen);
+    };
+    static ActiveMessageHandlerReg<SubscribeDeleteMessage>
+        subscribe_delete_message_handler_reg;
+  };
 
 }; // namespace Realm
 
