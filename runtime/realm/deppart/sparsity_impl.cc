@@ -356,15 +356,35 @@ namespace Realm {
   void SparsityMapImplWrapper::subscribe(NodeID node)
   {
     assert(NodeID(ID(me).sparsity_creator_node()) == Network::my_node_id);
+    if(references.load() == 0) {
+      assert(subscribers.empty());
+      assert(map_impl.load() == nullptr);
+      // already deleted
+      ActiveMessage<typename SparsityMapRefCounter::SparsityMapRemoveReferencesMessage>
+          amsg(node);
+      amsg->id = me.id;
+      amsg->count = 0;
+      amsg.commit();
+    } else {
+      AutoLock<> al(mutex);
+      subscribers.add(node);
+    }
   }
 
   void SparsityMapImplWrapper::unsubscribe(NodeID node)
   {
     AutoLock<> al(mutex);
+
     assert(NodeID(ID(me).sparsity_creator_node()) == Network::my_node_id);
+
+    assert(subscribers.contains(node));
+    subscribers.remove(node);
+    if(subscribers.empty()) {
+      recycle();
+    }
   }
 
-    void SparsityMapImplWrapper::SubscribeDeleteMessage::handle_message(
+  void SparsityMapImplWrapper::SubscribeDeleteMessage::handle_message(
       NodeID sender, const SubscribeDeleteMessage &msg, const void *data, size_t datalen)
   {
     SparsityMapImplWrapper *wrapper = get_runtime()->get_sparsity_impl(msg.id);
@@ -377,7 +397,6 @@ namespace Realm {
   /*static*/ ActiveMessageHandlerReg<
       typename SparsityMapImplWrapper::SubscribeDeleteMessage>
       SparsityMapImplWrapper::subscribe_delete_message_handler_reg;
-
 
   ////////////////////////////////////////////////////////////////////////
   //

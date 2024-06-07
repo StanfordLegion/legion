@@ -201,6 +201,7 @@ namespace Realm {
     atomic<DynamicTemplates::TagType> type_tag;
     atomic<void *> map_impl;  // actual implementation
     atomic<unsigned> references;
+    NodeSet subscribers;
 
     bool need_refcount;
 
