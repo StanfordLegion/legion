@@ -11597,7 +11597,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     VirtualChannel::VirtualChannel(VirtualChannelKind kind, 
         AddressSpaceID local_address_space, size_t max_message_size, 
-        bool profile_outgoing, LegionProfiler *prof)
+        bool profile_outgoing)
       : sending_buffer((char*)malloc(max_message_size)), 
         sending_buffer_size(max_message_size), 
         ordered_channel((kind != DEFAULT_VIRTUAL_CHANNEL) &&
@@ -11609,7 +11609,7 @@ namespace Legion {
         response_priority((kind == THROUGHPUT_VIRTUAL_CHANNEL) ?
             LG_THROUGHPUT_RESPONSE_PRIORITY : (kind == UPDATE_VIRTUAL_CHANNEL) ?
             LG_LATENCY_MESSAGE_PRIORITY : LG_LATENCY_RESPONSE_PRIORITY),
-        partial_messages(0), observed_recent(true), profiler(prof)
+        partial_messages(0), observed_recent(true)
     //--------------------------------------------------------------------------
     //
     {
@@ -11659,7 +11659,7 @@ namespace Legion {
       : sending_buffer(NULL), sending_buffer_size(0), 
         ordered_channel(false), profile_outgoing_messages(false),
         request_priority(rhs.request_priority),
-        response_priority(rhs.response_priority), profiler(NULL)
+        response_priority(rhs.response_priority)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -11998,6 +11998,8 @@ namespace Legion {
                          Runtime *runtime, AddressSpaceID remote_address_space)
     //--------------------------------------------------------------------------
     {
+      // Pull this onto the stack before we do anything else
+      LegionProfiler *profiler = runtime->profiler;
       // If we have a profiler we need to increment our requests count
       if (profiler != NULL)
 #ifdef DEBUG_LEGION
@@ -13795,7 +13797,7 @@ namespace Legion {
       for (unsigned idx = 0; idx < MAX_NUM_VIRTUAL_CHANNELS; idx++)
       {
         new (channels+idx) VirtualChannel((VirtualChannelKind)idx,
-          rt->address_space, max_message_size, always_flush, runtime->profiler);
+          rt->address_space, max_message_size, always_flush);
       }
     }
 
@@ -17196,6 +17198,11 @@ namespace Legion {
     Runtime::~Runtime(void)
     //--------------------------------------------------------------------------
     {
+      if (profiler != NULL)
+      {
+        delete profiler;
+        profiler = NULL;
+      }
       // Make sure we don't send anymore messages
       for (unsigned idx = 0; idx < LEGION_MAX_NUM_NODES; idx++)
       {
@@ -17205,12 +17212,7 @@ namespace Legion {
           delete manager;
           message_managers[idx].store(NULL);
         }
-      }
-      if (profiler != NULL)
-      {
-        delete profiler;
-        profiler = NULL;
-      }
+      } 
       // Free any input arguments
       if (input_args.argc > 0)
       {
