@@ -30862,25 +30862,6 @@ namespace Legion {
                               const char *task_name, CollectiveMapping *mapping)
     //--------------------------------------------------------------------------
     {
-      // Save the top-level task name if necessary
-      if (task_name != NULL)
-        attach_semantic_information(top_task_id, 
-            LEGION_NAME_SEMANTIC_TAG, task_name, 
-            strlen(task_name) + 1, true/*mutable*/);
-      // Record a fake variant if we're profiling
-      if (profiler != NULL)
-      {
-        if (task_name == NULL)
-        {
-          char implicit_name[64];
-          snprintf(implicit_name, 64, "implicit_variant_%d", top_task_id);
-          profiler->register_task_variant(top_task_id, 0/*variant ID*/, 
-                                          implicit_name);
-        }
-        else
-          profiler->register_task_variant(top_task_id, 0/*variant ID*/, 
-                                          task_name);
-      }
       // Get an individual task to be the top-level task
       IndividualTask *top_task = get_available_individual_task();
       // Get a remote task to serve as the top of the top-level task
@@ -30953,6 +30934,24 @@ namespace Legion {
             "Implicit top-level tasks are not allowed to be started inside "
             "of Legion tasks. Only external computations are permitted "
             "to create new implicit top-level tasks.")
+      // Save the top-level task name if necessary
+      // Record a fake variant if we're profiling
+      if (task_name != NULL)
+      {
+        attach_semantic_information(top_task_id,
+            LEGION_NAME_SEMANTIC_TAG, task_name,
+            strlen(task_name) + 1, true/*mutable*/, false/*send to owner*/);
+        if (profiler != NULL)
+          profiler->register_task_variant(top_task_id, 0/*variant ID*/,
+                                          task_name);
+      }
+      else if (profiler != NULL)
+      {
+        char implicit_name[64];
+        snprintf(implicit_name, 64, "implicit_variant_%d", top_task_id);
+        profiler->register_task_variant(top_task_id, 0/*variant ID*/,
+                                        implicit_name);
+      }
       // Find a proxy processor for us to use for this task 
       // We might already even be on a Realm processor
       Processor proxy = Processor::get_executing_processor();
