@@ -16,10 +16,11 @@ enum
 {
   TOP_LEVEL_TASK = Processor::TASK_ID_FIRST_AVAILABLE + 0,
   WORKER_TASK,
-  PROF_TASK,
+  ALLOC_PROF_TASK,
+  ALLOC_INST_TASK
 };
 
-int num_iterations = 2;
+int num_iterations = 1;
 bool needs_oom = false;
 
 struct WorkerArgs {
@@ -28,21 +29,43 @@ struct WorkerArgs {
   std::vector<int> data;
 };
 
-struct CopyProfResult {
-  bool success;
+struct ProfTimelResult {
+  int *called;
   UserEvent done;
 };
 
-void copy_profiling_task(const void *args, size_t arglen, const void *userdata,
+struct ProfAllocResult {
+  int *success;
+  UserEvent done;
+};
+
+void inst_profiling_task(const void *args, size_t arglen, const void *userdata,
                          size_t userlen, Processor p)
 {
   ProfilingResponse resp(args, arglen);
-  assert(resp.user_data_size() == sizeof(CopyProfResult));
-  // const CopyProfResult *result = static_cast<const CopyProfResult *>(resp.user_data());
+  assert(resp.user_data_size() == sizeof(ProfTimelResult));
+  const ProfTimelResult *result = static_cast<const ProfTimelResult *>(resp.user_data());
+  ProfilingMeasurements::InstanceTimeline inst_time;
+  assert((resp.get_measurement(inst_time)));
 
+  // TODO(apryakhin@): Verify timestamps
+  assert(inst_time.create_time != 0);
+  assert(inst_time.ready_time != 0);
+  *(result->called) = 1;
+
+  result->done.trigger();
+}
+
+void alloc_profiling_task(const void *args, size_t arglen, const void *userdata,
+                          size_t userlen, Processor p)
+{
+  ProfilingResponse resp(args, arglen);
+  assert(resp.user_data_size() == sizeof(ProfAllocResult));
+  const ProfAllocResult *result = static_cast<const ProfAllocResult *>(resp.user_data());
   ProfilingMeasurements::InstanceAllocResult inst_alloc;
   assert((resp.get_measurement(inst_alloc)));
-  assert(inst_alloc.success);
+  *(result->success) = inst_alloc.success;
+  result->done.trigger();
 }
 
 template <int N>
@@ -134,7 +157,6 @@ void top_level_task(const void *args, size_t arglen, const void *userdata, size_
   e2.wait();
 
   destroy_event.trigger();
-
   usleep(100000);
 }
 
@@ -144,6 +166,14 @@ void worker_task(const void *args, size_t arglen, const void *userdata, size_t u
   const WorkerArgs *wargs = static_cast<const WorkerArgs *>(args);
   Rect<1> bounds = wargs->bounds;
   RegionInstance inst = wargs->inst;
+
+  Event timel_event;
+  Event alloc_event;
+
+  size_t index = 0;
+  std::vector<int> alloc_results(num_iterations * 2);
+  std::vector<int> timel_results(num_iterations * 2);
+
   for(int i = 0; i < num_iterations; i++) {
     Rect<1> next_bounds;
     next_bounds.lo[0] = 0;
@@ -157,18 +187,32 @@ void worker_task(const void *args, size_t arglen, const void *userdata, size_t u
     const InstanceLayoutGeneric *ilg_b = create_layout(next_bounds);
     std::vector<const InstanceLayoutGeneric *> layouts{ilg_a, ilg_b};
 
+    std::vector<Event> timel_events;
+    std::vector<Event> alloc_events;
+
     std::vector<ProfilingRequestSet> prs(2);
     for(int i = 0; i < 2; i++) {
-      UserEvent event = UserEvent::create_user_event();
-      CopyProfResult result;
-      result.done = event;
-      // prs[i]
-      //  .add_request(p, PROF_TASK, &result, sizeof(CopyProfResult))
-      //.add_measurement<ProfilingMeasurements::InstanceTimeline>();
+      {
+        UserEvent event = UserEvent::create_user_event();
+        ProfTimelResult result;
+        result.done = event;
+        result.called = &timel_results[index];
+        prs[i]
+            .add_request(p, ALLOC_INST_TASK, &result, sizeof(ProfTimelResult))
+            .add_measurement<ProfilingMeasurements::InstanceTimeline>();
+        timel_events.push_back(event);
+      }
 
-      prs[i]
-          .add_request(p, PROF_TASK, &result, sizeof(CopyProfResult))
-          .add_measurement<ProfilingMeasurements::InstanceAllocResult>();
+      {
+        UserEvent event = UserEvent::create_user_event();
+        ProfAllocResult result;
+        result.done = event;
+        result.success = &alloc_results[index];
+        prs[i]
+            .add_request(p, ALLOC_PROF_TASK, &result, sizeof(ProfAllocResult))
+            .add_measurement<ProfilingMeasurements::InstanceAllocResult>();
+      }
+      index++;
     }
 
     Event e = inst.redistrict(insts.data(), layouts.data(), 2, prs.data());
@@ -179,7 +223,11 @@ void worker_task(const void *args, size_t arglen, const void *userdata, size_t u
       assert(poisoned);
       return;
     }
+
     assert(poisoned == false);
+
+    timel_event = Event::merge_events(timel_events);
+    alloc_event = Event::merge_events(alloc_events);
 
     delete ilg_a;
     delete ilg_b;
@@ -210,7 +258,18 @@ void worker_task(const void *args, size_t arglen, const void *userdata, size_t u
     inst = insts[0];
     insts[1].destroy();
   }
+
   inst.destroy();
+  alloc_event.wait();
+  timel_event.wait();
+
+  for(size_t i = 0; i < alloc_results.size(); i++) {
+    assert(alloc_results[i]);
+  }
+
+  for(size_t i = 0; i < timel_results.size(); i++) {
+    assert(timel_results[i]);
+  }
 }
 
 int main(int argc, char **argv)
@@ -235,8 +294,13 @@ int main(int argc, char **argv)
   rt.register_task(TOP_LEVEL_TASK, top_level_task);
   rt.register_task(WORKER_TASK, worker_task);
 
-  Processor::register_task_by_kind(Processor::LOC_PROC, false /*!global*/, PROF_TASK,
-                                   CodeDescriptor(copy_profiling_task),
+  Processor::register_task_by_kind(Processor::LOC_PROC, false /*!global*/,
+                                   ALLOC_PROF_TASK, CodeDescriptor(alloc_profiling_task),
+                                   ProfilingRequestSet(), 0, 0)
+      .wait();
+
+  Processor::register_task_by_kind(Processor::LOC_PROC, false /*!global*/,
+                                   ALLOC_INST_TASK, CodeDescriptor(inst_profiling_task),
                                    ProfilingRequestSet(), 0, 0)
       .wait();
 
