@@ -1024,6 +1024,8 @@ namespace Realm {
         }
       }
 
+      is_redistricted = true;
+
       // TODO(apryakhin@): Consider deleting this instance
       // notify_deallocation();
 

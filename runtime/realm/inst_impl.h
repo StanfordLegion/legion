@@ -195,6 +195,7 @@ namespace Realm {
 
       // used for serialized application access to contents of instance
       ReservationImpl lock;
+      bool is_redistricted = false;
     };
 
     // active messages
