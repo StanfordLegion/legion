@@ -45,7 +45,7 @@ void main_task(const void *args, size_t arglen, const void *userdata, size_t use
     Memory m = *it;
     if(m.kind() == Memory::SYSTEM_MEM) {
       NodeID node = NodeID(ID(m).memory_owner_node());
-      if (memories.find(node) == memories.end()) {
+      if(memories.find(node) == memories.end()) {
         memories[node] = m;
       }
     }

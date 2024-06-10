@@ -272,7 +272,7 @@ namespace Realm {
 
   void SparsityMapImplWrapper::recycle(void)
   {
-    //assert(subscribers.empty());
+    assert(subscribers.empty());
 
     void *impl = map_impl.load();
     if(impl != nullptr) {
