@@ -758,68 +758,65 @@ namespace Realm {
 	// this release may satisfy pending allocation requests
 	std::vector<std::pair<RegionInstanceImpl *, size_t> > successful_allocs;
 
-	do { // so we can 'break' out early below
-	  AutoLock<> al(allocator_mutex);
+        do { // so we can 'break' out early below
+          AutoLock<> al(allocator_mutex);
 
-	  // special case: we can get a (deferred only!) destruction of an
-	  //  instance whose creation precondition hasn't even been satisfied -
-	  //  it won't be represented in the heap state, so we can't do a
-	  //  "future release of it" - wait until the creation precondition is
-	  //  satisfied
-	  if(inst->metadata.inst_offset == RegionInstanceImpl::INSTOFFSET_DELAYEDALLOC) {
-	    assert(!triggered);
-	    inst->metadata.inst_offset = RegionInstanceImpl::INSTOFFSET_DELAYEDDESTROY;
-	    break;
-	  }
+          // special case: we can get a (deferred only!) destruction of an
+          //  instance whose creation precondition hasn't even been satisfied -
+          //  it won't be represented in the heap state, so we can't do a
+          //  "future release of it" - wait until the creation precondition is
+          //  satisfied
+          if(inst->metadata.inst_offset == RegionInstanceImpl::INSTOFFSET_DELAYEDALLOC) {
+            assert(!triggered);
+            inst->metadata.inst_offset = RegionInstanceImpl::INSTOFFSET_DELAYEDDESTROY;
+            break;
+          }
 
-	  if(pending_allocs.empty()) {
-	    if(triggered) {
-	      // we can apply the destruction directly to current state
-	      if(inst->metadata.inst_offset != RegionInstanceImpl::INSTOFFSET_FAILED)
+          if(pending_allocs.empty()) {
+            if(triggered) {
+              // we can apply the destruction directly to current state
+              if(inst->metadata.inst_offset != RegionInstanceImpl::INSTOFFSET_FAILED)
                 current_allocator.deallocate(inst->me, inst->is_redistricted);
             } else {
               // push the op, but we're not maintaining a future state yet
-	      pending_releases.push_back(PendingRelease(inst,
-							false /*!triggered*/,
-							++cur_release_seqid));
+              pending_releases.push_back(
+                  PendingRelease(inst, false /*!triggered*/, ++cur_release_seqid));
             }
           } else {
-	    // even if this destruction is ready, we can't update current
-	    //  state because older pending ops exist
-	    // TODO: pushing past a single pending alloc should always be safe
-	    if(triggered) {
-	      if(inst->metadata.inst_offset == RegionInstanceImpl::INSTOFFSET_FAILED) {
-		// (exception: a ready destruction of a failed allocation need not
-		//  be deferred)
-	      } else {
-		// event is known to have triggered, so these must not fail
+            // even if this destruction is ready, we can't update current
+            //  state because older pending ops exist
+            // TODO: pushing past a single pending alloc should always be safe
+            if(triggered) {
+              if(inst->metadata.inst_offset == RegionInstanceImpl::INSTOFFSET_FAILED) {
+                // (exception: a ready destruction of a failed allocation need not
+                //  be deferred)
+              } else {
+                // event is known to have triggered, so these must not fail
                 release_allocator.deallocate(inst->me, inst->is_redistricted);
                 future_allocator.deallocate(inst->me, inst->is_redistricted);
                 // see if we can reorder this (and maybe other) releases to
                 //  satisfy the pending allocs
                 if(attempt_release_reordering(successful_allocs)) {
-		  // we'll notify the successful allocations below, after we've
-		  //  released the mutex
-		} else {
-		  // nope, stick ourselves on the back of the (unreordered)
-		  //  pending release list
-		  pending_releases.push_back(PendingRelease(inst,
-							    true /*triggered*/,
-							    ++cur_release_seqid));
-		}
-	      }
-	    } else {
-	      // TODO: is it safe to test for failedness yet?
-	      if(inst->metadata.inst_offset != RegionInstanceImpl::INSTOFFSET_FAILED)
-		future_allocator.deallocate(inst->me, true /*missing ok*/);
-	      pending_releases.push_back(PendingRelease(inst,
-							false /*!triggered*/,
-							++cur_release_seqid));
-	    }
-	  }
-	} while(0);
+                  // we'll notify the successful allocations below, after we've
+                  //  released the mutex
+                } else {
+                  // nope, stick ourselves on the back of the (unreordered)
+                  //  pending release list
+                  pending_releases.push_back(
+                      PendingRelease(inst, true /*triggered*/, ++cur_release_seqid));
+                }
+              }
+            } else {
+              // TODO: is it safe to test for failedness yet?
+              if(inst->metadata.inst_offset != RegionInstanceImpl::INSTOFFSET_FAILED)
+                future_allocator.deallocate(inst->me, true /*missing ok*/);
+              pending_releases.push_back(
+                  PendingRelease(inst, false /*!triggered*/, ++cur_release_seqid));
+            }
+          }
+        } while(0);
 
-	if(!successful_allocs.empty()) {
+        if(!successful_allocs.empty()) {
 	  for(std::vector<std::pair<RegionInstanceImpl *, size_t> >::iterator it = successful_allocs.begin();
 	      it != successful_allocs.end();
 	      ++it) {
@@ -1095,16 +1092,16 @@ namespace Realm {
               // deallocs.push_back(it->inst);
 
               // did this unblock any allocations?
-	      std::vector<PendingAlloc>::iterator it2 = pending_allocs.begin();
-	      while(it2 != pending_allocs.end()) {
-		// if this alloc depends on further pending releases, we can't
-		//  be sure it'll work
-		{
-		  std::vector<PendingRelease>::iterator next_rel = it + 1;
-		  if((next_rel != pending_releases.end()) &&
-		     (it2->last_release_seqid >= next_rel->seqid))
-		    break;
-		}
+              std::vector<PendingAlloc>::iterator it2 = pending_allocs.begin();
+              while(it2 != pending_allocs.end()) {
+                // if this alloc depends on further pending releases, we can't
+                //  be sure it'll work
+                {
+                  std::vector<PendingRelease>::iterator next_rel = it + 1;
+                  if((next_rel != pending_releases.end()) &&
+                     (it2->last_release_seqid >= next_rel->seqid))
+                    break;
+                }
 
 #ifdef DEBUG_REALM
 		// but it should never be older than the current release
@@ -1141,91 +1138,89 @@ namespace Realm {
 #endif
 		successful_allocs.push_back(std::make_pair(it2->inst, offset));
 		++it2;
-	      }
+              }
 
-	      pending_allocs.erase(pending_allocs.begin(), it2);
+              pending_allocs.erase(pending_allocs.begin(), it2);
 
-	      ++it;
-	    } while((it != pending_releases.end()) && (it->is_ready));
-	    
-	    pending_releases.erase(pending_releases.begin(), it);
+              ++it;
+            } while((it != pending_releases.end()) && (it->is_ready));
 
-	    // if we did any allocations but some remain, we need to rebuild
-	    //  the release_allocator state (TODO: incremental updates?)
-	    if(!successful_allocs.empty() && !pending_allocs.empty()) {
-	      release_allocator = current_allocator;
-	      for(std::vector<PendingRelease>::iterator it = pending_releases.begin();
-		  it != pending_releases.end();
-		  ++it) {
-		// actually, include all pending releases
-		//if(it->seqid > pending_allocs.front().last_release_seqid)
-		//  break;
-		if(it->is_ready)
+            pending_releases.erase(pending_releases.begin(), it);
+
+            // if we did any allocations but some remain, we need to rebuild
+            //  the release_allocator state (TODO: incremental updates?)
+            if(!successful_allocs.empty() && !pending_allocs.empty()) {
+              release_allocator = current_allocator;
+              for(std::vector<PendingRelease>::iterator it = pending_releases.begin();
+                  it != pending_releases.end(); ++it) {
+                // actually, include all pending releases
+                // if(it->seqid > pending_allocs.front().last_release_seqid)
+                //  break;
+                if(it->is_ready)
                   release_allocator.deallocate(it->inst->me, it->inst->is_redistricted);
               }
             }
-	  } else {
-	    // find this destruction in the list and mark it ready
-	    do {
-	      ++it;
-	      assert(it != pending_releases.end());  // can't fall off end
-	    } while(it->inst != inst);
-	    it->is_ready = true;
+          } else {
+            // find this destruction in the list and mark it ready
+            do {
+              ++it;
+              assert(it != pending_releases.end()); // can't fall off end
+            } while(it->inst != inst);
+            it->is_ready = true;
 
-	    if(pending_allocs.empty()) {
-	      // we can apply this delete to the current state
+            if(pending_allocs.empty()) {
+              // we can apply this delete to the current state
               current_allocator.deallocate(inst->me, inst->is_redistricted);
-              //deallocs.push_back(inst);
-	      it = pending_releases.erase(it);
-	    } else {
-	      // apply this free to the release_allocator - we'll check below
-	      //  to see if it unblocks one or more allocations AND leaves the
-	      //  rest possible
+              // deallocs.push_back(inst);
+              it = pending_releases.erase(it);
+            } else {
+              // apply this free to the release_allocator - we'll check below
+              //  to see if it unblocks one or more allocations AND leaves the
+              //  rest possible
               release_allocator.deallocate(inst->me, inst->is_redistricted);
             }
           }
-	
-	  // a couple different ways to get to a state where the ready releases
-	  //  allow allocations to proceed but we could not be sure above, so
-	  //  check now
-	  if(!pending_allocs.empty())
-	    attempt_release_reordering(successful_allocs);
-	} else {
-	  // special case: if there are no pending allocation requests, we
-	  //  just forget this destruction request ever happened - there is
-	  //  no future state to fix up
-	  if(pending_allocs.empty()) {
-	    while(it->inst != inst) {
-	      ++it;
-	      assert(it != pending_releases.end());  // can't fall off end
-	    }
 
-	    it = pending_releases.erase(it);
-	  } else {
-	    // rewrite our (future) history without this allocation
-	    future_allocator = current_allocator;
-	    release_allocator = current_allocator;
+          // a couple different ways to get to a state where the ready releases
+          //  allow allocations to proceed but we could not be sure above, so
+          //  check now
+          if(!pending_allocs.empty())
+            attempt_release_reordering(successful_allocs);
+        } else {
+          // special case: if there are no pending allocation requests, we
+          //  just forget this destruction request ever happened - there is
+          //  no future state to fix up
+          if(pending_allocs.empty()) {
+            while(it->inst != inst) {
+              ++it;
+              assert(it != pending_releases.end()); // can't fall off end
+            }
 
-	    std::vector<PendingAlloc>::iterator it2 = pending_allocs.begin();
+            it = pending_releases.erase(it);
+          } else {
+            // rewrite our (future) history without this allocation
+            future_allocator = current_allocator;
+            release_allocator = current_allocator;
 
-	    bool found = false;
-	    while(it != pending_releases.end()) {
-	      // save the sequence id in case we delete the entry
-	      unsigned seqid = it->seqid;
-	      
-	      // only eat the first matching release that we find
-	      if((it->inst == inst) && !found) {
-		// alternate universe starts now
-		found = true;
-		it = pending_releases.erase(it);
-	      } else {
-		// replay this destuction on the future state
-		future_allocator.deallocate(it->inst->me,
-					    true /*missing ok*/);
-		++it;
-	      }
+            std::vector<PendingAlloc>::iterator it2 = pending_allocs.begin();
 
-	      // check any allocs that were waiting just on the releases we
+            bool found = false;
+            while(it != pending_releases.end()) {
+              // save the sequence id in case we delete the entry
+              unsigned seqid = it->seqid;
+
+              // only eat the first matching release that we find
+              if((it->inst == inst) && !found) {
+                // alternate universe starts now
+                found = true;
+                it = pending_releases.erase(it);
+              } else {
+                // replay this destuction on the future state
+                future_allocator.deallocate(it->inst->me, true /*missing ok*/);
+                ++it;
+              }
+
+              // check any allocs that were waiting just on the releases we
 	      //  have seen so far
 	      while((it2 != pending_allocs.end()) &&
 		    (it2->last_release_seqid <= seqid)) {
@@ -1245,9 +1240,9 @@ namespace Realm {
 		  it2 = pending_allocs.erase(it2);
 		}
 	      }
-	    }
-	  }
-	}
+            }
+          }
+        }
 
 #ifdef DEBUG_DEFERRED_ALLOCATIONS
 	log_defalloc.print() << "deferred destruction done: m=" << me

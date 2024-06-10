@@ -1016,11 +1016,20 @@ namespace Realm {
         offset += layouts[i]->bytes_used;
       }
 
+      // Handle profiling requests
       for(size_t i = 0; i < num_layouts; i++) {
         if(insts[i]
                ->measurements
                .wants_measurement<ProfilingMeasurements::InstanceTimeline>()) {
           insts[i]->timeline.record_ready_time();
+        }
+
+        if(insts[i]
+               ->measurements
+               .wants_measurement<ProfilingMeasurements::InstanceAllocResult>()) {
+          ProfilingMeasurements::InstanceAllocResult result;
+          result.success = true;
+          insts[i]->measurements.add_measurement(result);
         }
       }
 

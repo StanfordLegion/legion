@@ -29,18 +29,20 @@ struct WorkerArgs {
 };
 
 struct CopyProfResult {
-  long long *nanoseconds;
-  unsigned int *num_hops;
+  bool success;
   UserEvent done;
 };
 
 void copy_profiling_task(const void *args, size_t arglen, const void *userdata,
                          size_t userlen, Processor p)
 {
-  // TODO(apryakhin): fill-i:n
-  // ProfilingResponse resp(args, arglen);
-  // assert(resp.user_data_size() == sizeof(CopyProfResult));
+  ProfilingResponse resp(args, arglen);
+  assert(resp.user_data_size() == sizeof(CopyProfResult));
   // const CopyProfResult *result = static_cast<const CopyProfResult *>(resp.user_data());
+
+  ProfilingMeasurements::InstanceAllocResult inst_alloc;
+  assert((resp.get_measurement(inst_alloc)));
+  assert(inst_alloc.success);
 }
 
 template <int N>
@@ -160,9 +162,15 @@ void worker_task(const void *args, size_t arglen, const void *userdata, size_t u
       UserEvent event = UserEvent::create_user_event();
       CopyProfResult result;
       result.done = event;
+      // prs[i]
+      //  .add_request(p, PROF_TASK, &result, sizeof(CopyProfResult))
+      //.add_measurement<ProfilingMeasurements::InstanceTimeline>();
+
       prs[i]
           .add_request(p, PROF_TASK, &result, sizeof(CopyProfResult))
-          .add_measurement<ProfilingMeasurements::InstanceTimeline>();
+          .add_measurement<ProfilingMeasurements::InstanceAllocResult>();
+
+      std::cout << "add" << std::endl;
     }
 
     Event e = inst.redistrict(insts.data(), layouts.data(), 2, prs.data());
