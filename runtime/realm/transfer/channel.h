@@ -823,6 +823,10 @@ namespace Realm {
                                      XferDesKind *kind_ret = 0,
                                      unsigned *bw_ret = 0,
                                      unsigned *lat_ret = 0);
+      /// @brief Queries if a given \p mem can be used as an indirection buffer
+      /// @param mem Memory to be used as an indirection buffer
+      /// @return True if the given \p mem can be used as an indirection buffer for a copy
+      virtual bool supports_indirection_memory(Memory mem) const;
 
       virtual Memory suggest_ib_memories(Memory memory) const;
 
@@ -906,6 +910,9 @@ namespace Realm {
 
     class SimpleRemoteChannelInfo : public RemoteChannelInfo {
     public:
+      SimpleRemoteChannelInfo(NodeID _owner, XferDesKind _kind, uintptr_t _remote_ptr,
+                              const std::vector<Channel::SupportedPath> &_paths,
+                              const std::vector<Memory> &indirect_memories);
       SimpleRemoteChannelInfo(NodeID _owner, XferDesKind _kind,
                               uintptr_t _remote_ptr,
                               const std::vector<Channel::SupportedPath>& _paths);
@@ -927,12 +934,14 @@ namespace Realm {
       XferDesKind kind;
       uintptr_t remote_ptr;
       std::vector<Channel::SupportedPath> paths;
+      std::vector<Memory> indirect_memories;
     };
 
     class RemoteChannel : public Channel {
     protected:
       friend class SimpleRemoteChannelInfo;
 
+      RemoteChannel(uintptr_t _remote_ptr, const std::vector<Memory> &indirect_memories);
       RemoteChannel(uintptr_t _remote_ptr);
 
       virtual void shutdown();
@@ -970,11 +979,17 @@ namespace Realm {
                                      unsigned *bw_ret = 0,
                                      unsigned *lat_ret = 0);
 
+      /// @brief Queries if a given \p mem can be used as an indirection buffer
+      /// @param mem Memory to be used as an indirection buffer
+      /// @return True if the given \p mem can be used as an indirection buffer for a copy
+      virtual bool supports_indirection_memory(Memory mem) const;
+
       virtual void enqueue_ready_xd(XferDes *xd) { assert(0); }
       virtual void wakeup_xd(XferDes *xd) { assert(0); }
 
     protected:
       SimpleXferDesFactory factory_singleton;
+      const std::set<Memory> indirect_memories;
     };
 
     template <typename CHANNEL, typename XD>

@@ -1086,7 +1086,7 @@ namespace Realm {
     //
     // class GPUIndirectChannel
 
-    static bool supports_scatter_gather_path(ChannelCopyInfo channel_copy_info,
+    static bool supports_scatter_gather_path(const ChannelCopyInfo &channel_copy_info,
                                              NodeID node)
     {
       // TODO(apryakhin): remove this condition when it's supported.
@@ -1120,39 +1120,19 @@ namespace Realm {
       src_gpu = _src_gpu;
 
       // switch out of ordered mode if multi-threaded dma is requested
-      if(_src_gpu->module->config->cfg_multithread_dma)
+      if(_src_gpu->module->config->cfg_multithread_dma) {
         xdq.ordered_mode = false;
-
-      std::vector<Memory> local_gpu_mems;
-      local_gpu_mems.push_back(src_gpu->fbmem->me);
-      if(src_gpu->fb_ibmem)
-        local_gpu_mems.push_back(src_gpu->fb_ibmem->me);
-
-      std::vector<Memory> peer_gpu_mems;
-      peer_gpu_mems.insert(peer_gpu_mems.end(), src_gpu->peer_fbs.begin(),
-                           src_gpu->peer_fbs.end());
-      for(std::vector<GPU::CudaIpcMapping>::const_iterator it =
-              src_gpu->cudaipc_mappings.begin();
-          it != src_gpu->cudaipc_mappings.end(); ++it)
-        peer_gpu_mems.push_back(it->mem);
+      }
 
       // look for any other local memories that belong to our context or
       //  peer-able contexts
       const Node &n = get_runtime()->nodes[Network::my_node_id];
-      for(std::vector<MemoryImpl *>::const_iterator it = n.memories.begin();
-          it != n.memories.end(); ++it) {
-        CudaDeviceMemoryInfo *cdm = (*it)->find_module_specific<CudaDeviceMemoryInfo>();
-        if(!cdm)
-          continue;
-        if(cdm->context == src_gpu->context) {
-          local_gpu_mems.push_back((*it)->me);
-        } else {
-          // if the other context is associated with a gpu and we've got peer
-          //  access, use it
-          // TODO: add option to enable peer access at this point?  might be
-          //  expensive...
-          if(cdm->gpu && (src_gpu->info->peers.count(cdm->gpu->info->device) > 0))
-            peer_gpu_mems.push_back((*it)->me);
+      std::vector<Memory> local_gpu_mems;
+      for(MemoryImpl *mem_impl : n.memories) {
+        CudaDeviceMemoryInfo *cdm =
+            mem_impl->find_module_specific<CudaDeviceMemoryInfo>();
+        if((cdm != nullptr) && (cdm->context == src_gpu->context)) {
+          local_gpu_mems.push_back(mem_impl->me);
         }
       }
 
@@ -1160,8 +1140,9 @@ namespace Realm {
       case XFER_GPU_SC_IN_FB:
       {
         // self-path
-        unsigned bw = 200000;   // HACK - estimate at 200 GB/s
-        unsigned latency = 250; // HACK - estimate at 250 ns
+        // HACK - cut the bandwidth in half to account for indirection lookup
+        unsigned bw = src_gpu->info->logical_peer_bandwidth[src_gpu->info->index] / 2;
+        unsigned latency = src_gpu->info->logical_peer_latency[src_gpu->info->index];
         // TODO(apriakhin): Consider tweaking this value.
         unsigned frag_overhead = 200; // HACK - estimate at 2 us
 
@@ -1175,15 +1156,35 @@ namespace Realm {
 
       case XFER_GPU_SC_PEER_FB:
       {
-        // just do paths to peers - they'll do the other side
-        unsigned bw = 50000;          // HACK - estimate at 50 GB/s
-        unsigned latency = 1000;      // HACK - estimate at 1 us
-        unsigned frag_overhead = 200; // HACK - estimate at 2 us
-
-        add_path(local_gpu_mems, peer_gpu_mems, bw, latency, frag_overhead,
-                 XFER_GPU_SC_PEER_FB)
-            .set_max_dim(3);
-
+        for(MemoryImpl *mem_impl : n.memories) {
+          CudaDeviceMemoryInfo *cdm =
+              mem_impl->find_module_specific<CudaDeviceMemoryInfo>();
+          if((cdm != nullptr) && (cdm->gpu != src_gpu) &&
+             (src_gpu->info->peers.count(cdm->gpu->info->index)) > 0) {
+            // HACK - cut the bandwidth in half to account for indirection lookup
+            unsigned bw =
+                src_gpu->info->logical_peer_bandwidth[cdm->gpu->info->index] / 2;
+            unsigned latency = src_gpu->info->logical_peer_latency[cdm->gpu->info->index];
+            unsigned frag_overhead = 200; // HACK - estimate at 2 us
+            add_path(local_gpu_mems, mem_impl->me, bw, latency, frag_overhead,
+                     XFER_GPU_SC_PEER_FB)
+                .set_max_dim(3);
+          }
+        }
+        for(const GPU::CudaIpcMapping &mapping : src_gpu->cudaipc_mappings) {
+          unsigned bw = src_gpu->info->pci_bandwidth;
+          unsigned latency = 1000;       // HACK - estimate at 1 us
+          unsigned frag_overhead = 2000; // HACK - estimate at 2 us
+          if(mapping.src_gpu != nullptr) {
+            bw = static_cast<unsigned>(
+                src_gpu->info->logical_peer_bandwidth[mapping.src_gpu->info->index]);
+            latency = static_cast<unsigned>(
+                src_gpu->info->logical_peer_latency[mapping.src_gpu->info->index]);
+          }
+          add_path(local_gpu_mems, mapping.mem, bw, latency, frag_overhead,
+                   XFER_GPU_SC_PEER_FB)
+              .set_max_dim(3);
+        }
         break;
       }
 
@@ -1218,11 +1219,19 @@ namespace Realm {
         XferDesKind *kind_ret /*= 0*/, unsigned *bw_ret /*= 0*/,
         unsigned *lat_ret /*= 0*/)
     {
-      if(!supports_scatter_gather_path(channel_copy_info, node))
+      if(!supports_scatter_gather_path(channel_copy_info, node)) {
         return 0;
+      }
       return Channel::supports_path(channel_copy_info, src_serdez_id, dst_serdez_id,
                                     redop_id, total_bytes, src_frags, dst_frags, kind_ret,
                                     bw_ret, lat_ret);
+    }
+
+    bool GPUIndirectChannel::supports_indirection_memory(Memory memory) const
+    {
+      // TODO: support all memories accessible by the source gpu
+      return (memory.kind() == Memory::GPU_FB_MEM) &&
+             (NodeID(ID(memory).memory_owner_node()) == node);
     }
 
     XferDes *GPUIndirectChannel::create_xfer_des(
@@ -1252,13 +1261,15 @@ namespace Realm {
 
     GPUIndirectRemoteChannelInfo::GPUIndirectRemoteChannelInfo(
         NodeID _owner, XferDesKind _kind, uintptr_t _remote_ptr,
-        const std::vector<Channel::SupportedPath> &_paths)
-      : SimpleRemoteChannelInfo(_owner, _kind, _remote_ptr, _paths)
+        const std::vector<Channel::SupportedPath> &_paths,
+        const std::vector<Memory> &_indirect_memories)
+      : SimpleRemoteChannelInfo(_owner, _kind, _remote_ptr, _paths, _indirect_memories)
     {}
 
     RemoteChannel *GPUIndirectRemoteChannelInfo::create_remote_channel()
     {
-      GPUIndirectRemoteChannel *rc = new GPUIndirectRemoteChannel(remote_ptr);
+      GPUIndirectRemoteChannel *rc =
+          new GPUIndirectRemoteChannel(remote_ptr, indirect_memories);
       rc->node = owner;
       rc->kind = kind;
       rc->paths.swap(paths);
@@ -1269,7 +1280,8 @@ namespace Realm {
     bool GPUIndirectRemoteChannelInfo::serialize(S &serializer) const
     {
       return ((serializer << owner) && (serializer << kind) &&
-              (serializer << remote_ptr) && (serializer << paths));
+              (serializer << remote_ptr) && (serializer << paths) &&
+              (serializer << indirect_memories));
     }
 
     template <typename S>
@@ -1280,13 +1292,15 @@ namespace Realm {
       XferDesKind kind;
       uintptr_t remote_ptr;
       std::vector<Channel::SupportedPath> paths;
+      std::vector<Memory> indirect_memories;
 
       if((deserializer >> owner) && (deserializer >> kind) &&
-         (deserializer >> remote_ptr) && (deserializer >> paths)) {
-        return new GPUIndirectRemoteChannelInfo(owner, kind, remote_ptr, paths);
-      } else {
-        return 0;
+         (deserializer >> remote_ptr) && (deserializer >> paths) &&
+         (deserializer >> indirect_memories)) {
+        return new GPUIndirectRemoteChannelInfo(owner, kind, remote_ptr, paths,
+                                                indirect_memories);
       }
+      return nullptr;
     }
 
     /*static*/ Serialization::PolymorphicSerdezSubclass<RemoteChannelInfo,
@@ -1295,16 +1309,31 @@ namespace Realm {
 
     RemoteChannelInfo *GPUIndirectChannel::construct_remote_info() const
     {
-      return new GPUIndirectRemoteChannelInfo(node, kind,
-                                              reinterpret_cast<uintptr_t>(this), paths);
+      std::vector<Memory> indirect_memories;
+      for(NodeID n = 0; n < Network::max_node_id + 1; n++) {
+        Node &node = get_runtime()->nodes[n];
+        for(MemoryImpl *impl : node.memories) {
+          if(supports_indirection_memory(impl->me)) {
+            indirect_memories.push_back(impl->me);
+          }
+        }
+        for(IBMemory *impl : node.ib_memories) {
+          if(supports_indirection_memory(impl->me)) {
+            indirect_memories.push_back(impl->me);
+          }
+        }
+      }
+      return new GPUIndirectRemoteChannelInfo(
+          node, kind, reinterpret_cast<uintptr_t>(this), paths, indirect_memories);
     }
     ////////////////////////////////////////////////////////////////////////
     //
     // class GPUIndirectRemoteChannel
     //
 
-    GPUIndirectRemoteChannel::GPUIndirectRemoteChannel(uintptr_t _remote_ptr)
-      : RemoteChannel(_remote_ptr)
+    GPUIndirectRemoteChannel::GPUIndirectRemoteChannel(
+        uintptr_t _remote_ptr, const std::vector<Memory> &indirect_memories)
+      : RemoteChannel(_remote_ptr, indirect_memories)
     {}
 
     Memory GPUIndirectRemoteChannel::suggest_ib_memories(Memory memory) const
@@ -1329,11 +1358,13 @@ namespace Realm {
         XferDesKind *kind_ret /*= 0*/, unsigned *bw_ret /*= 0*/,
         unsigned *lat_ret /*= 0*/)
     {
-      if(!supports_scatter_gather_path(channel_copy_info, node))
+      if(!supports_scatter_gather_path(channel_copy_info, node)) {
         return 0;
-      return Channel::supports_path(channel_copy_info, src_serdez_id, dst_serdez_id,
-                                    redop_id, total_bytes, src_frags, dst_frags, kind_ret,
-                                    bw_ret, lat_ret);
+      }
+
+      return RemoteChannel::supports_path(channel_copy_info, src_serdez_id, dst_serdez_id,
+                                          redop_id, total_bytes, src_frags, dst_frags,
+                                          kind_ret, bw_ret, lat_ret);
     }
 
     bool GPUIndirectRemoteChannel::needs_wrapping_iterator() const { return true; }

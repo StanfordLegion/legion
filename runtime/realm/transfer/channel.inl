@@ -247,7 +247,8 @@ namespace Realm {
     return ((serializer << owner) &&
             (serializer << kind) &&
             (serializer << remote_ptr) &&
-            (serializer << paths));
+            (serializer << paths) &&
+            (serializer << indirect_memories));
   }
 
   template <typename S>
@@ -257,15 +258,16 @@ namespace Realm {
     XferDesKind kind;
     uintptr_t remote_ptr;
     std::vector<Channel::SupportedPath> paths;
+    std::vector<Memory> indirect_memories;
 
     if((deserializer >> owner) &&
        (deserializer >> kind) &&
        (deserializer >> remote_ptr) &&
-       (deserializer >> paths)) {
-      return new SimpleRemoteChannelInfo(owner, kind, remote_ptr, paths);
-    } else {
-      return 0;
+       (deserializer >> paths) &&
+       (deserializer >> indirect_memories)) {
+      return new SimpleRemoteChannelInfo(owner, kind, remote_ptr, paths, indirect_memories);
     }
+    return nullptr;
   }
 
 

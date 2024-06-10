@@ -4289,7 +4289,7 @@ namespace Realm {
       CudaModuleConfig *config = new CudaModuleConfig();
 #ifdef REALM_CUDA_DYNAMIC_LOAD
       // load the cuda lib
-      if(!resolve_cuda_api_fnptrs(true)) {
+      if(!resolve_cuda_api_fnptrs(false)) {
         // warning was printed in resolve function
         delete config;
         return NULL;
@@ -4303,10 +4303,14 @@ namespace Realm {
 
     /*static*/ Module *CudaModule::create_module(RuntimeImpl *runtime)
     {
+      ModuleConfig *uncasted_config = runtime->get_module_config("cuda");
+      if(!uncasted_config) {
+        return nullptr;
+      }
+
       CudaModule *m = new CudaModule(runtime);
 
-      CudaModuleConfig *config =
-          checked_cast<CudaModuleConfig *>(runtime->get_module_config("cuda"));
+      CudaModuleConfig *config = checked_cast<CudaModuleConfig *>(uncasted_config);
       assert(config != nullptr);
       assert(config->finish_configured);
       assert(m->name == config->get_name());
