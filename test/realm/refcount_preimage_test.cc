@@ -68,34 +68,6 @@ void main_task(const void *args, size_t arglen, const void *userdata, size_t use
     }
   }
 
-  IndexSpace<1, int> root1(rects[0]);
-  IndexSpace<1> parent(rects[0]);
-
-  std::vector<IndexSpace<1>> targets;
-  root1.create_equal_subspaces(NUM_INSTS, 1, targets, Realm::ProfilingRequestSet())
-      .wait();
-
-  std::vector<size_t> field_sizes;
-  field_sizes.push_back(sizeof(int));
-  field_sizes.push_back(sizeof(Point<1>));
-
-  std::vector<FieldDataDescriptor<IndexSpace<1>, Point<1>>> ptr_data(NUM_INSTS);
-
-  for(int i = 0; i < NUM_INSTS; i++) {
-    int mem_idx = i % memories.size();
-    RegionInstance ri;
-    RegionInstance::create_instance(ri, memories[mem_idx], targets[i], field_sizes, 0,
-                                    Realm::ProfilingRequestSet())
-        .wait();
-    ptr_data[i].index_space = targets[i];
-    ptr_data[i].inst = ri;
-    ptr_data[i].field_offset = 0;
-    AffineAccessor<int, 1> a_vals(ri, 0);
-    for(PointInRectIterator<1, int> pir(root1.bounds); pir.valid; pir.step()) {
-      a_vals.write(pir.p, pir.p[0]);
-    }
-  }
-
   std::vector<Event> events;
   for(std::vector<Memory>::const_iterator it = memories.begin(); it != memories.end();
       ++it) {
@@ -103,6 +75,34 @@ void main_task(const void *args, size_t arglen, const void *userdata, size_t use
                           .only_kind(Processor::LOC_PROC)
                           .same_address_space_as(*it)
                           .begin();
+
+    IndexSpace<1, int> root1(rects[0]);
+    IndexSpace<1> parent(rects[0]);
+
+    std::vector<IndexSpace<1>> targets;
+    root1.create_equal_subspaces(NUM_INSTS, 1, targets, Realm::ProfilingRequestSet())
+        .wait();
+
+    std::vector<size_t> field_sizes;
+    field_sizes.push_back(sizeof(int));
+    field_sizes.push_back(sizeof(Point<1>));
+
+    std::vector<FieldDataDescriptor<IndexSpace<1>, Point<1>>> ptr_data(NUM_INSTS);
+
+    for(int i = 0; i < NUM_INSTS; i++) {
+      int mem_idx = i % memories.size();
+      RegionInstance ri;
+      RegionInstance::create_instance(ri, memories[mem_idx], targets[i], field_sizes, 0,
+                                      Realm::ProfilingRequestSet())
+          .wait();
+      ptr_data[i].index_space = targets[i];
+      ptr_data[i].inst = ri;
+      ptr_data[i].field_offset = 0;
+      AffineAccessor<int, 1> a_vals(ri, 0);
+      for(PointInRectIterator<1, int> pir(root1.bounds); pir.valid; pir.step()) {
+        a_vals.write(pir.p, pir.p[0]);
+      }
+    }
 
     if((TestConfig::remote_create) &&
        NodeID(ID(*it).memory_owner_node()) ==
