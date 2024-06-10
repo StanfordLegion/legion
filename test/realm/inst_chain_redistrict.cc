@@ -169,8 +169,6 @@ void worker_task(const void *args, size_t arglen, const void *userdata, size_t u
       prs[i]
           .add_request(p, PROF_TASK, &result, sizeof(CopyProfResult))
           .add_measurement<ProfilingMeasurements::InstanceAllocResult>();
-
-      std::cout << "add" << std::endl;
     }
 
     Event e = inst.redistrict(insts.data(), layouts.data(), 2, prs.data());
