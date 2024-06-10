@@ -817,14 +817,13 @@ namespace Realm {
         } while(0);
 
         if(!successful_allocs.empty()) {
-	  for(std::vector<std::pair<RegionInstanceImpl *, size_t> >::iterator it = successful_allocs.begin();
-	      it != successful_allocs.end();
-	      ++it) {
-	    it->first->notify_allocation(ALLOC_EVENTUAL_SUCCESS,
-					 it->second,
-					 TimeLimit::responsive());
-	  }
-	}
+          for(std::vector<std::pair<RegionInstanceImpl *, size_t>>::iterator it =
+                  successful_allocs.begin();
+              it != successful_allocs.end(); ++it) {
+            it->first->notify_allocation(ALLOC_EVENTUAL_SUCCESS, it->second,
+                                         TimeLimit::responsive());
+          }
+        }
       }
 
       // even if we don't apply the destruction to the heap state right away,
@@ -1221,25 +1220,23 @@ namespace Realm {
               }
 
               // check any allocs that were waiting just on the releases we
-	      //  have seen so far
-	      while((it2 != pending_allocs.end()) &&
-		    (it2->last_release_seqid <= seqid)) {
-		size_t offset;
-		bool ok = future_allocator.allocate(it2->inst->me,
-						    it2->bytes, it2->alignment,
-						    offset);
-		if(ok) {
-		  ++it2;
-		} else {
-		  // this should only happen if we've seen the poisoned release
-		  assert(found);
-		  
-		  // this alloc is no longer possible - remove from the list
-		  //  and notify of the failure
-		  failed_allocs.push_back(it2->inst);
-		  it2 = pending_allocs.erase(it2);
-		}
-	      }
+              //  have seen so far
+              while((it2 != pending_allocs.end()) && (it2->last_release_seqid <= seqid)) {
+                size_t offset;
+                bool ok = future_allocator.allocate(it2->inst->me, it2->bytes,
+                                                    it2->alignment, offset);
+                if(ok) {
+                  ++it2;
+                } else {
+                  // this should only happen if we've seen the poisoned release
+                  assert(found);
+
+                  // this alloc is no longer possible - remove from the list
+                  //  and notify of the failure
+                  failed_allocs.push_back(it2->inst);
+                  it2 = pending_allocs.erase(it2);
+                }
+              }
             }
           }
         }
