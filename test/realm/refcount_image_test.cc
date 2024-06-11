@@ -119,12 +119,6 @@ void main_task(const void *args, size_t arglen, const void *userdata, size_t use
       }
     }
 
-    // TODO(apryakhin@): Fix for remote creation.
-    if(NodeID(ID(*it).memory_owner_node()) !=
-       NodeID(ID(ptr_data[0].inst).instance_owner_node())) {
-      continue;
-    }
-
     TaskArgs args;
     for(int i = 0; i < NUM_INSTS; i++) {
       args.sources[0] = sources[0];

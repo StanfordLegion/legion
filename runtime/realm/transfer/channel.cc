@@ -4161,9 +4161,22 @@ namespace Realm {
 	  
       RemoteChannelInfo *Channel::construct_remote_info() const
       {
-        return new SimpleRemoteChannelInfo(node, kind,
-                                           reinterpret_cast<uintptr_t>(this),
-                                           paths);
+        std::vector<Memory> indirect_memories;
+        for(NodeID n = 0; n < Network::max_node_id + 1; n++) {
+          Node &node = get_runtime()->nodes[n];
+          for(MemoryImpl *impl : node.memories) {
+            if(supports_indirection_memory(impl->me)) {
+              indirect_memories.push_back(impl->me);
+            }
+          }
+          for(IBMemory *impl : node.ib_memories) {
+            if(supports_indirection_memory(impl->me)) {
+              indirect_memories.push_back(impl->me);
+            }
+          }
+        }
+        return new SimpleRemoteChannelInfo(node, kind, reinterpret_cast<uintptr_t>(this),
+                                           paths, indirect_memories);
       }
 
       void Channel::print(std::ostream& os) const
@@ -4183,178 +4196,226 @@ namespace Realm {
       {
 	return paths;
       }
-	  
+
       uint64_t Channel::supports_path(ChannelCopyInfo channel_copy_info,
                                       CustomSerdezID src_serdez_id,
                                       CustomSerdezID dst_serdez_id,
-                                      ReductionOpID redop_id,
-                                      size_t total_bytes,
+                                      ReductionOpID redop_id, size_t total_bytes,
                                       const std::vector<size_t> *src_frags,
                                       const std::vector<size_t> *dst_frags,
                                       XferDesKind *kind_ret /*= 0*/,
-                                      unsigned *bw_ret /*= 0*/,
-                                      unsigned *lat_ret /*= 0*/)
+                                      unsigned *bw_ret /*= 0*/, unsigned *lat_ret /*= 0*/)
       {
         Memory src_mem = channel_copy_info.src_mem;
         Memory dst_mem = channel_copy_info.dst_mem;
+        // If we don't support the indirection memory, then no need to check the paths.
+        if((channel_copy_info.ind_mem != Memory::NO_MEMORY) &&
+           !supports_indirection_memory(channel_copy_info.ind_mem)) {
+          return 0;
+        }
         for(std::vector<SupportedPath>::const_iterator it = paths.begin();
-	    it != paths.end();
-	    ++it) {
-	  if(!it->serdez_allowed && ((src_serdez_id != 0) ||
-				     (dst_serdez_id != 0)))
-	    continue;
-	  if(!it->redops_allowed && (redop_id != 0))
-	    continue;
+            it != paths.end(); ++it) {
+          if(!it->serdez_allowed && ((src_serdez_id != 0) || (dst_serdez_id != 0)))
+            continue;
+          if(!it->redops_allowed && (redop_id != 0))
+            continue;
 
-	  bool src_ok = false;
-	  switch(it->src_type) {
-	    case SupportedPath::SPECIFIC_MEMORY: {
-	      src_ok = (src_mem == it->src_mem);
-	      break;
-	    }
-	    case SupportedPath::LOCAL_KIND: {
-	      src_ok = (src_mem.exists() &&
-			(src_mem.kind() == it->src_kind) &&
-			(NodeID(ID(src_mem).memory_owner_node()) == node));
-	      break;
-	    }
-	    case SupportedPath::GLOBAL_KIND: {
-	      src_ok = (src_mem.exists() &&
-			(src_mem.kind() == it->src_kind));
-	      break;
-	    }
-	    case SupportedPath::LOCAL_RDMA: {
-	      if(src_mem.exists() &&
-		 (NodeID(ID(src_mem).memory_owner_node()) == node)) {
-		MemoryImpl *src_impl = get_runtime()->get_memory_impl(src_mem);
-		// detection of rdma-ness depends on whether memory is
-		//  local/remote to us, not the channel
-		if(NodeID(ID(src_mem).memory_owner_node()) == Network::my_node_id) {
-		  src_ok = (src_impl->get_rdma_info(Network::single_network) != nullptr);
-		} else {
-		  RemoteAddress dummy;
-		  src_ok = src_impl->get_remote_addr(0, dummy);
-		}
-	      }
-	      break;
-	    }
-	    case SupportedPath::REMOTE_RDMA: {
-	      if(src_mem.exists() &&
-		 (NodeID(ID(src_mem).memory_owner_node()) != node)) {
-		MemoryImpl *src_impl = get_runtime()->get_memory_impl(src_mem);
-		// detection of rdma-ness depends on whether memory is
-		//  local/remote to us, not the channel
-		if(NodeID(ID(src_mem).memory_owner_node()) == Network::my_node_id) {
-		  src_ok = (src_impl->get_rdma_info(Network::single_network) != nullptr);
-		} else {
-		  RemoteAddress dummy;
-		  src_ok = src_impl->get_remote_addr(0, dummy);
-		}
-	      }
-	      break;
-	    }
-            case SupportedPath::MEMORY_BITMASK: {
-              ID src_id(src_mem);
-              if(NodeID(src_id.memory_owner_node()) == it->src_bitmask.node) {
-                if(src_id.is_memory())
-                  src_ok = ((it->src_bitmask.mems[src_id.memory_mem_idx() >> 6] &
-                             (uint64_t(1) << (src_id.memory_mem_idx() & 63))) != 0);
-                else if(src_id.is_ib_memory())
-                  src_ok = ((it->src_bitmask.ib_mems[src_id.memory_mem_idx() >> 6] &
-                             (uint64_t(1) << (src_id.memory_mem_idx() & 63))) != 0);
-                else
-                  src_ok = false;  // consider asserting on a non-memory ID?
-              } else
-                src_ok = false;
-              break;
+          bool src_ok = false;
+          switch(it->src_type) {
+          case SupportedPath::SPECIFIC_MEMORY:
+          {
+            src_ok = (src_mem == it->src_mem);
+            break;
+          }
+          case SupportedPath::LOCAL_KIND:
+          {
+            src_ok = (src_mem.exists() && (src_mem.kind() == it->src_kind) &&
+                      (NodeID(ID(src_mem).memory_owner_node()) == node));
+            break;
+          }
+          case SupportedPath::GLOBAL_KIND:
+          {
+            src_ok = (src_mem.exists() && (src_mem.kind() == it->src_kind));
+            break;
+          }
+          case SupportedPath::LOCAL_RDMA:
+          {
+            if(src_mem.exists() && (NodeID(ID(src_mem).memory_owner_node()) == node)) {
+              MemoryImpl *src_impl = get_runtime()->get_memory_impl(src_mem);
+              // detection of rdma-ness depends on whether memory is
+              //  local/remote to us, not the channel
+              if(NodeID(ID(src_mem).memory_owner_node()) == Network::my_node_id) {
+                src_ok = (src_impl->get_rdma_info(Network::single_network) != nullptr);
+              } else {
+                RemoteAddress dummy;
+                src_ok = src_impl->get_remote_addr(0, dummy);
+              }
             }
-	  }
-	  if(!src_ok)
-	    continue;
-
-	  bool dst_ok = false;
-	  switch(it->dst_type) {
-	    case SupportedPath::SPECIFIC_MEMORY: {
-	      dst_ok = (dst_mem == it->dst_mem);
-	      break;
-	    }
-	    case SupportedPath::LOCAL_KIND: {
-	      dst_ok = ((dst_mem.kind() == it->dst_kind) &&
-			(NodeID(ID(dst_mem).memory_owner_node()) == node));
-	      break;
-	    }
-	    case SupportedPath::GLOBAL_KIND: {
-	      dst_ok = (dst_mem.kind() == it->dst_kind);
-	      break;
-	    }
-	    case SupportedPath::LOCAL_RDMA: {
-	      if(NodeID(ID(dst_mem).memory_owner_node()) == node) {
-		MemoryImpl *dst_impl = get_runtime()->get_memory_impl(dst_mem);
-		// detection of rdma-ness depends on whether memory is
-		//  local/remote to us, not the channel
-		if(NodeID(ID(dst_mem).memory_owner_node()) == Network::my_node_id) {
-		  dst_ok = (dst_impl->get_rdma_info(Network::single_network) != nullptr);
-		} else {
-		  RemoteAddress dummy;
-		  dst_ok = dst_impl->get_remote_addr(0, dummy);
-		}
-	      }
-	      break;
-	    }
-	    case SupportedPath::REMOTE_RDMA: {
-	      if(NodeID(ID(dst_mem).memory_owner_node()) != node) {
-		MemoryImpl *dst_impl = get_runtime()->get_memory_impl(dst_mem);
-		// detection of rdma-ness depends on whether memory is
-		//  local/remote to us, not the channel
-		if(NodeID(ID(dst_mem).memory_owner_node()) == Network::my_node_id) {
-		  dst_ok = (dst_impl->get_rdma_info(Network::single_network) != nullptr);
-		} else {
-		  RemoteAddress dummy;
-		  dst_ok = dst_impl->get_remote_addr(0, dummy);
-		}
-	      }
-	      break;
-	    }
-            case SupportedPath::MEMORY_BITMASK: {
-              ID dst_id(dst_mem);
-              if(NodeID(dst_id.memory_owner_node()) == it->dst_bitmask.node) {
-                if(dst_id.is_memory())
-                  dst_ok = ((it->dst_bitmask.mems[dst_id.memory_mem_idx() >> 6] &
-                             (uint64_t(1) << (dst_id.memory_mem_idx() & 63))) != 0);
-                else if(dst_id.is_ib_memory())
-                  dst_ok = ((it->dst_bitmask.ib_mems[dst_id.memory_mem_idx() >> 6] &
-                             (uint64_t(1) << (dst_id.memory_mem_idx() & 63))) != 0);
-                else
-                  dst_ok = false;  // consider asserting on a non-memory ID?
-              } else
-                dst_ok = false;
-              break;
+            break;
+          }
+          case SupportedPath::REMOTE_RDMA:
+          {
+            if(src_mem.exists() && (NodeID(ID(src_mem).memory_owner_node()) != node)) {
+              MemoryImpl *src_impl = get_runtime()->get_memory_impl(src_mem);
+              // detection of rdma-ness depends on whether memory is
+              //  local/remote to us, not the channel
+              if(NodeID(ID(src_mem).memory_owner_node()) == Network::my_node_id) {
+                src_ok = (src_impl->get_rdma_info(Network::single_network) != nullptr);
+              } else {
+                RemoteAddress dummy;
+                src_ok = src_impl->get_remote_addr(0, dummy);
+              }
             }
-	  }
-	  if(!dst_ok)
-	    continue;
+            break;
+          }
+          case SupportedPath::MEMORY_BITMASK:
+          {
+            ID src_id(src_mem);
+            if(NodeID(src_id.memory_owner_node()) == it->src_bitmask.node) {
+              if(src_id.is_memory())
+                src_ok = ((it->src_bitmask.mems[src_id.memory_mem_idx() >> 6] &
+                           (uint64_t(1) << (src_id.memory_mem_idx() & 63))) != 0);
+              else if(src_id.is_ib_memory())
+                src_ok = ((it->src_bitmask.ib_mems[src_id.memory_mem_idx() >> 6] &
+                           (uint64_t(1) << (src_id.memory_mem_idx() & 63))) != 0);
+              else
+                src_ok = false; // consider asserting on a non-memory ID?
+            } else
+              src_ok = false;
+            break;
+          }
+          }
+          if(!src_ok)
+            continue;
 
-	  // match
-	  if(kind_ret) *kind_ret = it->xd_kind;
-	  if(bw_ret) *bw_ret = it->bandwidth;
-	  if(lat_ret) *lat_ret = it->latency;
+          bool dst_ok = false;
+          switch(it->dst_type) {
+          case SupportedPath::SPECIFIC_MEMORY:
+          {
+            dst_ok = (dst_mem == it->dst_mem);
+            break;
+          }
+          case SupportedPath::LOCAL_KIND:
+          {
+            dst_ok = ((dst_mem.kind() == it->dst_kind) &&
+                      (NodeID(ID(dst_mem).memory_owner_node()) == node));
+            break;
+          }
+          case SupportedPath::GLOBAL_KIND:
+          {
+            dst_ok = (dst_mem.kind() == it->dst_kind);
+            break;
+          }
+          case SupportedPath::LOCAL_RDMA:
+          {
+            if(NodeID(ID(dst_mem).memory_owner_node()) == node) {
+              MemoryImpl *dst_impl = get_runtime()->get_memory_impl(dst_mem);
+              // detection of rdma-ness depends on whether memory is
+              //  local/remote to us, not the channel
+              if(NodeID(ID(dst_mem).memory_owner_node()) == Network::my_node_id) {
+                dst_ok = (dst_impl->get_rdma_info(Network::single_network) != nullptr);
+              } else {
+                RemoteAddress dummy;
+                dst_ok = dst_impl->get_remote_addr(0, dummy);
+              }
+            }
+            break;
+          }
+          case SupportedPath::REMOTE_RDMA:
+          {
+            if(NodeID(ID(dst_mem).memory_owner_node()) != node) {
+              MemoryImpl *dst_impl = get_runtime()->get_memory_impl(dst_mem);
+              // detection of rdma-ness depends on whether memory is
+              //  local/remote to us, not the channel
+              if(NodeID(ID(dst_mem).memory_owner_node()) == Network::my_node_id) {
+                dst_ok = (dst_impl->get_rdma_info(Network::single_network) != nullptr);
+              } else {
+                RemoteAddress dummy;
+                dst_ok = dst_impl->get_remote_addr(0, dummy);
+              }
+            }
+            break;
+          }
+          case SupportedPath::MEMORY_BITMASK:
+          {
+            ID dst_id(dst_mem);
+            if(NodeID(dst_id.memory_owner_node()) == it->dst_bitmask.node) {
+              if(dst_id.is_memory())
+                dst_ok = ((it->dst_bitmask.mems[dst_id.memory_mem_idx() >> 6] &
+                           (uint64_t(1) << (dst_id.memory_mem_idx() & 63))) != 0);
+              else if(dst_id.is_ib_memory())
+                dst_ok = ((it->dst_bitmask.ib_mems[dst_id.memory_mem_idx() >> 6] &
+                           (uint64_t(1) << (dst_id.memory_mem_idx() & 63))) != 0);
+              else
+                dst_ok = false; // consider asserting on a non-memory ID?
+            } else
+              dst_ok = false;
+            break;
+          }
+          }
+          if(!dst_ok)
+            continue;
+
+          // match
+          if(kind_ret) {
+            *kind_ret = it->xd_kind;
+          }
+          if(bw_ret) {
+            *bw_ret = it->bandwidth;
+          }
+          if(lat_ret) {
+            *lat_ret = it->latency;
+          }
 
           // estimate transfer time
           uint64_t xfer_time = uint64_t(total_bytes) * 1000 / it->bandwidth;
           size_t frags = 1;
-          if(src_frags)
-            frags = std::max(frags, (*src_frags)[std::min<size_t>(src_frags->size()-1,
-                                                                  it->max_src_dim)]);
-          if(dst_frags)
-            frags = std::max(frags, (*dst_frags)[std::min<size_t>(dst_frags->size()-1,
-                                                                  it->max_dst_dim)]);
+          if(src_frags) {
+            frags = std::max(
+                frags,
+                (*src_frags)[std::min<size_t>(src_frags->size() - 1, it->max_src_dim)]);
+          }
+          if(dst_frags) {
+            frags = std::max(
+                frags,
+                (*dst_frags)[std::min<size_t>(dst_frags->size() - 1, it->max_dst_dim)]);
+          }
           xfer_time += uint64_t(frags) * it->frag_overhead;
 
           // make sure returned value is strictly positive
-	  return std::max<uint64_t>(xfer_time, 1);
-	}
+          return std::max<uint64_t>(xfer_time, 1);
+        }
 
-	return 0;
+        return 0;
+      }
+
+      bool Channel::supports_indirection_memory(Memory memory) const
+      {
+        ID id_mem(memory);
+        // TODO: This should just be a query on the memory if it's mapped and accessible
+        // locally by a CPU on this node.
+        if(node == Network::my_node_id) {
+          // This check is only valid for local channels.
+          switch(memory.kind()) {
+          case Memory::GPU_DYNAMIC_MEM:
+          case Memory::GPU_FB_MEM:
+            return false;
+          default:
+          {
+            if(NodeID(id_mem.memory_owner_node()) == node) {
+              // Local memories are always accessible
+              return true;
+            } else {
+              // Check if we have a remote memory mapping (HACK: should check the
+              // MemoryImpl)
+              return get_runtime()->remote_shared_memory_mappings.count(memory.id) > 0;
+            }
+          }
+          }
+        } else {
+          assert(0 && "Should not be called on remote channels!");
+        }
+        return false;
       }
 
       Memory Channel::suggest_ib_memories(Memory memory) const
@@ -4830,6 +4891,17 @@ namespace Realm {
   SimpleRemoteChannelInfo::SimpleRemoteChannelInfo()
   {}
 
+  SimpleRemoteChannelInfo::SimpleRemoteChannelInfo(
+      NodeID _owner, XferDesKind _kind, uintptr_t _remote_ptr,
+      const std::vector<Channel::SupportedPath> &_paths,
+      const std::vector<Memory> &_indirection_memories)
+    : owner(_owner)
+    , kind(_kind)
+    , remote_ptr(_remote_ptr)
+    , paths(_paths)
+    , indirect_memories(_indirection_memories)
+  {}
+
   SimpleRemoteChannelInfo::SimpleRemoteChannelInfo(NodeID _owner,
                                                    XferDesKind _kind,
                                                    uintptr_t _remote_ptr,
@@ -4842,7 +4914,7 @@ namespace Realm {
 
   RemoteChannel *SimpleRemoteChannelInfo::create_remote_channel()
   {
-    RemoteChannel *rc = new RemoteChannel(remote_ptr);
+    RemoteChannel *rc = new RemoteChannel(remote_ptr, indirect_memories);
     rc->node = owner;
     rc->kind = kind;
     rc->paths.swap(paths);
@@ -4858,24 +4930,26 @@ namespace Realm {
   // class RemoteChannel
   //
 
-      RemoteChannel::RemoteChannel(uintptr_t _remote_ptr)
-	: Channel(XFER_NONE)
-	, factory_singleton(_remote_ptr)
-      {}
+  RemoteChannel::RemoteChannel(uintptr_t _remote_ptr,
+                               const std::vector<Memory> &_indirect_memories)
+    : Channel(XFER_NONE)
+    , factory_singleton(_remote_ptr)
+    , indirect_memories(_indirect_memories.begin(), _indirect_memories.end())
+  {}
+  RemoteChannel::RemoteChannel(uintptr_t _remote_ptr)
+    : Channel(XFER_NONE)
+    , factory_singleton(_remote_ptr)
+  {}
 
-      void RemoteChannel::shutdown()
-      {}
+  void RemoteChannel::shutdown() {}
 
-      XferDesFactory *RemoteChannel::get_factory()
-      {
-	return &factory_singleton;
-      }
+  XferDesFactory *RemoteChannel::get_factory() { return &factory_singleton; }
 
-      long RemoteChannel::submit(Request** requests, long nr)
-      {
-	assert(0);
-	return 0;
-      }
+  long RemoteChannel::submit(Request **requests, long nr)
+  {
+    assert(0);
+    return 0;
+  }
 
       void RemoteChannel::pull()
       {
@@ -4888,30 +4962,28 @@ namespace Realm {
 	return 0;
       }
 
-      uint64_t RemoteChannel::supports_path(ChannelCopyInfo channel_copy_info,
-                                            CustomSerdezID src_serdez_id,
-                                            CustomSerdezID dst_serdez_id,
-                                            ReductionOpID redop_id,
-                                            size_t total_bytes,
-                                            const std::vector<size_t> *src_frags,
-                                            const std::vector<size_t> *dst_frags,
-                                            XferDesKind *kind_ret /*= 0*/,
-                                            unsigned *bw_ret /*= 0*/,
-                                            unsigned *lat_ret /*= 0*/)
+      uint64_t RemoteChannel::supports_path(
+          ChannelCopyInfo channel_copy_info, CustomSerdezID src_serdez_id,
+          CustomSerdezID dst_serdez_id, ReductionOpID redop_id, size_t total_bytes,
+          const std::vector<size_t> *src_frags, const std::vector<size_t> *dst_frags,
+          XferDesKind *kind_ret /*= 0*/, unsigned *bw_ret /*= 0*/,
+          unsigned *lat_ret /*= 0*/)
       {
-	// simultaneous serialization/deserialization not
-	//  allowed anywhere right now
-	if((src_serdez_id != 0) && (dst_serdez_id != 0))
-	  return 0;
+        // simultaneous serialization/deserialization not
+        //  allowed anywhere right now
+        if((src_serdez_id != 0) && (dst_serdez_id != 0))
+          return 0;
 
-	// fall through to normal checks
-	return Channel::supports_path(channel_copy_info,
-				      src_serdez_id, dst_serdez_id, redop_id,
-                                      total_bytes, src_frags, dst_frags,
-				      kind_ret, bw_ret, lat_ret);
+        // fall through to normal checks
+        return Channel::supports_path(channel_copy_info, src_serdez_id, dst_serdez_id,
+                                      redop_id, total_bytes, src_frags, dst_frags,
+                                      kind_ret, bw_ret, lat_ret);
       }
 
-
+      bool RemoteChannel::supports_indirection_memory(Memory mem) const
+      {
+        return indirect_memories.count(mem) > 0;
+      }
 
   static void enumerate_remote_shared_mems(std::vector<Memory> &mems)
   {

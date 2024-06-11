@@ -154,7 +154,8 @@ namespace Realm {
      * \param wait_on precondition to wait on
      * \return The event to wait on before using the new instance.
      */
-    Event redistrict(RegionInstance &instance, InstanceLayoutGeneric *layout,
+    // TODO(apryakhin@): Add deferred execution
+    Event redistrict(RegionInstance &instance, const InstanceLayoutGeneric *layout,
                      const ProfilingRequestSet &prs, Event wait_on = Event::NO_EVENT);
 
     /**
@@ -167,7 +168,8 @@ namespace Realm {
      * \param wait_on precondition to wait on
      * \return The event to wait on before using the new instance.
      */
-    Event redistrict(RegionInstance *instances, InstanceLayoutGeneric **layouts,
+    // TODO(apryakhin@): Add deferred execution
+    Event redistrict(RegionInstance *instances, const InstanceLayoutGeneric **layouts,
                      size_t num_layouts, const ProfilingRequestSet *prs,
                      Event wait_on = Event::NO_EVENT);
 
