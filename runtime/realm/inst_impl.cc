@@ -967,9 +967,23 @@ namespace Realm {
       // TODO(apryakhin): Handle redistricting from non-owner node
       assert(NodeID(ID(me).instance_owner_node()) == Network::my_node_id);
 
+      bool need_alloc_result = false;
       for(size_t i = 0; i < num_layouts; i++) {
         insts[i] = m_impl->new_instance();
         insts[i]->metadata.layout = layouts[i]->clone();
+        if(!prs[i].empty()) {
+          insts[i]->requests = prs[i];
+          insts[i]->measurements.import_requests(insts[i]->requests);
+          if(insts[i]
+                 ->measurements
+                 .wants_measurement<ProfilingMeasurements::InstanceTimeline>()) {
+            insts[i]->timeline.record_create_time();
+          }
+          need_alloc_result =
+              insts[i]
+                  ->measurements
+                  .wants_measurement<ProfilingMeasurements::InstanceAllocResult>();
+        }
       }
 
       // Attempt to reuse allocated range of existing instance
@@ -979,22 +993,18 @@ namespace Realm {
         // On failure, just recycle back the instance ids
         for(size_t i = 0; i < num_layouts; i++) {
           insts[i]->recycle_instance();
+
+          ProfilingMeasurementCollection pmc;
+          pmc.import_requests(prs[i]);
+          if(need_alloc_result) {
+            ProfilingMeasurements::InstanceAllocResult result;
+            result.success = false;
+            pmc.add_measurement(result);
+          }
         }
         Event event = GenEventImpl::create_genevent()->current_event();
         GenEventImpl::trigger(event, /*poisoned=*/true);
         return event;
-      }
-
-      for(size_t i = 0; i < num_layouts; i++) {
-        if(!prs[i].empty()) {
-          insts[i]->requests = prs[i];
-          insts[i]->measurements.import_requests(insts[i]->requests);
-          if(insts[i]
-                 ->measurements
-                 .wants_measurement<ProfilingMeasurements::InstanceTimeline>()) {
-            insts[i]->timeline.record_create_time();
-          }
-        }
       }
 
       // We managed to reuse the allocated instance, now set metadata.
@@ -1016,11 +1026,18 @@ namespace Realm {
         offset += layouts[i]->bytes_used;
       }
 
+      // Handle profiling requests
       for(size_t i = 0; i < num_layouts; i++) {
         if(insts[i]
                ->measurements
                .wants_measurement<ProfilingMeasurements::InstanceTimeline>()) {
           insts[i]->timeline.record_ready_time();
+        }
+
+        if(need_alloc_result) {
+          ProfilingMeasurements::InstanceAllocResult result;
+          result.success = true;
+          insts[i]->measurements.add_measurement(result);
         }
       }
 
