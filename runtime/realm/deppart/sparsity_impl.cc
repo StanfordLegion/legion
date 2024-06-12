@@ -29,7 +29,6 @@ namespace Realm {
   extern Logger log_part;
   extern Logger log_dpops;
 
-
   ////////////////////////////////////////////////////////////////////////
   //
   // class SparsityMapUntyped
