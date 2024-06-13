@@ -1018,7 +1018,8 @@ namespace Realm {
         NodeSet early_reqs;
         insts[i]->metadata.mark_valid(early_reqs);
 
-        insts[i]->metadata.need_alloc_result = false;
+        insts[i]->metadata.need_alloc_result = need_alloc_result;
+        insts[i]->metadata.need_notify_dealloc = false;
 
         if(!early_reqs.empty()) {
           send_metadata(early_reqs);
@@ -1050,6 +1051,7 @@ namespace Realm {
           ProfilingMeasurements::InstanceAllocResult result;
           result.success = true;
           insts[i]->measurements.add_measurement(result);
+          insts[i]->metadata.need_alloc_result = false;
         }
       }
 
