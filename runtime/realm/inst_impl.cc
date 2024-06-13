@@ -1026,12 +1026,24 @@ namespace Realm {
         offset += layouts[i]->bytes_used;
       }
 
+      notify_deallocation();
+
       // Handle profiling requests
       for(size_t i = 0; i < num_layouts; i++) {
         if(insts[i]
                ->measurements
                .wants_measurement<ProfilingMeasurements::InstanceTimeline>()) {
           insts[i]->timeline.record_ready_time();
+        }
+
+        if(insts[i]
+               ->measurements
+               .wants_measurement<ProfilingMeasurements::InstanceMemoryUsage>()) {
+          ProfilingMeasurements::InstanceMemoryUsage usage;
+          usage.instance = insts[i]->me;
+          usage.memory = memory;
+          usage.bytes = insts[i]->metadata.layout->bytes_used;
+          insts[i]->measurements.add_measurement(usage);
         }
 
         if(need_alloc_result) {
@@ -1042,9 +1054,6 @@ namespace Realm {
       }
 
       is_redistricted = true;
-
-      // TODO(apryakhin@): Consider deleting this instance
-      // notify_deallocation();
 
       return Event::NO_EVENT;
     }
@@ -1301,6 +1310,10 @@ namespace Realm {
 
     void RegionInstanceImpl::notify_deallocation(void)
     {
+      if(is_redistricted) {
+        log_inst.warning() << "calling destroy on redistricted instance me:" << me;
+        return;
+      }
       // response needs to be handled by the instance's creator node, so forward
       //  there if it's not us
       NodeID creator_node = ID(me).instance_creator_node();
