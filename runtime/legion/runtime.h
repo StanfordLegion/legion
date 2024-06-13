@@ -362,6 +362,8 @@ namespace Legion {
                              bool check_extent = false,
                              bool silence_warnings = false, 
                              const char *warning_string = NULL);
+      void get_memories(std::set<Memory> &memories,
+                        bool silence_warnings, const char *warning_string);
       PhysicalInstance get_instance(Memory::Kind kind,
                              size_t extent_in_bytes, bool check_extent,
                              bool silence_warnings, const char *warning_string);

@@ -1120,6 +1120,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void FutureImpl::get_memories(std::set<Memory> &memories,
+                              bool silence_warnings, const char *warning_string)
+    //--------------------------------------------------------------------------
+    {
+      // Wait for the future to be ready
+      memories.clear();
+      wait(silence_warnings, warning_string);
+      AutoLock f_lock(future_lock,1,false/*exclusive*/);
+      for (std::map<Memory,FutureInstanceTracker>::const_iterator it =
+            instances.begin(); it != instances.end(); it++)
+        memories.insert(it->first);
+    }
+
+    //--------------------------------------------------------------------------
     PhysicalInstance FutureImpl::get_instance(Memory::Kind memkind, 
                               size_t extent_in_bytes, bool check_extent, 
                               bool silence_warnings, const char *warning_string)
