@@ -967,7 +967,7 @@ namespace Realm {
       // TODO(apryakhin): Handle redistricting from non-owner node
       assert(NodeID(ID(me).instance_owner_node()) == Network::my_node_id);
 
-      bool need_alloc_result = false;
+      std::vector<bool> need_alloc_result(num_layouts);
       for(size_t i = 0; i < num_layouts; i++) {
         insts[i] = m_impl->new_instance();
         insts[i]->metadata.layout = layouts[i]->clone();
@@ -979,7 +979,7 @@ namespace Realm {
                  .wants_measurement<ProfilingMeasurements::InstanceTimeline>()) {
             insts[i]->timeline.record_create_time();
           }
-          need_alloc_result =
+          need_alloc_result[i] =
               insts[i]
                   ->measurements
                   .wants_measurement<ProfilingMeasurements::InstanceAllocResult>();
@@ -996,7 +996,7 @@ namespace Realm {
 
           ProfilingMeasurementCollection pmc;
           pmc.import_requests(prs[i]);
-          if(need_alloc_result) {
+          if(need_alloc_result[i]) {
             ProfilingMeasurements::InstanceAllocResult result;
             result.success = false;
             pmc.add_measurement(result);
@@ -1018,7 +1018,7 @@ namespace Realm {
         NodeSet early_reqs;
         insts[i]->metadata.mark_valid(early_reqs);
 
-        insts[i]->metadata.need_alloc_result = need_alloc_result;
+        insts[i]->metadata.need_alloc_result = need_alloc_result[i];
         insts[i]->metadata.need_notify_dealloc = false;
 
         if(!early_reqs.empty()) {
@@ -1047,7 +1047,7 @@ namespace Realm {
           insts[i]->measurements.add_measurement(usage);
         }
 
-        if(need_alloc_result) {
+        if(need_alloc_result[i]) {
           ProfilingMeasurements::InstanceAllocResult result;
           result.success = true;
           insts[i]->measurements.add_measurement(result);
