@@ -1309,6 +1309,9 @@ namespace Realm {
 
     void RegionInstanceImpl::notify_deallocation(void)
     {
+      if(is_redistricted) {
+        return;
+      }
       // response needs to be handled by the instance's creator node, so forward
       //  there if it's not us
       NodeID creator_node = ID(me).instance_creator_node();
