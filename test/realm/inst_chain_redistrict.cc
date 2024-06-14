@@ -245,7 +245,6 @@ void top_level_task(const void *args, size_t arglen, const void *userdata, size_
   assert(musage_result == 1048576);
   assert(inst_status_result == 0);
 
-
   destroy_event.trigger();
   usleep(100000);
 }
