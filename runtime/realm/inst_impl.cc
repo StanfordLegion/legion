@@ -967,7 +967,7 @@ namespace Realm {
       // TODO(apryakhin): Handle redistricting from non-owner node
       assert(NodeID(ID(me).instance_owner_node()) == Network::my_node_id);
 
-      bool need_alloc_result = false;
+      std::vector<bool> need_alloc_result(num_layouts);
       for(size_t i = 0; i < num_layouts; i++) {
         insts[i] = m_impl->new_instance();
         insts[i]->metadata.layout = layouts[i]->clone();
@@ -979,7 +979,7 @@ namespace Realm {
                  .wants_measurement<ProfilingMeasurements::InstanceTimeline>()) {
             insts[i]->timeline.record_create_time();
           }
-          need_alloc_result =
+          need_alloc_result[i] =
               insts[i]
                   ->measurements
                   .wants_measurement<ProfilingMeasurements::InstanceAllocResult>();
@@ -996,7 +996,7 @@ namespace Realm {
 
           ProfilingMeasurementCollection pmc;
           pmc.import_requests(prs[i]);
-          if(need_alloc_result) {
+          if(need_alloc_result[i]) {
             ProfilingMeasurements::InstanceAllocResult result;
             result.success = false;
             pmc.add_measurement(result);
@@ -1008,25 +1008,22 @@ namespace Realm {
       }
 
       // We managed to reuse the allocated instance, now set metadata.
-      size_t offset = 0;
       for(size_t i = 0; i < num_layouts; i++) {
         assert(insts[i]);
         instances[i] = insts[i]->me;
         insts[i]->metadata.layout->compile_lookup_program(
             insts[i]->metadata.lookup_program);
-        insts[i]->metadata.inst_offset = metadata.inst_offset + offset;
+
         NodeSet early_reqs;
         insts[i]->metadata.mark_valid(early_reqs);
 
-        insts[i]->metadata.need_alloc_result = false;
+        insts[i]->metadata.need_alloc_result = need_alloc_result[i];
+        insts[i]->metadata.need_notify_dealloc = false;
 
         if(!early_reqs.empty()) {
           send_metadata(early_reqs);
         }
-        offset += layouts[i]->bytes_used;
       }
-
-      notify_deallocation();
 
       // Handle profiling requests
       for(size_t i = 0; i < num_layouts; i++) {
@@ -1046,13 +1043,15 @@ namespace Realm {
           insts[i]->measurements.add_measurement(usage);
         }
 
-        if(need_alloc_result) {
+        if(need_alloc_result[i]) {
           ProfilingMeasurements::InstanceAllocResult result;
           result.success = true;
           insts[i]->measurements.add_measurement(result);
+          insts[i]->metadata.need_alloc_result = false;
         }
       }
 
+      notify_deallocation();
       is_redistricted = true;
 
       return Event::NO_EVENT;
@@ -1311,7 +1310,6 @@ namespace Realm {
     void RegionInstanceImpl::notify_deallocation(void)
     {
       if(is_redistricted) {
-        log_inst.warning() << "calling destroy on redistricted instance me:" << me;
         return;
       }
       // response needs to be handled by the instance's creator node, so forward

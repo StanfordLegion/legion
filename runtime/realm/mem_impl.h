@@ -255,7 +255,8 @@ namespace Realm {
     void deallocate(TT tag, bool missing_ok = false);
     bool lookup(TT tag, RT& first, RT& size);
     bool split_range(TT old_tag, const std::vector<TT> &new_tags,
-                     const std::vector<RT> &sizes, const std::vector<RT> &alignment);
+                     const std::vector<RT> &sizes, const std::vector<RT> &alignment,
+                     std::vector<RT> &allocs_first);
 
   protected:
     unsigned first_free_range;

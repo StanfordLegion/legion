@@ -43,6 +43,7 @@ struct ProfTimelResult {
 
 struct ProfAllocResult {
   int *success;
+  int *invocations;
   UserEvent done;
 };
 
@@ -102,6 +103,7 @@ void alloc_profiling_task(const void *args, size_t arglen, const void *userdata,
   ProfilingMeasurements::InstanceAllocResult inst_alloc;
   assert((resp.get_measurement(inst_alloc)));
   *(result->success) = inst_alloc.success;
+  *(result->invocations) = *(result->invocations) + 1;
   result->done.trigger();
 }
 
@@ -178,10 +180,12 @@ void top_level_task(const void *args, size_t arglen, const void *userdata, size_
 
   UserEvent alloc_event = UserEvent::create_user_event();
   int alloc_result = 0;
+  int alloc_invocatios = 0;
   {
     ProfAllocResult result;
     result.done = alloc_event;
     result.success = &alloc_result;
+    result.invocations = &alloc_invocatios;
     prs.add_request(p, ALLOC_PROF_TASK, &result, sizeof(ProfAllocResult))
         .add_measurement<ProfilingMeasurements::InstanceAllocResult>();
   }
@@ -257,7 +261,7 @@ void worker_task(const void *args, size_t arglen, const void *userdata, size_t u
   Event musage_event;
 
   size_t index = 0;
-
+  int alloc_invocations = 0;
   std::vector<int> alloc_results(num_iterations * 2);
   std::vector<int> timel_results(num_iterations * 2);
   std::vector<int> musage_results(num_iterations * 2);
@@ -292,12 +296,13 @@ void worker_task(const void *args, size_t arglen, const void *userdata, size_t u
         timel_events.push_back(event);
       }
 
-      {
+      if(i == 0) {
         UserEvent event = UserEvent::create_user_event();
         alloc_events.push_back(event);
         ProfAllocResult result;
         result.done = event;
         result.success = &alloc_results[index];
+        result.invocations = &alloc_invocations;
         prs[i]
             .add_request(p, ALLOC_PROF_TASK, &result, sizeof(ProfAllocResult))
             .add_measurement<ProfilingMeasurements::InstanceAllocResult>();
@@ -334,13 +339,13 @@ void worker_task(const void *args, size_t arglen, const void *userdata, size_t u
     delete ilg_a;
     delete ilg_b;
 
-    std::vector<CopySrcDstField> srcs(1), dsts(1);
+    /*std::vector<CopySrcDstField> srcs(1), dsts(1);
     srcs[0].set_field(insts[0], 0, sizeof(int));
     dsts[0].set_field(insts[1], 0, sizeof(int));
     e = IndexSpace<1>(next_bounds).copy(srcs, dsts, ProfilingRequestSet(), e);
-    e.wait();
+    e.wait();*/
 
-    int index = 0; /// next_bounds.volume();
+    int index = next_bounds.volume();
     for(size_t i = 1; i < insts.size(); i++) {
       AffineAccessor<int, 1, int> acc(insts[i], 0);
       IndexSpaceIterator<1, int> it(next_bounds);
@@ -366,7 +371,7 @@ void worker_task(const void *args, size_t arglen, const void *userdata, size_t u
   musage_event.wait();
   timel_event.wait();
 
-  for(size_t i = 0; i < alloc_results.size(); i++) {
+  for(size_t i = 1; i < alloc_results.size() - 1; i++) {
     assert(alloc_results[i]);
   }
 
@@ -377,6 +382,8 @@ void worker_task(const void *args, size_t arglen, const void *userdata, size_t u
   for(size_t i = 0; i < musage_results.size(); i++) {
     assert(musage_results[i] == 524288);
   }
+
+  assert(alloc_invocations == 1);
 }
 
 int main(int argc, char **argv)
