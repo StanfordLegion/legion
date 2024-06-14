@@ -1130,6 +1130,8 @@ namespace Realm {
                     const std::vector<size_t> *dst_frags, XferDesKind *kind_ret = 0,
                     unsigned *bw_ret = 0, unsigned *lat_ret = 0);
 
+      virtual bool supports_indirection_memory(Memory mem) const;
+
       virtual XferDes *create_xfer_des(uintptr_t dma_op, NodeID launch_node,
                                        XferDesID guid,
                                        const std::vector<XferDesPortInfo> &inputs_info,
@@ -1149,7 +1151,8 @@ namespace Realm {
     public:
       GPUIndirectRemoteChannelInfo(NodeID _owner, XferDesKind _kind,
                                    uintptr_t _remote_ptr,
-                                   const std::vector<Channel::SupportedPath> &_paths);
+                                   const std::vector<Channel::SupportedPath> &_paths,
+                                   const std::vector<Memory> &_indirect_memories);
 
       virtual RemoteChannel *create_remote_channel();
 
@@ -1169,21 +1172,21 @@ namespace Realm {
       friend class GPUIndirectRemoteChannelInfo;
 
     public:
-      GPUIndirectRemoteChannel(uintptr_t _remote_ptr);
+      GPUIndirectRemoteChannel(uintptr_t _remote_ptr,
+                               const std::vector<Memory> &_indirect_memories);
       virtual Memory suggest_ib_memories(Memory memory) const;
+      virtual bool needs_wrapping_iterator() const;
       virtual uint64_t
       supports_path(ChannelCopyInfo channel_copy_info, CustomSerdezID src_serdez_id,
                     CustomSerdezID dst_serdez_id, ReductionOpID redop_id,
                     size_t total_bytes, const std::vector<size_t> *src_frags,
-                    const std::vector<size_t> *dst_frags, XferDesKind *kind_ret = 0,
-                    unsigned *bw_ret = 0, unsigned *lat_ret = 0);
-      virtual bool needs_wrapping_iterator() const;
+                    const std::vector<size_t> *dst_frags, XferDesKind *kind_ret /*= 0*/,
+                    unsigned *bw_ret /*= 0*/, unsigned *lat_ret /*= 0*/);
     };
 
     class GPUChannel : public SingleXDQChannel<GPUChannel, GPUXferDes> {
     public:
-      GPUChannel(GPU* _src_gpu, XferDesKind _kind,
-		 BackgroundWorkManager *bgwork);
+      GPUChannel(GPU *_src_gpu, XferDesKind _kind, BackgroundWorkManager *bgwork);
       ~GPUChannel();
 
       // multi-threading of cuda copies for a given device is disabled by
@@ -1728,6 +1731,7 @@ namespace Realm {
   __op__(nvmlDeviceGetNvLinkVersion);                                                    \
   __op__(nvmlDeviceGetNvLinkRemotePciInfo);                                              \
   __op__(nvmlDeviceGetNvLinkRemoteDeviceType);                                           \
+  __op__(nvmlDeviceGetDeviceHandleFromMigDeviceHandle);                                  \
   NVML_11_APIS(__op__);
 
 #define DECL_FNPTR_EXTERN(name) extern decltype(&name) name##_fnptr;

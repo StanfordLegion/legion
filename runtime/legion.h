@@ -1275,6 +1275,17 @@ namespace Legion {
                              const char *warning_string = NULL) const;
 
       /**
+       * Report an instantaneous set of available memories where instances
+       * for the this future exist. These will only be memories local to
+       * the current process in which the call is performed. The result of
+       * this query might be come stale as soon as it is returned since it
+       * is only a snapshot of the memories where the future has copies.
+       */
+      void get_memories(std::set<Memory> &memories,
+                        bool silence_warnings = false,
+                        const char *warning_string = NULL) const;
+
+      /**
        * Return a const reference to the future.
        * WARNING: these method is unsafe as the underlying
        * buffer containing the future result can be deleted

@@ -696,7 +696,8 @@ namespace Realm {
       ChannelCopyInfo(Memory _src_mem, Memory _dst_mem,
                       Memory _ind_mem = Memory::NO_MEMORY, size_t _num_spaces = 1,
                       bool _is_scatter = false, bool _is_ranges = false,
-                      bool _is_direct = true, size_t _addr_size = 0)
+                      bool _is_direct = true, bool _oor_possible = false,
+                      size_t _addr_size = 0)
         : src_mem(_src_mem)
         , dst_mem(_dst_mem)
         , ind_mem(_ind_mem)
@@ -704,6 +705,7 @@ namespace Realm {
         , is_scatter(_is_scatter)
         , is_ranges(_is_ranges)
         , is_direct(_is_direct)
+        , oor_possible(_oor_possible)
         , addr_size(_addr_size)
       {}
       Memory src_mem;
@@ -713,6 +715,7 @@ namespace Realm {
       bool is_scatter;
       bool is_ranges;
       bool is_direct;
+      bool oor_possible;
       size_t addr_size;
     };
 
@@ -820,6 +823,10 @@ namespace Realm {
                                      XferDesKind *kind_ret = 0,
                                      unsigned *bw_ret = 0,
                                      unsigned *lat_ret = 0);
+      /// @brief Queries if a given \p mem can be used as an indirection buffer
+      /// @param mem Memory to be used as an indirection buffer
+      /// @return True if the given \p mem can be used as an indirection buffer for a copy
+      virtual bool supports_indirection_memory(Memory mem) const;
 
       virtual Memory suggest_ib_memories(Memory memory) const;
 
@@ -903,6 +910,9 @@ namespace Realm {
 
     class SimpleRemoteChannelInfo : public RemoteChannelInfo {
     public:
+      SimpleRemoteChannelInfo(NodeID _owner, XferDesKind _kind, uintptr_t _remote_ptr,
+                              const std::vector<Channel::SupportedPath> &_paths,
+                              const std::vector<Memory> &indirect_memories);
       SimpleRemoteChannelInfo(NodeID _owner, XferDesKind _kind,
                               uintptr_t _remote_ptr,
                               const std::vector<Channel::SupportedPath>& _paths);
@@ -924,12 +934,14 @@ namespace Realm {
       XferDesKind kind;
       uintptr_t remote_ptr;
       std::vector<Channel::SupportedPath> paths;
+      std::vector<Memory> indirect_memories;
     };
 
     class RemoteChannel : public Channel {
     protected:
       friend class SimpleRemoteChannelInfo;
 
+      RemoteChannel(uintptr_t _remote_ptr, const std::vector<Memory> &indirect_memories);
       RemoteChannel(uintptr_t _remote_ptr);
 
       virtual void shutdown();
@@ -967,11 +979,17 @@ namespace Realm {
                                      unsigned *bw_ret = 0,
                                      unsigned *lat_ret = 0);
 
+      /// @brief Queries if a given \p mem can be used as an indirection buffer
+      /// @param mem Memory to be used as an indirection buffer
+      /// @return True if the given \p mem can be used as an indirection buffer for a copy
+      virtual bool supports_indirection_memory(Memory mem) const;
+
       virtual void enqueue_ready_xd(XferDes *xd) { assert(0); }
       virtual void wakeup_xd(XferDes *xd) { assert(0); }
 
     protected:
       SimpleXferDesFactory factory_singleton;
+      const std::set<Memory> indirect_memories;
     };
 
     template <typename CHANNEL, typename XD>
