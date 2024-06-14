@@ -1008,13 +1008,12 @@ namespace Realm {
       }
 
       // We managed to reuse the allocated instance, now set metadata.
-      size_t offset = 0;
       for(size_t i = 0; i < num_layouts; i++) {
         assert(insts[i]);
         instances[i] = insts[i]->me;
         insts[i]->metadata.layout->compile_lookup_program(
             insts[i]->metadata.lookup_program);
-        insts[i]->metadata.inst_offset = metadata.inst_offset + offset;
+
         NodeSet early_reqs;
         insts[i]->metadata.mark_valid(early_reqs);
 
@@ -1024,10 +1023,7 @@ namespace Realm {
         if(!early_reqs.empty()) {
           send_metadata(early_reqs);
         }
-        offset += layouts[i]->bytes_used;
       }
-
-      notify_deallocation();
 
       // Handle profiling requests
       for(size_t i = 0; i < num_layouts; i++) {
@@ -1055,6 +1051,7 @@ namespace Realm {
         }
       }
 
+      notify_deallocation();
       is_redistricted = true;
 
       return Event::NO_EVENT;
@@ -1312,10 +1309,6 @@ namespace Realm {
 
     void RegionInstanceImpl::notify_deallocation(void)
     {
-      if(is_redistricted) {
-        log_inst.warning() << "calling destroy on redistricted instance me:" << me;
-        return;
-      }
       // response needs to be handled by the instance's creator node, so forward
       //  there if it's not us
       NodeID creator_node = ID(me).instance_creator_node();

@@ -596,8 +596,14 @@ namespace Realm {
         tags[i] = new_insts[i]->me;
       }
 
-      if(!current_allocator.split_range(old_inst->me, tags, sizes, alignments)) {
+      std::vector<size_t> offsets(num_insts);
+      if(!current_allocator.split_range(old_inst->me, tags, sizes, alignments, offsets)) {
         return AllocationResult::ALLOC_INSTANT_FAILURE;
+      }
+
+      // adjust offsets
+      for(size_t i = 0; i < num_insts; i++) {
+        new_insts[i]->metadata.inst_offset = offsets[i];
       }
 
       return AllocationResult::ALLOC_INSTANT_SUCCESS;

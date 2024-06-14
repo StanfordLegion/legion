@@ -166,7 +166,8 @@ namespace Realm {
   inline bool BasicRangeAllocator<RT, TT>::split_range(TT old_tag,
                                                        const std::vector<TT> &new_tags,
                                                        const std::vector<RT> &sizes,
-                                                       const std::vector<RT> &alignments)
+                                                       const std::vector<RT> &alignments,
+                                                       std::vector<RT> &allocs_first)
   {
     typename std::map<TT, unsigned>::iterator it = allocated.find(old_tag);
     if(it == allocated.end()) {
@@ -175,6 +176,7 @@ namespace Realm {
 
     size_t n = new_tags.size();
     assert(n == sizes.size() && n == alignments.size());
+    assert(allocs_first.size() == n);
 
     RT alloc_size = 0;
     for(size_t i = 0; i < n; i++) {
@@ -194,6 +196,9 @@ namespace Realm {
     // First part reuse existing allocated range for the first tag
     RT offset = calculate_offset(prev->first, alignments[0]);
     prev->last = prev->first + sizes[0] + offset;
+
+    allocs_first[0] = prev->first + offset;
+
     allocated.erase(old_tag);
     allocated[new_tags[0]] = prev_idx;
     remaining_size -= sizes[0];
@@ -208,6 +213,9 @@ namespace Realm {
       remaining_size -= sizes[i];
 
       Range *new_prev = &ranges[new_idx];
+
+      allocs_first[i] = new_prev->first + offset;
+
       prev = &ranges[prev_idx];
 
       new_prev->prev = prev_idx;
