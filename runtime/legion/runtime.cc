@@ -8550,10 +8550,18 @@ namespace Legion {
         delete layout;
         remaining_instance = PhysicalInstance::NO_INST;
         remaining_bytes = 0;
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+        const bool success =
+#endif
+          allocator.succeeded();
+        assert(success);
+#endif
         return result;
       }
       else
       {
+        remaining_bytes -= needed_bytes;
         // Make a new layout for the remainder 
         Realm::InstanceLayoutOpaque opaque(remaining_bytes, 1/*alignment*/);
         // Split the instance into two remaining instances
@@ -8581,17 +8589,16 @@ namespace Legion {
         delete layout;
         remaining_use_event = use_event;
         remaining_instance = results[1];
-        remaining_bytes -= needed_bytes;
         offset = (offset + needed_bytes) % max_alignment;
-        return results[0];
-      }
 #ifdef DEBUG_LEGION
 #ifndef NDEBUG
-      const bool success =
+        const bool success =
 #endif
-        allocator.succeeded();
-      assert(success);
+          allocator.succeeded();
+        assert(success);
 #endif
+        return results[0];
+      }
     }
 
     //--------------------------------------------------------------------------
