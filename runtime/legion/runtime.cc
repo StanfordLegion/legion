@@ -2005,15 +2005,17 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
+      assert(future_size_set);
       assert(!pending_instances.empty());
 #endif
       for (std::map<Memory,PendingInstance>::iterator it =
             pending_instances.begin(); it != pending_instances.end(); it++)
       {
         // Check to see if we already have an instance for this memory
+        // or if the future doesn't have any size to begin with
         std::map<Memory,FutureInstanceTracker>::iterator finder =
           instances.find(it->first);
-        if (finder != instances.end())
+        if ((finder != instances.end()) || (future_size == 0))
         {
           // If we do then we just trigger any events that we need to
           if (it->second.alloc_ready.exists())
@@ -2059,6 +2061,7 @@ namespace Legion {
                 Runtime::trigger_event(it->second.alloc_ready);
               if (it->second.inst_ready.exists())
                 Runtime::poison_event(it->second.inst_ready);
+              continue;
             }
           }
           else
@@ -2170,7 +2173,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(future_size > 0);
       assert(instances.find(memory) == instances.end());
-      assert(pending_instances.find(memory) == pending_instances.end());
       assert(memory.address_space() == runtime->address_space);
 #endif
       MemoryManager *manager = runtime->find_memory_manager(memory);
