@@ -1810,6 +1810,7 @@ namespace Legion {
       assert(instances.empty());
       assert(metadata == NULL);
 #endif
+      future_size = size;
       if (size > 0)
       {
         FutureInstance *instance = 
@@ -2009,6 +2010,24 @@ namespace Legion {
       for (std::map<Memory,PendingInstance>::iterator it =
             pending_instances.begin(); it != pending_instances.end(); it++)
       {
+        // Check to see if we already have an instance for this memory
+        std::map<Memory,FutureInstanceTracker>::iterator finder =
+          instances.find(it->first);
+        if (finder != instances.end())
+        {
+          // If we do then we just trigger any events that we need to
+          if (it->second.alloc_ready.exists())
+            Runtime::trigger_event(it->second.alloc_ready);
+          if (it->second.inst_ready.exists())
+            Runtime::trigger_event(NULL, it->second.inst_ready,
+                finder->second.ready_event);
+          // Delete the instance we had made since it can't have escaped
+          // yet and therefore we can replace it with the new instance
+          if (it->second.instance != NULL &&
+              !it->second.instance->defer_deletion(ApEvent::NO_AP_EVENT))
+            delete it->second.instance;
+          continue;
+        }
         if (it->second.instance == NULL)
         {
           if (it->second.context == NULL)
@@ -2149,7 +2168,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(!empty.load());
       assert(future_size > 0);
       assert(instances.find(memory) == instances.end());
       assert(pending_instances.find(memory) == pending_instances.end());
@@ -2181,7 +2199,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(!empty.load());
       assert(future_size > 0);
       assert(!instances.empty());
       assert(instances.find(instance->memory) == instances.end());
@@ -8828,6 +8845,13 @@ namespace Legion {
       {
 #ifdef DEBUG_LEGION
         assert(!(*it)->is_external_instance());
+#ifndef NDEBUG
+        const size_t previous =
+#endif
+#endif
+          remaining_capacity.fetch_add((*it)->instance_footprint);
+#ifdef DEBUG_LEGION
+        assert((previous + (*it)->instance_footprint) <= capacity);
 #endif
         RtEvent deletion_done;
         (*it)->collect(deletion_done);
