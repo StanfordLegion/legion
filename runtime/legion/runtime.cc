@@ -2018,7 +2018,7 @@ namespace Legion {
         if ((finder != instances.end()) || (future_size == 0))
         {
           // If we do then we just trigger any events that we need to
-          if (it->second.alloc_ready.exists())
+          if (it->second.alloc_ready.exists() && (it->second.instance == NULL))
             Runtime::trigger_event(it->second.alloc_ready);
           if (it->second.inst_ready.exists())
             Runtime::trigger_event(NULL, it->second.inst_ready,
@@ -6355,14 +6355,15 @@ namespace Legion {
         const std::vector<FieldID> fields(1,it->first);
         const std::vector<size_t> sizes(1, get_field_size(it->first));
 
+        const Realm::InstanceLayoutGeneric *current = it->second.get_layout();
         Realm::InstanceLayoutGeneric *layout =
           region->row_source->create_layout(*constraints, fields,
-              sizes, false/*compact*/);
-        const Realm::InstanceLayoutGeneric *current = it->second.get_layout();
+              sizes, false/*compact*/, NULL, NULL, NULL, 
+              current->alignment_reqd);
 #ifdef DEBUG_LEGION
         assert(layout->bytes_used == current->bytes_used);
+        assert(layout->alignment_reqd == current->alignment_reqd);
 #endif
-        layout->alignment_reqd = current->alignment_reqd;
         // Create an external Realm instance
         Realm::ProfilingRequestSet requests;
         if (runtime->profiler != NULL)
@@ -8847,13 +8848,6 @@ namespace Legion {
       {
 #ifdef DEBUG_LEGION
         assert(!(*it)->is_external_instance());
-#ifndef NDEBUG
-        const size_t previous =
-#endif
-#endif
-          remaining_capacity.fetch_add((*it)->instance_footprint);
-#ifdef DEBUG_LEGION
-        assert((previous + (*it)->instance_footprint) <= capacity);
 #endif
         RtEvent deletion_done;
         (*it)->collect(deletion_done);
@@ -9579,6 +9573,15 @@ namespace Legion {
             {
               it->first->add_base_gc_ref(MEMORY_MANAGER_REF);
               to_delete.push_back(it->first);
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+              const size_t previous =
+#endif
+#endif
+                remaining_capacity.fetch_add(it->first->instance_footprint);
+#ifdef DEBUG_LEGION
+              assert((previous + it->first->instance_footprint) <= capacity);
+#endif
             }
             else if (already_collected)
               remove_collectable(it->second, it->first);
