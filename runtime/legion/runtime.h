@@ -299,15 +299,20 @@ namespace Legion {
       struct PendingInstance {
       public:
         PendingInstance(void)
-          : instance(NULL), context(NULL), op(NULL) { }
+          : instance(NULL), context(NULL), op(NULL), creator_uid(0) { }
         PendingInstance(FutureInstance *i)
-          : instance(i), context(NULL), op(NULL) { }
+          : instance(i), context(NULL), op(NULL), creator_uid(0) { }
         PendingInstance(Operation *o, RtUserEvent a)
-          : instance(NULL), context(NULL), op(o), alloc_ready(a) { }
+          : instance(NULL), context(NULL), op(o), creator_uid(0), 
+            alloc_ready(a) { }
+        PendingInstance(UniqueID uid, RtUserEvent a)
+          : instance(NULL), context(NULL), op(NULL), creator_uid(uid),
+            alloc_ready(a) { }
       public:
         FutureInstance *instance;
         TaskContext *context;
         Operation *op;
+        UniqueID creator_uid;
         RtUserEvent alloc_ready;
         ApUserEvent inst_ready;
         RtEvent safe_inst_ready;
@@ -433,7 +438,8 @@ namespace Legion {
       FutureInstance* find_or_create_instance(Memory memory,
                                               ApEvent &inst_ready);
       // Must be holding the lock when calling create_instance
-      FutureInstance* create_instance(Memory memory, Operation *op);
+      FutureInstance* create_instance(Memory memory, Operation *op,
+                                      UniqueID creator_uid = 0);
       // Must be holding the lock when calling initialize_instance
       ApEvent record_instance(Operation *op, FutureInstance *instance);
       Memory find_best_source(Memory target) const;

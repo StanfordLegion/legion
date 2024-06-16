@@ -1311,8 +1311,12 @@ namespace Legion {
                 // Defer making this, the subscription we'll send
                 // will guarantee that we see the size asap
                 const RtUserEvent mapped = Runtime::create_rt_user_event();
-                pending_instances.emplace(std::make_pair(target,
-                      PendingInstance(task, mapped)));
+                if (task != NULL)
+                  pending_instances.emplace(std::make_pair(target,
+                        PendingInstance(task, mapped)));
+                else
+                  pending_instances.emplace(std::make_pair(target,
+                        PendingInstance(task_uid, mapped)));
                 ready_event = mapped;
                 if ((source != runtime->address_space) && can_fail)
                   pending_instances[target].can_fail_remote_requests.insert(
@@ -1327,10 +1331,12 @@ namespace Legion {
             }
             need_subscribe = !subscription_event.exists();
           }
+          else if (future_size_set && (future_size == 0))
+            return RtEvent::NO_RT_EVENT;
           else
           {
             ApEvent inst_ready;
-            FutureInstance *instance = create_instance(target, task);
+            FutureInstance *instance = create_instance(target, task, task_uid);
             if (can_fail && (instance == NULL))
             {
               const RtUserEvent notified = Runtime::create_rt_user_event();
@@ -1924,7 +1930,8 @@ namespace Legion {
             assert(it->second.alloc_ready.exists());
 #endif
             if (it->second.context == NULL)
-              it->second.instance = create_instance(it->first, it->second.op);
+              it->second.instance = create_instance(it->first, it->second.op,
+                                                    it->second.creator_uid);
             else
               it->second.instance = 
                 it->second.context->create_task_local_future(
@@ -2034,7 +2041,8 @@ namespace Legion {
         {
           if (it->second.context == NULL)
           {
-            it->second.instance = create_instance(it->first, it->second.op);
+            it->second.instance = create_instance(it->first, it->second.op, 
+                                                  it->second.creator_uid);
             if (it->second.instance == NULL)
             {
               std::vector<RtEvent> preconditions;
@@ -2167,18 +2175,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FutureInstance* FutureImpl::create_instance(Memory memory, Operation *op)
+    FutureInstance* FutureImpl::create_instance(Memory memory, Operation *op,
+                                                UniqueID creator_uid)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(future_size > 0);
+      assert((op != NULL) || (creator_uid > 0));
       assert(instances.find(memory) == instances.end());
       assert(memory.address_space() == runtime->address_space);
 #endif
+      if (op != NULL)
+        creator_uid = op->get_unique_op_id();
       MemoryManager *manager = runtime->find_memory_manager(memory);
       FutureInstance *instance = manager->create_future_instance(
-          op->get_unique_op_id(), future_size);
-      if (instance == NULL)
+          creator_uid, future_size);
+      if ((instance == NULL) && (op != NULL))
       {
         const char *mem_names[] = {
 #define MEM_NAMES(name, desc) desc,
