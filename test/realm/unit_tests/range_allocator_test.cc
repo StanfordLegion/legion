@@ -106,6 +106,59 @@ TEST(RangeAllocatorTestsWithParams, SplitRangeInvalidSize)
   }
 }
 
+// TODO: alignment test
+// requested range with alignment should exceed the existing range
+TEST(RangeAllocatorTestsWithParams, ReuseFailureDueToAlignment)
+{
+  const size_t old_range_size = 200;
+  const int old_range_alignment = 1;
+  const int old_range_tag = 42;
+  const int new_range_tag = 43;
+  size_t offset = 0;
+  std::vector<int> tags{new_range_tag};
+  std::vector<size_t> sizes{100};
+  std::vector<size_t> alignment{16};
+  std::vector<size_t> offsets{0};
+  BasicRangeAllocator<size_t, int> range_alloc;
+
+  range_alloc.add_range(0, old_range_size);
+  EXPECT_TRUE(range_alloc.allocate(old_range_tag, 100, old_range_alignment, offset));
+  EXPECT_TRUE(range_alloc.allocate(old_range_tag + 1, 100, old_range_alignment, offset));
+
+  EXPECT_FALSE(
+      range_alloc.split_range(old_range_tag + 1, tags, sizes, alignment, offsets));
+}
+
+TEST(RangeAllocatorTestsWithParams, ReuseZeroRange)
+{
+  const int old_range_tag = 42;
+  const int new_range_tag = 43;
+  size_t offset = 0;
+  size_t old_start = 0, old_size = 0;
+  size_t new_start = 0, new_size = 0;
+  std::vector<int> tags{new_range_tag};
+  std::vector<size_t> sizes{0};
+  std::vector<size_t> alignment{16};
+  std::vector<size_t> offsets{0};
+  BasicRangeAllocator<size_t, int> range_alloc;
+
+  range_alloc.add_range(0, 2);
+  EXPECT_TRUE(range_alloc.allocate(old_range_tag, 0, 1, offset));
+  EXPECT_TRUE(range_alloc.allocate(old_range_tag + 1, 0, 1, offset));
+  const size_t num_ranges = range_alloc.ranges.size();
+  EXPECT_TRUE(range_alloc.split_range(old_range_tag, tags, sizes, alignment, offsets));
+  EXPECT_FALSE(range_alloc.lookup(old_range_tag, old_start, old_size));
+  EXPECT_TRUE(range_alloc.lookup(new_range_tag, new_start, new_size));
+
+  EXPECT_EQ(range_alloc.ranges.size(), num_ranges);
+  EXPECT_EQ(offsets.size(), 1);
+  EXPECT_EQ(offsets[0], 0);
+  EXPECT_EQ(old_start, 0);
+  EXPECT_EQ(old_size, 0);
+  EXPECT_EQ(new_start, 0);
+  EXPECT_EQ(new_size, 0);
+}
+
 TEST(RangeAllocatorTestsWithParams, ReuseRange)
 {
   const int old_range_tag = 42;
@@ -122,22 +175,18 @@ TEST(RangeAllocatorTestsWithParams, ReuseRange)
   range_alloc.add_range(0, 512);
   EXPECT_TRUE(range_alloc.allocate(old_range_tag, 512, 16, offset));
   EXPECT_TRUE(range_alloc.lookup(old_range_tag, old_start, old_size));
-
-  range_alloc.split_range(old_range_tag, tags, sizes, alignment, offsets);
-
+  EXPECT_TRUE(range_alloc.split_range(old_range_tag, tags, sizes, alignment, offsets));
   EXPECT_FALSE(range_alloc.lookup(old_range_tag, old_start, old_size));
   EXPECT_TRUE(range_alloc.lookup(new_range_tag, new_start, new_size));
 
   EXPECT_EQ(new_start, old_start);
   EXPECT_EQ(new_size, old_size);
   EXPECT_EQ(range_alloc.ranges.size(), 2);
-
   EXPECT_EQ(range_alloc.ranges[0].last, 0);
   EXPECT_EQ(range_alloc.ranges[0].prev, 1);
   EXPECT_EQ(range_alloc.ranges[0].next, 1);
   EXPECT_EQ(range_alloc.ranges[0].prev_free, 0);
   EXPECT_EQ(range_alloc.ranges[0].next_free, 0);
-
   EXPECT_EQ(range_alloc.ranges[1].first, offsets[0]);
   EXPECT_EQ(range_alloc.ranges[1].first, new_start);
   EXPECT_EQ(range_alloc.ranges[1].last, new_start + new_size);
@@ -164,7 +213,7 @@ TEST(RangeAllocatorTestsWithParams, SplitRange)
 
   range_alloc.add_range(0, 768);
   EXPECT_TRUE(range_alloc.allocate(old_range_tag, 512, 16, offset));
-  range_alloc.split_range(old_range_tag, tags, sizes, alignment, offsets);
+  EXPECT_TRUE(range_alloc.split_range(old_range_tag, tags, sizes, alignment, offsets));
   for(size_t i = 0; i < tags.size(); i++) {
     EXPECT_TRUE(range_alloc.lookup(tags[i], new_starts[i], new_sizes[i]));
   }
@@ -225,7 +274,7 @@ TEST(RangeAllocatorTestsWithParams, SplitRangeSmaller)
 
   range_alloc.add_range(0, 768);
   EXPECT_TRUE(range_alloc.allocate(old_range_tag, 768, 16, offset));
-  range_alloc.split_range(old_range_tag, tags, sizes, alignment, offsets);
+  EXPECT_TRUE(range_alloc.split_range(old_range_tag, tags, sizes, alignment, offsets));
   for(size_t i = 0; i < tags.size(); i++) {
     EXPECT_TRUE(range_alloc.lookup(tags[i], new_starts[i], new_sizes[i]));
   }

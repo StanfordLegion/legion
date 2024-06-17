@@ -256,6 +256,10 @@ namespace Realm {
   SparsityMapImplWrapper::~SparsityMapImplWrapper(void)
   {
     if(map_impl.load() != 0) {
+      if(need_refcount) {
+        log_dpops.warning() << "leaking map:" << me << " refs:" << references.load();
+        assert(0);
+      }
       (*map_deleter)(map_impl.load());
     }
   }
@@ -264,6 +268,23 @@ namespace Realm {
   {
     me = _me;
     owner = _init_owner;
+  }
+
+  void SparsityMapImplWrapper::recycle(void)
+  {
+    assert(subscribers.empty());
+
+    void *impl = map_impl.load();
+    if(impl != nullptr) {
+      assert(map_deleter);
+      (*map_deleter)(impl);
+      map_impl.store(0);
+      type_tag.store(0);
+    }
+
+    if(Network::my_node_id == NodeID(ID(me).sparsity_creator_node())) {
+      get_runtime()->free_sparsity_impl(this);
+    }
   }
 
   void SparsityMapImplWrapper::destroy(void) { remove_references(/*count=*/1); }
@@ -275,19 +296,42 @@ namespace Realm {
     }
   }
 
+  class RemoveReferenceAcknowledeged {
+  public:
+    RemoveReferenceAcknowledeged(SparsityMapImplWrapper *_wrapper, NodeID _node)
+      : wrapper(_wrapper)
+      , node(_node)
+    {}
+
+    void operator()() const { wrapper->unsubscribe(node); }
+
+  protected:
+    SparsityMapImplWrapper *wrapper;
+    NodeID node;
+  };
+
   void SparsityMapImplWrapper::remove_references(unsigned count)
   {
     if(need_refcount) {
       if(references.fetch_sub_acqrel(count) == count) {
-        void *impl = map_impl.load();
-        if(impl != nullptr) {
-          assert(map_deleter);
-          (*map_deleter)(impl);
-          map_impl.store(0);
-          type_tag.store(0);
+        assert(Network::my_node_id == NodeID(me.sparsity_creator_node()) ||
+               subscribers.empty());
+
+        // broadcast delete to remote subscribers
+        for(NodeID node : subscribers) {
+          ActiveMessage<
+              typename SparsityMapRefCounter::SparsityMapRemoveReferencesMessage>
+              amsg(node);
+          amsg.add_remote_completion(RemoveReferenceAcknowledeged(this, node));
+          amsg->id = me.id;
+          amsg->count = 0;
+          amsg.commit();
         }
-        if(Network::my_node_id == NodeID(ID(me).sparsity_creator_node())) {
-          get_runtime()->free_sparsity_impl(this);
+
+        if(Network::my_node_id != NodeID(me.sparsity_creator_node()) ||
+           subscribers.empty()) {
+
+          recycle();
         }
       }
     }
@@ -320,6 +364,13 @@ namespace Realm {
 
     // create one and try to swap it in
     SparsityMapImpl<N,T> *new_impl = new SparsityMapImpl<N,T>(me);
+
+    if(need_refcount && NodeID(ID(me).sparsity_creator_node()) != Network::my_node_id) {
+      ActiveMessage<SubscribeDeleteMessage> amsg(NodeID(ID(me).sparsity_creator_node()));
+      amsg->id = me.id;
+      amsg.commit();
+    }
+
     if(map_impl.compare_exchange(impl, new_impl)) {
       // ours is the winner - return it
       map_deleter = &delete_sparsity_map_impl<N,T>;
@@ -331,6 +382,50 @@ namespace Realm {
     }
   }
 
+  void SparsityMapImplWrapper::subscribe(NodeID node)
+  {
+    assert(NodeID(ID(me).sparsity_creator_node()) == Network::my_node_id);
+    if(references.load() == 0) {
+      assert(subscribers.empty());
+      assert(map_impl.load() == nullptr);
+      // already deleted
+      ActiveMessage<typename SparsityMapRefCounter::SparsityMapRemoveReferencesMessage>
+          amsg(node);
+      amsg->id = me.id;
+      amsg->count = 0;
+      amsg.commit();
+    } else {
+      AutoLock<> al(mutex);
+      subscribers.add(node);
+    }
+  }
+
+  void SparsityMapImplWrapper::unsubscribe(NodeID node)
+  {
+    AutoLock<> al(mutex);
+
+    assert(NodeID(ID(me).sparsity_creator_node()) == Network::my_node_id);
+
+    assert(subscribers.contains(node));
+    subscribers.remove(node);
+    if(subscribers.empty()) {
+      recycle();
+    }
+  }
+
+  void SparsityMapImplWrapper::SubscribeDeleteMessage::handle_message(
+      NodeID sender, const SubscribeDeleteMessage &msg, const void *data, size_t datalen)
+  {
+    SparsityMapImplWrapper *wrapper = get_runtime()->get_sparsity_impl(msg.id);
+    if(wrapper) {
+      assert(sender != Network::my_node_id);
+      wrapper->subscribe(sender);
+    }
+  }
+
+  /*static*/ ActiveMessageHandlerReg<
+      typename SparsityMapImplWrapper::SubscribeDeleteMessage>
+      SparsityMapImplWrapper::subscribe_delete_message_handler_reg;
 
   ////////////////////////////////////////////////////////////////////////
   //

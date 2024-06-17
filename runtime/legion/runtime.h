@@ -366,6 +366,8 @@ namespace Legion {
                              bool check_extent = false,
                              bool silence_warnings = false, 
                              const char *warning_string = NULL);
+      void get_memories(std::set<Memory> &memories,
+                        bool silence_warnings, const char *warning_string);
       PhysicalInstance get_instance(Memory::Kind kind,
                              size_t extent_in_bytes, bool check_extent,
                              bool silence_warnings, const char *warning_string);
@@ -1892,7 +1894,7 @@ namespace Legion {
       };
     public:
       VirtualChannel(VirtualChannelKind kind,AddressSpaceID local_address_space,
-               size_t max_message_size, bool profile, LegionProfiler *profiler);
+               size_t max_message_size, bool profile);
       VirtualChannel(const VirtualChannel &rhs);
       ~VirtualChannel(void);
     public:
@@ -1952,8 +1954,6 @@ namespace Legion {
       unsigned partial_messages;
       std::map<unsigned/*message id*/,PartialMessage> *partial_assembly;
       mutable bool observed_recent;
-    private:
-      LegionProfiler *const profiler;
     }; 
 
     /**
