@@ -83,6 +83,7 @@ namespace Legion {
 
     thread_local TaskContext *implicit_context = NULL;
     thread_local Runtime *implicit_runtime = NULL;
+    thread_local LegionProfInstance *implicit_profiler = NULL;
     thread_local AutoLock *local_lock_list = NULL;
     thread_local UniqueID implicit_provenance = 0;
     thread_local unsigned inside_registration_callback=NO_REGISTRATION_CALLBACK;
@@ -30849,6 +30850,8 @@ namespace Legion {
       // Save the context in the implicit context
       implicit_context = top_context;
       implicit_runtime = this;
+      if ((profiler != NULL) && (implicit_profiler == NULL))
+        implicit_profiler = profiler->create_profiling_instance();
       // Add a reference to the top level context
       top_context->add_base_gc_ref(RUNTIME_REF);
       // Get an individual task to be the top-level task
@@ -31046,7 +31049,12 @@ namespace Legion {
             "is not an implicit top-level task",
             ctx->get_task_name(), ctx->get_unique_id())
       ctx->end_wait(true/*from application*/);
-      implicit_runtime = this;
+      if (implicit_runtime == NULL)
+      {
+        implicit_runtime = this;
+        if (profiler != NULL)
+          implicit_profiler = profiler->create_profiling_instance();
+      }
       implicit_context = ctx;
       implicit_provenance = ctx->owner_task->get_unique_op_id();
     }
@@ -32263,7 +32271,11 @@ namespace Legion {
 #endif
       Runtime *runtime = *((Runtime**)userdata); 
       if (implicit_runtime == NULL)
+      {
         implicit_runtime = runtime;
+        if (runtime->profiler != NULL)
+          implicit_profiler = runtime->profiler->create_profiling_instance();
+      }
       if (implicit_context != NULL)
         implicit_context = NULL;
       // Finalize the runtime and then delete it
@@ -32299,7 +32311,11 @@ namespace Legion {
       assert(implicit_reference_tracker == NULL);
 #endif
       if (implicit_runtime == NULL)
+      {
         implicit_runtime = runtime;
+        if (runtime->profiler != NULL)
+          implicit_profiler = runtime->profiler->create_profiling_instance();
+      }
       if (implicit_context != NULL)
         implicit_context = NULL;
       // We immediately bump the priority of all meta-tasks once they start
@@ -32846,7 +32862,11 @@ namespace Legion {
 #endif
       Runtime *runtime = *((Runtime**)userdata);
       if (implicit_runtime == NULL)
+      {
         implicit_runtime = runtime;
+        if (runtime->profiler != NULL)
+          implicit_profiler = runtime->profiler->create_profiling_instance();
+      }
       if (implicit_context != NULL)
         implicit_context = NULL;
       Realm::ProfilingResponse response(args, arglen);
@@ -32906,7 +32926,11 @@ namespace Legion {
 #endif
       Runtime *runtime = *((Runtime**)userdata);
       if (implicit_runtime == NULL)
+      {
         implicit_runtime = runtime;
+        if (runtime->profiler != NULL)
+          implicit_profiler = runtime->profiler->create_profiling_instance();
+      }
       if (implicit_context != NULL)
         implicit_context = NULL;
       // Create the startup barrier and send it out
@@ -32928,7 +32952,11 @@ namespace Legion {
 #endif
       Deserializer derez(args, arglen);
       if (implicit_runtime == NULL)
+      {
         implicit_runtime = runtime;
+        if (runtime->profiler != NULL)
+          implicit_profiler = runtime->profiler->create_profiling_instance();
+      }
       if (implicit_context != NULL)
         implicit_context = NULL;
       runtime->handle_endpoint_creation(derez);
@@ -32947,7 +32975,11 @@ namespace Legion {
       assert(implicit_reference_tracker == NULL);
 #endif
       if (implicit_runtime == NULL)
+      {
         implicit_runtime = runtime;
+        if (runtime->profiler != NULL)
+          implicit_profiler = runtime->profiler->create_profiling_instance();
+      }
       if (implicit_context != NULL)
         implicit_context = NULL;
       // We immediately bump the priority of all meta-tasks once they start

@@ -3888,15 +3888,15 @@ namespace Legion {
 #ifdef LEGION_MALLOC_INSTANCES
       memory_manager->record_legion_instance(result, instance);
 #endif
-      if (runtime->profiler != NULL)
+      if (implicit_profiler != NULL)
       {
         // Log the logical regions and fields that make up this instance
         for (std::vector<LogicalRegion>::const_iterator it =
               regions.begin(); it != regions.end(); it++)
           if (it->exists())
-            runtime->profiler->record_physical_instance_region(unique_event, 
-                                                               *it);
-        runtime->profiler->record_physical_instance_layout(unique_event,
+            implicit_profiler->register_physical_instance_region(unique_event,
+                                                                 *it);
+        implicit_profiler->register_physical_instance_layout(unique_event,
                                                      layout->owner->handle,
                                                      *layout->constraints);
       }

@@ -675,12 +675,12 @@ namespace Legion {
       };
       OverheadProfiler *overhead_profiler; 
     protected:
-      class ImplicitProfiler {
+      class ImplicitTaskProfiler {
       public:
         std::vector<std::pair<long long,long long> > waits; 
         long long start_time;
       };
-      ImplicitProfiler *implicit_profiler;
+      ImplicitTaskProfiler *implicit_task_profiler;
     protected:
       std::map<LocalVariableID,
                std::pair<void*,void (*)(void*)> > task_local_variables;
@@ -3968,10 +3968,11 @@ namespace Legion {
           overhead_profiler->application_time += diff;
         overhead_profiler->previous_profiling_time = current;
       }
-      if (implicit_profiler != NULL)
+      if (implicit_task_profiler != NULL)
       {
         const long long current = Realm::Clock::current_time_in_nanoseconds();
-        implicit_profiler->waits.emplace_back(std::make_pair(current, current));
+        implicit_task_profiler->waits.emplace_back(
+            std::make_pair(current, current));
       }
     }
 
@@ -3987,10 +3988,10 @@ namespace Legion {
         overhead_profiler->wait_time += diff;
         overhead_profiler->previous_profiling_time = current;
       }
-      if (implicit_profiler != NULL)
+      if (implicit_task_profiler != NULL)
       {
         const long long current = Realm::Clock::current_time_in_nanoseconds();
-        implicit_profiler->waits.back().second = current;
+        implicit_task_profiler->waits.back().second = current;
       }
     }
 

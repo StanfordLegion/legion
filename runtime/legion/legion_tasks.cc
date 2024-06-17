@@ -5213,8 +5213,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, DEACTIVATE_MULTI_CALL);
-      if (runtime->profiler != NULL)
-        runtime->profiler->register_multi_task(this, task_id);
+      if (implicit_profiler != NULL)
+        implicit_profiler->register_multi_task(this, task_id);
       CollectiveViewCreator<TaskOp>::deactivate(freeop);
       if (remove_launch_space_reference(launch_space))
         delete launch_space;
@@ -6686,8 +6686,8 @@ namespace Legion {
       // we get cleaned up after the resolve speculation call
       if (runtime->legion_spy_enabled)
         LegionSpy::log_point_point(remote_unique_id, get_unique_id());
-      if (runtime->profiler != NULL)
-        runtime->profiler->register_operation(this);
+      if (implicit_profiler != NULL)
+        implicit_profiler->register_operation(this);
       // Return true to add ourselves to the ready queue
       return true;
     }
@@ -6909,8 +6909,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, POINT_DEACTIVATE_CALL);
-      if (runtime->profiler != NULL)
-        runtime->profiler->register_slice_owner(
+      if (implicit_profiler != NULL)
+        implicit_profiler->register_slice_owner(
             this->slice_owner->get_unique_op_id(),
             this->get_unique_op_id());
       SingleTask::deactivate(false/*free*/);
@@ -7352,8 +7352,8 @@ namespace Legion {
       else
         complete_mapping();
       slice_owner->record_point_mapped(get_mapped_event());
-      if (runtime->profiler != NULL)
-        runtime->profiler->register_operation(this);
+      if (implicit_profiler != NULL)
+        implicit_profiler->register_operation(this);
       return false;
     }
 
@@ -9959,8 +9959,8 @@ namespace Legion {
       if (runtime->legion_spy_enabled)
         LegionSpy::log_index_slice(get_unique_id(), 
                                    result->get_unique_id());
-      if (runtime->profiler != NULL)
-        runtime->profiler->register_slice_owner(get_unique_op_id(),
+      if (implicit_profiler != NULL)
+        implicit_profiler->register_slice_owner(get_unique_op_id(),
                                                 result->get_unique_op_id());
       return result;
     }
@@ -11380,8 +11380,8 @@ namespace Legion {
       derez.deserialize(internal_space);
       if (runtime->legion_spy_enabled)
         LegionSpy::log_slice_slice(remote_unique_id, get_unique_id());
-      if (runtime->profiler != NULL)
-        runtime->profiler->register_slice_owner(remote_unique_id,
+      if (implicit_profiler != NULL)
+        implicit_profiler->register_slice_owner(remote_unique_id,
             get_unique_op_id());
       num_unmapped_points = num_points;
       num_uncompleted_points.store(num_points);
@@ -11434,8 +11434,8 @@ namespace Legion {
       }
       else // Set the first mapping to false since we know things are mapped
         first_mapping = false;
-      if (runtime->profiler != NULL)
-        runtime->profiler->register_operation(this);
+      if (implicit_profiler != NULL)
+        implicit_profiler->register_operation(this);
       // Return true to add this to the ready queue
       return true;
     }
@@ -11512,8 +11512,8 @@ namespace Legion {
       if (runtime->legion_spy_enabled)
         LegionSpy::log_slice_slice(get_unique_id(), 
                                    result->get_unique_id());
-      if (runtime->profiler != NULL)
-        runtime->profiler->register_slice_owner(get_unique_op_id(),
+      if (implicit_profiler != NULL)
+        implicit_profiler->register_slice_owner(get_unique_op_id(),
             result->get_unique_op_id());
       return result;
     }

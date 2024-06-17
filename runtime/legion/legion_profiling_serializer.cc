@@ -843,7 +843,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LegionProfBinarySerializer::serialize(
-                                  const LegionProfInstance::TaskKind& task_kind)
+                                  const LegionProfDesc::TaskKind& task_kind)
     //--------------------------------------------------------------------------
     {
       int ID = TASK_KIND_ID;
@@ -855,7 +855,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LegionProfBinarySerializer::serialize(
-                            const LegionProfInstance::TaskVariant& task_variant)
+                            const LegionProfDesc::TaskVariant& task_variant)
     //--------------------------------------------------------------------------
     {
       int ID = TASK_VARIANT_ID;
@@ -1794,7 +1794,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LegionProfASCIISerializer::serialize(
-                                  const LegionProfInstance::TaskKind &task_kind)
+                                  const LegionProfDesc::TaskKind &task_kind)
     //--------------------------------------------------------------------------
     {
       log_prof.print("Prof Task Kind %u %s %d", task_kind.task_id, 
@@ -1803,7 +1803,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LegionProfASCIISerializer::serialize(
-                            const LegionProfInstance::TaskVariant& task_variant)
+                            const LegionProfDesc::TaskVariant& task_variant)
     //--------------------------------------------------------------------------
     {
       log_prof.print("Prof Task Variant %u %u %s", task_variant.task_id,

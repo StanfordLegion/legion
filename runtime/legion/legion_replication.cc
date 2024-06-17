@@ -6733,11 +6733,11 @@ namespace Legion {
               *external_resource, requests));
         if (single_broadcast != NULL)
           single_broadcast->broadcast({instance, ready_event, unique_event});
-        if (runtime->profiler != NULL)
+        if (implicit_profiler != NULL)
         {
-          runtime->profiler->record_physical_instance_region(unique_event,
+          implicit_profiler->register_physical_instance_region(unique_event,
                                                       requirement.region);
-          runtime->profiler->record_physical_instance_layout(unique_event,
+          implicit_profiler->register_physical_instance_layout(unique_event,
               requirement.region.field_space, layout_constraint_set);
         }
       }

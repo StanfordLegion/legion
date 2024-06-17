@@ -109,6 +109,18 @@ namespace Legion {
 
     class LegionProfDesc {
     public:
+      struct TaskKind {
+      public:
+        TaskID task_id;
+        const char *name;
+        bool overwrite;
+      };
+      struct TaskVariant {
+      public:
+        TaskID task_id;
+        VariantID variant_id;
+        const char *name;
+      };
       struct MapperName {
         MapperID mapper_id;
         ProcID mapper_proc;
@@ -175,18 +187,6 @@ namespace Legion {
 
     class LegionProfInstance {
     public:
-      struct TaskKind {
-      public:
-        TaskID task_id;
-        const char *name;
-        bool overwrite;
-      };
-      struct TaskVariant {
-      public:
-        TaskID task_id;
-        VariantID variant_id;
-        const char *name;
-      };
       struct OperationInstance {
       public:
         UniqueID op_id;
@@ -457,11 +457,7 @@ namespace Legion {
       ~LegionProfInstance(void);
     public:
       LegionProfInstance& operator=(const LegionProfInstance &rhs);
-    public:
-      void register_task_kind(TaskID task_id, const char *name, bool overwrite);
-      void register_task_variant(TaskID task_id,
-                                 VariantID variant_id, 
-                                 const char *variant_name);
+    public: 
       void register_operation(Operation *op);
       void register_multi_task(Operation *op, TaskID kind);
       void register_slice_owner(UniqueID pid, UniqueID id);
@@ -469,6 +465,10 @@ namespace Legion {
 				     &ispace_rect_desc);
       void register_index_space_point(IndexSpacePointDesc
 				      &ispace_point_desc);
+      template <int DIM, typename T>
+      void record_index_space_point(IDType handle, const Point<DIM, T> &point);
+      template<int DIM, typename T>
+      void record_index_space_rect(IDType handle, const Rect<DIM, T> &rect);
       void register_empty_index_space(IDType handle);
       void register_field(UniqueID unique_id, unsigned field_id,
 			  size_t size, const char* name);
@@ -484,6 +484,9 @@ namespace Legion {
 				   const char* name);
       void register_physical_instance_region(LgEvent inst_uid,
 					     LogicalRegion handle);
+      void register_physical_instance_layout(LgEvent unique_event,
+                                             FieldSpace fs,
+                                             const LayoutConstraintSet &lc);
       void register_physical_instance_field(LgEvent inst_uid,
                                             unsigned field_id,
                                             unsigned fspace,
@@ -534,16 +537,12 @@ namespace Legion {
       void process_proc_mem_aff_desc(const Memory &m);
       void process_proc_mem_aff_desc(const Processor &p);
     public:
-      void record_mapper_call(Processor proc, MapperID mapper,
-                              Processor mapper_proc, MappingCallKind kind,
-                              UniqueID uid, timestamp_t start,
-                              timestamp_t stop, LgEvent finish_event);
-      void record_runtime_call(Processor proc, RuntimeCallKind kind,
-                               timestamp_t start, timestamp_t stop,
-                               LgEvent finish_event);
-      void record_application_range(Processor proc, ProvenanceID pid,
-                                    timestamp_t start, timestamp_t stop,
-                                    LgEvent finish_event);
+      void record_mapper_call(MapperID mapper, Processor mapper_proc,
+       MappingCallKind kind, UniqueID uid, timestamp_t start, timestamp_t stop);
+      void record_runtime_call(RuntimeCallKind kind, timestamp_t start,
+                               timestamp_t stop);
+      void record_application_range(ProvenanceID pid,
+                                    timestamp_t start, timestamp_t stop);
 #ifdef LEGION_PROF_SELF_PROFILE
     public:
       void record_proftask(Processor p, UniqueID op_id, timestamp_t start,
@@ -554,8 +553,6 @@ namespace Legion {
       size_t dump_inter(LegionProfSerializer *serializer, const double over);
     private:
       LegionProfiler *const owner;
-      std::deque<TaskKind>          task_kinds;
-      std::deque<TaskVariant>       task_variants;
       std::deque<OperationInstance> operation_instances;
       std::deque<MultiTask>         multi_tasks;
       std::deque<SliceOwner>        slice_owners;
@@ -638,17 +635,10 @@ namespace Legion {
     public:
       LegionProfiler& operator=(const LegionProfiler &rhs) = delete;
     public:
-      // Dynamically created things must be registered at runtime
-      // Tasks
-      void register_task_kind(TaskID task_id, const char *task_name, 
-                              bool overwrite);
+      void register_task_kind(TaskID task_id, const char *name, bool overwrite);
       void register_task_variant(TaskID task_id,
-                                 VariantID var_id,
+                                 VariantID variant_id, 
                                  const char *variant_name);
-      // Operations
-      void register_operation(Operation *op);
-      void register_multi_task(Operation *op, TaskID task_id);
-      void register_slice_owner(UniqueID pid, UniqueID id);
     public:
       void add_task_request(Realm::ProfilingRequestSet &requests, TaskID tid, 
                             VariantID vid, UniqueID task_uid, Processor p);
@@ -698,52 +688,14 @@ namespace Legion {
       // Dump all the results
       void finalize(void);
     public:
-      void record_empty_index_space(IDType handle);
-      void record_field_space(UniqueID uid, const char* name);
-      void record_field(UniqueID unique_id,
-			unsigned field_id,
-			size_t size,
-			const char* name);
-      void record_index_space(UniqueID uid, const char* name);
-      void record_index_subspace(IDType parent_id, IDType unique_id,
-				 const DomainPoint &point);
-      void record_logical_region(IDType index_space, unsigned field_space,
-				 unsigned tree_id, const char* name);
-      void record_physical_instance_region(LgEvent unique_event, 
-                                           LogicalRegion handle);
-      void record_physical_instance_layout(LgEvent unique_event, FieldSpace fs,
-                                           const LayoutConstraintSet &lc);
-      void record_physical_instance_use(LgEvent unique_event, UniqueID op_id,
-                          unsigned index, const std::vector<FieldID> &fields);
-      void record_index_part(UniqueID id, const char* name);
-      void record_index_partition(UniqueID parent_id, UniqueID id, 
-                                  bool disjoint, LegionColor c);
-      void record_index_space_size(UniqueID unique_id,
-                                   unsigned long long
-                                   dense_size,
-                                   unsigned long long
-                                   sparse_size,
-                                   bool is_sparse);
-    public:
       void record_mapper_name(MapperID mapper, Processor p, const char *name);
       void record_mapper_call_kinds(const char *const *const mapper_call_names,
                                     unsigned int num_mapper_call_kinds);
-      void record_mapper_call(MapperID mapper, Processor mapper_proc,
-       MappingCallKind kind, UniqueID uid, timestamp_t start, timestamp_t stop);
-    public:
+      
       void record_runtime_call_kinds(const char *const *const runtime_calls,
                                      unsigned int num_runtime_call_kinds);
-      void record_runtime_call(RuntimeCallKind kind, timestamp_t start,
-                               timestamp_t stop);
       void record_provenance(ProvenanceID pid, 
                              const char *provenance, size_t size);
-      void record_application_range(ProvenanceID pid,
-                                    timestamp_t start, timestamp_t stop);
-    public:
-      void record_implicit(UniqueID op_id, TaskID tid, Processor proc,
-                           long long start, long long stop,
-           const std::vector<std::pair<long long,long long> > &waits,
-                           LgEvent finish_event);
     public:
 #ifdef DEBUG_LEGION
       void increment_total_outstanding_requests(ProfilingKind kind,
@@ -758,8 +710,8 @@ namespace Legion {
       void update_footprint(size_t diff, LegionProfInstance *inst);
     public:
       void issue_default_mapper_warning(Operation *op, const char *call_name);
-    private:
-      void create_thread_local_profiling_instance(void);
+    public:
+      LegionProfInstance* create_profiling_instance(void);
     public:
       Runtime *const runtime;
       // Event to trigger once the profiling is actually done
@@ -786,16 +738,7 @@ namespace Legion {
       std::atomic<size_t> total_memory_footprint;
     private:
       // Issue the default mapper warning
-      std::atomic<bool> need_default_mapper_warning;
-    public:
-      void record_index_space_point_desc(
-          LegionProfInstance::IndexSpacePointDesc &i);
-      void record_index_space_rect_desc(
-          LegionProfInstance::IndexSpaceRectDesc &i);
-      template <int DIM, typename T>
-      void record_index_space_point(IDType handle, const Point<DIM, T> &point);
-      template<int DIM, typename T>
-      void record_index_space_rect(IDType handle, const Rect<DIM, T> &rect);
+      std::atomic<bool> need_default_mapper_warning; 
     };
 
     class DetailedProfiler {
@@ -813,27 +756,27 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    inline void LegionProfiler::record_index_space_point(IDType handle,
+    inline void LegionProfInstance::record_index_space_point(IDType handle,
                                                       const Point<DIM,T> &point)
     //--------------------------------------------------------------------------
     {
-      LegionProfInstance::IndexSpacePointDesc ispace_point_desc;
+      IndexSpacePointDesc ispace_point_desc;
       ispace_point_desc.unique_id = handle;
       ispace_point_desc.dim = (unsigned)DIM;
 #define DIMFUNC(D2) \
       ispace_point_desc.points[D2-1] = (D2<=DIM) ? (long long)point[D2-1] : 0;
       LEGION_FOREACH_N(DIMFUNC)
 #undef DIMFUNC
-      record_index_space_point_desc(ispace_point_desc);
+      register_index_space_point(ispace_point_desc);
     }
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    inline void LegionProfiler::record_index_space_rect(IDType handle,
+    inline void LegionProfInstance::record_index_space_rect(IDType handle,
                                                         const Rect<DIM,T> &rect)
     //--------------------------------------------------------------------------
     {
-      LegionProfInstance::IndexSpaceRectDesc ispace_rect_desc;
+      IndexSpaceRectDesc ispace_rect_desc;
       ispace_rect_desc.unique_id = handle;
       ispace_rect_desc.dim = DIM;
 #define DIMFUNC(D2) \
@@ -841,7 +784,7 @@ namespace Legion {
       ispace_rect_desc.rect_hi[D2-1] = (D2<=DIM) ? (long long)rect.hi[D2-1]:0;
       LEGION_FOREACH_N(DIMFUNC)
 #undef DIMFUNC
-      record_index_space_rect_desc(ispace_rect_desc);
+      register_index_space_rect(ispace_rect_desc);
     }
 
   }; // namespace Internal
