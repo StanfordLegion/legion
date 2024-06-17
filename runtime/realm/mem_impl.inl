@@ -194,7 +194,7 @@ namespace Realm {
 
     allocated.erase(old_tag);
 
-    if(it->second == SENTINEL) {
+    if(prev_idx == SENTINEL) {
       // trivial case - zero-size ranges
       for(size_t i = 0; i < n; i++) {
         allocated[new_tags[i]] = SENTINEL;
