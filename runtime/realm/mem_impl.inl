@@ -178,17 +178,28 @@ namespace Realm {
     assert(n == sizes.size() && n == alignments.size());
     assert(allocs_first.size() == n);
 
-    RT alloc_size = 0;
-    for(size_t i = 0; i < n; i++) {
-      alloc_size += sizes[i];
-    }
-
     unsigned prev_idx = it->second;
     Range *prev = &ranges[prev_idx];
     unsigned next_idx = prev->next;
 
+    RT alloc_size = 0;
+    for(size_t i = 0; i < n; i++) {
+      RT offset = calculate_offset(prev->first, alignments[0]);
+      alloc_size += sizes[i] + offset;
+    }
+
     if((prev->last - prev->first) < alloc_size) {
       return false;
+    }
+
+    allocated.erase(old_tag);
+
+    if(it->second == SENTINEL) {
+      // trivial case - zero-size ranges
+      for(size_t i = 0; i < n; i++) {
+        allocated[new_tags[i]] = SENTINEL;
+      }
+      return true;
     }
 
     RT remaining_size = prev->last - prev->first;
@@ -199,7 +210,6 @@ namespace Realm {
 
     allocs_first[0] = prev->first + offset;
 
-    allocated.erase(old_tag);
     allocated[new_tags[0]] = prev_idx;
     remaining_size -= sizes[0];
 
