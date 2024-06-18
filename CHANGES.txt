@@ -28,6 +28,12 @@ Version 24.06.0 (June ??, 2024)
     - Restore profiler's ability to render dependent partitioning channels
     - Render mapper information on mapper calls in the profiler
     - Render user-provided profiling information in the profiler
+  * Realm
+    - UVM support for the HIP module
+    - Error code support for command line parser
+    - Support for querying MIG devices from NVML
+    - Add indirection channel query
+    - Additional unit tests and bug fixes
 
 Version 24.03.0 (March 27, 2024)
   * Build
