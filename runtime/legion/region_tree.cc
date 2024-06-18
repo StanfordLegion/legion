@@ -4339,12 +4339,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RegionNode* RegionTreeForest::get_tree(RegionTreeID tid,bool first/*=true*/)
+    RegionNode* RegionTreeForest::get_tree(RegionTreeID tid, bool can_fail,
+                                           bool first/*=true*/)
     //--------------------------------------------------------------------------
     {
       if (tid == 0)
+      {
+        if (can_fail)
+          return NULL;
         REPORT_LEGION_ERROR(ERROR_INVALID_REQUEST_TREE_ID,
           "Invalid request for tree ID 0 which is never a tree ID")
+      }
       RtEvent wait_on;
       RegionNode *result = NULL;
       {
@@ -4388,8 +4393,10 @@ namespace Legion {
         if (pending_wait.exists())
         {
           pending_wait.wait();
-          return get_tree(tid, false/*first*/); 
+          return get_tree(tid, can_fail, false/*first*/); 
         }
+        else if (can_fail)
+          return NULL;
         else
           REPORT_LEGION_ERROR(ERROR_UNABLE_FIND_ENTRY,
             "Unable to find entry for region tree ID %d", tid)
@@ -4424,12 +4431,16 @@ namespace Legion {
       std::map<RegionTreeID,RegionNode*>::const_iterator finder = 
           tree_nodes.find(tid);
       if (finder == tree_nodes.end())
+      {
+        if (can_fail)
+          return NULL;
         REPORT_LEGION_ERROR(ERROR_UNABLE_FIND_TOPLEVEL_TREE,
           "Unable to find top-level tree entry for "
                          "region tree %d.  This is either a runtime "
                          "bug or requires Legion fences if names are "
                          "being returned out of the context in which"
                          "they are being created.", tid)
+      }
       return finder->second;
     }
 
@@ -17391,7 +17402,7 @@ namespace Legion {
     {
       RegionTreeID tid;
       derez.deserialize(tid);
-      RegionNode *node = forest->get_tree(tid);
+      RegionNode *node = forest->get_tree(tid, true/*can fail*/);
       RtUserEvent done_event;
       derez.deserialize(done_event);
       AddressSpaceID source;

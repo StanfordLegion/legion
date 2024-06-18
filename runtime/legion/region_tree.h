@@ -743,7 +743,8 @@ namespace Legion {
       RegionNode*     get_node(LogicalRegion handle, 
                                bool need_check = true, bool first = true);
       PartitionNode*  get_node(LogicalPartition handle, bool need_check = true);
-      RegionNode*     get_tree(RegionTreeID tid, bool first = true);
+      RegionNode*     get_tree(RegionTreeID tid, bool can_fail = false,
+                               bool first = true);
       // Request but don't block
       RtEvent find_or_request_node(IndexSpace space, AddressSpaceID target);
     public:
