@@ -747,12 +747,6 @@ namespace Legion {
       // Request but don't block
       RtEvent find_or_request_node(IndexSpace space, AddressSpaceID target);
     public:
-      bool has_node(IndexSpace space);
-      bool has_node(IndexPartition part);
-      bool has_node(FieldSpace space);
-      bool has_node(LogicalRegion handle);
-      bool has_node(LogicalPartition handle);
-      bool has_tree(RegionTreeID tid);
       bool has_field(FieldSpace space, FieldID fid);
     public:
       void remove_node(IndexSpace space);

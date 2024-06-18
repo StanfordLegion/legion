@@ -1207,8 +1207,6 @@ namespace Legion {
                                       bool sharded_non_owner)
     //--------------------------------------------------------------------------
     {
-      if (!has_node(handle))
-        return;
       FieldSpaceNode *node = get_node(handle);
       node->free_field(fid, runtime->address_space, applied, sharded_non_owner);
     }
@@ -1256,8 +1254,6 @@ namespace Legion {
                                        bool sharded_non_owner)
     //--------------------------------------------------------------------------
     {
-      if (!has_node(handle))
-        return;
       FieldSpaceNode *node = get_node(handle);
       node->free_fields(to_free, runtime->address_space, applied, 
                         sharded_non_owner);
@@ -4476,56 +4472,6 @@ namespace Legion {
       }
       else
         return wait_finder->second;
-    }
-
-    //--------------------------------------------------------------------------
-    bool RegionTreeForest::has_node(IndexSpace space)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
-      return (index_nodes.find(space) != index_nodes.end());
-    }
-    
-    //--------------------------------------------------------------------------
-    bool RegionTreeForest::has_node(IndexPartition part)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
-      return (index_parts.find(part) != index_parts.end());
-    }
-
-    //--------------------------------------------------------------------------
-    bool RegionTreeForest::has_node(FieldSpace space)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
-      return (field_nodes.find(space) != field_nodes.end());
-    }
-
-    //--------------------------------------------------------------------------
-    bool RegionTreeForest::has_node(LogicalRegion handle)
-    //--------------------------------------------------------------------------
-    {
-      // Reflect that we can build these nodes whenever this is true
-      return (has_node(handle.index_space) && has_node(handle.field_space) &&
-              has_tree(handle.tree_id));
-    }
-
-    //--------------------------------------------------------------------------
-    bool RegionTreeForest::has_node(LogicalPartition handle)
-    //--------------------------------------------------------------------------
-    {
-      // Reflect that we can build these nodes whenever this is true
-      return (has_node(handle.index_partition) && has_node(handle.field_space)
-              && has_tree(handle.tree_id));
-    }
-
-    //--------------------------------------------------------------------------
-    bool RegionTreeForest::has_tree(RegionTreeID tid)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
-      return (tree_nodes.find(tid) != tree_nodes.end());
     }
 
     //--------------------------------------------------------------------------
