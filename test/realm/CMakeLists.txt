@@ -57,7 +57,9 @@ list(APPEND REALM_TESTS
   )
 
 if(Legion_USE_CUDA)
-
+  # Remove this once the Realm::Point class is updated
+  target_compile_options(LegionTest_realm PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:
+                           -Xcudafe=--diag_suppress=1444>)
   # some tests have CUDA source files too
   set(CUDASRC_memspeed memspeed_gpu.cu)
   set(CUDASRC_simple_reduce simple_reduce_gpu.cu)
