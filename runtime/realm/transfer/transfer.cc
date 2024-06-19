@@ -1692,7 +1692,7 @@ namespace Realm {
               merge_dim = 0;
             }
           } else {
-	    const Rect<N,T>& r2 = rects[rect_pos];
+            const Rect<N,T>& r2 = rects[rect_pos];
 	    int dims_match = 0;
 	    while(dims_match < (N-1))
 	      if((r.lo[dims_match] == r2.lo[dims_match]) &&
@@ -1710,8 +1710,8 @@ namespace Realm {
 		  break;
 		}
 	    }
-	  }
-	  if(merge_dim >= 0) {
+          }
+          if(merge_dim >= 0) {
 	    // merge and continue
 	    r.hi[merge_dim] = rects[rect_pos++].hi[merge_dim];
 	  } else {

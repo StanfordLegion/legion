@@ -43,8 +43,6 @@ namespace Realm {
 #elif defined(__INTEL_COMPILER) || defined(__INTEL_LLVM_COMPILER)
   #pragma warning push
   #pragma warning disable 1478
-#else
-#warning "Don't know how to suppress deprecated warnings for this compiler"
 #endif
 
   template <int N, typename T>

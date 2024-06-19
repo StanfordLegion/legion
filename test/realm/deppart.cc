@@ -1588,7 +1588,7 @@ public:
           ps[0]++;
 
           // point pointers are ugly because they can be in neighbors - use a helper
-	  Point<1> pp0 = global_point_pointer(zy, zx); // go CCW
+          Point<1> pp0 = global_point_pointer(zy, zx); // go CCW
 	  Point<1> pp1 = global_point_pointer(zy+1, zx);
 	  Point<1> pp2 = global_point_pointer(zy+1, zx+1);
 	  Point<1> pp3 = global_point_pointer(zy, zx+1);

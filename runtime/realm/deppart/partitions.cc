@@ -367,11 +367,11 @@ namespace Realm {
         else
           nx = bounds.lo[0] + (total_x * cum_weight / total_weight);
         // wrap-around here means bad math
-	assert(nx >= px);
+        assert(nx >= px);
         ss.bounds.lo[0] = px;
         ss.bounds.hi[0] = nx - 1;
         subspaces.push_back(ss);
-	px = nx;
+        px = nx;
       }
       PartitioningOperation::do_inline_profiling(reqs, inline_start_time);
       return wait_on;

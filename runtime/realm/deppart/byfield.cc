@@ -118,10 +118,10 @@ namespace Realm {
 	  FT val = a_data.read(p);
 	  Point<N,T> p2 = p;
           while(p2[0] < r.hi[0]) {
-            Point<N,T> p3 = p2;
+            Point<N, T> p3 = p2;
             p3[0]++;
             FT val2 = a_data.read(p3);
-	    if(val != val2) {
+            if(val != val2) {
 	      // record old strip
 	      BM *&bmp = bitmasks[val];
 	      if(!bmp) bmp = new BM;
@@ -133,7 +133,7 @@ namespace Realm {
 	    p2 = p3;
           }
           // record whatever strip we have at the end
-	  BM *&bmp = bitmasks[val];
+          BM *&bmp = bitmasks[val];
 	  if(!bmp) bmp = new BM;
 	  bmp->add_rect(Rect<N,T>(p,p2));
 	  //std::cout << val << ": " << p << ".." << p2 << std::endl;

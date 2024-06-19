@@ -1004,20 +1004,20 @@ bool scatter_gather_test(const std::vector<Memory> &mems, T size1, T2 size2, int
   region2
       .template fill<DT>(
           is2, FID_DATA1,
-          [](Point<N2, T2> p) -> DT { return DT(200 + p[0] + 10    *    p[1]); },
+          [](Point<N2, T2> p) -> DT { return DT(200 + p[0] + 10 * p[1]); },
           Event::NO_EVENT)
       .wait();
   region2
       .template fill<DT>(
           is2, FID_DATA2,
-          [](Point<N2, T2> p) -> DT { return DT(300 + p[0] + 10    *    p[1]); },
+          [](Point<N2, T2> p) -> DT { return DT(300 + p[0] + 10 * p[1]); },
           Event::NO_EVENT)
       .wait();
 
   region1
       .template fill<Point<N2, T2>>(
           is1, FID_PTR1,
-          [=](Point<N, T> p) -> Point<N2, T2> { return Point<N2,    T2>(p[0] % size2); },
+          [=](Point<N, T> p) -> Point<N2, T2> { return Point<N2, T2>(p[0] % size2); },
           Event::NO_EVENT)
       .wait();
 

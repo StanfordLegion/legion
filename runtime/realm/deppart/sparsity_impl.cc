@@ -1170,10 +1170,10 @@ namespace Realm {
         if(this->entries.empty() ||
            (this->entries.rbegin()->bounds.hi[0] < rects[0].lo[0])) {
           // special case when merging occurs with the last entry from before
-	  size_t n = this->entries.size();
+          size_t n = this->entries.size();
           if((n > 0) && (this->entries.rbegin()->bounds.hi[0] == (rects[0].lo[0] - 1))) {
             this->entries.resize(n + count - 1);
-	    assert(!this->entries[n - 1].sparsity.exists());
+            assert(!this->entries[n - 1].sparsity.exists());
 	    assert(this->entries[n - 1].bitmap == 0);
 	    this->entries[n - 1].bounds.hi = rects[0].hi;
 	    for(size_t i = 1; i < count; i++) {
@@ -1183,7 +1183,7 @@ namespace Realm {
 	    }
           } else {
             this->entries.resize(n + count);
-	    for(size_t i = 0; i < count; i++) {
+            for(size_t i = 0; i < count; i++) {
 	      this->entries[n + i].bounds = rects[i];
 	      this->entries[n + i].sparsity.id = 0; // no sparsity map
 	      this->entries[n + i].bitmap = 0;
@@ -1191,7 +1191,7 @@ namespace Realm {
           }
         } else {
           // do a merge of the new data with the old
-	  std::vector<SparsityMapEntry<N,T> > old_data;
+          std::vector<SparsityMapEntry<N,T> > old_data;
 	  old_data.swap(this->entries);
 	  size_t i = 0;
 	  size_t n = 0;
@@ -1199,7 +1199,7 @@ namespace Realm {
 	  while((i < count) && (old_it != old_data.end())) {
             if(rects[i].hi[0] < (old_it->bounds.lo[0] - 1)) {
               this->entries.resize(n + 1);
-	      this->entries[n].bounds = rects[i];
+              this->entries[n].bounds = rects[i];
 	      this->entries[n].sparsity.id = 0; // no sparsity map
 	      this->entries[n].bitmap = 0;
 	      n++;
@@ -1209,29 +1209,29 @@ namespace Realm {
 
             if(old_it->bounds.hi[0] < (rects[i].lo[0] - 1)) {
               this->entries.push_back(*old_it);
-	      n++;
+              n++;
 	      old_it++;
 	      continue;
             }
 
-            Rect<N,T> u = rects[i].union_bbox(old_it->bounds);
-	    // step rects, but not old_it - want sanity checks below to be done
+            Rect<N, T> u = rects[i].union_bbox(old_it->bounds);
+            // step rects, but not old_it - want sanity checks below to be done
 	    i++;
 	    while(true) {
               if((i < count) && (rects[i].lo[0] <= (u.hi[0] + 1))) {
                 u.hi[0] = std::max(u.hi[0], rects[i].hi[0]);
                 i++;
-		continue;
+                continue;
               }
               if((old_it != old_data.end()) && (old_it->bounds.lo[0] <= (u.hi[0] + 1))) {
                 assert(!old_it->sparsity.exists());
-		assert(old_it->bitmap == 0);
+                assert(old_it->bitmap == 0);
                 u.hi[0] = std::max(u.hi[0], old_it->bounds.hi[0]);
                 old_it++;
-		continue;
+                continue;
               }
               // if neither test passed, the chain is broken
-	      break;
+              break;
 	    }
 	    this->entries.resize(n + 1);
 	    this->entries[n].bounds = u;
