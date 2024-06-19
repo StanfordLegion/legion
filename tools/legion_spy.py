@@ -5644,7 +5644,7 @@ class EquivalenceSet(object):
             fill.record_version_number(self)
             preconditions = inst.find_verification_copy_dependences(
                 self.field, self.point, op, req.index, False, 0, self.version_number)
-            add_precondition(preconditions, fill, self.depth)
+            add_preconditions(preconditions, fill)
             inst.add_verification_copy_user(self.field, 
                 self.point, fill, req.index, False, 0, self.version_number)
             return True
