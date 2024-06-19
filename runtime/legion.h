@@ -2489,14 +2489,14 @@ namespace Legion {
      */
     struct PoolBounds {
     public:
-      PoolBounds(size_t s = 0, size_t a = 16) : size(s), alignment(a) { }
+      PoolBounds(uint64_t s = 0, uint32_t a = 16) : size(s), alignment(a) { }
       PoolBounds(const PoolBounds&) = default;
       PoolBounds(PoolBounds&&) = default;
       PoolBounds& operator=(const PoolBounds&) = default;
       PoolBounds& operator=(PoolBounds&&) = default;
     public:
-      size_t size; // upper bound of the pool in bytes
-      size_t alignment; // maximum alignment supported
+      uint64_t size; // upper bound of the pool in bytes
+      uint32_t alignment; // maximum alignment supported
     };
 
     /**
@@ -2547,14 +2547,14 @@ namespace Legion {
     public:
       // If this is a leaf task variant then the application can
       // request that the runtime preserve a pool in the memory of
-      // the corresponding kind with the closes affinity to the target
+      // the corresponding kind with the closest affinity to the target
       // processor for handling dynamic memory allocations during the
-      // execution of the task. Setting a bound of zero will indicate
-      // that no bound can be provided and the runtime should block
-      // all future allocations in that memory until the task is done.
-      // Note that requesting an unbound memory allocation will likely
-      // result in severe performance degradations.
-      std::map<Memory::Kind,PoolBounds> leaf_pool_bounds;
+      // execution of the task. Setting an empty optional upper bound 
+      // will indicate that no bound can be provided and the runtime 
+      // should block all future allocations in that memory until the 
+      // task is done. Note that requesting an unbound memory allocation
+      // will likely result in severe performance degradations.
+      std::map<Memory::Kind,std::optional<PoolBounds> > leaf_pool_bounds;
     public:
       // TaskIDs for which this variant can serve as a generator
       std::set<TaskID>                  generator_tasks;

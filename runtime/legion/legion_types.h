@@ -33,6 +33,7 @@
 #include <limits>
 #include <deque>
 #include <vector>
+#include <optional>
 #include <typeinfo>
 #include <type_traits>
 #include <string_view>
