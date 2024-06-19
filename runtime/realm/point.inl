@@ -31,6 +31,22 @@ namespace Realm {
   //
   // class Point<N,T>
 
+#if defined(__PGIC__)
+  #pragma warning (push)
+  #pragma diag_suppress 1445
+#elif defined(__GNUC__)
+  #pragma GCC diagnostic push
+  #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#elif defined(__clang__)
+  #pragma clang diagnostic push
+  #pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#elif defined(__INTEL_COMPILER) || defined(__INTEL_LLVM_COMPILER)
+  #pragma warning push
+  #pragma warning disable 1478
+#else
+#warning "Don't know how to suppress deprecated warnings for this compiler"
+#endif
+
   template <int N, typename T>
   REALM_CUDA_HD
   inline Point<N,T>::Point(void)
@@ -123,7 +139,7 @@ namespace Realm {
   // specializations for N <= 4
   template <typename T>
   struct REALM_PUBLIC_API Point<1,T> {
-    T x;
+    [[deprecated("The \"Point::x\" member will be removed in the next Realm release. Please switch to using Point::operator[] instead.")]] T x;
     REALM_CUDA_HD
     Point(void) {}
     REALM_CUDA_HD
@@ -174,7 +190,7 @@ namespace Realm {
 
   template <typename T>
   struct REALM_PUBLIC_API Point<2,T> {
-    T x, y;
+    [[deprecated("The \"Point::x,y\" members will be removed in the next Realm release. Please switch to using Point::operator[] instead.")]] T x, y;
     REALM_CUDA_HD
     Point(void) {}
     REALM_CUDA_HD
@@ -225,7 +241,7 @@ namespace Realm {
 
   template <typename T>
   struct REALM_PUBLIC_API Point<3,T> {
-    T x, y, z;
+    [[deprecated("The \"Point::x,y,z\" members will be removed in the next Realm release. Please switch to using Point::operator[] instead.")]] T x, y, z;
     REALM_CUDA_HD
     Point(void) {}
     REALM_CUDA_HD
@@ -440,6 +456,15 @@ namespace Realm {
     return lhs;
   }
 
+#if defined(__PGIC__)
+  #pragma warning (pop)
+#elif defined(__GNUC__)
+  #pragma GCC diagnostic pop
+#elif defined(__clang__)
+  #pragma clang diagnostic pop
+#elif defined(__INTEL_COMPILER) || defined(__INTEL_LLVM_COMPILER)
+  #pragma warning pop
+#endif
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -792,8 +817,8 @@ namespace Realm {
 #endif
     if(N == 1) {
       // 1-D doesn't care about fortran/C order
-      if(p.x < rect.hi.x) {
-	p.x++;
+      if(p[0] < rect.hi[0]) {
+	p[0]++;
 	return true;
       }
     } else {

@@ -349,12 +349,12 @@ namespace Realm {
       assert(count >= 1);
       // unsafe to subtract and test against zero - compare first
       size_t total_x;
-      if(bounds.lo.x <= bounds.hi.x)
-        total_x = ((long long)bounds.hi.x) - ((long long)bounds.lo.x) + 1;
+      if(bounds.lo[0] <= bounds.hi[0])
+        total_x = ((long long)bounds.hi[0]) - ((long long)bounds.lo[0]) + 1;
       else
         total_x = 0;
       subspaces.reserve(count);
-      T px = bounds.lo.x;
+      T px = bounds.lo[0];
       size_t cum_weight = 0;
       for(size_t i = 0; i < count; i++) {
 	IndexSpace<N,T> ss(*this);
@@ -363,13 +363,13 @@ namespace Realm {
         //  that ratio to avoid overflow problems
         T nx;
         if((total_x % total_weight) == 0)
-          nx = bounds.lo.x + cum_weight * (total_x / total_weight);
+          nx = bounds.lo[0] + cum_weight * (total_x / total_weight);
         else
-	  nx = bounds.lo.x + (total_x * cum_weight / total_weight);
+	  nx = bounds.lo[0] + (total_x * cum_weight / total_weight);
 	// wrap-around here means bad math
 	assert(nx >= px);
-	ss.bounds.lo.x = px;
-	ss.bounds.hi.x = nx - 1;
+	ss.bounds.lo[0] = px;
+	ss.bounds.hi[0] = nx - 1;
 	subspaces.push_back(ss);
 	px = nx;
       }
@@ -501,8 +501,8 @@ namespace Realm {
     RectListAdapter(const Rect<1,T> *_rects, size_t _count)
       : rects(_rects), count(_count) {}
     size_t size(void) const { return count; }
-    T start(size_t idx) const { return rects[idx].lo.x; }
-    T end(size_t idx) const { return rects[idx].hi.x; }
+    T start(size_t idx) const { return rects[idx].lo[0]; }
+    T end(size_t idx) const { return rects[idx].hi[0]; }
   protected:
     const Rect<1,T> *rects;
     size_t count;
@@ -514,14 +514,14 @@ namespace Realm {
   {
     if(use_approx) {
       if(space.dense())
-	interval_tree.add_interval(space.bounds.lo.x, space.bounds.hi.x,label);
+	interval_tree.add_interval(space.bounds.lo[0], space.bounds.hi[0],label);
       else {
 	SparsityMapImpl<1,T> *impl = SparsityMapImpl<1,T>::lookup(space.sparsity);
 	interval_tree.add_intervals(RectListAdapter<T>(impl->get_approx_rects()), label);
       }
     } else {
       for(IndexSpaceIterator<1,T> it(space); it.valid; it.step())
-	interval_tree.add_interval(it.rect.lo.x, it.rect.hi.x, label);
+	interval_tree.add_interval(it.rect.lo[0], it.rect.hi[0], label);
     }
   }
 
@@ -542,14 +542,14 @@ namespace Realm {
 					bool approx)
   {
     if(space.dense()) {
-      interval_tree.test_interval(space.bounds.lo.x, space.bounds.hi.x, overlaps);
+      interval_tree.test_interval(space.bounds.lo[0], space.bounds.hi[0], overlaps);
     } else {
       if(approx) {
 	SparsityMapImpl<1,T> *impl = SparsityMapImpl<1,T>::lookup(space.sparsity);
 	interval_tree.test_sorted_intervals(RectListAdapter<T>(impl->get_approx_rects()), overlaps);
       } else {
 	for(IndexSpaceIterator<1,T> it(space); it.valid; it.step())
-	  interval_tree.test_interval(it.rect.lo.x, it.rect.hi.x, overlaps);
+	  interval_tree.test_interval(it.rect.lo[0], it.rect.hi[0], overlaps);
       }
     }
   }

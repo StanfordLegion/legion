@@ -991,17 +991,17 @@ bool scatter_gather_test(const std::vector<Memory> &mems, T size1, T2 size2, int
   region2.add_subspaces(is2, pieces2);
   region2.create_instances(fields2, RoundRobinPicker<N2,T2>(mems)).wait();
 
-  region1.template fill<DT>(is1, FID_DATA1, [](Point<N,T> p) -> DT { return DT(p.x); },
+  region1.template fill<DT>(is1, FID_DATA1, [](Point<N,T> p) -> DT { return DT(p[0]); },
 			    Event::NO_EVENT).wait();
-  region1.template fill<DT>(is1, FID_DATA2, [](Point<N,T> p) -> DT { return DT(p.x + 100); },
+  region1.template fill<DT>(is1, FID_DATA2, [](Point<N,T> p) -> DT { return DT(p[0] + 100); },
 			    Event::NO_EVENT).wait();
   
-  region2.template fill<DT>(is2, FID_DATA1, [](Point<N2,T2> p) -> DT { return DT(200 + p.x + 10*p.y); },
+  region2.template fill<DT>(is2, FID_DATA1, [](Point<N2,T2> p) -> DT { return DT(200 + p[0] + 10*p[1]); },
 			    Event::NO_EVENT).wait();
-  region2.template fill<DT>(is2, FID_DATA2, [](Point<N2,T2> p) -> DT { return DT(300 + p.x + 10*p.y); },
+  region2.template fill<DT>(is2, FID_DATA2, [](Point<N2,T2> p) -> DT { return DT(300 + p[0] + 10*p[1]); },
 			    Event::NO_EVENT).wait();
 
-  region1.template fill<Point<N2,T2> >(is1, FID_PTR1, [=](Point<N,T> p) -> Point<N2,T2> { return Point<N2,T2>(p.x % size2); },
+  region1.template fill<Point<N2,T2> >(is1, FID_PTR1, [=](Point<N,T> p) -> Point<N2,T2> { return Point<N2,T2>(p[0] % size2); },
 				       Event::NO_EVENT).wait();
 
   if(TestConfig::do_gather) {
@@ -1192,13 +1192,13 @@ public:
   {}
 
   template <typename T>
-  DT operator()(Point<1,T> p) const { return base + step0 * p.x; }
+  DT operator()(Point<1,T> p) const { return base + step0 * p[0]; }
 
   template <typename T>
-  DT operator()(Point<2,T> p) const { return base + step0 * p.x + step1 * p.y; }
+  DT operator()(Point<2,T> p) const { return base + step0 * p[0] + step1 * p[1]; }
 
   template <typename T>
-  DT operator()(Point<3,T> p) const { return base + step0 * p.x + step1 * p.y + step2 * p.z; }
+  DT operator()(Point<3,T> p) const { return base + step0 * p[0] + step1 * p[1] + step2 * p[2]; }
 
 protected:
   DT base, step0, step1, step2;
@@ -1279,17 +1279,17 @@ bool range_copy_test(const std::vector<Memory>& mems,
   region3.template fill<DT>(is3, FID_DATA1, RegularFiller<DT>(2000),
     Event::NO_EVENT).wait();
 #if 0
-  region1.template fill<DT>(is1, FID_DATA1, [](Point<N,T> p) -> DT { return DT(p.x); },
+  region1.template fill<DT>(is1, FID_DATA1, [](Point<N,T> p) -> DT { return DT(p[0]); },
 			    Event::NO_EVENT).wait();
-  region1.template fill<DT>(is1, FID_DATA2, [](Point<N,T> p) -> DT { return DT(p.x + 100); },
+  region1.template fill<DT>(is1, FID_DATA2, [](Point<N,T> p) -> DT { return DT(p[0] + 100); },
 			    Event::NO_EVENT).wait();
   
-  region2.template fill<DT>(is2, FID_DATA1, [](Point<N2,T2> p) -> DT { return DT(200 + p.x + 10*p.y); },
+  region2.template fill<DT>(is2, FID_DATA1, [](Point<N2,T2> p) -> DT { return DT(200 + p[0] + 10*p[1]); },
 			    Event::NO_EVENT).wait();
-  region2.template fill<DT>(is2, FID_DATA2, [](Point<N2,T2> p) -> DT { return DT(300 + p.x + 10*p.y); },
+  region2.template fill<DT>(is2, FID_DATA2, [](Point<N2,T2> p) -> DT { return DT(300 + p[0] + 10*p[1]); },
 			    Event::NO_EVENT).wait();
 
-  region1.template fill<Point<N2,T2> >(is1, FID_PTR1, [=](Point<N,T> p) -> Point<N2,T2> { return Point<N2,T2>(p.x % size2); },
+  region1.template fill<Point<N2,T2> >(is1, FID_PTR1, [=](Point<N,T> p) -> Point<N2,T2> { return Point<N2,T2>(p[0] % size2); },
 				       Event::NO_EVENT).wait();
 #endif
 

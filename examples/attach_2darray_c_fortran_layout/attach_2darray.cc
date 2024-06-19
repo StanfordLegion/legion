@@ -87,8 +87,8 @@ void top_level_task(const Task *task,
   double *b_ptr = (double*)malloc(sizeof(double)*(num_elements*num_elements));
   
   for (i = 0; i < num_elements*num_elements; i++) {
-      xy_ptr[i].x = val;
-      xy_ptr[i].y = val + 0.1;
+      xy_ptr[i][0] = val;
+      xy_ptr[i][1] = val + 0.1;
       a_ptr[i] = val + 0.2;
       b_ptr[i] = val + 0.3;
       val += 1.0;
@@ -232,8 +232,8 @@ void read_field_task(const Task *task,
   int errors = 0;
   for (PointInRectIterator<2> pir(rect); pir(); pir++) {
     double expval = (args.base_val +
-		     ((*pir).x * args.step_x) +
-		     ((*pir).y * args.step_y));
+		     ((*pir)[0] * args.step_x) +
+		     ((*pir)[1] * args.step_y));
     double actval = acc[*pir];
     if(fabs(actval - expval) < 1e-10) {
       printf("%.1f\t", actval);

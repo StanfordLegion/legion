@@ -117,9 +117,9 @@ namespace Realm {
 	while(true) {
 	  FT val = a_data.read(p);
 	  Point<N,T> p2 = p;
-	  while(p2.x < r.hi.x) {
+	  while(p2[0] < r.hi[0]) {
 	    Point<N,T> p3 = p2;
-	    p3.x++;
+	    p3[0]++;
 	    FT val2 = a_data.read(p3);
 	    if(val != val2) {
 	      // record old strip

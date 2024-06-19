@@ -56,7 +56,8 @@ namespace Realm {
   // specializations for N <= 4 defined in point.inl
   template <int N, typename T>
   struct REALM_PUBLIC_API Point {
-    T x, y, z, w;  T rest[N - 4];
+    [[deprecated("The \"Point::x,y,z,w\" members will be removed in the next Realm release. Please switch to using Point::operator[] instead.")]] T x, y, z, w;
+    [[deprecated("The \"Point::rest\" data member will be removed in the next Realm release. Please switch to using Point::operator[] instead.")]] T rest[N - 4];
 
     REALM_CUDA_HD
     Point(void);

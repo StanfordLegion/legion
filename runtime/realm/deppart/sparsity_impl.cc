@@ -1164,13 +1164,13 @@ namespace Realm {
       else if(N == 1) {
 	// demand that our input data is sorted
 	for(size_t i = 1; i < count; i++)
-	  assert(rects[i-1].hi.x < (rects[i].lo.x - 1));
+	  assert(rects[i-1].hi[0] < (rects[i].lo[0] - 1));
 
 	// fast case - all these rectangles are after all the ones we have now
-	if(this->entries.empty() || (this->entries.rbegin()->bounds.hi.x < rects[0].lo.x)) {
+	if(this->entries.empty() || (this->entries.rbegin()->bounds.hi[0] < rects[0].lo[0])) {
 	  // special case when merging occurs with the last entry from before
 	  size_t n = this->entries.size();
-	  if((n > 0) && (this->entries.rbegin()->bounds.hi.x == (rects[0].lo.x - 1))) {
+	  if((n > 0) && (this->entries.rbegin()->bounds.hi[0] == (rects[0].lo[0] - 1))) {
 	    this->entries.resize(n + count - 1);
 	    assert(!this->entries[n - 1].sparsity.exists());
 	    assert(this->entries[n - 1].bitmap == 0);
@@ -1196,7 +1196,7 @@ namespace Realm {
 	  size_t n = 0;
 	  typename std::vector<SparsityMapEntry<N,T> >::const_iterator old_it = old_data.begin();
 	  while((i < count) && (old_it != old_data.end())) {
-	    if(rects[i].hi.x < (old_it->bounds.lo.x - 1)) {
+	    if(rects[i].hi[0] < (old_it->bounds.lo[0] - 1)) {
 	      this->entries.resize(n + 1);
 	      this->entries[n].bounds = rects[i];
 	      this->entries[n].sparsity.id = 0; // no sparsity map
@@ -1206,7 +1206,7 @@ namespace Realm {
 	      continue;
 	    }
 
-	    if(old_it->bounds.hi.x < (rects[i].lo.x - 1)) {
+	    if(old_it->bounds.hi[0] < (rects[i].lo[0] - 1)) {
 	      this->entries.push_back(*old_it);
 	      n++;
 	      old_it++;
@@ -1217,15 +1217,15 @@ namespace Realm {
 	    // step rects, but not old_it - want sanity checks below to be done
 	    i++;
 	    while(true) {
-	      if((i < count) && (rects[i].lo.x <= (u.hi.x + 1))) {
-		u.hi.x = std::max(u.hi.x, rects[i].hi.x);
+	      if((i < count) && (rects[i].lo[0] <= (u.hi[0] + 1))) {
+		u.hi[0] = std::max(u.hi[0], rects[i].hi[0]);
 		i++;
 		continue;
 	      }
-	      if((old_it != old_data.end()) && (old_it->bounds.lo.x <= (u.hi.x + 1))) {
+	      if((old_it != old_data.end()) && (old_it->bounds.lo[0] <= (u.hi[0] + 1))) {
 		assert(!old_it->sparsity.exists());
 		assert(old_it->bitmap == 0);
-		u.hi.x = std::max(u.hi.x, old_it->bounds.hi.x);
+		u.hi[0] = std::max(u.hi[0], old_it->bounds.hi[0]);
 		old_it++;
 		continue;
 	      }
@@ -1603,7 +1603,7 @@ namespace Realm {
     std::vector<T> gap_sizes(max_rects - 1, 0);
     std::vector<int> gap_idxs(max_rects - 1, -1);
     for(int i = 1; i < n; i++) {
-      T gap = entries[i].bounds.lo.x - entries[i - 1].bounds.hi.x;
+      T gap = entries[i].bounds.lo[0] - entries[i - 1].bounds.hi[0];
       if(gap <= gap_sizes[0])
 	continue;
       // the smallest gap is discarded and we insertion-sort this new value in

@@ -1688,7 +1688,7 @@ namespace Realm {
 	  int merge_dim = -1;
 	  if(N == 1) {
 	    // simple 1-D case
-	    if(rects[rect_pos].lo.x == (r.hi.x + 1)) {
+	    if(rects[rect_pos].lo[0] == (r.hi[0] + 1)) {
 	      merge_dim = 0;
 	    }
 	  } else {
