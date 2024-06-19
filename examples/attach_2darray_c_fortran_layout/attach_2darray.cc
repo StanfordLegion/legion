@@ -87,8 +87,8 @@ void top_level_task(const Task *task,
   double *b_ptr = (double*)malloc(sizeof(double)*(num_elements*num_elements));
   
   for (i = 0; i < num_elements*num_elements; i++) {
-      xy_ptr[i][0] = val;
-      xy_ptr[i][1] = val + 0.1;
+      xy_ptr[i].x = val;
+      xy_ptr[i].y = val + 0.1;
       a_ptr[i] = val + 0.2;
       b_ptr[i] = val + 0.3;
       val += 1.0;

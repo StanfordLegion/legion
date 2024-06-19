@@ -1688,10 +1688,10 @@ namespace Realm {
 	  int merge_dim = -1;
 	  if(N == 1) {
 	    // simple 1-D case
-	    if(rects[rect_pos].lo[0] == (r.hi[0] + 1)) {
-	      merge_dim = 0;
-	    }
-	  } else {
+            if(rects[rect_pos].lo[0] == (r.hi[0] + 1)) {
+              merge_dim = 0;
+            }
+          } else {
 	    const Rect<N,T>& r2 = rects[rect_pos];
 	    int dims_match = 0;
 	    while(dims_match < (N-1))

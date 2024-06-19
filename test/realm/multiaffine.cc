@@ -207,8 +207,8 @@ void top_level_task(const void *args, size_t arglen,
     Rect<2> bounds;
     bounds.lo[0] = 0;
     bounds.hi[0] = (1 << lx2) - 1;
-    bounds.lo.y = 0;
-    bounds.hi.y = (1 << ly2) - 1;
+    bounds.lo[1] = 0;
+    bounds.hi[1] = (1 << ly2) - 1;
     if(!test_case(p, proc_write, IndexSpace<2>(bounds),
 		  8, TestConfig::random_seed, test_id))
       errors++;

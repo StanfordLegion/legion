@@ -471,8 +471,8 @@ public:
 	    a_face_left.write(pf, global_cell_pointer(fx - (reversed ? 0 : 1), cy, cz));
 	    a_face_right.write(pf, global_cell_pointer(fx - (reversed ? 1 : 0), cy, cz));
 	    a_face_type.write(pf, ftype);
-	    pf[0]++;
-	  }
+            pf[0]++;
+          }
       }
 
       // down/up faces next
@@ -507,8 +507,8 @@ public:
 	    a_face_left.write(pf, global_cell_pointer(cx, fy - (reversed ? 0 : 1), cz));
 	    a_face_right.write(pf, global_cell_pointer(cx, fy - (reversed ? 1 : 0), cz));
 	    a_face_type.write(pf, ftype);
-	    pf[0]++;
-	  }
+            pf[0]++;
+          }
       }
 
       // back/front faces last
@@ -543,8 +543,8 @@ public:
 	    a_face_left.write(pf, global_cell_pointer(cx, cy, fz - (reversed ? 0 : 1)));
 	    a_face_right.write(pf, global_cell_pointer(cx, cy, fz - (reversed ? 1 : 0)));
 	    a_face_type.write(pf, ftype);
-	    pf[0]++;
-	  }
+            pf[0]++;
+          }
       }
 
       assert(pf[0] == is_faces.bounds.hi[0] + 1);
@@ -748,7 +748,7 @@ public:
 	  }
 	}
 
-	pc[0]++;
+        pc[0]++;
       }
 
       // check faces
@@ -819,7 +819,7 @@ public:
 	    }
 	  }
 	}
-	pf[0]++;
+        pf[0]++;
       }
     }
 
@@ -1578,12 +1578,16 @@ public:
       for(int zy = zylo; zy < zyhi; zy++) {
 	for(int zx = zxlo; zx < zxhi; zx++) {
 	  // get 4 side pointers
-	  Point<1> ps0 = ps; ps[0]++;
-	  Point<1> ps1 = ps; ps[0]++;
-	  Point<1> ps2 = ps; ps[0]++;
-	  Point<1> ps3 = ps; ps[0]++;
+          Point<1> ps0 = ps;
+          ps[0]++;
+          Point<1> ps1 = ps;
+          ps[0]++;
+          Point<1> ps2 = ps;
+          ps[0]++;
+          Point<1> ps3 = ps;
+          ps[0]++;
 
-	  // point pointers are ugly because they can be in neighbors - use a helper
+          // point pointers are ugly because they can be in neighbors - use a helper
 	  Point<1> pp0 = global_point_pointer(zy, zx); // go CCW
 	  Point<1> pp1 = global_point_pointer(zy+1, zx);
 	  Point<1> pp2 = global_point_pointer(zy+1, zx+1);
@@ -1611,8 +1615,8 @@ public:
 	  a_side_ok.write(ps2, true);
 	  a_side_ok.write(ps3, true);
 
-	  pz[0]++;
-	}
+          pz[0]++;
+        }
       }
       assert(pz[0] == is_zones.bounds.hi[0] + 1);
       assert(ps[0] == is_sides.bounds.hi[0] + 1);
@@ -1809,7 +1813,7 @@ public:
 	    errors++;
 	  }
 	}
-	pz[0]++;
+        pz[0]++;
       }
     }
 
@@ -1825,7 +1829,7 @@ public:
 	    errors++;
 	  }
 	}
-	ps[0]++;
+        ps[0]++;
       }
     }
 

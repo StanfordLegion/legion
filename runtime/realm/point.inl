@@ -84,7 +84,7 @@ namespace Realm {
   inline Point<N,T>::Point(const Point<N,T2>& copy_from)
   {
     for(int i = 0; i < N; i++)
-      (&x)[i] = (&copy_from.x)[i];
+      (&x)[i] = copy_from[i];
   }
 
   template <int N, typename T>
@@ -93,7 +93,7 @@ namespace Realm {
   inline Point<N,T>& Point<N,T>::operator=(const Point<N,T2>& copy_from)
   {
     for(int i = 0; i < N; i++)
-      (&x)[i] = (&copy_from.x)[i];
+      (&x)[i] = copy_from[i];
     return *this;
   }
 
@@ -155,7 +155,7 @@ namespace Realm {
     // copies allow type coercion (assuming the underlying type does)
     template <typename T2>
     REALM_CUDA_HD
-    Point(const Point<1, T2>& copy_from) : x(copy_from.x) {}
+    Point(const Point<1, T2>& copy_from) : x(copy_from[0]) {}
     template <typename T2>
     REALM_CUDA_HD
     Point<1,T>& operator=(const Point<1, T2>& copy_from)
@@ -209,7 +209,7 @@ namespace Realm {
     template <typename T2>
     REALM_CUDA_HD
     Point(const Point<2, T2>& copy_from)
-      : x(copy_from.x), y(copy_from.y) {}
+      : x(copy_from[0]), y(copy_from[1]) {}
     template <typename T2>
     REALM_CUDA_HD
     Point<2,T>& operator=(const Point<2,T2>& copy_from)
@@ -260,7 +260,7 @@ namespace Realm {
     template <typename T2>
     REALM_CUDA_HD
     Point(const Point<3, T2>& copy_from)
-      : x(copy_from.x), y(copy_from.y), z(copy_from.z) {}
+      : x(copy_from[0]), y(copy_from[1]), z(copy_from[2]) {}
     template <typename T2>
     REALM_CUDA_HD
     Point<3,T>& operator=(const Point<3,T2>& copy_from)
@@ -312,7 +312,7 @@ namespace Realm {
     template <typename T2>
     REALM_CUDA_HD
     Point(const Point<4, T2>& copy_from)
-      : x(copy_from.x), y(copy_from.y), z(copy_from.z), w(copy_from.w) {}
+      : x(copy_from[0]), y(copy_from[1]), z(copy_from[2]), w(copy_from[3]) {}
     template <typename T2>
     REALM_CUDA_HD
     Point<4,T>& operator=(const Point<4,T2>& copy_from)
