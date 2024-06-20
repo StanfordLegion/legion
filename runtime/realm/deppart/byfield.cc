@@ -122,19 +122,19 @@ namespace Realm {
             p3[0]++;
             FT val2 = a_data.read(p3);
             if(val != val2) {
-	      // record old strip
+              // record old strip
 	      BM *&bmp = bitmasks[val];
 	      if(!bmp) bmp = new BM;
 	      bmp->add_rect(Rect<N,T>(p,p2));
 	      //std::cout << val << ": " << p << ".." << p2 << std::endl;
 	      val = val2;
 	      p = p3;
-	    }
-	    p2 = p3;
+            }
+            p2 = p3;
           }
           // record whatever strip we have at the end
           BM *&bmp = bitmasks[val];
-	  if(!bmp) bmp = new BM;
+          if(!bmp) bmp = new BM;
 	  bmp->add_rect(Rect<N,T>(p,p2));
 	  //std::cout << val << ": " << p << ".." << p2 << std::endl;
 

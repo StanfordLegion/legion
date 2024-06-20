@@ -1692,10 +1692,10 @@ namespace Realm {
               merge_dim = 0;
             }
           } else {
-            const Rect<N,T>& r2 = rects[rect_pos];
-	    int dims_match = 0;
-	    while(dims_match < (N-1))
-	      if((r.lo[dims_match] == r2.lo[dims_match]) &&
+            const Rect<N, T> &r2 = rects[rect_pos];
+            int dims_match = 0;
+            while(dims_match < (N - 1))
+              if((r.lo[dims_match] == r2.lo[dims_match]) &&
 		 (r.hi[dims_match] == r2.hi[dims_match]))
 		dims_match++;
 	      else
@@ -1712,16 +1712,16 @@ namespace Realm {
 	    }
           }
           if(merge_dim >= 0) {
-	    // merge and continue
-	    r.hi[merge_dim] = rects[rect_pos++].hi[merge_dim];
-	  } else {
-	    // can't merge - return what we've got
-	    return true;
-	  }
-	} else {
-	  r = rects[rect_pos++];
-	  nonempty = true;
-	}
+            // merge and continue
+            r.hi[merge_dim] = rects[rect_pos++].hi[merge_dim];
+          } else {
+            // can't merge - return what we've got
+            return true;
+          }
+        } else {
+          r = rects[rect_pos++];
+          nonempty = true;
+        }
       }
     }
   }
