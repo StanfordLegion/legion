@@ -4606,9 +4606,9 @@ namespace Legion {
               const PoolBounds &dynamic_bounds = finder->second.value();
               if (static_bounds.size < dynamic_bounds.size)
                 REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
-                    "Mapper %s dynamically requested %lld bytes for pool"
+                    "Mapper %s dynamically requested %zd bytes for pool"
                     " in %s memory for task %s (UID %lld), but the selected "
-                    "variant %d specified a static bound of %lld bytes. "
+                    "variant %d specified a static bound of %zd bytes. "
                     "Dynamically requested memory allocations must be further "
                     "refinements of the upper bounds provided by the chosen "
                     "task variant.", mapper->get_mapper_name(),
@@ -4630,7 +4630,7 @@ namespace Legion {
               REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                   "Mapper %s dynamically requested an unbounded pool "
                   "in %s memory for task %s (UID %lld), but the selected "
-                  "variant %d specified a static bound of %lld bytes. "
+                  "variant %d specified a static bound of %zdd bytes. "
                   "Dynamically requested memory allocations must be further "
                   "refinements of the upper bounds provided by the chosen "
                   "task variant.", mapper->get_mapper_name(),
@@ -4664,7 +4664,7 @@ namespace Legion {
           manager->create_memory_pool(get_unique_id(), it->second);
         if (pool == NULL)
           REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
-              "Failed to reserve a dynamic memory pool of %lld bytes for "
+              "Failed to reserve a dynamic memory pool of %zd bytes for "
               "leaf task %s (UID %lld) in %s memory. You are actually out "
               "of memory here so you'll need to either allocate more memory "
               "for this kind of memory when you configure Realm which may "
