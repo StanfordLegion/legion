@@ -4606,9 +4606,9 @@ namespace Legion {
               const PoolBounds &dynamic_bounds = finder->second.value();
               if (static_bounds.size < dynamic_bounds.size)
                 REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
-                    "Mapper %s dynamically requested %ld bytes for pool"
+                    "Mapper %s dynamically requested %lld bytes for pool"
                     " in %s memory for task %s (UID %lld), but the selected "
-                    "variant %d specified a static bound of %ld bytes. "
+                    "variant %d specified a static bound of %lld bytes. "
                     "Dynamically requested memory allocations must be further "
                     "refinements of the upper bounds provided by the chosen "
                     "task variant.", mapper->get_mapper_name(),
@@ -4630,7 +4630,7 @@ namespace Legion {
               REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                   "Mapper %s dynamically requested an unbounded pool "
                   "in %s memory for task %s (UID %lld), but the selected "
-                  "variant %d specified a static bound of %ld bytes. "
+                  "variant %d specified a static bound of %lld bytes. "
                   "Dynamically requested memory allocations must be further "
                   "refinements of the upper bounds provided by the chosen "
                   "task variant.", mapper->get_mapper_name(),
