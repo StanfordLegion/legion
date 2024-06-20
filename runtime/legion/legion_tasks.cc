@@ -4563,15 +4563,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void SingleTask::create_leaf_memory_pools(VariantImpl *variant,
-                               std::map<Memory,PoolBounds> &dynamic_pool_bounds)
+               std::map<Memory,std::optional<PoolBounds> > &dynamic_pool_bounds)
     //--------------------------------------------------------------------------
     {
       if (dynamic_pool_bounds.empty() && variant->leaf_pool_bounds.empty())
         return;
-      // Fill in the dynamic pool bounds with the static versions and take
-      // the max if they already exist
-      for (std::map<Memory::Kind,PoolBounds>::const_iterator it =
-            variant->leaf_pool_bounds.begin(); it !=
+      // Fill in the dynamic pool bounds with the static versions
+      for (std::map<Memory::Kind,std::optional<PoolBounds> >::const_iterator
+            it = variant->leaf_pool_bounds.begin(); it !=
             variant->leaf_pool_bounds.end(); it++)
       {
         // This might occur if we're doing origin mapping on a remote node
@@ -4592,14 +4591,60 @@ namespace Legion {
               get_task_name(), get_unique_id());
         }
         const Memory target = query.first();
-        // The dynamic pool bounds override any static registrations so
-        // if we have a bound provided by the mapper then we use that
-        // instead of this bound
-        if (dynamic_pool_bounds.find(target) == dynamic_pool_bounds.end())
+        // Check to see if we also got a dynamic memory pool bound, if we 
+        // did then it needs to tighten what already existed
+        std::map<Memory,std::optional<PoolBounds> >::const_iterator finder =
+          dynamic_pool_bounds.find(target);
+        if (finder != dynamic_pool_bounds.end())
+        {
+          if (it->second.has_value())
+          {
+            MemoryManager *manager = runtime->find_memory_manager(target);
+            if (finder->second.has_value())
+            {
+              const PoolBounds &static_bounds = it->second.value();
+              const PoolBounds &dynamic_bounds = finder->second.value();
+              if (static_bounds.size < dynamic_bounds.size)
+                REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                    "Mapper %s dynamically requested %lld bytes for pool"
+                    " in %s memory for task %s (UID %lld), but the selected "
+                    "variant %d specified a static bound of %lld bytes. "
+                    "Dynamically requested memory allocations must be further "
+                    "refinements of the upper bounds provided by the chosen "
+                    "task variant.", mapper->get_mapper_name(),
+                    dynamic_bounds.size, manager->get_name(), get_task_name(),
+                    get_unique_id(), variant->vid, static_bounds.size)
+              else if (static_bounds.alignment < dynamic_bounds.alignment)
+                REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                    "Mapper %s dynamically requested a minimum alignment of %d "
+                    "bytes for pool in %s memory for task %s (UID %lld), but "
+                    "the selected variant %d specified a static minimum "
+                    "alignment of %d bytes. Dynamically requested memory "
+                    "allocations must be further refinements of the "
+                    "alignments provided by the chosen task variant.",
+                    mapper->get_mapper_name(), dynamic_bounds.alignment, 
+                    manager->get_name(), get_task_name(), get_unique_id(),
+                    variant->vid, static_bounds.alignment)
+            }
+            else
+              REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                  "Mapper %s dynamically requested an unbounded pool "
+                  "in %s memory for task %s (UID %lld), but the selected "
+                  "variant %d specified a static bound of %lld bytes. "
+                  "Dynamically requested memory allocations must be further "
+                  "refinements of the upper bounds provided by the chosen "
+                  "task variant.", mapper->get_mapper_name(),
+                  manager->get_name(), get_task_name(), get_unique_id(),
+                  variant->vid, it->second.value().size);
+          }
+          // Else if the static variant had no bounds we know that the
+          // dynamic one is at least as tight as the static one
+        }
+        else
           dynamic_pool_bounds.emplace(std::make_pair(target, it->second));
       }
       // Now we can go through and create the pools for use by this task
-      for (std::map<Memory,PoolBounds>::const_iterator it =
+      for (std::map<Memory,std::optional<PoolBounds> >::const_iterator it =
             dynamic_pool_bounds.begin(); it != dynamic_pool_bounds.end(); it++)
       {
         MemoryManager *manager = runtime->find_memory_manager(it->first);
@@ -4612,15 +4657,18 @@ namespace Legion {
                 "of task %s (UID %lld) for creating dynamic memory pool.", 
                 manager->get_name(), it->first.id, get_task_name(),
                 get_unique_id());
+        // Skip creation of pools of size zero
+        if (it->second.has_value() && (it->second.value().size == 0))
+          continue;
         MemoryPool *pool =
           manager->create_memory_pool(get_unique_id(), it->second);
         if (pool == NULL)
           REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
-              "Failed to reserve a dynamic memory pool of %zd bytes for "
+              "Failed to reserve a dynamic memory pool of %lld bytes for "
               "leaf task %s (UID %lld) in %s memory. You are actually out "
               "of memory here so you'll need to either allocate more memory "
               "for this kind of memory when you configure Realm which may "
-              "necessitate finding a bigger machine.", it->second.size,
+              "necessitate finding a bigger machine.", it->second.value().size,
               get_task_name(), get_unique_id(), manager->get_name())
         leaf_memory_pools.emplace(std::make_pair(it->first, pool));
       }

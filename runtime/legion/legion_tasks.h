@@ -453,7 +453,7 @@ namespace Legion {
       void perform_post_mapping(const TraceInfo &trace_info);
       void check_future_return_bounds(FutureInstance *instance) const;
       void create_leaf_memory_pools(VariantImpl *impl,
-          std::map<Memory,PoolBounds> &dynamic_pool_bounds);
+          std::map<Memory,std::optional<PoolBounds> > &dynamic_pool_bounds);
     protected:
       void pack_single_task(Serializer &rez, AddressSpaceID target);
       void unpack_single_task(Deserializer &derez,

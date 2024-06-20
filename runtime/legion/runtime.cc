@@ -8468,11 +8468,12 @@ namespace Legion {
       Memory memory;
       derez.deserialize(memory);
       MemoryManager *manager = runtime->find_memory_manager(memory);
-      size_t size, alignment;
+      size_t size;
       derez.deserialize(size);
-      derez.deserialize(alignment);
       if (size > 0)
       {
+        size_t alignment;
+        derez.deserialize(alignment);
         PhysicalInstance instance;
         derez.deserialize(instance);
         RtEvent use_event;
@@ -8480,7 +8481,7 @@ namespace Legion {
         return new ConcretePool(instance, size, alignment, use_event, manager);
       }
       else
-        return new UnboundPool(manager, alignment);
+        return new UnboundPool(manager);
     }
 
     //--------------------------------------------------------------------------
@@ -8673,8 +8674,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    UnboundPool::UnboundPool(MemoryManager *man, size_t alignment)
-      : MemoryPool(alignment), manager(man)
+    UnboundPool::UnboundPool(MemoryManager *man)
+      : MemoryPool(std::numeric_limits<size_t>::max()), manager(man)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -8743,7 +8744,6 @@ namespace Legion {
 #endif
       rez.serialize(manager->memory);
       rez.serialize<size_t>(0);
-      rez.serialize(max_alignment);
       // Clear the manager since we packed it
       manager = NULL;
     }
@@ -11108,7 +11108,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     MemoryPool* MemoryManager::create_memory_pool(UniqueID creator_uid,
-                                                  const PoolBounds &bounds)
+                                      const std::optional<PoolBounds> &optional)
     //--------------------------------------------------------------------------
     {
       if (!is_owner)
@@ -11120,7 +11120,7 @@ namespace Legion {
           RezCheck z(rez);
           rez.serialize(memory);
           rez.serialize(creator_uid);
-          rez.serialize(bounds);
+          rez.serialize(optional);
           rez.serialize(&result);
           rez.serialize(ready);
         }
@@ -11128,8 +11128,13 @@ namespace Legion {
         ready.wait();
         return result;
       }
-      if (bounds.size > 0)
+      if (optional.has_value())
       {
+        const PoolBounds &bounds = optional.value();
+#ifdef DEBUG_LEGION
+        // Caller should have filtered size 0 pools before this
+        assert(bounds.size > 0);
+#endif
         // Creating a normal memory pool so create a task local instance
         // for the requested number of bytes and and then make a pool for it  
         Realm::InstanceLayoutOpaque *layout =
@@ -11182,7 +11187,7 @@ namespace Legion {
             wait_on = RtEvent::NO_RT_EVENT;
           }
         } while (wait_on.exists());
-        return new UnboundPool(this, bounds.alignment);
+        return new UnboundPool(this);
       }
     }
 
@@ -15522,7 +15527,8 @@ namespace Legion {
             if (leaf_variant)
             {
               rez.serialize<size_t>(leaf_pool_bounds.size());
-              for (std::map<Memory::Kind,PoolBounds>::const_iterator it =
+              for (std::map<Memory::Kind,
+                    std::optional<PoolBounds> >::const_iterator it =
                     leaf_pool_bounds.begin(); it !=
                     leaf_pool_bounds.end(); it++)
               {

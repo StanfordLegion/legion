@@ -1510,7 +1510,7 @@ namespace Legion {
      */
     class UnboundPool : public MemoryPool {
     public:
-      UnboundPool(MemoryManager *manager, size_t alignment);
+      UnboundPool(MemoryManager *manager);
       virtual ~UnboundPool(void) override;
       virtual size_t query_available_memory(void) override;
       virtual FutureInstance* allocate_future(UniqueID creator_uid,
@@ -1701,7 +1701,7 @@ namespace Legion {
                                   RtEvent precondition = RtEvent::NO_RT_EVENT);
       size_t query_available_memory(void); 
       MemoryPool* create_memory_pool(UniqueID creator_uid, 
-                                     const PoolBounds &bounds);
+                                     const std::optional<PoolBounds> &bounds);
       void release_unbound_pool(void);
       static void handle_create_memory_pool_request(Deserializer &derez,
           Runtime *runtime, AddressSpaceID source);
@@ -2228,7 +2228,7 @@ namespace Legion {
     public:
       const ExecutionConstraintSet execution_constraints;
       const TaskLayoutConstraintSet   layout_constraints;
-      const std::map<Memory::Kind,PoolBounds> leaf_pool_bounds;
+      const std::map<Memory::Kind,std::optional<PoolBounds> > leaf_pool_bounds;
     private:
       void *user_data;
       size_t user_data_size;
