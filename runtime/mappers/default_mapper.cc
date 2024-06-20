@@ -1412,6 +1412,11 @@ namespace Legion {
           // Only leaf tasks should map their reduction regions to instances
           if (chosen.is_leaf)
           {
+	    // check task layout constraints are valid before trying to
+	    // create instances for this region req
+	    check_valid_task_layout_constraints(task,ctx,
+		layout_constraints,target_proc, target_memory,
+		task.regions[idx], idx);
             size_t footprint;
             if (!default_create_custom_instances(ctx, target_proc,
                     target_memory, task.regions[idx], idx, missing_fields[idx],
@@ -1464,6 +1469,11 @@ namespace Legion {
           if (missing_fields[idx].empty())
             continue;
         }
+	// check task layout constraints are valid before trying to
+	// create instances for this region req
+	check_valid_task_layout_constraints(task,ctx,
+		    layout_constraints,target_proc, target_memory,
+		    task.regions[idx], idx);
         // Otherwise make normal instances for the given region
         size_t footprint;
         if (!default_create_custom_instances(ctx, target_proc,
@@ -2011,6 +2021,51 @@ namespace Legion {
       return true;
     }
 
+    //--------------------------------------------------------------------------
+    void DefaultMapper::check_valid_task_layout_constraints(const Task &task,
+				    MapperContext ctx,
+				    const TaskLayoutConstraintSet &layout_constraints,
+				    const Processor target_proc, const Memory target_memory,
+				    const RegionRequirement &req, const unsigned index)
+    //--------------------------------------------------------------------------
+    {
+      // if we have reduce privileges on region requirements - the default mapper
+      // doesn't support task layout constraints for those fields
+      if (req.privilege == LEGION_REDUCE)
+	{
+	  for (auto lay_it =
+	   layout_constraints.layouts.lower_bound(index); lay_it !=
+	   layout_constraints.layouts.upper_bound(index); lay_it++)
+	    {
+	      // Get the layout constraints from the task layout set
+	      const LayoutConstraintSet &index_constraints =
+		runtime->find_layout_constraints(ctx, lay_it->second);
+	      std::vector<FieldID> overlapping_fields;
+	      const std::vector<FieldID> &constraint_fields =
+		index_constraints.field_constraint.get_field_set();
+	      // check if there are any field constraints in the current task layout constraint
+	      if (!constraint_fields.empty()) {
+
+		for (FieldID fid: constraint_fields)
+		  {
+		    // check if the field is included in the privilege fields
+		    auto finder =  req.privilege_fields.find(fid);
+		    if (finder != req.privilege_fields.end()) {
+		      log_mapper.error("Default mapper failed allocation for "
+                       "region requirement %d of task %s (UID %lld) in memory "
+                       IDFMT " (%s) for processor " IDFMT " (%s). Task layout constraints  "
+		       "for region requirements with reduction privileges are not supported.",
+                       index,
+                       task.get_task_name(), task.get_unique_id(),
+                       target_memory.id, Utilities::to_string(target_memory.kind()),
+                       target_proc.id, Utilities::to_string(target_proc.kind()));
+		      assert(false);
+		    }
+		  }
+	      }
+	    }
+	}
+    }
     //--------------------------------------------------------------------------
     bool DefaultMapper::default_create_custom_instances(MapperContext ctx,
                           Processor target_proc, Memory target_memory,
