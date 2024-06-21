@@ -1696,8 +1696,8 @@ namespace Realm {
             int dims_match = 0;
             while(dims_match < (N - 1))
               if((r.lo[dims_match] == r2.lo[dims_match]) &&
-		 (r.hi[dims_match] == r2.hi[dims_match]))
-		dims_match++;
+                 (r.hi[dims_match] == r2.hi[dims_match]))
+                dims_match++;
 	      else
 		break;
 	    if((r2.lo[dims_match] == (r.hi[dims_match] + 1))) {

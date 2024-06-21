@@ -730,7 +730,7 @@ namespace Realm {
         }
 
         // leftover rects from one side or the other just get added
-	while(it_lhs.valid) {
+        while(it_lhs.valid) {
 	  bitmask.add_rect(it_lhs.rect);
 	  it_lhs.step();
 	}
@@ -772,7 +772,7 @@ namespace Realm {
         // any stragglers?
         if(nwm.size() > 0)
           do {
-	    bitmask.add_rect(nwm[0]);
+            bitmask.add_rect(nwm[0]);
           } while(nwm.step(0));
 #if 0
 	std::vector<IndexSpaceIterator<N,T> > its(inputs.size());
@@ -1312,7 +1312,7 @@ namespace Realm {
         if(!it_rhs.valid) {
           while(it_lhs.valid) {
             bitmask.add_rect(it_lhs.rect);
-	    it_lhs.step();
+            it_lhs.step();
           }
           break;
         }

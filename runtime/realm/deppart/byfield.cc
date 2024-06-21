@@ -124,9 +124,9 @@ namespace Realm {
             if(val != val2) {
               // record old strip
               BM *&bmp = bitmasks[val];
-	      if(!bmp)
+              if(!bmp)
                 bmp = new BM;
-	      bmp->add_rect(Rect<N,T>(p,p2));
+              bmp->add_rect(Rect<N,T>(p,p2));
 	      //std::cout << val << ": " << p << ".." << p2 << std::endl;
 	      val = val2;
 	      p = p3;
@@ -137,7 +137,7 @@ namespace Realm {
           BM *&bmp = bitmasks[val];
           if(!bmp)
             bmp = new BM;
-	  bmp->add_rect(Rect<N,T>(p,p2));
+          bmp->add_rect(Rect<N,T>(p,p2));
 	  //std::cout << val << ": " << p << ".." << p2 << std::endl;
 
 	  // are we done?

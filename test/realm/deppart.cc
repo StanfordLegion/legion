@@ -1591,9 +1591,9 @@ public:
           Point<1> pp0 = global_point_pointer(zy, zx); // go CCW
           Point<1> pp1 = global_point_pointer(zy + 1, zx);
           Point<1> pp2 = global_point_pointer(zy + 1, zx + 1);
-          Point<1> pp3 = global_point_pointer(zy, zx+1);
+          Point<1> pp3 = global_point_pointer(zy, zx + 1);
 
-	  a_zone_color.write(pz, i_args.index);
+          a_zone_color.write(pz, i_args.index);
 
 	  a_side_mapsz.write(ps0, pz);
 	  a_side_mapsz.write(ps1, pz);
