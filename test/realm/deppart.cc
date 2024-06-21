@@ -1596,7 +1596,7 @@ public:
           a_zone_color.write(pz, i_args.index);
 
           a_side_mapsz.write(ps0, pz);
-	  a_side_mapsz.write(ps1, pz);
+          a_side_mapsz.write(ps1, pz);
 	  a_side_mapsz.write(ps2, pz);
 	  a_side_mapsz.write(ps3, pz);
 

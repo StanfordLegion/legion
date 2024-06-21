@@ -732,12 +732,12 @@ namespace Realm {
         // leftover rects from one side or the other just get added
         while(it_lhs.valid) {
           bitmask.add_rect(it_lhs.rect);
-	  it_lhs.step();
+          it_lhs.step();
         }
         while(it_rhs.valid) {
-	  bitmask.add_rect(it_rhs.rect);
+          bitmask.add_rect(it_rhs.rect);
 	  it_rhs.step();
-	}
+        }
       } else {
 	// N-way merge
 	NWayMerge<N,T> nwm(inputs);

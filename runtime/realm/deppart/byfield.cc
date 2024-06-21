@@ -127,8 +127,8 @@ namespace Realm {
               if(!bmp)
                 bmp = new BM;
               bmp->add_rect(Rect<N, T>(p, p2));
-              //std::cout << val << ": " << p << ".." << p2 << std::endl;
-	      val = val2;
+              // std::cout << val << ": " << p << ".." << p2 << std::endl;
+              val = val2;
 	      p = p3;
             }
             p2 = p3;
@@ -138,9 +138,9 @@ namespace Realm {
           if(!bmp)
             bmp = new BM;
           bmp->add_rect(Rect<N, T>(p, p2));
-          //std::cout << val << ": " << p << ".." << p2 << std::endl;
+          // std::cout << val << ": " << p << ".." << p2 << std::endl;
 
-	  // are we done?
+          // are we done?
 	  if(p2 == r.hi) break;
 
 	  // now go to the next span, if there is one (can't be in 1-D)
