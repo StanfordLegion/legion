@@ -511,6 +511,7 @@ namespace Legion {
             wait_info.wait_start = waits.intervals[idx].wait_start;
             wait_info.wait_ready = waits.intervals[idx].wait_ready;
             wait_info.wait_end = waits.intervals[idx].wait_end;
+            wait_info.wait_event = LgEvent(waits.intervals[idx].wait_event);
           }
         }
         info.creator = prof_info->creator;
@@ -544,6 +545,7 @@ namespace Legion {
             wait_info.wait_start = waits.intervals[idx].wait_start;
             wait_info.wait_ready = waits.intervals[idx].wait_ready;
             wait_info.wait_end = waits.intervals[idx].wait_end;
+            wait_info.wait_event = LgEvent(waits.intervals[idx].wait_event);
           }
         }
         info.creator = prof_info->creator;
@@ -594,6 +596,7 @@ namespace Legion {
           wait_info.wait_start = waits.intervals[idx].wait_start;
           wait_info.wait_ready = waits.intervals[idx].wait_ready;
           wait_info.wait_end = waits.intervals[idx].wait_end;
+          wait_info.wait_event = LgEvent(waits.intervals[idx].wait_event);
         }
       }
       info.creator = prof_info->creator;
@@ -643,6 +646,7 @@ namespace Legion {
           wait_info.wait_start = waits.intervals[idx].wait_start;
           wait_info.wait_ready = waits.intervals[idx].wait_ready;
           wait_info.wait_end = waits.intervals[idx].wait_end;
+          wait_info.wait_event = LgEvent(waits.intervals[idx].wait_event);
         }
       }
       info.creator = prof_info->creator;
@@ -928,8 +932,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void LegionProfInstance::process_implicit(UniqueID op_id, TaskID tid,
         Processor proc, long long start_time, long long stop_time,
-        const std::vector<std::pair<long long,long long> > &waits,
-        LgEvent finish_event)
+        std::deque<WaitInfo> &waits, LgEvent finish_event)
     //--------------------------------------------------------------------------
     {
       process_proc_desc(proc);
@@ -944,18 +947,7 @@ namespace Legion {
       info.ready = start_time;
       info.start = start_time;
       info.stop = stop_time;
-      if (!waits.empty())
-      {
-        info.wait_intervals.resize(waits.size());
-        for (unsigned idx = 0; idx < waits.size(); idx++)
-        {
-          info.wait_intervals[idx].wait_start = waits[idx].first;
-          // For implicit tasks, these are external waits so we just
-          // assume that they resume right away
-          info.wait_intervals[idx].wait_ready = waits[idx].second;
-          info.wait_intervals[idx].wait_end = waits[idx].second;
-        }
-      }
+      info.wait_intervals.swap(waits);
       info.finish_event = finish_event;
     }
 
@@ -1041,8 +1033,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void LegionProfInstance::record_mapper_call(MapperID mapper,
                               Processor mapper_proc, MappingCallKind kind, 
-                              UniqueID uid, unsigned long long start,
-                              unsigned long long stop)
+                              UniqueID uid, long long start, long long stop)
     //--------------------------------------------------------------------------
     {
       LgEvent finish_event;
@@ -1084,7 +1075,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LegionProfInstance::record_runtime_call(RuntimeCallKind kind,
-        unsigned long long start, unsigned long long stop)
+                                                long long start, long long stop)
     //--------------------------------------------------------------------------
     {
       LgEvent finish_event;
@@ -1121,7 +1112,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LegionProfInstance::record_application_range(
-        ProvenanceID pid, timestamp_t start, timestamp_t stop)
+                              ProvenanceID pid, long long start, long long stop)
     //--------------------------------------------------------------------------
     {
       LgEvent finish_event;
@@ -1151,11 +1142,37 @@ namespace Legion {
       owner->update_footprint(sizeof(ApplicationCallInfo), this);
     }
 
+    //--------------------------------------------------------------------------
+    void LegionProfInstance::record_event_wait(LgEvent event,
+                                               Realm::Backtrace &bt)
+    //--------------------------------------------------------------------------
+    {
+      LgEvent finish_event;
+      Processor current = Processor::get_executing_processor();
+      if (!current.exists())
+      {
+        // Implicit top-level task case where we're not actually running
+        // on a Realm processor so we need to get the proxy processor
+        // for the context instead
+#ifdef DEBUG_LEGION
+        assert(implicit_context != NULL);
+#endif
+        current = implicit_context->get_executing_processor();
+        finish_event = implicit_context->owner_task->get_completion_event();
+      }
+      else
+        finish_event = LgEvent(Processor::get_current_finish_event());
+      // Check to see if we have a backtrace ID for this backtrace yet 
+      unsigned long long backtrace_id = owner->find_backtrace_id(bt);
+      event_wait_infos.emplace_back(
+          EventWaitInfo{current.id, finish_event, event, backtrace_id});
+      owner->update_footprint(sizeof(EventWaitInfo), this);
+    }
+
 #ifdef LEGION_PROF_SELF_PROFILE
     //--------------------------------------------------------------------------
     void LegionProfInstance::record_proftask(Processor proc, UniqueID op_id,
-					     unsigned long long start,
-					     unsigned long long stop,
+					     long long start, long long stop,
                                              LgEvent creator,
                                              LgEvent finish_event)
     //--------------------------------------------------------------------------
@@ -1356,7 +1373,12 @@ namespace Legion {
       {
         serializer->serialize(*it);
       }
-
+      for (std::deque<EventWaitInfo>::const_iterator it =
+            event_wait_infos.begin(); it !=
+            event_wait_infos.end(); it++)
+      {
+        serializer->serialize(*it);
+      }
 #ifdef LEGION_PROF_SELF_PROFILE
       for (std::deque<ProfTaskInfo>::const_iterator it = 
             prof_task_infos.begin(); it != prof_task_infos.end(); it++)
@@ -1391,6 +1413,7 @@ namespace Legion {
       mem_desc_infos.clear();
       proc_desc_infos.clear();
       proc_mem_aff_desc_infos.clear();
+      event_wait_infos.clear();
     }
 
     //--------------------------------------------------------------------------
@@ -1711,6 +1734,16 @@ namespace Legion {
         if (t_curr >= t_stop)
           return diff;
       }
+      while (!event_wait_infos.empty())
+      {
+        EventWaitInfo &info = event_wait_infos.front();
+        serializer->serialize(info);
+        diff += sizeof(info);
+        event_wait_infos.pop_front();
+        const long long t_curr = Realm::Clock::current_time_in_microseconds();
+        if (t_curr >= t_stop)
+          return diff;
+      }
 
 #ifdef LEGION_PROF_SELF_PROFILE
       while (!prof_task_infos.empty())
@@ -1923,6 +1956,38 @@ namespace Legion {
       }
       else
         serializer->serialize(task_variant);
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned long long LegionProfiler::find_backtrace_id(Realm::Backtrace &bt)
+    //--------------------------------------------------------------------------
+    {
+      const uintptr_t hash = bt.hash();
+      {
+        AutoLock p_lock(profiler_lock,1,false/*exclusive*/);
+        std::map<uintptr_t,unsigned long long>::const_iterator finder =
+          backtrace_ids.find(hash);
+        if (finder != backtrace_ids.end())
+          return finder->second;
+      }
+      // First time seeing this backtrace so capture the symbols
+      bt.lookup_symbols();
+      std::stringstream ss;
+      ss << bt;
+      const std::string str = ss.str();
+      // Now retake the lock and see if we lost the race
+      AutoLock p_lock(profiler_lock);
+      std::map<uintptr_t,unsigned long long>::const_iterator finder =
+        backtrace_ids.find(hash);
+      if (finder != backtrace_ids.end())
+        return finder->second;
+      // Didn't lose the race so generate a new ID for this backtrace
+      unsigned long long result = backtrace_ids.empty() ? runtime->address_space
+        : backtrace_ids.rbegin()->second + runtime->total_address_spaces;
+      const LegionProfDesc::Backtrace backtrace = { result, str.c_str() };
+      serializer->serialize(backtrace);
+      backtrace_ids[hash] = result;
+      return result;
     }
 
     //--------------------------------------------------------------------------

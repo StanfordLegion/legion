@@ -102,6 +102,8 @@ namespace Legion {
       virtual void serialize(const LegionProfInstance::ProcDesc&) = 0;
       virtual void serialize(const LegionProfInstance::MemDesc&) = 0;
       virtual void serialize(const LegionProfInstance::ProcMemDesc&) = 0;
+      virtual void serialize(const LegionProfDesc::Backtrace&) = 0;
+      virtual void serialize(const LegionProfInstance::EventWaitInfo&) = 0;
 #ifdef LEGION_PROF_SELF_PROFILE
       virtual void serialize(const LegionProfInstance::ProfTaskInfo&) = 0;
 #endif
@@ -171,6 +173,8 @@ namespace Legion {
       void serialize(const LegionProfInstance::ProcDesc&);
       void serialize(const LegionProfInstance::MemDesc&);
       void serialize(const LegionProfInstance::ProcMemDesc&);
+      void serialize(const LegionProfDesc::Backtrace&);
+      void serialize(const LegionProfInstance::EventWaitInfo&);
 #ifdef LEGION_PROF_SELF_PROFILE
       void serialize(const LegionProfInstance::ProfTaskInfo&);
 #endif
@@ -229,6 +233,8 @@ namespace Legion {
         INDEX_INST_INFO_ID,
         COPY_INST_INFO_ID,
         FILL_INST_INFO_ID,
+        BACKTRACE_DESC_ID,
+        EVENT_WAIT_INFO_ID,
 #ifdef LEGION_PROF_SELF_PROFILE
         PROFTASK_INFO_ID,
 #endif
@@ -300,6 +306,8 @@ namespace Legion {
       void serialize(const LegionProfInstance::ProcDesc&);
       void serialize(const LegionProfInstance::MemDesc&);
       void serialize(const LegionProfInstance::ProcMemDesc&);
+      void serialize(const LegionProfDesc::Backtrace&);
+      void serialize(const LegionProfInstance::EventWaitInfo&);
 #ifdef LEGION_PROF_SELF_PROFILE
       void serialize(const LegionProfInstance::ProfTaskInfo&);
 #endif

@@ -51,7 +51,7 @@ namespace Legion {
   namespace Internal { 
 
     // XXX: Make sure these typedefs are consistent with Realm
-    typedef ::realm_barrier_timestamp_t timestamp_t;
+    typedef long long timestamp_t;
     typedef Realm::Processor::Kind ProcKind;
     typedef Realm::Memory::Kind MemKind;
     typedef ::realm_id_t ProcID;
@@ -183,6 +183,11 @@ namespace Legion {
         const char *provenance;
         size_t size;
       };
+      struct Backtrace {
+      public:
+        unsigned long long id;
+        const char *backtrace;
+      };
     };
 
     class LegionProfInstance {
@@ -207,6 +212,7 @@ namespace Legion {
       struct WaitInfo {
       public:
         timestamp_t wait_start, wait_ready, wait_end;
+        LgEvent wait_event;
       };
       struct TaskInfo {
       public:
@@ -429,6 +435,13 @@ namespace Legion {
         unsigned bandwidth;
         unsigned latency;
       };
+      struct EventWaitInfo {
+      public:
+        ProcID proc_id;
+        LgEvent fevent;
+        LgEvent event;
+        unsigned long long backtrace_id;
+      };
 #ifdef LEGION_PROF_SELF_PROFILE
       struct ProfTaskInfo {
       public:
@@ -529,8 +542,7 @@ namespace Legion {
       void process_partition(const ProfilingInfo *info,
                              const Realm::ProfilingResponse &response);
       void process_implicit(UniqueID op_id, TaskID tid, Processor proc,
-          long long start, long long stop, 
-          const std::vector<std::pair<long long,long long> > &waits,
+          long long start, long long stop, std::deque<WaitInfo> &waits,
           LgEvent finish_event);
       void process_mem_desc(const Memory &m);
       void process_proc_desc(const Processor &p);
@@ -543,6 +555,7 @@ namespace Legion {
                                timestamp_t stop);
       void record_application_range(ProvenanceID pid,
                                     timestamp_t start, timestamp_t stop);
+      void record_event_wait(LgEvent event, Realm::Backtrace &bt);
 #ifdef LEGION_PROF_SELF_PROFILE
     public:
       void record_proftask(Processor p, UniqueID op_id, timestamp_t start,
@@ -585,6 +598,7 @@ namespace Legion {
       std::deque<MemDesc> mem_desc_infos;
       std::deque<ProcDesc> proc_desc_infos;
       std::deque<ProcMemDesc> proc_mem_aff_desc_infos;
+      std::deque<EventWaitInfo> event_wait_infos;
       // keep track of MemIDs/ProcIDs to avoid duplicate entries
       std::vector<MemID> mem_ids;
       std::vector<ProcID> proc_ids;
@@ -639,6 +653,7 @@ namespace Legion {
       void register_task_variant(TaskID task_id,
                                  VariantID variant_id, 
                                  const char *variant_name);
+      unsigned long long find_backtrace_id(Realm::Backtrace &bt);
     public:
       void add_task_request(Realm::ProfilingRequestSet &requests, TaskID tid, 
                             VariantID vid, UniqueID task_uid, Processor p);
@@ -728,6 +743,7 @@ namespace Legion {
       LegionProfSerializer* serializer;
       mutable LocalLock profiler_lock;
       std::vector<LegionProfInstance*> instances;
+      std::map<uintptr_t,unsigned long long> backtrace_ids;
 #ifdef DEBUG_LEGION
       unsigned total_outstanding_requests[LEGION_PROF_LAST];
 #else

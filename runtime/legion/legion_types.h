@@ -2894,6 +2894,7 @@ namespace Legion {
     protected:
       void begin_context_wait(Context ctx, bool from_application) const;
       void end_context_wait(Context ctx, bool from_application) const;
+      void record_event_wait(Realm::Backtrace &bt) const;
     };
 
     class PredEvent : public LgEvent {
@@ -3241,6 +3242,8 @@ namespace Legion {
     inline void LgEvent::wait(void) const
     //--------------------------------------------------------------------------
     {
+      if (!exists())
+        return;
 #ifdef DEBUG_LEGION_WAITS
       const int local_meta_task_id = Internal::meta_task_id;
       const long long start = Realm::Clock::current_time_in_microseconds();
@@ -3258,6 +3261,12 @@ namespace Legion {
       // Save the reference tracker that we have
       ImplicitReferenceTracker *local_tracker = implicit_reference_tracker;
       Internal::implicit_reference_tracker = NULL;
+      if (implicit_profiler != NULL)
+      {
+        Realm::Backtrace bt;
+        bt.capture_backtrace();
+        record_event_wait(bt);
+      }
       // Check to see if we have any local locks to notify
       if (Internal::local_lock_list != NULL)
       {
@@ -3322,6 +3331,8 @@ namespace Legion {
     inline void LgEvent::wait_faultaware(bool &poisoned, bool from_app) const
     //--------------------------------------------------------------------------
     {
+      if (!exists())
+        return;
 #ifdef DEBUG_LEGION_WAITS
       const int local_meta_task_id = Internal::meta_task_id;
       const long long start = Realm::Clock::current_time_in_microseconds();
@@ -3339,6 +3350,12 @@ namespace Legion {
       // Save the reference tracker that we have
       ImplicitReferenceTracker *local_tracker = implicit_reference_tracker;
       Internal::implicit_reference_tracker = NULL;
+      if (implicit_profiler != NULL)
+      {
+        Realm::Backtrace bt;
+        bt.capture_backtrace();
+        record_event_wait(bt);
+      }
       // Check to see if we have any local locks to notify
       if (Internal::local_lock_list != NULL)
       {

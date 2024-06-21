@@ -186,8 +186,8 @@ class LegionProfASCIIDeserializer(LegionDeserializer):
         "OperationInstance": re.compile(prefix + r'Prof Operation (?P<op_id>[0-9]+) (?P<parent_id>[0-9]+) (?P<kind>[0-9]+) (?P<provenance>[0-9]+)'),
         "MultiTask": re.compile(prefix + r'Prof Multi (?P<op_id>[0-9]+) (?P<task_id>[0-9]+)'),
         "SliceOwner": re.compile(prefix + r'Prof Slice Owner (?P<parent_id>[0-9]+) (?P<op_id>[0-9]+)'),
-        "TaskWaitInfo": re.compile(prefix + r'Prof Task Wait Info (?P<op_id>[0-9]+) (?P<task_id>[0-9]+) (?P<variant_id>[0-9]+) (?P<wait_start>[0-9]+) (?P<wait_ready>[0-9]+) (?P<wait_end>[0-9]+)'),
-        "MetaWaitInfo": re.compile(prefix + r'Prof Meta Wait Info (?P<op_id>[0-9]+) (?P<lg_id>[0-9]+) (?P<wait_start>[0-9]+) (?P<wait_ready>[0-9]+) (?P<wait_end>[0-9]+)'),
+        "TaskWaitInfo": re.compile(prefix + r'Prof Task Wait Info (?P<op_id>[0-9]+) (?P<task_id>[0-9]+) (?P<variant_id>[0-9]+) (?P<wait_start>[0-9]+) (?P<wait_ready>[0-9]+) (?P<wait_end>[0-9]+) (?P<wait_event>[0-9a-f]+)'),
+        "MetaWaitInfo": re.compile(prefix + r'Prof Meta Wait Info (?P<op_id>[0-9]+) (?P<lg_id>[0-9]+) (?P<wait_start>[0-9]+) (?P<wait_ready>[0-9]+) (?P<wait_end>[0-9]+) (?P<wait_event>[0-9a-f]+)'),
         "TaskInfo": re.compile(prefix + r'Prof Task Info (?P<op_id>[0-9]+) (?P<task_id>[0-9]+) (?P<variant_id>[0-9]+) (?P<proc_id>[a-f0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+) (?P<creator>[0-9a-f]+) (?P<fevent>[0-9a-f]+)'),
         "GPUTaskInfo": re.compile(prefix + r'Prof GPU Task Info (?P<op_id>[0-9]+) (?P<task_id>[0-9]+) (?P<variant_id>[0-9]+) (?P<proc_id>[a-f0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+) (?P<gpu_start>[0-9]+) (?P<gpu_stop>[0-9]+) (?P<creator>[0-9a-f]+) (?P<fevent>[0-9a-f]+)'),
         "MetaInfo": re.compile(prefix + r'Prof Meta Info (?P<op_id>[0-9]+) (?P<lg_id>[0-9]+) (?P<proc_id>[a-f0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+) (?P<creator>[0-9a-f]+) (?P<fevent>[0-9a-f]+)'),
@@ -202,6 +202,8 @@ class LegionProfASCIIDeserializer(LegionDeserializer):
         "ApplicationCallInfo": re.compile(prefix + r'Prof Application Call Info (?P<provenance>[0-9]+) (?P<proc_id>[0-9a-f]+) (?P<start>[0-9]+) (?P<stop>[0-9]+) (?P<fevent>[0-9a-f]+)'),
         "ProfTaskInfo": re.compile(prefix + r'Prof ProfTask Info (?P<proc_id>[a-f0-9]+) (?P<op_id>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+) (?P<creator>[0-9a-f]+) (?P<fevent>[0-9a-f]+)'),
         "CalibrationErr": re.compile(prefix + r'Calibration Err (?P<calibration_err>[0-9]+)'),
+        "BacktraceDesc": re.compile(prefix + r'Prof Backtrace Desc (?P<backtrace_id>[0-9]+) (?P<backtrace>.+)'),
+        "EventWaitInfo": re.compile(prefix + r'Prof Event Wait Info (?P<proc_id>[0-9a-f]+) (?P<fevent>[0-9a-f]+) (?P<wait_event>[0-9a-f]+) (?P<backtrace_id>[0-9]+)'),
         # "UserInfo": re.compile(prefix + r'Prof User Info (?P<proc_id>[a-f0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+) (?P<name>[$()a-zA-Z0-9_]+)')
     }
     parse_callbacks = {
@@ -211,6 +213,7 @@ class LegionProfASCIIDeserializer(LegionDeserializer):
         "capacity": int,
         "variant_id": int,
         "lg_id": int,
+        "backtrace_id": int,
         "uid": int,
         "overwrite": int,
         "task_id": int,
@@ -248,6 +251,7 @@ class LegionProfASCIIDeserializer(LegionDeserializer):
         "inst_uid": lambda x: int(x, 16),
         "creator": lambda x: int(x, 16),
         "fevent": lambda x: int(x, 16),
+        "wait_event": lambda x: int(x, 16),
         "indirect": int,
         "create": int,
         "destroy": int,
@@ -278,6 +282,7 @@ class LegionProfASCIIDeserializer(LegionDeserializer):
         "zero_time": int,
         "version": int,
         "hostname": str,
+        "backtrace": str,
         "host_id": int,
         "process_id": int,
         "calibration_err": int,
