@@ -732,7 +732,7 @@ namespace Legion {
       // Event to trigger once the profiling is actually done
       const RtUserEvent done_event;
       // Minimum duration of mapper and runtime calls for logging in ns
-      const size_t minimum_call_threshold;
+      const long long minimum_call_threshold;
       // Size in bytes of the footprint before we start dumping
       const size_t output_footprint_threshold;
       // The goal size in microseconds of the output tasks
