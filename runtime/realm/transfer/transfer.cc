@@ -1701,7 +1701,7 @@ namespace Realm {
               else
                 break;
             if((r2.lo[dims_match] == (r.hi[dims_match] + 1))) {
-	      merge_dim = dims_match;  // unless checks below fail
+              merge_dim = dims_match;  // unless checks below fail
 	      // rest of dims must be degenerate and match
 	      for(int i = dims_match + 1; i < N; i++)
 		if((r.lo[i] != r.hi[i]) ||
@@ -1709,7 +1709,7 @@ namespace Realm {
 		  merge_dim = -1;
 		  break;
 		}
-	    }
+            }
           }
           if(merge_dim >= 0) {
             // merge and continue
