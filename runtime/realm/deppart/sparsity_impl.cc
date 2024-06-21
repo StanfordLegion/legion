@@ -1248,7 +1248,7 @@ namespace Realm {
             this->entries[n].sparsity.id = 0; // no sparsity map
             this->entries[n].bitmap = 0;
             n++;
-	    i++;
+            i++;
           }
 
           while(old_it != old_data.end()) {
