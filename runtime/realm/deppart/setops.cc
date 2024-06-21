@@ -712,7 +712,7 @@ namespace Realm {
           it_lhs.step();
           it_rhs.step();
           // try to consume even more
-	  while(true) {
+          while(true) {
             if(it_lhs.valid && (it_lhs.rect.lo[0] <= (u.hi[0] + 1))) {
               u.hi[0] = std::max(u.hi[0], it_lhs.rect.hi[0]);
               it_lhs.step();
@@ -729,7 +729,7 @@ namespace Realm {
           bitmask.add_rect(u);
         }
 
-	// leftover rects from one side or the other just get added
+        // leftover rects from one side or the other just get added
 	while(it_lhs.valid) {
 	  bitmask.add_rect(it_lhs.rect);
 	  it_lhs.step();
@@ -773,7 +773,7 @@ namespace Realm {
         if(nwm.size() > 0)
           do {
 	    bitmask.add_rect(nwm[0]);
-	  } while(nwm.step(0));
+          } while(nwm.step(0));
 #if 0
 	std::vector<IndexSpaceIterator<N,T> > its(inputs.size());
 	std::vector<int> order(inputs.size());
