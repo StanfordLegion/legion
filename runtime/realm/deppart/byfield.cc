@@ -145,7 +145,7 @@ namespace Realm {
             break;
 
           // now go to the next span, if there is one (can't be in 1-D)
-	  assert(N > 1);
+          assert(N > 1);
 	  for(int i = 0; i < (N - 1); i++) {
 	    p[i] = r.lo[i];
 	    if(p[i + 1] < r.hi[i+1]) {
