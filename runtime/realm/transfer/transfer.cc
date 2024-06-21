@@ -1704,11 +1704,11 @@ namespace Realm {
               merge_dim = dims_match; // unless checks below fail
               // rest of dims must be degenerate and match
               for(int i = dims_match + 1; i < N; i++)
-                if((r.lo[i] != r.hi[i]) ||
-		   (r2.lo[i] != r.lo[i]) || (r2.hi[i] != r.hi[i])) {
-		  merge_dim = -1;
+                if((r.lo[i] != r.hi[i]) || (r2.lo[i] != r.lo[i]) ||
+                   (r2.hi[i] != r.hi[i])) {
+                  merge_dim = -1;
 		  break;
-		}
+                }
             }
           }
           if(merge_dim >= 0) {

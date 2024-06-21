@@ -1602,7 +1602,7 @@ public:
 
           a_side_mapss3.write(ps0, ps1);
           a_side_mapss3.write(ps1, ps2);
-	  a_side_mapss3.write(ps2, ps3);
+          a_side_mapss3.write(ps2, ps3);
 	  a_side_mapss3.write(ps3, ps0);
 
 	  a_side_mapsp1.write(ps0, pp0);
