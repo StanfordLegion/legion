@@ -1245,7 +1245,7 @@ namespace Realm {
           while(i < count) {
             this->entries.resize(n + 1);
             this->entries[n].bounds = rects[i];
-	    this->entries[n].sparsity.id = 0; // no sparsity map
+            this->entries[n].sparsity.id = 0; // no sparsity map
 	    this->entries[n].bitmap = 0;
 	    n++;
 	    i++;
@@ -1253,7 +1253,7 @@ namespace Realm {
 
           while(old_it != old_data.end()) {
             this->entries.push_back(*old_it);
-	    old_it++;
+            old_it++;
           }
         }
       } else {
