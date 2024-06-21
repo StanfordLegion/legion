@@ -1698,7 +1698,7 @@ namespace Realm {
               if((r.lo[dims_match] == r2.lo[dims_match]) &&
                  (r.hi[dims_match] == r2.hi[dims_match]))
                 dims_match++;
-	      else
+              else
 		break;
 	    if((r2.lo[dims_match] == (r.hi[dims_match] + 1))) {
 	      merge_dim = dims_match;  // unless checks below fail
