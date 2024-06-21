@@ -3022,11 +3022,11 @@ impl State {
         fevent: EventID,
     ) -> &mut ProcEntry {
         self.create_op(op_id);
+        let prof_uid = self.prof_uid_allocator.get_prof_uid();
         let creator_uid = self.find_or_create_prof_uid(fevent);
-        let alloc = &mut self.prof_uid_allocator;
         let proc = self.procs.get_mut(&proc_id).unwrap();
         proc.create_proc_entry(
-            Base::new(alloc.get_prof_uid()),
+            Base::new(prof_uid),
             None,
             if op_id != OpID::ZERO {
                 Some(op_id)
@@ -3048,11 +3048,11 @@ impl State {
         time_range: TimeRange,
         fevent: EventID,
     ) -> &mut ProcEntry {
+        let prof_uid = self.prof_uid_allocator.get_prof_uid();
         let creator_uid = self.find_or_create_prof_uid(fevent);
-        let alloc = &mut self.prof_uid_allocator;
         let proc = self.procs.get_mut(&proc_id).unwrap();
         proc.create_proc_entry(
-            Base::new(alloc.get_prof_uid()),
+            Base::new(prof_uid),
             None,
             None,
             ProcEntryKind::RuntimeCall(kind),
@@ -3071,11 +3071,11 @@ impl State {
         fevent: EventID,
     ) -> &mut ProcEntry {
         assert!(self.provenances.contains_key(&provenance));
+        let prof_uid = self.prof_uid_allocator.get_prof_uid();
         let creator_uid = self.find_or_create_prof_uid(fevent);
-        let alloc = &mut self.prof_uid_allocator;
         let proc = self.procs.get_mut(&proc_id).unwrap();
         proc.create_proc_entry(
-            Base::new(alloc.get_prof_uid()),
+            Base::new(prof_uid),
             None,
             None,
             ProcEntryKind::ApplicationCall(provenance),
@@ -3095,11 +3095,11 @@ impl State {
         time_range: TimeRange,
         fevent: EventID,
     ) -> &mut ProcEntry {
+        let prof_uid = self.prof_uid_allocator.get_prof_uid();
         let creator_uid = self.find_or_create_prof_uid(fevent);
-        let alloc = &mut self.prof_uid_allocator;
         let proc = self.procs.get_mut(&proc_id).unwrap();
         proc.create_proc_entry(
-            Base::new(alloc.get_prof_uid()),
+            Base::new(prof_uid),
             Some(op_id),
             None,
             ProcEntryKind::GPUKernel(task_id, variant_id),
