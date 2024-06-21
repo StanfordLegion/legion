@@ -129,7 +129,7 @@ namespace Realm {
               bmp->add_rect(Rect<N, T>(p, p2));
               // std::cout << val << ": " << p << ".." << p2 << std::endl;
               val = val2;
-	      p = p3;
+              p = p3;
             }
             p2 = p3;
           }
@@ -141,7 +141,7 @@ namespace Realm {
           // std::cout << val << ": " << p << ".." << p2 << std::endl;
 
           // are we done?
-	  if(p2 == r.hi) break;
+          if(p2 == r.hi) break;
 
 	  // now go to the next span, if there is one (can't be in 1-D)
 	  assert(N > 1);

@@ -1597,7 +1597,7 @@ public:
 
           a_side_mapsz.write(ps0, pz);
           a_side_mapsz.write(ps1, pz);
-	  a_side_mapsz.write(ps2, pz);
+          a_side_mapsz.write(ps2, pz);
 	  a_side_mapsz.write(ps3, pz);
 
 	  a_side_mapss3.write(ps0, ps1);

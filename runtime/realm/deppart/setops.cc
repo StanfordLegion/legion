@@ -736,7 +736,7 @@ namespace Realm {
         }
         while(it_rhs.valid) {
           bitmask.add_rect(it_rhs.rect);
-	  it_rhs.step();
+          it_rhs.step();
         }
       } else {
 	// N-way merge

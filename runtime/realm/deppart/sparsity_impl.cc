@@ -1242,7 +1242,7 @@ namespace Realm {
           }
 
           // leftovers...
-	  while(i < count) {
+          while(i < count) {
 	    this->entries.resize(n + 1);
 	    this->entries[n].bounds = rects[i];
 	    this->entries[n].sparsity.id = 0; // no sparsity map
