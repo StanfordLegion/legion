@@ -32289,6 +32289,8 @@ namespace Legion {
       std::vector<RtEvent> shutdown_events;
       runtime->finalize_runtime(shutdown_events);
       delete runtime;
+      // Don't record waits on the event after this
+      implicit_profiler = NULL;
       // If we have any shutdown events we need to wait for them to have
       // finished before we return and end up marking ourselves finished
       if (!shutdown_events.empty())
