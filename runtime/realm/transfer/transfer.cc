@@ -1707,7 +1707,7 @@ namespace Realm {
                 if((r.lo[i] != r.hi[i]) || (r2.lo[i] != r.lo[i]) ||
                    (r2.hi[i] != r.hi[i])) {
                   merge_dim = -1;
-		  break;
+                  break;
                 }
             }
           }
