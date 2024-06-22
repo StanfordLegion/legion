@@ -790,6 +790,8 @@ impl Proc {
                     }
                 }
             }
+            // Sort any wait intervals that we added to the task entry
+            task_entry.waiters.wait_intervals.sort_by_key(|w| w.start);
             // Save any calls on the proc entry
             std::mem::swap(&mut task_entry.subcalls, calls);
             // Finally add the task entry back in now that we're done mutating it
