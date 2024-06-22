@@ -944,7 +944,7 @@ impl StateDataSource {
                             if let Some(callee) = wait_callee {
                                 item_meta
                                     .fields
-                                    .push((self.fields.callee, self.generate_creator_link(callee)))
+                                    .push((self.fields.callee, self.generate_creator_link(callee)));
                             }
                             if let Some(backtrace) = wait_backtrace {
                                 item_meta.fields.push((

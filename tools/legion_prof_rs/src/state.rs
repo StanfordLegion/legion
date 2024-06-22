@@ -814,6 +814,16 @@ impl Proc {
             // Finally add the task entry back in now that we're done mutating it
             self.entries.insert(*task_uid, task_entry);
         }
+        // Finally update all the backtrace event waits we have left
+        for (task_uid, waiters) in self.event_waits.iter_mut() {
+            let task_entry = self.entries.get_mut(&task_uid).unwrap();
+            for wait in task_entry.waiters.wait_intervals.iter_mut() {
+                if let Some(event) = wait.event {
+                    wait.backtrace = waiters.remove(&event);
+                }
+            }
+        }
+        self.event_waits.clear();
     }
 
     fn sort_time_range(&mut self) {
