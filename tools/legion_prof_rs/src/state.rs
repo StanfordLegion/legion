@@ -762,6 +762,8 @@ impl Proc {
                             *call_stop,
                             *call_stop,
                         ));
+                        // Keep the wait intervals sorted by starting time
+                        next_entry.waiters.wait_intervals.sort_by_key(|w| w.start);
                         found = true;
                         break;
                     } else {
@@ -775,6 +777,8 @@ impl Proc {
                         *call_stop,
                         *call_stop,
                     ));
+                    // Keep the wait intervals sorted by starting time
+                    task_entry.waiters.wait_intervals.sort_by_key(|w| w.start);
                 }
                 // Update the operation info for the calls
                 let call_entry = self.entries.get_mut(&call_uid).unwrap();
