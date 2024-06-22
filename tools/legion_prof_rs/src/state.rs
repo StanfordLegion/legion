@@ -773,6 +773,8 @@ impl Proc {
                                 *call_stop,
                                 *call_uid,
                             ));
+                        // Keep the wait intervals sorted by starting time
+                        next_entry.waiters.wait_intervals.sort_by_key(|w| w.start);
                         caller_uid = Some(next_uid);
                         break;
                     } else {
@@ -789,6 +791,8 @@ impl Proc {
                             *call_stop,
                             *call_uid,
                         ));
+                    // Keep the wait intervals sorted by starting time
+                    task_entry.waiters.wait_intervals.sort_by_key(|w| w.start);
                     caller_uid = Some(*task_uid);
                 }
                 // Update the operation info for the calls
