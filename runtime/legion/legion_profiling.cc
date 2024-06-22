@@ -1781,6 +1781,8 @@ namespace Legion {
         minimum_call_threshold(call_threshold * 1000 /*convert us to ns*/),
         output_footprint_threshold(footprint_threshold), 
         output_target_latency(target_latency), target_proc(target), 
+        next_backtrace_id((runtime->address_space == 0) ?
+            runtime->total_address_spaces : runtime->address_space),
 #ifndef DEBUG_LEGION
         total_outstanding_requests(1/*start with guard*/),
 #endif
@@ -1982,8 +1984,8 @@ namespace Legion {
       if (finder != backtrace_ids.end())
         return finder->second;
       // Didn't lose the race so generate a new ID for this backtrace
-      unsigned long long result = backtrace_ids.empty() ? runtime->address_space
-        : backtrace_ids.rbegin()->second + runtime->total_address_spaces;
+      unsigned long long result = next_backtrace_id;
+      next_backtrace_id += runtime->total_address_spaces;
       const LegionProfDesc::Backtrace backtrace = { result, str.c_str() };
       serializer->serialize(backtrace);
       backtrace_ids[hash] = result;

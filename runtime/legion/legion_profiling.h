@@ -744,6 +744,7 @@ namespace Legion {
       mutable LocalLock profiler_lock;
       std::vector<LegionProfInstance*> instances;
       std::map<uintptr_t,unsigned long long> backtrace_ids;
+      unsigned long long next_backtrace_id;
 #ifdef DEBUG_LEGION
       unsigned total_outstanding_requests[LEGION_PROF_LAST];
 #else
