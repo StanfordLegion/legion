@@ -361,7 +361,6 @@ void worker_task(const void *args, size_t arglen, const void *userdata, size_t u
     }
 
     bounds = next_bounds;
-    inst.destroy();
     inst = insts[0];
     insts[1].destroy();
   }
