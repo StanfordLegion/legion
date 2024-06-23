@@ -484,7 +484,7 @@ namespace Realm {
           for(size_t i = 0; i < chunk_size - 1; i++)
             local_instances.free_list[i] = new_size - 1 - i;
           inst_idx = old_size;
-	  inst_impl = 0;
+          inst_impl = 0;
 	} else {
 	  inst_idx = local_instances.free_list.back();
 	  local_instances.free_list.pop_back();
