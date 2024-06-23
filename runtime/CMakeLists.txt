@@ -277,6 +277,7 @@ if(Legion_USE_CUDA)
   #TODO(apryakhin): Enable with cmake 3.27
   #set_property(TARGET realm_cuda_fatbin PROPERTY CUDA_FATBIN_COMPILATION ON)
   target_compile_options(realm_cuda_fatbin PRIVATE $<$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>:
+                         -Xcudafe=--diag_suppress=1444 # Remove once Point class is updated
                          -Xcudafe=--diag_suppress=boolean_controlling_expr_is_constant
                          --fatbin>)
   target_compile_definitions(realm_cuda_fatbin PRIVATE "CUDA_FATBIN_COMPILATION")
@@ -934,6 +935,7 @@ add_library(Legion::LegionRuntime ALIAS LegionRuntime)
 # Add CUDA-specific properties
 if(Legion_USE_CUDA)
   target_compile_options(LegionRuntime PRIVATE $<$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>:
+                         -Xcudafe=--diag_suppress=1444 # Remove once Point class is updated
                          -Xcudafe=--diag_suppress=boolean_controlling_expr_is_constant>)
 
   set_target_cuda_warnings_and_errors(LegionRuntime WARN_AS_ERROR ${Legion_BUILD_WARN_AS_ERROR})
@@ -971,6 +973,7 @@ if(Legion_USE_HIP)
   if(Legion_HIP_TARGET STREQUAL "CUDA")
     target_sources(LegionRuntime PRIVATE ${LEGION_HIP_SRC})
     target_compile_options(LegionRuntime PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:
+                           -Xcudafe=--diag_suppress=1444 # Remove once Point class is updated
                            -Xcudafe=--diag_suppress=boolean_controlling_expr_is_constant>)
     target_include_directories(LegionRuntime PRIVATE ${HIP_ROOT_DIR}/include)
     # complex reduction ops bring in a public dependency on cuda headers

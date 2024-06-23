@@ -31,6 +31,20 @@ namespace Realm {
   //
   // class Point<N,T>
 
+#if defined(__PGIC__)
+  #pragma warning (push)
+  #pragma diag_suppress 1445
+#elif defined(__GNUC__)
+  #pragma GCC diagnostic push
+  #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#elif defined(__clang__)
+  #pragma clang diagnostic push
+  #pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#elif defined(__INTEL_COMPILER) || defined(__INTEL_LLVM_COMPILER)
+  #pragma warning push
+  #pragma warning disable 1478
+#endif
+
   template <int N, typename T>
   REALM_CUDA_HD
   inline Point<N,T>::Point(void)
@@ -68,7 +82,7 @@ namespace Realm {
   inline Point<N,T>::Point(const Point<N,T2>& copy_from)
   {
     for(int i = 0; i < N; i++)
-      (&x)[i] = (&copy_from.x)[i];
+      (&x)[i] = copy_from[i];
   }
 
   template <int N, typename T>
@@ -77,7 +91,7 @@ namespace Realm {
   inline Point<N,T>& Point<N,T>::operator=(const Point<N,T2>& copy_from)
   {
     for(int i = 0; i < N; i++)
-      (&x)[i] = (&copy_from.x)[i];
+      (&x)[i] = copy_from[i];
     return *this;
   }
 
@@ -123,7 +137,7 @@ namespace Realm {
   // specializations for N <= 4
   template <typename T>
   struct REALM_PUBLIC_API Point<1,T> {
-    T x;
+    [[deprecated("The \"Point::x\" member will be removed in the next Realm release. Please switch to using Point::operator[] instead.")]] T x;
     REALM_CUDA_HD
     Point(void) {}
     REALM_CUDA_HD
@@ -139,7 +153,7 @@ namespace Realm {
     // copies allow type coercion (assuming the underlying type does)
     template <typename T2>
     REALM_CUDA_HD
-    Point(const Point<1, T2>& copy_from) : x(copy_from.x) {}
+    Point(const Point<1, T2>& copy_from) : x(copy_from[0]) {}
     template <typename T2>
     REALM_CUDA_HD
     Point<1,T>& operator=(const Point<1, T2>& copy_from)
@@ -174,7 +188,7 @@ namespace Realm {
 
   template <typename T>
   struct REALM_PUBLIC_API Point<2,T> {
-    T x, y;
+    [[deprecated("The \"Point::x,y\" members will be removed in the next Realm release. Please switch to using Point::operator[] instead.")]] T x, y;
     REALM_CUDA_HD
     Point(void) {}
     REALM_CUDA_HD
@@ -193,7 +207,7 @@ namespace Realm {
     template <typename T2>
     REALM_CUDA_HD
     Point(const Point<2, T2>& copy_from)
-      : x(copy_from.x), y(copy_from.y) {}
+      : x(copy_from[0]), y(copy_from[1]) {}
     template <typename T2>
     REALM_CUDA_HD
     Point<2,T>& operator=(const Point<2,T2>& copy_from)
@@ -225,7 +239,7 @@ namespace Realm {
 
   template <typename T>
   struct REALM_PUBLIC_API Point<3,T> {
-    T x, y, z;
+    [[deprecated("The \"Point::x,y,z\" members will be removed in the next Realm release. Please switch to using Point::operator[] instead.")]] T x, y, z;
     REALM_CUDA_HD
     Point(void) {}
     REALM_CUDA_HD
@@ -244,7 +258,7 @@ namespace Realm {
     template <typename T2>
     REALM_CUDA_HD
     Point(const Point<3, T2>& copy_from)
-      : x(copy_from.x), y(copy_from.y), z(copy_from.z) {}
+      : x(copy_from[0]), y(copy_from[1]), z(copy_from[2]) {}
     template <typename T2>
     REALM_CUDA_HD
     Point<3,T>& operator=(const Point<3,T2>& copy_from)
@@ -296,7 +310,7 @@ namespace Realm {
     template <typename T2>
     REALM_CUDA_HD
     Point(const Point<4, T2>& copy_from)
-      : x(copy_from.x), y(copy_from.y), z(copy_from.z), w(copy_from.w) {}
+      : x(copy_from[0]), y(copy_from[1]), z(copy_from[2]), w(copy_from[3]) {}
     template <typename T2>
     REALM_CUDA_HD
     Point<4,T>& operator=(const Point<4,T2>& copy_from)
@@ -440,6 +454,15 @@ namespace Realm {
     return lhs;
   }
 
+#if defined(__PGIC__)
+  #pragma warning (pop)
+#elif defined(__GNUC__)
+  #pragma GCC diagnostic pop
+#elif defined(__clang__)
+  #pragma clang diagnostic pop
+#elif defined(__INTEL_COMPILER) || defined(__INTEL_LLVM_COMPILER)
+  #pragma warning pop
+#endif
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -792,8 +815,8 @@ namespace Realm {
 #endif
     if(N == 1) {
       // 1-D doesn't care about fortran/C order
-      if(p.x < rect.hi.x) {
-	p.x++;
+      if(p[0] < rect.hi[0]) {
+	p[0]++;
 	return true;
       }
     } else {
