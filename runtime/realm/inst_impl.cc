@@ -844,7 +844,7 @@ namespace Realm {
         GenEventImpl *ev = GenEventImpl::create_genevent();
         Event ready_event = ev->current_event();
         GenEventImpl::trigger(ready_event, true /*poisoned*/);
-	return ready_event;
+        return ready_event;
       }
 
       // set this handle before we do anything that can result in a
