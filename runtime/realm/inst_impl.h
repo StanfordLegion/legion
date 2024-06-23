@@ -90,8 +90,7 @@ namespace Realm {
 				   const ProfilingRequestSet& prs,
 				   Event wait_on);
 
-      // TODO(apryakhin@): Add deferred execution
-      Event redistrict(RegionInstance *instances, InstanceLayoutGeneric **layouts,
+      Event redistrict(RegionInstance *instances, const InstanceLayoutGeneric **layouts,
                        size_t num_layouts, const ProfilingRequestSet *prs,
                        Event wait_on = Event::NO_EVENT);
 

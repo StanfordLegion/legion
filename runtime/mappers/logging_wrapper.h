@@ -79,6 +79,9 @@ class LoggingWrapper : public ForwardingMapper {
 #endif // NO_LEGION_CONTROL_REPLICATION
  public:
   const char* get_mapper_name(void) const override;
+  void select_task_options(const MapperContext ctx,
+                           const Task& task,
+                           TaskOptions& output) override;
   void slice_task(const MapperContext ctx,
                   const Task& task,
                   const SliceTaskInput& input,

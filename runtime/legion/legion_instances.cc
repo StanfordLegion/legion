@@ -933,7 +933,8 @@ namespace Legion {
                         ApEvent u_event, LgEvent unique, InstanceKind k,
                         const ReductionOp *op /*= NULL*/,
                         CollectiveMapping *mapping /*=NULL*/,
-                        ApEvent p_event /*= ApEvent::NO_AP_EVENT*/)
+                        ApEvent p_event /*= ApEvent::NO_AP_EVENT*/,
+                        GarbageCollectionState init /*COLLECTABLE_GC_STATE*/)
       : InstanceManager(ctx, encode_instance_did(did, 
           (k == EXTERNAL_ATTACHED_INSTANCE_KIND), (redop_id > 0)), layout, node,
           // If we're on the owner node we need to produce the expression
@@ -951,7 +952,7 @@ namespace Legion {
         instance_ready((k == UNBOUND_INSTANCE_KIND) ? 
             Runtime::create_rt_user_event() : RtUserEvent::NO_RT_USER_EVENT),
         kind(k), external_pointer(-1UL), producer_event(p_event),
-        gc_state(COLLECTABLE_GC_STATE), pending_changes(0),
+        gc_state(init), pending_changes(0),
         failed_collection_count(0), min_gc_priority(0), added_gc_events(0),
         valid_references(0), sent_valid_references(0),
         received_valid_references(0), padded_reservations(NULL)
@@ -968,7 +969,14 @@ namespace Legion {
       }
       else // add a resource reference to remove once this manager is set
         add_base_valid_ref(PENDING_UNBOUND_REF);
-
+      // If we're in a pending collectable state, then add a reference
+      if (gc_state == PENDING_COLLECTED_GC_STATE)
+      {
+#ifdef DEBUG_LEGION
+        assert(!is_owner());
+#endif
+        add_base_resource_ref(PENDING_COLLECTIVE_REF);
+      }
       if (!is_owner() && !is_external_instance())
         memory_manager->register_remote_instance(this);
 #ifdef LEGION_GC
@@ -2328,22 +2336,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalManager::initialize_remote_gc_state(
-                                                   GarbageCollectionState state)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock i_lock(inst_lock);
-#ifdef DEBUG_LEGION
-      assert(!is_owner());
-      assert(gc_state == COLLECTABLE_GC_STATE);
-#endif
-      gc_state = state;
-      // If we're in a pending collectable state, then add a reference
-      if (state == PENDING_COLLECTED_GC_STATE)
-        add_base_resource_ref(PENDING_COLLECTIVE_REF);
-    }
-
-    //--------------------------------------------------------------------------
     bool PhysicalManager::collect(RtEvent &ready, AutoLock *i_lock)
     //--------------------------------------------------------------------------
     {
@@ -3160,8 +3152,8 @@ namespace Legion {
                                             space_node, tree_id, layout, 
                                             redop, false/*reg now*/, 
                                             inst_footprint, use_event, 
-                                            unique_event, kind, op);
-      man->initialize_remote_gc_state(state);
+                                            unique_event, kind, op,
+                                            NULL, ApEvent::NO_AP_EVENT, state);
       // Hold-off doing the registration until construction is complete
       man->register_with_runtime();
       // Remove the reference we got back on the layout description

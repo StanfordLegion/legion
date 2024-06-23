@@ -1275,6 +1275,17 @@ namespace Legion {
                              const char *warning_string = NULL) const;
 
       /**
+       * Report an instantaneous set of available memories where instances
+       * for the this future exist. These will only be memories local to
+       * the current process in which the call is performed. The result of
+       * this query might be come stale as soon as it is returned since it
+       * is only a snapshot of the memories where the future has copies.
+       */
+      void get_memories(std::set<Memory> &memories,
+                        bool silence_warnings = false,
+                        const char *warning_string = NULL) const;
+
+      /**
        * Return a const reference to the future.
        * WARNING: these method is unsafe as the underlying
        * buffer containing the future result can be deleted
@@ -2472,6 +2483,24 @@ namespace Legion {
     };
 
     /**
+     * \struct PoolBounds
+     * A small helper class for tracking the bounds on what
+     * memory pools can support when they are created
+     */
+    struct PoolBounds {
+    public:
+      PoolBounds(size_t s = 0, size_t a = 16) : size(s), alignment(a) { }
+      PoolBounds(const PoolBounds&) = default;
+      PoolBounds(PoolBounds&&) = default;
+      PoolBounds& operator=(const PoolBounds&) = default;
+      PoolBounds& operator=(PoolBounds&&) = default;
+    public:
+      size_t size; // upper bound of the pool in bytes
+      size_t alignment; // maximum alignment supported
+    };
+
+
+    /**
      * \struct TaskVariantRegistrar
      * This structure captures all the meta-data information necessary for
      * describing a task variant including the logical task ID, the execution
@@ -2516,6 +2545,17 @@ namespace Legion {
     public: // constraints
       ExecutionConstraintSet            execution_constraints; 
       TaskLayoutConstraintSet           layout_constraints;
+    public:
+      // If this is a leaf task variant then the application can
+      // request that the runtime preserve a pool in the memory of
+      // the corresponding kind with the closes affinity to the target
+      // processor for handling dynamic memory allocations during the
+      // execution of the task. Setting a bound of zero will indicate
+      // that no bound can be provided and the runtime should block
+      // all future allocations in that memory until the task is done.
+      // Note that requesting an unbound memory allocation will likely
+      // result in severe performance degradations.
+      std::map<Memory::Kind,PoolBounds> leaf_pool_bounds;
     public:
       // TaskIDs for which this variant can serve as a generator
       std::set<TaskID>                  generator_tasks;

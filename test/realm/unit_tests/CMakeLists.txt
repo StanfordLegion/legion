@@ -29,6 +29,8 @@ list(APPEND REALM_TESTS
   sequence_assembler_test.cc
   range_allocator_test.cc
   pri_queue_test.cc
+  intrusive_list_test.cc
+  nodeset_test.cc
  )
 
 include(FetchContent)
