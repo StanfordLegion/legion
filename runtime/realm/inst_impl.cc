@@ -1005,7 +1005,10 @@ namespace Realm {
               insts[i]
                   ->measurements
                   .wants_measurement<ProfilingMeasurements::InstanceAllocResult>();
+        } else {
+          insts[i]->metadata.need_alloc_result = false;
         }
+        insts[i]->metadata.need_notify_dealloc = false;
         insts[i]->metadata.layout->compile_lookup_program(
             insts[i]->metadata.lookup_program);
       }
