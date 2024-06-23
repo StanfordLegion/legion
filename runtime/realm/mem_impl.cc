@@ -486,10 +486,10 @@ namespace Realm {
           inst_idx = old_size;
           inst_impl = 0;
         } else {
-	  inst_idx = local_instances.free_list.back();
+          inst_idx = local_instances.free_list.back();
 	  local_instances.free_list.pop_back();
 	  inst_impl = local_instances.instances[inst_idx];
-	}
+        }
       }
 
       // we've got a slot and possibly an object to reuse - if not, allocate
