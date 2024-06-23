@@ -61,7 +61,7 @@ TEST(RangeAllocatorTestsWithParams, SplitRangeEmpty)
   BasicRangeAllocator<size_t, int> range_alloc;
 
   EXPECT_FALSE(range_alloc.allocate(0, 512, 16, offset));
-  EXPECT_EQ(range_alloc.split_range(1, tags, sizes, alignment, offsets), tags.size());
+  EXPECT_EQ(range_alloc.split_range(1, tags, sizes, alignment, offsets), 0);
 
   for(size_t i = 0; i < offsets.size(); i++) {
     EXPECT_EQ(offsets[0], 0);
@@ -99,7 +99,7 @@ TEST(RangeAllocatorTestsWithParams, SplitRangeInvalidSize)
   range_alloc.add_range(0, 1024);
   EXPECT_TRUE(range_alloc.allocate(7, 512, 16, offset));
 
-  EXPECT_EQ(range_alloc.split_range(7, tags, sizes, alignment, offsets), 0);
+  EXPECT_EQ(range_alloc.split_range(7, tags, sizes, alignment, offsets), 1);
 
   for(size_t i = 0; i < offsets.size(); i++) {
     EXPECT_EQ(offsets[0], 0);
