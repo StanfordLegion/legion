@@ -483,7 +483,7 @@ namespace Realm {
           local_instances.free_list.resize(chunk_size - 1);
           for(size_t i = 0; i < chunk_size - 1; i++)
             local_instances.free_list[i] = new_size - 1 - i;
-	  inst_idx = old_size;
+          inst_idx = old_size;
 	  inst_impl = 0;
 	} else {
 	  inst_idx = local_instances.free_list.back();
