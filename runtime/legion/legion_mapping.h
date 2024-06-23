@@ -609,6 +609,7 @@ namespace Legion {
         std::set<unsigned>                          untracked_valid_regions;
         std::vector<Memory>                         future_locations;
         std::vector<Processor>                      target_procs;
+        std::map<Memory,PoolBounds>                 leaf_pool_bounds;
         VariantID                                   chosen_variant; // = 0 
         TaskPriority                                task_priority;  // = 0
         RealmPriority                               copy_fill_priority;
