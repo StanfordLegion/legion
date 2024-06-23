@@ -839,10 +839,10 @@ namespace Realm {
       RegionInstanceImpl *impl = m_impl->new_instance(prs);
       // we can fail to get a valid pointer if we are out of instance slots
       if(!impl) {
-	inst = RegionInstance::NO_INST;
-	// generate a poisoned event for completion
-	GenEventImpl *ev = GenEventImpl::create_genevent();
-	Event ready_event = ev->current_event();
+        inst = RegionInstance::NO_INST;
+        // generate a poisoned event for completion
+        GenEventImpl *ev = GenEventImpl::create_genevent();
+        Event ready_event = ev->current_event();
 	GenEventImpl::trigger(ready_event, true /*poisoned*/);
 	return ready_event;
       }
