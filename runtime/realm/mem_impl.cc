@@ -485,7 +485,7 @@ namespace Realm {
             local_instances.free_list[i] = new_size - 1 - i;
           inst_idx = old_size;
           inst_impl = 0;
-	} else {
+        } else {
 	  inst_idx = local_instances.free_list.back();
 	  local_instances.free_list.pop_back();
 	  inst_impl = local_instances.instances[inst_idx];
