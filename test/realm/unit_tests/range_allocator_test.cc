@@ -61,7 +61,7 @@ TEST(RangeAllocatorTestsWithParams, SplitRangeEmpty)
   BasicRangeAllocator<size_t, int> range_alloc;
 
   EXPECT_FALSE(range_alloc.allocate(0, 512, 16, offset));
-  EXPECT_FALSE(range_alloc.split_range(1, tags, sizes, alignment, offsets));
+  EXPECT_EQ(range_alloc.split_range(1, tags, sizes, alignment, offsets), tags.size());
 
   for(size_t i = 0; i < offsets.size(); i++) {
     EXPECT_EQ(offsets[0], 0);
@@ -80,7 +80,7 @@ TEST(RangeAllocatorTestsWithParams, SplitRangeIvalidID)
   range_alloc.add_range(0, 1024);
   EXPECT_TRUE(range_alloc.allocate(7, 512, 16, offset));
 
-  EXPECT_FALSE(range_alloc.split_range(8, tags, sizes, alignment, offsets));
+  EXPECT_EQ(range_alloc.split_range(8, tags, sizes, alignment, offsets), 0);
 
   for(size_t i = 0; i < offsets.size(); i++) {
     EXPECT_EQ(offsets[0], 0);
@@ -99,7 +99,7 @@ TEST(RangeAllocatorTestsWithParams, SplitRangeInvalidSize)
   range_alloc.add_range(0, 1024);
   EXPECT_TRUE(range_alloc.allocate(7, 512, 16, offset));
 
-  EXPECT_FALSE(range_alloc.split_range(7, tags, sizes, alignment, offsets));
+  EXPECT_EQ(range_alloc.split_range(7, tags, sizes, alignment, offsets), 0);
 
   for(size_t i = 0; i < offsets.size(); i++) {
     EXPECT_EQ(offsets[0], 0);
@@ -125,8 +125,8 @@ TEST(RangeAllocatorTestsWithParams, ReuseFailureDueToAlignment)
   EXPECT_TRUE(range_alloc.allocate(old_range_tag, 100, old_range_alignment, offset));
   EXPECT_TRUE(range_alloc.allocate(old_range_tag + 1, 100, old_range_alignment, offset));
 
-  EXPECT_FALSE(
-      range_alloc.split_range(old_range_tag + 1, tags, sizes, alignment, offsets));
+  EXPECT_EQ(range_alloc.split_range(old_range_tag + 1, tags, sizes, alignment, offsets),
+            0);
 }
 
 TEST(RangeAllocatorTestsWithParams, ReuseZeroRange)
@@ -146,7 +146,8 @@ TEST(RangeAllocatorTestsWithParams, ReuseZeroRange)
   EXPECT_TRUE(range_alloc.allocate(old_range_tag, 0, 1, offset));
   EXPECT_TRUE(range_alloc.allocate(old_range_tag + 1, 0, 1, offset));
   const size_t num_ranges = range_alloc.ranges.size();
-  EXPECT_TRUE(range_alloc.split_range(old_range_tag, tags, sizes, alignment, offsets));
+  EXPECT_EQ(range_alloc.split_range(old_range_tag, tags, sizes, alignment, offsets),
+            tags.size());
   EXPECT_FALSE(range_alloc.lookup(old_range_tag, old_start, old_size));
   EXPECT_TRUE(range_alloc.lookup(new_range_tag, new_start, new_size));
 
@@ -175,7 +176,8 @@ TEST(RangeAllocatorTestsWithParams, ReuseRange)
   range_alloc.add_range(0, 512);
   EXPECT_TRUE(range_alloc.allocate(old_range_tag, 512, 16, offset));
   EXPECT_TRUE(range_alloc.lookup(old_range_tag, old_start, old_size));
-  EXPECT_TRUE(range_alloc.split_range(old_range_tag, tags, sizes, alignment, offsets));
+  EXPECT_EQ(range_alloc.split_range(old_range_tag, tags, sizes, alignment, offsets),
+            tags.size());
   EXPECT_FALSE(range_alloc.lookup(old_range_tag, old_start, old_size));
   EXPECT_TRUE(range_alloc.lookup(new_range_tag, new_start, new_size));
 
@@ -213,7 +215,8 @@ TEST(RangeAllocatorTestsWithParams, SplitRange)
 
   range_alloc.add_range(0, 768);
   EXPECT_TRUE(range_alloc.allocate(old_range_tag, 512, 16, offset));
-  EXPECT_TRUE(range_alloc.split_range(old_range_tag, tags, sizes, alignment, offsets));
+  EXPECT_EQ(range_alloc.split_range(old_range_tag, tags, sizes, alignment, offsets),
+            tags.size());
   for(size_t i = 0; i < tags.size(); i++) {
     EXPECT_TRUE(range_alloc.lookup(tags[i], new_starts[i], new_sizes[i]));
   }
@@ -274,7 +277,8 @@ TEST(RangeAllocatorTestsWithParams, SplitRangeSmaller)
 
   range_alloc.add_range(0, 768);
   EXPECT_TRUE(range_alloc.allocate(old_range_tag, 768, 16, offset));
-  EXPECT_TRUE(range_alloc.split_range(old_range_tag, tags, sizes, alignment, offsets));
+  EXPECT_EQ(range_alloc.split_range(old_range_tag, tags, sizes, alignment, offsets),
+            tags.size());
   for(size_t i = 0; i < tags.size(); i++) {
     EXPECT_TRUE(range_alloc.lookup(tags[i], new_starts[i], new_sizes[i]));
   }
