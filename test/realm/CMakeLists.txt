@@ -54,6 +54,7 @@ list(APPEND REALM_TESTS
   machine_config
   rsrv_acquire_poisoned
   inst_chain_redistrict
+  refcount_setops_test
   )
 
 if(Legion_USE_CUDA)
