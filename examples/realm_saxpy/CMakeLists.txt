@@ -29,6 +29,9 @@ if(Legion_USE_CUDA)
   set_target_cuda_standard(realm_saxpy STANDARD ${Legion_CUDA_STANDARD})
   set_target_cuda_architectures(realm_saxpy ARCHITECTURES ${Legion_CUDA_ARCH})
   set_target_cuda_warnings_and_errors(realm_saxpy WARN_AS_ERROR ${Legion_BUILD_WARN_AS_ERROR})
+  # Remove this once the Realm::Point class is updated
+  target_compile_options(realm_saxpy PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:
+                           -Xcudafe=--diag_suppress=1444>)
 elseif(Legion_USE_HIP)
   set(GPU_SOURCES realm_saxpy_gpu.cu)
   if(Legion_HIP_TARGET STREQUAL "CUDA")

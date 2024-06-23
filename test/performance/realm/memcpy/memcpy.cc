@@ -228,7 +228,7 @@ public:
     graph.clear();
     Realm::Point<MAX_DIM> start_pnt(0);
     Realm::Point<MAX_DIM> end_pnt(0);
-    end_pnt.x = size - 1;
+    end_pnt[0] = size - 1;
     CopyIndexSpace is(Realm::Rect<MAX_DIM>(start_pnt, end_pnt));
     std::vector<size_t> fields(1, sizeof(size_t));
 
@@ -276,7 +276,7 @@ public:
     graph.clear();
     Realm::Point<MAX_DIM> start_pnt(0);
     Realm::Point<MAX_DIM> end_pnt(0);
-    end_pnt.x = size - 1;
+    end_pnt[0] = size - 1;
     CopyIndexSpace is(Realm::Rect<MAX_DIM>(start_pnt, end_pnt));
     std::vector<size_t> fields(1, sizeof(size_t));
 

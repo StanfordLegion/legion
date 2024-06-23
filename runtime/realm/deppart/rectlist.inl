@@ -67,16 +67,16 @@ namespace Realm {
     while(rects.size() > upper_bound) {
       // scan the rectangles to decide which to merge - want the smallest gap
       size_t best_idx = 0;
-      T best_gap = rects[1].lo.x - rects[0].hi.x;
+      T best_gap = rects[1].lo[0] - rects[0].hi[0];
       for(size_t i = 1; i < max_rects; i++) {
-	T gap = rects[i + 1].lo.x - rects[i].hi.x;
+	T gap = rects[i + 1].lo[0] - rects[i].hi[0];
 	if(gap < best_gap) {
 	  best_gap = gap;
 	  best_idx = i;
 	}
       }
       //std::cout << "merging " << rects[best_idx] << " and " << rects[best_idx + 1] << "\n";
-      rects[best_idx].hi.x = rects[best_idx + 1].hi.x;
+      rects[best_idx].hi[0] = rects[best_idx + 1].hi[0];
       rects.erase(rects.begin() + best_idx + 1);
     }
   }
@@ -93,11 +93,11 @@ namespace Realm {
       // optimize for sorted insertion (i.e. stuff at end)
       {
 	Rect<N,T> &lr = *rects.rbegin();
-	if(p.x == (lr.hi.x + 1)) {
-	  lr.hi.x = p.x;
+	if(p[0] == (lr.hi[0] + 1)) {
+	  lr.hi[0] = p[0];
 	  return;
 	}
-	if(p.x > (lr.hi.x + 1)) {
+	if(p[0] > (lr.hi[0] + 1)) {
 	  rects.push_back(Rect<N,T>(p, p));
 	  if((max_rects > 0) && (rects.size() > (size_t)max_rects)) {
 	    //std::cout << "too big " << rects.size() << " > " << max_rects << "\n";
@@ -119,9 +119,9 @@ namespace Realm {
       int hi = rects.size();
       while(lo < hi) {
 	int mid = (lo + hi) >> 1;
-	if(p.x < rects[mid].lo.x)
+	if(p[0] < rects[mid].lo[0])
 	  hi = mid;
-	else if(p.x > rects[mid].hi.x)
+	else if(p[0] > rects[mid].hi[0])
 	  lo = mid + 1;
 	else {
 	  // we landed right on an existing rectangle - we're done
@@ -132,20 +132,20 @@ namespace Realm {
 	}
       }
       // when we get here, 'lo' is the first rectangle above us, so check for a merge below first
-      if((lo > 0) && (rects[lo - 1].hi.x == (p.x - 1))) {
+      if((lo > 0) && (rects[lo - 1].hi[0] == (p[0] - 1))) {
 	// merging low
-	if((lo < (int)rects.size()) && rects[lo].lo.x == (p.x + 1)) {
+	if((lo < (int)rects.size()) && rects[lo].lo[0] == (p[0] + 1)) {
 	  // merging high too
-	  rects[lo - 1].hi.x = rects[lo].hi.x;
+	  rects[lo - 1].hi[0] = rects[lo].hi[0];
 	  rects.erase(rects.begin() + lo);
 	} else {
 	  // just low
-	  rects[lo - 1].hi.x = p.x;
+	  rects[lo - 1].hi[0] = p[0];
 	}
       } else {
-	if((lo < (int)rects.size()) && rects[lo].lo.x == (p.x + 1)) {
+	if((lo < (int)rects.size()) && rects[lo].lo[0] == (p[0] + 1)) {
 	  // merging just high
-	  rects[lo].lo.x = p.x;
+	  rects[lo].lo[0] = p[0];
 	} else {
 	  // no merge - must insert
 	  rects.insert(rects.begin() + lo, Rect<N,T>(p, p));
@@ -223,11 +223,11 @@ namespace Realm {
     if(N == 1) {
       // try to optimize for sorted insertion (i.e. stuff at end)
       Rect<N,T> &lr = *rects.rbegin();
-      if(_r.lo.x == (lr.hi.x + 1)) {
-	lr.hi.x = _r.hi.x;
+      if(_r.lo[0] == (lr.hi[0] + 1)) {
+	lr.hi[0] = _r.hi[0];
 	return;
       }
-      if(_r.lo.x > (lr.hi.x + 1)) {
+      if(_r.lo[0] > (lr.hi[0] + 1)) {
 	rects.push_back(_r);
 	if((max_rects > 0) && (rects.size() > (size_t)max_rects)) {
           merge_rects(max_rects);
@@ -239,12 +239,12 @@ namespace Realm {
       //  that will get big and aren't sorted well (e.g. images), the HybridRectangleList
       //  is a better choice)
       // use a binary search to skip over all rectangles that are strictly
-      //  below the new rectangle (i.e. all r s.t. r.hi.x + 1 < _r.lo.x)
+      //  below the new rectangle (i.e. all r s.t. r.hi[0] + 1 < _r.lo[0])
       int lo = 0;
       int hi = rects.size();
       while(lo < hi) {
 	int mid = (lo + hi) >> 1;
-	if(rects[mid].hi.x + 1 < _r.lo.x)
+	if(rects[mid].hi[0] + 1 < _r.lo[0])
 	  lo = mid + 1;
 	else
 	  hi = mid;
@@ -256,7 +256,7 @@ namespace Realm {
 
       // if the new rect fits entirely below the existing one, insert the new
       //  one here and we're done
-      if(_r.hi.x + 1 < mr.lo.x) {
+      if(_r.hi[0] + 1 < mr.lo[0]) {
 	rects.insert(rects.begin()+lo, _r);
 	return;
       }
@@ -267,8 +267,8 @@ namespace Realm {
       int dlo = lo + 1;
       int dhi = dlo;
       while((dhi < (int)rects.size()) &&
-	    ((mr.hi.x + 1) >= rects[dhi].lo.x)) {
-	mr.hi.x = std::max(mr.hi.x, rects[dhi].hi.x);
+	    ((mr.hi[0] + 1) >= rects[dhi].lo[0])) {
+	mr.hi[0] = std::max(mr.hi[0], rects[dhi].hi[0]);
 	dhi++;
       }
       if(dhi > dlo)
@@ -569,52 +569,52 @@ namespace Realm {
 
     // otherwise add to the map
     assert(!as_map.empty());
-    typename std::map<T, T>::iterator it = as_map.lower_bound(p.x);
+    typename std::map<T, T>::iterator it = as_map.lower_bound(p[0]);
     if(it == as_map.end()) {
       //std::cout << "add " << p << " BIGGER " << as_map.rbegin()->first << "," << as_map.rbegin()->second << "\n";
       // bigger than everything - see if we can merge with the last guy
       T& last = as_map.rbegin()->second;
-      if(last == (p.x - 1))
-	last = p.x;
-      else if(last < (p.x - 1))
-	as_map[p.x] = p.x;
+      if(last == (p[0] - 1))
+	last = p[0];
+      else if(last < (p[0] - 1))
+	as_map[p[0]] = p[0];
     } 
-    else if(it->first == p.x) {
+    else if(it->first == p[0]) {
       //std::cout << "add " << p << " OVERLAP1 " << it->first << "," << it->second << "\n";
       // we're the beginning of an existing range - nothing to do
     } else if(it == as_map.begin()) {
       //std::cout << "add " << p << " FIRST " << it->first << "," << it->second << "\n";
       // we're before everything - see if we can merge with the first guy
-      if(it->first == (p.x + 1)) {
+      if(it->first == (p[0] + 1)) {
 	T last = it->second;
 	as_map.erase(it);
-	as_map[p.x] = last;
+	as_map[p[0]] = last;
       } else {
-	as_map[p.x] = p.x;
+	as_map[p[0]] = p[0];
       }
     } else {
       typename std::map<T, T>::iterator it2 = it; --it2;
       //std::cout << "add " << p << " BETWEEN " << it->first << "," << it->second << " / " << it2->first << "," << it2->second << "\n";
-      if(it2->second >= p.x) {
+      if(it2->second >= p[0]) {
 	// range below us includes us - nothing to do
       } else {
-	bool merge_above = it->first == (p.x + 1);
-	bool merge_below = it2->second == (p.x - 1);
+	bool merge_above = it->first == (p[0] + 1);
+	bool merge_below = it2->second == (p[0] - 1);
 
 	if(merge_below) {
 	  if(merge_above) {
 	    it2->second = it->second;
 	    as_map.erase(it);
 	  } else
-	    it2->second = p.x;
+	    it2->second = p[0];
 	} else {
 	  T last;
 	  if(merge_above) {
 	    last = it->second;
 	    as_map.erase(it);
 	  } else
-	    last = p.x;
-	  as_map[p.x] = last;
+	    last = p[0];
+	  as_map[p[0]] = last;
 	}
       }
     }
@@ -639,33 +639,33 @@ namespace Realm {
 
     // otherwise add to the map
     assert(!as_map.empty());
-    typename std::map<T, T>::iterator it = as_map.lower_bound(r.lo.x);
+    typename std::map<T, T>::iterator it = as_map.lower_bound(r.lo[0]);
     if(it == as_map.end()) {
       //std::cout << "add " << p << " BIGGER " << as_map.rbegin()->first << "," << as_map.rbegin()->second << "\n";
       // bigger than everything - see if we can merge with the last guy
       T& last = as_map.rbegin()->second;
-      if(last == (r.lo.x - 1))
-	last = r.hi.x;
-      else if(last < (r.lo.x - 1))
-	as_map[r.lo.x] = r.hi.x;
+      if(last == (r.lo[0] - 1))
+	last = r.hi[0];
+      else if(last < (r.lo[0] - 1))
+	as_map[r.lo[0]] = r.hi[0];
     } else {
       // if the interval we found isn't the first, we may need to back up one to
       //  find the one that overlaps the start of our range
       if(it != as_map.begin()) {
 	typename std::map<T, T>::iterator it2 = it;
 	--it2;
-	if(it2->second >= (r.lo.x - 1))
+	if(it2->second >= (r.lo[0] - 1))
 	  it = it2;
       }
 
-      if(it->first <= r.lo.x) {
-	assert((it->second + 1) >= r.lo.x); // it had better overlap or just touch
+      if(it->first <= r.lo[0]) {
+	assert((it->second + 1) >= r.lo[0]); // it had better overlap or just touch
 
-	if(it->second < r.hi.x)
-	  it->second = r.hi.x;
+	if(it->second < r.hi[0])
+	  it->second = r.hi[0];
       } else {
 	// we are the low end of a range (but may absorb other ranges)
-	it = as_map.insert(std::make_pair(r.lo.x, r.hi.x)).first;
+	it = as_map.insert(std::make_pair(r.lo[0], r.hi[0])).first;
       }
 
       // have we subsumed or merged with anything?
@@ -691,7 +691,7 @@ namespace Realm {
     for(typename std::vector<Rect<1,T> >::iterator it = this->rects.begin();
 	it != this->rects.end();
 	it++)
-      as_map[it->lo.x] = it->hi.x;
+      as_map[it->lo[0]] = it->hi[0];
     this->rects.clear();
     is_vector = false;
   }
@@ -705,12 +705,12 @@ namespace Realm {
 	  it != as_map.end();
 	  it++) {
 	Rect<1,T> r;
-	r.lo.x = it->first;
-	r.hi.x = it->second;
+	r.lo[0] = it->first;
+	r.hi[0] = it->second;
 	this->rects.push_back(r);
       }
       for(size_t i = 1; i < this->rects.size(); i++)
-	assert(this->rects[i-1].hi.x < (this->rects[i].lo.x - 1));
+	assert(this->rects[i-1].hi[0] < (this->rects[i].lo[0] - 1));
       as_map.clear();
       is_vector = true;
     }

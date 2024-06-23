@@ -163,15 +163,15 @@ namespace Realm {
   }
 
   template <typename RT, typename TT>
-  inline bool BasicRangeAllocator<RT, TT>::split_range(TT old_tag,
-                                                       const std::vector<TT> &new_tags,
-                                                       const std::vector<RT> &sizes,
-                                                       const std::vector<RT> &alignments,
-                                                       std::vector<RT> &allocs_first)
+  inline size_t BasicRangeAllocator<RT, TT>::split_range(TT old_tag,
+                                                         const std::vector<TT> &new_tags,
+                                                         const std::vector<RT> &sizes,
+                                                         const std::vector<RT> &alignments,
+                                                         std::vector<RT> &allocs_first)
   {
     typename std::map<TT, unsigned>::iterator it = allocated.find(old_tag);
     if(it == allocated.end()) {
-      return false;
+      return 0;
     }
 
     size_t n = new_tags.size();
@@ -182,16 +182,6 @@ namespace Realm {
     Range *prev = &ranges[prev_idx];
     unsigned next_idx = prev->next;
 
-    RT alloc_size = 0;
-    for(size_t i = 0; i < n; i++) {
-      RT offset = calculate_offset(prev->first, alignments[0]);
-      alloc_size += sizes[i] + offset;
-    }
-
-    if((prev->last - prev->first) < alloc_size) {
-      return false;
-    }
-
     allocated.erase(old_tag);
 
     if(prev_idx == SENTINEL) {
@@ -199,28 +189,35 @@ namespace Realm {
       for(size_t i = 0; i < n; i++) {
         allocated[new_tags[i]] = SENTINEL;
       }
-      return true;
+      return n;
     }
 
     RT remaining_size = prev->last - prev->first;
 
+    size_t successful_allocations = 0;
+
     // First part reuse existing allocated range for the first tag
     RT offset = calculate_offset(prev->first, alignments[0]);
-    prev->last = prev->first + sizes[0] + offset;
+    if ((sizes[0] + offset) <= remaining_size) {
+      prev->last = prev->first + sizes[0] + offset;
 
-    allocs_first[0] = prev->first + offset;
+      allocs_first[0] = prev->first + offset;
 
-    allocated[new_tags[0]] = prev_idx;
-    remaining_size -= sizes[0];
+      allocated[new_tags[0]] = prev_idx;
+      remaining_size -= (sizes[0] + offset);
+      successful_allocations++;
+    }
 
     // Second part create new ranges for the remaining requested tags
     for(size_t i = 1; i < n; i++) {
       size_t start = prev_idx > 0 ? prev->first : 0;
       RT offset = calculate_offset(start, alignments[i]);
-
+      if (remaining_size < (sizes[i] + offset))
+        break;
       unsigned new_idx = alloc_range(prev->last, prev->last + sizes[i] + offset);
       allocated[new_tags[i]] = new_idx;
-      remaining_size -= sizes[i];
+      remaining_size -= (sizes[i] + offset);
+      successful_allocations++;
 
       Range *new_prev = &ranges[new_idx];
 
@@ -260,7 +257,7 @@ namespace Realm {
 
     assert(remaining_size == 0);
 
-    return true;
+    return successful_allocations;
   }
 
   template <typename RT, typename TT>

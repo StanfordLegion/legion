@@ -1190,6 +1190,8 @@ class HasWaiters(ABC):
                           end: int
     ) -> None:
         self.wait_intervals.append(WaitInterval(start, ready, end))
+        # Keep these sorted
+        self.wait_intervals.sort(key=lambda w: w.start)
 
     @typecheck
     def active_time(self) -> int:

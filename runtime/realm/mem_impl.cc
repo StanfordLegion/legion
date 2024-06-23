@@ -426,7 +426,7 @@ namespace Realm {
     }
 
     // adds a new instance to this memory, to be filled in by caller
-    RegionInstanceImpl *MemoryImpl::new_instance(void)
+    RegionInstanceImpl *MemoryImpl::new_instance(const ProfilingRequestSet &prs)
     {
       // selecting a slot requires holding the mutex
       unsigned inst_idx;
@@ -442,21 +442,54 @@ namespace Realm {
 	  if(new_size > (1 << ID::INSTANCE_INDEX_WIDTH)) {
 	    new_size = (1 << ID::INSTANCE_INDEX_WIDTH);
 	    if(old_size == new_size) {
-	      // completely out of slots - nothing we can do
-	      return 0;
-	    }
-	  }
-	  local_instances.instances.resize(new_size, 0);
-	  local_instances.free_list.resize(chunk_size - 1);
-	  for(size_t i = 0; i < chunk_size - 1; i++)
-	    local_instances.free_list[i] = new_size - 1 - i;
-	  inst_idx = old_size;
-	  inst_impl = 0;
-	} else {
-	  inst_idx = local_instances.free_list.back();
-	  local_instances.free_list.pop_back();
-	  inst_impl = local_instances.instances[inst_idx];
-	}
+              // completely out of slots - nothing we can do
+              // Release the lock and check to see if anyone is listening
+              al.release();
+              // import the profiling requests to see if anybody is paying attention to
+              //  failure
+              ProfilingMeasurementCollection pmc;
+              pmc.import_requests(prs);
+              bool reported = false;
+              if(pmc.wants_measurement<ProfilingMeasurements::InstanceStatus>()) {
+                ProfilingMeasurements::InstanceStatus stat;
+                stat.result =
+                    ProfilingMeasurements::InstanceStatus::INSTANCE_COUNT_EXCEEDED;
+                stat.error_code = 0;
+                pmc.add_measurement(stat);
+                reported = true;
+              }
+              if(pmc.wants_measurement<ProfilingMeasurements::InstanceAbnormalStatus>()) {
+                ProfilingMeasurements::InstanceAbnormalStatus stat;
+                stat.result =
+                    ProfilingMeasurements::InstanceStatus::INSTANCE_COUNT_EXCEEDED;
+                stat.error_code = 0;
+                pmc.add_measurement(stat);
+                reported = true;
+              }
+              if(pmc.wants_measurement<ProfilingMeasurements::InstanceAllocResult>()) {
+                ProfilingMeasurements::InstanceAllocResult result;
+                result.success = false;
+                pmc.add_measurement(result);
+              }
+              if(!reported) {
+                // fatal error
+                log_inst.fatal() << "FATAL: instance count exceeded for memory " << me;
+                assert(0);
+              }
+              return 0;
+            }
+          }
+          local_instances.instances.resize(new_size, 0);
+          local_instances.free_list.resize(chunk_size - 1);
+          for(size_t i = 0; i < chunk_size - 1; i++)
+            local_instances.free_list[i] = new_size - 1 - i;
+          inst_idx = old_size;
+          inst_impl = 0;
+        } else {
+          inst_idx = local_instances.free_list.back();
+          local_instances.free_list.pop_back();
+          inst_impl = local_instances.instances[inst_idx];
+        }
       }
 
       // we've got a slot and possibly an object to reuse - if not, allocate
@@ -567,7 +600,7 @@ namespace Realm {
 #endif
     }
 
-    MemoryImpl::AllocationResult LocalManagedMemory::reuse_allocated_range(
+    void LocalManagedMemory::reuse_allocated_range(
         RegionInstanceImpl *old_inst, std::vector<RegionInstanceImpl *> &new_insts)
     {
       AutoLock<> al(allocator_mutex);
@@ -575,13 +608,19 @@ namespace Realm {
 #ifdef DEBUG_REALM
       for(const PendingAlloc &alloc : pending_allocs) {
         if(alloc.inst == old_inst) {
-          return AllocationResult::ALLOC_INSTANT_FAILURE;
+          for(RegionInstanceImpl *inst : new_insts)
+            inst->notify_allocation(AllocationResult::ALLOC_INSTANT_FAILURE, 0,
+                                    TimeLimit::responsive());
+          return;
         }
       }
 
       for(const PendingRelease &release : pending_releases) {
         if(release.inst == old_inst) {
-          return AllocationResult::ALLOC_INSTANT_FAILURE;
+          for(RegionInstanceImpl *inst : new_insts)
+            inst->notify_allocation(AllocationResult::ALLOC_INSTANT_FAILURE, 0,
+                                    TimeLimit::responsive());
+          return;
         }
       }
 #endif
@@ -596,17 +635,15 @@ namespace Realm {
         tags[i] = new_insts[i]->me;
       }
 
-      std::vector<size_t> offsets(num_insts);
-      if(!current_allocator.split_range(old_inst->me, tags, sizes, alignments, offsets)) {
-        return AllocationResult::ALLOC_INSTANT_FAILURE;
-      }
-
-      // adjust offsets
-      for(size_t i = 0; i < num_insts; i++) {
-        new_insts[i]->metadata.inst_offset = offsets[i];
-      }
-
-      return AllocationResult::ALLOC_INSTANT_SUCCESS;
+      std::vector<size_t> offsets(num_insts, 0);
+      size_t allocated =
+          current_allocator.split_range(old_inst->me, tags, sizes, alignments, offsets);
+      for(unsigned idx = 0; idx < num_insts; idx++)
+        new_insts[idx]->notify_allocation((idx < allocated)
+                                              ? AllocationResult::ALLOC_INSTANT_SUCCESS
+                                              : AllocationResult::ALLOC_INSTANT_FAILURE,
+                                          offsets[idx], TimeLimit::responsive());
+      old_inst->notify_deallocation();
     }
 
     // attempt to allocate storage for the specified instance
@@ -782,7 +819,7 @@ namespace Realm {
             if(triggered) {
               // we can apply the destruction directly to current state
               if(inst->metadata.inst_offset != RegionInstanceImpl::INSTOFFSET_FAILED)
-                current_allocator.deallocate(inst->me, inst->is_redistricted);
+                current_allocator.deallocate(inst->me);
             } else {
               // push the op, but we're not maintaining a future state yet
               pending_releases.push_back(
@@ -798,8 +835,8 @@ namespace Realm {
                 //  be deferred)
               } else {
                 // event is known to have triggered, so these must not fail
-                release_allocator.deallocate(inst->me, inst->is_redistricted);
-                future_allocator.deallocate(inst->me, inst->is_redistricted);
+                release_allocator.deallocate(inst->me);
+                future_allocator.deallocate(inst->me);
                 // see if we can reorder this (and maybe other) releases to
                 //  satisfy the pending allocs
                 if(attempt_release_reordering(successful_allocs)) {
@@ -1089,11 +1126,11 @@ namespace Realm {
 	  //  poisoned), we unclog things in the order we planned
 	  if(it->inst == inst) {
 	    if(!pending_allocs.empty())
-              release_allocator.deallocate(it->inst->me, it->inst->is_redistricted);
+              release_allocator.deallocate(it->inst->me);
 
             // catch up the current state
             do {
-              current_allocator.deallocate(it->inst->me, it->inst->is_redistricted);
+              current_allocator.deallocate(it->inst->me);
               // deallocs.push_back(it->inst);
 
               // did this unblock any allocations?
@@ -1162,7 +1199,7 @@ namespace Realm {
                 // if(it->seqid > pending_allocs.front().last_release_seqid)
                 //  break;
                 if(it->is_ready)
-                  release_allocator.deallocate(it->inst->me, it->inst->is_redistricted);
+                  release_allocator.deallocate(it->inst->me);
               }
             }
           } else {
@@ -1175,14 +1212,14 @@ namespace Realm {
 
             if(pending_allocs.empty()) {
               // we can apply this delete to the current state
-              current_allocator.deallocate(inst->me, inst->is_redistricted);
+              current_allocator.deallocate(inst->me);
               // deallocs.push_back(inst);
               it = pending_releases.erase(it);
             } else {
               // apply this free to the release_allocator - we'll check below
               //  to see if it unblocks one or more allocations AND leaves the
               //  rest possible
-              release_allocator.deallocate(inst->me, inst->is_redistricted);
+              release_allocator.deallocate(inst->me);
             }
           }
 

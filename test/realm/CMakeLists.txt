@@ -57,7 +57,7 @@ list(APPEND REALM_TESTS
   )
 
 if(Legion_USE_CUDA)
-
+  
   # some tests have CUDA source files too
   set(CUDASRC_memspeed memspeed_gpu.cu)
   set(CUDASRC_simple_reduce simple_reduce_gpu.cu)
@@ -96,6 +96,9 @@ foreach(test IN LISTS REALM_TESTS)
     set_target_cuda_standard(${test} STANDARD ${Legion_CUDA_STANDARD})
     set_target_cuda_architectures(${test} ARCHITECTURES ${Legion_CUDA_ARCH})
     set_target_cuda_warnings_and_errors(${test} WARN_AS_ERROR ${Legion_BUILD_WARN_AS_ERROR})
+    # Remove this once the Realm::Point class is updated
+    target_compile_options(${test} PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:
+                             -Xcudafe=--diag_suppress=1444>)
   elseif(HIPSRC_${test})
     hip_add_executable(${test} ${test}.cc ${HIPSRC_${test}})
   else()
@@ -103,7 +106,6 @@ foreach(test IN LISTS REALM_TESTS)
   endif()
   target_link_libraries(${test} Legion::Realm)
   target_compile_options(${test} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
-
   if(Legion_USE_HIP)
     target_include_directories(${test} PRIVATE ${HIP_INCLUDE_DIRS})
     if(Legion_HIP_TARGET STREQUAL "CUDA")
