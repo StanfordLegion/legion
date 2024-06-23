@@ -843,7 +843,7 @@ namespace Realm {
         // generate a poisoned event for completion
         GenEventImpl *ev = GenEventImpl::create_genevent();
         Event ready_event = ev->current_event();
-	GenEventImpl::trigger(ready_event, true /*poisoned*/);
+        GenEventImpl::trigger(ready_event, true /*poisoned*/);
 	return ready_event;
       }
 
