@@ -395,7 +395,7 @@ pub struct ProcEntry {
     pub initiation_op: Option<OpID>,
     pub kind: ProcEntryKind,
     pub time_range: TimeRange,
-    pub creator: ProfUID,
+    pub creator: Option<ProfUID>,
     pub waiters: Waiters,
 }
 
@@ -406,7 +406,7 @@ impl ProcEntry {
         initiation_op: Option<OpID>,
         kind: ProcEntryKind,
         time_range: TimeRange,
-        creator: ProfUID,
+        creator: Option<ProfUID>,
     ) -> Self {
         ProcEntry {
             base,
@@ -449,11 +449,7 @@ impl ContainerEntry for ProcEntry {
     }
 
     fn creator(&self) -> Option<ProfUID> {
-        if self.creator.0 > 0 {
-            Some(self.creator)
-        } else {
-            None
-        }
+        self.creator
     }
 
     fn name(&self, state: &State) -> String {
@@ -622,7 +618,7 @@ impl Proc {
         initiation_op: Option<OpID>,
         kind: ProcEntryKind,
         time_range: TimeRange,
-        creator: ProfUID,
+        creator: Option<ProfUID>,
         op_prof_uid: &mut BTreeMap<OpID, ProfUID>,
         prof_uid_proc: &mut BTreeMap<ProfUID, ProcID>,
     ) -> &mut ProcEntry {
@@ -709,7 +705,7 @@ impl Proc {
                     let call_stop = entry.time_range.stop.unwrap();
                     assert!(call_start <= call_stop);
                     subcalls
-                        .entry(entry.creator)
+                        .entry(entry.creator.unwrap())
                         .or_insert_with(Vec::new)
                         .push((*uid, call_start, call_stop));
                 }
@@ -809,7 +805,7 @@ impl Proc {
                     }
                 }
                 // Update the call entry creator
-                call_entry.creator = caller_uid.unwrap();
+                call_entry.creator = caller_uid;
             }
             // Finally add the task entry back in now that we're done mutating it
             self.entries.insert(*task_uid, task_entry);
@@ -1320,9 +1316,9 @@ impl ContainerEntry for ChanEntry {
 
     fn creator(&self) -> Option<ProfUID> {
         match self {
-            ChanEntry::Copy(copy) => Some(copy.creator),
-            ChanEntry::Fill(fill) => Some(fill.creator),
-            ChanEntry::DepPart(deppart) => Some(deppart.creator),
+            ChanEntry::Copy(copy) => copy.creator,
+            ChanEntry::Fill(fill) => fill.creator,
+            ChanEntry::DepPart(deppart) => deppart.creator,
         }
     }
 
@@ -1927,9 +1923,9 @@ impl Inst {
     fn trim_time_range(&mut self, start: Timestamp, stop: Timestamp) -> bool {
         self.time_range.trim_time_range(start, stop)
     }
-    fn set_creator(&mut self, creator: ProfUID) -> &mut Self {
-        assert!(self.creator.map_or(true, |c| c == creator));
-        self.creator = Some(creator);
+    fn set_creator(&mut self, creator: Option<ProfUID>) -> &mut Self {
+        assert!(self.creator.map_or(true, |c| c == creator.unwrap()));
+        self.creator = creator;
         self
     }
 }
@@ -2504,7 +2500,7 @@ impl CopyInstInfo {
 #[derive(Debug)]
 pub struct Copy {
     base: Base,
-    creator: ProfUID,
+    creator: Option<ProfUID>,
     time_range: TimeRange,
     chan_id: Option<ChanID>,
     pub op_id: OpID,
@@ -2520,7 +2516,7 @@ impl Copy {
         time_range: TimeRange,
         op_id: OpID,
         size: u64,
-        creator: ProfUID,
+        creator: Option<ProfUID>,
         collective: u32,
     ) -> Self {
         Copy {
@@ -2626,7 +2622,7 @@ impl FillInstInfo {
 #[derive(Debug)]
 pub struct Fill {
     base: Base,
-    creator: ProfUID,
+    creator: Option<ProfUID>,
     time_range: TimeRange,
     chan_id: Option<ChanID>,
     pub op_id: OpID,
@@ -2635,7 +2631,13 @@ pub struct Fill {
 }
 
 impl Fill {
-    fn new(base: Base, time_range: TimeRange, op_id: OpID, size: u64, creator: ProfUID) -> Self {
+    fn new(
+        base: Base,
+        time_range: TimeRange,
+        op_id: OpID,
+        size: u64,
+        creator: Option<ProfUID>,
+    ) -> Self {
         Fill {
             base,
             creator,
@@ -2666,7 +2668,7 @@ impl Fill {
 #[derive(Debug)]
 pub struct DepPart {
     base: Base,
-    creator: ProfUID,
+    creator: Option<ProfUID>,
     pub part_op: DepPartKind,
     time_range: TimeRange,
     pub op_id: OpID,
@@ -2678,7 +2680,7 @@ impl DepPart {
         part_op: DepPartKind,
         time_range: TimeRange,
         op_id: OpID,
-        creator: ProfUID,
+        creator: Option<ProfUID>,
     ) -> Self {
         DepPart {
             base,
@@ -2899,14 +2901,16 @@ impl State {
             .or_insert_with(|| Operation::new(Base::new(alloc.get_prof_uid())))
     }
 
-    fn find_or_create_prof_uid(&mut self, event: EventID) -> ProfUID {
-        if event.0 == 0 {
-            ProfUID(0)
+    fn find_or_create_prof_uid(&mut self, fevent: EventID) -> Option<ProfUID> {
+        if let Some(event) = fevent.existing() {
+            Some(
+                *self
+                    .fevents
+                    .entry(event)
+                    .or_insert_with(|| self.prof_uid_allocator.get_prof_uid()),
+            )
         } else {
-            *self
-                .fevents
-                .entry(event)
-                .or_insert_with(|| self.prof_uid_allocator.get_prof_uid())
+            None
         }
     }
 
@@ -2966,7 +2970,7 @@ impl State {
         // logged first, this will come back Some(_) and we'll store it below.
         let parent_id = self.create_op(op_id).parent_id;
         self.tasks.insert(op_id, proc_id);
-        let prof_uid = self.find_or_create_prof_uid(fevent);
+        let prof_uid = self.find_or_create_prof_uid(fevent).unwrap();
         let creator_uid = self.find_or_create_prof_uid(creator);
         let proc = self.procs.get_mut(&proc_id).unwrap();
         proc.create_proc_entry(
@@ -3003,7 +3007,7 @@ impl State {
     ) -> &mut ProcEntry {
         self.create_op(op_id);
         self.meta_tasks.insert((op_id, variant_id), proc_id);
-        let prof_uid = self.find_or_create_prof_uid(fevent);
+        let prof_uid = self.find_or_create_prof_uid(fevent).unwrap();
         let creator_uid = self.find_or_create_prof_uid(creator);
         let proc = self.procs.get_mut(&proc_id).unwrap();
         proc.create_proc_entry(
@@ -3132,7 +3136,7 @@ impl State {
         creator: EventID,
         fevent: EventID,
     ) -> &mut ProcEntry {
-        let prof_uid = self.find_or_create_prof_uid(fevent);
+        let prof_uid = self.find_or_create_prof_uid(fevent).unwrap();
         let creator_uid = self.find_or_create_prof_uid(creator);
         let proc = self.procs.get_mut(&proc_id).unwrap();
         proc.create_proc_entry(
@@ -3157,7 +3161,7 @@ impl State {
         collective: u32,
         copies: &'a mut BTreeMap<EventID, Copy>,
     ) -> &'a mut Copy {
-        let prof_uid = self.find_or_create_prof_uid(fevent);
+        let prof_uid = self.find_or_create_prof_uid(fevent).unwrap();
         let creator_uid = self.find_or_create_prof_uid(creator);
         assert!(!copies.contains_key(&fevent));
         copies.entry(fevent).or_insert_with(|| {
@@ -3181,7 +3185,7 @@ impl State {
         fevent: EventID,
         fills: &'a mut BTreeMap<EventID, Fill>,
     ) -> &'a mut Fill {
-        let prof_uid = self.find_or_create_prof_uid(fevent);
+        let prof_uid = self.find_or_create_prof_uid(fevent).unwrap();
         let creator_uid = self.find_or_create_prof_uid(creator);
         assert!(!fills.contains_key(&fevent));
         fills
@@ -4556,7 +4560,7 @@ fn process_record(
             event,
             backtrace_id,
         } => {
-            let task_uid = state.find_or_create_prof_uid(*fevent);
+            let task_uid = state.find_or_create_prof_uid(*fevent).unwrap();
             let proc = state.procs.get_mut(proc_id).unwrap();
             proc.record_event_wait(task_uid, *event, *backtrace_id);
         }
