@@ -46,7 +46,7 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
         preimages, ProfilingRequestSet());
     e2.wait();
     for(size_t i = 0; i < preimages.size(); i++) {
-      preimages[i].sparsity.remove_references();
+      preimages[i].sparsity.destroy();
     }
   }
 }
@@ -102,12 +102,6 @@ void main_task(const void *args, size_t arglen, const void *userdata, size_t use
       for(PointInRectIterator<1, int> pir(root1.bounds); pir.valid; pir.step()) {
         a_vals.write(pir.p, pir.p[0]);
       }
-    }
-
-    if((TestConfig::remote_create) &&
-       NodeID(ID(*it).memory_owner_node()) ==
-           NodeID(ID(ptr_data[0].inst).instance_owner_node())) {
-      continue;
     }
 
     TaskArgs args;
