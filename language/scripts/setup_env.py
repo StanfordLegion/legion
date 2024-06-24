@@ -269,6 +269,11 @@ def install_llvm(llvm_dir, llvm_install_dir, scratch_dir, llvm_version, cmake_ex
         llvm_source_dir = os.path.join(llvm_dir, 'llvm-project-17.0.6.src', 'llvm')
         clang_tarball = None
         download(llvm_tarball, '%s/llvmorg-17.0.6/llvm-project-17.0.6.src.tar.xz' % mirror, '58a8818c60e6627064f312dbf46c02d9949956558340938b71cf731ad8bc0813', insecure=insecure)
+    elif llvm_version == '181':
+        llvm_tarball = os.path.join(llvm_dir, 'llvm-project-18.1.7.src.tar.xz')
+        llvm_source_dir = os.path.join(llvm_dir, 'llvm-project-18.1.7.src', 'llvm')
+        clang_tarball = None
+        download(llvm_tarball, '%s/llvmorg-18.1.7/llvm-project-18.1.7.src.tar.xz' % mirror, '74446ab6943f686391954cbda0d77ae92e8a60c432eff437b8666e121d748ec4', insecure=insecure)
     else:
         assert False
 
@@ -276,7 +281,6 @@ def install_llvm(llvm_dir, llvm_install_dir, scratch_dir, llvm_version, cmake_ex
         extract(llvm_dir, llvm_tarball, 'xz')
         if clang_tarball:
             extract(llvm_dir, clang_tarball, 'xz')
-        if clang_tarball:
             os.rename(clang_source_dir, os.path.join(llvm_source_dir, 'tools', 'clang'))
 
         llvm_build_dir = tempfile.mkdtemp(prefix='setup_env_llvm_build', dir=scratch_dir or llvm_dir)
@@ -599,7 +603,7 @@ if __name__ == '__main__':
         default=[],
         help='Extra flags for Make/CMake command.')
     parser.add_argument(
-        '--llvm-version', dest='llvm_version', required=False, choices=('60', '110', '130', '160', '170'),
+        '--llvm-version', dest='llvm_version', required=False, choices=('60', '110', '130', '160', '170', '181'),
         default=discover_llvm_version(),
         help='Select LLVM version.')
     parser.add_argument(
