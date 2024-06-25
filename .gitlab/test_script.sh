@@ -7,6 +7,7 @@ set -x
 JOB_WORKDIR="${EXTERNAL_WORKDIR}_${CI_JOB_ID:-legion${TEST_LEGION_CXX:-1}_regent${TEST_REGENT:-1}}"
 rm -rf $JOB_WORKDIR
 cp -r $CI_PROJECT_DIR $JOB_WORKDIR
+cd $JOB_WORKDIR
 echo "Running tests in $JOB_WORKDIR"
 
 # copy files from shared environment
