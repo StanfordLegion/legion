@@ -430,9 +430,9 @@ def install(gasnet=False, cuda=False, hip=False, openmp=False, python=False, llv
                 pass # don't disturb what's already there
             elif os.path.realpath(llvm_link) != os.path.realpath(llvm_dir):
                 os.unlink(llvm_link)
-                os.symlink(llvm_link, llvm_dir)
+                os.symlink(llvm_dir, llvm_link)
         else:
-            os.symlink(llvm_link, llvm_dir)
+            os.symlink(llvm_dir, llvm_link)
 
     if legion_install_prefix is None:
         bindings_dir = os.path.join(legion_dir, 'bindings', 'regent')
