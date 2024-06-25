@@ -377,7 +377,7 @@ def get_legion_install_prefix(legion_install_prefix, regent_dir, default=None):
 def install(gasnet=False, cuda=False, hip=False, openmp=False, python=False, llvm=False, hdf=False,
             spy=False, conduit=None, cmake=None,
             cmake_exe=None, cmake_build_dir=None,
-            legion_install_prefix=None,
+            legion_install_prefix=None, llvm_dir=None,
             terra_url=None, terra_branch=None, terra_use_cmake=None, external_terra_dir=None,
             gasnet_dir=None, debug=False, clean_first=True, extra_flags=[],
             thread_count=None, verbose=False):
@@ -423,16 +423,16 @@ def install(gasnet=False, cuda=False, hip=False, openmp=False, python=False, llv
     # install_luarocks(terra_dir, luarocks_dir)
 
     # Link LLVM too so that Regent can find it later.
-    if llvm:
-        llvm_dir = os.path.join(regent_dir, 'llvm')
-        if os.path.lexists(llvm_dir):
-            if not os.path.islink(llvm_dir):
+    if llvm_dir:
+        llvm_link = os.path.join(regent_dir, 'llvm')
+        if os.path.lexists(llvm_link):
+            if not os.path.islink(llvm_link):
                 pass # don't disturb what's already there
-            elif os.path.realpath(llvm_dir) != os.path.realpath(llvm):
-                os.unlink(llvm_dir)
-                os.symlink(llvm_dir, llvm)
+            elif os.path.realpath(llvm_link) != os.path.realpath(llvm_dir):
+                os.unlink(llvm_link)
+                os.symlink(llvm_link, llvm_dir)
         else:
-            os.symlink(llvm_dir, llvm)
+            os.symlink(llvm_link, llvm_dir)
 
     if legion_install_prefix is None:
         bindings_dir = os.path.join(legion_dir, 'bindings', 'regent')
@@ -495,6 +495,9 @@ def driver():
         '--llvm', dest='llvm', action='store_true', required=False,
         default=os.environ.get('USE_LLVM') == '1',
         help='Build Legion (and compatible Terra) with LLVM support.')
+    parser.add_argument(
+        '--with-llvm', dest='llvm_dir', metavar='DIR', required=False,
+        help='Path to LLVM installation directory.')
     parser.add_argument(
         '--hdf5', '--hdf', dest='hdf', action='store_true', required=False,
         default=os.environ.get('USE_HDF') == '1',

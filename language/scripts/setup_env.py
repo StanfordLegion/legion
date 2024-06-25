@@ -226,6 +226,7 @@ def build_regent(root_dir, use_cmake, cmake_exe, extra_flags,
          '-j', str(thread_count),
         ] + (['--cmake', '--with-cmake', cmake_exe]
              if use_cmake else ['--no-cmake']) +
+        (['--with-llvm', llvm_dir] if llvm_dir is not None else []) +
         ['--extra=%s' % flag for flag in extra_flags],
         env=env)
 
