@@ -486,7 +486,7 @@ def setup_terra(llvm_version, terra_url, terra_branch, terra_binary, terra_lua, 
                 if not cache:
                     extract(prefix_dir, llvm_tarball, 'xz')
 
-        return (bin_dir, None)
+        return (bin_dir, llvm_install_dir)
 
     llvm_dir = os.path.realpath(os.path.join(prefix_dir, 'llvm'))
     llvm_install_dir = os.path.join(llvm_dir, 'install')

@@ -422,6 +422,18 @@ def install(gasnet=False, cuda=False, hip=False, openmp=False, python=False, llv
     # luarocks_dir = os.path.join(regent_dir, 'luarocks')
     # install_luarocks(terra_dir, luarocks_dir)
 
+    # Link LLVM too so that Regent can find it later.
+    if llvm:
+        llvm_dir = os.path.join(regent_dir, 'llvm')
+        if os.path.lexists(llvm_dir):
+            if not os.path.islink(llvm_dir):
+                pass # don't disturb what's already there
+            elif os.path.realpath(llvm_dir) != os.path.realpath(llvm):
+                os.unlink(llvm_dir)
+                os.symlink(llvm_dir, llvm)
+        else:
+            os.symlink(llvm_dir, llvm)
+
     if legion_install_prefix is None:
         bindings_dir = os.path.join(legion_dir, 'bindings', 'regent')
         python_bindings_dir = os.path.join(legion_dir, 'bindings', 'python')
