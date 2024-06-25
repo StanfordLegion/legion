@@ -2029,8 +2029,8 @@ namespace Legion {
 				    const RegionRequirement &req, const unsigned index)
     //--------------------------------------------------------------------------
     {
-      // if we have reduce privileges on region requirements - the default mapper
-      // doesn't support task layout constraints for those fields
+      // if we have reduce privileges on region requirements - check if the
+      // req.redop is same as that in 'specialized constraints'
       if (req.privilege == LEGION_REDUCE)
 	{
 	  for (auto lay_it =
@@ -2051,19 +2051,29 @@ namespace Legion {
 		    // check if the field is included in the privilege fields
 		    auto finder =  req.privilege_fields.find(fid);
 		    if (finder != req.privilege_fields.end()) {
-		      log_mapper.error("Default mapper failed allocation for "
-                       "region requirement %d of task %s (UID %lld) in memory "
-                       IDFMT " (%s) for processor " IDFMT " (%s). Task layout constraints  "
-		       "for region requirements with reduction privileges are not supported.",
-                       index,
-                       task.get_task_name(), task.get_unique_id(),
-                       target_memory.id, Utilities::to_string(target_memory.kind()),
-                       target_proc.id, Utilities::to_string(target_proc.kind()));
-		      assert(false);
+		      // check specialized constraint
+		      if (index_constraints.specialized_constraint.kind != LEGION_NO_SPECIALIZE)
+			{
+			  if ((index_constraints.specialized_constraint.kind
+			      != LEGION_AFFINE_REDUCTION_SPECIALIZE) ||
+			      (index_constraints.specialized_constraint.redop != req.redop))
+			    {
+			      log_mapper.error("Default mapper failed allocation for "
+			        "region requirement %d of task %s (UID %lld) in memory "
+			       IDFMT " (%s) for processor " IDFMT " (%s). Mismatch between "
+			       "reduction type in task layout constraint "
+			       "and region requirement for FieldID (%u)",
+			       index,
+			       task.get_task_name(), task.get_unique_id(),
+			       target_memory.id, Utilities::to_string(target_memory.kind()),
+			       target_proc.id, Utilities::to_string(target_proc.kind()), fid);
+			      assert(false);
+			}
 		    }
 		  }
 	      }
 	    }
+	}
 	}
     }
     //--------------------------------------------------------------------------
@@ -2080,33 +2090,8 @@ namespace Legion {
       // Special case for reduction instances, no point in checking
       // for existing ones and we also know that currently we can only
       // make a single instance for each field of a reduction
-      if (req.privilege == LEGION_REDUCE)
-      {
-        // Iterate over the fields one by one for now, once Realm figures
-        // out how to deal with reduction instances that contain
-        bool force_new_instances = true; // always have to force new instances
-        LayoutConstraintID our_layout_id =
-         default_policy_select_layout_constraints(ctx, target_memory, req,
-               TASK_MAPPING, needs_field_constraint_check, force_new_instances);
-        LayoutConstraintSet our_constraints =
-                      runtime->find_layout_constraints(ctx, our_layout_id);
-        instances.resize(instances.size() + req.privilege_fields.size());
-        unsigned idx = 0;
-        for (auto it =
-              req.privilege_fields.begin(); it !=
-              req.privilege_fields.end(); it++, idx++)
-        {
-          our_constraints.field_constraint.field_set.clear();
-          our_constraints.field_constraint.field_set.push_back(*it);
-          if (!default_make_instance(ctx, target_memory, our_constraints,
-                       instances[idx], TASK_MAPPING, force_new_instances,
-                       true/*meets*/, req, footprint))
-            return false;
-        }
-        return true;
-      }
-
       bool force_new_instances = false;
+      if (req.privilege == LEGION_REDUCE) force_new_instances=true;
       // preprocess all the task constraint sets
       // partition them into field/non-field constraint sets + fields
       std::vector<std::vector<FieldID> > field_arrays, leftover_fields;
