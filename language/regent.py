@@ -53,7 +53,7 @@ rocm_include_dir = os.path.join(rocm_dir, 'include') if rocm_dir is not None els
 # Thrust only needs to be manually located with HIP, where we need an older version to work around a bug.
 thrust_dir = os.environ.get('THRUST_PATH')
 
-llvm_dir = os.environ.get('REGENT_LLVM_DIR')
+llvm_dir = os.environ.get('REGENT_LLVM_PATH')
 if not llvm_dir:
     llvm_dir = os.path.join(regent_dir, 'llvm')
     if not os.path.lexists(llvm_dir):
@@ -150,7 +150,7 @@ def regent(args, env={}, cwd=None, **kwargs):
         LD_LIBRARY_PATH: ':'.join(lib_path),
         'INCLUDE_PATH': ';'.join(include_path),
         'PYTHONPATH': ':'.join(python_path),
-        'REGENT_LLVM_DIR': llvm_dir,
+        'REGENT_LLVM_PATH': llvm_dir,
         'LG_RT_DIR': runtime_dir,
         'USE_CMAKE': '1' if cmake else '0',
         'CMAKE_BUILD_DIR': cmake_build_dir,
