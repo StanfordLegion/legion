@@ -147,23 +147,23 @@ legion_cmake_rocm600:
   variables:
     <<: [*legion, *cmake, *ctest, *rocm600, *nodes1]
 
-regent_rocm543:
+regent_rocm600:
   <<: [*tests]
   stage: test
   tags:
     - slurm
     - frontier
   variables:
-    <<: [*regent, *rocm543, *nodes1]
+    <<: [*regent, *rocm600, *nodes1]
 
-regent_cmake_rocm543:
+regent_cmake_rocm600:
   <<: [*tests]
   stage: test
   tags:
     - slurm
     - frontier
   variables:
-    <<: [*regent, *cmake, *rocm543, *nodes2]
+    <<: [*regent, *cmake, *rocm600, *nodes2]
 
 clean:
   stage: clean
