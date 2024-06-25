@@ -739,7 +739,7 @@ namespace Realm {
       };
       std::vector<CudaIpcMapping> cudaipc_mappings;
       std::map<NodeID, GPUStream *> cudaipc_streams;
-
+      Mutex alloc_mutex;
       const CudaIpcMapping *find_ipc_mapping(Memory mem) const;
 
 #ifdef REALM_USE_CUDART_HIJACK
