@@ -464,6 +464,28 @@ def setup_terra(llvm_version, terra_url, terra_branch, terra_binary, terra_lua, 
                 download(bin_tarball, bin_url, bin_shasum, insecure=insecure)
             if not cache:
                 extract(prefix_dir, bin_tarball, 'xz')
+
+        # also download the corresponding LLVM binary, if applicable
+        llvm_version = {'1.1.0': None, '1.2.0': '18.1.7'}[release_version]
+        llvm_install_dir = None
+        if llvm_version is not None:
+            llvm_triple = {('Linux', 'x86_64'): 'x86_64-linux-gnu'}[(terra_system, terra_processor)]
+            llvm_stem = 'clang+llvm-%s-%s' % (llvm_version, llvm_triple)
+            llvm_shasum = ({
+                'clang+llvm-18.1.7-x86_64-linux-gnu': 'e86847217fdb8fa3bdde964540a3e945c171ea0a01004fa9b95fd41e8e9f20ac',
+            }[llvm_stem])
+            llvm_basename = '%s.tar.xz' % llvm_stem
+            llvm_url = 'https://github.com/terralang/llvm-build/releases/download/llvm-%s/%s' % (
+                llvm_version, llvm_basename
+            )
+            llvm_install_dir = os.path.join(prefix_dir, llvm_stem)
+            llvm_tarball = os.path.join(prefix_dir, llvm_basename)
+            if not os.path.exists(llvm_install_dir):
+                if not os.path.exists(llvm_tarball):
+                    download(llvm_tarball, llvm_url, llvm_shasum, insecure=insecure)
+                if not cache:
+                    extract(prefix_dir, llvm_tarball, 'xz')
+
         return (bin_dir, None)
 
     llvm_dir = os.path.realpath(os.path.join(prefix_dir, 'llvm'))
