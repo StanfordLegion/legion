@@ -432,7 +432,7 @@ def setup_terra(llvm_version, terra_url, terra_branch, terra_binary, terra_lua, 
 
         release_version = terra_branch[len('release-'):]
 
-        release_commits = {'1.1.0': 'be89521'}
+        release_commits = {'1.1.0': 'be89521', '1.2.0': 'cc543db'}
         release_commit = release_commits[release_version]
 
         bin_key = '%s-%s-%s' % (terra_system, terra_processor, release_commit)
@@ -444,6 +444,12 @@ def setup_terra(llvm_version, terra_url, terra_branch, terra_binary, terra_lua, 
             'Linux-ppc64le-be89521': '95af7749f5bf8e3060d41dce4c8908f63adf016f006045e97a8b8279f566ed20',
             'Linux-x86_64-be89521': 'ee2b13715704da41b0d475b44e1e0432f4395edff44b535353652bda8f6610b1',
             'OSX-x86_64-be89521': '08607ea2919b3571dd9882ac594b62f551f001f7a21151bc99e85155d89c63d3',
+
+            # 1.2.0
+            'Linux-aarch64-cc543db': 'f6b2fd0b8b4f99cf930d5f465a3083a7a586cfe43d7e4f6fb2f9e9a36d2438f1',
+            'Linux-ppc64le-cc543db': '7acb19db3b37a85476dd63b99aac1d0431d8518b796023ce652a137acfc8b13d',
+            'Linux-x86_64-cc543db': '32f6420330de4d7176396aa36929a76733fe5a1fbc5a0cf8b9a6d270f9630d8d',
+            'OSX-x86_64-cc543db': 'f3196177e6508fa2113a44e9cfb839b0522e4e67557351a8b8b2f7e607d5d832',
         }
         bin_shasum = bin_shasums[bin_key]
 
@@ -612,7 +618,7 @@ if __name__ == '__main__':
         help='URL of Terra repository to clone from.')
     parser.add_argument(
         '--terra-branch', dest='terra_branch', required=False,
-        default='release-1.1.0',
+        default='release-1.2.0',
         help='Branch of Terra repository to checkout.')
     parser.add_argument(
         '--terra-binary', dest='terra_binary', action='store_true', default=None,
