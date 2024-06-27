@@ -467,10 +467,12 @@ def setup_terra(llvm_version, terra_url, terra_branch, terra_binary, terra_lua, 
                 extract(prefix_dir, bin_tarball, 'xz')
 
         # also download the corresponding LLVM binary, if applicable
-        llvm_version = {'1.1.0': None, '1.2.0': '18.1.7'}[release_version]
+        llvm_versions = {'1.1.0': None, '1.2.0': '18.1.7'}
+        llvm_triples = {('Linux', 'x86_64'): 'x86_64-linux-gnu'}
         llvm_install_dir = None
-        if llvm_version is not None:
-            llvm_triple = {('Linux', 'x86_64'): 'x86_64-linux-gnu'}[(terra_system, terra_processor)]
+        if release_version in llvm_versions and (terra_system, terra_processor) in llvm_triples:
+            llvm_version = llvm_versions[release_version]
+            llvm_triple = llvm_triples[(terra_system, terra_processor)]
             llvm_stem = 'clang+llvm-%s-%s' % (llvm_version, llvm_triple)
             llvm_shasum = ({
                 'clang+llvm-18.1.7-x86_64-linux-gnu': 'e86847217fdb8fa3bdde964540a3e945c171ea0a01004fa9b95fd41e8e9f20ac',
