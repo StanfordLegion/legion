@@ -8326,7 +8326,7 @@ legion_runtime_generate_library_task_ids(
 }
 
 legion_task_variant_registrar_t
-legion_create_task_variant_registrar(
+legion_task_variant_registrar_create(
     legion_task_id_t id,
     bool global,
     const char *variant_name)
@@ -8337,7 +8337,7 @@ legion_create_task_variant_registrar(
 }
 
 void
-legion_destroy_task_variant_registrar(
+legion_task_variant_registrar_destroy(
     legion_task_variant_registrar_t registrar_)
 {
   TaskVariantRegistrar *registrar = CObjectWrapper::unwrap(registrar_);

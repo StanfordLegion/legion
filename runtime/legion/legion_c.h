@@ -5987,7 +5987,7 @@ extern "C" {
    * @see Legion::Runtime::TaskVariantRegistrar::TaskVariantRegistrar()
    */
   legion_task_variant_registrar_t
-  legion_create_task_variant_registrar(
+  legion_task_variant_registrar_create(
       legion_task_id_t tid, 
       bool global,
       const char *variant_name);
@@ -5998,7 +5998,7 @@ extern "C" {
    * @see Legion::TaskVariantRegistrar::~TaskVariantRegistrar()
    */
   void
-  legion_destroy_task_variant_registrar(
+  legion_task_variant_registrar_destroy(
       legion_task_variant_registrar_t registrar);
 
   /**
