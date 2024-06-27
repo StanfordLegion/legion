@@ -152,7 +152,6 @@ def regent(args, env={}, cwd=None, **kwargs):
         LD_LIBRARY_PATH: ':'.join(lib_path),
         'INCLUDE_PATH': ';'.join(include_path),
         'PYTHONPATH': ':'.join(python_path),
-        'REGENT_LLVM_PATH': llvm_dir,
         'LG_RT_DIR': runtime_dir,
         'USE_CMAKE': '1' if cmake else '0',
         'CMAKE_BUILD_DIR': cmake_build_dir,
@@ -163,6 +162,9 @@ def regent(args, env={}, cwd=None, **kwargs):
 
     if cuda_dir is not None:
         terra_env['CUDA_HOME'] = cuda_dir
+
+    if llvm_dir is not None:
+        terra_env['REGENT_LLVM_PATH'] = llvm_dir,
 
     cmd = []
     if 'LAUNCHER' in os.environ:
