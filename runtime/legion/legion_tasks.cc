@@ -779,7 +779,7 @@ namespace Legion {
           for (unsigned idx = 0; idx < regions.size(); idx++)
           {
             const RegionRequirement &req = regions[idx];
-            if (!IS_WRITE(req))
+            if (!IS_WRITE(req) || IS_COLLECTIVE(req))
               continue;
             if (((req.projection == 0) &&
                 (req.handle_type == LEGION_REGION_PROJECTION)) ||
