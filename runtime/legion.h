@@ -2489,13 +2489,13 @@ namespace Legion {
      */
     struct PoolBounds {
     public:
-      PoolBounds(uint64_t s = 0, uint32_t a = 16) : size(s), alignment(a) { }
+      PoolBounds(size_t s = 0, uint32_t a = 16) : size(s), alignment(a) { }
       PoolBounds(const PoolBounds&) = default;
       PoolBounds(PoolBounds&&) = default;
       PoolBounds& operator=(const PoolBounds&) = default;
       PoolBounds& operator=(PoolBounds&&) = default;
     public:
-      uint64_t size; // upper bound of the pool in bytes
+      size_t size; // upper bound of the pool in bytes
       uint32_t alignment; // maximum alignment supported
     };
 
