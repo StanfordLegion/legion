@@ -84,6 +84,7 @@ struct OutputArgs {
 
 #[derive(Debug, Clone, Subcommand)]
 enum Commands {
+    #[command(about = "dump an archive of the profile for sharing")]
     Archive {
         #[command(flatten)]
         args: ParserArgs,
@@ -104,14 +105,17 @@ enum Commands {
         )]
         zstd_compression: i32,
     },
+    #[command(about = "connect viewer to the specified HTTP profile server")]
     Attach {
         #[arg(required = true, help = "URL(s) to attach to")]
         urls: Vec<Url>,
     },
+    #[command(about = "dump parsed log files in a JSON format")]
     Dump {
         #[command(flatten)]
         args: ParserArgs,
     },
+    #[command(about = "dump a legacy format profile for sharing")]
     Legacy {
         #[command(flatten)]
         args: ParserArgs,
@@ -119,6 +123,7 @@ enum Commands {
         #[command(flatten)]
         out: OutputArgs,
     },
+    #[command(about = "start profile HTTP server")]
     Serve {
         #[command(flatten)]
         args: ParserArgs,
@@ -133,14 +138,17 @@ enum Commands {
         #[arg(long, default_value_t = 8080, help = "port to bind for HTTP server")]
         port: u16,
     },
+    #[command(about = "start interactive profile viewer")]
     View {
         #[command(flatten)]
         args: ParserArgs,
     },
+    #[command(about = "print statistics")]
     Statistics {
         #[command(flatten)]
         args: ParserArgs,
     },
+    #[command(about = "emit JSON for Google Trace Viewer")]
     Trace {
         #[command(flatten)]
         args: ParserArgs,
