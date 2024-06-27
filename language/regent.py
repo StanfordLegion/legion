@@ -165,7 +165,7 @@ def regent(args, env={}, cwd=None, **kwargs):
         terra_env['CUDA_HOME'] = cuda_dir
 
     if llvm_dir is not None:
-        terra_env['REGENT_LLVM_PATH'] = llvm_dir,
+        terra_env['REGENT_LLVM_PATH'] = llvm_dir
 
     cmd = []
     if 'LAUNCHER' in os.environ:
