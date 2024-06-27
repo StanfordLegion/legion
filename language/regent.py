@@ -55,9 +55,11 @@ thrust_dir = os.environ.get('THRUST_PATH')
 
 llvm_dir = os.environ.get('REGENT_LLVM_PATH')
 if not llvm_dir:
-    llvm_dir = os.path.join(regent_dir, 'llvm')
-    if not os.path.lexists(llvm_dir):
-        llvm_dir = None
+    llvm_dir = os.path.join(regent_dir, 'llvm', 'install')
+    if not os.path.exists(llvm_dir):
+        llvm_dir = os.path.join(regent_dir, 'llvm')
+        if not os.path.exists(llvm_dir):
+            llvm_dir = None
 
 # Detect use of CMake.
 if 'USE_CMAKE' in os.environ:
