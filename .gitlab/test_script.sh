@@ -42,7 +42,7 @@ fi
 # GASNet environment
 if [[ "$REALM_NETWORKS" == gasnet* ]]; then
     if [[ "$GASNET_DEBUG" -eq 1 ]]; then
-        Cat >>env.sh <<EOF
+        cat >>env.sh <<EOF
 export GASNET_ROOT="\$JOB_WORKDIR/gasnet/debug"
 EOF
     else
