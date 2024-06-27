@@ -99,14 +99,14 @@ if __name__ == '__main__':
         legion_prof_no_filter_input_folder = os.path.join(outdir,"legion_prof_no_filter_input")
 
     # parse logs with input filter
-    filter_input_cmd = [legion_prof_exe, "--nodes", nodes, "--output", legion_prof_filter_input_folder]
+    filter_input_cmd = [legion_prof_exe, "legacy", "--nodes", nodes, "--output", legion_prof_filter_input_folder]
     filter_input_cmd[5:5] = filenames
     if verbose:
         print(filter_input_cmd)
     subprocess.check_call(filter_input_cmd)
 
     # parse logs without input filter
-    no_filter_input_cmd = [legion_prof_exe, "--nodes", nodes, "--output", legion_prof_no_filter_input_folder, "--no-filter-input"]
+    no_filter_input_cmd = [legion_prof_exe, "legacy", "--nodes", nodes, "--output", legion_prof_no_filter_input_folder, "--no-filter-input"]
     no_filter_input_cmd[5:5] = filenames
     if verbose:
         print(no_filter_input_cmd)
