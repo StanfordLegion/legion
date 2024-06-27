@@ -53,6 +53,15 @@ rocm_include_dir = os.path.join(rocm_dir, 'include') if rocm_dir is not None els
 # Thrust only needs to be manually located with HIP, where we need an older version to work around a bug.
 thrust_dir = os.environ.get('THRUST_PATH')
 
+# Find LLVM.
+llvm_dir = os.environ.get('REGENT_LLVM_PATH')
+if not llvm_dir:
+    llvm_dir = os.path.join(regent_dir, 'llvm', 'install')
+    if not os.path.exists(llvm_dir):
+        llvm_dir = os.path.join(regent_dir, 'llvm')
+        if not os.path.exists(llvm_dir):
+            llvm_dir = None
+
 # Detect use of CMake.
 if 'USE_CMAKE' in os.environ:
     cmake = os.environ['USE_CMAKE'] == '1'
@@ -154,6 +163,9 @@ def regent(args, env={}, cwd=None, **kwargs):
 
     if cuda_dir is not None:
         terra_env['CUDA_HOME'] = cuda_dir
+
+    if llvm_dir is not None:
+        terra_env['REGENT_LLVM_PATH'] = llvm_dir,
 
     cmd = []
     if 'LAUNCHER' in os.environ:
