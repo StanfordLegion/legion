@@ -1018,10 +1018,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      while ((index + sizeof(size_t)) > total_bytes)
+      while ((index + sizeof(context_bytes)) > total_bytes)
         resize();
-      *((size_t*)(buffer+index)) = context_bytes;
-      index += sizeof(size_t);
+      memcpy(buffer+index, &context_bytes, sizeof(context_bytes));
+      index += sizeof(context_bytes);
       context_bytes = 0;
 #endif
     }
@@ -1032,10 +1032,10 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       // Save the size into the buffer
-      while ((index + sizeof(size_t)) > total_bytes)
+      while ((index + sizeof(context_bytes)) > total_bytes)
         resize();
-      *((size_t*)(buffer+index)) = context_bytes;
-      index += sizeof(size_t);
+      memcpy(buffer+index, &context_bytes, sizeof(context_bytes));
+      index += sizeof(context_bytes);
       context_bytes = 0;
 #endif
     }
