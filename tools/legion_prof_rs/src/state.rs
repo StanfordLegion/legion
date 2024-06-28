@@ -3306,7 +3306,10 @@ impl State {
 
         let mut total_messages = 0;
         let mut bad_messages = 0;
+        let mut skew_messages = 0;
         let mut longest_latency = Timestamp::from_us(0);
+        let mut total_skew = Timestamp::from_us(0);
+        let mut skew_nodes = BTreeMap::new();
         for proc in self.procs.values() {
             for ((_, variant_id), meta_tasks) in &proc.meta_tasks {
                 let variant = self.meta_variants.get(variant_id).unwrap();
@@ -3322,6 +3325,24 @@ impl State {
                         bad_messages += 1;
                     }
                     longest_latency = max(longest_latency, latency);
+                    if let Some(creator_uid) = self.fevents.get(&meta_task.creator) {
+                        let proc_id = self.prof_uid_proc.get(creator_uid).unwrap();
+                        let creator_proc = self.procs.get(&proc_id).unwrap();
+                        let creator = creator_proc.find_entry(*creator_uid).unwrap();
+                        let creator_start = creator.time_range.start.unwrap();
+                        let message_creation = meta_task.time_range.create.unwrap();
+                        if message_creation <= creator_start {
+                            skew_messages += 1;
+                            let skew = creator_start - message_creation;
+                            total_skew += skew;
+                            let nodes = (proc_id.node_id(), proc.proc_id.node_id());
+                            let node_skew = skew_nodes
+                                .entry(nodes)
+                                .or_insert_with(|| (0, Timestamp::from_us(0)));
+                            node_skew.0 += 1;
+                            node_skew.1 += skew;
+                        }
+                    }
                 }
             }
         }
@@ -3352,6 +3373,41 @@ impl State {
             for _ in 0..5 {
                 println!("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! WARNING !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
             }
+        }
+        if skew_messages != 0 {
+            println!("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! WARNING !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+            println!(
+                "Detected timing skew! Legion Prof found {} messages between nodes \
+                    that appear to have been sent before the (meta-)task on the \
+                    creating node started (which is clearly impossible because messages \
+                    can't time-travel into the future). The average skew was at least {:.2} us. \
+                    Please report this case to the Legion developers along with an \
+                    accompanying Legion Prof profile and a description of the machine \
+                    it was run on so we can understand why the timing skew is occuring. \
+                    In the meantime you can still use this profile to performance debug \
+                    but you should be aware that the relative position of boxes on \
+                    different nodes might not be accurate.",
+                skew_messages,
+                total_skew.to_us() / skew_messages as f64
+            );
+            for (nodes, skew) in skew_nodes.iter() {
+                println!(
+                    "Node {} appears to be {:.2} us behind node {} for {} messages.",
+                    nodes.0 .0,
+                    skew.1.to_us() / skew.0 as f64,
+                    nodes.1 .0,
+                    skew.0
+                );
+                // Skew is hopefully only going in one direction, if not warn ourselves
+                let alt = (nodes.1, nodes.0);
+                if skew_nodes.contains_key(&alt) {
+                    println!(
+                        "WARNING: detected bi-directional skew between nodes {} and {}",
+                        nodes.0 .0, nodes.1 .0
+                    );
+                }
+            }
+            println!("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! WARNING !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
         }
     }
 
