@@ -20,7 +20,7 @@
 #include "realm/transfer/channel.h"
 
 namespace Realm {
-  // finds the largest subrectangle of 'domain' that starts with 'start',
+  // Finds the largest subrectangle of 'domain' that starts with 'start',
   //  lies entirely within 'restriction', and is consistent with an iteration
   //  order (over the original 'domain') of 'dim_order'
   // the subrectangle is returned in 'subrect', the start of the next subrect
@@ -31,12 +31,12 @@ namespace Realm {
                     const Rect<N, T> &restriction, const int *dim_order,
                     Rect<N, T> &subrect, Point<N, T> &next_start);
 
+  // TODO: Proper header comment
   bool find_best_channel_for_memories(
-      const std::vector<Node> &nodes_info, ChannelCopyInfo channel_copy_info,
-      CustomSerdezID src_serdez_id, CustomSerdezID dst_serdez_id, ReductionOpID redop_id,
-      size_t total_bytes, const std::vector<size_t> *src_frags,
-      const std::vector<size_t> *dst_frags, uint64_t &best_cost, Channel *&best_channel,
-      XferDesKind &best_kind);
+      Node *nodes_info, ChannelCopyInfo channel_copy_info, CustomSerdezID src_serdez_id,
+      CustomSerdezID dst_serdez_id, ReductionOpID redop_id, size_t total_bytes,
+      const std::vector<size_t> *src_frags, const std::vector<size_t> *dst_frags,
+      uint64_t &best_cost, Channel *&best_channel, XferDesKind &best_kind);
 } // namespace Realm
 
 #include "realm/transfer/transfer_utils.inl"

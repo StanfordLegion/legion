@@ -2734,66 +2734,6 @@ namespace Realm {
   // transfer path search logic
   //
 
-  static bool best_channel_for_mem_pair(ChannelCopyInfo channel_copy_info,
-                                        CustomSerdezID src_serdez_id,
-                                        CustomSerdezID dst_serdez_id,
-                                        ReductionOpID redop_id,
-                                        size_t total_bytes,
-                                        const std::vector<size_t> *src_frags,
-                                        const std::vector<size_t> *dst_frags,
-                                        uint64_t& best_cost,
-                                        Channel *& best_channel,
-                                        XferDesKind& best_kind)
-  {
-    // consider dma channels available on either source or dest node
-    NodeID src_node = ID(channel_copy_info.src_mem).memory_owner_node();
-    NodeID dst_node = ID(channel_copy_info.dst_mem).memory_owner_node();
-
-    best_cost = 0;
-    best_channel = 0;
-    best_kind = XFER_NONE;
-
-    {
-      const Node& n = get_runtime()->nodes[src_node];
-      for(std::vector<Channel *>::const_iterator it = n.dma_channels.begin();
-	  it != n.dma_channels.end();
-	  ++it) {
-        XferDesKind kind = XFER_NONE;
-        uint64_t cost = (*it)->supports_path(channel_copy_info,
-                                             src_serdez_id, dst_serdez_id,
-                                             redop_id,
-                                             total_bytes, src_frags, dst_frags,
-                                             &kind);
-        if((cost > 0) && ((best_cost == 0) || (cost < best_cost))) {
-          best_cost = cost;
-          best_channel = *it;
-          best_kind = kind;
-        }
-      }
-    }
-
-    if(dst_node != src_node) {
-      const Node& n = get_runtime()->nodes[dst_node];
-      for(std::vector<Channel *>::const_iterator it = n.dma_channels.begin();
-	  it != n.dma_channels.end();
-	  ++it) {
-        XferDesKind kind = XFER_NONE;
-        uint64_t cost = (*it)->supports_path(channel_copy_info,
-                                             src_serdez_id, dst_serdez_id,
-                                             redop_id,
-                                             total_bytes, src_frags, dst_frags,
-                                             &kind);
-        if((cost > 0) && ((best_cost == 0) || (cost < best_cost))) {
-          best_cost = cost;
-          best_channel = *it;
-          best_kind = kind;
-        }
-      }
-    }
-
-    return (best_cost != 0);
-  }
-
 // #define PATH_CACHE_EARLY_INIT
 
   // a map to cache the path from src memory to dst memory. 
@@ -3039,9 +2979,9 @@ namespace Realm {
     {
       Channel *channel;
       XferDesKind kind;
-      if(best_channel_for_mem_pair(channel_copy_info, serdez_id, serdez_id,
-                                   redop_id, total_bytes, src_frags, dst_frags,
-                                   best_cost, channel, kind)) {
+      if(find_best_channel_for_memories(get_runtime()->nodes, channel_copy_info,
+                                        serdez_id, serdez_id, redop_id, total_bytes,
+                                        src_frags, dst_frags, best_cost, channel, kind)) {
         log_xpath.info() << "direct: " << src_mem << "(" << src_mem.kind()
                          << ",n:" << src_node << ")->" << dst_mem << " ("
                          << dst_mem.kind() << ",n:" << dst_node << ") cost=" << best_cost
@@ -3097,11 +3037,10 @@ namespace Realm {
       if(channel_copy_info.is_scatter) {
         copy_info.ind_mem = Memory::NO_MEMORY;
       }
-      if(best_channel_for_mem_pair(copy_info,
-                                   serdez_id, 0 /*no dst serdez*/,
-                                   0 /*no redop on not-last hops*/,
-                                   total_bytes, src_frags, 0 /*no dst_frags*/,
-                                   cost, channel, kind)) {
+      if(find_best_channel_for_memories(
+             get_runtime()->nodes, copy_info, serdez_id, 0 /*no dst serdez*/,
+             0 /*no redop on not-last hops*/, total_bytes, src_frags, 0 /*no dst_frags*/,
+             cost, channel, kind)) {
         NodeID dst_node = ID(partials[i].ib_mem).memory_owner_node();
         log_xpath.info() << "first: " << src_mem << "(" << src_mem.kind()
                          << ",n:" << src_node << ")->" << partials[i].ib_mem << "("
@@ -3138,10 +3077,10 @@ namespace Realm {
         copy_info.dst_mem = partials[dst_idx].ib_mem;
         copy_info.ind_mem = Memory::NO_MEMORY;
         copy_info.is_direct = false;
-        if(best_channel_for_mem_pair(copy_info,
-                                     0, 0, 0, // no serdez or redop on interhops
-                                     total_bytes, 0, 0, // no fragmentation also
-                                     cost, channel, kind)) {
+        if(find_best_channel_for_memories(get_runtime()->nodes, copy_info, 0, 0,
+                                          0, // no serdez or redop on interhops
+                                          total_bytes, 0, 0, // no fragmentation also
+                                          cost, channel, kind)) {
 
           NodeID src_node = ID(partials[src_idx].ib_mem).memory_owner_node();
           NodeID dst_node = ID(partials[dst_idx].ib_mem).memory_owner_node();
@@ -3185,10 +3124,9 @@ namespace Realm {
         copy_info.ind_mem = Memory::NO_MEMORY;
       }
       copy_info.is_direct = false;
-      if(best_channel_for_mem_pair(copy_info,
-                                   0 /*no src serdez*/, serdez_id, redop_id,
-                                   total_bytes, 0 /*no src_frags*/, dst_frags,
-                                   cost, channel, kind)) {
+      if(find_best_channel_for_memories(
+             get_runtime()->nodes, copy_info, 0 /*no src serdez*/, serdez_id, redop_id,
+             total_bytes, 0 /*no src_frags*/, dst_frags, cost, channel, kind)) {
         NodeID src_node = ID(partials[i].ib_mem).memory_owner_node();
         size_t total_cost = partials[i].cost + cost;
         log_xpath.info() << "last: " << partials[i].ib_mem << "("
