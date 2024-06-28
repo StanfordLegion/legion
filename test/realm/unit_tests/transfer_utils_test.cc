@@ -155,6 +155,7 @@ TEST(FindBestChannelTest, BestChannelForMemPairSameMemory)
 
   EXPECT_TRUE(ok);
   EXPECT_EQ(best_cost, exp_cost_b);
+  EXPECT_EQ(best_channel, channel_b);
 }
 
 TEST(FindBestChannelTest, BestChannelForMemPairDifferntMemory)
@@ -191,6 +192,7 @@ TEST(FindBestChannelTest, BestChannelForMemPairDifferntMemory)
 
   EXPECT_TRUE(ok);
   EXPECT_EQ(best_cost, exp_cost_src);
+  EXPECT_EQ(best_channel, src_channel);
 }
 
 TEST(FindBestChannelTest, BestChannelForMemPairNoSrcPath)
@@ -225,4 +227,5 @@ TEST(FindBestChannelTest, BestChannelForMemPairNoSrcPath)
 
   EXPECT_TRUE(ok);
   EXPECT_EQ(best_cost, exp_cost_dst);
+  EXPECT_EQ(best_channel, dst_channel);
 }

@@ -692,6 +692,7 @@ namespace Realm {
     class RemoteChannelInfo;
     class RemoteChannel;
 
+    // TODO(apryakhin): Deprecate ChannelCopyInfo
     struct ChannelCopyInfo {
       ChannelCopyInfo(Memory _src_mem, Memory _dst_mem,
                       Memory _ind_mem = Memory::NO_MEMORY, size_t _num_spaces = 1,
