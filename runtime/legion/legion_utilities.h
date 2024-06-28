@@ -1293,9 +1293,10 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       // Save our enclosing context on the stack
 #ifndef NDEBUG
-      size_t sent_context = *((const size_t*)(buffer+index));
+      decltype(context_bytes) sent_context = 0;
+      memcpy(&sent_context, buffer+index, sizeof(sent_context));
 #endif
-      index += sizeof(size_t);
+      index += sizeof(sent_context);
       // Check to make sure that they match
       assert(sent_context == context_bytes);
       context_bytes = 0;
@@ -1309,9 +1310,10 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       // Read the send context size out of the buffer      
 #ifndef NDEBUG
-      size_t sent_context = *((const size_t*)(buffer+index));
+      decltype(context_bytes) sent_context = 0;
+      memcpy(&sent_context, buffer+index, sizeof(sent_context));
 #endif
-      index += sizeof(size_t);
+      index += sizeof(sent_context);
       // Check to make sure that they match
       assert(sent_context == context_bytes);
       context_bytes = 0;
