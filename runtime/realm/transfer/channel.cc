@@ -4072,6 +4072,35 @@ namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
   //
+  // class ChannelCopyInfo
+  //
+
+  std::ostream &operator<<(std::ostream &os, const ChannelCopyInfo &info)
+  {
+    os << "ChannelCopyInfo { "
+       << "src_mem: " << info.src_mem << ", "
+       << "dst_mem: " << info.dst_mem << ", "
+       << "ind_mem: " << info.ind_mem << ", "
+       << "num_spaces: " << info.num_spaces << ", "
+       << "is_scatter: " << info.is_scatter << ", "
+       << "is_ranges: " << info.is_ranges << ", "
+       << "is_direct: " << info.is_direct << ", "
+       << "oor_possible: " << info.oor_possible << ", "
+       << "addr_size: " << info.addr_size << " }";
+    return os;
+  }
+
+  bool operator==(const ChannelCopyInfo &lhs, const ChannelCopyInfo &rhs)
+  {
+    return lhs.src_mem == rhs.src_mem && lhs.dst_mem == rhs.dst_mem &&
+           lhs.ind_mem == rhs.ind_mem && lhs.num_spaces == rhs.num_spaces &&
+           lhs.is_scatter == rhs.is_scatter && lhs.is_ranges == rhs.is_ranges &&
+           lhs.is_direct == rhs.is_direct && lhs.oor_possible == rhs.oor_possible &&
+           lhs.addr_size == rhs.addr_size;
+  }
+
+  ////////////////////////////////////////////////////////////////////////
+  //
   // class Channel
   //
 

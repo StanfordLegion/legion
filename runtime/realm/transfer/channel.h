@@ -719,6 +719,9 @@ namespace Realm {
       size_t addr_size;
     };
 
+    std::ostream &operator<<(std::ostream &os, const ChannelCopyInfo &info);
+    bool operator==(const ChannelCopyInfo &lhs, const ChannelCopyInfo &rhs);
+
     class Channel {
     public:
       Channel(XferDesKind _kind)
