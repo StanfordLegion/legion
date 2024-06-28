@@ -114,6 +114,7 @@ extern "C" {
   NEW_OPAQUE_TYPE(legion_mapper_context_t);
   NEW_OPAQUE_TYPE(legion_field_map_t);
   NEW_OPAQUE_TYPE(legion_point_transform_functor_t);
+  NEW_OPAQUE_TYPE(legion_task_variant_registrar_t);
 #undef NEW_OPAQUE_TYPE
 
   /**
@@ -5979,6 +5980,93 @@ extern "C" {
       legion_runtime_t runtime,
       const char *library_name,
       size_t count);
+
+  /**
+   * @return Caller takes ownership of return value
+   *
+   * @see Legion::Runtime::TaskVariantRegistrar::TaskVariantRegistrar()
+   */
+  legion_task_variant_registrar_t
+  legion_task_variant_registrar_create(
+      legion_task_id_t tid, 
+      bool global,
+      const char *variant_name);
+
+  /**
+   * @param registrar Caller must have ownership of parameter `registrar`.
+   *
+   * @see Legion::TaskVariantRegistrar::~TaskVariantRegistrar()
+   */
+  void
+  legion_task_variant_registrar_destroy(
+      legion_task_variant_registrar_t registrar);
+
+  /**
+   * @see Legion::TaskVariantRegistrar::execution_constraints
+   */
+  void
+  legion_task_variant_registrar_set_execution_constraints(
+      legion_task_variant_registrar_t registrar,
+      legion_execution_constraint_set_t constraints);
+
+  /**
+   * @see Legion::TaskVariantRegistrar::layout_constraints
+   */
+  void
+  legion_task_variant_registrar_set_layout_constraints(
+      legion_task_variant_registrar_t registrar,
+      legion_task_layout_constraint_set_t constraints);
+
+
+  /**
+   * @see Legion::TaskVariantRegistrar::leaf_variant
+   * @see Legion::TaskVariantRegistrar::inner_variant
+   * @see Legion::TaskVariantRegistrar::idempotent_variant
+   * @see Legion::TaskVariantRegistrar::replicable_variant
+   */
+  void
+  legion_task_variant_registrar_set_options(
+      legion_task_variant_registrar_t registrar,
+      legion_task_config_options_t options);
+
+  /**
+   * @see Legion::TaskVariantRegistrar::leaf_pool_bounds
+   */
+  void
+  legion_task_variant_registrar_set_leaf_memory_pool_bounds(
+      legion_task_variant_registrar_t registrar,
+      legion_memory_kind_t kind,
+      size_t size,
+      unsigned alignment);
+
+  /**
+   * @see Legion::Runtime::register_task_variant()
+   */
+  legion_variant_id_t
+  legion_runtime_register_task_variant_fnptr_with_registrar(
+      legion_runtime_t runtime,
+      legion_task_variant_registrar_t registrar,
+      legion_task_pointer_wrapped_t wrapped_task_pointer,
+      legion_variant_id_t variant_id,
+      const void *userdata,
+      size_t userlen,
+      size_t return_type_size,
+      bool has_return_type_size);
+
+
+  /**
+   * @see Legion::Runtime::preregister_task_variant()
+   */
+  legion_variant_id_t
+  legion_runtime_preregister_task_variant_fnptr_with_registrar(
+      legion_task_variant_registrar_t registrar,
+      legion_task_pointer_wrapped_t wrapped_task_pointer,
+      legion_variant_id_t variant_id,
+      const char *task_name,
+      const void *userdata,
+      size_t userlen,
+      size_t return_type_size,
+      bool has_return_type_size);
 
   /**
    * @see Legion::Runtime::register_task_variant()
