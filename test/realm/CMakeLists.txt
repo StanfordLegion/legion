@@ -53,6 +53,7 @@ list(APPEND REALM_TESTS
   multiaffine
   machine_config
   rsrv_acquire_poisoned
+  refcount_image_test
   inst_chain_redistrict
   )
 
