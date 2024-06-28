@@ -34,10 +34,11 @@ namespace Realm {
   // Returns true if successfully found a DMA channel that has a minimum
   // transfer cost from source to destination memories.
   bool find_best_channel_for_memories(
-      Node *nodes_info, ChannelCopyInfo channel_copy_info, CustomSerdezID src_serdez_id,
-      CustomSerdezID dst_serdez_id, ReductionOpID redop_id, size_t total_bytes,
-      const std::vector<size_t> *src_frags, const std::vector<size_t> *dst_frags,
-      uint64_t &best_cost, Channel *&best_channel, XferDesKind &best_kind);
+      const Node *nodes_info, ChannelCopyInfo channel_copy_info,
+      CustomSerdezID src_serdez_id, CustomSerdezID dst_serdez_id, ReductionOpID redop_id,
+      size_t total_bytes, const std::vector<size_t> *src_frags,
+      const std::vector<size_t> *dst_frags, uint64_t &best_cost, Channel *&best_channel,
+      XferDesKind &best_kind);
 } // namespace Realm
 
 #include "realm/transfer/transfer_utils.inl"

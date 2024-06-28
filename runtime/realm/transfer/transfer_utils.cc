@@ -19,10 +19,11 @@
 namespace Realm {
 
   bool find_best_channel_for_memories(
-      Node *nodes_info, ChannelCopyInfo channel_copy_info, CustomSerdezID src_serdez_id,
-      CustomSerdezID dst_serdez_id, ReductionOpID redop_id, size_t total_bytes,
-      const std::vector<size_t> *src_frags, const std::vector<size_t> *dst_frags,
-      uint64_t &best_cost, Channel *&best_channel, XferDesKind &best_kind)
+      const Node *nodes_info, ChannelCopyInfo channel_copy_info,
+      CustomSerdezID src_serdez_id, CustomSerdezID dst_serdez_id, ReductionOpID redop_id,
+      size_t total_bytes, const std::vector<size_t> *src_frags,
+      const std::vector<size_t> *dst_frags, uint64_t &best_cost, Channel *&best_channel,
+      XferDesKind &best_kind)
   {
     // consider dma channels available on either source or dest node
     NodeID src_node = ID(channel_copy_info.src_mem).memory_owner_node();
