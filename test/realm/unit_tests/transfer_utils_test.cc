@@ -101,21 +101,7 @@ public:
   MOCK_METHOD(XferDesFactory *, get_factory, (), ());
 };
 
-class FindBestChannelTest : public ::testing::Test {
-protected:
-  static MockChannel *mock_channel;
-
-  static void SetUpTestSuite()
-  {
-    mock_channel = new MockChannel(XferDesKind::XFER_MEM_CPY, 0);
-  }
-
-  static void TearDownTestSuite() { delete mock_channel; }
-};
-
-MockChannel *FindBestChannelTest::mock_channel;
-
-TEST_F(FindBestChannelTest, BestChannelForMemPairNoChannels)
+TEST(FindBestChannelTest, BestChannelForMemPairNoChannels)
 {
   const uint64_t exp_cost_a = 7;
   const uint64_t exp_cost_b = 5;
@@ -136,7 +122,7 @@ TEST_F(FindBestChannelTest, BestChannelForMemPairNoChannels)
   EXPECT_FALSE(ok);
 }
 
-TEST_F(FindBestChannelTest, BestChannelForMemPairSameMemory)
+TEST(FindBestChannelTest, BestChannelForMemPairSameMemory)
 {
   const uint64_t exp_cost_a = 7;
   const uint64_t exp_cost_b = 5;
@@ -171,7 +157,7 @@ TEST_F(FindBestChannelTest, BestChannelForMemPairSameMemory)
   EXPECT_EQ(best_cost, exp_cost_b);
 }
 
-TEST_F(FindBestChannelTest, BestChannelForMemPairDifferntMemory)
+TEST(FindBestChannelTest, BestChannelForMemPairDifferntMemory)
 {
   const uint64_t exp_cost_src = 7;
   const uint64_t exp_cost_dst = 10;
@@ -207,7 +193,7 @@ TEST_F(FindBestChannelTest, BestChannelForMemPairDifferntMemory)
   EXPECT_EQ(best_cost, exp_cost_src);
 }
 
-TEST_F(FindBestChannelTest, BestChannelForMemPairNoSrcPath)
+TEST(FindBestChannelTest, BestChannelForMemPairNoSrcPath)
 {
   const uint64_t exp_cost_dst = 10;
   std::vector<Node> nodes(2);
