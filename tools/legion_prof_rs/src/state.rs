@@ -3307,8 +3307,8 @@ impl State {
         let mut total_messages = 0;
         let mut bad_messages = 0;
         let mut skew_messages = 0;
-        let mut longest_latency = Timestamp::from_us(0);
-        let mut total_skew = Timestamp::from_us(0);
+        let mut longest_latency = Timestamp::ZERO;
+        let mut total_skew = Timestamp::ZERO;
         let mut skew_nodes = BTreeMap::new();
         for proc in self.procs.values() {
             for ((_, variant_id), meta_tasks) in &proc.meta_tasks {
@@ -3338,7 +3338,7 @@ impl State {
                             let nodes = (proc_id.node_id(), proc.proc_id.node_id());
                             let node_skew = skew_nodes
                                 .entry(nodes)
-                                .or_insert_with(|| (0, Timestamp::from_us(0)));
+                                .or_insert_with(|| (0, Timestamp::ZERO));
                             node_skew.0 += 1;
                             node_skew.1 += skew;
                         }
