@@ -1,7 +1,7 @@
 This file lists the major changes as they appear in the stable branch.  No
 attempt is made to keep this list accurate for the master branch.
 
-Version 24.06.0 (June ??, 2024)
+Version 24.06.0 (June 28, 2024)
   * Build
     - Minimum required C++ standard is now 17
     - Embedded GASNet build in CMake now automatically enables GPU memory kinds
