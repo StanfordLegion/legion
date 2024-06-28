@@ -8394,7 +8394,7 @@ legion_task_variant_registrar_set_leaf_memory_pool_bounds(
 }
 
 legion_variant_id_t
-legion_register_task_variant_fnptr(
+legion_runtime_register_task_variant_fnptr_with_registrar(
       legion_runtime_t runtime_,
       legion_task_variant_registrar_t registrar_,
       legion_task_pointer_wrapped_t wrapped_task_pointer,
@@ -8415,7 +8415,7 @@ legion_register_task_variant_fnptr(
 }
 
 legion_variant_id_t
-legion_preregister_task_variant_fnptr(
+legion_runtime_preregister_task_variant_fnptr_with_registrar(
       legion_task_variant_registrar_t registrar_,
       legion_task_pointer_wrapped_t wrapped_task_pointer,
       legion_variant_id_t variant_id,
