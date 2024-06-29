@@ -355,6 +355,20 @@ namespace Legion {
          << "fevent:unsigned long long:" << sizeof(LgEvent)
          << "}" << std::endl;
 
+      ss << "MessageInfo {"
+         << "id:" << MESSAGE_INFO_ID                      << delim
+         << "op_id:UniqueID:"     << sizeof(UniqueID)     << delim
+         << "lg_id:unsigned:"     << sizeof(unsigned)     << delim
+         << "proc_id:ProcID:"     << sizeof(ProcID)       << delim
+         << "spawn:timestamp_t:"  << sizeof(timestamp_t)  << delim
+         << "create:timestamp_t:" << sizeof(timestamp_t)  << delim
+         << "ready:timestamp_t:"  << sizeof(timestamp_t)  << delim
+         << "start:timestamp_t:"  << sizeof(timestamp_t)  << delim
+         << "stop:timestamp_t:"   << sizeof(timestamp_t)  << delim
+         << "creator:unsigned long long:" << sizeof(LgEvent) << delim
+         << "fevent:unsigned long long:" << sizeof(LgEvent)
+         << "}" << std::endl;
+
       ss << "CopyInfo {"
          << "id:" << COPY_INFO_ID                                    << delim
          << "op_id:UniqueID:"          << sizeof(UniqueID)           << delim
@@ -1005,6 +1019,26 @@ namespace Legion {
       lp_fwrite(f, (char*)&(meta_info.op_id),   sizeof(meta_info.op_id));
       lp_fwrite(f, (char*)&(meta_info.lg_id),   sizeof(meta_info.lg_id));
       lp_fwrite(f, (char*)&(meta_info.proc_id), sizeof(meta_info.proc_id));
+      lp_fwrite(f, (char*)&(meta_info.create),  sizeof(meta_info.create));
+      lp_fwrite(f, (char*)&(meta_info.ready),   sizeof(meta_info.ready));
+      lp_fwrite(f, (char*)&(meta_info.start),   sizeof(meta_info.start));
+      lp_fwrite(f, (char*)&(meta_info.stop),    sizeof(meta_info.stop));
+      lp_fwrite(f, (char*)&(meta_info.creator), sizeof(meta_info.creator));
+      lp_fwrite(f, (char*)&(meta_info.finish_event),
+                                                sizeof(meta_info.finish_event));
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfBinarySerializer::serialize(
+                               const LegionProfInstance::MessageInfo& meta_info)
+    //--------------------------------------------------------------------------
+    {
+      int ID = MESSAGE_INFO_ID;
+      lp_fwrite(f, (char*)&ID, sizeof(ID));
+      lp_fwrite(f, (char*)&(meta_info.op_id),   sizeof(meta_info.op_id));
+      lp_fwrite(f, (char*)&(meta_info.lg_id),   sizeof(meta_info.lg_id));
+      lp_fwrite(f, (char*)&(meta_info.proc_id), sizeof(meta_info.proc_id));
+      lp_fwrite(f, (char*)&(meta_info.spawn),   sizeof(meta_info.spawn));
       lp_fwrite(f, (char*)&(meta_info.create),  sizeof(meta_info.create));
       lp_fwrite(f, (char*)&(meta_info.ready),   sizeof(meta_info.ready));
       lp_fwrite(f, (char*)&(meta_info.start),   sizeof(meta_info.start));
@@ -1905,6 +1939,18 @@ namespace Legion {
       log_prof.print("Prof Meta Info %llu %u " IDFMT " %llu %llu %llu %llu "
           IDFMT " " IDFMT "",
          meta_info.op_id, meta_info.lg_id, meta_info.proc_id,
+         meta_info.create, meta_info.ready, meta_info.start, meta_info.stop,
+         meta_info.creator.id, meta_info.finish_event.id);
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfASCIISerializer::serialize(
+                               const LegionProfInstance::MessageInfo& meta_info)
+    //--------------------------------------------------------------------------
+    {
+      log_prof.print("Prof Message Info %llu %u " IDFMT " %llu %llu %llu %llu "
+          "%llu " IDFMT " " IDFMT "",
+         meta_info.op_id, meta_info.lg_id, meta_info.proc_id, meta_info.spawn,
          meta_info.create, meta_info.ready, meta_info.start, meta_info.stop,
          meta_info.creator.id, meta_info.finish_event.id);
     }

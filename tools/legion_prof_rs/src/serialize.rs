@@ -129,6 +129,7 @@ pub enum Record {
     TaskInfo { op_id: OpID, task_id: TaskID, variant_id: VariantID, proc_id: ProcID, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp, creator: EventID, fevent: EventID  },
     GPUTaskInfo { op_id: OpID, task_id: TaskID, variant_id: VariantID, proc_id: ProcID, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp, gpu_start: Timestamp, gpu_stop: Timestamp, creator: EventID, fevent: EventID },
     MetaInfo { op_id: OpID, lg_id: VariantID, proc_id: ProcID, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp, creator: EventID, fevent: EventID },
+    MessageInfo { op_id: OpID, lg_id: VariantID, proc_id: ProcID, spawn: Timestamp, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp, creator: EventID, fevent: EventID },
     CopyInfo { op_id: OpID, size: u64, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp, creator: EventID, fevent: EventID, collective: u32 },
     CopyInstInfo { src: MemID, dst: MemID, src_fid: FieldID, dst_fid: FieldID, src_inst: InstUID, dst_inst: InstUID, fevent: EventID, num_hops: u32, indirect: bool },
     FillInfo { op_id: OpID, size: u64, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp, creator: EventID, fevent: EventID },
@@ -849,6 +850,33 @@ fn parse_meta_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
         },
     ))
 }
+fn parse_message_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
+    let (input, op_id) = parse_op_id(input)?;
+    let (input, lg_id) = parse_variant_id(input)?;
+    let (input, proc_id) = parse_proc_id(input)?;
+    let (input, spawn) = parse_timestamp(input)?;
+    let (input, create) = parse_timestamp(input)?;
+    let (input, ready) = parse_timestamp(input)?;
+    let (input, start) = parse_timestamp(input)?;
+    let (input, stop) = parse_timestamp(input)?;
+    let (input, creator) = parse_event_id(input)?;
+    let (input, fevent) = parse_event_id(input)?;
+    Ok((
+        input,
+        Record::MessageInfo {
+            op_id,
+            lg_id,
+            proc_id,
+            spawn,
+            create,
+            ready,
+            start,
+            stop,
+            creator,
+            fevent,
+        },
+    ))
+}
 fn parse_copy_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, op_id) = parse_op_id(input)?;
     let (input, size) = le_u64(input)?;
@@ -1107,6 +1135,9 @@ fn filter_record<'a>(
         Record::MetaInfo { proc_id, .. } => {
             State::is_on_visible_nodes(visible_nodes, proc_id.node_id())
         }
+        Record::MessageInfo { proc_id, .. } => {
+            State::is_on_visible_nodes(visible_nodes, proc_id.node_id())
+        }
         Record::CopyInfo { .. } => true,
         Record::CopyInstInfo { src, dst, .. } => {
             State::is_on_visible_nodes(visible_nodes, src.node_id())
@@ -1206,6 +1237,7 @@ fn parse<'a>(
     parsers.insert(ids["TaskInfo"], parse_task_info);
     parsers.insert(ids["GPUTaskInfo"], parse_gpu_task_info);
     parsers.insert(ids["MetaInfo"], parse_meta_info);
+    parsers.insert(ids["MessageInfo"], parse_message_info);
     parsers.insert(ids["CopyInfo"], parse_copy_info);
     parsers.insert(ids["CopyInstInfo"], parse_copy_inst_info);
     parsers.insert(ids["FillInfo"], parse_fill_info);

@@ -2126,7 +2126,7 @@ pub struct VariantID(pub u32);
 pub struct Variant {
     variant_id: VariantID,
     message: bool,
-    ordered_vc: bool,
+    _ordered_vc: bool, // Not used currently
     pub name: String,
     task_id: Option<TaskID>,
     pub color: Option<Color>,
@@ -2137,7 +2137,7 @@ impl Variant {
         Variant {
             variant_id,
             message,
-            ordered_vc,
+            _ordered_vc: ordered_vc,
             name: name.to_owned(),
             task_id: None,
             color: None,
@@ -2185,6 +2185,7 @@ impl Base {
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct TimeRange {
+    pub spawn: Option<Timestamp>,
     pub create: Option<Timestamp>,
     pub ready: Option<Timestamp>,
     pub start: Option<Timestamp>,
@@ -2192,20 +2193,40 @@ pub struct TimeRange {
 }
 
 impl TimeRange {
-    fn new_full(create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp) -> Self {
+    fn new_message(
+        spawn: Timestamp,
+        create: Timestamp,
+        ready: Timestamp,
+        start: Timestamp,
+        stop: Timestamp,
+    ) -> Self {
         assert!(create <= ready);
         assert!(ready <= start);
         assert!(start <= stop);
         TimeRange {
+            spawn: Some(spawn),
             create: Some(create),
             ready: Some(ready),
             start: Some(start),
             stop: Some(stop),
         }
     }
-    fn new_start(start: Timestamp, stop: Timestamp) -> Self {
+    fn new_full(create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp) -> Self {
+        assert!(create <= ready);
+        assert!(ready <= start);
         assert!(start <= stop);
         TimeRange {
+            spawn: None,
+            create: Some(create),
+            ready: Some(ready),
+            start: Some(start),
+            stop: Some(stop),
+        }
+    }
+    fn new_call(start: Timestamp, stop: Timestamp) -> Self {
+        assert!(start <= stop);
+        TimeRange {
+            spawn: None,
             create: None,
             ready: None,
             start: Some(start),
@@ -2214,6 +2235,7 @@ impl TimeRange {
     }
     fn new_empty() -> Self {
         TimeRange {
+            spawn: None,
             create: None,
             ready: None,
             start: None,
@@ -2379,6 +2401,15 @@ impl Operation {
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct EventID(pub u64);
+
+impl EventID {
+    // Important: keep this in sync with realm/id.h
+    // EVENT:   tag:1 = 0b1, creator_node:16, gen_event_idx:27, generation:20
+    // owner_node = proc_id[63:47]
+    pub fn node_id(&self) -> NodeID {
+        NodeID((self.0 >> 47) & ((1 << 16) - 1))
+    }
+}
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct InstUID(pub u64);
@@ -3304,51 +3335,119 @@ impl State {
         assert!(threshold >= 0.0);
         assert!((0.0..100.0).contains(&warn_percentage));
 
-        let mut total_messages = 0;
-        let mut bad_messages = 0;
+        // First go through and compute the skew between the nodes
         let mut skew_messages = 0;
-        let mut longest_latency = Timestamp::ZERO;
+        let mut total_messages = 0;
         let mut total_skew = Timestamp::ZERO;
         let mut skew_nodes = BTreeMap::new();
         for proc in self.procs.values() {
             for ((_, variant_id), meta_tasks) in &proc.meta_tasks {
                 let variant = self.meta_variants.get(variant_id).unwrap();
-                if !variant.message || variant.ordered_vc {
+                if !variant.message {
                     continue;
                 }
                 total_messages += meta_tasks.len();
                 for meta_uid in meta_tasks {
                     let meta_task = proc.entry(*meta_uid);
-                    let latency =
-                        meta_task.time_range.ready.unwrap() - meta_task.time_range.create.unwrap();
-                    if threshold <= latency.to_us() {
-                        bad_messages += 1;
+                    // Check for the presence of skew
+                    if meta_task.time_range.spawn.unwrap() <= meta_task.time_range.create.unwrap() {
+                        continue;
                     }
-                    longest_latency = max(longest_latency, latency);
-                    if let Some(creator_uid) = self.fevents.get(&meta_task.creator) {
-                        let proc_id = self.prof_uid_proc.get(creator_uid).unwrap();
-                        let creator_proc = self.procs.get(&proc_id).unwrap();
-                        let creator = creator_proc.find_entry(*creator_uid).unwrap();
-                        let creator_start = creator.time_range.start.unwrap();
-                        let message_creation = meta_task.time_range.create.unwrap();
-                        if message_creation <= creator_start {
-                            skew_messages += 1;
-                            let skew = creator_start - message_creation;
-                            total_skew += skew;
-                            let nodes = (proc_id.node_id(), proc.proc_id.node_id());
-                            let node_skew = skew_nodes
-                                .entry(nodes)
-                                .or_insert_with(|| (0, Timestamp::ZERO));
-                            node_skew.0 += 1;
-                            node_skew.1 += skew;
-                        }
-                    }
+                    skew_messages += 1;
+                    let skew =
+                        meta_task.time_range.spawn.unwrap() - meta_task.time_range.create.unwrap();
+                    total_skew += skew;
+                    // Creator node (fevent) should be different than execution node
+                    assert!(meta_task.fevent.node_id() != proc.proc_id.node_id());
+                    let nodes = (meta_task.fevent.node_id(), proc.proc_id.node_id());
+                    let node_skew = skew_nodes
+                        .entry(nodes)
+                        .or_insert_with(|| (0, Timestamp::ZERO.to_ns()));
+                    node_skew.0 += 1;
+                    node_skew.1 += skew.to_ns();
                 }
             }
         }
         if total_messages == 0 {
             return;
         }
+        if skew_messages != 0 {
+            println!("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! WARNING !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+            println!(
+                "Detected timing skew! Legion Prof found {} messages between nodes \
+                    that appear to have been sent before the (meta-)task on the \
+                    creating node started (which is clearly impossible because messages \
+                    can't time-travel into the future). The average skew was at least {:.2} us. \
+                    Please report this case to the Legion developers along with an \
+                    accompanying Legion Prof profile and a description of the machine \
+                    it was run on so we can understand why the timing skew is occuring. \
+                    In the meantime you can still use this profile to performance debug \
+                    but you should be aware that the relative position of boxes on \
+                    different nodes might not be accurate.",
+                skew_messages,
+                total_skew.to_us() / skew_messages as f64
+            );
+            // Compute the averages
+            for skew in skew_nodes.values_mut() {
+                skew.1 /= skew.0;
+            }
+            for (nodes, skew) in skew_nodes.iter() {
+                // Compute the average skew
+                println!(
+                    "Node {} appears to be {} us behind node {} for {} messages.",
+                    nodes.0 .0,
+                    skew.1 / 1000,
+                    nodes.1 .0,
+                    skew.0
+                );
+                // Skew is hopefully only going in one direction, if not warn ourselves
+                let alt = (nodes.1, nodes.0);
+                if skew_nodes.contains_key(&alt) {
+                    println!(
+                        "WARNING: detected bi-directional skew between nodes {} and {}",
+                        nodes.0 .0, nodes.1 .0
+                    );
+                }
+            }
+            println!("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! WARNING !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+        }
+
+        // Now we can go through and look for long-latency messages while also taking
+        // into account any skew that we might have observed going the other way
+
+        let mut bad_messages = 0;
+        let mut longest_latency = Timestamp::ZERO;
+
+        for proc in self.procs.values() {
+            for ((_, variant_id), meta_tasks) in &proc.meta_tasks {
+                let variant = self.meta_variants.get(variant_id).unwrap();
+                if !variant.message {
+                    continue;
+                }
+                for meta_uid in meta_tasks {
+                    let meta_task = proc.entry(*meta_uid);
+                    // Check if there was skew to begin with
+                    let spawn = meta_task.time_range.spawn.unwrap();
+                    let mut create = meta_task.time_range.create.unwrap();
+                    // If there was any skew shift the create time forward by the average skew amount
+                    let nodes = (meta_task.fevent.node_id(), proc.proc_id.node_id());
+                    if let Some(skew) = skew_nodes.get(&nodes) {
+                        create += Timestamp::from_ns(skew.1);
+                    }
+                    // If we still have skew we're just going to ignore it for now
+                    // Otherwise we can check the latency of message delivery
+                    if spawn <= create {
+                        // No skew
+                        let latency = create - spawn;
+                        if threshold <= latency.to_us() {
+                            bad_messages += 1;
+                        }
+                        longest_latency = max(longest_latency, latency);
+                    }
+                }
+            }
+        }
+
         let percentage = 100.0 * bad_messages as f64 / total_messages as f64;
         if warn_percentage <= percentage {
             for _ in 0..5 {
@@ -3373,41 +3472,6 @@ impl State {
             for _ in 0..5 {
                 println!("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! WARNING !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
             }
-        }
-        if skew_messages != 0 {
-            println!("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! WARNING !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
-            println!(
-                "Detected timing skew! Legion Prof found {} messages between nodes \
-                    that appear to have been sent before the (meta-)task on the \
-                    creating node started (which is clearly impossible because messages \
-                    can't time-travel into the future). The average skew was at least {:.2} us. \
-                    Please report this case to the Legion developers along with an \
-                    accompanying Legion Prof profile and a description of the machine \
-                    it was run on so we can understand why the timing skew is occuring. \
-                    In the meantime you can still use this profile to performance debug \
-                    but you should be aware that the relative position of boxes on \
-                    different nodes might not be accurate.",
-                skew_messages,
-                total_skew.to_us() / skew_messages as f64
-            );
-            for (nodes, skew) in skew_nodes.iter() {
-                println!(
-                    "Node {} appears to be {:.2} us behind node {} for {} messages.",
-                    nodes.0 .0,
-                    skew.1.to_us() / skew.0 as f64,
-                    nodes.1 .0,
-                    skew.0
-                );
-                // Skew is hopefully only going in one direction, if not warn ourselves
-                let alt = (nodes.1, nodes.0);
-                if skew_nodes.contains_key(&alt) {
-                    println!(
-                        "WARNING: detected bi-directional skew between nodes {} and {}",
-                        nodes.0 .0, nodes.1 .0
-                    );
-                }
-            }
-            println!("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! WARNING !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
         }
     }
 
@@ -4321,7 +4385,7 @@ fn process_record(
             if gpu_start > *gpu_stop {
                 gpu_start = *gpu_stop - Timestamp::ONE;
             }
-            let gpu_range = TimeRange::new_start(gpu_start, *gpu_stop);
+            let gpu_range = TimeRange::new_call(gpu_start, *gpu_stop);
             state.create_gpu_kernel(*op_id, *proc_id, *task_id, *variant_id, gpu_range, *fevent);
             let time_range = TimeRange::new_full(*create, *ready, *start, *stop);
             state.create_task(
@@ -4347,6 +4411,22 @@ fn process_record(
             fevent,
         } => {
             let time_range = TimeRange::new_full(*create, *ready, *start, *stop);
+            state.create_meta(*op_id, *lg_id, *proc_id, time_range, *creator, *fevent);
+            state.update_last_time(*stop);
+        }
+        Record::MessageInfo {
+            op_id,
+            lg_id,
+            proc_id,
+            spawn,
+            create,
+            ready,
+            start,
+            stop,
+            creator,
+            fevent,
+        } => {
+            let time_range = TimeRange::new_message(*spawn, *create, *ready, *start, *stop);
             state.create_meta(*op_id, *lg_id, *proc_id, time_range, *creator, *fevent);
             state.update_last_time(*stop);
         }
@@ -4478,7 +4558,7 @@ fn process_record(
             // Check to make sure it is above the call threshold
             if call_threshold <= (*stop - *start) {
                 assert!(state.mapper_call_kinds.contains_key(kind));
-                let time_range = TimeRange::new_start(*start, *stop);
+                let time_range = TimeRange::new_call(*start, *stop);
                 state.create_mapper_call(
                     *mapper_id,
                     *mapper_proc,
@@ -4501,7 +4581,7 @@ fn process_record(
             // Check to make sure that it is above the call threshold
             if call_threshold <= (*stop - *start) {
                 assert!(state.runtime_call_kinds.contains_key(kind));
-                let time_range = TimeRange::new_start(*start, *stop);
+                let time_range = TimeRange::new_call(*start, *stop);
                 state.create_runtime_call(*kind, *proc_id, time_range, *fevent);
                 state.update_last_time(*stop);
             }
@@ -4513,7 +4593,7 @@ fn process_record(
             proc_id,
             fevent,
         } => {
-            let time_range = TimeRange::new_start(*start, *stop);
+            let time_range = TimeRange::new_call(*start, *stop);
             state.create_application_call(*provenance, *proc_id, time_range, *fevent);
             state.update_last_time(*stop);
         }
@@ -4525,7 +4605,7 @@ fn process_record(
             creator,
             fevent,
         } => {
-            let time_range = TimeRange::new_start(*start, *stop);
+            let time_range = TimeRange::new_call(*start, *stop);
             state.create_prof_task(*proc_id, *op_id, time_range, *creator, *fevent);
             state.update_last_time(*stop);
         }

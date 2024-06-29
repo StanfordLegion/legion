@@ -334,6 +334,14 @@ namespace Legion {
         LgEvent creator;
         LgEvent finish_event;
       };
+      struct MessageInfo : public MetaInfo {
+      public:
+        // Spawn is recorded on the creator node while
+        // create is recorded on the destination node
+        // We use that to detect network congestion and
+        // cases of timing skew
+        timestamp_t spawn;
+      };
       struct CopyInstInfo {
       public:
         MemID src, dst;
@@ -447,6 +455,7 @@ namespace Legion {
         union {
           size_t id2;
           InstanceNameClosure *closure;
+          long long spawn_time;
         } extra;
         UniqueID op_id;
         LgEvent creator;
@@ -578,6 +587,7 @@ namespace Legion {
       std::deque<PhysicalInstanceUsage> phy_inst_usage;
       std::deque<IndexSpaceSizeDesc> index_space_size_desc;
       std::deque<MetaInfo> meta_infos;
+      std::deque<MessageInfo> message_infos;
       std::deque<CopyInfo> copy_infos;
       std::deque<FillInfo> fill_infos;
       std::deque<InstTimelineInfo> inst_timeline_infos;
