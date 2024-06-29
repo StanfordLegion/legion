@@ -31,31 +31,23 @@ namespace Realm {
   //
   // class Point<N,T>
 
-#if defined(__PGIC__)
-  #pragma warning (push)
-  #pragma diag_suppress 1445
-#elif defined(__GNUC__)
-  #pragma GCC diagnostic push
-  #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-#elif defined(__clang__)
-  #pragma clang diagnostic push
-  #pragma clang diagnostic ignored "-Wdeprecated-declarations"
-#elif defined(__INTEL_COMPILER) || defined(__INTEL_LLVM_COMPILER)
-  #pragma warning push
-  #pragma warning disable 1478
-#endif
-
   template <int N, typename T>
   REALM_CUDA_HD
-  inline Point<N,T>::Point(void)
-  {}
-
-  template <int N, typename T>
-  REALM_CUDA_HD
-  inline Point<N,T>::Point(T val)
+  inline Point<N,T>::Point(value_type val)
   {
     for(int i = 0; i < N; i++)
-      (&x)[i] = val;
+      values[i] = val;
+  }
+
+  template <int N, typename T>
+  template <typename Arg0, typename Arg1, typename... Args>
+  REALM_CUDA_HD inline Point<N, T>::Point(Arg0 val0, Arg1 val1, Args... vals)
+    // TODO(cperry): Very bad!  We should not static_cast these for the user, as it can
+    // hide sign and casting issues.  Kept here for compatibility while we weed out all
+    // the cases in our codebase
+    : values{static_cast<value_type>(val0), static_cast<value_type>(val1),
+             static_cast<value_type>(vals)...}
+  {
   }
 
   template <int N, typename T>
@@ -64,7 +56,7 @@ namespace Realm {
   inline Point<N,T>::Point(T2 val, ONLY_IF_INTEGRAL_DEFN(T2))
   {
     for(int i = 0; i < N; i++)
-      (&x)[i] = val;
+      values[i] = val;
   }
 
   template <int N, typename T>
@@ -73,7 +65,7 @@ namespace Realm {
   inline Point<N,T>::Point(T2 vals[N], ONLY_IF_INTEGRAL_DEFN(T2))
   {
     for(int i = 0; i < N; i++)
-      (&x)[i] = vals[i];
+      values[i] = vals[i];
   }
 
   template <int N, typename T>
@@ -82,7 +74,7 @@ namespace Realm {
   inline Point<N,T>::Point(const Point<N,T2>& copy_from)
   {
     for(int i = 0; i < N; i++)
-      (&x)[i] = copy_from[i];
+      values[i] = copy_from.values[i];
   }
 
   template <int N, typename T>
@@ -91,7 +83,7 @@ namespace Realm {
   inline Point<N,T>& Point<N,T>::operator=(const Point<N,T2>& copy_from)
   {
     for(int i = 0; i < N; i++)
-      (&x)[i] = copy_from[i];
+      values[i] = copy_from.values[i];
     return *this;
   }
 
@@ -99,14 +91,16 @@ namespace Realm {
   REALM_CUDA_HD
   inline T& Point<N,T>::operator[](int index)
   {
-    return (&x)[index];
+    assert(index < N);
+    return values[index];
   }
 
   template <int N, typename T>
   REALM_CUDA_HD
   inline const T& Point<N,T>::operator[](int index) const
   {
-    return (&x)[index];
+    assert(index < N);
+    return values[index];
   }
 
   template <int N, typename T>
@@ -114,233 +108,83 @@ namespace Realm {
   REALM_CUDA_HD
   inline T Point<N,T>::dot(const Point<N,T2>& rhs) const
   {
-    T acc = x * rhs.x;
+    T acc = values[0] * rhs.values[0];
     for(int i = 1; i < N; i++)
-      acc += (&x)[i] * (&rhs.x)[i];
+      acc += values[i] * rhs.values[i];
     return acc;
   }
 
   template <int N, typename T>
   REALM_CUDA_HD
-  /*static*/ inline Point<N,T> Point<N,T>::ZEROES(void)
+  T &Point<N, T>::x()
+  {
+    static_assert(N > 0);
+    return values[0];
+  }
+  template <int N, typename T>
+  REALM_CUDA_HD
+  T &Point<N, T>::y()
+  {
+    static_assert(N > 1);
+    return values[1];
+  }
+  template <int N, typename T>
+  REALM_CUDA_HD
+  T &Point<N, T>::z()
+  {
+    static_assert(N > 2);
+    return values[2];
+  }
+  template <int N, typename T>
+  REALM_CUDA_HD
+  T &Point<N, T>::w()
+  {
+    static_assert(N > 3);
+    return values[3];
+  }
+
+  template <int N, typename T>
+  REALM_CUDA_HD
+  const T &Point<N, T>::x() const
+  {
+    static_assert(N > 0);
+    return values[0];
+  }
+  template <int N, typename T>
+  REALM_CUDA_HD
+  const T &Point<N, T>::y() const
+  {
+    static_assert(N > 1);
+    return values[1];
+  }
+  template <int N, typename T>
+  REALM_CUDA_HD
+  const T &Point<N, T>::z() const
+  {
+    static_assert(N > 2);
+    return values[2];
+  }
+  template <int N, typename T>
+  REALM_CUDA_HD
+  const T &Point<N, T>::w() const
+  {
+    static_assert(N > 3);
+    return values[3];
+  }
+
+  template <int N, typename T>
+  REALM_CUDA_HD
+  /*static*/ constexpr inline Point<N,T> Point<N,T>::ZEROES(void)
   {
     return Point<N,T>(static_cast<T>(0));
   }
 
   template <int N, typename T>
   REALM_CUDA_HD
-  /*static*/ inline Point<N,T> Point<N,T>::ONES(void)
+  /*static*/ constexpr inline Point<N,T> Point<N,T>::ONES(void)
   {
     return Point<N,T>(static_cast<T>(1));
   }
-
-  // specializations for N <= 4
-  template <typename T>
-  struct REALM_PUBLIC_API Point<1,T> {
-    [[deprecated("The \"Point::x\" member will be removed in the next Realm release. Please switch to using Point::operator[] instead.")]] T x;
-    REALM_CUDA_HD
-    Point(void) {}
-    REALM_CUDA_HD
-    Point(T _x) : x(_x) {}
-    template <typename T2>
-    REALM_CUDA_HD
-    Point(T2 _x, ONLY_IF_INTEGRAL(T2))
-      : x(_x) {}
-    template <typename T2>
-    REALM_CUDA_HD
-    explicit Point(T2 vals[1], ONLY_IF_INTEGRAL(T2))
-      : x(vals[0]) {}
-    // copies allow type coercion (assuming the underlying type does)
-    template <typename T2>
-    REALM_CUDA_HD
-    Point(const Point<1, T2>& copy_from) : x(copy_from[0]) {}
-    template <typename T2>
-    REALM_CUDA_HD
-    Point<1,T>& operator=(const Point<1, T2>& copy_from)
-    {
-      x = copy_from.x;
-      return *this;
-    }
-
-    REALM_CUDA_HD
-    T& operator[](int index) { return (&x)[index]; }
-    REALM_CUDA_HD
-    const T& operator[](int index) const { return (&x)[index]; }
-
-    template <typename T2>
-    REALM_CUDA_HD
-    T dot(const Point<1, T2>& rhs) const
-    {
-      return (x * rhs.x);
-    }
-
-    // special case: for N == 1, we're willing to coerce to T
-    REALM_CUDA_HD
-    operator T(void) const { return x; }
-
-    REALM_CUDA_HD
-    static inline Point<1,T> ZEROES(void) 
-      { return Point<1,T>(static_cast<T>(0)); }
-    REALM_CUDA_HD
-    static inline Point<1,T> ONES(void) 
-      { return Point<1,T>(static_cast<T>(1)); }
-  };
-
-  template <typename T>
-  struct REALM_PUBLIC_API Point<2,T> {
-    [[deprecated("The \"Point::x,y\" members will be removed in the next Realm release. Please switch to using Point::operator[] instead.")]] T x, y;
-    REALM_CUDA_HD
-    Point(void) {}
-    REALM_CUDA_HD
-    explicit Point(T val) : x(val), y(val) { }
-    template <typename T2>
-    REALM_CUDA_HD
-    explicit Point(T2 val, ONLY_IF_INTEGRAL(T2))
-      : x(val), y(val) { }
-    template <typename T2>
-    REALM_CUDA_HD
-    explicit Point(T2 vals[2], ONLY_IF_INTEGRAL(T2))
-      : x(vals[0]), y(vals[1]) {}
-    REALM_CUDA_HD
-    Point(T _x, T _y) : x(_x), y(_y) {}
-    // copies allow type coercion (assuming the underlying type does)
-    template <typename T2>
-    REALM_CUDA_HD
-    Point(const Point<2, T2>& copy_from)
-      : x(copy_from[0]), y(copy_from[1]) {}
-    template <typename T2>
-    REALM_CUDA_HD
-    Point<2,T>& operator=(const Point<2,T2>& copy_from)
-    {
-      x = copy_from.x;
-      y = copy_from.y;
-      return *this;
-    }
-
-    REALM_CUDA_HD
-    T& operator[](int index) { return (&x)[index]; }
-    REALM_CUDA_HD
-    const T& operator[](int index) const { return (&x)[index]; }
-
-    template <typename T2>
-    REALM_CUDA_HD
-    T dot(const Point<2, T2>& rhs) const
-    {
-      return (x * rhs.x) + (y * rhs.y);
-    }
-
-    REALM_CUDA_HD
-    static inline Point<2,T> ZEROES(void) 
-      { return Point<2,T>(static_cast<T>(0)); }
-    REALM_CUDA_HD
-    static inline Point<2,T> ONES(void) 
-      { return Point<2,T>(static_cast<T>(1)); }
-  };
-
-  template <typename T>
-  struct REALM_PUBLIC_API Point<3,T> {
-    [[deprecated("The \"Point::x,y,z\" members will be removed in the next Realm release. Please switch to using Point::operator[] instead.")]] T x, y, z;
-    REALM_CUDA_HD
-    Point(void) {}
-    REALM_CUDA_HD
-    explicit Point(T val) : x(val), y(val), z(val) { }
-    template <typename T2>
-    REALM_CUDA_HD
-    explicit Point(T2 val, ONLY_IF_INTEGRAL(T2))
-      : x(val), y(val), z(val) { }
-    template <typename T2>
-    REALM_CUDA_HD
-    explicit Point(T2 vals[3], ONLY_IF_INTEGRAL(T2))
-      : x(vals[0]), y(vals[1]), z(vals[2]) {}
-    REALM_CUDA_HD
-    Point(T _x, T _y, T _z) : x(_x), y(_y), z(_z) {}
-    // copies allow type coercion (assuming the underlying type does)
-    template <typename T2>
-    REALM_CUDA_HD
-    Point(const Point<3, T2>& copy_from)
-      : x(copy_from[0]), y(copy_from[1]), z(copy_from[2]) {}
-    template <typename T2>
-    REALM_CUDA_HD
-    Point<3,T>& operator=(const Point<3,T2>& copy_from)
-    {
-      x = copy_from.x;
-      y = copy_from.y;
-      z = copy_from.z;
-      return *this;
-    }
-
-    REALM_CUDA_HD
-    T& operator[](int index) { return (&x)[index]; }
-    REALM_CUDA_HD
-    const T& operator[](int index) const { return (&x)[index]; }
-
-    template <typename T2>
-    REALM_CUDA_HD
-    T dot(const Point<3, T2>& rhs) const
-    {
-      return (x * rhs.x) + (y * rhs.y) + (z * rhs.z);
-    }
-
-    REALM_CUDA_HD
-    static inline Point<3,T> ZEROES(void) 
-      { return Point<3,T>(static_cast<T>(0)); }
-    REALM_CUDA_HD
-    static inline Point<3,T> ONES(void) 
-      { return Point<3,T>(static_cast<T>(1)); }
-  };
-
-  template <typename T>
-  struct REALM_PUBLIC_API Point<4,T> {
-    T x, y, z, w;
-    REALM_CUDA_HD
-    Point(void) {} 
-    REALM_CUDA_HD
-    explicit Point(T val) : x(val), y(val), z(val), w(val) { }
-    template <typename T2>
-    REALM_CUDA_HD
-    explicit Point(T2 val, ONLY_IF_INTEGRAL(T2))
-      : x(val), y(val), z(val), w(val) { }
-    template <typename T2>
-    REALM_CUDA_HD
-    explicit Point(T2 vals[4], ONLY_IF_INTEGRAL(T2))
-      : x(vals[0]), y(vals[1]), z(vals[2]), w(vals[3]) {}
-    REALM_CUDA_HD
-    Point(T _x, T _y, T _z, T _w) : x(_x), y(_y), z(_z), w(_w) {}
-    // copies allow type coercion (assuming the underlying type does)
-    template <typename T2>
-    REALM_CUDA_HD
-    Point(const Point<4, T2>& copy_from)
-      : x(copy_from[0]), y(copy_from[1]), z(copy_from[2]), w(copy_from[3]) {}
-    template <typename T2>
-    REALM_CUDA_HD
-    Point<4,T>& operator=(const Point<4,T2>& copy_from)
-    {
-      x = copy_from.x;
-      y = copy_from.y;
-      z = copy_from.z;
-      w = copy_from.w;
-      return *this;
-    }
-
-    REALM_CUDA_HD
-    T& operator[](int index) { return (&x)[index]; }
-    REALM_CUDA_HD
-    const T& operator[](int index) const { return (&x)[index]; }
-
-    template <typename T2>
-    REALM_CUDA_HD
-    T dot(const Point<4, T2>& rhs) const
-    {
-      return (x * rhs.x) + (y * rhs.y) + (z * rhs.z) + (w * rhs.w);
-    }
-
-    REALM_CUDA_HD
-    static inline Point<4,T> ZEROES(void) 
-      { return Point<4,T>(static_cast<T>(0)); }
-    REALM_CUDA_HD
-    static inline Point<4,T> ONES(void) 
-      { return Point<4,T>(static_cast<T>(1)); }
-  };
 
   template <int N, typename T>
   inline std::ostream& operator<<(std::ostream& os, const Point<N,T>& p)
@@ -351,6 +195,73 @@ namespace Realm {
     os << '>';
     return os;
   }
+
+  // 1D specialization (needed for implicit conversion of coordinate to 1D point)
+  template <typename T>
+  struct REALM_PUBLIC_API Point<1, T> {
+
+    typedef T value_type;
+    value_type value;
+
+    REALM_CUDA_HD
+    Point(void) {}
+    REALM_CUDA_HD
+    Point(value_type val)
+      : value(val)
+    {}
+    template <typename T2>
+    REALM_CUDA_HD explicit Point(T2 vals[1], ONLY_IF_INTEGRAL(T2))
+      : value(vals[0])
+    {}
+    // construct from any integral value
+    template <typename T2>
+    REALM_CUDA_HD explicit Point(T2 val, ONLY_IF_INTEGRAL(T2))
+      : value(val)
+    {}
+    // copies allow type coercion (assuming the underlying type does)
+    template <typename T2>
+    REALM_CUDA_HD Point(const Point<1, T2> &copy_from)
+      : value(copy_from.value)
+    {}
+    template <typename T2>
+    REALM_CUDA_HD Point<1, T> &operator=(const Point<1, T2> &copy_from)
+    {
+      value = copy_from.value;
+      return *this;
+    }
+
+    REALM_CUDA_HD
+    T &operator[](int index)
+    {
+      assert(index == 0);
+      return value;
+    }
+    REALM_CUDA_HD
+    const T &operator[](int index) const
+    {
+      assert(index == 0);
+      return value;
+    }
+
+    template <typename T2>
+    REALM_CUDA_HD T dot(const Point<1, T2> &rhs) const
+    {
+      return value * rhs.value;
+    }
+
+    // 1-4D accessors.  These will only be available if the class's dimensioned allow for
+    // it, otherwise it is a compiler error to use them
+    REALM_CUDA_HD T &x() { return value; }
+    REALM_CUDA_HD const T &x() const { return value; }
+
+    REALM_CUDA_HD
+    operator T() const { return value; }
+
+    REALM_CUDA_HD
+    static constexpr Point<1, T> ZEROES(void) { return Point<1, T>(0); }
+    REALM_CUDA_HD
+    static constexpr Point<1, T> ONES(void) { return Point<1, T>(1); }
+  };
 
   // component-wise operators defined on Point<N,T> (with optional coercion)
   template <int N, typename T, typename T2>
@@ -453,16 +364,6 @@ namespace Realm {
     for(int i = 0; i < N; i++) lhs[i] %= rhs[i];
     return lhs;
   }
-
-#if defined(__PGIC__)
-  #pragma warning (pop)
-#elif defined(__GNUC__)
-  #pragma GCC diagnostic pop
-#elif defined(__clang__)
-  #pragma clang diagnostic pop
-#elif defined(__INTEL_COMPILER) || defined(__INTEL_LLVM_COMPILER)
-  #pragma warning pop
-#endif
 
   ////////////////////////////////////////////////////////////////////////
   //

@@ -553,19 +553,17 @@ public:
     if(show_graph) {
       AffineAccessor<int,1> a_cell_blockid(i_args.ri_cells, 0 /* offset */);
 
-      for(int i = is_cells.bounds.lo; i <= is_cells.bounds.hi; i++)
-	std::cout << "Z[" << i << "]: blockid=" << a_cell_blockid.read(i) << std::endl;
+      for(int i = is_cells.bounds.lo[0]; i <= is_cells.bounds.hi[0]; i++)
+        std::cout << "Z[" << i << "]: blockid=" << a_cell_blockid.read(i) << std::endl;
 
       AffineAccessor<Point<1>,1> a_face_left(i_args.ri_faces, 0 * sizeof(Point<1>) /* offset */);
       AffineAccessor<Point<1>,1> a_face_right(i_args.ri_faces, 1 * sizeof(Point<1>) /* offset */);
       AffineAccessor<int,1> a_face_type(i_args.ri_faces, 2 * sizeof(Point<1>) /* offset */);
 
-      for(int i = is_faces.bounds.lo; i <= is_faces.bounds.hi; i++)
-	std::cout << "S[" << i << "]:"
-		  << " left=" << a_face_left.read(i)
-		  << " right=" << a_face_right.read(i)
-		  << " type=" << a_face_type.read(i)
-		  << std::endl;
+      for(int i = is_faces.bounds.lo[0]; i <= is_faces.bounds.hi[0]; i++)
+        std::cout << "S[" << i << "]:"
+                  << " left=" << a_face_left.read(i) << " right=" << a_face_right.read(i)
+                  << " type=" << a_face_type.read(i) << std::endl;
     }
   }
 

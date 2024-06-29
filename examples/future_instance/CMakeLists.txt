@@ -31,8 +31,5 @@ add_executable(future_instance ${GPU_SOURCES})
 set_target_cuda_standard(future_instance STANDARD ${Legion_CUDA_STANDARD})
 set_target_cuda_architectures(future_instance ARCHITECTURES ${Legion_CUDA_ARCH})
 set_target_cuda_warnings_and_errors(future_instance WARN_AS_ERROR ${Legion_BUILD_WARN_AS_ERROR})
-# Remove this once the Realm::Point class is updated
-target_compile_options(future_instance PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:
-                         -Xcudafe=--diag_suppress=1444>)
 
 target_link_libraries(future_instance Legion::Legion)

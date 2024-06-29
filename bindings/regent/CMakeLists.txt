@@ -66,9 +66,6 @@ if(Legion_USE_CUDA)
   set_target_cuda_standard(Regent STANDARD ${Legion_CUDA_STANDARD})
   set_target_cuda_architectures(Regent ARCHITECTURES ${Legion_CUDA_ARCH})
   set_target_cuda_warnings_and_errors(Regent WARN_AS_ERROR ${Legion_BUILD_WARN_AS_ERROR})
-  # Remove this once the Realm::Point class is updated
-  target_compile_options(Regent PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:
-                           -Xcudafe=--diag_suppress=1444>)
 elseif(Legion_USE_HIP)
   target_include_directories(Regent PRIVATE ${HIP_INCLUDE_DIRS})
   if (Legion_HIP_TARGET STREQUAL "CUDA")
