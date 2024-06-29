@@ -666,7 +666,7 @@ NVCC_FLAGS += $(foreach X,$(subst $(COMMA), ,$(GPU_ARCH)),-gencode arch=compute_
 NVCC_FLAGS += -gencode arch=compute_$(lastword $(GPU_ARCH))$(COMMA)code=compute_$(lastword $(GPU_ARCH))
 endif
 
-NVCC_FLAGS += -Xcudafe --diag_suppress=boolean_controlling_expr_is_constant -Xcudafe --diag_suppress=1444
+NVCC_FLAGS += -Xcudafe --diag_suppress=boolean_controlling_expr_is_constant
 
 # cuhook lib
 ifeq ($(shell uname -s),Darwin)
