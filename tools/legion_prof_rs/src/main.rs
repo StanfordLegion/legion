@@ -66,6 +66,9 @@ struct ParserArgs {
         help = "parse all log files, even when a subset of nodes are being shown (uses more memory)"
     )]
     no_filter_input: bool,
+
+    #[arg(short, long, help = "print verbose profiling information")]
+    verbose: bool,
 }
 
 #[derive(Debug, Clone, Args)]
@@ -163,9 +166,6 @@ enum Commands {
 struct Cli {
     #[command(subcommand)]
     command: Commands,
-
-    #[arg(short, long, help = "print verbose profiling information")]
-    verbose: bool,
 }
 
 fn main() -> io::Result<()> {
@@ -338,7 +338,7 @@ fn main() -> io::Result<()> {
         have_alllogs = false;
     }
 
-    Config::set_config(filter_input, cli.verbose, have_alllogs);
+    Config::set_config(filter_input, args.verbose, have_alllogs);
 
     spy_state.postprocess_spy_records(&state);
 
