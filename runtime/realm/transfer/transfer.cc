@@ -2727,8 +2727,7 @@ namespace Realm {
 
     return did_work;
   }
-  
-  
+
   ////////////////////////////////////////////////////////////////////////
   //
   // transfer path search logic
