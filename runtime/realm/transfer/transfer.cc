@@ -3094,10 +3094,11 @@ namespace Realm {
              0 /*no redop on not-last hops*/, total_bytes, src_frags, 0 /*no dst_frags*/,
              cost, channel, kind)) {
         NodeID dst_node = ID(partials[i].ib_mem).memory_owner_node();
-        log_xpath.info() << "first: " << src_mem << "(" << src_mem.kind()
+        // TODO: fix comment
+        /*log_xpath.info() << "first: " << src_mem << "(" << src_mem.kind()
                          << ",n:" << src_node << ")->" << partials[i].ib_mem << "("
                          << partials[i].ib_mem.kind() << ",n:" << dst_node
-                         << ") cost=" << cost << " channel=" << channel->kind;
+                         << ") cost=" << cost << " channel=" << channel->kind;*/
         // ignore anything that's already worse than the direct path
         if((best_cost == 0) || (cost < best_cost)) {
           active_ibs.insert(i);
@@ -3137,7 +3138,7 @@ namespace Realm {
           NodeID src_node = ID(partials[src_idx].ib_mem).memory_owner_node();
           NodeID dst_node = ID(partials[dst_idx].ib_mem).memory_owner_node();
           size_t total_cost = partials[src_idx].cost + cost;
-          log_xpath.info() << "inter: src_idx:" << src_idx << " "
+          /*log_xpath.info() << "inter: src_idx:" << src_idx << " "
                            << partials[src_idx].ib_mem << "("
                            << partials[src_idx].ib_mem.kind() << ",n:" << src_node
                            << ")-> dst_idx:" << dst_idx << " " << partials[dst_idx].ib_mem
@@ -3145,7 +3146,7 @@ namespace Realm {
                            << ")"
                            << " channel=" << channel->kind
                            << " cost=" << partials[src_idx].cost << "+" << cost << " = "
-                           << total_cost << " <? " << partials[dst_idx].cost;
+                           << total_cost << " <? " << partials[dst_idx].cost;*/
           // also prune any path that already exceeds the cost of the direct path
           if(((partials[dst_idx].cost == 0) ||
               (total_cost < partials[dst_idx].cost)) &&
@@ -3181,11 +3182,11 @@ namespace Realm {
              0 /*no src_frags*/, dst_frags, cost, channel, kind)) {
         NodeID src_node = ID(partials[i].ib_mem).memory_owner_node();
         size_t total_cost = partials[i].cost + cost;
-        log_xpath.info() << "last: " << partials[i].ib_mem << "("
+        /*log_xpath.info() << "last: " << partials[i].ib_mem << "("
                          << partials[i].ib_mem.kind() << ",n:" << src_node << ")->"
                          << dst_mem << "(" << dst_mem.kind() << ",n:" << dst_node << ")"
                          << " channel=" << channel->kind << " cost=" << partials[i].cost
-                         << "+" << cost << " = " << total_cost << " <? " << best_cost;
+                         << "+" << cost << " = " << total_cost << " <? " << best_cost;*/
         if((best_cost == 0) || (total_cost < best_cost)) {
           best_cost = total_cost;
           info.path.swap(partials[i].path);
