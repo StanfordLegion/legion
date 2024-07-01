@@ -385,7 +385,7 @@ namespace Legion {
       virtual unsigned get_output_offset() const;
       virtual const RegionRequirement &get_requirement(unsigned idx) const
         { assert(false); return *(new RegionRequirement()); }
-      void analyze_region_requirements(
+      virtual void analyze_region_requirements(
         IndexSpaceNode *launch_space = nullptr,
         ShardingFunction *func = nullptr,
         IndexSpace shard_space = IndexSpace::NO_SPACE);

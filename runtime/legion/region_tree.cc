@@ -1602,19 +1602,31 @@ namespace Legion {
         return;
       // Then compute the logical user
       ProjectionSummary *shard_proj = NULL;
-      if (proj_info.is_sharding() && proj_info.is_projecting())
+      if (proj_info.is_projecting())
       {
-        // If we're doing a projection in a control replicated context then
-        // we need to compute the shard projection up front since it might
-        // involve a collective if we don't hit in the cache and we want
-        // that to appear nice and deterministic
-        RegionTreeNode *destination = 
-          (req.handle_type == LEGION_PARTITION_PROJECTION) ?
-          static_cast<RegionTreeNode*>(get_node(req.partition)) :
-          static_cast<RegionTreeNode*>(get_node(req.region));
-        shard_proj = destination->compute_projection_summary(op, idx, req,
-                                              logical_analysis, proj_info);
+#ifndef POINT_WISE_LOGICAL_ANALYSIS
+        if(proj_info.is_sharding()) {
+#endif
+          // If we're doing a projection in a control replicated context then
+          // we need to compute the shard projection up front since it might
+          // involve a collective if we don't hit in the cache and we want
+          // that to appear nice and deterministic
+          RegionTreeNode *destination = 
+            (req.handle_type == LEGION_PARTITION_PROJECTION) ?
+            static_cast<RegionTreeNode*>(get_node(req.partition)) :
+            static_cast<RegionTreeNode*>(get_node(req.region));
+          shard_proj = destination->compute_projection_summary(op, idx, req,
+                                                logical_analysis, proj_info);
+#ifdef POINT_WISE_LOGICAL_ANALYSIS
+          if(!shard_proj->is_disjoint() || !shard_proj->can_perform_name_based_self_analysis()) {
+            logical_analysis.point_wise_analyses.back().bail_analysis = true;
+          }
+#endif
+#ifndef POINT_WISE_LOGICAL_ANALYSIS
+        }
+#endif
       }
+
       LogicalUser *user = new LogicalUser(op, idx, RegionUsage(req),
           shard_proj, (op->get_must_epoch_op() == NULL) ? UINT_MAX :
           op->get_must_epoch_op()->find_operation_index(
@@ -16321,6 +16333,10 @@ namespace Legion {
             FieldMask still_open;
             it->first->close_logical_node(user, close_mask, privilege_root,
                                           path_node, analysis, still_open);
+#ifdef POINT_WISE_LOGICAL_ANALYSIS
+            analysis.point_wise_analyses.back().bail_analysis = true;
+            analysis.point_wise_analyses.back().has_interfering_sibling = true;
+#endif
             if (!!still_open)
             {
               if (still_open != close_mask)
@@ -16365,6 +16381,10 @@ namespace Legion {
               FieldMask child_fields;
               next_child->close_logical_node(user, overlap, privilege_root,
                                              path_node, analysis, child_fields);
+#ifdef POINT_WISE_LOGICAL_ANALYSIS
+              analysis.point_wise_analyses.back().bail_analysis = true;
+              analysis.point_wise_analyses.back().has_interfering_sibling = true;
+#endif
               if (!!child_fields)
               {
                 open_below |= child_fields;
@@ -16398,6 +16418,10 @@ namespace Legion {
           FieldMask still_open;
           it->first->close_logical_node(user, close_mask, privilege_root,
                                         path_node, analysis, still_open);
+#ifdef POINT_WISE_LOGICAL_ANALYSIS
+          analysis.point_wise_analyses.back().bail_analysis = true;
+          analysis.point_wise_analyses.back().has_interfering_sibling = true;
+#endif
           if (!!still_open)
           {
             open_below |= still_open;
@@ -16610,6 +16634,31 @@ namespace Legion {
 #endif
                   if (prev.shard_proj != NULL)
                   {
+#ifdef POINT_WISE_LOGICAL_ANALYSIS
+                    if (logical_analysis.point_wise_analyses.back().ancestor != NULL)
+                    {
+                      // We bail if we have more than one ancestor for now
+                      logical_analysis.point_wise_analyses.back().bail_analysis = true;
+                    }
+                    if (!logical_analysis.point_wise_analyses.back().bail_analysis) {
+                      if(!prev.shard_proj->is_disjoint() || !prev.shard_proj->can_perform_name_based_self_analysis()) {
+                        logical_analysis.point_wise_analyses.back().bail_analysis = true;
+                      }
+                      else if ((user.shard_proj->projection->projection_id != prev.shard_proj->projection->projection_id) || !user.shard_proj->projection->is_functional)
+                      {
+                        logical_analysis.point_wise_analyses.back().bail_analysis = true;
+                      }
+                      else
+                      {
+                        bool parent_dominates = prev.shard_proj->domain->dominates(user.shard_proj->domain);
+                        if(parent_dominates)
+                        {
+                          printf("FOUND PROPER ANCESTOR\n");
+                          logical_analysis.point_wise_analyses.back().ancestor = &prev;
+                        }
+                      }
+                    }
+#endif
                     // Two operations from the same must epoch shouldn't
                     // be recording close dependences on each other so
                     // we can skip that part
@@ -16639,7 +16688,9 @@ namespace Legion {
                       // each other and see if we can prove that they are
                       // disjoint in which case we don't need a close
 #ifdef DEBUG_LEGION
+#ifndef POINT_WISE_LOGICAL_ANALYSIS
                       assert(proj_info.is_sharding());
+#endif
                       assert(user.shard_proj != NULL);
 #endif
                       if (!state.has_interfering_shards(logical_analysis,

@@ -31,6 +31,8 @@
 namespace Legion {
   namespace Internal {
 
+#define POINT_WISE_LOGICAL_ANALYSIS 1
+
     LEGION_EXTERN_LOGGER_DECLARATIONS
 
     /////////////////////////////////////////////////////////////
@@ -9314,6 +9316,42 @@ namespace Legion {
         parent_ctx->perform_barrier_dependence_analysis(this, 
                   wait_barriers, arrive_barriers, must_epoch);
       version_infos.resize(logical_regions.size());
+    }
+
+    void IndexTask::analyze_region_requirements(
+      IndexSpaceNode *launch_space,
+      ShardingFunction *func,
+      IndexSpace shard_space)
+    {
+      // We can skip doing the analysis for logical regions if we
+      // are replaying a logical trace
+      if ((trace != NULL) && !trace->is_recording())
+        return;
+
+      LogicalAnalysis logical_analysis(this, get_output_offset());
+
+      unsigned req_count = get_region_count();
+      for (unsigned i = 0; i < req_count; i++)
+      {
+        const RegionRequirement &req = get_requirement(i);
+
+        ProjectionInfo projection_info(runtime,
+                                       &req,
+                                       launch_space,
+                                       func,
+                                       shard_space);
+
+#ifdef POINT_WISE_LOGICAL_ANALYSIS
+        PointWiseLogicalAnalysis point_wise_logical_analysis(i);
+        logical_analysis.point_wise_analyses.push_back(point_wise_logical_analysis);
+#endif
+
+        runtime->forest->perform_dependence_analysis(this,
+                                                     i,
+                                                     req,
+                                                     projection_info,
+                                                     logical_analysis);
+      }
     }
 
     //--------------------------------------------------------------------------

@@ -24,6 +24,8 @@
 namespace Legion {
   namespace Internal {
 
+#define POINT_WISE_LOGICAL_ANALYSIS 1
+
     /**
      * \struct ContextCoordinate
      * A struct that can uniquely identify an operation inside
@@ -1444,6 +1446,21 @@ namespace Legion {
 
     typedef DynamicTableAllocator<LogicalState,10,8> LogicalStateAllocator;
 
+#ifdef POINT_WISE_LOGICAL_ANALYSIS
+    struct PointWiseLogicalAnalysis : public LegionHeapify<PointWiseLogicalAnalysis> {
+      public:
+        PointWiseLogicalAnalysis(unsigned idx)
+          : req_idx(idx) { }
+      public:
+        const unsigned req_idx;
+        // At this point if there are multiple ancestors we bail.
+        LogicalUser *ancestor = NULL;
+        ProjectionSummary *proj_summary;
+        bool has_interfering_sibling = false;
+        bool bail_analysis = false;
+      };
+#endif
+
     /**
      * \class LogicalAnalysis 
      * The logical analysis helps capture the state of region tree traversals
@@ -1457,6 +1474,10 @@ namespace Legion {
      * in an operation that touch the same fields of the same region tree.
      */
     class LogicalAnalysis {
+#ifdef POINT_WISE_LOGICAL_ANALYSIS
+    public:
+      std::vector<PointWiseLogicalAnalysis> point_wise_analyses;
+#endif
     public:
       struct PendingClose : public LegionHeapify<PendingClose> {
       public:

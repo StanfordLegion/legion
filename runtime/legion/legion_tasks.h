@@ -1198,6 +1198,10 @@ namespace Legion {
       void initialize_predicate(const Future &pred_future,
                                 const UntypedBuffer &pred_arg);
       void perform_base_dependence_analysis(void);
+      void analyze_region_requirements(
+        IndexSpaceNode *launch_space = nullptr,
+        ShardingFunction *func = nullptr,
+        IndexSpace shard_space = IndexSpace::NO_SPACE);
     protected:
       void create_output_regions(std::vector<OutputRequirement> &outputs,
                                  IndexSpace launch_space);
