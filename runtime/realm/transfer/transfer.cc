@@ -2976,12 +2976,10 @@ namespace Realm {
     NodeID dst_node = ID(dst_mem).memory_owner_node();
     std::vector<size_t> empty_vec;
 
-    // TODO: FIX COMMET
-    /*log_xpath.info() << "FFP: " << src_mem << '(' << src_mem.kind() << ')' << "->"
-                     << dst_mem << '(' << dst_mem.kind() << ')' << " serdez=" << serdez_id
+    log_xpath.info() << "FFP: " << src_mem << "->" << dst_mem << " serdez=" << serdez_id
                      << " redop=" << redop_id << " bytes=" << total_bytes << " frags="
                      << PrettyVector<size_t>(*(src_frags ? src_frags : &empty_vec)) << "/"
-                     << PrettyVector<size_t>(*(dst_frags ? dst_frags : &empty_vec));*/
+                     << PrettyVector<size_t>(*(dst_frags ? dst_frags : &empty_vec));
 
     if (path_cache_inited) {
       std::pair<realm_id_t, realm_id_t> key(src_mem.id, dst_mem.id);
@@ -3033,11 +3031,9 @@ namespace Realm {
       if(find_best_channel_for_memories(nodes_info, channel_copy_info, serdez_id,
                                         serdez_id, redop_id, total_bytes, src_frags,
                                         dst_frags, best_cost, channel, kind)) {
-        // TODO: FIX COMMENT
-        /*log_xpath.info() << "direct: " << src_mem << "(" << src_mem.kind()
-                         << ",n:" << src_node << ")->" << dst_mem << " ("
-                         << dst_mem.kind() << ",n:" << dst_node << ") cost=" << best_cost
-                         << " channel=" << channel->kind;*/
+        log_xpath.info() << "direct: " << src_mem << "(n:" << src_node << ")->" << dst_mem
+                         << " (n:" << dst_node << ") cost=" << best_cost
+                         << " channel=" << channel->kind;
         info.path.assign(1, src_mem);
         if(!skip_final_memcpy || (kind != XFER_MEM_CPY)) {
           info.path.push_back(dst_mem);
@@ -3094,11 +3090,9 @@ namespace Realm {
              0 /*no redop on not-last hops*/, total_bytes, src_frags, 0 /*no dst_frags*/,
              cost, channel, kind)) {
         NodeID dst_node = ID(partials[i].ib_mem).memory_owner_node();
-        // TODO: fix comment
-        /*log_xpath.info() << "first: " << src_mem << "(" << src_mem.kind()
-                         << ",n:" << src_node << ")->" << partials[i].ib_mem << "("
-                         << partials[i].ib_mem.kind() << ",n:" << dst_node
-                         << ") cost=" << cost << " channel=" << channel->kind;*/
+        log_xpath.info() << "first: " << src_mem << "(n:" << src_node << ")->"
+                         << partials[i].ib_mem << "(n:" << dst_node << ") cost=" << cost
+                         << " channel=" << channel->kind;
         // ignore anything that's already worse than the direct path
         if((best_cost == 0) || (cost < best_cost)) {
           active_ibs.insert(i);
@@ -3138,15 +3132,13 @@ namespace Realm {
           NodeID src_node = ID(partials[src_idx].ib_mem).memory_owner_node();
           NodeID dst_node = ID(partials[dst_idx].ib_mem).memory_owner_node();
           size_t total_cost = partials[src_idx].cost + cost;
-          /*log_xpath.info() << "inter: src_idx:" << src_idx << " "
-                           << partials[src_idx].ib_mem << "("
-                           << partials[src_idx].ib_mem.kind() << ",n:" << src_node
+          log_xpath.info() << "inter: src_idx:" << src_idx << " "
+                           << partials[src_idx].ib_mem << "(n:" << src_node
                            << ")-> dst_idx:" << dst_idx << " " << partials[dst_idx].ib_mem
-                           << "(" << partials[dst_idx].ib_mem.kind() << ",n:" << dst_node
-                           << ")"
+                           << "(n:" << dst_node << ")"
                            << " channel=" << channel->kind
                            << " cost=" << partials[src_idx].cost << "+" << cost << " = "
-                           << total_cost << " <? " << partials[dst_idx].cost;*/
+                           << total_cost << " <? " << partials[dst_idx].cost;
           // also prune any path that already exceeds the cost of the direct path
           if(((partials[dst_idx].cost == 0) ||
               (total_cost < partials[dst_idx].cost)) &&
