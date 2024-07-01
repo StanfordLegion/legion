@@ -51,18 +51,18 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  template <typename T2>
+  template <typename T2, std::enable_if_t<std::is_integral<T2>::value, bool> >
   REALM_CUDA_HD
-  inline Point<N,T>::Point(T2 val, ONLY_IF_INTEGRAL_DEFN(T2))
+  inline Point<N,T>::Point(T2 val)
   {
     for(int i = 0; i < N; i++)
       values[i] = val;
   }
 
   template <int N, typename T>
-  template <typename T2>
+  template <typename T2, std::enable_if_t<std::is_integral<T2>::value, bool> >
   REALM_CUDA_HD
-  inline Point<N,T>::Point(T2 vals[N], ONLY_IF_INTEGRAL_DEFN(T2))
+  inline Point<N,T>::Point(T2 vals[N])
   {
     for(int i = 0; i < N; i++)
       values[i] = vals[i];
@@ -200,7 +200,7 @@ namespace Realm {
   template <typename T>
   struct REALM_PUBLIC_API Point<1, T> {
 
-    typedef T value_type;
+    typedef ONLY_IF_INTEGRAL(T) value_type;
     value_type value;
 
     REALM_CUDA_HD
@@ -209,13 +209,13 @@ namespace Realm {
     Point(value_type val)
       : value(val)
     {}
-    template <typename T2>
-    REALM_CUDA_HD explicit Point(T2 vals[1], ONLY_IF_INTEGRAL(T2))
+    template <typename T2, std::enable_if_t<std::is_integral<T2>::value, bool> = true >
+    REALM_CUDA_HD explicit Point(T2 vals[1])
       : value(vals[0])
     {}
     // construct from any integral value
-    template <typename T2>
-    REALM_CUDA_HD explicit Point(T2 val, ONLY_IF_INTEGRAL(T2))
+    template <typename T2, std::enable_if_t<std::is_integral<T2>::value, bool> = true >
+    REALM_CUDA_HD explicit Point(T2 val)
       : value(val)
     {}
     // copies allow type coercion (assuming the underlying type does)
