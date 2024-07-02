@@ -2912,6 +2912,56 @@ namespace Realm {
     return item_list.end();
   }
 
+  bool find_best_channel_for_memories(
+      const Node *nodes_info, ChannelCopyInfo channel_copy_info,
+      CustomSerdezID src_serdez_id, CustomSerdezID dst_serdez_id, ReductionOpID redop_id,
+      size_t total_bytes, const std::vector<size_t> *src_frags,
+      const std::vector<size_t> *dst_frags, uint64_t &best_cost, Channel *&best_channel,
+      XferDesKind &best_kind)
+  {
+    // consider dma channels available on either source or dest node
+    NodeID src_node = ID(channel_copy_info.src_mem).memory_owner_node();
+    NodeID dst_node = ID(channel_copy_info.dst_mem).memory_owner_node();
+
+    best_cost = 0;
+    best_channel = 0;
+    best_kind = XFER_NONE;
+
+    {
+      const Node &n = nodes_info[src_node];
+      for(std::vector<Channel *>::const_iterator it = n.dma_channels.begin();
+          it != n.dma_channels.end(); ++it) {
+        XferDesKind kind = XFER_NONE;
+        uint64_t cost =
+            (*it)->supports_path(channel_copy_info, src_serdez_id, dst_serdez_id,
+                                 redop_id, total_bytes, src_frags, dst_frags, &kind);
+        if((cost > 0) && ((best_cost == 0) || (cost < best_cost))) {
+          best_cost = cost;
+          best_channel = *it;
+          best_kind = kind;
+        }
+      }
+    }
+
+    if(dst_node != src_node) {
+      const Node &n = nodes_info[dst_node];
+      for(std::vector<Channel *>::const_iterator it = n.dma_channels.begin();
+          it != n.dma_channels.end(); ++it) {
+        XferDesKind kind = XFER_NONE;
+        uint64_t cost =
+            (*it)->supports_path(channel_copy_info, src_serdez_id, dst_serdez_id,
+                                 redop_id, total_bytes, src_frags, dst_frags, &kind);
+        if((cost > 0) && ((best_cost == 0) || (cost < best_cost))) {
+          best_cost = cost;
+          best_channel = *it;
+          best_kind = kind;
+        }
+      }
+    }
+
+    return (best_cost != 0);
+  }
+
   static bool find_fastest_path(ChannelCopyInfo channel_copy_info,
                                 CustomSerdezID serdez_id,
                                 ReductionOpID redop_id,
