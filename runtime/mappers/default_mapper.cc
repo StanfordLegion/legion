@@ -2152,7 +2152,8 @@ namespace Legion {
 	runtime->find_layout_constraints(ctx, our_layout_id);
       LayoutConstraintSet creation_constraints = our_constraints;
       std::vector<FieldID> creation_fields;
-      if (needed_fields.size() != needed_fields_size)
+      // for reduce privileges disable adding all fields in the field space
+      if ((needed_fields.size() != needed_fields_size) || (req.privilege == LEGION_REDUCE))
 	default_policy_select_instance_fields(ctx, req, needed_fields,
 					      creation_fields);
       else
