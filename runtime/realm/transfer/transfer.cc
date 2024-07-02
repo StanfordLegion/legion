@@ -3173,11 +3173,10 @@ namespace Realm {
              0 /*no src_frags*/, dst_frags, cost, channel, kind)) {
         NodeID src_node = ID(partials[i].ib_mem).memory_owner_node();
         size_t total_cost = partials[i].cost + cost;
-        /*log_xpath.info() << "last: " << partials[i].ib_mem << "("
-                         << partials[i].ib_mem.kind() << ",n:" << src_node << ")->"
-                         << dst_mem << "(" << dst_mem.kind() << ",n:" << dst_node << ")"
+        log_xpath.info() << "last: " << partials[i].ib_mem << "(n:" << src_node << ")->"
+                         << dst_mem << "(n:" << dst_node << ")"
                          << " channel=" << channel->kind << " cost=" << partials[i].cost
-                         << "+" << cost << " = " << total_cost << " <? " << best_cost;*/
+                         << "+" << cost << " = " << total_cost << " <? " << best_cost;
         if((best_cost == 0) || (total_cost < best_cost)) {
           best_cost = total_cost;
           info.path.swap(partials[i].path);
