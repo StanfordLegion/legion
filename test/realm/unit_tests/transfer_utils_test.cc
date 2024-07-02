@@ -1,7 +1,6 @@
 #include "realm/transfer/transfer_utils.h"
 #include <tuple>
 #include <gtest/gtest.h>
-#include <gmock/gmock.h>
 
 using namespace Realm;
 
