@@ -183,8 +183,6 @@ protected:
 
 TEST_F(FFPTest, FFPNoChannels)
 {
-  const uint64_t exp_cost_a = 7;
-  const uint64_t exp_cost_b = 5;
   std::vector<Node> nodes(1);
   ChannelCopyInfo channel_info{ID::make_memory(0, 0).convert<Memory>(),
                                ID::make_memory(0, 1).convert<Memory>()};
