@@ -2087,11 +2087,7 @@ namespace Legion {
                           size_t *footprint /*= NULL*/)
     //--------------------------------------------------------------------------
     {
-      // Special case for reduction instances, no point in checking
-      // for existing ones and we also know that currently we can only
-      // make a single instance for each field of a reduction
-      bool force_new_instances = false;
-      if (req.privilege == LEGION_REDUCE) force_new_instances=true;
+      bool force_new_instances = (req.privilege==LEGION_REDUCE) ? true: false;
       // preprocess all the task constraint sets
       // partition them into field/non-field constraint sets + fields
       std::vector<std::vector<FieldID> > field_arrays, leftover_fields;
@@ -2123,8 +2119,11 @@ namespace Legion {
       // case 2 - non-field constraints + needed fields not empty
       if((!non_field_layout_ids.empty()) && (!needed_fields.empty()))
       {
+	// all_fields_opt ->  creates an instance with all fields
+	// in a region requirement is not valid for region req with reduce privileges.
+	bool all_fields_opt = ((needed_fields.size() == needed_fields_size)
+			       && (req.privilege != LEGION_REDUCE)) ? true: false;
 	// we will process all the needed_fields and use one non-field layout set
-	bool all_fields_opt = (needed_fields.size() == needed_fields_size) ? true: false;
 	needed_fields.clear();
 	bool ok = create_instances_from_partitioned_task_layout_constraint_set(
 			   ctx,
