@@ -17,10 +17,9 @@
 #define REALM_TRANSFER_UTILS_H
 
 #include "realm/point.h"
-#include "realm/transfer/channel.h"
 
 namespace Realm {
-  // Finds the largest subrectangle of 'domain' that starts with 'start',
+  // finds the largest subrectangle of 'domain' that starts with 'start',
   //  lies entirely within 'restriction', and is consistent with an iteration
   //  order (over the original 'domain') of 'dim_order'
   // the subrectangle is returned in 'subrect', the start of the next subrect
