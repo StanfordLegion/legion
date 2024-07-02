@@ -1,4 +1,5 @@
 #include "realm/transfer/lowlevel_dma.h"
+#include "realm/transfer/ib_memory.h"
 #include <tuple>
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
