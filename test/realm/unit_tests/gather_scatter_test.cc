@@ -92,7 +92,6 @@ TEST_F(GatherTest, GatherSingleSource1DSameNode)
   const unsigned src_field_start = 8;
   const unsigned src_field_count = 8;
   const size_t bytes_per_element = 8;
-
   // TODO: set actually some meaningfull costs
   const uint64_t exp_cost = 4;
 
@@ -100,20 +99,16 @@ TEST_F(GatherTest, GatherSingleSource1DSameNode)
   RegionInstance src_inst =
       ID::make_instance(/*owner=*/0, /*creator=*/0, /*mem_idx=*/0, /*inst_idx=*/0)
           .convert<RegionInstance>();
-
   RegionInstance dst_inst =
       ID::make_instance(/*owner=*/0, /*creator=*/0, /*mem_idx=*/1, /*inst_idx=*/1)
           .convert<RegionInstance>();
-
   RegionInstance ind_inst =
       ID::make_instance(/*owner=*/0, /*creator=*/0, /*mem_idx=*/2, /*inst_idx=*/2)
           .convert<RegionInstance>();
-
   Memory src_mem = src_inst.get_location();
   Memory dst_mem = dst_inst.get_location();
   Memory ind_mem = ind_inst.get_location();
   Memory ind_ib_mem = ID::make_memory(0, 3).convert<Memory>();
-
   std::vector<Node> nodes(1);
   MockChannel *channel_a = new MockChannel(XferDesKind::XFER_MEM_CPY, /*node=*/0);
   nodes[0].dma_channels.push_back(channel_a);
@@ -203,6 +198,8 @@ TEST_F(GatherTest, GatherSingleSource1DSameNode)
   EXPECT_EQ(xd_nodes[1].outputs[0].inst.fld_start, 2);
   EXPECT_EQ(xd_nodes[1].outputs[0].inst.fld_count, 3);
   EXPECT_EQ(xd_nodes[1].outputs[0].inst.inst, dst_inst);
+
+  delete ind;
 }
 
 TEST_F(GatherTest, GatherSingleSource1DSameNode_OOREnabled)
@@ -225,14 +222,12 @@ TEST_F(GatherTest, GatherSingleSource1DSameNode_OOREnabled)
   RegionInstance ind_inst =
       ID::make_instance(/*owner=*/0, /*creator=*/0, /*mem_idx=*/2, /*inst_idx=*/2)
           .convert<RegionInstance>();
-
   Memory src_mem = src_inst.get_location(); // ID::make_memory(0, 0).convert<Memory>();
   Memory dst_mem = dst_inst.get_location(); // ID::make_memory(0, 1).convert<Memory>();
   Memory ind_mem = ind_inst.get_location(); // ID::make_memory(0, 2).convert<Memory>();
   Memory ind_ib_mem = ID::make_memory(0, 3).convert<Memory>();
   Memory src_ib_mem = ID::make_memory(0, 4).convert<Memory>();
   Memory dst_ib_mem = ID::make_memory(0, 5).convert<Memory>();
-
   std::vector<Node> nodes(1);
   MockChannel *channel_a = new MockChannel(XferDesKind::XFER_MEM_CPY, /*node=*/0);
   nodes[0].dma_channels.push_back(channel_a);
@@ -351,6 +346,8 @@ TEST_F(GatherTest, GatherSingleSource1DSameNode_OOREnabled)
   EXPECT_EQ(xd_nodes[2].outputs[0].iotype, TransferGraph::XDTemplate::IO_INST);
   EXPECT_EQ(xd_nodes[2].outputs[0].inst.fld_start, 2);
   EXPECT_EQ(xd_nodes[2].outputs[0].inst.fld_count, 3);
+
+  delete ind;
 }
 
 // TODO
