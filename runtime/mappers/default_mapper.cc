@@ -2088,6 +2088,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       bool force_new_instances = (req.privilege==LEGION_REDUCE) ? true: false;
+      // include all the fields in the region req for reduce privileges
+      if (req.privilege == LEGION_REDUCE) {
+	needed_fields.clear();
+	needed_fields.insert(req.privilege_fields.begin(), req.privilege_fields.end());
+      }
       // preprocess all the task constraint sets
       // partition them into field/non-field constraint sets + fields
       std::vector<std::vector<FieldID> > field_arrays, leftover_fields;
