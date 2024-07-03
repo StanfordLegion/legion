@@ -2052,28 +2052,23 @@ namespace Legion {
 		    auto finder =  req.privilege_fields.find(fid);
 		    if (finder != req.privilege_fields.end()) {
 		      // check specialized constraint
-		      if (index_constraints.specialized_constraint.kind != LEGION_NO_SPECIALIZE)
+		      if (index_constraints.specialized_constraint.conflicts(req.redop))
 			{
-			  if ((index_constraints.specialized_constraint.kind
-			      != LEGION_AFFINE_REDUCTION_SPECIALIZE) ||
-			      (index_constraints.specialized_constraint.redop != req.redop))
-			    {
-			      log_mapper.error("Default mapper failed allocation for "
-			        "region requirement %d of task %s (UID %lld) in memory "
-			       IDFMT " (%s) for processor " IDFMT " (%s). Mismatch between "
-			       "reduction type in task layout constraint "
-			       "and region requirement for FieldID (%u)",
-			       index,
-			       task.get_task_name(), task.get_unique_id(),
-			       target_memory.id, Utilities::to_string(target_memory.kind()),
-			       target_proc.id, Utilities::to_string(target_proc.kind()), fid);
-			      assert(false);
+			  log_mapper.error("Default mapper failed allocation for "
+			   "region requirement %d of task %s (UID %lld) in memory "
+			   IDFMT " (%s) for processor " IDFMT " (%s). Mismatch between "
+			   "reduction type in task layout constraint "
+			   "and region requirement for FieldID (%u)",
+			   index,
+			   task.get_task_name(), task.get_unique_id(),
+			   target_memory.id, Utilities::to_string(target_memory.kind()),
+			   target_proc.id, Utilities::to_string(target_proc.kind()), fid);
+			  assert(false);
 			}
 		    }
 		  }
 	      }
 	    }
-	}
 	}
     }
     //--------------------------------------------------------------------------
