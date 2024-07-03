@@ -32,8 +32,6 @@ public:
 
 TEST(FindBestChannelTest, BestChannelForMemPairNoChannels)
 {
-  const uint64_t exp_cost_a = 7;
-  const uint64_t exp_cost_b = 5;
   std::vector<Node> nodes(1);
   ChannelCopyInfo channel_info{ID::make_memory(0, 0).convert<Memory>(),
                                ID::make_memory(0, 1).convert<Memory>()};
@@ -189,9 +187,6 @@ TEST_F(FFPTest, FFPNoChannels)
   std::vector<size_t> src_frags;
   std::vector<size_t> dst_frags;
   size_t total_bytes = 16;
-  uint64_t best_cost;
-  Channel *best_channel;
-  XferDesKind best_kind = XFER_NONE;
 
   MemPathInfo info;
   std::map<std::pair<realm_id_t, realm_id_t>, PathLRU *> path_cache;
@@ -219,9 +214,7 @@ TEST_F(FFPTest, FFPSrcDstDirectNoPath)
   std::vector<size_t> src_frags;
   std::vector<size_t> dst_frags;
   size_t total_bytes = 16;
-  uint64_t best_cost;
-  Channel *best_channel;
-  XferDesKind best_kind = XFER_NONE;
+
   mock_supports_path(channel_a, src_mem, dst_mem, &src_frags, &dst_frags, exp_cost_a);
   mock_supports_path(channel_b, src_mem, dst_mem, &src_frags, &dst_frags, exp_cost_b);
 
@@ -254,8 +247,7 @@ TEST_F(FFPTest, FFPSrcDstDirect)
   std::vector<size_t> src_frags;
   std::vector<size_t> dst_frags;
   size_t total_bytes = 16;
-  uint64_t best_cost;
-  Channel *best_channel;
+
   XferDesKind best_kind = XFER_NONE;
   mock_supports_path(channel_a, src_mem, dst_mem, &src_frags, &dst_frags, exp_cost_a);
   mock_supports_path(channel_b, src_mem, dst_mem, &src_frags, &dst_frags, exp_cost_b);
@@ -295,8 +287,7 @@ TEST_F(FFPTest, FFPSrcIBDst)
   std::vector<size_t> src_frags;
   std::vector<size_t> dst_frags;
   size_t total_bytes = 16;
-  uint64_t best_cost;
-  Channel *best_channel;
+
   XferDesKind best_kind = XFER_NONE;
 
   // Channels setup - direct path
@@ -350,9 +341,6 @@ TEST_F(FFPTest, FFPSrcIBToIBDst)
   std::vector<size_t> src_frags;
   std::vector<size_t> dst_frags;
   size_t total_bytes = 16;
-  uint64_t best_cost;
-  Channel *best_channel;
-  XferDesKind best_kind = XFER_NONE;
 
   // TODO(apryakhin): Consider doing a smarter setup and name
   // variables.
