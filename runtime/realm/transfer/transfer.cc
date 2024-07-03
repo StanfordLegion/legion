@@ -2317,7 +2317,8 @@ namespace Realm {
   class AddressSplitXferDesFactory : public XferDesFactory {
   public:
     AddressSplitXferDesFactory(size_t _bytes_per_element,
-			       const std::vector<IndexSpace<N,T> >& _spaces);
+                               const std::vector<IndexSpace<N, T>> &_spaces,
+                               Channel *_channel);
 
   protected:
     virtual ~AddressSplitXferDesFactory();
@@ -2336,11 +2337,14 @@ namespace Realm {
 				 const void *fill_data, size_t fill_size,
                                  size_t fill_total);
 
+    virtual Channel *get_channel() const { return channel; }
+
     static ActiveMessageHandlerReg<AddressSplitXferDesCreateMessage<N,T> > areg;
 
   protected:
     size_t bytes_per_element;
     std::vector<IndexSpace<N,T> > spaces;
+    Channel *channel;
   };
 
   template <int N, typename T>
@@ -2381,10 +2385,12 @@ namespace Realm {
   };
 
   template <int N, typename T>
-  AddressSplitXferDesFactory<N,T>::AddressSplitXferDesFactory(size_t _bytes_per_element,
-							      const std::vector<IndexSpace<N,T> >& _spaces)
+  AddressSplitXferDesFactory<N, T>::AddressSplitXferDesFactory(
+      size_t _bytes_per_element, const std::vector<IndexSpace<N, T>> &_spaces,
+      Channel *_channel)
     : bytes_per_element(_bytes_per_element)
     , spaces(_spaces)
+    , channel(_channel)
   {}
 
   template <int N, typename T>
@@ -2415,16 +2421,12 @@ namespace Realm {
     if(target_node == Network::my_node_id) {
       // local creation
       //assert(!inst.exists());
-      assert(local_addrsplit_channel);
-      XferDes *xd = new AddressSplitXferDes<N,T>(dma_op,
-						 local_addrsplit_channel,
-						 launch_node, guid,
-						 inputs_info, outputs_info,
-						 priority,
-						 bytes_per_element,
-						 spaces);
+      assert(channel);
+      XferDes *xd = new AddressSplitXferDes<N, T>(dma_op, channel, launch_node, guid,
+                                                  inputs_info, outputs_info, priority,
+                                                  bytes_per_element, spaces);
 
-      local_addrsplit_channel->enqueue_ready_xd(xd);
+      channel->enqueue_ready_xd(xd);
     } else {
       // remote creation
       Serialization::ByteCountSerializer bcs;
@@ -3213,67 +3215,6 @@ namespace Realm {
     return (best_cost != 0);
   }
 
-
-  ////////////////////////////////////////////////////////////////////////
-  //
-  // class IndirectionInfoBase
-  //
-
-  class IndirectionInfoBase : public IndirectionInfo {
-  public:
-    IndirectionInfoBase(bool _structured,
-                        FieldID _field_id,
-                        RegionInstance _inst,
-                        bool _is_ranges,
-                        bool _oor_possible,
-                        bool _aliasing_possible,
-                        size_t _subfield_offset,
-                        const std::vector<RegionInstance> _insts);
-
-  protected:
-    // most of the logic to generate unstructured gather/scatter paths is
-    // dimension-agnostic and we can define it in a base class to save
-    // compile time/code size ...
-    virtual void generate_gather_paths(Memory dst_mem,
-				       TransferGraph::XDTemplate::IO dst_edge,
-				       unsigned indirect_idx,
-				       unsigned src_fld_start,
-				       unsigned src_fld_count,
-				       size_t bytes_per_element,
-				       CustomSerdezID serdez_id,
-				       std::vector<TransferGraph::XDTemplate>& xd_nodes,
-				       std::vector<TransferGraph::IBInfo>& ib_edges,
-				       std::vector<TransferDesc::FieldInfo>& src_fields);
-
-    virtual void generate_scatter_paths(Memory src_mem,
-					TransferGraph::XDTemplate::IO src_edge,
-					unsigned indirect_idx,
-					unsigned dst_fld_start,
-					unsigned dst_fld_count,
-					size_t bytes_per_element,
-					CustomSerdezID serdez_id,
-					std::vector<TransferGraph::XDTemplate>& xd_nodes,
-					std::vector<TransferGraph::IBInfo>& ib_edges,
-					std::vector<TransferDesc::FieldInfo>& src_fields);
-
-    // ... but we need three helpers that will be defined in the typed versions
-    virtual size_t num_spaces() const = 0;
-    virtual void populate_copy_info(ChannelCopyInfo &info) const = 0;
-    virtual size_t domain_size() const = 0;
-    virtual size_t address_size() const = 0;
-
-    virtual XferDesFactory *create_addrsplit_factory(size_t bytes_per_element) const = 0;
-
-    bool structured;
-    FieldID field_id;
-    RegionInstance inst;
-    bool is_ranges;
-    bool oor_possible;
-    bool aliasing_possible;
-    size_t subfield_offset;
-    std::vector<RegionInstance> insts;
-  };
-
   IndirectionInfoBase::IndirectionInfoBase(bool _structured,
                                            FieldID _field_id,
                                            RegionInstance _inst,
@@ -3355,9 +3296,10 @@ namespace Realm {
   }
 
   void IndirectionInfoBase::generate_gather_paths(
-      Memory dst_mem, TransferGraph::XDTemplate::IO dst_edge, unsigned indirect_idx,
-      unsigned src_fld_start, unsigned src_fld_count, size_t bytes_per_element,
-      CustomSerdezID serdez_id, std::vector<TransferGraph::XDTemplate> &xd_nodes,
+      const Node *nodes_info, Memory dst_mem, TransferGraph::XDTemplate::IO dst_edge,
+      unsigned indirect_idx, unsigned src_fld_start, unsigned src_fld_count,
+      size_t bytes_per_element, CustomSerdezID serdez_id,
+      std::vector<TransferGraph::XDTemplate> &xd_nodes,
       std::vector<TransferGraph::IBInfo> &ib_edges,
       std::vector<TransferDesc::FieldInfo> &src_fields)
   {
@@ -3388,15 +3330,15 @@ namespace Realm {
                                   spaces_size,
                                   /*is_scatter=*/false};
         populate_copy_info(copy_info);
-        bool ok = find_fastest_path(get_runtime()->nodes, path_cache, copy_info,
-                                    serdez_id, 0, domain_size() * bytes_per_element,
-                                    &src_frags, &dst_frags, path_infos[idx]);
+        bool ok = find_fastest_path(nodes_info, path_cache, copy_info, serdez_id, 0,
+                                    domain_size() * bytes_per_element, &src_frags,
+                                    &dst_frags, path_infos[idx]);
         if(!ok) {
           // Couldn't find a path with the given indirect memory, so use a path without it
           // and we'll move the indirection buffer somewhere that channel can access it
           copy_info.ind_mem = Memory::NO_MEMORY;
-          ok = find_fastest_path(get_runtime()->nodes, path_cache, copy_info, serdez_id,
-                                 0, domain_size() * bytes_per_element, &src_frags,
+          ok = find_fastest_path(nodes_info, path_cache, copy_info, serdez_id, 0,
+                                 domain_size() * bytes_per_element, &src_frags,
                                  &dst_frags, path_infos[idx]);
         }
         assert(ok);
@@ -3416,18 +3358,17 @@ namespace Realm {
       auto channel = path_infos[0].xd_channels[0];
       log_xpath.info() << "Gather channel kind=" << channel->kind
                        << " node=" << channel->node << " path len=" << pathlen;
-
       Memory ind_ib_mem = channel->suggest_ib_memories(inst.get_location());
       if(ind_ib_mem != Memory::NO_MEMORY) {
-        log_xpath.info() << "Copy indirectiom from src_node="
+        /*log_xpath.info() << "Copy indirectiom from src_node="
                          << NodeID(ID(inst.get_location()).memory_owner_node())
                          << " to dst_node=" << NodeID(ID(ind_ib_mem).memory_owner_node())
                          << " ind_mem=" << ind_ib_mem
-                         << " ind_mem_kind=" << ind_ib_mem.kind();
+                         << " ind_mem_kind=" << ind_ib_mem.kind();*/
         MemPathInfo addr_path;
-        bool ok =
-            find_shortest_path(inst.get_location(), ind_ib_mem, 0 /*no serdez*/,
-                               0 /*redop_id*/, addr_path, true /*skip_final_memcpy*/);
+        bool ok = find_shortest_path(nodes_info, inst.get_location(), ind_ib_mem,
+                                     0 /*no serdez*/, 0 /*redop_id*/, addr_path,
+                                     true /*skip_final_memcpy*/);
         assert(ok);
         size_t aligned_ib_size =
             Config::ib_size_bytes +
@@ -3476,11 +3417,12 @@ namespace Realm {
       // also insist that the final step be owned by the destination node
       //  (i.e. the merging should not be done via rdma)
       NodeID dst_node = ID(dst_mem).memory_owner_node();
-      Memory dst_ib_mem = find_sysmem_ib_memory(dst_node);
+      Memory dst_ib_mem = Memory::NO_MEMORY;
       Channel *last_channel =
           path_infos[0].xd_channels[path_infos[0].xd_channels.size() - 1];
       bool same_last_channel = true;
       if(last_channel->node == dst_node) {
+        dst_ib_mem = last_channel->suggest_ib_memories(dst_mem);
         for(size_t i = 1; i < path_infos.size(); i++) {
           if(path_infos[i].xd_channels[path_infos[i].xd_channels.size() - 1] !=
              last_channel) {
@@ -3490,13 +3432,15 @@ namespace Realm {
         }
       } else {
         same_last_channel = false;
+        dst_ib_mem = last_channel->suggest_ib_memories_for_node(dst_node);
       }
+
       if(!same_last_channel) {
         // figure out what the final kind will be (might not be the same as
         //  any of the current paths)
         MemPathInfo tail_path;
-        bool ok =
-            find_shortest_path(dst_ib_mem, dst_mem, serdez_id, 0 /*redop_id*/, tail_path);
+        bool ok = find_shortest_path(nodes_info, dst_ib_mem, dst_mem, serdez_id,
+                                     0 /*redop_id*/, tail_path);
         assert(ok && (tail_path.xd_channels.size() == 1));
         last_channel = tail_path.xd_channels[0];
         // and fix any path that doesn't use that channel
@@ -3506,8 +3450,8 @@ namespace Realm {
             continue;
           // log_new_dma.print() << "fix " << i << " " << path_infos[i].path[0] << " -> "
           // << dst_ib_mem;
-          bool ok = find_shortest_path(path_infos[i].path[0], dst_ib_mem, 0 /*no serdez*/,
-                                       0 /*redop_id*/, path_infos[i]);
+          bool ok = find_shortest_path(nodes_info, path_infos[i].path[0], dst_ib_mem,
+                                       0 /*no serdez*/, 0 /*redop_id*/, path_infos[i]);
           assert(ok);
           // append last step
           path_infos[i].xd_channels.push_back(last_channel);
@@ -3515,14 +3459,20 @@ namespace Realm {
           // path_infos[i].xd_target_nodes.push_back(ID(dst_mem).memory_owner_node());
         }
       }
+
       // step 1: we need the address decoder, possibly with some hops to get
       //  the data to where a cpu can look at it
       NodeID addr_node = ID(inst).instance_owner_node();
       // HACK!
-      Memory addr_ib_mem = find_sysmem_ib_memory(addr_node);
       MemPathInfo addr_path;
-      bool ok = find_shortest_path(inst.get_location(), addr_ib_mem, 0 /*no serdez*/,
-                                   0 /*redop_id*/, addr_path, true /*skip_final_memcpy*/);
+
+      XferDesFactory *addr_split_factory = create_addrsplit_factory(bytes_per_element);
+      Memory addr_ib_mem =
+          addr_split_factory->get_channel()->suggest_ib_memories_for_node(addr_node);
+
+      bool ok = find_shortest_path(nodes_info, inst.get_location(), addr_ib_mem,
+                                   0 /*no serdez*/, 0 /*redop_id*/, addr_path,
+                                   true /*skip_final_memcpy*/);
       assert(ok);
       addr_edge = add_copy_path(xd_nodes, ib_edges, addr_edge, addr_path);
 
@@ -3538,7 +3488,7 @@ namespace Realm {
         TransferGraph::XDTemplate &xdn = xd_nodes[xd_base];
         xdn.target_node = addr_node;
         assert(!is_ranges && "need range address splitter");
-        xdn.factory = create_addrsplit_factory(bytes_per_element);
+        xdn.factory = addr_split_factory;
         xdn.gather_control_input = -1;
         xdn.scatter_control_input = -1;
         xdn.inputs.resize(1);
@@ -3565,8 +3515,8 @@ namespace Realm {
             insts[i].get_location());
         if(src_ib_mem != addr_ib_mem) {
           MemPathInfo path;
-          bool ok = find_shortest_path(addr_ib_mem, src_ib_mem, 0 /*no serdez*/,
-                                       0 /*redop_id*/, path);
+          bool ok = find_shortest_path(nodes_info, addr_ib_mem, src_ib_mem,
+                                       0 /*no serdez*/, 0 /*redop_id*/, path);
           assert(ok);
           decoded_addr_edges[i] =
               add_copy_path(xd_nodes, ib_edges, decoded_addr_edges[i], path);
@@ -3577,7 +3527,7 @@ namespace Realm {
       // HACK!
       if(dst_ib_mem != addr_ib_mem) {
         MemPathInfo path;
-        bool ok = find_shortest_path(addr_ib_mem, dst_ib_mem, 0 /*no serdez*/,
+        bool ok = find_shortest_path(nodes_info, addr_ib_mem, dst_ib_mem, 0 /*no serdez*/,
                                      0 /*redop_id*/, path);
         assert(ok);
         ctrl_edge = add_copy_path(xd_nodes, ib_edges, ctrl_edge, path);
@@ -3732,9 +3682,9 @@ namespace Realm {
         // do we have to do anything to get the addresses into a cpu-readable
         //  memory on that node?
         MemPathInfo addr_path;
-        bool ok =
-            find_shortest_path(inst.get_location(), ind_ib_mem, 0 /*no serdez*/,
-                               0 /*redop_id*/, addr_path, true /*skip_final_memcpy*/);
+        bool ok = find_shortest_path(get_runtime()->nodes, inst.get_location(),
+                                     ind_ib_mem, 0 /*no serdez*/, 0 /*redop_id*/,
+                                     addr_path, true /*skip_final_memcpy*/);
         assert(ok);
         size_t aligned_ib_size =
             Config::ib_size_bytes +
@@ -3795,8 +3745,8 @@ namespace Realm {
         // figure out what the first channel will be (might not be the same as
         //  any of the current paths)
         MemPathInfo head_path;
-        bool ok =
-            find_shortest_path(src_mem, src_ib_mem, serdez_id, 0 /*redop_id*/, head_path);
+        bool ok = find_shortest_path(get_runtime()->nodes, src_mem, src_ib_mem, serdez_id,
+                                     0 /*redop_id*/, head_path);
         assert(ok && (head_path.xd_channels.size() == 1));
         first_channel = head_path.xd_channels[0];
         // and fix any path that doesn't use that channel
@@ -3804,7 +3754,7 @@ namespace Realm {
           if(path_infos[i].xd_channels[0] == first_channel)
             continue;
 
-          bool ok = find_shortest_path(src_ib_mem,
+          bool ok = find_shortest_path(get_runtime()->nodes, src_ib_mem,
                                        path_infos[i].path[path_infos[i].path.size() - 1],
                                        0 /*no serdez*/, 0 /*redop_id*/, path_infos[i]);
           assert(ok);
@@ -3823,8 +3773,9 @@ namespace Realm {
       // HACK!
       Memory addr_ib_mem = find_sysmem_ib_memory(addr_node);
       MemPathInfo addr_path;
-      bool ok = find_shortest_path(inst.get_location(), addr_ib_mem, 0 /*no serdez*/,
-                                   0 /*redop_id*/, addr_path, true /*skip_final_memcpy*/);
+      bool ok = find_shortest_path(get_runtime()->nodes, inst.get_location(), addr_ib_mem,
+                                   0 /*no serdez*/, 0 /*redop_id*/, addr_path,
+                                   true /*skip_final_memcpy*/);
       assert(ok);
       addr_edge = add_copy_path(xd_nodes, ib_edges, addr_edge, addr_path);
 
@@ -3864,8 +3815,8 @@ namespace Realm {
       // HACK!
       if(src_ib_mem != addr_ib_mem) {
         MemPathInfo path;
-        bool ok = find_shortest_path(addr_ib_mem, src_ib_mem, 0 /*no serdez*/,
-                                     0 /*redop_id*/, path);
+        bool ok = find_shortest_path(get_runtime()->nodes, addr_ib_mem, src_ib_mem,
+                                     0 /*no serdez*/, 0 /*redop_id*/, path);
         assert(ok);
         ctrl_edge = add_copy_path(xd_nodes, ib_edges, ctrl_edge, path);
       }
@@ -3880,8 +3831,8 @@ namespace Realm {
         Memory dst_ib_mem = find_sysmem_ib_memory(dst_node);
         if(dst_ib_mem != addr_ib_mem) {
           MemPathInfo path;
-          bool ok = find_shortest_path(addr_ib_mem, dst_ib_mem, 0 /*no serdez*/,
-                                       0 /*redop_id*/, path);
+          bool ok = find_shortest_path(get_runtime()->nodes, addr_ib_mem, dst_ib_mem,
+                                       0 /*no serdez*/, 0 /*redop_id*/, path);
           assert(ok);
           decoded_addr_edges[i] =
               add_copy_path(xd_nodes, ib_edges, decoded_addr_edges[i], path);
@@ -3973,55 +3924,17 @@ namespace Realm {
     }
   }
 
-  ////////////////////////////////////////////////////////////////////////
-  //
-  // class IndirectionInfoTyped<N,T,N2,T2>
-  //
-
   template <int N, typename T, int N2, typename T2>
-  class IndirectionInfoTyped : public IndirectionInfoBase {
-  public:
-    IndirectionInfoTyped(const IndexSpace<N,T>& is,
-			 const typename CopyIndirection<N,T>::template Unstructured<N2,T2>& ind);
-
-    virtual Event request_metadata(void);
-
-    virtual RegionInstance get_pointer_instance(void) const;
-
-    virtual const std::vector<RegionInstance>* get_instances(void) const;
-
-    virtual FieldID get_field(void) const;
-
-    virtual TransferIterator *create_address_iterator(RegionInstance peer) const;
-
-    virtual TransferIterator *create_indirect_iterator(
-        Memory addrs_mem, RegionInstance inst, const std::vector<FieldID> &fields,
-        const std::vector<size_t> &fld_offsets, const std::vector<size_t> &fld_sizes,
-        Channel *channel = nullptr) const;
-
-    virtual void print(std::ostream& os) const;
-
-  protected:
-    virtual size_t num_spaces() const;
-    virtual void populate_copy_info(ChannelCopyInfo &info) const;
-    virtual size_t domain_size() const;
-    virtual size_t address_size() const;
-
-    virtual XferDesFactory *create_addrsplit_factory(size_t bytes_per_element) const;
-
-    IndexSpace<N,T> domain;
-    std::vector<IndexSpace<N2,T2> > spaces;
-  };
-
-  template <int N, typename T, int N2, typename T2>
-  IndirectionInfoTyped<N,T,N2,T2>::IndirectionInfoTyped(const IndexSpace<N,T>& is,
-							const typename CopyIndirection<N,T>::template Unstructured<N2,T2>& ind)
-    : IndirectionInfoBase(false /*!structured*/,
-                          ind.field_id, ind.inst, ind.is_ranges,
-                          ind.oor_possible, ind.aliasing_possible,
-                          ind.subfield_offset, ind.insts)
+  IndirectionInfoTyped<N, T, N2, T2>::IndirectionInfoTyped(
+      const IndexSpace<N, T> &is,
+      const typename CopyIndirection<N, T>::template Unstructured<N2, T2> &ind,
+      Channel *_addr_split_channel)
+    : IndirectionInfoBase(false /*!structured*/, ind.field_id, ind.inst, ind.is_ranges,
+                          ind.oor_possible, ind.aliasing_possible, ind.subfield_offset,
+                          ind.insts)
     , domain(is)
     , spaces(ind.spaces)
+    , addr_split_channel(_addr_split_channel)
   {}
 
   template <int N, typename T, int N2, typename T2>
@@ -4076,8 +3989,8 @@ namespace Realm {
   template <int N, typename T, int N2, typename T2>
   XferDesFactory *IndirectionInfoTyped<N,T,N2,T2>::create_addrsplit_factory(size_t bytes_per_element) const
   {
-    return new AddressSplitXferDesFactory<N2,T2>(bytes_per_element,
-                                                 spaces);
+    return new AddressSplitXferDesFactory<N2, T2>(bytes_per_element, spaces,
+                                                  addr_split_channel);
   }
 
   template <int N, typename T, int N2, typename T2>
@@ -4151,7 +4064,7 @@ namespace Realm {
   {
     // The next indirection is not allowed to be specified yet.
     assert(next_indirection == nullptr);
-    return new IndirectionInfoTyped<N,T,N2,T2>(is, *this);
+    return new IndirectionInfoTyped<N, T, N2, T2>(is, *this, local_addrsplit_channel);
   }
 
 
@@ -4492,16 +4405,16 @@ namespace Realm {
 
 	Memory dst_mem = dsts[i].inst.get_location();
 	MemPathInfo path_info;
-	bool ok = find_shortest_path(Memory::NO_MEMORY, dst_mem, serdez_id,
-                                     0 /*redop_id*/,
-				     path_info);
-	if(!ok) {
-	  log_new_dma.fatal() << "FATAL: no fill path found for " << dst_mem << " (serdez=" << serdez_id << ")";
-	  assert(0);
-	}
+        bool ok = find_shortest_path(get_runtime()->nodes, Memory::NO_MEMORY, dst_mem,
+                                     serdez_id, 0 /*redop_id*/, path_info);
+        if(!ok) {
+          log_new_dma.fatal() << "FATAL: no fill path found for " << dst_mem
+                              << " (serdez=" << serdez_id << ")";
+          assert(0);
+        }
 
-	size_t pathlen = path_info.xd_channels.size();
-	size_t xd_idx = graph.xd_nodes.size();
+        size_t pathlen = path_info.xd_channels.size();
+        size_t xd_idx = graph.xd_nodes.size();
         size_t ib_idx = graph.ib_edges.size();
         size_t ib_alloc_size = 0;
         graph.xd_nodes.resize(xd_idx + pathlen);
@@ -4743,15 +4656,11 @@ namespace Realm {
 	    Memory dst_mem = dsts[i].inst.get_location();
 	    IndirectionInfo *gather_info = indirects[srcs[i].indirect_index];
             size_t prev_nodes = graph.xd_nodes.size();
-	    gather_info->generate_gather_paths(dst_mem,
-					       TransferGraph::XDTemplate::mk_inst(dsts[i].inst, fld_start, 1),
-					       srcs[i].indirect_index,
-					       fld_start, 1,
-					       addrsplit_bytes_per_element,
-					       serdez_id,
-					       graph.xd_nodes,
-					       graph.ib_edges,
-					       src_fields);
+            gather_info->generate_gather_paths(
+                get_runtime()->nodes, dst_mem,
+                TransferGraph::XDTemplate::mk_inst(dsts[i].inst, fld_start, 1),
+                srcs[i].indirect_index, fld_start, 1, addrsplit_bytes_per_element,
+                serdez_id, graph.xd_nodes, graph.ib_edges, src_fields);
 
             prof_usage.source = Memory::NO_MEMORY;
             prof_usage.target = dst_mem;
@@ -4793,26 +4702,16 @@ namespace Realm {
 	    graph.ib_edges[ib_idx].size = 1 << 20;  //HACK
 
 	    IndirectionInfo *gather_info = indirects[srcs[i].indirect_index];
-	    gather_info->generate_gather_paths(ib_mem,
-					       TransferGraph::XDTemplate::mk_edge(ib_idx),
-					       srcs[i].indirect_index,
-					       fld_start, 1,
-					       addrsplit_bytes_per_element,
-					       serdez_id,
-					       graph.xd_nodes,
-					       graph.ib_edges,
-					       src_fields);
+            gather_info->generate_gather_paths(
+                get_runtime()->nodes, ib_mem, TransferGraph::XDTemplate::mk_edge(ib_idx),
+                srcs[i].indirect_index, fld_start, 1, addrsplit_bytes_per_element,
+                serdez_id, graph.xd_nodes, graph.ib_edges, src_fields);
 
-	    IndirectionInfo *scatter_info = indirects[dsts[i].indirect_index];
-	    scatter_info->generate_scatter_paths(ib_mem,
-						 TransferGraph::XDTemplate::mk_edge(ib_idx),
-						 dsts[i].indirect_index,
-						 fld_start, 1,
-						 addrsplit_bytes_per_element,
-						 serdez_id,
-						 graph.xd_nodes,
-						 graph.ib_edges,
-						 src_fields);
+            IndirectionInfo *scatter_info = indirects[dsts[i].indirect_index];
+            scatter_info->generate_scatter_paths(
+                ib_mem, TransferGraph::XDTemplate::mk_edge(ib_idx),
+                dsts[i].indirect_index, fld_start, 1, addrsplit_bytes_per_element,
+                serdez_id, graph.xd_nodes, graph.ib_edges, src_fields);
 
             prof_usage.source = Memory::NO_MEMORY;
             prof_usage.target = Memory::NO_MEMORY;

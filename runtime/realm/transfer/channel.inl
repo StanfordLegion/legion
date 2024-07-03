@@ -284,7 +284,9 @@ namespace Realm {
     : LocalChannel(_kind)
     , xdq(this, _name, CHANNEL::is_ordered)
   {
-    xdq.add_to_manager(bgwork, _numa_domain);
+    if (bgwork) { // TODO(apryakhin)
+      xdq.add_to_manager(bgwork, _numa_domain);
+    }
   }
 
   template <typename CHANNEL, typename XD>

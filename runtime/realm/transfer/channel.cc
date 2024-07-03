@@ -4446,24 +4446,30 @@ namespace Realm {
         return false;
       }
 
-      Memory Channel::suggest_ib_memories(Memory memory) const
+      static Memory find_sysmem_ib_memory(NodeID node)
       {
         Node &n = get_runtime()->nodes[node];
         for(std::vector<IBMemory *>::const_iterator it = n.ib_memories.begin();
-            it != n.ib_memories.end(); ++it) {
-          switch((*it)->lowlevel_kind) {
-          case Memory::SYSTEM_MEM:
-          case Memory::REGDMA_MEM:
-          case Memory::SOCKET_MEM:
-          case Memory::Z_COPY_MEM:
+            it != n.ib_memories.end(); ++it)
+          if(((*it)->lowlevel_kind == Memory::SYSTEM_MEM) ||
+             ((*it)->lowlevel_kind == Memory::REGDMA_MEM) ||
+             ((*it)->lowlevel_kind == Memory::SOCKET_MEM) ||
+             ((*it)->lowlevel_kind == Memory::Z_COPY_MEM))
             return (*it)->me;
-          default:
-            break;
-          }
-        }
-        log_new_dma.fatal() << "no sysmem ib memory on node:" << node;
+
+        log_new_dma.fatal() << "no sysmem ib memory on node " << node;
         abort();
         return Memory::NO_MEMORY;
+      }
+
+      Memory Channel::suggest_ib_memories(Memory memory) const
+      {
+        return find_sysmem_ib_memory(node);
+      }
+
+      Memory Channel::suggest_ib_memories_for_node(NodeID node_id) const
+      {
+        return find_sysmem_ib_memory(node_id);
       }
 
       // sometimes we need to return a reference to a SupportedPath that won't
@@ -4754,6 +4760,11 @@ namespace Realm {
   void SimpleXferDesFactory::release()
   {
     // do nothing since we are a singleton
+  }
+
+  Channel *SimpleXferDesFactory::get_channel() const
+  {
+    return reinterpret_cast<Channel *>(channel);
   }
 
   void SimpleXferDesFactory::create_xfer_des(uintptr_t dma_op,

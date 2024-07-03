@@ -102,12 +102,10 @@ namespace Realm {
       PathLRUIterator find(const LRUKey &key);
       PathLRUIterator end(void);
     };
-    
-    bool find_shortest_path(Memory src_mem, Memory dst_mem,
-			    CustomSerdezID serdez_id,
-                            ReductionOpID redop_id,
-			    MemPathInfo& info,
-			    bool skip_final_memcpy = false);
+
+    bool find_shortest_path(const Node *nodes_info, Memory src_mem, Memory dst_mem,
+                            CustomSerdezID serdez_id, ReductionOpID redop_id,
+                            MemPathInfo &info, bool skip_final_memcpy = false);
 
     // Returns true if successfully found a DMA channel that has a minimum
     // transfer cost from source to destination memories.

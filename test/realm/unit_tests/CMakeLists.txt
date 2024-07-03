@@ -32,6 +32,7 @@ list(APPEND REALM_TESTS
   intrusive_list_test.cc
   nodeset_test.cc
   lowlevel_dma_test.cc
+  gather_scatter_test.cc
  )
 
 include(FetchContent)

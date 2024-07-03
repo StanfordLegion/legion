@@ -638,6 +638,7 @@ namespace Realm {
 
     public:
       virtual void release() = 0;
+      virtual Channel *get_channel() const = 0;
 
       virtual void create_xfer_des(uintptr_t dma_op,
 				   NodeID launch_node,
@@ -673,6 +674,7 @@ namespace Realm {
       SimpleXferDesFactory(uintptr_t _channel);
 
       virtual void release();
+      virtual Channel *get_channel() const;
 
       virtual void create_xfer_des(uintptr_t dma_op,
 				   NodeID launch_node,
@@ -833,6 +835,7 @@ namespace Realm {
       virtual bool supports_indirection_memory(Memory mem) const;
 
       virtual Memory suggest_ib_memories(Memory memory) const;
+      virtual Memory suggest_ib_memories_for_node(NodeID node) const;
 
       virtual bool needs_wrapping_iterator() const { return false; }
 
