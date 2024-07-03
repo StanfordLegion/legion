@@ -1495,6 +1495,21 @@ impl StateDataSource {
                     }
                 }
             }
+            let time_range = entry.time_range();
+            if let Some(ready) = time_range.ready {
+                if let Some(create) = time_range.create {
+                    fields.push((
+                        self.fields.deferred_time,
+                        Field::Interval(ts::Interval::new(create.into(), ready.into())),
+                    ));
+                }
+                if let Some(start) = time_range.start {
+                    fields.push((
+                        self.fields.delayed_time,
+                        Field::Interval(ts::Interval::new(ready.into(), start.into())),
+                    ));
+                }
+            }
             ItemMeta {
                 item_uid: entry.base().prof_uid.into(),
                 title: name,

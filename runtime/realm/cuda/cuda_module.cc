@@ -3608,6 +3608,7 @@ namespace Realm {
 
     GPUAllocation &GPU::add_allocation(GPUAllocation &&alloc)
     {
+      AutoLock<> al(alloc_mutex);
       assert(((!!alloc) && (alloc.get_dptr() != 0)) && "Given allocation is not valid!");
       return allocations.emplace(std::make_pair(alloc.get_dptr(), std::move(alloc)))
           .first->second;

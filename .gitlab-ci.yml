@@ -117,7 +117,7 @@ cache: &global_cache
   CXX_STANDARD: "17"
 .cxx17_precise: &cxx17_precise
   # Intel compilers turn on some overly aggressive optimizations by default
-  CXXFLAGS: "-fp-model=precise -no-ansi-alias"
+  CXXFLAGS: "-fp-model=precise"
   CXX_STANDARD: "17"
 .cxx20_normal: &cxx20_normal
   CXXFLAGS: ""

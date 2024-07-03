@@ -29448,14 +29448,22 @@ namespace Legion {
       if ((req.handle_type == LEGION_SINGULAR_PROJECTION) || 
           (req.handle_type == LEGION_REGION_PROJECTION))
       {
-        if (!forest->has_node(req.region))
+        if (forest->get_tree(req.region.get_tree_id(),
+              true/*can fail*/) == NULL)
+          return ERROR_INVALID_REGION_HANDLE;
+        if (forest->get_node(req.region.get_index_space(), 
+              NULL/*do not defer*/, true/*can fail*/) == NULL)
           return ERROR_INVALID_REGION_HANDLE;
         if (req.region.get_tree_id() != req.parent.get_tree_id())
           return ERROR_INVALID_REGION_HANDLE;
       }
       else
       {
-        if (!forest->has_node(req.partition))
+        if (forest->get_tree(req.partition.get_tree_id(), 
+              true/*can fail*/) == NULL)
+          return ERROR_INVALID_PARTITION_HANDLE;
+        if (forest->get_node(req.partition.get_index_partition(),
+              NULL/*do not defer*/, true/*can fail*/) == NULL)
           return ERROR_INVALID_PARTITION_HANDLE;
         if (req.partition.get_tree_id() != req.parent.get_tree_id())
           return ERROR_INVALID_PARTITION_HANDLE;
