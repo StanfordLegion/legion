@@ -38,6 +38,7 @@
 #include <array>
 #include <list>
 #include <memory>
+#include <sstream>
 
 namespace Realm {
 
@@ -130,43 +131,54 @@ namespace Realm {
   }
 #endif
 
-  PythonInterpreter::PythonInterpreter()
-  {
-    std::unique_ptr<FILE, decltype(&pclose)> fp{
-        popen("python3 -c 'import sysconfig; import os; import sys; "
-              "lbdir = sysconfig.get_config_var(\"LIBDIR\");"
-              "masd = sysconfig.get_config_var(\"multiarchsubdir\");"
-              "masd = masd if masd else \"\";"
-              "masd = masd[len(os.sep):] if masd.startswith(os.sep) else masd;"
-              "name = f\"libpython{sys.version_info.major}.{sys.version_info.minor}\";"
-              "print(os.path.join(lbdir, masd, name),end=\"\")'",
-              "r"),
-        pclose};
-    if(fp == NULL) {
-      log_py.fatal() << "Failed to run a popen script";
-      abort();
-    }
+namespace {
 
-    std::array<char, PATH_MAX> path;
-    int lines = 0;
-    std::string python_lib = "";
-    while(fgets(path.data(), path.size(), fp.get())) {
-      python_lib += path.data();
-      lines++;
+std::string find_libpython()
+{
+  std::unique_ptr<FILE, decltype(&pclose)> fp{
+      popen("python3 -c 'import sysconfig; import os; import sys; "
+            "lbdir = sysconfig.get_config_var(\"LIBDIR\");"
+            "masd = sysconfig.get_config_var(\"multiarchsubdir\");"
+            "masd = masd if masd else \"\";"
+            "masd = masd[len(os.sep):] if masd.startswith(os.sep) else masd;"
+            "name = f\"libpython{sys.version_info.major}.{sys.version_info.minor}\";"
+            "print(os.path.join(lbdir, masd, name),end=\"\")'",
+            "r"),
+      pclose};
+  if(fp == NULL) {
+    log_py.fatal() << "Failed to run a popen script";
+    abort();
+  }
+
+  std::array<char, PATH_MAX> path;
+  int lines = 0;
+  std::stringstream python_lib;
+  while(fgets(path.data(), path.size(), fp.get())) {
+    python_lib << path.data();
+    lines++;
+  }
+  if(lines != 1) {
+    log_py.fatal() << "Failed to find a libpython candidate";
+    if(lines != 0) {
+      log_py.fatal() << "Expected single line output, received: " << python_lib.str();
     }
-    if(lines != 1) {
-      log_py.fatal() << "Failed to find a libpython candidate";
-      if(lines != 0) {
-        log_py.fatal() << "Expected single line output, received: " << python_lib;
-      }
-      abort();
-    }
+    abort();
+  }
 
 #if defined(REALM_ON_MACOS)
-    python_lib += ".dylib";
+  python_lib << ".dylib";
 #else
-    python_lib += ".so";
+  python_lib << ".so";
 #endif
+  return std::move(python_lib).str();
+}
+
+}  // namespace
+
+  PythonInterpreter::PythonInterpreter()
+  {
+    const char *python_lib_env = getenv("REALM_PYTHON_LIB");
+    std::string python_lib = python_lib_env ? python_lib_env : find_libpython();
 
 #ifdef REALM_USE_DLMOPEN
     // loading libpython into its own namespace will cause it to try to bring
