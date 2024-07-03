@@ -287,10 +287,8 @@ TEST_F(FFPTest, FFPSrcIBDst)
   std::vector<size_t> dst_frags;
   size_t total_bytes = 16;
 
-  XferDesKind best_kind = XFER_NONE;
-
   // Channels setup - direct path
-  mock_supports_path(channel_a, src_mem, dst_mem, &src_frags, &dst_frags, exp_cost_b);
+  mock_supports_path(channel_a, src_mem, dst_mem, &src_frags, &dst_frags, exp_cost_a);
   mock_supports_path(channel_b, src_mem, dst_mem, &src_frags, &dst_frags, exp_cost_b);
 
   // Channels setup - path via single edge

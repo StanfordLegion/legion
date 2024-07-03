@@ -124,7 +124,6 @@ TEST_F(GatherTest, GatherSingleSource1DSameNode)
   indirect.is_ranges = false;
   IndirectionInfo *ind =
       new IndirectionInfoTyped<1, int, 1, int>(is, indirect, mock_addrsplit_channel);
-  Memory mem = Memory::NO_MEMORY;
 
   // Set input for generate_gather_paths
   TransferGraph::XDTemplate::IO dst_edge;
@@ -226,8 +225,7 @@ TEST_F(GatherTest, GatherSingleSource1DSameNode_OOREnabled)
   Memory dst_mem = dst_inst.get_location(); // ID::make_memory(0, 1).convert<Memory>();
   Memory ind_mem = ind_inst.get_location(); // ID::make_memory(0, 2).convert<Memory>();
   Memory ind_ib_mem = ID::make_memory(0, 3).convert<Memory>();
-  Memory src_ib_mem = ID::make_memory(0, 4).convert<Memory>();
-  Memory dst_ib_mem = ID::make_memory(0, 5).convert<Memory>();
+
   std::vector<Node> nodes(1);
   MockChannel *channel_a = new MockChannel(XferDesKind::XFER_MEM_CPY, /*node=*/0);
   nodes[0].dma_channels.push_back(channel_a);
