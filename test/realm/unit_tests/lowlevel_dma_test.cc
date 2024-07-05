@@ -378,4 +378,3 @@ TEST_F(FFPTest, FFPSrcIBToIBDst)
   EXPECT_EQ(info.path[2], dst_ib_mem->me);
   EXPECT_EQ(info.path[3], dst_mem);
 }
-
