@@ -2963,7 +2963,6 @@ namespace Realm {
     return (best_cost != 0);
   }
 
-
   bool find_fastest_path(
       const Node *nodes_info,
       std::map<std::pair<realm_id_t, realm_id_t>, PathLRU *> &path_cache,
@@ -4326,7 +4325,8 @@ namespace Realm {
                                     dsts[i].redop_id, domain_size * combined_field_size,
                                     &src_frags, &dst_frags, path_info);
         if(!ok) {
-          log_new_dma.fatal() << "FATAL: no path found from " << src_mem << " to " << dst_mem << " (redop=" << dsts[i].redop_id << ")";
+          log_new_dma.fatal() << "FATAL: no path found from " << src_mem << " to "
+                              << dst_mem << " (redop=" << dsts[i].redop_id << ")";
           assert(0);
         }
         size_t pathlen = path_info.xd_channels.size();
