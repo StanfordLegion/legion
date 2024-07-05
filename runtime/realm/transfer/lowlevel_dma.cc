@@ -645,18 +645,15 @@ namespace Realm {
       NodeID dst_node = ID(dst_mem).memory_owner_node();
       const Node &n = nodes_info[src_node];
       for(std::vector<Channel *>::const_iterator it = n.dma_channels.begin();
-	  it != n.dma_channels.end();
-	  ++it) {
-	unsigned bw = 0;
-	unsigned latency = 0;
-	if((*it)->supports_path(ChannelCopyInfo{src_mem, dst_mem},
-				src_serdez_id, dst_serdez_id,
-				redop_id,
-                                0, 0, 0, // FIXME
-				&kind, &bw, &latency)) {
-	  channel = *it;
-	  break;
-	}
+          it != n.dma_channels.end(); ++it) {
+        unsigned bw = 0;
+        unsigned latency = 0;
+        if((*it)->supports_path(ChannelCopyInfo{src_mem, dst_mem}, src_serdez_id,
+                                dst_serdez_id, redop_id, 0, 0, 0, // FIXME
+                                &kind, &bw, &latency)) {
+          channel = *it;
+          break;
+        }
       }
 
       // if that didn't work, try the destination node (if different)
@@ -666,18 +663,17 @@ namespace Realm {
             it != n.dma_channels.end(); ++it) {
           unsigned bw = 0;
           unsigned latency = 0;
-          if((*it)->supports_path(ChannelCopyInfo{src_mem, dst_mem},
-				  src_serdez_id, dst_serdez_id,
-				  redop_id,
-                                  0, 0, 0, // FIXME
-				  &kind, &bw, &latency)) {
-	    channel = *it;
-	    break;
-	  }
+          if((*it)->supports_path(ChannelCopyInfo{src_mem, dst_mem}, src_serdez_id,
+                                  dst_serdez_id, redop_id, 0, 0, 0, // FIXME
+                                  &kind, &bw, &latency)) {
+            channel = *it;
+            break;
+          }
         }
       }
 
-      if(pkind) *pkind = kind;
+      if(pkind)
+        *pkind = kind;
       return channel;
     }
 
@@ -688,25 +684,25 @@ namespace Realm {
       // make sure we write a fresh MemPathInfo
       info.path.clear();
       info.xd_channels.clear();
-      //info.xd_kinds.clear();
-      //info.xd_target_nodes.clear();
+      // info.xd_kinds.clear();
+      // info.xd_target_nodes.clear();
 
       // fast case - can we go straight from src to dst?
       XferDesKind kind;
       Channel *channel = get_xfer_channel(nodes_info, src_mem, dst_mem, serdez_id,
                                           serdez_id, redop_id, &kind);
       if(channel) {
-	info.path.push_back(src_mem);
-	if(!skip_final_memcpy || (kind != XFER_MEM_CPY)) {
-	  info.path.push_back(dst_mem);
-	  //info.xd_kinds.push_back(kind);
-	  info.xd_channels.push_back(channel);
-	}
+        info.path.push_back(src_mem);
+        if(!skip_final_memcpy || (kind != XFER_MEM_CPY)) {
+          info.path.push_back(dst_mem);
+          // info.xd_kinds.push_back(kind);
+          info.xd_channels.push_back(channel);
+        }
       } else {
-	std::map<Memory, std::vector<Memory> > dist;
-	std::map<Memory, std::vector<Channel *> > channels;
-	std::list<Memory> mems_left;
-	std::queue<Memory> active_nodes;
+        std::map<Memory, std::vector<Memory>> dist;
+        std::map<Memory, std::vector<Channel *>> channels;
+        std::list<Memory> mems_left;
+        std::queue<Memory> active_nodes;
         const Node &node = nodes_info[ID(src_mem).memory_owner_node()];
         for(std::vector<IBMemory *>::const_iterator it = node.ib_memories.begin();
             it != node.ib_memories.end(); it++) {
@@ -726,34 +722,34 @@ namespace Realm {
             std::vector<Memory> &v = dist[*it];
             v.push_back(src_mem);
             v.push_back(*it);
-	    channels[*it].push_back(channel);
-	    active_nodes.push(*it);
-	    it = mems_left.erase(it);
+            channels[*it].push_back(channel);
+            active_nodes.push(*it);
+            it = mems_left.erase(it);
           } else
             ++it;
         }
         while(true) {
           if(active_nodes.empty())
-	    return false;
+            return false;
 
-	  Memory cur = active_nodes.front();
-	  active_nodes.pop();
-	  std::vector<Memory> sub_path = dist[cur];
-	  
-	  // can we reach the destination from here (handling potential
-	  //  deserialization or reduction)
+          Memory cur = active_nodes.front();
+          active_nodes.pop();
+          std::vector<Memory> sub_path = dist[cur];
+
+          // can we reach the destination from here (handling potential
+          //  deserialization or reduction)
           channel =
               get_xfer_channel(nodes_info, cur, dst_mem, 0, serdez_id, redop_id, &kind);
           if(channel) {
             info.path = dist[cur];
             // info.xd_kinds = kinds[cur];
             info.xd_channels = channels[cur];
-	    if(!skip_final_memcpy || (kind != XFER_MEM_CPY)) {
-	      info.path.push_back(dst_mem);
-	      //info.xd_kinds.push_back(kind);
-	      info.xd_channels.push_back(channel);
-	    }
-	    break;
+            if(!skip_final_memcpy || (kind != XFER_MEM_CPY)) {
+              info.path.push_back(dst_mem);
+              // info.xd_kinds.push_back(kind);
+              info.xd_channels.push_back(channel);
+            }
+            break;
           }
 
           // no, look for another intermediate hop
@@ -764,14 +760,14 @@ namespace Realm {
               std::vector<Memory> &v = dist[*it];
               v = dist[cur];
               v.push_back(*it);
-	      //std::vector<XferDesKind>& k = kinds[*it];
-	      //k = kinds[cur];
-	      //k.push_back(kind);
-	      std::vector<Channel *>& c = channels[*it];
-	      c = channels[cur];
-	      c.push_back(channel);
-	      active_nodes.push(*it);
-	      it = mems_left.erase(it);
+              // std::vector<XferDesKind>& k = kinds[*it];
+              // k = kinds[cur];
+              // k.push_back(kind);
+              std::vector<Channel *> &c = channels[*it];
+              c = channels[cur];
+              c.push_back(channel);
+              active_nodes.push(*it);
+              it = mems_left.erase(it);
             } else
               ++it;
           }
@@ -780,7 +776,6 @@ namespace Realm {
 
       return true;
     }
-
 
   ////////////////////////////////////////////////////////////////////////
   //
