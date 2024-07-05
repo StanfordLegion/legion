@@ -20,6 +20,12 @@
 
 #include "realm/serialize.h"
 
+#if defined (__CUDACC__) || defined (__HIPCC__)
+#ifdef REALM_USE_HIP
+#include <hip/hip_runtime.h>
+#endif
+#endif
+
 TEMPLATE_TYPE_IS_SERIALIZABLE2(int N, typename T, Realm::Point<N,T>);
 TEMPLATE_TYPE_IS_SERIALIZABLE2(int N, typename T, Realm::Rect<N,T>);
 TEMPLATE_TYPE_IS_SERIALIZABLE3(int M, int N, typename T,
