@@ -3308,8 +3308,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool PhysicalManager::update_physical_instance(
-                                                  PhysicalInstance new_instance,
-                                                  size_t new_footprint)
+             PhysicalInstance new_instance, RtEvent ready, size_t new_footprint)
     //--------------------------------------------------------------------------
     {
       {
@@ -3322,7 +3321,7 @@ namespace Legion {
         kind = INTERNAL_INSTANCE_KIND;
         instance_footprint = new_footprint;
 
-        Runtime::trigger_event(instance_ready);
+        Runtime::trigger_event(instance_ready, ready);
 
         if (runtime->legion_spy_enabled)
         {
@@ -3350,6 +3349,7 @@ namespace Legion {
         RezCheck z(rez);
         rez.serialize(did);
         rez.serialize(instance);
+        rez.serialize(instance_ready);
         rez.serialize(instance_footprint);
       }
       BroadcastFunctor functor(context->runtime, rez);
@@ -3366,6 +3366,8 @@ namespace Legion {
       derez.deserialize(did);
       PhysicalInstance instance;
       derez.deserialize(instance);
+      RtEvent ready;
+      derez.deserialize(ready);
       size_t footprint;
       derez.deserialize(footprint);
 
@@ -3375,7 +3377,7 @@ namespace Legion {
       if (manager_ready.exists() && !manager_ready.has_triggered())
         manager_ready.wait();
 
-      if (manager->update_physical_instance(instance, footprint))
+      if (manager->update_physical_instance(instance, ready, footprint))
         delete manager;
     }
 

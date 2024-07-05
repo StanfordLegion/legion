@@ -403,7 +403,7 @@ namespace Legion {
       size_t get_instance_size(void) const;
     public:
       bool update_physical_instance(PhysicalInstance new_instance,
-                                    size_t new_footprint);
+          RtEvent ready, size_t new_footprint);
       void broadcast_manager_update(void);
       static void handle_send_manager_update(Runtime *runtime,
                                              AddressSpaceID source,

@@ -299,8 +299,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void TaskContext::add_output_region(const OutputRequirement &req,
                                         const InstanceSet &instances,
-                                        bool global,
-                                        bool valid)
+                                        bool global, bool valid, bool grouped)
     //--------------------------------------------------------------------------
     {
       size_t index = output_regions.size();
@@ -310,7 +309,8 @@ namespace Legion {
                                                     this,
                                                     runtime,
                                                     global,
-                                                    valid);
+                                                    valid,
+                                                    grouped);
       output_regions.push_back(OutputRegion(impl));
     }
 

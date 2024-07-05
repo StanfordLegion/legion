@@ -89,6 +89,18 @@ namespace Legion {
         SLICE_TASK_KIND,
         SHARD_TASK_KIND,
       };
+      class OutputOptions {
+      public:
+        OutputOptions(void) : store(0) { }
+        OutputOptions(bool global, bool valid, bool grouped)
+          : store((global ? 1 : 0) | (valid ? 2 : 0) | (grouped ? 4 : 0)) { }
+      public:
+        inline bool global_indexing(void) const { return (store & 1); }
+        inline bool valid_requirement(void) const { return (store & 2); }
+        inline bool grouped_fields(void) const { return (store & 4); }
+      private:
+        uint8_t store;
+      };
     public:
       struct TriggerTaskArgs : public LgTaskArgs<TriggerTaskArgs> {
       public:
@@ -220,6 +232,7 @@ namespace Legion {
       virtual bool is_stealable(void) const = 0;
       virtual bool is_output_global(unsigned idx) const { return false; }
       virtual bool is_output_valid(unsigned idx) const { return false; } 
+      virtual bool is_output_grouped(unsigned idx) const { return false; }
     public:
       virtual TaskKind get_task_kind(void) const = 0;
     public:
@@ -609,18 +622,7 @@ namespace Legion {
      */
     class MultiTask : public CollectiveViewCreator<TaskOp> {
     public:
-      typedef std::map<DomainPoint,DomainPoint> OutputExtentMap;
-      class OutputOptions {
-      public:
-        OutputOptions(void) : store(0) { }
-        OutputOptions(bool global, bool valid)
-          : store((global ? 1 : 0) | (valid ? 2 : 0)) { } 
-      public:
-        inline bool global_indexing(void) const { return (store & 1); }
-        inline bool valid_requirement(void) const { return (store & 2); }
-      private:
-        unsigned char store;
-      };
+      typedef std::map<DomainPoint,DomainPoint> OutputExtentMap; 
       struct FutureHandles : public Collectable {
       public:
         std::map<DomainPoint,DistributedID> handles;
@@ -815,6 +817,7 @@ namespace Legion {
       virtual bool replicate_task(void);
     public:
       virtual bool is_output_valid(unsigned idx) const;
+      virtual bool is_output_grouped(unsigned idx) const;
     public:
       virtual TaskKind get_task_kind(void) const;
     public:
@@ -854,7 +857,7 @@ namespace Legion {
     protected: 
       Future result; 
     protected:
-      std::vector<bool> valid_output_regions;
+      std::vector<OutputOptions> output_region_options;
       // Event for when the output regions are registered with the context
       RtEvent output_regions_registered;
       RtEvent remote_commit_precondition;
@@ -922,6 +925,7 @@ namespace Legion {
       virtual const VersionInfo& get_version_info(unsigned idx) const;
       virtual bool is_output_global(unsigned idx) const; 
       virtual bool is_output_valid(unsigned idx) const;
+      virtual bool is_output_grouped(unsigned idx) const;
       virtual void record_output_extent(unsigned idx,
           const DomainPoint &color, const DomainPoint &extents);
       virtual void record_output_registered(RtEvent registered,
@@ -1400,6 +1404,7 @@ namespace Legion {
       virtual void map_and_launch(void);
       virtual bool is_output_global(unsigned idx) const;
       virtual bool is_output_valid(unsigned idx) const;
+      virtual bool is_output_grouped(unsigned idx) const;
       virtual void trigger_complete(ApEvent effects);
     public:
       virtual TaskKind get_task_kind(void) const;

@@ -322,6 +322,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
+      assert(base_alignment > 0); // should be at least 1
       assert(field_ids.size() == field_sizes.size());
       assert(int(constraints.ordering_constraint.ordering.size()) == (DIM+1));
 #endif

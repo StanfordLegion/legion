@@ -602,7 +602,7 @@ namespace Legion {
     public:
       void add_output_region(const OutputRequirement &req,
                              const InstanceSet &instances,
-                             bool global_indexing, bool valid);
+                             bool global_indexing, bool valid, bool grouped);
       void finalize_output_regions(void);
       void initialize_overhead_profiler(void);
       inline void begin_runtime_call(void);

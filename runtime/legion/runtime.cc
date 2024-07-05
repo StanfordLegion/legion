@@ -6038,12 +6038,13 @@ namespace Legion {
                                        const InstanceSet &instances,
                                        TaskContext *ctx, Runtime *rt,
                                        const bool global,
-                                       const bool valid)
+                                       const bool valid,
+                                       const bool grouped)
       : Collectable(), runtime(rt), context(ctx), req(r), 
         region(runtime->forest->get_node(req.region)), index(idx),
         created_region(
           (req.flags & LEGION_CREATED_OUTPUT_REQUIREMENT_FLAG) && !valid),
-        global_indexing(global)
+        global_indexing(global), grouped_fields(grouped)
     //--------------------------------------------------------------------------
     {
       region->add_base_gc_ref(OUTPUT_REGION_REF);
@@ -6233,11 +6234,10 @@ namespace Legion {
           field_id, index, context->owner_task->get_task_name(),
           context->owner_task->get_unique_op_id());
       PhysicalManager *manager = get_manager(field_id);
+      const LayoutConstraints *manager_cons = manager->layout->constraints;
       if (check_constraints && (constraints != NULL))
       {
         bool has_conflict = false;
-
-        LayoutConstraints *manager_cons = manager->layout->constraints;
         if (!req.global_indexing && context->owner_task->is_index_space)
         {
           // Unfortunately, for local indexing, the ordering constraint
@@ -6255,7 +6255,7 @@ namespace Legion {
                manager_cons->ordering_constraint.ordering.end(); ++it)
           {
             int32_t dim = *it;
-            if (dim - LEGION_DIM_X < ndim || dim == LEGION_DIM_F)
+            if (((dim - LEGION_DIM_X) < ndim) || (dim == LEGION_DIM_F))
               ordering.push_back(static_cast<DimensionKind>(dim));
           }
           copied.ordering_constraint =
@@ -6349,99 +6349,232 @@ namespace Legion {
             context->owner_task->get_unique_op_id(),
             manager->get_memory().id, instance.get_location().id);
 
-        if (!context->is_task_local_instance(instance))
+        // Check to see if we've already escaped this instance or not
+        // Note the instance could also be a true external Realm instance
+        // that the user has given us that we are taking ownership of
+        if (context->is_task_local_instance(instance))
+          // The realm instance backing a deferred buffer is currently tagged as
+          // a task local instance, so we need to tell the runtime that the 
+          // instance now escapes the context.
+          context->escape_task_local_instance(instance);
+      }
+      if (grouped_fields && !returned_instances.empty())
+      {
+        // Make sure that all the fields have the same instance
+        if (instance != returned_instances.begin()->second)
           REPORT_LEGION_ERROR(ERROR_DUPLICATE_RETURN_REQUESTS,
-            "Instance passed to field %u of output region %u of task %s "
-            "(UID: %lld) is already bound to this field or some other fields. "
-            "You cannot assign a buffer to more than one output region field. ",
-            field_id, index, context->owner_task->get_task_name(),
-            context->owner_task->get_unique_op_id());
-        // The realm instance backing a deferred buffer is currently tagged as
-        // a task local instance, so we need to tell the runtime that the 
-        // instance now escapes the context.
-        context->escape_task_local_instance(instance);
+                "Instance passed to field %u of output region %u of task %s "
+                "(UID: %lld) is not the same as previous instance returned "
+                "for this output region requirement. The layout constraints "
+                "for this output region suggested that the fields need to "
+                "be grouped into one instance and therefore they must all "
+                "be in the same instance.", field_id, index,
+                context->get_task_name(), context->get_unique_id());
       }
       returned_instances.emplace(std::make_pair(field_id, instance));
     }
 
     //--------------------------------------------------------------------------
     void OutputRegionImpl::finalize(void)
-      //--------------------------------------------------------------------------
+    //--------------------------------------------------------------------------
     {
-      // Create a Realm instance and update the physical manager
-      // for each output field
-      for (std::map<FieldID,PhysicalInstance>::iterator it =
-            returned_instances.begin(); it !=
-            returned_instances.end(); ++it)
+      // Transpose the returned instances 
+      std::map<PhysicalInstance,std::vector<FieldID> > instance_fields;
+      for (std::map<FieldID,PhysicalInstance>::const_iterator it = 
+            returned_instances.begin(); it != returned_instances.end(); it++)
+        instance_fields[it->second].push_back(it->first);
+
+      for (std::map<PhysicalInstance,std::vector<FieldID> >::const_iterator
+            pit = instance_fields.begin(); pit != instance_fields.end(); pit++)
       {
-        PhysicalManager *manager = get_manager(it->first);
-        // Create a layout to use for redistricting
-        LayoutConstraints *constraints = manager->layout->constraints;
-
-        const std::vector<FieldID> fields(1,it->first);
-        const std::vector<size_t> sizes(1, get_field_size(it->first));
-
-        const Realm::InstanceLayoutGeneric *current = it->second.get_layout();
-        Realm::InstanceLayoutGeneric *layout =
-          region->row_source->create_layout(*constraints, fields,
-              sizes, false/*compact*/, NULL, NULL, NULL, 
-              current->alignment_reqd);
-#ifdef DEBUG_LEGION
-        assert(layout->bytes_used == current->bytes_used);
-        assert(layout->alignment_reqd == current->alignment_reqd);
-#endif
-        // Create an external Realm instance
-        Realm::ProfilingRequestSet requests;
-        if (runtime->profiler != NULL)
+        const Realm::InstanceLayoutGeneric *current = pit->first.exists() ?
+          pit->first.get_layout() : NULL;
+        if (grouped_fields)
         {
-          const LgEvent unique_event = manager->get_unique_event();
+          // Redistricting to just one layout for all the fields
+          std::vector<size_t> sizes(pit->second.size());
+          for (unsigned idx = 0; idx < pit->second.size(); idx++)
+            sizes[idx] = get_field_size(pit->second[idx]);
+
+          PhysicalManager *manager = get_manager(pit->second.back());
+          const LayoutConstraints *constraints = manager->layout->constraints;
+
+          Realm::InstanceLayoutGeneric *layout =
+            region->row_source->create_layout(*constraints, pit->second,
+                sizes, false/*compact*/, NULL, NULL, NULL, 
+                (current != NULL) ? current->alignment_reqd : 1);
 #ifdef DEBUG_LEGION
-          assert(unique_event.exists());
+          assert((current == NULL) || 
+              (layout->bytes_used <= current->bytes_used));
+          assert((current == NULL) ||
+              (layout->alignment_reqd == current->alignment_reqd));
 #endif
-          runtime->profiler->add_inst_request(requests,
-                    context->owner_task->get_unique_id(), unique_event);
-        }
-        PhysicalInstance instance;
-        const size_t footprint = layout->bytes_used;
-        if (it->second.exists())
-        {
+          // Create an external Realm instance
+          Realm::ProfilingRequestSet requests;
+          if (runtime->profiler != NULL)
+          {
+            const LgEvent unique_event = manager->get_unique_event();
 #ifdef DEBUG_LEGION
-          MemoryManager::TaskLocalInstanceAllocator allocator;
-          ProfilingResponseBase base(&allocator);
-          Realm::ProfilingRequest &req = requests.add_request(
-              runtime->find_utility_group(), LG_LEGION_PROFILING_ID,
-              &base, sizeof(base), LG_RESOURCE_PRIORITY);
-          req.add_measurement<
-            Realm::ProfilingMeasurements::InstanceAllocResult>();
+            assert(unique_event.exists());
 #endif
-          // We have an existing instance so we need to redistrict it
-          const RtEvent wait_on(it->second.redistrict(
-                instance, layout, requests));
-          delete layout;
+            runtime->profiler->add_inst_request(requests,
+                      context->get_unique_id(), unique_event);
+          }
+          PhysicalInstance instance;
+          const size_t footprint = layout->bytes_used;
+          if (pit->first.exists())
+          {
+#ifdef DEBUG_LEGION
+            MemoryManager::TaskLocalInstanceAllocator allocator;
+            ProfilingResponseBase base(&allocator);
+            Realm::ProfilingRequest &req = requests.add_request(
+                runtime->find_utility_group(), LG_LEGION_PROFILING_ID,
+                &base, sizeof(base), LG_RESOURCE_PRIORITY);
+            req.add_measurement<
+              Realm::ProfilingMeasurements::InstanceAllocResult>();
+#endif
+            // We have an existing instance so we need to redistrict it
+            PhysicalInstance copy = pit->first; // constness is stupid
+            const RtEvent ready(copy.redistrict(instance, layout, requests));
+            delete layout;
 #ifdef DEBUG_LEGION
 #ifndef NDEBUG
-          const bool success =
+            const bool success =
 #endif
-            allocator.succeeded();
-          assert(success);
+              allocator.succeeded();
+            assert(success);
 #endif
-          if (wait_on.exists())
-            wait_on.wait();
+            if (manager->update_physical_instance(instance, ready, footprint))
+              delete manager;
+          }
+          else
+          {
+            // We don't have an existing instance so we need to make one
+            const RtEvent ready(
+                Realm::RegionInstance::create_instance(instance,
+                  manager->memory_manager->memory, layout, requests));
+            if (manager->update_physical_instance(instance, ready, footprint))
+              delete manager;
+          }
+        }
+        else if (pit->first.exists())
+        {
+          // Use redistricting to make N instances for each manager
+          std::vector<Realm::InstanceLayoutGeneric*> 
+            layouts(pit->second.size());
+          std::vector<Realm::ProfilingRequestSet> requests(pit->second.size());
+          std::vector<PhysicalManager*> managers(pit->second.size());
+#ifdef DEBUG_LEGION
+          std::vector<MemoryManager::TaskLocalInstanceAllocator>
+            allocators(pit->second.size());
+          std::vector<ProfilingResponseBase> bases;
+          bases.reserve(allocators.size());
+#endif
+          for (unsigned idx = 0; idx < layouts.size(); idx++)
+          {
+            const FieldID field_id = pit->second[idx];
+            PhysicalManager *manager = get_manager(field_id);
+            managers[idx] = manager;
+            // Create a layout to use for redistricting
+            const LayoutConstraints *constraints = manager->layout->constraints;
+
+            const std::vector<FieldID> fields(1, field_id);
+            const std::vector<size_t> sizes(1, get_field_size(field_id));
+
+            // Base alignment of 1 if not specified
+            size_t alignment = 1;
+            if (!constraints->alignment_constraints.empty())
+            {
+#ifdef DEBUG_LEGION
+              // Should only be one alignment constraint at most since there
+              // should just be one field for this manager
+              assert(constraints->alignment_constraints.size() == 1);
+#endif
+              const AlignmentConstraint &constraint = 
+                constraints->alignment_constraints.front();
+#ifdef DEBUG_LEGION
+              assert(constraint.fid == field_id);
+#endif
+              alignment = constraint.alignment;
+            }
+            layouts[idx] = region->row_source->create_layout(*constraints,
+                fields, sizes, false/*compact*/, NULL, NULL, NULL, alignment);
+            if (runtime->profiler != NULL)
+            {
+              const LgEvent unique_event = manager->get_unique_event();
+#ifdef DEBUG_LEGION
+              assert(unique_event.exists());
+              
+#endif
+              runtime->profiler->add_inst_request(requests[idx],
+                        context->get_unique_id(), unique_event);
+            }
+#ifdef DEBUG_LEGION
+            bases.emplace_back(ProfilingResponseBase(&allocators[idx]));
+            Realm::ProfilingRequest &req = requests[idx].add_request(
+                runtime->find_utility_group(), LG_LEGION_PROFILING_ID,
+                &bases[idx], sizeof(bases[idx]), LG_RESOURCE_PRIORITY);
+            req.add_measurement<
+              Realm::ProfilingMeasurements::InstanceAllocResult>();
+#endif
+          }
+          std::vector<PhysicalInstance> instances(layouts.size());
+          PhysicalInstance copy = pit->first; // constness is stupid
+          const RtEvent ready(copy.redistrict(&instances.front(),
+              (const Realm::InstanceLayoutGeneric**)&layouts.front(),
+              layouts.size(), &requests.front()));
+#ifdef DEBUG_LEGION
+          for (unsigned idx = 0; idx < allocators.size(); idx++)
+          {
+#ifndef NDEBUG
+            const bool success =
+#endif
+              allocators[idx].succeeded();
+            assert(success);
+          }
+#endif
+          for (unsigned idx = 0; idx < instances.size(); idx++)
+          {
+            if (managers[idx]->update_physical_instance(instances[idx],
+                  ready, layouts[idx]->bytes_used))
+              delete managers[idx];
+            delete layouts[idx];
+          }
         }
         else
         {
-          // We don't have an existing instance so we need to make one
-          const RtEvent wait_on(
+          // Make an empty instance for each manager
+          for (unsigned idx = 0; idx < pit->second.size(); idx++)
+          {
+            const FieldID field_id = pit->second[idx];
+            PhysicalManager *manager = get_manager(field_id);
+            // Create a layout to use for redistricting
+            const LayoutConstraints *constraints = manager->layout->constraints;
+
+            const std::vector<FieldID> fields(1, field_id);
+            const std::vector<size_t> sizes(1, get_field_size(field_id));
+            Realm::InstanceLayoutGeneric *layout =
+              region->row_source->create_layout(*constraints, fields,
+                  sizes, false/*compact*/);
+            Realm::ProfilingRequestSet requests;
+            if (runtime->profiler != NULL)
+            {
+              const LgEvent unique_event = manager->get_unique_event();
+#ifdef DEBUG_LEGION
+              assert(unique_event.exists()); 
+#endif
+              runtime->profiler->add_inst_request(requests,
+                        context->owner_task->get_unique_id(), unique_event);
+            }
+            PhysicalInstance instance;
+            const RtEvent ready(
               Realm::RegionInstance::create_instance(instance,
                 manager->memory_manager->memory, layout, requests));
-          if (wait_on.exists())
-            wait_on.wait();
+            if (manager->update_physical_instance(instance, ready,
+                  0/*footprint*/))
+              delete manager;
+          }
         }
-#ifdef DEBUG_LEGION
-        assert(instance.exists());
-#endif
-        if (manager->update_physical_instance(instance, footprint))
-          delete manager;
       }
     }
 

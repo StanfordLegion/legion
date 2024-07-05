@@ -3365,6 +3365,17 @@ namespace Legion {
       {
         // TODO: For now we only allow SOA layout with either the C order
         // or the Fotran order for output instances.
+        // We've actually added support for this in the OutputRegionImpl
+        // but it's unclear what the right way to expose it is since we 
+        // need to know how to make managers for which groups of fields. 
+        // Right now the OutputRegionImpl just keys off the grouped_fields
+        // parameter which assumes that AOS and hybrid have to be grouped
+        // whereas SOA can do whatever it wants and the right thing will happen
+        // We assume that if you have grouped fields then there is exactly
+        // one PhysicalManager for all the fields, but if not then we will
+        // break things up so there is one PhysicalManager per field, it's
+        // unclear if we also want to handle the case where there are subsets
+        // of fields that share a manager.
         if (ordering.back() != LEGION_DIM_F)
         {
           REPORT_LEGION_FATAL(LEGION_FATAL_UNIMPLEMENTED_FEATURE,
@@ -4812,8 +4823,8 @@ namespace Legion {
         // Initialize output regions
         for (unsigned idx = 0; idx < output_regions.size(); ++idx)
           execution_context->add_output_region(output_regions[idx],
-              physical_instances[regions.size() + idx],
-              is_output_global(idx), is_output_valid(idx));
+              physical_instances[regions.size() + idx], is_output_global(idx),
+              is_output_valid(idx), is_output_grouped(idx));
 
         // Initialize any region tree contexts
         execution_context->initialize_region_tree_contexts(clone_requirements,
@@ -6034,7 +6045,7 @@ namespace Legion {
       // Remove our reference on the future
       result = Future();
       predicate_false_future = Future();
-      valid_output_regions.clear();
+      output_region_options.clear();
       if (freeop)
         runtime->free_individual_task(this);
     }
@@ -6196,12 +6207,13 @@ namespace Legion {
                                         std::vector<OutputRequirement> &outputs)
     //--------------------------------------------------------------------------
     {
-      valid_output_regions.resize(outputs.size());
+      output_region_options.resize(outputs.size());
       Provenance *provenance = get_provenance();
       for (unsigned idx = 0; idx < outputs.size(); idx++)
       {
         OutputRequirement &req = outputs[idx];
-        valid_output_regions[idx] = req.valid_requirement;
+        output_region_options[idx] = OutputOptions(false,
+            req.valid_requirement, false/*grouped*/);
 
         if (!req.valid_requirement)
         {
@@ -6518,7 +6530,14 @@ namespace Legion {
     bool IndividualTask::is_output_valid(unsigned idx) const
     //--------------------------------------------------------------------------
     {
-      return valid_output_regions[idx];
+      return output_region_options[idx].valid_requirement();
+    }
+
+    //--------------------------------------------------------------------------
+    bool IndividualTask::is_output_grouped(unsigned idx) const
+    //--------------------------------------------------------------------------
+    {
+      return output_region_options[idx].grouped_fields();
     }
 
     //--------------------------------------------------------------------------
@@ -6715,10 +6734,9 @@ namespace Legion {
       // yet been sent remotely, then send the state now
       RezCheck z(rez);
       pack_single_task(rez, target);
-      size_t valid_output_regions_size = valid_output_regions.size();
-      rez.serialize(valid_output_regions_size);
-      for (unsigned idx = 0; idx < valid_output_regions.size(); idx++)
-        rez.serialize<bool>(valid_output_regions[idx]);
+      rez.serialize<size_t>(output_region_options.size());
+      for (unsigned idx = 0; idx < output_region_options.size(); idx++)
+        rez.serialize(output_region_options[idx]);
       rez.serialize(orig_task);
       rez.serialize(remote_unique_id);
       parent_ctx->pack_inner_context(rez);
@@ -6755,15 +6773,11 @@ namespace Legion {
       DETAILED_PROFILER(runtime, INDIVIDUAL_UNPACK_TASK_CALL);
       DerezCheck z(derez);
       unpack_single_task(derez, ready_events);
-      size_t valid_output_regions_size = 0;
-      derez.deserialize(valid_output_regions_size);
-      valid_output_regions.resize(valid_output_regions_size);
-      for (unsigned idx = 0; idx < valid_output_regions_size; idx++)
-      {
-        bool valid_output_region = false;
-        derez.deserialize<bool>(valid_output_region);
-        valid_output_regions[idx] = valid_output_region;
-      }
+      size_t output_regions_size = 0;
+      derez.deserialize(output_regions_size);
+      output_region_options.resize(output_regions_size);
+      for (unsigned idx = 0; idx < output_regions_size; idx++)
+        derez.deserialize(output_region_options[idx]);
       derez.deserialize(orig_task);
       derez.deserialize(remote_unique_id);
       set_current_proc(current);
@@ -7376,6 +7390,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return slice_owner->is_output_valid(idx);
+    }
+
+    //--------------------------------------------------------------------------
+    bool PointTask::is_output_grouped(unsigned idx) const
+    //--------------------------------------------------------------------------
+    {
+      return slice_owner->is_output_grouped(idx);
     }
 
     //--------------------------------------------------------------------------
@@ -9323,8 +9344,8 @@ namespace Legion {
       for (unsigned idx = 0; idx < outputs.size(); idx++)
       {
         OutputRequirement &req = outputs[idx];
-        output_region_options[idx] = 
-          OutputOptions(req.global_indexing, req.valid_requirement);
+        output_region_options[idx] = OutputOptions(req.global_indexing,
+            req.valid_requirement, false/*grouped*/);
 
         IndexSpace color_space = launch_space;
         if (req.projection != 0) {
@@ -11426,6 +11447,16 @@ namespace Legion {
       assert(idx < output_region_options.size());
 #endif
       return output_region_options[idx].global_indexing();
+    }
+
+    //--------------------------------------------------------------------------
+    bool SliceTask::is_output_grouped(unsigned idx) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(idx < output_region_options.size());
+#endif
+      return output_region_options[idx].grouped_fields();
     }
 
     //--------------------------------------------------------------------------

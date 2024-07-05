@@ -996,7 +996,8 @@ namespace Legion {
                        const InstanceSet &instance_set,
                        TaskContext *ctx, Runtime *rt,
                        const bool global_indexing,
-                       const bool valid);
+                       const bool valid,
+                       const bool grouped_fields);
       OutputRegionImpl(const OutputRegionImpl &rhs) = delete;
       ~OutputRegionImpl(void);
     public:
@@ -1048,6 +1049,8 @@ namespace Legion {
       const unsigned index;
       const bool created_region;
       const bool global_indexing;
+      // Either AOS or hybrid or contiguous SOA
+      const bool grouped_fields;
     private:
       // Output data batched during task execution
       std::map<FieldID,PhysicalInstance> returned_instances;
@@ -1548,6 +1551,7 @@ namespace Legion {
       class TaskLocalInstanceAllocator : public ProfilingResponseHandler {
       public:
         TaskLocalInstanceAllocator(void);
+        virtual ~TaskLocalInstanceAllocator(void) { ready.wait(); }
       public:
         virtual void handle_profiling_response(
                 const ProfilingResponseBase *base,
