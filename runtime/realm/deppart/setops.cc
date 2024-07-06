@@ -646,14 +646,16 @@ namespace Realm {
   template <int N, typename T>
   void NWayMerge<N,T>::update(int idx)
   {
+    // TODO(cperry): Fix this to support N>1?
+    assert(N == 1);
     if(its[order[idx]].valid) {
       // can only move upwards
-      T lo = its[order[idx]].rect.lo;
+      T lo = its[order[idx]].rect.lo[0];
       for(int j = idx + 1; j < n; j++)
-	if(its[order[j]].rect.lo < lo)
-	  std::swap(order[j], order[j-1]);
-	else
-	  break;
+        if(its[order[j]].rect.lo[0] < lo)
+          std::swap(order[j], order[j - 1]);
+        else
+          break;
     } else {
       // just delete it
       order.erase(order.begin() + idx);
