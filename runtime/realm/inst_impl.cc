@@ -1445,10 +1445,10 @@ namespace Realm {
                              affine->offset +
                              affine->strides.dot(affine->bounds.lo) +
                              it->second.rel_offset);
-      size_t total_bytes = (it->second.size_in_bytes + 
-                            affine->strides[0] * (affine->bounds.hi -
-                                                  affine->bounds.lo));
- 
+      size_t total_bytes =
+          (it->second.size_in_bytes +
+           affine->strides[0] * (affine->bounds.hi[0] - affine->bounds.lo[0]));
+
       base = mem->get_direct_ptr(start_offset, total_bytes);
       if (!base) return false;
 

@@ -32,8 +32,5 @@ add_executable(thrust_interop ${CPU_SOURCES} ${GPU_SOURCES})
 set_target_cuda_standard(thrust_interop STANDARD ${Legion_CUDA_STANDARD})
 set_target_cuda_architectures(thrust_interop ARCHITECTURES ${Legion_CUDA_ARCH})
 set_target_cuda_warnings_and_errors(thrust_interop WARN_AS_ERROR ${Legion_BUILD_WARN_AS_ERROR})
-# Remove this once the Realm::Point class is updated
-target_compile_options(thrust_interop PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:
-                         -Xcudafe=--diag_suppress=1444>)
 target_link_libraries(thrust_interop Legion::Legion)
 target_compile_options(thrust_interop PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)

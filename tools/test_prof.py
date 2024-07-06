@@ -63,7 +63,8 @@ def run_prof_rs(verbose, legion_prof_rs, legion_prof_result_folder, prof_logs):
         print("remove:", result_dir)
         shutil.rmtree(result_dir)
     cmd = [
-        legion_prof_rs, 
+        legion_prof_rs,
+        'legacy',
         # Filter all calls smaller than 100us to match the Python profiler
         '--call-threshold', '100', 
         '-o', result_dir,
