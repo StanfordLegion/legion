@@ -1075,7 +1075,8 @@ namespace Legion {
       // Do this wait after everything is ready for pipelining of communication
       subscribed.wait();
       ApEvent inst_ready;
-      FutureInstance *instance = find_or_create_instance(memory, inst_ready);
+      FutureInstance *instance = find_or_create_instance(memory, inst_ready,
+          silence_warnings, warning_string);
       if (extent_in_bytes != NULL)
       {
         if (check_extent)
@@ -1164,7 +1165,8 @@ namespace Legion {
       // Do this wait after everything is ready for pipelining of communication
       subscribed.wait();
       ApEvent inst_ready;
-      FutureInstance *instance = find_or_create_instance(memory, inst_ready);
+      FutureInstance *instance = find_or_create_instance(memory, inst_ready,
+          silence_warnings, warning_string);
       if (empty.load())
         REPORT_LEGION_ERROR(ERROR_REQUEST_FOR_EMPTY_FUTURE, 
             "Accessing empty future when making an accessor! (UID %lld)",
@@ -1943,13 +1945,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
             assert(it->second.alloc_ready.exists());
 #endif
-            if (it->second.context == NULL)
-              it->second.instance = create_instance(it->first, it->second.op,
-                                                    it->second.creator_uid);
-            else
-              it->second.instance = 
-                it->second.context->create_task_local_future(
-                    it->first, future_size);
+            it->second.instance = create_instance(it->first, it->second.op,
+                                                  it->second.creator_uid);
             Runtime::trigger_event(it->second.alloc_ready);
           }
 #ifdef DEBUG_LEGION
@@ -2053,42 +2050,36 @@ namespace Legion {
         }
         if (it->second.instance == NULL)
         {
-          if (it->second.context == NULL)
+          it->second.instance = create_instance(it->first, it->second.op, 
+                                                it->second.creator_uid);
+          if (it->second.instance == NULL)
           {
-            it->second.instance = create_instance(it->first, it->second.op, 
-                                                  it->second.creator_uid);
-            if (it->second.instance == NULL)
+            std::vector<RtEvent> preconditions;
+            preconditions.reserve(it->second.can_fail_remote_requests.size());
+            for (std::set<AddressSpaceID>::const_iterator fit =
+                  it->second.can_fail_remote_requests.begin(); fit !=
+                  it->second.can_fail_remote_requests.end(); fit++)
             {
-              std::vector<RtEvent> preconditions;
-              preconditions.reserve(it->second.can_fail_remote_requests.size());
-              for (std::set<AddressSpaceID>::const_iterator fit =
-                    it->second.can_fail_remote_requests.begin(); fit !=
-                    it->second.can_fail_remote_requests.end(); fit++)
+              const RtUserEvent notified = Runtime::create_rt_user_event();
+              Serializer rez;
               {
-                const RtUserEvent notified = Runtime::create_rt_user_event();
-                Serializer rez;
-                {
-                  RezCheck z(rez);
-                  rez.serialize(did);
-                  rez.serialize(it->first);
-                  rez.serialize(notified);
-                }
-                runtime->send_future_create_instance_response(*fit, rez);
-                preconditions.push_back(notified);
+                RezCheck z(rez);
+                rez.serialize(did);
+                rez.serialize(it->first);
+                rez.serialize(notified);
               }
-              if (!preconditions.empty())
-                Runtime::trigger_event(it->second.alloc_ready,
-                    Runtime::merge_events(preconditions));
-              else
-                Runtime::trigger_event(it->second.alloc_ready);
-              if (it->second.inst_ready.exists())
-                Runtime::poison_event(it->second.inst_ready);
-              continue;
+              runtime->send_future_create_instance_response(*fit, rez);
+              preconditions.push_back(notified);
             }
+            if (!preconditions.empty())
+              Runtime::trigger_event(it->second.alloc_ready,
+                  Runtime::merge_events(preconditions));
+            else
+              Runtime::trigger_event(it->second.alloc_ready);
+            if (it->second.inst_ready.exists())
+              Runtime::poison_event(it->second.inst_ready);
+            continue;
           }
-          else
-            it->second.instance = it->second.context->create_task_local_future(
-                it->first, future_size);
           Runtime::trigger_event(it->second.alloc_ready);
         }
         ApEvent inst_ready =
@@ -2101,7 +2092,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FutureInstance* FutureImpl::find_or_create_instance(Memory memory,
-                                                        ApEvent &inst_ready)
+        ApEvent &inst_ready, bool silence_warnings, const char *warning_string)
     //--------------------------------------------------------------------------
     {
       RtEvent wait_on;
@@ -2182,8 +2173,8 @@ namespace Legion {
             future_size, true/*external*/, true/*own allocation*/);
       }
       else
-        instance = 
-          implicit_context->create_task_local_future(memory, future_size);
+        instance = implicit_context->create_task_local_future(memory,
+            future_size, silence_warnings, warning_string);
       inst_ready = record_instance(implicit_context->owner_task, instance);
       return instance;
     }
@@ -3858,6 +3849,13 @@ namespace Legion {
         }
       }
       return false;
+    }
+
+    //--------------------------------------------------------------------------
+    bool FutureInstance::is_immediate(void) const
+    //--------------------------------------------------------------------------
+    {
+      return !use_event.exists() || use_event.has_triggered();
     }
 
     //--------------------------------------------------------------------------

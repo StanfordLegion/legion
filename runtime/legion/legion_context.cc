@@ -815,8 +815,8 @@ namespace Legion {
       // Make a simple memory copy here now
       if (size > LEGION_MAX_RETURN_SIZE)
       {
-        FutureInstance *instance = 
-          create_task_local_future(runtime->runtime_system_memory, size);
+        FutureInstance *instance = create_task_local_future(
+            runtime->runtime_system_memory, size);
         memcpy(const_cast<void*>(instance->get_data()), value, size);
         return instance;
       }
@@ -11735,7 +11735,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FutureInstance* InnerContext::create_task_local_future(Memory memory,
-                                                           size_t size)
+        size_t size, bool silence_warnings, const char *warning_string)
     //--------------------------------------------------------------------------
     {
       MemoryManager *manager = runtime->find_memory_manager(memory);
@@ -25052,7 +25052,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FutureInstance* LeafContext::create_task_local_future(Memory memory,
-                                                          size_t size)
+        size_t size, bool silence_warnings, const char *warning_string)
     //--------------------------------------------------------------------------
     {
       std::map<Memory,MemoryPool*>::const_iterator finder =
@@ -25066,6 +25066,37 @@ namespace Legion {
         if ((memory == runtime->runtime_system_memory) &&
             (size <= LEGION_MAX_RETURN_SIZE))
           return manager->create_future_instance(get_unique_id(), size);
+        // WE'RE ABOUT TO DO SOMETHING DANGEROUS!
+        // The user didn't bother to pre-allocate a pool so we're going
+        // to try to make an immediate instance that has no event precondition
+        // If we can do that then we can still use that instance, but if we're
+        // given an instance with a precondition we cannot wait for it under
+        // any circumstances without risking a deadlock
+        FutureInstance *instance = manager->create_future_instance(
+            get_unique_id(), size, true/*unbound*/);
+        if (instance != NULL)
+        {
+          if (instance->is_immediate())
+          {
+            if (!silence_warnings)
+              REPORT_LEGION_WARNING(LEGION_WARNING_MISSING_ALLOCATION_BOUNDS,
+                    "WARNING! Leaf task %s (UID %lld) attempted to allocate a "
+                    "future instance of %zd bytes in %s memory but no space "
+                    "was reserved for dynamic allocations during "
+                    "the lifetime of this task. Legion has managed to procure "
+                    "for you an allocation this time but there is no guarantee "
+                    "that you will be so lucky the next time. We strongly "
+                    "encourage all users to place tight upper bounds on the "
+                    "required memory for all leaf tasks either statically at "
+                    "the point of task variant registration or dynamically at "
+                    "the point that the task is mapped. Warning string: %s",
+                    get_task_name(), get_unique_id(), size, manager->get_name(),
+                    (warning_string == NULL) ? "" : warning_string)
+            return instance;
+          }
+          else
+            delete instance; // Not immediately available so we can't use it
+        }
         REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
             "Failed to allocate %zd bytes for a future needed by leaf task %s "
             "(UID %lld) in %s memory because there was no space reserved at "
@@ -25097,11 +25128,51 @@ namespace Legion {
                                            Realm::InstanceLayoutGeneric *layout)
     //--------------------------------------------------------------------------
     {
+      RtEvent use_event;
+      LgEvent unique_event;
+      if (runtime->profiler != NULL)
+      {
+        // If we're profiling then each of these needs a unique event
+        const RtUserEvent unique = Runtime::create_rt_user_event();
+        Runtime::trigger_event(unique);
+        unique_event = unique;
+      }
+      const size_t footprint = layout->bytes_used;
       std::map<Memory,MemoryPool*>::const_iterator finder =
         memory_pools.find(memory);
       if (finder == memory_pools.end())
       {
         MemoryManager *manager = runtime->find_memory_manager(memory);
+        // WE'RE ABOUT TO DO SOMETHING DANGEROUS!
+        // The user didn't bother to pre-allocate a pool so we're going
+        // to try to make an immediate instance that has no event precondition
+        // If we can do that then we can still use that instance, but if we're
+        // given an instance with a precondition we cannot wait for it under
+        // any circumstances without risking a deadlock
+        const PhysicalInstance instance = manager->create_task_local_instance(
+            get_unique_id(), unique_event, layout, use_event, true/*unbound*/);
+        if (instance.exists())
+        {
+          if (!use_event.exists() || use_event.has_triggered())
+          {
+            REPORT_LEGION_WARNING(LEGION_WARNING_MISSING_ALLOCATION_BOUNDS,
+                "WARNING! Leaf task %s (UID %lld) attempted to allocate a "
+                "DeferredBuffer/Value/Reduction of %zd bytes in %s memory "
+                "but no space was reserved for dynamic allocations during "
+                "the lifetime of this task. Legion has managed to procure "
+                "for you an allocation this time but "
+                "there is no guarantee that you will be so lucky the next "
+                "time. We strongly encourage all users to place tight "
+                "upper bounds on the required memory for all leaf tasks "
+                "either statically at the point of task variant registration "
+                "or dynamically at the point that the task is mapped.",
+                get_task_name(), get_unique_id(), footprint,
+                manager->get_name())
+            return instance;
+          }
+          else
+            instance.destroy(use_event); // Can't use so destroy immediately
+        }
         REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
             "Failed to allocate DeferredBuffer/Value/Reduction of %zd bytes "
             "for leaf task %s (UID %lld) in %s memory because there was no "
@@ -25109,8 +25180,8 @@ namespace Legion {
             "allocations. If you designate a task as a leaf task variant "
             "then it is your responsibility to tell Legion how much memory "
             "needs to be allocated for satisfying dynamic allocations during "
-            "the execution of the task.", layout->bytes_used,
-            get_task_name(), get_unique_id(), manager->get_name())
+            "the execution of the task.", footprint, get_task_name(),
+            get_unique_id(), manager->get_name())
       }
       if (finder->second->max_alignment < layout->alignment_reqd)
       {
@@ -25121,19 +25192,10 @@ namespace Legion {
             "alignment required by the instance of %zd bytes is larger the "
             "reserved alignment for the pool of %zd bytes. You need to ask "
             "for a larger maximum alignment for the pool if you plan to do "
-            "dynamic allocations that require it.", layout->bytes_used,
+            "dynamic allocations that require it.", footprint,
             get_task_name(), get_unique_id(), manager->get_name(),
             layout->alignment_reqd, finder->second->max_alignment)
-      }
-      LgEvent unique_event;
-      if (runtime->profiler != NULL)
-      {
-        // If we're profiling then each of these needs a unique event
-        const RtUserEvent unique = Runtime::create_rt_user_event();
-        Runtime::trigger_event(unique);
-        unique_event = unique;
-      }
-      RtEvent use_event;
+      } 
       PhysicalInstance instance = finder->second->allocate_instance(
           get_unique_id(), unique_event, layout, use_event);
       if (!instance.exists())
@@ -25144,7 +25206,7 @@ namespace Legion {
             "for leaf task %s (UID %lld) in %s memory because there was "
             "insufficient space reserved for dynamic allocations. This means "
             "that you set your upper bound for the amount of dynamic memory "
-            "required for this task too low.", layout->bytes_used,
+            "required for this task too low.", footprint,
             get_task_name(), get_unique_id(), manager->get_name())
       }
       task_local_instances[instance] = unique_event;

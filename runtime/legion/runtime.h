@@ -299,18 +299,17 @@ namespace Legion {
       struct PendingInstance {
       public:
         PendingInstance(void)
-          : instance(NULL), context(NULL), op(NULL), creator_uid(0) { }
+          : instance(NULL), op(NULL), creator_uid(0) { }
         PendingInstance(FutureInstance *i)
-          : instance(i), context(NULL), op(NULL), creator_uid(0) { }
+          : instance(i), op(NULL), creator_uid(0) { }
         PendingInstance(Operation *o, RtUserEvent a)
-          : instance(NULL), context(NULL), op(o), creator_uid(0), 
+          : instance(NULL), op(o), creator_uid(0), 
             alloc_ready(a) { }
         PendingInstance(UniqueID uid, RtUserEvent a)
-          : instance(NULL), context(NULL), op(NULL), creator_uid(uid),
+          : instance(NULL), op(NULL), creator_uid(uid),
             alloc_ready(a) { }
       public:
         FutureInstance *instance;
-        TaskContext *context;
         Operation *op;
         UniqueID creator_uid;
         RtUserEvent alloc_ready;
@@ -437,8 +436,8 @@ namespace Legion {
     protected:
       void finish_set_future(ApEvent complete); // must be holding lock
       void create_pending_instances(void); // must be holding lock
-      FutureInstance* find_or_create_instance(Memory memory,
-                                              ApEvent &inst_ready);
+      FutureInstance* find_or_create_instance(Memory memory,ApEvent &inst_ready,
+          bool silence_warnings, const char *warning_string);
       // Must be holding the lock when calling create_instance
       FutureInstance* create_instance(Memory memory, Operation *op,
                                       UniqueID creator_uid = 0);
@@ -613,6 +612,7 @@ namespace Legion {
 #endif
       bool defer_deletion(ApEvent precondition);
     public:
+      bool is_immediate(void) const; 
       bool can_pack_by_value(void) const;
       // You only need to check the return value if you set pack_ownership=false
       // as that is when the you need to make sure the instance isn't deleted

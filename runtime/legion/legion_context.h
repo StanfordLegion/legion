@@ -527,7 +527,8 @@ namespace Legion {
                                       ShardID source_shard = 0) = 0;
     public:
       virtual FutureInstance* create_task_local_future(Memory memory, 
-                                                       size_t size) = 0;
+          size_t size, bool silence_warnings = false, 
+          const char *warning_string = NULL) = 0;
       virtual PhysicalInstance create_task_local_instance(Memory memory,
                                       Realm::InstanceLayoutGeneric *layout) = 0;
       virtual void destroy_task_local_instance(PhysicalInstance instance) = 0;
@@ -1682,7 +1683,8 @@ namespace Legion {
         { return remove_nested_resource_ref(manager->did); }
     public:
       virtual FutureInstance* create_task_local_future(Memory memory, 
-                                                       size_t size);
+          size_t size, bool silence_warnings = false,
+          const char *warning_string = NULL);
       virtual PhysicalInstance create_task_local_instance(Memory memory,
                                         Realm::InstanceLayoutGeneric *layout);
       virtual void destroy_task_local_instance(PhysicalInstance instance);
@@ -3889,8 +3891,9 @@ namespace Legion {
                                       const ShardMapping *mapping = NULL,
                                       ShardID source_shard = 0);
     public:
-      virtual FutureInstance* create_task_local_future(Memory memory, 
-                                                       size_t size);
+      virtual FutureInstance* create_task_local_future(Memory memory,
+          size_t size, bool silence_warnings = false, 
+          const char *warning_string = NULL);
       virtual PhysicalInstance create_task_local_instance(Memory memory,
                                         Realm::InstanceLayoutGeneric *layout);
       virtual void destroy_task_local_instance(PhysicalInstance instance);
