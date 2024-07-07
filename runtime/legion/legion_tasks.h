@@ -253,7 +253,6 @@ namespace Legion {
       void update_arrival_barriers(const std::vector<PhaseBarrier> &barriers);
       void compute_point_region_requirements(void);
       void complete_point_projection(void);
-      bool prepare_steal(void);
       void finalize_output_region_trees(void);
     public:
       void compute_parent_indexes(InnerContext *alt_context = NULL);

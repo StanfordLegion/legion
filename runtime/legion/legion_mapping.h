@@ -1853,18 +1853,9 @@ namespace Legion {
        * the mapper in another mapper call or the state of the 
        * ready_queue changes (e.g. new tasks are added). Failure to
        * provide a mapper event will result in an error.
-       *
-       * In some cases, certain tasks must be mapped in order to guarantee
-       * forward progress. These tasks are often ones associated with 
-       * dependent index space task launches, concurrent index space task
-       * launches, and index space task launches with collectively mapped
-       * region requirements. The runtime will indicate any such tasks in
-       * the progress_tasks vector. It is up to the mapper to make sure
-       * that these tasks are mapped in finite time.
        */
       struct SelectMappingInput {
         std::list<const Task*>                  ready_tasks;
-        std::vector<const Task*>                progress_tasks;
       };
       struct SelectMappingOutput {
         std::set<const Task*>                   map_tasks;
