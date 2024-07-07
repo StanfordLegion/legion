@@ -1085,7 +1085,6 @@ namespace Legion {
       owner->update_footprint(sizeof(ApplicationCallInfo), this);
     }
 
-#ifdef LEGION_PROF_SELF_PROFILE
     //--------------------------------------------------------------------------
     void LegionProfInstance::record_proftask(Processor proc, UniqueID op_id,
 					     unsigned long long start,
@@ -1104,7 +1103,6 @@ namespace Legion {
       info.finish_event = finish_event;
       owner->update_footprint(sizeof(ProfTaskInfo), this);
     }
-#endif
 
     //--------------------------------------------------------------------------
     void LegionProfInstance::dump_state(LegionProfSerializer *serializer)
@@ -1304,13 +1302,11 @@ namespace Legion {
         serializer->serialize(*it);
       }
 
-#ifdef LEGION_PROF_SELF_PROFILE
       for (std::deque<ProfTaskInfo>::const_iterator it = 
             prof_task_infos.begin(); it != prof_task_infos.end(); it++)
       {
         serializer->serialize(*it);
       }
-#endif
       task_kinds.clear();
       task_variants.clear();
       operation_instances.clear();
@@ -1683,7 +1679,6 @@ namespace Legion {
           return diff;
       }
 
-#ifdef LEGION_PROF_SELF_PROFILE
       while (!prof_task_infos.empty())
       {
         ProfTaskInfo &front = prof_task_infos.front();
@@ -1694,7 +1689,6 @@ namespace Legion {
         if (t_curr >= t_stop)
           return diff;
       }
-#endif
       return diff;
     }
 
@@ -1714,11 +1708,13 @@ namespace Legion {
                                    const size_t footprint_threshold,
                                    const size_t target_latency,
                                    const size_t call_threshold,
-                                   const bool slow_config_ok)
+                                   const bool slow_config_ok,
+                                   const bool self_prof)
       : runtime(rt), done_event(Runtime::create_rt_user_event()), 
         minimum_call_threshold(call_threshold * 1000 /*convert us to ns*/),
         output_footprint_threshold(footprint_threshold), 
-        output_target_latency(target_latency), target_proc(target), 
+        output_target_latency(target_latency),
+        target_proc(target), self_profile(self_prof),
 #ifndef DEBUG_LEGION
         total_outstanding_requests(1/*start with guard*/),
 #endif
@@ -2468,9 +2464,9 @@ namespace Legion {
                                        const void *orig, size_t orig_length)
     //--------------------------------------------------------------------------
     {
-#ifdef LEGION_PROF_SELF_PROFILE
-      long long t_start = Realm::Clock::current_time_in_nanoseconds();
-#endif
+      long long t_start = 0;
+      if (self_profile)
+        t_start = Realm::Clock::current_time_in_nanoseconds();
       if (thread_local_profiling_instance == NULL)
         create_thread_local_profiling_instance();
 #ifdef DEBUG_LEGION
@@ -2564,14 +2560,15 @@ namespace Legion {
         default:
           assert(false);
       }
-#ifdef LEGION_PROF_SELF_PROFILE
-      long long t_stop = Realm::Clock::current_time_in_nanoseconds();
-      const Processor p = Realm::Processor::get_executing_processor();
-      const LgEvent finish_event(Processor::get_current_finish_event());
-      thread_local_profiling_instance->process_proc_desc(p);
-      thread_local_profiling_instance->record_proftask(p, info->op_id,
-          t_start, t_stop, info->creator, finish_event);
-#endif
+      if (self_profile)
+      {
+        long long t_stop = Realm::Clock::current_time_in_nanoseconds();
+        const Processor p = Realm::Processor::get_executing_processor();
+        const LgEvent finish_event(Processor::get_current_finish_event());
+        thread_local_profiling_instance->process_proc_desc(p);
+        thread_local_profiling_instance->record_proftask(p, info->op_id,
+            t_start, t_stop, info->creator, finish_event);
+      }
 #ifdef DEBUG_LEGION
       decrement_total_outstanding_requests(info->kind);
 #else

@@ -9431,6 +9431,11 @@ namespace Legion {
        *              that are less than this threshold will be discarded
        *              and will not be recorded in the profiling logs. The
        *              default value is 0 (us) so all calls are logged.
+       * -lg:prof_self Perform self-profiling so that the profiling 
+       *              response meta-tasks are also recorded in the profile.
+       *              In general these are tiny and not worth profiling,
+       *              but you might still want to see them. They are not
+       *              recorded by default.
        *
        * @param argc the number of input arguments
        * @param argv pointer to an array of string arguments of size argc
