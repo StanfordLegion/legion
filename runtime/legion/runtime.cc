@@ -8155,7 +8155,7 @@ namespace Legion {
                   const ContextID ctx =
                     (*it)->get_context()->get_logical_tree_context();
                   const ContextState &ctx_state = context_states[ctx];
-                  if (ctx_state.active)
+                  if (ctx_state.active || (*it)->is_forward_progress_task())
                     input.ready_tasks.push_back(*it);
                 }
                 // Set the queue guard so no one else tries to
