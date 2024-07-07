@@ -2151,7 +2151,7 @@ checksum = "d4345964bb142484797b161f473a503a434de77149dd8c7427788c6e13379388"
 
 [[package]]
 name = "legion_prof"
-version = "0.2403.0"
+version = "0.2406.0"
 dependencies = [
  "clap",
  "csv",

@@ -23,8 +23,10 @@ void node_task_0(const void *args, size_t arglen, const void *userdata, size_t u
                  Processor p)
 {
   TaskArgs &task_args = *(TaskArgs *)args;
+
   task_args.sparsity_map.impl();
   task_args.sparsity_map.remove_references(1);
+
   SparsityMap<1> local_sparsity =
       SparsityMap<1>::construct({Rect<1>(Point<1>(0), Point<1>(50000))}, true, true);
   local_sparsity.add_references();
