@@ -2185,6 +2185,10 @@ impl Base {
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct TimeRange {
+    // Unlike other TimeRange components, spawn is measured on the node that
+    // spawns a (meta-)task, and therefore can potentially skew relative to the
+    // other Timestamp values, whereas all the other four values are measured
+    // all on the same node so will all be temporally consistent.
     pub spawn: Option<Timestamp>,
     pub create: Option<Timestamp>,
     pub ready: Option<Timestamp>,
@@ -3360,11 +3364,14 @@ impl State {
                     // Creator node (fevent) should be different than execution node
                     assert!(meta_task.fevent.node_id() != proc.proc_id.node_id());
                     let nodes = (meta_task.fevent.node_id(), proc.proc_id.node_id());
-                    let node_skew = skew_nodes
-                        .entry(nodes)
-                        .or_insert_with(|| (0, Timestamp::ZERO.to_ns()));
+                    let node_skew = skew_nodes.entry(nodes).or_insert_with(|| (0, 0.0, 0.0));
+                    // Wellford's algorithm for online variance calculation
                     node_skew.0 += 1;
-                    node_skew.1 += skew.to_ns();
+                    let value = skew.to_ns() as f64;
+                    let delta = value - node_skew.1;
+                    node_skew.1 += delta / node_skew.0 as f64;
+                    let delta2 = value - node_skew.1;
+                    node_skew.2 += delta * delta2;
                 }
             }
         }
@@ -3387,18 +3394,15 @@ impl State {
                 skew_messages,
                 total_skew.to_us() / skew_messages as f64
             );
-            // Compute the averages
-            for skew in skew_nodes.values_mut() {
-                skew.1 /= skew.0;
-            }
             for (nodes, skew) in skew_nodes.iter() {
                 // Compute the average skew
                 println!(
-                    "Node {} appears to be {} us behind node {} for {} messages.",
+                    "Node {} appears to be {} us behind node {} for {} messages with standard deviation {} us.",
                     nodes.0 .0,
-                    skew.1 / 1000,
+                    skew.1 / 1000.0, // convert to us
                     nodes.1 .0,
-                    skew.0
+                    skew.0,
+                    skew.2.sqrt() / 1000.0 // convert variance to standard deviation and then to us
                 );
                 // Skew is hopefully only going in one direction, if not warn ourselves
                 let alt = (nodes.1, nodes.0);
@@ -3432,7 +3436,8 @@ impl State {
                     // If there was any skew shift the create time forward by the average skew amount
                     let nodes = (meta_task.fevent.node_id(), proc.proc_id.node_id());
                     if let Some(skew) = skew_nodes.get(&nodes) {
-                        create += Timestamp::from_ns(skew.1);
+                        // Just truncate fractional nanoseconds, they won't matter
+                        create += Timestamp::from_ns(skew.1 as u64);
                     }
                     // If we still have skew we're just going to ignore it for now
                     // Otherwise we can check the latency of message delivery
