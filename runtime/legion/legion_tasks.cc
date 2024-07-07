@@ -321,6 +321,60 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool TaskOp::is_forward_progress_task(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (!is_index_space)
+        return false;
+      if (forward_progress_cached)
+        return is_forward_progress;
+      // A forward progress task is any task that needs to have some or all
+      // of its point tasks mapped in order to avoid blocking the mapping
+      // of other point tasks. This includes dependent index space task 
+      // launches, index space task launches with collective mapping region
+      // requirements, or concurrent index space task launches.
+      is_forward_progress = false;
+      if (!concurrent_task && check_collective_regions.empty())
+      {
+        for (std::vector<RegionRequirement>::const_iterator it =
+              regions.begin(); it != regions.end(); it++)
+        {
+          if (IS_COLLECTIVE(*it))
+          {
+            is_forward_progress = true;
+            break;
+          }
+          // If we're not writing then there are no intra-space dependences
+          if (!IS_WRITE(*it))
+            continue;
+          if (it->handle_type == LEGION_SINGULAR_PROJECTION)
+            continue;
+          if (it->projection == 0)
+          {
+            if (it->handle_type == LEGION_REGION_PROJECTION)
+            {
+              is_forward_progress = true;
+              break;
+            }
+            else
+              continue;
+          }
+          ProjectionFunction *function = 
+            runtime->find_projection_function(it->projection);
+          if (function->is_invertible)
+          {
+            is_forward_progress = true;
+            break;
+          }
+        }
+      }
+      else
+        is_forward_progress = true;
+      forward_progress_cached = true;
+      return is_forward_progress;
+    }
+
+    //--------------------------------------------------------------------------
     void TaskOp::set_current_proc(Processor current)
     //--------------------------------------------------------------------------
     {
@@ -348,6 +402,7 @@ namespace Legion {
       elide_future_return = false;
       replicate = false; 
       local_cached = false;
+      forward_progress_cached = false;
       arg_manager = NULL;
       target_proc = Processor::NO_PROC;
       mapper = NULL;
@@ -4101,22 +4156,35 @@ namespace Legion {
         single_task_termination = Runtime::create_ap_user_event(NULL); 
         record_completion_effect(single_task_termination);
       }
+      // If we have any intra-space mapping dependences that haven't triggered
+      // then we need to defer ourselves until they have occurred, do this
+      // before we invoke the mapper since the mapper might make instances
+      // and we need that to happen in program order
+      if (!intra_space_mapping_dependences.empty())
+      {
+        const RtEvent ready =
+          Runtime::merge_events(intra_space_mapping_dependences);
+        intra_space_mapping_dependences.clear();
+        if (ready.exists() && !ready.has_triggered())
+          return defer_perform_mapping(ready, must_epoch_op,
+                                       defer_args, 1/*invocation count*/);
+      }
       // Only do this the first or second time through
-      if ((defer_args == NULL) || (defer_args->invocation_count < 2))
+      if ((defer_args == NULL) || (defer_args->invocation_count < 3))
       {
         if (request_valid_instances)
         {
           // If the mapper wants valid instances we first need to do our
           // versioning analysis and then call the mapper
           if ((defer_args == NULL/*first invocation*/) ||
-              (defer_args->invocation_count == 0))
+              (defer_args->invocation_count < 2))
           {
             const RtEvent version_ready_event = 
               perform_versioning_analysis(false/*post mapper*/);
             if (version_ready_event.exists() && 
                 !version_ready_event.has_triggered())
             return defer_perform_mapping(version_ready_event, must_epoch_op,
-                                         defer_args, 1/*invocation count*/);
+                                         defer_args, 2/*invocation count*/);
           }
           // Now do the mapping call
           invoke_mapper(must_epoch_op);
@@ -4126,7 +4194,7 @@ namespace Legion {
           // If the mapper doesn't need valid instances, we do the mapper
           // call first and then see if we need to do any versioning analysis
           if ((defer_args == NULL/*first invocation*/) ||
-              (defer_args->invocation_count == 0))
+              (defer_args->invocation_count < 2))
           {
             invoke_mapper(must_epoch_op);
             const RtEvent version_ready_event = 
@@ -4134,20 +4202,9 @@ namespace Legion {
             if (version_ready_event.exists() && 
                 !version_ready_event.has_triggered())
             return defer_perform_mapping(version_ready_event, must_epoch_op,
-                                         defer_args, 1/*invocation count*/);
+                                         defer_args, 2/*invocation count*/);
           }
         }
-      }
-      // If we have any intra-space mapping dependences that haven't triggered
-      // then we need to defer ourselves until they have occurred
-      if (!intra_space_mapping_dependences.empty())
-      {
-        const RtEvent ready = 
-          Runtime::merge_events(intra_space_mapping_dependences);
-        intra_space_mapping_dependences.clear();
-        if (ready.exists() && !ready.has_triggered())
-          return defer_perform_mapping(ready, must_epoch_op,
-                                       defer_args, 2/*invocation count*/);
       } 
       // See if we have a remote trace info to use, if we don't then make
       // our trace info and do the initialization

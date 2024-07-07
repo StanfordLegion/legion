@@ -160,6 +160,7 @@ namespace Legion {
                                            std::set<RtEvent> &applied) const;
     public:
       bool is_remote(void) const;
+      bool is_forward_progress_task(void) const;
       inline bool is_stolen(void) const { return (steal_count > 0); }
       inline bool is_origin_mapped(void) const { return map_origin; }
       inline bool is_replicable(void) const { return replicate; }
@@ -304,6 +305,9 @@ namespace Legion {
     private:
       mutable bool is_local;
       mutable bool local_cached;
+    private:
+      mutable bool is_forward_progress;
+      mutable bool forward_progress_cached;
     protected:
       bool children_commit;
     protected:
