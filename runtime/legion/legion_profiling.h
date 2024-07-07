@@ -643,6 +643,9 @@ namespace Legion {
       void register_multi_task(Operation *op, TaskID task_id);
       void register_slice_owner(UniqueID pid, UniqueID id);
     public:
+      bool has_memory_desc(Memory m);
+      bool has_processor_desc(Processor p);
+    public:
       void add_task_request(Realm::ProfilingRequestSet &requests, TaskID tid, 
                             VariantID vid, UniqueID task_uid, Processor p);
       void add_meta_request(Realm::ProfilingRequestSet &requests,
@@ -771,6 +774,8 @@ namespace Legion {
       LegionProfSerializer* serializer;
       mutable LocalLock profiler_lock;
       std::vector<LegionProfInstance*> instances;
+      std::vector<Memory> recorded_memories;
+      std::vector<Processor> recorded_processors;
 #ifdef DEBUG_LEGION
       unsigned total_outstanding_requests[LEGION_PROF_LAST];
 #else

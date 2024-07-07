@@ -957,7 +957,10 @@ namespace Legion {
         return;
       mem_ids.push_back(m.id);
       std::sort(mem_ids.begin(), mem_ids.end());
-
+      // Do a quick check to see if we've recorded this in a different thread
+      // This helps deduplicates when users are running with force_kthreads
+      if (owner->has_memory_desc(m))
+        return;
       mem_desc_infos.emplace_back(MemDesc());
       MemDesc &info = mem_desc_infos.back();
       info.mem_id = m.id;
@@ -976,7 +979,10 @@ namespace Legion {
         return;
       proc_ids.push_back(p.id);
       std::sort(proc_ids.begin(), proc_ids.end());
-
+      // Do a quick check to see if we've recorded this in a different thread
+      // This helps deduplicates when users are running with force_kthreads
+      if (owner->has_processor_desc(p))
+        return;
       proc_desc_infos.emplace_back(ProcDesc());
       ProcDesc &info = proc_desc_infos.back();
       info.proc_id = p.id;
@@ -2106,6 +2112,44 @@ namespace Legion {
       if (thread_local_profiling_instance == NULL)
         create_thread_local_profiling_instance();
       thread_local_profiling_instance->register_slice_owner(pid, id);
+    }
+
+    //--------------------------------------------------------------------------
+    bool LegionProfiler::has_memory_desc(Memory m)
+    //--------------------------------------------------------------------------
+    {
+      {
+        AutoLock p_lock(profiler_lock,1,false/*exclusive*/);
+        if (std::binary_search(recorded_memories.begin(),
+              recorded_memories.end(), m))
+          return true;
+      }
+      AutoLock p_lock(profiler_lock);
+      if (std::binary_search(recorded_memories.begin(),
+            recorded_memories.end(), m))
+        return true;
+      recorded_memories.push_back(m);
+      std::sort(recorded_memories.begin(), recorded_memories.end());
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    bool LegionProfiler::has_processor_desc(Processor p)
+    //--------------------------------------------------------------------------
+    {
+      {
+        AutoLock p_lock(profiler_lock,1,false/*exclusive*/);
+        if (std::binary_search(recorded_processors.begin(),
+              recorded_processors.end(), p))
+          return true;
+      }
+      AutoLock p_lock(profiler_lock);
+      if (std::binary_search(recorded_processors.begin(),
+            recorded_processors.end(), p))
+        return true;
+      recorded_processors.push_back(p);
+      std::sort(recorded_processors.begin(), recorded_processors.end());
+      return false;
     }
 
     //--------------------------------------------------------------------------
