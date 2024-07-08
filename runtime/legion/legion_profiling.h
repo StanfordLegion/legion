@@ -31,8 +31,6 @@
 #include <algorithm>
 #include <sstream>
 
-#define LEGION_PROF_SELF_PROFILE
-
 #ifdef DETAILED_LEGION_PROF
 #define DETAILED_PROFILER(runtime, call) \
   DetailedProfiler __detailed_profiler(runtime, call)
@@ -340,6 +338,14 @@ namespace Legion {
         LgEvent creator;
         LgEvent finish_event;
       };
+      struct MessageInfo : public MetaInfo {
+      public:
+        // Spawn is recorded on the creator node while
+        // create is recorded on the destination node
+        // We use that to detect network congestion and
+        // cases of timing skew
+        timestamp_t spawn;
+      };
       struct CopyInstInfo {
       public:
         MemID src, dst;
@@ -442,7 +448,6 @@ namespace Legion {
         LgEvent event;
         unsigned long long backtrace_id;
       };
-#ifdef LEGION_PROF_SELF_PROFILE
       struct ProfTaskInfo {
       public:
         ProcID proc_id;
@@ -451,7 +456,6 @@ namespace Legion {
         LgEvent creator;
         LgEvent finish_event;
       };
-#endif
       struct ProfilingInfo : public ProfilingResponseBase {
       public:
         ProfilingInfo(ProfilingResponseHandler *h);
@@ -460,6 +464,7 @@ namespace Legion {
         union {
           size_t id2;
           InstanceNameClosure *closure;
+          long long spawn_time;
         } extra;
         UniqueID op_id;
         LgEvent creator;
@@ -556,11 +561,9 @@ namespace Legion {
       void record_application_range(ProvenanceID pid,
                                     timestamp_t start, timestamp_t stop);
       void record_event_wait(LgEvent event, Realm::Backtrace &bt);
-#ifdef LEGION_PROF_SELF_PROFILE
     public:
       void record_proftask(Processor p, UniqueID op_id, timestamp_t start,
           timestamp_t stop, LgEvent creator, LgEvent finish_event);
-#endif
     public:
       void dump_state(LegionProfSerializer *serializer);
       size_t dump_inter(LegionProfSerializer *serializer, const double over);
@@ -588,6 +591,7 @@ namespace Legion {
       std::deque<PhysicalInstanceUsage> phy_inst_usage;
       std::deque<IndexSpaceSizeDesc> index_space_size_desc;
       std::deque<MetaInfo> meta_infos;
+      std::deque<MessageInfo> message_infos;
       std::deque<CopyInfo> copy_infos;
       std::deque<FillInfo> fill_infos;
       std::deque<InstTimelineInfo> inst_timeline_infos;
@@ -602,10 +606,8 @@ namespace Legion {
       // keep track of MemIDs/ProcIDs to avoid duplicate entries
       std::vector<MemID> mem_ids;
       std::vector<ProcID> proc_ids;
-#ifdef LEGION_PROF_SELF_PROFILE
     private:
       std::deque<ProfTaskInfo> prof_task_infos;
-#endif
     };
 
     class LegionProfiler : public ProfilingResponseHandler {
@@ -643,7 +645,8 @@ namespace Legion {
                      const size_t footprint_threshold,
                      const size_t target_latency,
                      const size_t minimum_call_threshold,
-                     const bool slow_config_ok);
+                     const bool slow_config_ok,
+                     const bool self_profile);
       LegionProfiler(const LegionProfiler &rhs) = delete;
       virtual ~LegionProfiler(void);
     public:
@@ -654,6 +657,9 @@ namespace Legion {
                                  VariantID variant_id, 
                                  const char *variant_name);
       unsigned long long find_backtrace_id(Realm::Backtrace &bt);
+    public:
+      bool has_memory_desc(Memory m);
+      bool has_processor_desc(Processor p);
     public:
       void add_task_request(Realm::ProfilingRequestSet &requests, TaskID tid, 
                             VariantID vid, UniqueID task_uid, Processor p);
@@ -739,12 +745,16 @@ namespace Legion {
       const long long output_target_latency;
       // Target processor on which to launch jobs
       const Processor target_proc;
+      // Whether we are self-profiling
+      const bool self_profile;
     private:
       LegionProfSerializer* serializer;
       mutable LocalLock profiler_lock;
       std::vector<LegionProfInstance*> instances;
       std::map<uintptr_t,unsigned long long> backtrace_ids;
       unsigned long long next_backtrace_id;
+      std::vector<Memory> recorded_memories;
+      std::vector<Processor> recorded_processors;
 #ifdef DEBUG_LEGION
       unsigned total_outstanding_requests[LEGION_PROF_LAST];
 #else

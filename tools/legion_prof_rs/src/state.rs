@@ -2141,7 +2141,7 @@ pub struct VariantID(pub u32);
 pub struct Variant {
     variant_id: VariantID,
     message: bool,
-    ordered_vc: bool,
+    _ordered_vc: bool, // Not used currently
     pub name: String,
     task_id: Option<TaskID>,
     pub color: Option<Color>,
@@ -2152,7 +2152,7 @@ impl Variant {
         Variant {
             variant_id,
             message,
-            ordered_vc,
+            _ordered_vc: ordered_vc,
             name: name.to_owned(),
             task_id: None,
             color: None,
@@ -2200,6 +2200,11 @@ impl Base {
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct TimeRange {
+    // Unlike other TimeRange components, spawn is measured on the node that
+    // spawns a (meta-)task, and therefore can potentially skew relative to the
+    // other Timestamp values, whereas all the other four values are measured
+    // all on the same node so will all be temporally consistent.
+    pub spawn: Option<Timestamp>,
     pub create: Option<Timestamp>,
     pub ready: Option<Timestamp>,
     pub start: Option<Timestamp>,
@@ -2207,20 +2212,40 @@ pub struct TimeRange {
 }
 
 impl TimeRange {
-    fn new_full(create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp) -> Self {
+    fn new_message(
+        spawn: Timestamp,
+        create: Timestamp,
+        ready: Timestamp,
+        start: Timestamp,
+        stop: Timestamp,
+    ) -> Self {
         assert!(create <= ready);
         assert!(ready <= start);
         assert!(start <= stop);
         TimeRange {
+            spawn: Some(spawn),
             create: Some(create),
             ready: Some(ready),
             start: Some(start),
             stop: Some(stop),
         }
     }
-    fn new_start(start: Timestamp, stop: Timestamp) -> Self {
+    fn new_full(create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp) -> Self {
+        assert!(create <= ready);
+        assert!(ready <= start);
         assert!(start <= stop);
         TimeRange {
+            spawn: None,
+            create: Some(create),
+            ready: Some(ready),
+            start: Some(start),
+            stop: Some(stop),
+        }
+    }
+    fn new_call(start: Timestamp, stop: Timestamp) -> Self {
+        assert!(start <= stop);
+        TimeRange {
+            spawn: None,
             create: None,
             ready: None,
             start: Some(start),
@@ -2229,6 +2254,7 @@ impl TimeRange {
     }
     fn new_empty() -> Self {
         TimeRange {
+            spawn: None,
             create: None,
             ready: None,
             start: None,
@@ -2434,6 +2460,11 @@ impl EventID {
         } else {
             None
         }
+    // Important: keep this in sync with realm/id.h
+    // EVENT:   tag:1 = 0b1, creator_node:16, gen_event_idx:27, generation:20
+    // owner_node = proc_id[63:47]
+    pub fn node_id(&self) -> NodeID {
+        NodeID((self.0 >> 47) & ((1 << 16) - 1))
     }
 }
 
@@ -2746,12 +2777,13 @@ struct LFSR {
 impl LFSR {
     fn new(size: u64) -> Self {
         let needed_bits = (size as f64).log2().floor() as u32 + 1;
-        let seed_configuration = 0b1010010011110011;
+        let seed_configuration = 0b101001001111001110100011;
         LFSR {
-            register: (seed_configuration & (((1 << needed_bits) - 1) << (16 - needed_bits)))
-                >> (16 - needed_bits),
+            register: (seed_configuration & (((1 << needed_bits) - 1) << (24 - needed_bits)))
+                >> (24 - needed_bits),
             bits: needed_bits,
             max_value: 1 << needed_bits,
+            // Polynomials from https://en.wikipedia.org/wiki/Linear-feedback_shift_register#Example_polynomials_for_maximal_LFSRs
             taps: match needed_bits {
                 2 => vec![2, 1],
                 3 => vec![3, 2],
@@ -2767,8 +2799,16 @@ impl LFSR {
                 13 => vec![13, 12, 11, 8],
                 14 => vec![14, 13, 12, 2],
                 15 => vec![15, 14],
-                16 => vec![16, 14, 13, 11],
-                _ => unreachable!(), // if we need more than 16 bits that is a lot tasks
+                16 => vec![16, 15, 13, 4],
+                17 => vec![17, 14],
+                18 => vec![18, 11],
+                19 => vec![19, 18, 17, 14],
+                20 => vec![20, 17],
+                21 => vec![21, 19],
+                22 => vec![22, 21],
+                23 => vec![23, 18],
+                24 => vec![24, 23, 22, 17],
+                _ => unreachable!(), // if we need more than 24 bits that is a lot tasks
             },
         }
     }
@@ -3362,30 +3402,120 @@ impl State {
         assert!(threshold >= 0.0);
         assert!((0.0..100.0).contains(&warn_percentage));
 
+        // First go through and compute the skew between the nodes
+        let mut skew_messages = 0;
         let mut total_messages = 0;
-        let mut bad_messages = 0;
-        let mut longest_latency = Timestamp::from_us(0);
+        let mut total_skew = Timestamp::ZERO;
+        let mut skew_nodes = BTreeMap::new();
         for proc in self.procs.values() {
             for ((_, variant_id), meta_tasks) in &proc.meta_tasks {
                 let variant = self.meta_variants.get(variant_id).unwrap();
-                if !variant.message || variant.ordered_vc {
+                if !variant.message {
                     continue;
                 }
                 total_messages += meta_tasks.len();
                 for meta_uid in meta_tasks {
                     let meta_task = proc.entry(*meta_uid);
-                    let latency =
-                        meta_task.time_range.ready.unwrap() - meta_task.time_range.create.unwrap();
-                    if threshold <= latency.to_us() {
-                        bad_messages += 1;
+                    // Check for the presence of skew
+                    if meta_task.time_range.spawn.unwrap() <= meta_task.time_range.create.unwrap() {
+                        continue;
                     }
-                    longest_latency = max(longest_latency, latency);
+                    skew_messages += 1;
+                    let skew =
+                        meta_task.time_range.spawn.unwrap() - meta_task.time_range.create.unwrap();
+                    total_skew += skew;
+                    // Creator node (fevent) should be different than execution node
+                    assert!(meta_task.fevent.node_id() != proc.proc_id.node_id());
+                    let nodes = (meta_task.fevent.node_id(), proc.proc_id.node_id());
+                    let node_skew = skew_nodes.entry(nodes).or_insert_with(|| (0, 0.0, 0.0));
+                    // Wellford's algorithm for online variance calculation
+                    node_skew.0 += 1;
+                    let value = skew.to_ns() as f64;
+                    let delta = value - node_skew.1;
+                    node_skew.1 += delta / node_skew.0 as f64;
+                    let delta2 = value - node_skew.1;
+                    node_skew.2 += delta * delta2;
                 }
             }
         }
         if total_messages == 0 {
             return;
         }
+        if skew_messages != 0 {
+            println!("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! WARNING !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+            println!(
+                "Detected timing skew! Legion Prof found {} messages between nodes \
+                    that appear to have been sent before the (meta-)task on the \
+                    creating node started (which is clearly impossible because messages \
+                    can't time-travel into the future). The average skew was at least {:.2} us. \
+                    Please report this case to the Legion developers along with an \
+                    accompanying Legion Prof profile and a description of the machine \
+                    it was run on so we can understand why the timing skew is occuring. \
+                    In the meantime you can still use this profile to performance debug \
+                    but you should be aware that the relative position of boxes on \
+                    different nodes might not be accurate.",
+                skew_messages,
+                total_skew.to_us() / skew_messages as f64
+            );
+            for (nodes, skew) in skew_nodes.iter() {
+                // Compute the average skew
+                println!(
+                    "Node {} appears to be {} us behind node {} for {} messages with standard deviation {} us.",
+                    nodes.0 .0,
+                    skew.1 / 1000.0, // convert to us
+                    nodes.1 .0,
+                    skew.0,
+                    skew.2.sqrt() / 1000.0 // convert variance to standard deviation and then to us
+                );
+                // Skew is hopefully only going in one direction, if not warn ourselves
+                let alt = (nodes.1, nodes.0);
+                if skew_nodes.contains_key(&alt) {
+                    println!(
+                        "WARNING: detected bi-directional skew between nodes {} and {}",
+                        nodes.0 .0, nodes.1 .0
+                    );
+                }
+            }
+            println!("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! WARNING !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+        }
+
+        // Now we can go through and look for long-latency messages while also taking
+        // into account any skew that we might have observed going the other way
+
+        let mut bad_messages = 0;
+        let mut longest_latency = Timestamp::ZERO;
+
+        for proc in self.procs.values() {
+            for ((_, variant_id), meta_tasks) in &proc.meta_tasks {
+                let variant = self.meta_variants.get(variant_id).unwrap();
+                if !variant.message {
+                    continue;
+                }
+                for meta_uid in meta_tasks {
+                    let meta_task = proc.entry(*meta_uid);
+                    // Check if there was skew to begin with
+                    let spawn = meta_task.time_range.spawn.unwrap();
+                    let mut create = meta_task.time_range.create.unwrap();
+                    // If there was any skew shift the create time forward by the average skew amount
+                    let nodes = (meta_task.fevent.node_id(), proc.proc_id.node_id());
+                    if let Some(skew) = skew_nodes.get(&nodes) {
+                        // Just truncate fractional nanoseconds, they won't matter
+                        create += Timestamp::from_ns(skew.1 as u64);
+                    }
+                    // If we still have skew we're just going to ignore it for now
+                    // Otherwise we can check the latency of message delivery
+                    if spawn <= create {
+                        // No skew
+                        let latency = create - spawn;
+                        if threshold <= latency.to_us() {
+                            bad_messages += 1;
+                        }
+                        longest_latency = max(longest_latency, latency);
+                    }
+                }
+            }
+        }
+
         let percentage = 100.0 * bad_messages as f64 / total_messages as f64;
         if warn_percentage <= percentage {
             for _ in 0..5 {
@@ -4337,7 +4467,7 @@ fn process_record(
             if gpu_start > *gpu_stop {
                 gpu_start = *gpu_stop - Timestamp::ONE;
             }
-            let gpu_range = TimeRange::new_start(gpu_start, *gpu_stop);
+            let gpu_range = TimeRange::new_call(gpu_start, *gpu_stop);
             state.create_gpu_kernel(*op_id, *proc_id, *task_id, *variant_id, gpu_range, *fevent);
             let time_range = TimeRange::new_full(*create, *ready, *start, *stop);
             state.create_task(
@@ -4363,6 +4493,22 @@ fn process_record(
             fevent,
         } => {
             let time_range = TimeRange::new_full(*create, *ready, *start, *stop);
+            state.create_meta(*op_id, *lg_id, *proc_id, time_range, *creator, *fevent);
+            state.update_last_time(*stop);
+        }
+        Record::MessageInfo {
+            op_id,
+            lg_id,
+            proc_id,
+            spawn,
+            create,
+            ready,
+            start,
+            stop,
+            creator,
+            fevent,
+        } => {
+            let time_range = TimeRange::new_message(*spawn, *create, *ready, *start, *stop);
             state.create_meta(*op_id, *lg_id, *proc_id, time_range, *creator, *fevent);
             state.update_last_time(*stop);
         }
@@ -4494,7 +4640,7 @@ fn process_record(
             // Check to make sure it is above the call threshold
             if call_threshold <= (*stop - *start) {
                 assert!(state.mapper_call_kinds.contains_key(kind));
-                let time_range = TimeRange::new_start(*start, *stop);
+                let time_range = TimeRange::new_call(*start, *stop);
                 state.create_mapper_call(
                     *mapper_id,
                     *mapper_proc,
@@ -4517,7 +4663,7 @@ fn process_record(
             // Check to make sure that it is above the call threshold
             if call_threshold <= (*stop - *start) {
                 assert!(state.runtime_call_kinds.contains_key(kind));
-                let time_range = TimeRange::new_start(*start, *stop);
+                let time_range = TimeRange::new_call(*start, *stop);
                 state.create_runtime_call(*kind, *proc_id, time_range, *fevent);
                 state.update_last_time(*stop);
             }
@@ -4529,7 +4675,7 @@ fn process_record(
             proc_id,
             fevent,
         } => {
-            let time_range = TimeRange::new_start(*start, *stop);
+            let time_range = TimeRange::new_call(*start, *stop);
             state.create_application_call(*provenance, *proc_id, time_range, *fevent);
             state.update_last_time(*stop);
         }
@@ -4541,7 +4687,7 @@ fn process_record(
             creator,
             fevent,
         } => {
-            let time_range = TimeRange::new_start(*start, *stop);
+            let time_range = TimeRange::new_call(*start, *stop);
             state.create_prof_task(*proc_id, *op_id, time_range, *creator, *fevent);
             state.update_last_time(*stop);
         }

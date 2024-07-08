@@ -87,6 +87,7 @@ namespace Legion {
                              const LegionProfInstance::MetaInfo&) = 0;
       virtual void serialize(const LegionProfInstance::TaskInfo&) = 0;
       virtual void serialize(const LegionProfInstance::MetaInfo&) = 0;
+      virtual void serialize(const LegionProfInstance::MessageInfo&) = 0;
       virtual void serialize(const LegionProfInstance::CopyInfo&) = 0;
       virtual void serialize(const LegionProfInstance::FillInfo&) = 0;
       virtual void serialize(const LegionProfInstance::InstTimelineInfo&) = 0;
@@ -104,9 +105,7 @@ namespace Legion {
       virtual void serialize(const LegionProfInstance::ProcMemDesc&) = 0;
       virtual void serialize(const LegionProfDesc::Backtrace&) = 0;
       virtual void serialize(const LegionProfInstance::EventWaitInfo&) = 0;
-#ifdef LEGION_PROF_SELF_PROFILE
       virtual void serialize(const LegionProfInstance::ProfTaskInfo&) = 0;
-#endif
     };
 
     // This is the Internal Binary Format Serializer
@@ -158,6 +157,7 @@ namespace Legion {
                      const LegionProfInstance::MetaInfo&);
       void serialize(const LegionProfInstance::TaskInfo&);
       void serialize(const LegionProfInstance::MetaInfo&);
+      void serialize(const LegionProfInstance::MessageInfo&);
       void serialize(const LegionProfInstance::CopyInfo&);
       void serialize(const LegionProfInstance::FillInfo&);
       void serialize(const LegionProfInstance::InstTimelineInfo&);
@@ -175,9 +175,7 @@ namespace Legion {
       void serialize(const LegionProfInstance::ProcMemDesc&);
       void serialize(const LegionProfDesc::Backtrace&);
       void serialize(const LegionProfInstance::EventWaitInfo&);
-#ifdef LEGION_PROF_SELF_PROFILE
       void serialize(const LegionProfInstance::ProfTaskInfo&);
-#endif
     private:
 #ifdef LEGION_USE_ZLIB
       gzFile f;
@@ -235,9 +233,7 @@ namespace Legion {
         FILL_INST_INFO_ID,
         BACKTRACE_DESC_ID,
         EVENT_WAIT_INFO_ID,
-#ifdef LEGION_PROF_SELF_PROFILE
         PROFTASK_INFO_ID,
-#endif
         ZERO_TIME_ID,
         CALIBRATION_ERR_ID,
         PROVENANCE_ID,
@@ -291,6 +287,7 @@ namespace Legion {
                      const LegionProfInstance::MetaInfo&);
       void serialize(const LegionProfInstance::TaskInfo&);
       void serialize(const LegionProfInstance::MetaInfo&);
+      void serialize(const LegionProfInstance::MessageInfo&);
       void serialize(const LegionProfInstance::CopyInfo&);
       void serialize(const LegionProfInstance::FillInfo&);
       void serialize(const LegionProfInstance::InstTimelineInfo&);
@@ -308,9 +305,7 @@ namespace Legion {
       void serialize(const LegionProfInstance::ProcMemDesc&);
       void serialize(const LegionProfDesc::Backtrace&);
       void serialize(const LegionProfInstance::EventWaitInfo&);
-#ifdef LEGION_PROF_SELF_PROFILE
       void serialize(const LegionProfInstance::ProfTaskInfo&);
-#endif
     };
   }; // namespace Internal
 }; // namespace Legion
