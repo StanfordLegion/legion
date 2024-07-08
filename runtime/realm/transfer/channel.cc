@@ -36,6 +36,7 @@ namespace Realm {
     Logger log_new_dma("new_dma");
     Logger log_request("request");
     Logger log_xd("xd");
+    Logger log_xd_ref("xd_ref");
 
   
   // fast memcpy stuff - uses std::copy instead of memcpy to communicate
@@ -846,7 +847,7 @@ namespace Realm {
           fill_data(&inline_fill_storage),
           fill_size(_fill_size),
           orig_fill_size(_fill_size),
-	  progress_counter(0), reference_count(1)
+	  progress_counter(0), reference_count(1), nb_update_pre_bytes_total_calls_expected(0), nb_update_pre_bytes_total_calls_received(0)
       {
 	input_ports.resize(inputs_info.size());
 	int gather_control_port = -1;
@@ -960,6 +961,14 @@ namespace Realm {
         }
         if(fill_size > 0)
           memcpy(fill_data, _fill_data, fill_size);
+	
+	nb_update_pre_bytes_total_calls_expected = 0;
+	for (size_t i = 0; i < input_ports.size(); i++) {
+          if (input_ports[i].peer_guid != XFERDES_NO_GUID) {
+            nb_update_pre_bytes_total_calls_expected ++;
+	  }
+	}
+	log_xd_ref.info("new xd=%llx, update_pre_bytes_total_expected=%u", guid, nb_update_pre_bytes_total_calls_expected);
       }
 
       XferDes::~XferDes() {
@@ -6002,6 +6011,7 @@ namespace Realm {
       XferDesPlaceholder::XferDesPlaceholder()
         : refcount(1)
         , xd(0)
+	, nb_update_pre_bytes_total_calls_received(0)
       {
         for(int i = 0; i < INLINE_PORTS; i++)
           inline_bytes_total[i] = ~size_t(0);
@@ -6088,6 +6098,17 @@ namespace Realm {
         //  happen once we're destroyed
         xd = _xd;
         xd->add_reference();
+	xd->nb_update_pre_bytes_total_calls_received.fetch_add_acqrel(nb_update_pre_bytes_total_calls_received.load_acquire());
+      }
+
+      void XferDesPlaceholder::add_update_pre_bytes_total_received(void)
+      {
+        nb_update_pre_bytes_total_calls_received.fetch_add_acqrel(1);
+      }
+
+      unsigned XferDesPlaceholder::get_update_pre_bytes_total_received(void)
+      {
+        return nb_update_pre_bytes_total_calls_received.load_acquire();
       }
 
 
@@ -6188,10 +6209,14 @@ namespace Realm {
                 // is a real xd - add a reference before we release the lock
                 xd = reinterpret_cast<XferDes *>(it->second);
                 xd->add_reference();
+		xd->add_update_pre_bytes_total_received();
+		log_xd_ref.info("xd=%llx, add_ref refcount=%u, update_pre_bytes_total_received=%u", xd_guid, xd->reference_count.load_acquire(), xd->nb_update_pre_bytes_total_calls_received.load_acquire());
               } else {
                 // is a placeholder - add a reference before we release lock
                 ph = reinterpret_cast<XferDesPlaceholder *>(it->second - 1);
                 ph->add_reference();
+		ph->add_update_pre_bytes_total_received();
+		log_xd_ref.info("xd=%llx, placeholder, update_pre_bytes_total_received=%u", xd_guid, ph->get_update_pre_bytes_total_received());
               }
             }
           }
@@ -6207,16 +6232,22 @@ namespace Realm {
                   // is a real xd - add a reference before we release the lock
                   xd = reinterpret_cast<XferDes *>(it->second);
                   xd->add_reference();
+		  xd->add_update_pre_bytes_total_received();
+		  log_xd_ref.info("xd=%llx, 2nd, add_ref refcount=%u, update_pre_bytes_total_received=%u", xd_guid, xd->reference_count.load_acquire(), xd->nb_update_pre_bytes_total_calls_received.load_acquire());
                 } else {
                   // is a placeholder - add a reference before we release lock
                   ph = reinterpret_cast<XferDesPlaceholder *>(it->second - 1);
                   ph->add_reference();
+		  ph->add_update_pre_bytes_total_received();
+		  log_xd_ref.info("xd=%llx, 2nd, placeholder, update_pre_bytes_total_received=%u", xd_guid, ph->get_update_pre_bytes_total_received());
                 }
               } else {
                 guid_to_xd.insert(std::make_pair(xd_guid,
                                                  reinterpret_cast<uintptr_t>(new_ph) + 1));
                 ph = new_ph;
                 new_ph->add_reference();  // table keeps the original reference
+		new_ph->add_update_pre_bytes_total_received();
+		log_xd_ref.info("xd=%llx, new placeholder, update_pre_bytes_total_received=%u", xd_guid, ph->get_update_pre_bytes_total_received());
               }
             }
             // if we didn't install our placeholder, remove the reference so it
@@ -6258,6 +6289,7 @@ namespace Realm {
                 // is a real xd - add a reference before we release the lock
                 xd = reinterpret_cast<XferDes *>(it->second);
                 xd->add_reference();
+		log_xd_ref.info("xd=%llx, after add_ref refcount=%u", xd_guid, xd->reference_count.load_acquire());
               } else {
                 // should never be a placeholder!
                 assert(0);
@@ -6269,6 +6301,7 @@ namespace Realm {
           }
           if(xd) {
             xd->update_next_bytes_read(port_idx, span_start, span_size);
+	    log_xd_ref.info("xd=%llx, before rm_ref refcount=%u", xd_guid, xd->reference_count.load_acquire());
             xd->remove_reference();
           }
         }
@@ -6290,7 +6323,8 @@ namespace Realm {
             if((it->second & 1) == 0) {
               // remember xd but remove from table (stealing table's reference)
               xd = reinterpret_cast<XferDes *>(it->second);
-              guid_to_xd.erase(it);
+	      guid_to_xd.erase(it);
+	      log_xd_ref.info("destroy xd=%llx, update_pre_bytes_total_received=%u, expected=%u", guid, xd->nb_update_pre_bytes_total_calls_received.load_acquire(), xd->nb_update_pre_bytes_total_calls_expected);
             } else {
               // should never be a placeholder!
               assert(0);
@@ -6304,6 +6338,7 @@ namespace Realm {
         //   if some other thread is still poking it)
 	xd->remove_reference();
       }
+
 
       bool XferDesQueue::enqueue_xferDes_local(XferDes* xd,
 					       bool add_to_queue /*= true*/)
@@ -6330,10 +6365,12 @@ namespace Realm {
               ph = reinterpret_cast<XferDesPlaceholder *>(it->second - 1);
               // put xd in, donating the initial reference to the table
               it->second = reinterpret_cast<uintptr_t>(xd);
+              log_xd_ref.info("xd=%llx, swap placeholder, refcount=%u", xd->guid, xd->reference_count.load_acquire());
             }
           } else {
             guid_to_xd.insert(std::make_pair(xd->guid,
                                              reinterpret_cast<uintptr_t>(xd)));
+            log_xd_ref.info("xd=%llx, new xd, refcount=%u", xd->guid, xd->reference_count.load_acquire());
           }
         }
         if(ph) {
@@ -6348,6 +6385,7 @@ namespace Realm {
 
 	return true;
       }
+
 
       void XferDes::DeferredXDEnqueue::defer(XferDesQueue *_xferDes_queue,
 					     XferDes *_xd, Event wait_on)
