@@ -2460,6 +2460,7 @@ impl EventID {
         } else {
             None
         }
+    }
     // Important: keep this in sync with realm/id.h
     // EVENT:   tag:1 = 0b1, creator_node:16, gen_event_idx:27, generation:20
     // owner_node = proc_id[63:47]
@@ -3424,17 +3425,21 @@ impl State {
                     let skew =
                         meta_task.time_range.spawn.unwrap() - meta_task.time_range.create.unwrap();
                     total_skew += skew;
-                    // Creator node (fevent) should be different than execution node
-                    assert!(meta_task.fevent.node_id() != proc.proc_id.node_id());
-                    let nodes = (meta_task.fevent.node_id(), proc.proc_id.node_id());
-                    let node_skew = skew_nodes.entry(nodes).or_insert_with(|| (0, 0.0, 0.0));
-                    // Wellford's algorithm for online variance calculation
-                    node_skew.0 += 1;
-                    let value = skew.to_ns() as f64;
-                    let delta = value - node_skew.1;
-                    node_skew.1 += delta / node_skew.0 as f64;
-                    let delta2 = value - node_skew.1;
-                    node_skew.2 += delta * delta2;
+                    // Find the creator processor for the creator
+                    if let Some(creator) = meta_task.creator {
+                        let creator_proc = self.prof_uid_proc.get(&creator).unwrap();
+                        // Creator node should be different than execution node
+                        assert!(creator_proc.node_id() != proc.proc_id.node_id());
+                        let nodes = (creator_proc.node_id(), proc.proc_id.node_id());
+                        let node_skew = skew_nodes.entry(nodes).or_insert_with(|| (0, 0.0, 0.0));
+                        // Wellford's algorithm for online variance calculation
+                        node_skew.0 += 1;
+                        let value = skew.to_ns() as f64;
+                        let delta = value - node_skew.1;
+                        node_skew.1 += delta / node_skew.0 as f64;
+                        let delta2 = value - node_skew.1;
+                        node_skew.2 += delta * delta2;
+                    }
                 }
             }
         }
@@ -3497,20 +3502,23 @@ impl State {
                     let spawn = meta_task.time_range.spawn.unwrap();
                     let mut create = meta_task.time_range.create.unwrap();
                     // If there was any skew shift the create time forward by the average skew amount
-                    let nodes = (meta_task.fevent.node_id(), proc.proc_id.node_id());
-                    if let Some(skew) = skew_nodes.get(&nodes) {
-                        // Just truncate fractional nanoseconds, they won't matter
-                        create += Timestamp::from_ns(skew.1 as u64);
-                    }
-                    // If we still have skew we're just going to ignore it for now
-                    // Otherwise we can check the latency of message delivery
-                    if spawn <= create {
-                        // No skew
-                        let latency = create - spawn;
-                        if threshold <= latency.to_us() {
-                            bad_messages += 1;
+                    if let Some(creator) = meta_task.creator {
+                        let creator_proc = self.prof_uid_proc.get(&creator).unwrap();
+                        let nodes = (creator_proc.node_id(), proc.proc_id.node_id());
+                        if let Some(skew) = skew_nodes.get(&nodes) {
+                            // Just truncate fractional nanoseconds, they won't matter
+                            create += Timestamp::from_ns(skew.1 as u64);
                         }
-                        longest_latency = max(longest_latency, latency);
+                        // If we still have skew we're just going to ignore it for now
+                        // Otherwise we can check the latency of message delivery
+                        if spawn <= create {
+                            // No skew
+                            let latency = create - spawn;
+                            if threshold <= latency.to_us() {
+                                bad_messages += 1;
+                            }
+                            longest_latency = max(longest_latency, latency);
+                        }
                     }
                 }
             }
