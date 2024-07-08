@@ -77,83 +77,42 @@ namespace Realm {
     return 0;
   }
 
-  ////////////////////////////////////////////////////////////////////////
-  //
-  // class TransferIteratorBase<N,T>
-  //
-
   template <int N, typename T>
-  class TransferIteratorBase : public TransferIterator {
-  protected:
-    TransferIteratorBase(void); // used by deserializer
-  public:
-    TransferIteratorBase(RegionInstance inst,
-			 const int _dim_order[N]);
-
-    virtual Event request_metadata(void);
-
-    virtual void reset(void);
-    virtual bool done(void);
-    virtual size_t step(size_t max_bytes, AddressInfo& info,
-			unsigned flags,
-			bool tentative = false);
-    virtual size_t step_custom(size_t max_bytes, AddressInfoCustom& info,
-                               bool tentative = false);
-
-    virtual void confirm_step(void);
-    virtual void cancel_step(void);
-
-    virtual size_t get_base_offset(void) const;
-
-    virtual bool get_addresses(AddressList &addrlist,
-                               const InstanceLayoutPieceBase *&nonaffine);
-
-  protected:
-    virtual bool get_next_rect(Rect<N, T> &r, FieldID &fid, size_t &offset,
-                               size_t &fsize) = 0;
-
-    bool have_rect, is_done;
-    Rect<N,T> cur_rect;
-    FieldID cur_field_id;
-    size_t cur_field_offset, cur_field_size;
-    Point<N,T> cur_point, next_point;
-    bool carry;
-    RegionInstanceImpl *inst_impl;
-    const InstanceLayout<N,T> *inst_layout;
-    bool tentative_valid;
-    int dim_order[N];
-  };
-
-  template <int N, typename T>
-  TransferIteratorBase<N,T>::TransferIteratorBase(RegionInstance inst,
-						  const int _dim_order[N])
-    : have_rect(false), is_done(false)
-    , inst_layout(0)
+  TransferIteratorBase<N, T>::TransferIteratorBase(
+      const InstanceLayout<N, T> *_inst_layout, size_t _inst_offset,
+      const int _dim_order[N])
+    : have_rect(false)
+    , is_done(false)
     , tentative_valid(false)
+    , inst_layout(_inst_layout)
+    , inst_offset(_inst_offset)
   {
-    inst_impl = get_runtime()->get_instance_impl(inst);
+    assert(inst_layout != 0);
+    // inst_impl = get_runtime()->get_instance_impl(inst);
 
     if(_dim_order)
-      for(int i = 0; i < N; i++) dim_order[i] = _dim_order[i];
+      for(int i = 0; i < N; i++)
+        dim_order[i] = _dim_order[i];
     else
-      for(int i = 0; i < N; i++) dim_order[i] = i;
+      for(int i = 0; i < N; i++)
+        dim_order[i] = i;
   }
 
   template <int N, typename T>
-  TransferIteratorBase<N,T>::TransferIteratorBase(void)
-    : have_rect(false), is_done(false)
+  TransferIteratorBase<N, T>::TransferIteratorBase(void)
+    : have_rect(false)
+    , is_done(false)
     , inst_impl(0)
     , inst_layout(0)
+    , inst_offset(0)
     , tentative_valid(false)
   {}
 
   template <int N, typename T>
-  Event TransferIteratorBase<N,T>::request_metadata(void)
+  Event TransferIteratorBase<N, T>::request_metadata(void)
   {
-    if(inst_impl && !inst_impl->metadata.is_valid())
-      return inst_impl->request_metadata();
-    else
-      return Event::NO_EVENT;
+    assert(metadata.is_valid());
+    return Event::NO_EVENT;
   }
 
   template <int N, typename T>
@@ -173,11 +132,7 @@ namespace Realm {
     if(is_done)
       return true;
 
-    // if we haven't fetched the layout, now's our last chance
-    if(inst_layout == 0) {
-      assert(inst_impl->metadata.is_valid());
-      inst_layout = checked_cast<const InstanceLayout<N,T> *>(inst_impl->metadata.layout);
-    }
+    assert(inst_layout != 0);
 
     // try to get a new (non-empty) rectangle
     while(true) {
@@ -314,10 +269,8 @@ namespace Realm {
 	  target_subrect.hi[d] = cur_point[d];
       }
 
-      info.base_offset = (inst_impl->metadata.inst_offset +
-			  affine->offset +
-			  affine->strides.dot(cur_point) +
-			  field_rel_offset);
+      info.base_offset = (inst_offset + affine->offset + affine->strides.dot(cur_point) +
+                          field_rel_offset);
       //log_dma.print() << "A " << inst_impl->metadata.inst_offset << " + " << affine->offset << " + (" << affine->strides << " . " << cur_point << ") + " << field_rel_offset << " = " << info.base_offset;
       info.bytes_per_chunk = act_counts[0];
       info.num_lines = act_counts[1];
@@ -498,7 +451,7 @@ namespace Realm {
   template <int N, typename T>
   uintptr_t TransferIteratorBase<N, T>::get_base_offset(void) const
   {
-    return inst_impl->metadata.inst_offset;
+    return inst_offset;
   }
 
   template <int N, typename T>
@@ -530,8 +483,9 @@ namespace Realm {
 	assert((cur_field_offset + cur_field_size) <= size_t(it->second.size_in_bytes));
 	const InstancePieceList<N,T>& piece_list = inst_layout->piece_lists[it->second.list_idx];
 	layout_piece = piece_list.find_piece(cur_point);
-        log_dma.debug() << "Find piece found for " << cur_point
-                        << " in instance " << inst_impl->me
+        log_dma.debug() << "Find piece found for "
+                        << cur_point
+                        ///<< " in instance " << inst_impl->me
                         << " (list: " << piece_list << ")";
         if (REALM_UNLIKELY(layout_piece == 0)) {
           log_dma.fatal() << "no piece found for " << cur_point;
@@ -612,13 +566,11 @@ namespace Realm {
 	const AffineLayoutPiece<N,T> *affine = static_cast<const AffineLayoutPiece<N,T> *>(layout_piece);
 
 	// offset of initial entry is easy to compute
-	addr_data[1] = (inst_impl->metadata.inst_offset +
-			affine->offset +
-			affine->strides.dot(target_subrect.lo) +
-			field_rel_offset);
+        addr_data[1] = (inst_offset + affine->offset +
+                        affine->strides.dot(target_subrect.lo) + field_rel_offset);
 
-	size_t bytes = cur_field_size;
-	int cur_dim = 1;
+        size_t bytes = cur_field_size;
+        int cur_dim = 1;
 	int di = 0;
 	// compact any dimensions that are contiguous first
 	for(; di < N; di++) {
@@ -680,64 +632,18 @@ namespace Realm {
     return true; // we have no more addresses to produce
   }
 
-
-  ////////////////////////////////////////////////////////////////////////
-  //
-  // class TransferIteratorIndexSpace<N,T>
-  //
-
   template <int N, typename T>
-  class TransferIteratorIndexSpace : public TransferIteratorBase<N,T> {
-  protected:
-    TransferIteratorIndexSpace(void); // used by deserializer
-  public:
-    TransferIteratorIndexSpace(const IndexSpace<N,T> &_is,
-			       RegionInstance inst,
-			       const int _dim_order[N],
-			       const std::vector<FieldID>& _fields,
-			       const std::vector<size_t>& _fld_offsets,
-			       const std::vector<size_t>& _fld_sizes,
-			       size_t _extra_elems);
-
-    template <typename S>
-    static TransferIterator *deserialize_new(S& deserializer);
-      
-    virtual ~TransferIteratorIndexSpace(void);
-
-    virtual Event request_metadata(void);
-
-    virtual void reset(void);
-
-    static Serialization::PolymorphicSerdezSubclass<TransferIterator, TransferIteratorIndexSpace<N,T> > serdez_subclass;
-
-    template <typename S>
-    bool serialize(S& serializer) const;
-
-  protected:
-    virtual bool get_next_rect(Rect<N,T>& r, FieldID& fid,
-			       size_t& offset, size_t& fsize);
-    
-    IndexSpace<N,T> is;
-    IndexSpaceIterator<N,T> iter;
-    bool iter_init_deferred;
-    std::vector<FieldID> fields;
-    std::vector<size_t> fld_offsets, fld_sizes;
-    size_t field_idx;
-    size_t extra_elems;
-  };
-
-  template <int N, typename T>
-  TransferIteratorIndexSpace<N,T>::TransferIteratorIndexSpace(const IndexSpace<N,T>& _is,
-							      RegionInstance inst,
-							      const int _dim_order[N],
-							      const std::vector<FieldID>& _fields,
-							      const std::vector<size_t>& _fld_offsets,
-							      const std::vector<size_t>& _fld_sizes,
-							      size_t _extra_elems)
-    : TransferIteratorBase<N,T>(inst, _dim_order)
+  TransferIteratorIndexSpace<N, T>::TransferIteratorIndexSpace(
+      const IndexSpace<N, T> &_is, const InstanceLayout<N, T> *inst_layout,
+      size_t inst_offset, const int _dim_order[N], const std::vector<FieldID> &_fields,
+      const std::vector<size_t> &_fld_offsets, const std::vector<size_t> &_fld_sizes,
+      size_t _extra_elems)
+    : TransferIteratorBase<N, T>(inst_layout, inst_offset, _dim_order)
     , is(_is)
-    , field_idx(0), extra_elems(_extra_elems)
+    , field_idx(0)
+    , extra_elems(_extra_elems)
   {
+    assert(inst_layout != 0);
     if(is.is_valid()) {
       iter.reset(is);
       this->is_done = !iter.valid;
@@ -763,34 +669,38 @@ namespace Realm {
   template <typename S>
   /*static*/ TransferIterator *TransferIteratorIndexSpace<N,T>::deserialize_new(S& deserializer)
   {
-    IndexSpace<N,T> is;
+    // TODO(apryakhin@): Fix serdez
+    /*IndexSpace<N,T> is;
     RegionInstance inst;
     std::vector<FieldID> fields;
     std::vector<size_t> fld_offsets, fld_sizes;
     size_t extra_elems;
     int dim_order[N];
+    size_t inst_offset;
+    RegionInstanceImpl::Metadata metadata;
 
     if(!((deserializer >> is) &&
-	 (deserializer >> inst) &&
-	 (deserializer >> fields) &&
-	 (deserializer >> fld_offsets) &&
-	 (deserializer >> fld_sizes) &&
-	 (deserializer >> extra_elems)))
+         (deserializer >> inst) &&
+         (deserializer >> fields) &&
+         (deserializer >> fld_offsets) &&
+         (deserializer >> fld_sizes) &&
+         (deserializer >> extra_elems)))
       return 0;
 
     for(int i = 0; i < N; i++)
       if(!(deserializer >> dim_order[i]))
-	return 0;
+        return 0;
 
     TransferIteratorIndexSpace<N,T> *tiis = new TransferIteratorIndexSpace<N,T>(is,
-										inst,
-										dim_order,
-										fields,
-										fld_offsets,
-										fld_sizes,
-										extra_elems);
-
+                                                                                metadata,
+                                                                                dim_order,
+                                                                                fields,
+                                                                                fld_offsets,
+                                                                                fld_sizes,
+                                                                                extra_elems);
     return tiis;
+    */
+    return 0;
   }
 
   template <int N, typename T>
@@ -800,7 +710,7 @@ namespace Realm {
   template <int N, typename T>
   Event TransferIteratorIndexSpace<N,T>::request_metadata(void)
   {
-    Event e = TransferIteratorBase<N,T>::request_metadata();;
+    Event e = TransferIteratorBase<N, T>::request_metadata();
 
     if(iter_init_deferred)
       e = Event::merge_events(e, is.make_valid());
@@ -944,7 +854,10 @@ namespace Realm {
   WrappingTransferIteratorIndirect<N, T>::WrappingTransferIteratorIndirect(
       RegionInstance inst, const std::vector<FieldID> &_fields,
       const std::vector<size_t> &_fld_offsets, const std::vector<size_t> &_fld_sizes)
-    : TransferIteratorBase<N, T>(inst, 0)
+    : TransferIteratorBase<N, T>(
+          checked_cast<const InstanceLayout<N, T> *>(
+              get_runtime()->get_instance_impl(inst)->metadata.layout),
+          get_runtime()->get_instance_impl(inst)->metadata.inst_offset, 0)
     , fields(_fields)
     , fld_offsets(_fld_offsets)
     , fld_sizes(_fld_sizes)
@@ -1029,10 +942,11 @@ namespace Realm {
     size_t cur_field_offset = fld_offsets[0];
     size_t cur_field_size = fld_sizes[0];
 
+    assert(this->inst_layout);
     if(this->inst_layout == 0) {
-      assert(this->inst_impl->metadata.is_valid());
-      this->inst_layout =
-          checked_cast<const InstanceLayout<N, T> *>(this->inst_impl->metadata.layout);
+      // assert(this->inst_impl->metadata.is_valid());
+      // this->inst_layout =
+      //  checked_cast<const InstanceLayout<N, T> *>(this->inst_impl->metadata.layout);
     }
 
     assert(this->inst_layout);
@@ -1051,7 +965,7 @@ namespace Realm {
         const AffineLayoutPiece<N, T> *affine =
             static_cast<const AffineLayoutPiece<N, T> *>(layout_piece);
 
-        info.base_offset = (this->inst_impl->metadata.inst_offset + affine->offset +
+        info.base_offset = (this->inst_offset + affine->offset +
                             affine->strides.dot(affine->bounds.lo) + field_rel_offset);
 
         size_t cur_dim = 0;
@@ -1222,22 +1136,25 @@ namespace Realm {
     : can_merge(true)
     , point_pos(0), num_points(0)
   {}
-  
+
   template <int N, typename T>
-  TransferIteratorIndirect<N,T>::TransferIteratorIndirect(Memory _addrs_mem,
-							  //const IndexSpace<N,T> &_is,
-							  RegionInstance inst,
-							  //const int _dim_order[N],
-							  const std::vector<FieldID>& _fields,
-							  const std::vector<size_t>& _fld_offsets,
-							  const std::vector<size_t>& _fld_sizes)
-    : TransferIteratorBase<N,T>(inst, 0)
+  TransferIteratorIndirect<N, T>::TransferIteratorIndirect(
+      Memory _addrs_mem,
+      // const IndexSpace<N,T> &_is,
+      RegionInstance inst,
+      // const int _dim_order[N],
+      const std::vector<FieldID> &_fields, const std::vector<size_t> &_fld_offsets,
+      const std::vector<size_t> &_fld_sizes)
+    : TransferIteratorBase<N, T>(
+          checked_cast<const InstanceLayout<N, T> *>(
+              get_runtime()->get_instance_impl(inst)->metadata.layout),
+          get_runtime()->get_instance_impl(inst)->metadata.inst_offset, 0)
     , addrs_in(0)
     , addrs_mem(_addrs_mem)
     , addrs_mem_base(0)
     , point_pos(0)
     , num_points(0)
-      //, is(_is)
+    //, is(_is)
     , fields(_fields)
     , fld_offsets(_fld_offsets)
     , fld_sizes(_fld_sizes)
@@ -1504,23 +1421,26 @@ namespace Realm {
     : can_merge(true)
     , rect_pos(0), num_rects(0)
   {}
-  
+
   template <int N, typename T>
-  TransferIteratorIndirectRange<N,T>::TransferIteratorIndirectRange(Memory _addrs_mem,
-							  //const IndexSpace<N,T> &_is,
-							  RegionInstance inst,
-							  //const int _dim_order[N],
-								    const std::vector<FieldID>& _fields,
-								    const std::vector<size_t>& _fld_offsets,
-								    const std::vector<size_t>& _fld_sizes)
-    : TransferIteratorBase<N,T>(inst, 0)
+  TransferIteratorIndirectRange<N, T>::TransferIteratorIndirectRange(
+      Memory _addrs_mem,
+      // const IndexSpace<N,T> &_is,
+      RegionInstance inst,
+      // const int _dim_order[N],
+      const std::vector<FieldID> &_fields, const std::vector<size_t> &_fld_offsets,
+      const std::vector<size_t> &_fld_sizes)
+    : TransferIteratorBase<N, T>(
+          checked_cast<const InstanceLayout<N, T> *>(
+              get_runtime()->get_instance_impl(inst)->metadata.layout),
+          get_runtime()->get_instance_impl(inst)->metadata.inst_offset, 0)
     , addrs_in(0)
     , addrs_mem(_addrs_mem)
     , addrs_mem_base(0)
     , can_merge(true)
     , rect_pos(0)
     , num_rects(0)
-      //, is(_is)
+    //, is(_is)
     , fields(_fields)
     , fld_offsets(_fld_offsets)
     , fld_sizes(_fld_sizes)
@@ -2129,9 +2049,13 @@ namespace Realm {
   {
     size_t extra_elems = 0;
     assert(dim_order.size() == N);
-    return new TransferIteratorIndexSpace<N,T>(is, inst, dim_order.data(),
-					       fields, fld_offsets, fld_sizes,
-					       extra_elems);
+    RegionInstanceImpl *impl = get_runtime()->get_instance_impl(inst);
+    assert(impl->metadata.is_valid());
+    assert((checked_cast<const InstanceLayout<N, T> *>(impl->metadata.layout) != 0));
+    return new TransferIteratorIndexSpace<N, T>(
+        is, checked_cast<const InstanceLayout<N, T> *>(impl->metadata.layout),
+        impl->metadata.inst_offset, dim_order.data(), fields, fld_offsets, fld_sizes,
+        extra_elems);
   }
 
   template <int N, typename T>

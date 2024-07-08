@@ -31,6 +31,7 @@ list(APPEND REALM_TESTS
   pri_queue_test.cc
   intrusive_list_test.cc
   nodeset_test.cc
+  transfer_iterator_test.cc
  )
 
 include(FetchContent)
