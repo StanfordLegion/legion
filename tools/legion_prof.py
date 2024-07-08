@@ -3587,9 +3587,10 @@ class LFSR(object):
         self.max_value = pow(2,needed_bits)
         # We'll use a deterministic seed here so that
         # our results are repeatable
-        seed_configuration = '1010010011110011'
+        seed_configuration = '101001001111001110100011'
         for i in range(needed_bits):
             self.register += seed_configuration[i]
+        # Polynomials from https://en.wikipedia.org/wiki/Linear-feedback_shift_register#Example_polynomials_for_maximal_LFSRs
         polynomials = {
           2 : (2,1),
           3 : (3,2),
@@ -3615,7 +3616,7 @@ class LFSR(object):
           23 : (23,18),
           24 : (24,23,22,17),
         }
-        # If we need more than 16 bits that is a lot tasks
+        # If we need more than 24 bits that is a lot tasks
         assert needed_bits in polynomials
         self.taps = polynomials[needed_bits]
 
