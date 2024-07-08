@@ -256,8 +256,9 @@ namespace Realm {
   {
     if(map_impl.load() != 0) {
       if(need_refcount) {
-        log_dpops.fatal() << "leaking sparsity:" << me << " refs:" << references.load()
-                          << " N:" << Network::my_node_id;
+        log_dpops.fatal() << "leaking sparsity map me:" << me
+                          << " refs:" << references.load()
+                          << " node:" << Network::my_node_id;
         assert(0);
       }
       (*map_deleter)(map_impl.load());
