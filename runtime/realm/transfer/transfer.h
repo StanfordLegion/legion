@@ -158,8 +158,8 @@ namespace Realm {
     Point<N, T> cur_point, next_point;
     bool carry;
     RegionInstanceImpl *inst_impl;
-    size_t inst_offset;
     const InstanceLayout<N, T> *inst_layout;
+    size_t inst_offset;
     RegionInstanceImpl::Metadata metadata;
     bool tentative_valid;
     int dim_order[N];

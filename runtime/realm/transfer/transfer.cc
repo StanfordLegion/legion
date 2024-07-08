@@ -83,12 +83,11 @@ namespace Realm {
       const int _dim_order[N])
     : have_rect(false)
     , is_done(false)
-    , tentative_valid(false)
     , inst_layout(_inst_layout)
     , inst_offset(_inst_offset)
+    , tentative_valid(false)
   {
     assert(inst_layout != 0);
-    // inst_impl = get_runtime()->get_instance_impl(inst);
 
     if(_dim_order)
       for(int i = 0; i < N; i++)
@@ -943,11 +942,6 @@ namespace Realm {
     size_t cur_field_size = fld_sizes[0];
 
     assert(this->inst_layout);
-    if(this->inst_layout == 0) {
-      // assert(this->inst_impl->metadata.is_valid());
-      // this->inst_layout =
-      //  checked_cast<const InstanceLayout<N, T> *>(this->inst_impl->metadata.layout);
-    }
 
     assert(this->inst_layout);
     std::map<FieldID, InstanceLayoutGeneric::FieldLayout>::const_iterator it =

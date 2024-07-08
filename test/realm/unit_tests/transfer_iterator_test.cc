@@ -15,17 +15,11 @@ protected:
     const unsigned bytes_per_element = std::get<0>(GetParam());
     IndexSpace<3, int> is(std::get<1>(GetParam()));
 
-    inst_layout = new InstanceLayout<3, int>();
-    inst_layout->space = is.bounds;
-
     InstanceLayoutGeneric::FieldLayout field_layout;
     field_layout.list_idx = 0;
     field_layout.rel_offset = 0;
     field_layout.size_in_bytes = bytes_per_element;
 
-    inst_layout->fields[0] = field_layout;
-
-    inst_layout->piece_lists.resize(1);
     AffineLayoutPiece<3, int> *affine_piece = new AffineLayoutPiece<3, int>();
     affine_piece->offset = 0;
     affine_piece->strides[0] = bytes_per_element;
@@ -34,8 +28,12 @@ protected:
     affine_piece->strides[2] = bytes_per_element *
                                (is.bounds.hi[0] - is.bounds.lo[0] + 1) *
                                (is.bounds.hi[1] - is.bounds.lo[1] + 1);
-
     affine_piece->bounds = is.bounds;
+
+    inst_layout = new InstanceLayout<3, int>();
+    inst_layout->space = is.bounds;
+    inst_layout->fields[0] = field_layout;
+    inst_layout->piece_lists.resize(1);
     inst_layout->piece_lists[0].pieces.push_back(affine_piece);
   }
 
@@ -51,20 +49,19 @@ TEST_P(TransferIteratorIndexSpaceTest, Step3DEmpty)
   const std::vector<FieldID> fields{0};
   const std::vector<size_t> fld_offsets{0};
   const std::vector<size_t> fld_sizes{bytes_per_element};
-
   TransferIteratorIndexSpace<3, int> it(is, inst_layout, 0, 0, fields, fld_offsets,
                                         fld_sizes, 0);
 
   size_t max_bytes = 0;
   TransferIterator::AddressInfo info{0, 0, 0, 0, 0};
   size_t bytes = it.step(max_bytes, info, 0, 0);
+
   EXPECT_EQ(bytes, max_bytes);
   EXPECT_EQ(info.base_offset, 0);
   EXPECT_EQ(info.bytes_per_chunk, 0);
   EXPECT_EQ(info.num_lines, 0);
   EXPECT_EQ(info.line_stride, 0);
   EXPECT_EQ(info.num_planes, 0);
-
   EXPECT_FALSE(it.done());
 }
 
@@ -75,7 +72,6 @@ TEST_P(TransferIteratorIndexSpaceTest, Step3D)
   const std::vector<FieldID> fields{0};
   const std::vector<size_t> fld_offsets{0};
   const std::vector<size_t> fld_sizes{bytes_per_element};
-
   TransferIteratorIndexSpace<3, int> it(is, inst_layout, 0, 0, fields, fld_offsets,
                                         fld_sizes, 0);
 
@@ -104,7 +100,6 @@ TEST_P(TransferIteratorIndexSpaceTest, GetAddressesIsCoversEntirePiece)
   const std::vector<FieldID> fields{0};
   const std::vector<size_t> fld_offsets{0};
   const std::vector<size_t> fld_sizes{bytes_per_element};
-
   TransferIteratorIndexSpace<3, int> it(is, inst_layout, 0, 0, fields, fld_offsets,
                                         fld_sizes, 0);
 
@@ -114,7 +109,6 @@ TEST_P(TransferIteratorIndexSpaceTest, GetAddressesIsCoversEntirePiece)
 
   EXPECT_EQ(done, true);
   EXPECT_EQ(addrlist.bytes_pending(), is.bounds.volume() * bytes_per_element);
-
   AddressListCursor cursor;
   cursor.set_addrlist(&addrlist);
   // EXPECT_EQ(cursor.get_dim(), 1);
