@@ -77,6 +77,7 @@ TESTS += rect_transform_test
 TESTS += rsrv_acquire_poisoned
 TESTS += sparsity_destroy
 TESTS += refcount_image_test
+TESTS += refcount_preimage_test
 TESTS += inst_chain_redistrict
 
 ifeq ($(strip $(USE_CUDA)),1)
