@@ -2700,12 +2700,13 @@ struct LFSR {
 impl LFSR {
     fn new(size: u64) -> Self {
         let needed_bits = (size as f64).log2().floor() as u32 + 1;
-        let seed_configuration = 0b1010010011110011;
+        let seed_configuration = 0b101001001111001110100011;
         LFSR {
-            register: (seed_configuration & (((1 << needed_bits) - 1) << (16 - needed_bits)))
-                >> (16 - needed_bits),
+            register: (seed_configuration & (((1 << needed_bits) - 1) << (24 - needed_bits)))
+                >> (24 - needed_bits),
             bits: needed_bits,
             max_value: 1 << needed_bits,
+            // Polynomials from https://en.wikipedia.org/wiki/Linear-feedback_shift_register#Example_polynomials_for_maximal_LFSRs
             taps: match needed_bits {
                 2 => vec![2, 1],
                 3 => vec![3, 2],
@@ -2721,8 +2722,16 @@ impl LFSR {
                 13 => vec![13, 12, 11, 8],
                 14 => vec![14, 13, 12, 2],
                 15 => vec![15, 14],
-                16 => vec![16, 14, 13, 11],
-                _ => unreachable!(), // if we need more than 16 bits that is a lot tasks
+                16 => vec![16, 15, 13, 4],
+                17 => vec![17, 14],
+                18 => vec![18, 11],
+                19 => vec![19, 18, 17, 14],
+                20 => vec![20, 17],
+                21 => vec![21, 19],
+                22 => vec![22, 21],
+                23 => vec![23, 18],
+                24 => vec![24, 23, 22, 17],
+                _ => unreachable!(), // if we need more than 24 bits that is a lot tasks
             },
         }
     }

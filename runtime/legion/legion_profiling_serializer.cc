@@ -455,7 +455,6 @@ namespace Legion {
          << "fevent:unsigned long long:" << sizeof(LgEvent)
          << "}" << std::endl;
 
-#ifdef LEGION_PROF_SELF_PROFILE
       ss << "ProfTaskInfo {"
          << "id:" << PROFTASK_INFO_ID                        << delim
          << "proc_id:ProcID:"         << sizeof(ProcID)      << delim
@@ -465,7 +464,6 @@ namespace Legion {
          << "creator:unsigned long long:" << sizeof(LgEvent) << delim
          << "fevent:unsigned long long:" << sizeof(LgEvent)
          << "}" << std::endl;
-#endif
 
       // An empty line indicates the end of the preamble.
       ss << std::endl;
@@ -1257,7 +1255,6 @@ namespace Legion {
     }
 
 
-#ifdef LEGION_PROF_SELF_PROFILE
     //--------------------------------------------------------------------------
     void LegionProfBinarySerializer::serialize(
                           const LegionProfInstance::ProfTaskInfo& proftask_info)
@@ -1275,7 +1272,6 @@ namespace Legion {
       lp_fwrite(f, (char*)&(proftask_info.finish_event),
                                             sizeof(proftask_info.finish_event));
     }
-#endif
 
     //--------------------------------------------------------------------------
     LegionProfBinarySerializer::~LegionProfBinarySerializer()
@@ -2061,7 +2057,6 @@ namespace Legion {
 		     pm.proc_id, pm.mem_id, pm.bandwidth, pm.latency);
     }
 
-#ifdef LEGION_PROF_SELF_PROFILE
     //--------------------------------------------------------------------------
     void LegionProfASCIISerializer::serialize(
                           const LegionProfInstance::ProfTaskInfo& proftask_info)
@@ -2073,7 +2068,6 @@ namespace Legion {
                      proftask_info.creator.id,
                      proftask_info.finish_event.id);
     }
-#endif
 
     //--------------------------------------------------------------------------
     LegionProfASCIISerializer::~LegionProfASCIISerializer()
