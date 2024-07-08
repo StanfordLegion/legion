@@ -157,10 +157,12 @@ namespace Realm {
     size_t cur_field_offset, cur_field_size;
     Point<N, T> cur_point, next_point;
     bool carry;
-    RegionInstanceImpl *inst_impl;
+
+    RegionInstanceImpl *inst_impl; // TODO(apryakhin@): DELETE
     const InstanceLayout<N, T> *inst_layout;
     size_t inst_offset;
-    RegionInstanceImpl::Metadata metadata;
+    //RegionInstanceImpl::Metadata metadata; // TODO(apryakhin@):
+    //DELETE
     bool tentative_valid;
     int dim_order[N];
   };

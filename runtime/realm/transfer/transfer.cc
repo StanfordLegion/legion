@@ -110,7 +110,6 @@ namespace Realm {
   template <int N, typename T>
   Event TransferIteratorBase<N, T>::request_metadata(void)
   {
-    assert(metadata.is_valid());
     return Event::NO_EVENT;
   }
 
