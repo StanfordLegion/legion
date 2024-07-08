@@ -612,11 +612,12 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(timeline.is_valid());
 #endif
-      meta_infos.emplace_back(MetaInfo());
-      MetaInfo &info = meta_infos.back();
+      message_infos.emplace_back(MessageInfo());
+      MessageInfo &info = message_infos.back();
       info.op_id = prof_info->op_id;
       info.lg_id = prof_info->id;
       info.proc_id = usage.proc.id;
+      info.spawn = prof_info->extra.spawn_time;
       info.create = timeline.create_time;
       info.ready = timeline.ready_time;
       info.start = timeline.start_time;
@@ -638,7 +639,8 @@ namespace Legion {
       Realm::ProfilingMeasurements::OperationFinishEvent finish;
       if (response.get_measurement(finish))
         info.finish_event = LgEvent(finish.finish_event);
-      const size_t diff = sizeof(MetaInfo) + num_intervals * sizeof(WaitInfo);
+      const size_t diff = sizeof(MessageInfo) + 
+        num_intervals * sizeof(WaitInfo);
       owner->update_footprint(diff, this);
     }
 
@@ -1271,6 +1273,16 @@ namespace Legion {
           serializer->serialize(*wit, *it);
         }
       }
+      for (std::deque<MessageInfo>::const_iterator it = message_infos.begin();
+            it != message_infos.end(); it++)
+      {
+        serializer->serialize(*it);
+        for (std::deque<WaitInfo>::const_iterator wit =
+             it->wait_intervals.begin(); wit != it->wait_intervals.end(); wit++)
+        {
+          serializer->serialize(*wit, *it);
+        }
+      }
       for (std::deque<FillInfo>::const_iterator it = fill_infos.begin();
             it != fill_infos.end(); it++)
       {
@@ -1334,6 +1346,7 @@ namespace Legion {
       phy_inst_dim_order_rdesc.clear();
       index_space_size_desc.clear();
       meta_infos.clear();
+      message_infos.clear();
       copy_infos.clear();
       fill_infos.clear();
       inst_timeline_infos.clear();
@@ -1610,6 +1623,21 @@ namespace Legion {
           serializer->serialize(*wit, front);
         diff += sizeof(front) + front.wait_intervals.size() * sizeof(WaitInfo);
         meta_infos.pop_front();
+        const long long t_curr = Realm::Clock::current_time_in_microseconds();
+        if (t_curr >= t_stop)
+          return diff;
+      }
+      while (!message_infos.empty())
+      {
+        MessageInfo &front = message_infos.front();
+        serializer->serialize(front);
+        // Have to do all of these now
+        for (std::deque<WaitInfo>::const_iterator wit =
+              front.wait_intervals.begin(); wit != 
+              front.wait_intervals.end(); wit++)
+          serializer->serialize(*wit, front);
+        diff += sizeof(front) + front.wait_intervals.size() * sizeof(WaitInfo);
+        message_infos.pop_front();
         const long long t_curr = Realm::Clock::current_time_in_microseconds();
         if (t_curr >= t_stop)
           return diff;
@@ -2216,6 +2244,12 @@ namespace Legion {
       ProfilingInfo info(NULL, LEGION_PROF_MESSAGE);
       info.id = LG_MESSAGE_ID + (int)k;
       info.op_id = implicit_provenance;
+      // Record the spawn time which is different than the create_time in
+      // the Realm profiling response because the create time is not recorded
+      // until the active message makes it to the remote node and we want to
+      // see how long it took for that active message to make it there
+      // Do this last so it is as close the actual spawn as possible
+      info.extra.spawn_time = Realm::Clock::current_time_in_nanoseconds();
       Realm::ProfilingRequest &req = requests.add_request(remote_target,
                 LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_MIN_PRIORITY);
       req.add_measurement<

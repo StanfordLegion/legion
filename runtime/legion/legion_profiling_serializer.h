@@ -87,6 +87,7 @@ namespace Legion {
                              const LegionProfInstance::MetaInfo&) = 0;
       virtual void serialize(const LegionProfInstance::TaskInfo&) = 0;
       virtual void serialize(const LegionProfInstance::MetaInfo&) = 0;
+      virtual void serialize(const LegionProfInstance::MessageInfo&) = 0;
       virtual void serialize(const LegionProfInstance::CopyInfo&) = 0;
       virtual void serialize(const LegionProfInstance::FillInfo&) = 0;
       virtual void serialize(const LegionProfInstance::InstTimelineInfo&) = 0;
@@ -154,6 +155,7 @@ namespace Legion {
                      const LegionProfInstance::MetaInfo&);
       void serialize(const LegionProfInstance::TaskInfo&);
       void serialize(const LegionProfInstance::MetaInfo&);
+      void serialize(const LegionProfInstance::MessageInfo&);
       void serialize(const LegionProfInstance::CopyInfo&);
       void serialize(const LegionProfInstance::FillInfo&);
       void serialize(const LegionProfInstance::InstTimelineInfo&);
@@ -279,6 +281,7 @@ namespace Legion {
                      const LegionProfInstance::MetaInfo&);
       void serialize(const LegionProfInstance::TaskInfo&);
       void serialize(const LegionProfInstance::MetaInfo&);
+      void serialize(const LegionProfInstance::MessageInfo&);
       void serialize(const LegionProfInstance::CopyInfo&);
       void serialize(const LegionProfInstance::FillInfo&);
       void serialize(const LegionProfInstance::InstTimelineInfo&);

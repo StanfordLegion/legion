@@ -552,7 +552,7 @@ class HasNoDependencies(Dependencies):
         pass
 
 class TimeRange(ABC):
-    _abstract_slots = ['create', 'ready', 'start', 'stop', 'trimmed', 'was_removed']
+    _abstract_slots = ['spawn', 'create', 'ready', 'start', 'stop', 'trimmed', 'was_removed']
 
     @typecheck
     def __init__(self, 
@@ -564,6 +564,7 @@ class TimeRange(ABC):
         assert create is None or (create is not None and ready is not None and create <= ready)
         assert ready is None or (ready is not None and start is not None and ready <= start)
         assert start is None or (start is not None and stop is not None and start <= stop)
+        self.spawn: Optional[int] = None
         self.create: Optional[int] = create
         self.ready: Optional[int] = ready
         self.start: Optional[int] = start
@@ -3704,6 +3705,7 @@ class State(object):
             "TaskInfo": self.log_task_info,
             "GPUTaskInfo": self.log_gpu_task_info,
             "MetaInfo": self.log_meta_info,
+            "MessageInfo": self.log_message_info,
             "CopyInfo": self.log_copy_info,
             "CopyInstInfo": self.log_copy_inst_info,
             "FillInfo": self.log_fill_info,
@@ -3971,6 +3973,24 @@ class State(object):
         variant = self.find_or_create_meta_variant(lg_id)
         meta = self.create_meta(variant, op, create, ready, start, stop)
         meta.fevent = fevent
+        if stop > self.last_time:
+            self.last_time = stop
+        proc = self.find_or_create_processor(proc_id)
+        proc.add_task(meta)
+
+    # MessageInfo
+    @typecheck
+    def log_message_info(self, op_id: int, lg_id: int, 
+                         proc_id: int, spawn: int, 
+                         create: int, ready: int, 
+                         start: int, stop: int,
+                         creator: int, fevent: int
+    ) -> None:
+        op = self.find_or_create_op(op_id)
+        variant = self.find_or_create_meta_variant(lg_id)
+        meta = self.create_meta(variant, op, create, ready, start, stop)
+        meta.fevent = fevent
+        meta.spawn = spawn
         if stop > self.last_time:
             self.last_time = stop
         proc = self.find_or_create_processor(proc_id)
@@ -4733,13 +4753,15 @@ class State(object):
         for variant in self.meta_variants.values():
             if not variant.message:
                 continue
-            if variant.ordered_vc:
-                continue
             # Iterate over the lists of meta-tasks for each op_id
             for ops in variant.ops.values():
                 total_messages += len(ops)
                 for op in ops:
-                    latency = op.ready - op.create
+                    # Check for skew, we'll ignore skew for now
+                    # See Legion Prof Rust for skew analysis
+                    if op.create < op.spawn:
+                        continue
+                    latency = op.create - op.spawn
                     if threshold <= latency:
                         bad_messages += 1
                     if longest_latency < latency:
