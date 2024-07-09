@@ -470,6 +470,9 @@ namespace Legion {
       void check_future_return_bounds(FutureInstance *instance) const;
       void create_leaf_memory_pools(VariantImpl *impl,
           std::map<Memory,std::optional<PoolBounds> > &dynamic_pool_bounds);
+    public:
+      bool acquire_leaf_memory_pool(Memory memory, const PoolBounds &bounds);
+      void release_leaf_memory_pool(Memory memory);
     protected:
       void pack_single_task(Serializer &rez, AddressSpaceID target);
       void unpack_single_task(Deserializer &derez,

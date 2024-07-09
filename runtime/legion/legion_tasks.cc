@@ -3031,6 +3031,14 @@ namespace Legion {
       // allocations if we have an unbounded pool
       if (variant_impl->is_leaf())
         create_leaf_memory_pools(variant_impl, output.leaf_pool_bounds); 
+      else if (!leaf_memory_pools.empty())
+      {
+        // Free up any leaf memory pools that we have since we don't need them
+        for (std::map<Memory,MemoryPool*>::const_iterator it =
+              leaf_memory_pools.begin(); it != leaf_memory_pools.end(); it++)
+          delete it->second;
+        leaf_memory_pools.clear();
+      }
       // Save variant validation until we know which instances we'll be using 
 #ifdef DEBUG_LEGION
       // Check to see if any premapped region mappings changed
@@ -4743,6 +4751,8 @@ namespace Legion {
           dynamic_pool_bounds.emplace(std::make_pair(target, it->second));
         }
       }
+      std::map<Memory,MemoryPool*> acquired_pools;
+      acquired_pools.swap(leaf_memory_pools);
       // Now we can go through and create the pools for use by this task
       for (std::map<Memory,std::optional<PoolBounds> >::const_iterator it =
             dynamic_pool_bounds.begin(); it != dynamic_pool_bounds.end(); it++)
@@ -4757,10 +4767,21 @@ namespace Legion {
                 "of task %s (UID %lld) for creating dynamic memory pool.", 
                 manager->get_name(), it->first.id, get_task_name(),
                 get_unique_id());
-        // Skip creation of pools of size zero
-        if (it->second.has_value() && (it->second.value().size == 0))
-          continue;
-        if (runtime->runtime_warnings && !it->second.has_value() &&
+        if (it->second.has_value())
+        {
+          // Skip creation of pools of size zero
+          if (it->second.value().size == 0)
+            continue;
+          // Check to see if acquired a memory pool for this already
+          std::map<Memory,MemoryPool*>::iterator finder =
+            acquired_pools.find(it->first);
+          if (finder != acquired_pools.end())
+          {
+            leaf_memory_pools.insert(acquired_pools.extract(finder));
+            continue;
+          }
+        }
+        else if (runtime->runtime_warnings &&
             (variant->leaf_pool_bounds.find(it->first.kind()) ==
              variant->leaf_pool_bounds.end()))
           REPORT_LEGION_WARNING(LEGION_WARNING_UNBOUND_MEMORY_POOL,
@@ -4779,9 +4800,59 @@ namespace Legion {
               "leaf task %s (UID %lld) in %s memory. You are actually out "
               "of memory here so you'll need to either allocate more memory "
               "for this kind of memory when you configure Realm which may "
-              "necessitate finding a bigger machine.", it->second.value().size,
-              get_task_name(), get_unique_id(), manager->get_name())
+              "necessitate finding a bigger machine. If you want to avoid "
+              "this error message and instead attempt an alternative "
+              "mapping then your mapper should use the "
+              "'MapperRuntime::acquire_pool' call to make sure that it can "
+              "reserve memory for all the pools for this task in advance.", 
+              it->second.value().size, get_task_name(), get_unique_id(),
+              manager->get_name())
         leaf_memory_pools.emplace(std::make_pair(it->first, pool));
+      }
+      // If we have any pools left in the acquired set we can delete them
+      // since we're not going to need them
+      for (std::map<Memory,MemoryPool*>::const_iterator it =
+            acquired_pools.begin(); it != acquired_pools.end(); it++)
+        delete it->second;
+    }
+
+    //--------------------------------------------------------------------------
+    bool SingleTask::acquire_leaf_memory_pool(Memory memory, 
+                                              const PoolBounds &bounds)
+    //--------------------------------------------------------------------------
+    {
+      // Check to see if we already have a memory pool for this memory of
+      // the given size, if we do then we're already good
+      std::map<Memory,MemoryPool*>::iterator finder =
+        leaf_memory_pools.find(memory);
+      if (finder != leaf_memory_pools.end())
+      {
+        if ((bounds.size <= finder->second->query_available_memory()) &&
+            (bounds.alignment <= finder->second->max_alignment))
+          return true;
+        // Otherwise release this pool since we're going to make a new one
+        delete finder->second;
+        leaf_memory_pools.erase(finder);
+      }
+      MemoryManager *manager = runtime->find_memory_manager(memory);
+      const std::optional<PoolBounds> optional(bounds);
+      MemoryPool *pool = manager->create_memory_pool(get_unique_id(), optional);
+      if (pool == NULL)
+        return false;
+      leaf_memory_pools[memory] = pool;
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    void SingleTask::release_leaf_memory_pool(Memory memory)
+    //--------------------------------------------------------------------------
+    {
+      std::map<Memory,MemoryPool*>::iterator finder =
+        leaf_memory_pools.find(memory);
+      if (finder != leaf_memory_pools.end())
+      {
+        delete finder->second;
+        leaf_memory_pools.erase(finder);
       }
     }
 

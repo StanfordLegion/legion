@@ -1857,6 +1857,62 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool MapperManager::acquire_pool(MappingCallInfo *ctx,
+                                     Memory memory, const PoolBounds &bounds)
+    //--------------------------------------------------------------------------
+    {
+      if (!memory.exists() || (bounds.size == 0))
+        return false;
+      // Only support this in map-task calls
+      if (ctx->kind != MAP_TASK_CALL)
+      {
+        REPORT_LEGION_WARNING(LEGION_WARNING_IGNORING_ACQUIRE_REQUEST,
+                        "Ignoring acquire pool request in unsupported mapper "
+                        "call %s in mapper %s", get_mapper_call_name(ctx->kind),
+                        get_mapper_name());
+        return false;
+      }
+      pause_mapper_call(ctx);
+#ifdef DEBUG_LEGION
+      assert(ctx->operation != NULL);
+      SingleTask *task = dynamic_cast<SingleTask*>(ctx->operation);
+      assert(task != NULL);
+#else
+      SingleTask *task = static_cast<SingleTask*>(ctx->operation);
+#endif
+      const bool result = task->acquire_leaf_memory_pool(memory, bounds);
+      resume_mapper_call(ctx, MAPPER_ACQUIRE_POOL_CALL);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    void MapperManager::release_pool(MappingCallInfo *ctx, Memory memory)
+    //--------------------------------------------------------------------------
+    {
+      if (!memory.exists())
+        return;
+      // Only support this in map-task calls
+      if (ctx->kind != MAP_TASK_CALL)
+      {
+        REPORT_LEGION_WARNING(LEGION_WARNING_IGNORING_ACQUIRE_REQUEST,
+                        "Ignoring release pool request in unsupported mapper "
+                        "call %s in mapper %s", get_mapper_call_name(ctx->kind),
+                        get_mapper_name());
+        return;
+      }
+      pause_mapper_call(ctx);
+#ifdef DEBUG_LEGION
+      assert(ctx->operation != NULL);
+      SingleTask *task = dynamic_cast<SingleTask*>(ctx->operation);
+      assert(task != NULL);
+#else
+      SingleTask *task = static_cast<SingleTask*>(ctx->operation);
+#endif
+      task->release_leaf_memory_pool(memory);
+      resume_mapper_call(ctx, MAPPER_RELEASE_POOL_CALL);
+    }
+
+    //--------------------------------------------------------------------------
     void MapperManager::record_acquired_instance(MappingCallInfo *ctx,
                                              InstanceManager *man, bool created)
     //--------------------------------------------------------------------------

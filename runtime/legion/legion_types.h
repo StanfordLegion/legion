@@ -1471,6 +1471,8 @@ namespace Legion {
       MAPPER_COLLECT_INSTANCE_CALL,
       MAPPER_COLLECT_INSTANCES_CALL,
       MAPPER_ACQUIRE_FUTURE_CALL,
+      MAPPER_ACQUIRE_POOL_CALL,
+      MAPPER_RELEASE_POOL_CALL,
       MAPPER_CREATE_INDEX_SPACE_CALL,
       MAPPER_UNION_INDEX_SPACES_CALL,
       MAPPER_INTERSECT_INDEX_SPACES_CALL,
@@ -1699,6 +1701,8 @@ namespace Legion {
       "MapperRuntime::collect_instance",                              \
       "MapperRuntime::collect_instances",                             \
       "MapperRuntime::acquire_future",                                \
+      "MapperRuntime::acquire_pool",                                  \
+      "MapperRuntime::release_pool",                                  \
       "MapperRuntime::create_index_space",                            \
       "MapperRuntime::union_index_spaces",                            \
       "MapperRuntime::intersect_index_spaces",                        \

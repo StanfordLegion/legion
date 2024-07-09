@@ -1053,6 +1053,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool MapperRuntime::acquire_pool(MapperContext ctx, Memory memory,
+                                     const PoolBounds &bounds) const
+    //--------------------------------------------------------------------------
+    {
+      return ctx->manager->acquire_pool(ctx, memory, bounds);
+    }
+
+    //--------------------------------------------------------------------------
+    void MapperRuntime::release_pool(MapperContext ctx, Memory memory)
+    //--------------------------------------------------------------------------
+    {
+      ctx->manager->release_pool(ctx, memory);
+    }
+
+    //--------------------------------------------------------------------------
     IndexSpace MapperRuntime::create_index_space(MapperContext ctx, 
            const Domain &bounds, TypeTag type_tag, const char *provenance) const
     //--------------------------------------------------------------------------

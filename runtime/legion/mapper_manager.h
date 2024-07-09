@@ -400,6 +400,9 @@ namespace Legion {
                              const std::vector<MappingInstance> &instances,
                              std::vector<bool> &collected);
       bool acquire_future(MappingCallInfo *ctx, const Future &f, Memory memory);
+      bool acquire_pool(MappingCallInfo *ctx, Memory memory,
+                        const PoolBounds &bounds);
+      void release_pool(MappingCallInfo *ctx, Memory memory);
     public:
       void record_acquired_instance(MappingCallInfo *info, 
                                     InstanceManager *manager, bool created);

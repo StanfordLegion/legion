@@ -2295,6 +2295,14 @@ namespace Legion {
       // Futures can also be acquired to ensure that they are available in
       // particular memories prior to running a task.
       bool acquire_future(MapperContext ctx, const Future &f, Memory mem) const;
+      // Users can also acquire memory for unbound memory pools when mapping
+      // tasks. These pools will be implicitly used to satisfy any leaf_pool
+      // bounds requested for mapping the task. This interface allows mappers
+      // to discover if leaf pools can be allocated and potentially switch to
+      // an alternative mapping strategy if they cannot.
+      bool acquire_pool(MapperContext ctx, Memory memory,
+                        const PoolBounds &bounds) const;
+      void release_pool(MapperContext ctx, Memory memory);
     public:
       //------------------------------------------------------------------------
       // Methods for creating index spaces which mappers need to do
