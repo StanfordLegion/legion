@@ -4801,10 +4801,9 @@ namespace Legion {
               "of memory here so you'll need to either allocate more memory "
               "for this kind of memory when you configure Realm which may "
               "necessitate finding a bigger machine. If you want to avoid "
-              "this error message and instead attempt an alternative "
-              "mapping then your mapper should use the "
-              "'MapperRuntime::acquire_pool' call to make sure that it can "
-              "reserve memory for all the pools for this task in advance.", 
+              "finding out that you're out of memory this way you should "
+              "instead use the 'MapperRuntime::acquire_pool' call to make "
+              "sure that memory can be reserved for all pools in advance.",
               it->second.value().size, get_task_name(), get_unique_id(),
               manager->get_name())
         leaf_memory_pools.emplace(std::make_pair(it->first, pool));
