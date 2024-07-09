@@ -4696,11 +4696,52 @@ namespace Legion {
                   manager->get_name(), get_task_name(), get_unique_id(),
                   variant->vid, it->second.value().size);
           }
-          // Else if the static variant had no bounds we know that the
-          // dynamic one is at least as tight as the static one
+          else
+          {
+            // Else if the static variant had no bounds we know that the
+            // dynamic one is at least as tight as the static one
+            if (runtime->runtime_warnings)
+            {
+              const char *mem_names[] = {
+#define MEM_NAMES(name, desc) #name,
+                REALM_MEMORY_KINDS(MEM_NAMES) 
+#undef MEM_NAMES
+              };
+              REPORT_LEGION_WARNING(LEGION_WARNING_UNBOUND_MEMORY_POOL,
+                  "Selected variant %s of task %s (UID %lld) was registered "
+                  "with an unbound memory pool for %s memory and mapper %s "
+                  "failed to tighten the bound. Unbound memory pools are "
+                  "very bad for performance and we strongly encourage all "
+                  "users to avoid using them except for extenuating "
+                  "circumstances when the amount of dynamic memory required "
+                  "by a task is truly unbounded.", variant->get_name(),
+                  get_task_name(), get_unique_id(), mem_names[it->first],
+                  mapper->get_mapper_name())
+            }
+          }
         }
         else
+        {
+          if (!it->second.has_value() && runtime->runtime_warnings)
+          {
+            const char *mem_names[] = {
+#define MEM_NAMES(name, desc) #name,
+              REALM_MEMORY_KINDS(MEM_NAMES) 
+#undef MEM_NAMES
+            };
+            REPORT_LEGION_WARNING(LEGION_WARNING_UNBOUND_MEMORY_POOL,
+                "Selected variant %s of task %s (UID %lld) was registered "
+                "with an unbound memory pool for %s memory and mapper %s "
+                "failed to tighten the bound. Unbound memory pools are "
+                "very bad for performance and we strongly encourage all "
+                "users to avoid using them except for extenuating "
+                "circumstances when the amount of dynamic memory required "
+                "by a task is truly unbounded.", variant->get_name(),
+                get_task_name(), get_unique_id(), mem_names[it->first],
+                mapper->get_mapper_name())
+          }
           dynamic_pool_bounds.emplace(std::make_pair(target, it->second));
+        }
       }
       // Now we can go through and create the pools for use by this task
       for (std::map<Memory,std::optional<PoolBounds> >::const_iterator it =
@@ -4719,6 +4760,17 @@ namespace Legion {
         // Skip creation of pools of size zero
         if (it->second.has_value() && (it->second.value().size == 0))
           continue;
+        if (runtime->runtime_warnings && !it->second.has_value() &&
+            (variant->leaf_pool_bounds.find(it->first.kind()) ==
+             variant->leaf_pool_bounds.end()))
+          REPORT_LEGION_WARNING(LEGION_WARNING_UNBOUND_MEMORY_POOL,
+              "Mapper %s requested an unbound memory pool in %s memory for "
+              "leaf task %s (UID %lld). Unbound memory pools are very bad "
+              "for performance and we strongly encourage all users to avoid "
+              "using them except for extenuating circumstances when the "
+              "amount of dynamic memory required by a task is truly unbounded.",
+              mapper->get_mapper_name(), manager->get_name(),
+              get_task_name(), get_unique_id())
         MemoryPool *pool =
           manager->create_memory_pool(get_unique_id(), it->second);
         if (pool == NULL)
