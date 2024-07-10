@@ -1640,10 +1640,29 @@ namespace Realm {
       }
 
       if((ThreadLocal::context_sync_required > 0) ||
-	 ((ThreadLocal::context_sync_required < 0) && gpu_proc->gpu->module->config->cfg_task_context_sync))
-        gpu_proc->ctxsync.add_fence(fence);
-      else
-	fence->enqueue_on_stream(s);
+         ((ThreadLocal::context_sync_required < 0) &&
+          gpu_proc->gpu->module->config->cfg_task_context_sync)) {
+#if(CUDA_VERSION >= 12050) || defined(REALM_CUDA_DYNAMIC_LOAD)
+        // If this driver supports retrieving an event for the context's current work,
+        // retrieve and wait for it.  This will still over-synchronize with work from the
+        // DMA engine, but at least this is completely asynchronous and doesn't require a
+        // separate thread.
+        if(CUDA_DRIVER_HAS_FNPTR(cuCtxRecordEvent)) {
+          CUevent e = gpu_proc->gpu->event_pool.get_event();
+          CHECK_CU(CUDA_DRIVER_FNPTR(cuCtxRecordEvent)(gpu_proc->gpu->context, e));
+          CHECK_CU(CUDA_DRIVER_FNPTR(cuStreamWaitEvent)(s->get_stream(), e, 0));
+          s->add_event(e, fence);
+          gpu_proc->gpu->event_pool.return_event(e);
+        } else
+#endif
+        {
+          // Add the context sync to the thread
+          gpu_proc->ctxsync.add_fence(fence);
+        }
+      } else {
+        // Just wait for the fence
+        fence->enqueue_on_stream(s);
+      }
 
       // A useful debugging macro
 #ifdef FORCE_GPU_STREAM_SYNCHRONIZE
@@ -4213,29 +4232,26 @@ namespace Realm {
       PFN_cuGetProcAddress_v11030 cuGetProcAddress_fnptr =
           reinterpret_cast<PFN_cuGetProcAddress_v11030>(
               dlsym(libcuda, "cuGetProcAddress"));
-      if (cuGetProcAddress_fnptr) {
-#define DRIVER_GET_FNPTR(name)                                                 \
-  CHECK_CU((cuGetProcAddress_fnptr)(#name, (void **)&name##_fnptr,             \
-                                    CUDA_VERSION,                              \
-                                    CU_GET_PROC_ADDRESS_DEFAULT));
+      if(cuGetProcAddress_fnptr != nullptr) {
+#define DRIVER_GET_FNPTR(name)                                                           \
+  (cuGetProcAddress_fnptr)(#name, (void **)&name##_fnptr, CUDA_VERSION,                  \
+                           CU_GET_PROC_ADDRESS_DEFAULT);
         CUDA_DRIVER_APIS(DRIVER_GET_FNPTR);
 #undef DRIVER_GET_FNPTR
-      } else  // if cuGetProcAddress is not found, fallback to dlsym path
+      } else // if cuGetProcAddress is not found, fallback to dlsym path
 #endif
       {
     // before cuda 11.3, we have to dlsym things, but rely on cuda.h's
     //  compile-time translation to versioned function names
 #define STRINGIFY(s) #s
-#define DRIVER_GET_FNPTR(name)                                                 \
-  do {                                                                         \
-    void *sym = dlsym(libcuda, STRINGIFY(name));                               \
-    if (!sym) {                                                                \
-      log_gpu.fatal() << "symbol '" STRINGIFY(                                 \
-          name) " missing from libcuda.so!";                                   \
-      abort();                                                                 \
-    }                                                                          \
-    name##_fnptr = reinterpret_cast<decltype(&name)>(sym);                     \
-  } while (0)
+#define DRIVER_GET_FNPTR(name)                                                           \
+  do {                                                                                   \
+    void *sym = dlsym(libcuda, STRINGIFY(name));                                         \
+    if(sym != nullptr) {                                                                 \
+      log_gpu.info() << "symbol '" STRINGIFY(name) " missing from libcuda.so!";          \
+    }                                                                                    \
+    name##_fnptr = reinterpret_cast<decltype(&name)>(sym);                               \
+  } while(0)
 
     CUDA_DRIVER_APIS(DRIVER_GET_FNPTR);
 
