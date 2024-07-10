@@ -663,7 +663,7 @@ if __name__ == '__main__':
         help='Use Make to build Terra.')
     parser.add_argument(
         '--gasnet-version', dest='gasnet_version', required=False,
-        default=os.environ.get('GASNET_VERSION', 'GASNet-2023.9.0'),
+        default=os.environ.get('GASNET_VERSION', 'GASNet-2024.5.0'),
         help='Select GASNet version.')
     parser.add_argument(
         '--gasnet-config-version', dest='gasnet_config_version', required=False,
