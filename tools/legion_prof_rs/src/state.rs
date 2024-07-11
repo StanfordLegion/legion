@@ -2369,7 +2369,6 @@ impl OperationInstInfo {
 
 #[derive(Debug)]
 pub struct Operation {
-    pub base: Base,
     pub parent_id: Option<OpID>,
     pub kind: Option<OpKindID>,
     pub provenance: Option<ProvenanceID>,
@@ -2377,9 +2376,8 @@ pub struct Operation {
 }
 
 impl Operation {
-    fn new(base: Base) -> Self {
+    fn new() -> Self {
         Operation {
-            base,
             parent_id: None,
             kind: None,
             provenance: None,
@@ -2889,10 +2887,7 @@ pub struct State {
 
 impl State {
     fn create_op(&mut self, op_id: OpID) -> &mut Operation {
-        let alloc = &mut self.prof_uid_allocator;
-        self.operations
-            .entry(op_id)
-            .or_insert_with(|| Operation::new(Base::new(alloc)))
+        self.operations.entry(op_id).or_insert_with(Operation::new)
     }
 
     pub fn find_op(&self, op_id: OpID) -> Option<&Operation> {
