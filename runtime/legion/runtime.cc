@@ -8612,7 +8612,8 @@ namespace Legion {
     ConcretePool::ConcretePool(PhysicalInstance inst, size_t remain,
         size_t alignment, RtEvent use, MemoryManager *man)
       : MemoryPool(alignment), manager(man), remaining_instance(inst),
-        remaining_use_event(use), remaining_bytes(remain), offset(0)
+        remaining_use_event(use), remaining_bytes(remain), offset(0),
+        limit(remain)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -8628,6 +8629,13 @@ namespace Legion {
       if (remaining_instance.exists())
         manager->free_task_local_instance(remaining_instance, 
                                           remaining_use_event);
+    }
+
+    //--------------------------------------------------------------------------
+    size_t ConcretePool::query_memory_limit(void)
+    //--------------------------------------------------------------------------
+    {
+      return limit;
     }
 
     //--------------------------------------------------------------------------
@@ -8813,6 +8821,13 @@ namespace Legion {
     {
       if (manager != NULL)
         manager->release_unbound_pool();
+    }
+
+    //--------------------------------------------------------------------------
+    size_t UnboundPool::query_memory_limit(void)
+    //--------------------------------------------------------------------------
+    {
+      return 0;
     }
 
     //--------------------------------------------------------------------------

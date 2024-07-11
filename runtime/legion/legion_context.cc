@@ -25112,13 +25112,26 @@ namespace Legion {
       if (instance == NULL)
       {
         MemoryManager *manager = runtime->find_memory_manager(memory);
-        REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
-            "Failed to allocate %zd bytes for future needed by leaf task %s "
-            "(UID %lld) in %s memory because there was insufficient space "
-            "reserved for dynamic allocations. This means that you set your "
-            "upper bound for the amount of dynamic memory required for this "
-            "task too low.", size, get_task_name(), get_unique_id(), 
-            manager->get_name())
+        const size_t limit = finder->second->query_memory_limit();
+        if (limit > 0)
+          REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
+              "Failed to allocate %zd bytes for future needed by leaf task %s "
+              "(UID %lld) in %s memory because there was insufficient space "
+              "reserved for dynamic allocations. Only %zd bytes remain of %zd "
+              "reserved bytes. This means that you set your upper bound for "
+              "the amount of dynamic memory required for this task too low.",
+              size, get_task_name(), get_unique_id(), manager->get_name(),
+              finder->second->query_available_memory(), limit)
+        else
+          REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
+              "Failed to allocate %zd bytes for future needed by leaf task %s "
+              "(UID %lld) in %s memory because there was insufficient space "
+              "reserved for dynamic allocations. This was an unbounded memory "
+              "pool which means you're actually out of space in this memory. "
+              "We strongly recommend all users put bounds on their dynamic "
+              "memory usage so they can detect if space will be available "
+              "for task execution and if not select an alternative mapping.",
+              size, get_task_name(), get_unique_id(), manager->get_name())
       }
       return instance;
     }
@@ -25140,7 +25153,8 @@ namespace Legion {
       const size_t footprint = layout->bytes_used;
       std::map<Memory,MemoryPool*>::const_iterator finder =
         memory_pools.find(memory);
-      if (finder == memory_pools.end())
+      // Handle a special case for zero-byte instances here
+      if ((footprint == 0) || (finder == memory_pools.end()))
       {
         MemoryManager *manager = runtime->find_memory_manager(memory);
         // WE'RE ABOUT TO DO SOMETHING DANGEROUS!
@@ -25151,6 +25165,14 @@ namespace Legion {
         // any circumstances without risking a deadlock
         const PhysicalInstance instance = manager->create_task_local_instance(
             get_unique_id(), unique_event, layout, use_event, true/*unbound*/);
+        if (footprint == 0)
+        {
+#ifdef DEBUG_LEGION
+          assert(instance.exists());
+          assert(!use_event.exists());
+#endif
+          return instance;
+        }
         if (instance.exists())
         {
           if (!use_event.exists() || use_event.has_triggered())
@@ -25201,13 +25223,28 @@ namespace Legion {
       if (!instance.exists())
       {
         MemoryManager *manager = runtime->find_memory_manager(memory);
-        REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
-            "Failed to allocate DeferredBuffer/Value/Reduction of %zd bytes "
-            "for leaf task %s (UID %lld) in %s memory because there was "
-            "insufficient space reserved for dynamic allocations. This means "
-            "that you set your upper bound for the amount of dynamic memory "
-            "required for this task too low.", footprint,
-            get_task_name(), get_unique_id(), manager->get_name())
+        const size_t limit = finder->second->query_memory_limit();
+        if (limit > 0)
+          REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
+              "Failed to allocate DeferredBuffer/Value/Reduction of %zd bytes "
+              "for leaf task %s (UID %lld) in %s memory because there was "
+              "insufficient space reserved for dynamic allocations. Only %zd "
+              "bytes remain of %zd reserved bytes. This means that you set "
+              "your upper bound for the amount of dynamic memory "
+              "required for this task too low.", footprint,
+              get_task_name(), get_unique_id(), manager->get_name(),
+              finder->second->query_available_memory(), limit)
+        else
+          REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
+              "Failed to allocate DeferredBuffer/Value/Reduction of %zd bytes "
+              "for leaf task %s (UID %lld) in %s memory because there was "
+              "insufficient space reserved for dynamic allocations. This was "
+              "an unbounded memory pool which means you're actually out of "
+              "space in this memory. We strongly recommend all users put "
+              "bounds on their dynamic memory usage so they can detect "
+              "if space will be available for task execution and if not "
+              "select an alternative mapping.", footprint,
+              get_task_name(), get_unique_id(), manager->get_name())
       }
       task_local_instances[instance] = unique_event;
       if (use_event.exists())

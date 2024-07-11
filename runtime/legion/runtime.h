@@ -1472,6 +1472,7 @@ namespace Legion {
     public:
       MemoryPool(size_t alignment) : max_alignment(alignment) { }
       virtual ~MemoryPool(void) { }
+      virtual size_t query_memory_limit(void) = 0;
       virtual size_t query_available_memory(void) = 0;
       virtual FutureInstance* allocate_future(UniqueID creator_uid,
                                               size_t size) = 0;
@@ -1498,6 +1499,7 @@ namespace Legion {
       ConcretePool(PhysicalInstance instance, size_t size, size_t alignment, 
           RtEvent use_event, MemoryManager *manager);
       virtual ~ConcretePool(void) override;
+      virtual size_t query_memory_limit(void) override;
       virtual size_t query_available_memory(void) override;
       virtual FutureInstance* allocate_future(UniqueID creator_uid,
                                               size_t size) override;
@@ -1512,6 +1514,7 @@ namespace Legion {
       RtEvent remaining_use_event;
       size_t remaining_bytes;
       size_t offset;
+      const size_t limit;
     };
 
     /**
@@ -1527,6 +1530,7 @@ namespace Legion {
     public:
       UnboundPool(MemoryManager *manager);
       virtual ~UnboundPool(void) override;
+      virtual size_t query_memory_limit(void) override;
       virtual size_t query_available_memory(void) override;
       virtual FutureInstance* allocate_future(UniqueID creator_uid,
                                               size_t size) override;
