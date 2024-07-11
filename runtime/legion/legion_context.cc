@@ -25112,8 +25112,9 @@ namespace Legion {
       if (instance == NULL)
       {
         MemoryManager *manager = runtime->find_memory_manager(memory);
-        const size_t limit = finder->second->query_memory_limit();
-        if (limit > 0)
+        const size_t pool_limit = finder->second->query_memory_limit();
+        const size_t memory_limit = manager->query_available_memory();
+        if (pool_limit > 0)
           REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
               "Failed to allocate %zd bytes for future needed by leaf task %s "
               "(UID %lld) in %s memory because there was insufficient space "
@@ -25121,17 +25122,29 @@ namespace Legion {
               "reserved bytes. This means that you set your upper bound for "
               "the amount of dynamic memory required for this task too low.",
               size, get_task_name(), get_unique_id(), manager->get_name(),
-              finder->second->query_available_memory(), limit)
-        else
+              finder->second->query_available_memory(), pool_limit)
+        else if (memory_limit < size)
           REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
               "Failed to allocate %zd bytes for future needed by leaf task %s "
               "(UID %lld) in %s memory because there was insufficient space "
               "reserved for dynamic allocations. This was an unbounded memory "
-              "pool which means you're actually out of space in this memory. "
-              "We strongly recommend all users put bounds on their dynamic "
-              "memory usage so they can detect if space will be available "
-              "for task execution and if not select an alternative mapping.",
-              size, get_task_name(), get_unique_id(), manager->get_name())
+              "pool which means you're actually out of space in this memory "
+              "because it only has %zd remaining free bytes. We strongly "
+              "recommend all users put bounds on their dynamic memory usage so "
+              "they can detect if space will be available for task execution "
+              "and if not select an alternative mapping.", size,get_task_name(),
+              get_unique_id(), manager->get_name(), memory_limit)
+        else
+          REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
+              "Failed to allocate %zd bytes for future needed by leaf task %s "
+              "(UID %lld) in %s memory because the memory is fragmented. This "
+              "was an unbounded memory pool and there are still %zd bytes free "
+              "in the memory but not enough of them are contiguous to allocate "
+              "the future instance. We strongly recommend all users put bounds "
+              "on their dynamic memory usage so they can detect if space will "
+              "be available for task execution and if not select an "
+              "alternative mapping.", size, get_task_name(),
+              get_unique_id(), manager->get_name(), memory_limit)
       }
       return instance;
     }
@@ -25223,8 +25236,9 @@ namespace Legion {
       if (!instance.exists())
       {
         MemoryManager *manager = runtime->find_memory_manager(memory);
-        const size_t limit = finder->second->query_memory_limit();
-        if (limit > 0)
+        const size_t pool_limit = finder->second->query_memory_limit();
+        const size_t memory_limit = manager->query_available_memory();
+        if (pool_limit > 0)
           REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
               "Failed to allocate DeferredBuffer/Value/Reduction of %zd bytes "
               "for leaf task %s (UID %lld) in %s memory because there was "
@@ -25233,18 +25247,30 @@ namespace Legion {
               "your upper bound for the amount of dynamic memory "
               "required for this task too low.", footprint,
               get_task_name(), get_unique_id(), manager->get_name(),
-              finder->second->query_available_memory(), limit)
-        else
+              finder->second->query_available_memory(), pool_limit)
+        else if (memory_limit < footprint)
           REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
               "Failed to allocate DeferredBuffer/Value/Reduction of %zd bytes "
               "for leaf task %s (UID %lld) in %s memory because there was "
               "insufficient space reserved for dynamic allocations. This was "
               "an unbounded memory pool which means you're actually out of "
-              "space in this memory. We strongly recommend all users put "
-              "bounds on their dynamic memory usage so they can detect "
-              "if space will be available for task execution and if not "
-              "select an alternative mapping.", footprint,
-              get_task_name(), get_unique_id(), manager->get_name())
+              "space in this memory because it only has %zd remaining free "
+              "bytes. We strongly recommend all users put bounds on their 
+              "dynamic memory usage so they can detect if space will be "
+              "available for task execution and if not select an alternative "
+              "mapping.", footprint, get_task_name(), get_unique_id(),
+              manager->get_name(), memory_limit)
+        else
+          REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
+              "Failed to allocate DeferredBuffer/Value/Reduction of %zd bytes "
+              "for leaf task %s (UID %lld) in %s memory because the memory is "
+              "fragmented. This was an unbounded memory pool and there are "
+              "still %zd bytes free in the memory but not enough are "
+              "contiguous to allocate the instance. We strongly recommend all "
+              "users put bounds on their dynamic memory usage so they can "
+              "detect if space will be available for task execution and if "
+              "not select an alternative mapping.", footprint, get_task_name(),
+              get_unique_id(), manager->get_name(), memory_limit)
       }
       task_local_instances[instance] = unique_event;
       if (use_event.exists())

@@ -1519,8 +1519,8 @@ namespace Legion {
 
     /**
      * \class UnboundPool
-     * An unbound pool is a place holder for being able to do allocate
-     * an unbounded amount of memory (different from infinite since
+     * An unbound pool is a place holder for being able to do allocations
+     * with an unbounded amount of memory (different from infinite since
      * we can still run out). This will forward all allocation requests
      * through to the actual memory manager, which is only safe because
      * as long as this object is alive it blocks the memory manager 
