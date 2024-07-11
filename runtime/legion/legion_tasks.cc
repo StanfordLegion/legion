@@ -7688,6 +7688,46 @@ namespace Legion {
         SingleTask::convert_replicate_collective_views(key, rendezvous);
     }
 
+#ifdef POINT_WISE_LOGICAL_ANALYSIS
+    //--------------------------------------------------------------------------
+    void PointTask::record_point_wise_dependence_for_next_point(LogicalRegion lr,
+                                                  unsigned region_idx)
+    //--------------------------------------------------------------------------
+    {
+      if (slice_owner->index_owner->prev_point_wise_mapping)
+      {
+        // Find prev index task our owner index task depend on
+        std::map<unsigned,std::pair<Operation*, GenerationID>>::iterator finder =
+          slice_owner->index_owner->prev_index_tasks.find(region_idx);
+        assert(finder != slice_owner->index_owner->prev_index_tasks.end());
+        IndexTask *prev_index_task = static_cast<IndexTask*>(finder->second.first);
+        GenerationID prev_task_gen_id = finder->second.second;
+
+        if (prev_task_gen_id < prev_index_task->get_generation()) return;
+
+        RtEvent pre = prev_index_task->find_point_wise_dependence(lr);
+        if (!std::binary_search(point_wise_mapping_dependences.begin(),
+                  point_wise_mapping_dependences.end(), pre))
+        {
+          point_wise_mapping_dependences.push_back(pre);
+          std::sort(point_wise_mapping_dependences.begin(),
+                    point_wise_mapping_dependences.end());
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void PointTask::record_point_wise_dependence_for_prev_point(LogicalRegion lr)
+    //--------------------------------------------------------------------------
+    {
+      if (slice_owner->index_owner->next_point_wise_mapping)
+      {
+        slice_owner->index_owner->recond_point_wise_dependence(lr,
+                                                  get_mapped_event());
+      }
+    }
+#endif
+
     //--------------------------------------------------------------------------
     void PointTask::record_intra_space_dependences(unsigned index,
                                     const std::vector<DomainPoint> &dependences)
@@ -10170,7 +10210,7 @@ namespace Legion {
       pending_intra_space_dependences[point] = pending_event;
       return pending_event;
     }
-    
+
     //--------------------------------------------------------------------------
     void IndexTask::record_intra_space_dependence(const DomainPoint &point,
                                                   const DomainPoint &next,
@@ -10197,6 +10237,51 @@ namespace Legion {
       else
         intra_space_dependences[point] = point_mapped;
     }
+
+#ifdef POINT_WISE_LOGICAL_ANALYSIS
+    //--------------------------------------------------------------------------
+    void IndexTask::recond_point_wise_dependence(LogicalRegion lr,
+                                                 RtEvent point_mapped)
+    //--------------------------------------------------------------------------
+    {
+
+      AutoLock o_lock(op_lock);
+      std::map<LogicalRegion,RtEvent>::iterator finder =
+        point_wise_dependences.find(lr);
+      if (finder != point_wise_dependences.end())
+      {
+        if (finder->second != point_mapped)
+        {
+          std::map<LogicalRegion,RtUserEvent>::iterator pending_finder =
+            pending_point_wise_dependences.find(lr);
+#ifdef DEBUG_LEGION
+          assert(pending_finder != pending_point_wise_dependences.end());
+#endif
+          Runtime::trigger_event(pending_finder->second, point_mapped);
+          pending_point_wise_dependences.erase(pending_finder);
+          finder->second = point_mapped;
+        }
+      }
+      else
+        point_wise_dependences[lr] = point_mapped;
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent IndexTask::find_point_wise_dependence(LogicalRegion lr)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock o_lock(op_lock);
+      std::map<LogicalRegion,RtEvent>::iterator finder =
+        point_wise_dependences.find(lr);
+      if (finder != point_wise_dependences.end())
+        return finder->second;
+      // Otherwise make a temporary one and record it for now
+      const RtUserEvent pending_event = Runtime::create_rt_user_event();
+      point_wise_dependences[lr] = pending_event;
+      pending_point_wise_dependences[lr] = pending_event;
+      return pending_event;
+    }
+#endif
 
     //--------------------------------------------------------------------------
     void IndexTask::record_origin_mapped_slice(SliceTask *local_slice)

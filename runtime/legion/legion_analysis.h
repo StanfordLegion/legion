@@ -1457,7 +1457,6 @@ namespace Legion {
         LogicalUser *ancestor = NULL;
         ProjectionSummary *proj_summary;
         bool has_interfering_sibling = false;
-        bool bail_analysis = false;
       };
 #endif
 
@@ -1477,6 +1476,7 @@ namespace Legion {
 #ifdef POINT_WISE_LOGICAL_ANALYSIS
     public:
       std::vector<PointWiseLogicalAnalysis> point_wise_analyses;
+      bool bail_point_wise_analysis = false;
 #endif
     public:
       struct PendingClose : public LegionHeapify<PendingClose> {

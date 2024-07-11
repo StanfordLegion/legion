@@ -1619,7 +1619,7 @@ namespace Legion {
                                                 logical_analysis, proj_info);
 #ifdef POINT_WISE_LOGICAL_ANALYSIS
           if(!shard_proj->is_disjoint() || !shard_proj->can_perform_name_based_self_analysis()) {
-            logical_analysis.point_wise_analyses.back().bail_analysis = true;
+            logical_analysis.bail_point_wise_analysis = true;
           }
 #endif
 #ifndef POINT_WISE_LOGICAL_ANALYSIS
@@ -16334,7 +16334,7 @@ namespace Legion {
             it->first->close_logical_node(user, close_mask, privilege_root,
                                           path_node, analysis, still_open);
 #ifdef POINT_WISE_LOGICAL_ANALYSIS
-            analysis.point_wise_analyses.back().bail_analysis = true;
+            analysis.bail_point_wise_analysis = true;
             analysis.point_wise_analyses.back().has_interfering_sibling = true;
 #endif
             if (!!still_open)
@@ -16382,7 +16382,7 @@ namespace Legion {
               next_child->close_logical_node(user, overlap, privilege_root,
                                              path_node, analysis, child_fields);
 #ifdef POINT_WISE_LOGICAL_ANALYSIS
-              analysis.point_wise_analyses.back().bail_analysis = true;
+              analysis.bail_point_wise_analysis = true;
               analysis.point_wise_analyses.back().has_interfering_sibling = true;
 #endif
               if (!!child_fields)
@@ -16419,7 +16419,7 @@ namespace Legion {
           it->first->close_logical_node(user, close_mask, privilege_root,
                                         path_node, analysis, still_open);
 #ifdef POINT_WISE_LOGICAL_ANALYSIS
-          analysis.point_wise_analyses.back().bail_analysis = true;
+          analysis.bail_point_wise_analysis = true;
           analysis.point_wise_analyses.back().has_interfering_sibling = true;
 #endif
           if (!!still_open)
@@ -16621,6 +16621,39 @@ namespace Legion {
               case LEGION_SIMULTANEOUS_DEPENDENCE:
               case LEGION_TRUE_DEPENDENCE:
                 {
+
+#ifdef POINT_WISE_LOGICAL_ANALYSIS
+                  if (prev.shard_proj != NULL && user.shard_proj != NULL)
+                  {
+                    if (logical_analysis.point_wise_analyses.back().ancestor != NULL)
+                    {
+                      // We bail if we have more than one ancestor for now
+                      logical_analysis.bail_point_wise_analysis = true;
+                    }
+                    if (!logical_analysis.bail_point_wise_analysis) {
+                      if(!prev.shard_proj->is_disjoint() || !prev.shard_proj->can_perform_name_based_self_analysis()) {
+                        logical_analysis.bail_point_wise_analysis = true;
+                      }
+                      else if ((user.shard_proj->projection->projection_id != prev.shard_proj->projection->projection_id) || !user.shard_proj->projection->is_functional)
+                      {
+                        logical_analysis.bail_point_wise_analysis = true;
+                      }
+                      else
+                      {
+                        bool parent_dominates = prev.shard_proj->domain->dominates(user.shard_proj->domain);
+                        if(parent_dominates)
+                        {
+                          printf("FOUND PROPER ANCESTOR\n");
+                          logical_analysis.point_wise_analyses.back().ancestor = &prev;
+                          static_cast<IndexTask*>(user.op)->prev_index_tasks[user.idx] = std::pair<Operation*, unsigned>(prev.op, prev.gen);
+                          static_cast<IndexTask*>(user.op)->prev_point_wise_mapping = true;
+                          static_cast<IndexTask*>(prev.op)->next_point_wise_mapping = true;
+                        }
+                      }
+                    }
+                  }
+#endif
+
                   // If we can validate a region record which of our
                   // predecessors regions we are validating, otherwise
                   // just register a normal dependence
@@ -16634,32 +16667,7 @@ namespace Legion {
 #endif
                   if (prev.shard_proj != NULL)
                   {
-#ifdef POINT_WISE_LOGICAL_ANALYSIS
-                    if (logical_analysis.point_wise_analyses.back().ancestor != NULL)
-                    {
-                      // We bail if we have more than one ancestor for now
-                      logical_analysis.point_wise_analyses.back().bail_analysis = true;
-                    }
-                    if (!logical_analysis.point_wise_analyses.back().bail_analysis) {
-                      if(!prev.shard_proj->is_disjoint() || !prev.shard_proj->can_perform_name_based_self_analysis()) {
-                        logical_analysis.point_wise_analyses.back().bail_analysis = true;
-                      }
-                      else if ((user.shard_proj->projection->projection_id != prev.shard_proj->projection->projection_id) || !user.shard_proj->projection->is_functional)
-                      {
-                        logical_analysis.point_wise_analyses.back().bail_analysis = true;
-                      }
-                      else
-                      {
-                        bool parent_dominates = prev.shard_proj->domain->dominates(user.shard_proj->domain);
-                        if(parent_dominates)
-                        {
-                          printf("FOUND PROPER ANCESTOR\n");
-                          logical_analysis.point_wise_analyses.back().ancestor = &prev;
-                        }
-                      }
-                    }
-#endif
-                    // Two operations from the same must epoch shouldn't
+                   // Two operations from the same must epoch shouldn't
                     // be recording close dependences on each other so
                     // we can skip that part
                     if ((prev.ctx_index == user.ctx_index) &&
