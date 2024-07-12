@@ -2306,6 +2306,7 @@ namespace Legion {
       virtual_mapped.clear();
       no_access_regions.clear();
       intra_space_mapping_dependences.clear();
+      point_wise_mapping_dependences.clear();
       map_applied_conditions.clear();
       task_profiling_requests.clear();
       copy_profiling_requests.clear();
@@ -2384,6 +2385,8 @@ namespace Legion {
       this->physical_instances = rhs->physical_instances;
       this->intra_space_mapping_dependences = 
         rhs->intra_space_mapping_dependences;
+      this->point_wise_mapping_dependences =
+        rhs->point_wise_mapping_dependences;
       // no need to copy the control replication map
       this->selected_variant  = rhs->selected_variant;
       this->task_priority     = rhs->task_priority;
@@ -4149,6 +4152,24 @@ namespace Legion {
         single_task_termination = Runtime::create_ap_user_event(NULL); 
         record_completion_effect(single_task_termination);
       }
+
+#ifdef POINT_WISE_LOGICAL_ANALYSIS
+      // If we have any point-wise mapping dependences that haven't triggered
+      // then we need to defer ourselves until they have occurred, do this
+      // before we invoke the mapper since the mapper might make instances
+      // and we need that to happen in program order
+      if (!point_wise_mapping_dependences.empty())
+      {
+        printf("GOT point wise dependence\n");
+        const RtEvent ready =
+          Runtime::merge_events(point_wise_mapping_dependences);
+        point_wise_mapping_dependences.clear();
+        if (ready.exists() && !ready.has_triggered())
+          return defer_perform_mapping(ready, must_epoch_op,
+                                       defer_args, 1/*invocation count*/);
+      }
+#endif
+
       // If we have any intra-space mapping dependences that haven't triggered
       // then we need to defer ourselves until they have occurred, do this
       // before we invoke the mapper since the mapper might make instances

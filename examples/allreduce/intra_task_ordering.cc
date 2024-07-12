@@ -122,7 +122,7 @@ void intra_is_ordering_task(const Task *task,
   assert(task->regions[0].privilege_fields.size() == 1);
 
   const Point<1> point = task->index_point;
-  printf("Executing task %lld\n", point.x);
+  printf("Executing task %lld\n", point.x());
 }
 
 int main(int argc, char **argv)

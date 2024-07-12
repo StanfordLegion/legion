@@ -16609,7 +16609,10 @@ namespace Legion {
                       }
                     }
                   }
+                  if(logical_analysis.bail_point_wise_analysis)
+                  {
 #endif
+                    printf("Registering dependence!\n");
 
                   // If we can validate a region record which of our
                   // predecessors regions we are validating, otherwise
@@ -16617,6 +16620,14 @@ namespace Legion {
                   user.op->register_region_dependence(user.idx, prev.op,
                                                       prev.gen, prev.idx,
                                                       dtype, overlap);
+#ifdef POINT_WISE_LOGICAL_ANALYSIS
+                  }
+                  else
+                  {
+                    printf("Not Registering dependence!\n");
+                  }
+#endif
+
 #ifdef LEGION_SPY
                   LegionSpy::log_mapping_dependence(
                       user.op->get_context()->get_unique_id(),
