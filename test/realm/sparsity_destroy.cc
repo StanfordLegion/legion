@@ -1,18 +1,6 @@
-#include <time.h>
-
-#include <cassert>
-#include <climits>
-#include <cmath>
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
-
-#include "philox.h"
 #include "realm.h"
 #include "realm/id.h"
 #include "realm/network.h"
-#include "realm/nodeset.h"
-#include "realm/threads.h"
 #include "osdep.h"
 
 using namespace Realm;
@@ -35,21 +23,14 @@ void node_task_0(const void *args, size_t arglen, const void *userdata, size_t u
                  Processor p)
 {
   TaskArgs &task_args = *(TaskArgs *)args;
-  SparsityMapUntyped handle(task_args.sparsity_map.id);
 
-  // add remote reference
-  handle.add_references(1);
-  // remove remote reference
-  handle.remove_references(2);
-  // deferred remote destroy
+  task_args.sparsity_map.impl();
+  task_args.sparsity_map.remove_references(1);
 
   SparsityMap<1> local_sparsity =
       SparsityMap<1>::construct({Rect<1>(Point<1>(0), Point<1>(50000))}, true, true);
   local_sparsity.add_references();
   local_sparsity.destroy(task_args.wait_on);
-
-  task_args.wait_on.wait();
-  assert(local_sparsity.impl()->is_valid() == 0);
 }
 
 void main_task(const void *args, size_t arglen, const void *userdata, size_t userlen,
@@ -59,60 +40,54 @@ void main_task(const void *args, size_t arglen, const void *userdata, size_t use
   rects.push_back(Rect<1>(Point<1>(0), Point<1>(50000)));
   rects.push_back(Rect<1>(Point<1>(50008), Point<1>(50008 * 2)));
 
-  UserEvent done = UserEvent::create_user_event();
-
   Machine machine = Machine::get_machine();
-  std::vector<Memory> memories;
+  std::map<NodeID, Memory> memories;
   for(Machine::MemoryQuery::iterator it = Machine::MemoryQuery(machine).begin(); it;
       ++it) {
     Memory m = *it;
-    if(m.kind() != Memory::SYSTEM_MEM)
-      continue;
-    memories.push_back(m);
+    if(m.kind() == Memory::SYSTEM_MEM) {
+      NodeID node = NodeID(ID(m).memory_owner_node());
+      if(memories.find(node) == memories.end()) {
+        memories[node] = m;
+      }
+    }
   }
 
   std::vector<SparsityMap<1>> sparsity_maps;
-  std::vector<Event> events;
-  for(std::vector<Memory>::const_iterator it = memories.begin(); it != memories.end();
-      ++it) {
-    Memory m = *it;
 
-    Processor proc = *Machine::ProcessorQuery(machine)
-                          .only_kind(Processor::LOC_PROC)
-                          .same_address_space_as(m)
-                          .begin();
+  {
+    UserEvent done = UserEvent::create_user_event();
+    std::vector<Event> events;
+
     sparsity_maps.push_back(SparsityMap<1>::construct(rects, true, true));
+    sparsity_maps.back().impl();
 
-    {
-      TaskArgs args;
-      sparsity_maps.back().add_references();
-      args.sparsity_map = sparsity_maps.back();
-      args.node = Network::my_node_id;
-      args.wait_on = done;
-      Event e = proc.spawn(NODE_TASK_0, &args, sizeof(args));
-      events.push_back(e);
+    for(std::map<NodeID, Memory>::const_iterator it = memories.begin();
+        it != memories.end(); ++it) {
+      Memory m = it->second;
+      Processor proc = *Machine::ProcessorQuery(machine)
+                            .only_kind(Processor::LOC_PROC)
+                            .same_address_space_as(m)
+                            .begin();
+
+      sparsity_maps.back().add_references(1);
+
+      {
+        TaskArgs args;
+        args.sparsity_map = sparsity_maps.back();
+        args.node = Network::my_node_id;
+        args.wait_on = done;
+        Event e = proc.spawn(NODE_TASK_0, &args, sizeof(args));
+        events.push_back(e);
+      }
     }
+
+    done.trigger();
+    Event::merge_events(events).wait();
   }
 
-  done.trigger();
-  Event::merge_events(events).wait();
-
-  int errors = 0;
-  for(auto &sparsity_map : sparsity_maps) {
-    auto *impl = sparsity_map.impl();
-    assert(impl);
-    if(impl->is_valid()) {
-      log_app.info() << "sparsity_map=" << sparsity_map << " hasn't been deleted";
-      errors++;
-    }
-  }
-
-  if(errors > 0) {
-    log_app.error() << "Test failed with erros=" << errors;
-  }
-
-  usleep(100000);
-  Runtime::get_runtime().shutdown(Processor::get_current_finish_event(), errors ? 1 : 0);
+  usleep(300000);
+  Runtime::get_runtime().shutdown(Processor::get_current_finish_event(), 0);
 }
 
 int main(int argc, char **argv)

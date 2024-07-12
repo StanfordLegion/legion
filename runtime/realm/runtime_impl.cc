@@ -1465,18 +1465,6 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
       if(!ok) {
         return ok;
       }
-      ok = serialize_announce(serializer, node->memories, net);
-      if(!ok) {
-        return ok;
-      }
-      ok = serialize_announce(serializer, node->memories, net);
-      if(!ok) {
-        return ok;
-      }
-      ok = serialize_announce(serializer, node->ib_memories, net);
-      if(!ok) {
-        return ok;
-      }
       for(ProcessorImpl *proc : node->processors) {
         get_machine()->get_proc_mem_affinity(pmas, proc->me);
         ok = serialize_announce(serializer, pmas, net);
@@ -1712,6 +1700,37 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
 #else  // REALM_USE_SHM
       return true;
 #endif
+    }
+
+    static void allgather_announcement(Realm::Serialization::DynamicBufferSerializer &dbs,
+                                       const NodeSet &targets, MachineImpl *machine,
+                                       NetworkModule *network_module)
+    {
+      std::vector<char> all_announcements;
+      std::vector<size_t> lengths(targets.size() + 1);
+      char *buffer = nullptr;
+      size_t rank = 0;
+
+      // Use the networking module to exchange all the announcement information, by
+      // whatever optimal path is available.  We assume a non-symmetric machine here,
+      // so we use allgatherv.
+      network_module->allgatherv(reinterpret_cast<const char *>(dbs.get_buffer()),
+                                 dbs.bytes_used(), all_announcements, lengths);
+      buffer = all_announcements.data();
+      // Traverse the nodes _in-order_, as their data is laid out in the same order
+      for(NodeID node_id = 0; node_id <= Network::max_node_id; node_id++) {
+        if(node_id != Network::my_node_id) {
+          if(!targets.contains(node_id)) {
+            // Not a node that's collaborating here, so skip it and don't update the
+            // buffer pointer
+            continue;
+          }
+          machine->parse_node_announce_data(node_id, buffer, lengths[rank], true);
+        }
+        // Increment to the next section of the buffer with data for the next node id
+        buffer += lengths[rank];
+        rank++;
+      }
     }
 
     void RuntimeImpl::parse_command_line(std::vector<std::string> &cmdline)
@@ -2280,47 +2299,31 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
           continue;
         }
 
+        // Announcement needs to happen in two stages in order to ensure all memory
+        // information is available for later serialization information (like remote
+        // channels)
+        // Stage 1: Announce all the memories attributes
+        dbs.reset();
+        ok = serialize_announce(dbs, n->memories, module);
+        assert(ok && "Failed to serialize memories");
+        ok = serialize_announce(dbs, n->ib_memories, module);
+        assert(ok && "Failed to serialize ib memories");
+        allgather_announcement(dbs, targets, machine, module);
+
+        // Stage 2: Announce everything else.
         dbs.reset();
         ok = serialize_announce(dbs, n, machine, module);
         assert(ok && "Failed to serialize node for announcement");
-
-        // Now that all of this node's network-specific information is collected, time to
-        // send it all out
-        {
-          std::vector<char> all_announcements;
-          std::vector<size_t> lengths(targets.size() + 1);
-          char *buffer = nullptr;
-          size_t rank = 0;
-
-          // Use the networking module to exchange all the announcement information, by
-          // whatever optimal path is available.  We assume a non-symmetric machine here,
-          // so we use allgatherv.
-          module->allgatherv(reinterpret_cast<const char *>(dbs.get_buffer()),
-                             dbs.bytes_used(), all_announcements, lengths);
-          buffer = all_announcements.data();
-          // Traverse the nodes _in-order_, as their data is laid out in the same order
-          for(NodeID node_id = 0; node_id <= Network::max_node_id; node_id++) {
-            if(node_id != Network::my_node_id) {
-              if(!targets.contains(node_id)) {
-                // Not a node that's collaborating here, so skip it and don't update the
-                // buffer pointer
-                continue;
-              }
-              machine->parse_node_announce_data(node_id, buffer, lengths[rank], true);
-            }
-            // Increment to the next section of the buffer with data for the next node id
-            buffer += lengths[rank];
-            rank++;
-          }
-        }
+        allgather_announcement(dbs, targets, machine, module);
       }
 
       // Now that we have full knowledge of the machine, update the machine model's
-      // internal representation Start with the kind maps
+      // internal representation.  Start with the kind maps
       machine->update_kind_maps();
       // and the mem_mem affinities
       machine->enumerate_mem_mem_affinities();
 
+      // Then update the path caches
       if (Config::path_cache_lru_size) {
         assert(Config::path_cache_lru_size > 0);
         init_path_cache();

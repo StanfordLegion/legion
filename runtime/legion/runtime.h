@@ -362,6 +362,8 @@ namespace Legion {
                              bool check_extent = false,
                              bool silence_warnings = false, 
                              const char *warning_string = NULL);
+      void get_memories(std::set<Memory> &memories,
+                        bool silence_warnings, const char *warning_string);
       PhysicalInstance get_instance(Memory::Kind kind,
                              size_t extent_in_bytes, bool check_extent,
                              bool silence_warnings, const char *warning_string);
@@ -1374,6 +1376,9 @@ namespace Legion {
     protected:
       void increment_active_mappers(void);
       void decrement_active_mappers(void);
+    protected:
+      void increment_progress_tasks(void);
+      void decrement_progress_tasks(void);
     public:
       // Immutable state
       Runtime *const runtime;
@@ -1394,6 +1399,15 @@ namespace Legion {
       bool outstanding_task_scheduler;
       unsigned total_active_contexts;
       unsigned total_active_mappers;
+      // Progress tasks are tasks that have to be mapped in order
+      // to guarantee forward progress of the program, these include
+      // slices from dependent index space task launches, slices from
+      // collectively mapped index task launches, and concurrent
+      // index space task launches. If we have a progress task then
+      // we need to keep calling select_tasks_to_map until the mapper
+      // maps these tasks regardless of whether their context is
+      // active or not to avoid hanging waiting for them to map
+      unsigned total_progress_tasks;
       struct ContextState {
       public:
         ContextState(void)
@@ -1817,7 +1831,7 @@ namespace Legion {
       };
     public:
       VirtualChannel(VirtualChannelKind kind,AddressSpaceID local_address_space,
-               size_t max_message_size, bool profile, LegionProfiler *profiler);
+               size_t max_message_size, bool profile);
       VirtualChannel(const VirtualChannel &rhs);
       ~VirtualChannel(void);
     public:
@@ -1877,8 +1891,6 @@ namespace Legion {
       unsigned partial_messages;
       std::map<unsigned/*message id*/,PartialMessage> *partial_assembly;
       mutable bool observed_recent;
-    private:
-      LegionProfiler *const profiler;
     }; 
 
     /**
@@ -2535,7 +2547,8 @@ namespace Legion {
             serializer_type("binary"),
             prof_footprint_threshold(128 << 20),
             prof_target_latency(100),
-            prof_call_threshold(0) { }
+            prof_call_threshold(0),
+            prof_self_profile(false) { }
       public:
         int delay_start;
         int legion_collective_radix;
@@ -2593,6 +2606,7 @@ namespace Legion {
         size_t prof_footprint_threshold;
         size_t prof_target_latency;
         size_t prof_call_threshold;
+        bool prof_self_profile;
       public:
         bool parse_alloc_percentage_override_argument(const std::string& s);
       };

@@ -387,6 +387,9 @@ namespace Realm {
       void add_fence(GPUWorkFence *fence);
       void add_start_event(GPUWorkStart *start);
       void add_notification(GPUCompletionNotification *notification);
+      void add_event(CUevent event, GPUWorkFence *fence,
+                     GPUCompletionNotification *notification = NULL,
+                     GPUWorkStart *start = NULL);
       void wait_on_streams(const std::set<GPUStream *> &other_streams);
 
       // atomically checks rate limit counters and returns true if 'bytes'
@@ -403,10 +406,6 @@ namespace Realm {
     protected:
       // may only be tested with lock held
       bool has_work(void) const;
-
-      void add_event(CUevent event, GPUWorkFence *fence,
-                     GPUCompletionNotification *notification = NULL,
-                     GPUWorkStart *start = NULL);
 
       GPU *gpu;
       GPUWorker *worker;
@@ -739,7 +738,7 @@ namespace Realm {
       };
       std::vector<CudaIpcMapping> cudaipc_mappings;
       std::map<NodeID, GPUStream *> cudaipc_streams;
-
+      Mutex alloc_mutex;
       const CudaIpcMapping *find_ipc_mapping(Memory mem) const;
 
 #ifdef REALM_USE_CUDART_HIJACK
@@ -1130,6 +1129,8 @@ namespace Realm {
                     const std::vector<size_t> *dst_frags, XferDesKind *kind_ret = 0,
                     unsigned *bw_ret = 0, unsigned *lat_ret = 0);
 
+      virtual bool supports_indirection_memory(Memory mem) const;
+
       virtual XferDes *create_xfer_des(uintptr_t dma_op, NodeID launch_node,
                                        XferDesID guid,
                                        const std::vector<XferDesPortInfo> &inputs_info,
@@ -1149,7 +1150,8 @@ namespace Realm {
     public:
       GPUIndirectRemoteChannelInfo(NodeID _owner, XferDesKind _kind,
                                    uintptr_t _remote_ptr,
-                                   const std::vector<Channel::SupportedPath> &_paths);
+                                   const std::vector<Channel::SupportedPath> &_paths,
+                                   const std::vector<Memory> &_indirect_memories);
 
       virtual RemoteChannel *create_remote_channel();
 
@@ -1169,21 +1171,21 @@ namespace Realm {
       friend class GPUIndirectRemoteChannelInfo;
 
     public:
-      GPUIndirectRemoteChannel(uintptr_t _remote_ptr);
+      GPUIndirectRemoteChannel(uintptr_t _remote_ptr,
+                               const std::vector<Memory> &_indirect_memories);
       virtual Memory suggest_ib_memories(Memory memory) const;
+      virtual bool needs_wrapping_iterator() const;
       virtual uint64_t
       supports_path(ChannelCopyInfo channel_copy_info, CustomSerdezID src_serdez_id,
                     CustomSerdezID dst_serdez_id, ReductionOpID redop_id,
                     size_t total_bytes, const std::vector<size_t> *src_frags,
-                    const std::vector<size_t> *dst_frags, XferDesKind *kind_ret = 0,
-                    unsigned *bw_ret = 0, unsigned *lat_ret = 0);
-      virtual bool needs_wrapping_iterator() const;
+                    const std::vector<size_t> *dst_frags, XferDesKind *kind_ret /*= 0*/,
+                    unsigned *bw_ret /*= 0*/, unsigned *lat_ret /*= 0*/);
     };
 
     class GPUChannel : public SingleXDQChannel<GPUChannel, GPUXferDes> {
     public:
-      GPUChannel(GPU* _src_gpu, XferDesKind _kind,
-		 BackgroundWorkManager *bgwork);
+      GPUChannel(GPU *_src_gpu, XferDesKind _kind, BackgroundWorkManager *bgwork);
       ~GPUChannel();
 
       // multi-threading of cuda copies for a given device is disabled by
@@ -1594,7 +1596,16 @@ namespace Realm {
 
 #ifdef REALM_CUDA_DYNAMIC_LOAD
   // cuda driver and/or runtime entry points
-#define CUDA_DRIVER_FNPTR(name) (name##_fnptr)
+#define CUDA_DRIVER_HAS_FNPTR(name) ((name##_fnptr) != nullptr)
+#define CUDA_DRIVER_FNPTR(name) (assert(name##_fnptr != nullptr), name##_fnptr)
+
+#if CUDA_VERSION < 12050
+    // Instead of defining this as part of CUDA_DRIVER_APIS, define it locally here if we
+    // know the definition isn't in cuda.h.  This allows us to use this driver function
+    // even if it is unavailable to our current toolkit
+    CUresult cuCtxRecordEvent(CUcontext hctx, CUevent event);
+    typedef decltype(&cuCtxRecordEvent) PFN_cuCtxRecordEvent;
+#endif
 
 #define CUDA_DRIVER_APIS(__op__)                                                         \
   __op__(cuModuleGetFunction);                                                           \
@@ -1674,7 +1685,8 @@ namespace Realm {
   __op__(cuStreamQuery);                                                                 \
   __op__(cuMemGetAddressRange);                                                          \
   __op__(cuPointerGetAttributes);                                                        \
-  __op__(cuLaunchHostFunc)
+  __op__(cuLaunchHostFunc);                                                              \
+  __op__(cuCtxRecordEvent)
 
 #if CUDA_VERSION >= 11030
 // cuda 11.3+ gives us handy PFN_... types

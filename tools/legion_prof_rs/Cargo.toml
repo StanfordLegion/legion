@@ -1,6 +1,6 @@
 [package]
 name = "legion_prof"
-version = "0.2403.0"
+version = "0.2406.0"
 authors = ["Elliott Slaughter <slaughter@cs.stanford.edu>"]
 description = "Legion Prof: a profiler for Legion"
 documentation = "https://legion.stanford.edu/profiling"
@@ -31,7 +31,7 @@ num_enum = "0.7"
 rayon = "1.7"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-legion_prof_viewer = { version = "0.2.1", optional = true }
+legion_prof_viewer = { version = "0.2.2", optional = true }
 url = { version = "2", optional = true }
 slice-group-by = "0.3" # because &[]::group_by is unstable
 log = "0.4"

@@ -1134,15 +1134,18 @@ impl StateDataSource {
                 ProcEntryKind::MapperCall(mapper_id, mapper_proc, _) => {
                     let mapper = self.state.mappers.get(&(mapper_id, mapper_proc)).unwrap();
                     fields.push((self.fields.mapper, Field::String(mapper.name.to_owned())));
-                    let proc = self.state.procs.get(&mapper_proc).unwrap();
-                    let proc_name = format!(
-                        "Node {} {:?} {}",
-                        mapper_proc.node_id().0,
-                        proc.kind,
-                        mapper_proc.proc_in_node()
-                    );
-
-                    fields.push((self.fields.mapper_proc, Field::String(proc_name)));
+                    if let Some(proc) = self.state.procs.get(&mapper_proc) {
+                        let proc_name = format!(
+                            "Node {} {:?} {}",
+                            mapper_proc.node_id().0,
+                            proc.kind,
+                            mapper_proc.proc_in_node()
+                        );
+                        fields.push((self.fields.mapper_proc, Field::String(proc_name)));
+                    } else {
+                        let proc_name = format!("Node {}", mapper_proc.node_id().0);
+                        fields.push((self.fields.mapper_proc, Field::String(proc_name)));
+                    }
                 }
                 _ => {}
             }
@@ -1490,6 +1493,21 @@ impl StateDataSource {
                             self.generate_creator_link(*creator_uid, create_time),
                         ));
                     }
+                }
+            }
+            let time_range = entry.time_range();
+            if let Some(ready) = time_range.ready {
+                if let Some(create) = time_range.create {
+                    fields.push((
+                        self.fields.deferred_time,
+                        Field::Interval(ts::Interval::new(create.into(), ready.into())),
+                    ));
+                }
+                if let Some(start) = time_range.start {
+                    fields.push((
+                        self.fields.delayed_time,
+                        Field::Interval(ts::Interval::new(ready.into(), start.into())),
+                    ));
                 }
             }
             ItemMeta {

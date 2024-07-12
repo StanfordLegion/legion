@@ -328,6 +328,10 @@ namespace Realm {
 
       atomic<unsigned> reference_count;
 
+      unsigned nb_update_pre_bytes_total_calls_expected;
+
+      atomic<unsigned> nb_update_pre_bytes_total_calls_received;
+
       // intrusive list for queued XDs in a channel
       IntrusivePriorityListLink<XferDes> xd_link;
       REALM_PMTA_DEFN(XferDes,IntrusivePriorityListLink<XferDes>,xd_link);
@@ -351,6 +355,8 @@ namespace Realm {
       //  deleted
       void add_reference(void);
       void remove_reference(void);
+
+      void add_update_pre_bytes_total_received(void);
 
     protected:
       virtual ~XferDes();
@@ -823,6 +829,10 @@ namespace Realm {
                                      XferDesKind *kind_ret = 0,
                                      unsigned *bw_ret = 0,
                                      unsigned *lat_ret = 0);
+      /// @brief Queries if a given \p mem can be used as an indirection buffer
+      /// @param mem Memory to be used as an indirection buffer
+      /// @return True if the given \p mem can be used as an indirection buffer for a copy
+      virtual bool supports_indirection_memory(Memory mem) const;
 
       virtual Memory suggest_ib_memories(Memory memory) const;
 
@@ -906,6 +916,9 @@ namespace Realm {
 
     class SimpleRemoteChannelInfo : public RemoteChannelInfo {
     public:
+      SimpleRemoteChannelInfo(NodeID _owner, XferDesKind _kind, uintptr_t _remote_ptr,
+                              const std::vector<Channel::SupportedPath> &_paths,
+                              const std::vector<Memory> &indirect_memories);
       SimpleRemoteChannelInfo(NodeID _owner, XferDesKind _kind,
                               uintptr_t _remote_ptr,
                               const std::vector<Channel::SupportedPath>& _paths);
@@ -927,12 +940,14 @@ namespace Realm {
       XferDesKind kind;
       uintptr_t remote_ptr;
       std::vector<Channel::SupportedPath> paths;
+      std::vector<Memory> indirect_memories;
     };
 
     class RemoteChannel : public Channel {
     protected:
       friend class SimpleRemoteChannelInfo;
 
+      RemoteChannel(uintptr_t _remote_ptr, const std::vector<Memory> &indirect_memories);
       RemoteChannel(uintptr_t _remote_ptr);
 
       virtual void shutdown();
@@ -970,11 +985,17 @@ namespace Realm {
                                      unsigned *bw_ret = 0,
                                      unsigned *lat_ret = 0);
 
+      /// @brief Queries if a given \p mem can be used as an indirection buffer
+      /// @param mem Memory to be used as an indirection buffer
+      /// @return True if the given \p mem can be used as an indirection buffer for a copy
+      virtual bool supports_indirection_memory(Memory mem) const;
+
       virtual void enqueue_ready_xd(XferDes *xd) { assert(0); }
       virtual void wakeup_xd(XferDes *xd) { assert(0); }
 
     protected:
       SimpleXferDesFactory factory_singleton;
+      const std::set<Memory> indirect_memories;
     };
 
     template <typename CHANNEL, typename XD>
@@ -1380,10 +1401,15 @@ namespace Realm {
 
       void set_real_xd(XferDes *_xd);
 
+      void add_update_pre_bytes_total_received(void);
+
+      unsigned get_update_pre_bytes_total_received(void);
+
     protected:
       static const int INLINE_PORTS = 4;
       atomic<unsigned> refcount;
       XferDes *xd;
+      atomic<unsigned> nb_update_pre_bytes_total_calls_received;
       size_t inline_bytes_total[INLINE_PORTS];
       SequenceAssembler inline_pre_write[INLINE_PORTS];
       Mutex extra_mutex;
@@ -1405,6 +1431,7 @@ namespace Realm {
       }
 
       ~XferDesQueue() {
+        assert(guid_to_xd.empty());
       }
 
       static XferDesQueue* get_singleton();

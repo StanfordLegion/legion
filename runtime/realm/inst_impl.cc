@@ -430,7 +430,7 @@ namespace Realm {
     }
 
     Event RegionInstance::redistrict(RegionInstance &instance,
-                                     InstanceLayoutGeneric *layout,
+                                     const InstanceLayoutGeneric *layout,
                                      const ProfilingRequestSet &prs, Event wait_on)
     {
       MemoryImpl *mem_impl = get_runtime()->get_memory_impl(*this);
@@ -439,8 +439,9 @@ namespace Realm {
     }
 
     Event RegionInstance::redistrict(RegionInstance *instances,
-                                     InstanceLayoutGeneric **layouts, size_t num_layouts,
-                                     const ProfilingRequestSet *prs, Event wait_on)
+                                     const InstanceLayoutGeneric **layouts,
+                                     size_t num_layouts, const ProfilingRequestSet *prs,
+                                     Event wait_on)
     {
       MemoryImpl *mem_impl = get_runtime()->get_memory_impl(*this);
       RegionInstanceImpl *inst_impl = mem_impl->get_instance(*this);
@@ -952,7 +953,7 @@ namespace Realm {
     }
 
     Event RegionInstanceImpl::redistrict(RegionInstance *instances,
-                                         InstanceLayoutGeneric **layouts,
+                                         const InstanceLayoutGeneric **layouts,
                                          size_t num_layouts,
                                          const ProfilingRequestSet *prs, Event wait_on)
     {
@@ -968,7 +969,7 @@ namespace Realm {
 
       for(size_t i = 0; i < num_layouts; i++) {
         insts[i] = m_impl->new_instance();
-        insts[i]->metadata.layout = layouts[i];
+        insts[i]->metadata.layout = layouts[i]->clone();
       }
 
       // Attempt to reuse allocated range of existing instance
@@ -1023,7 +1024,8 @@ namespace Realm {
         }
       }
 
-      notify_deallocation();
+      // TODO(apryakhin@): Consider deleting this instance
+      // notify_deallocation();
 
       return Event::NO_EVENT;
     }
@@ -1440,10 +1442,10 @@ namespace Realm {
                              affine->offset +
                              affine->strides.dot(affine->bounds.lo) +
                              it->second.rel_offset);
-      size_t total_bytes = (it->second.size_in_bytes + 
-                            affine->strides[0] * (affine->bounds.hi -
-                                                  affine->bounds.lo));
- 
+      size_t total_bytes =
+          (it->second.size_in_bytes +
+           affine->strides[0] * (affine->bounds.hi[0] - affine->bounds.lo[0]));
+
       base = mem->get_direct_ptr(start_offset, total_bytes);
       if (!base) return false;
 

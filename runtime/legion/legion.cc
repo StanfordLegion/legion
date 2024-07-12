@@ -2419,6 +2419,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Future::get_memories(std::set<Memory> &memories,
+                        bool silence_warnings, const char *warning_string) const
+    //--------------------------------------------------------------------------
+    {
+      if (impl == NULL)
+        REPORT_LEGION_ERROR(ERROR_REQUEST_FOR_EMPTY_FUTURE, 
+                        "Illegal request for future memories from empty future")
+      impl->get_memories(memories, silence_warnings, warning_string);
+    }
+
+    //--------------------------------------------------------------------------
     size_t Future::get_untyped_size(void) const
     //--------------------------------------------------------------------------
     {

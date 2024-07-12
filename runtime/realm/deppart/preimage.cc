@@ -77,8 +77,12 @@ namespace Realm {
   }
 
   template <int N, typename T, int N2, typename T2>
-  PreimageMicroOp<N,T,N2,T2>::~PreimageMicroOp(void)
-  {}
+  PreimageMicroOp<N, T, N2, T2>::~PreimageMicroOp(void)
+  {
+    for(size_t i = 0; i < sparsity_outputs.size(); i++) {
+      sparsity_outputs[i].remove_references();
+    }
+  }
 
   template <int N, typename T, int N2, typename T2>
   void PreimageMicroOp<N,T,N2,T2>::add_sparsity_output(IndexSpace<N2,T2> _target,
@@ -86,6 +90,7 @@ namespace Realm {
   {
     targets.push_back(_target);
     sparsity_outputs.push_back(_sparsity);
+    sparsity_outputs.back().add_references();
   }
 
   template <int N, typename T, int N2, typename T2>
@@ -247,6 +252,9 @@ namespace Realm {
 	       (s >> targets) &&
 	       (s >> sparsity_outputs));
     assert(ok);
+    for(size_t i = 0; i < sparsity_outputs.size(); i++) {
+      sparsity_outputs[i].add_references();
+    }
     (void)ok;
   }
 
@@ -273,8 +281,11 @@ namespace Realm {
   }
 
   template <int N, typename T, int N2, typename T2>
-  PreimageOperation<N,T,N2,T2>::~PreimageOperation(void)
+  PreimageOperation<N, T, N2, T2>::~PreimageOperation(void)
   {
+    for(size_t i = 0; i < preimages.size(); i++) {
+      preimages[i].destroy();
+    }
     if(overlap_tester)
       delete overlap_tester;
   }
@@ -309,9 +320,11 @@ namespace Realm {
              .instance_owner_node();
     SparsityMap<N,T> sparsity = get_runtime()->get_available_sparsity_impl(target_node)->me.convert<SparsityMap<N,T> >();
     preimage.sparsity = sparsity;
+    sparsity.add_references();
 
     targets.push_back(target);
     preimages.push_back(sparsity);
+    sparsity.add_references();
 
     return preimage;
   }
