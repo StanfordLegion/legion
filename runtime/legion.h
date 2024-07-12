@@ -96,6 +96,7 @@ namespace Legion {
       inline bool operator!=(const IndexSpace &rhs) const;
       inline bool operator<(const IndexSpace &rhs) const;
       inline bool operator>(const IndexSpace &rhs) const;
+      inline std::size_t hash(void) const;
       inline IndexSpaceID get_id(void) const { return id; }
       inline IndexTreeID get_tree_id(void) const { return tid; }
       inline bool exists(void) const { return (id != 0); }
@@ -151,6 +152,7 @@ namespace Legion {
       inline bool operator!=(const IndexPartition &rhs) const;
       inline bool operator<(const IndexPartition &rhs) const;
       inline bool operator>(const IndexPartition &rhs) const;
+      inline std::size_t hash(void) const;
       inline IndexPartitionID get_id(void) const { return id; }
       inline IndexTreeID get_tree_id(void) const { return tid; }
       inline bool exists(void) const { return (id != 0); }
@@ -209,6 +211,7 @@ namespace Legion {
       inline bool operator!=(const FieldSpace &rhs) const;
       inline bool operator<(const FieldSpace &rhs) const;
       inline bool operator>(const FieldSpace &rhs) const;
+      inline std::size_t hash(void) const;
       inline FieldSpaceID get_id(void) const { return id; }
       inline bool exists(void) const { return (id != 0); }
     private:
@@ -243,6 +246,7 @@ namespace Legion {
       inline bool operator==(const LogicalRegion &rhs) const;
       inline bool operator!=(const LogicalRegion &rhs) const;
       inline bool operator<(const LogicalRegion &rhs) const;
+      std::size_t hash(void) const;
     public:
       inline IndexSpace get_index_space(void) const { return index_space; }
       inline FieldSpace get_field_space(void) const { return field_space; }
@@ -310,6 +314,7 @@ namespace Legion {
       inline bool operator==(const LogicalPartition &rhs) const;
       inline bool operator!=(const LogicalPartition &rhs) const;
       inline bool operator<(const LogicalPartition &rhs) const;
+      std::size_t hash(void) const;
     public:
       inline IndexPartition get_index_partition(void) const 
         { return index_partition; }
@@ -1195,6 +1200,7 @@ namespace Legion {
         { return impl < f.impl; }
       Future& operator=(const Future &f);
       Future& operator=(Future &&f) noexcept;
+      std::size_t hash(void) const;
     public:
       /**
        * Wait on the result of this future.  Return
@@ -1410,6 +1416,7 @@ namespace Legion {
         { return get_future(point); }
       FutureMap& operator=(const FutureMap &f);
       FutureMap& operator=(FutureMap &&f) noexcept;
+      std::size_t hash(void) const;
     public:
       /**
        * Block until we can return the result for the
@@ -2599,6 +2606,7 @@ namespace Legion {
         { return (impl == reg.impl); }
       inline bool operator<(const PhysicalRegion &reg) const
         { return (impl < reg.impl); }
+      std::size_t hash(void) const;
     public:
       /**
        * Check to see if this represents a mapped physical region. 
@@ -10342,6 +10350,7 @@ namespace Legion {
 }; // namespace Legion
 
 #include "legion/legion.inl"
+
 // Include this here so we get the mapper interface in the header file
 // We have to put it here though since the mapper interface depends
 // on the rest of the legion interface
