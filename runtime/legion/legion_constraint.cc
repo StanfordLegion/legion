@@ -704,19 +704,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool SpecializedConstraint::conflicts(
-				  const ReductionOpID other_redop) const
-    //--------------------------------------------------------------------------
-    {
-      if ((redop != 0) && (other_redop != 0)) {
-	if (kind != LEGION_AFFINE_REDUCTION_SPECIALIZE)
-	  return true;
-	if (redop != other_redop)
-	  return true;
-      }
-      return false;
-    }
-    //--------------------------------------------------------------------------
     void SpecializedConstraint::swap(SpecializedConstraint &rhs)
     //--------------------------------------------------------------------------
     {

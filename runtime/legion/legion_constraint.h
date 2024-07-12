@@ -342,7 +342,6 @@ namespace Legion {
     public:
       bool entails(const SpecializedConstraint &other) const;
       bool conflicts(const SpecializedConstraint &other) const;
-      bool conflicts(const ReductionOpID other_redop) const;
     public:
       inline SpecializedKind get_kind(void) const { return kind; }
       inline ReductionOpID get_reduction_op(void) const { return redop; }
