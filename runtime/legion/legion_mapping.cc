@@ -119,6 +119,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    std::size_t PhysicalInstance::hash(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (impl != NULL)
+        return std::hash<unsigned long long>{}(impl->did);
+      else
+        return std::hash<unsigned long long>{}(0);
+    }
+
+    //--------------------------------------------------------------------------
     Memory PhysicalInstance::get_location(void) const
     //--------------------------------------------------------------------------
     {

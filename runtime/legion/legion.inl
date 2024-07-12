@@ -17736,6 +17736,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    inline size_t IndexSpace::hash(void) const
+    //--------------------------------------------------------------------------
+    {
+      return std::hash<unsigned>{}(id); // uniquely identifies this index space
+    }
+
+    //--------------------------------------------------------------------------
     inline int IndexSpace::get_dim(void) const
     //--------------------------------------------------------------------------
     {
@@ -17828,6 +17835,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    inline size_t IndexPartition::hash(void) const
+    //--------------------------------------------------------------------------
+    {
+      // uniquely identifies this index partition
+      return std::hash<unsigned>{}(id);
+    }
+
+    //--------------------------------------------------------------------------
     inline int IndexPartition::get_dim(void) const
     //--------------------------------------------------------------------------
     {
@@ -17901,6 +17916,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return (id > rhs.id);
+    }
+
+    //--------------------------------------------------------------------------
+    inline size_t FieldSpace::hash(void) const
+    //--------------------------------------------------------------------------
+    {
+      return std::hash<unsigned>{}(id); // uniquely identifies this field space
     }
 
     //--------------------------------------------------------------------------
@@ -21782,3 +21804,25 @@ namespace Legion {
     }
 
 }; // namespace Legion
+
+namespace std {
+
+#define LEGION_DEFINE_HASHABLE(__TYPE_NAME__)                     \
+  template<>                                                      \
+  struct hash<__TYPE_NAME__> {                                    \
+    inline std::size_t operator()(const __TYPE_NAME__ &obj) const \
+    { return obj.hash(); }                                        \
+  };
+
+LEGION_DEFINE_HASHABLE(Legion::IndexSpace);
+LEGION_DEFINE_HASHABLE(Legion::IndexPartition);
+LEGION_DEFINE_HASHABLE(Legion::FieldSpace);
+LEGION_DEFINE_HASHABLE(Legion::LogicalRegion);
+LEGION_DEFINE_HASHABLE(Legion::LogicalPartition);
+LEGION_DEFINE_HASHABLE(Legion::Future);
+LEGION_DEFINE_HASHABLE(Legion::FutureMap);
+LEGION_DEFINE_HASHABLE(Legion::PhysicalRegion);
+
+#undef LEGION_DEFINE_HASHABLE
+
+}; // namespace std
