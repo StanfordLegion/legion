@@ -2179,9 +2179,16 @@ pub struct Base {
 }
 
 impl Base {
-    fn new(prof_uid: ProfUID) -> Self {
+    fn new(allocator: &mut ProfUIDAllocator) -> Self {
         Base {
-            prof_uid,
+            prof_uid: allocator.create_fresh_prof_uid(),
+            level: None,
+            level_ready: None,
+        }
+    }
+    fn from_fevent(allocator: &mut ProfUIDAllocator, fevent: EventID) -> Self {
+        Base {
+            prof_uid: allocator.create_fevent_prof_uid(fevent),
             level: None,
             level_ready: None,
         }
@@ -2413,7 +2420,6 @@ impl OperationInstInfo {
 
 #[derive(Debug)]
 pub struct Operation {
-    pub base: Base,
     pub parent_id: Option<OpID>,
     pub kind: Option<OpKindID>,
     pub provenance: Option<ProvenanceID>,
@@ -2421,9 +2427,8 @@ pub struct Operation {
 }
 
 impl Operation {
-    fn new(base: Base) -> Self {
+    fn new() -> Self {
         Operation {
-            base,
             parent_id: None,
             kind: None,
             provenance: None,
@@ -2623,7 +2628,7 @@ impl Copy {
             // not guaranteed.
             indirect.map(|i| group.insert(0, i));
             result.push(Copy {
-                base: Base::new(allocator.get_prof_uid()),
+                base: Base::new(allocator),
                 copy_kind: Some(copy_kind),
                 chan_id: Some(chan_id),
                 copy_inst_infos: group,
@@ -2827,12 +2832,42 @@ impl LFSR {
 #[derive(Debug, Default)]
 struct ProfUIDAllocator {
     next_prof_uid: ProfUID,
+    fevents: BTreeMap<EventID, ProfUID>,
+    used_fevents: BTreeSet<EventID>,
+    reverse_lookup: BTreeMap<ProfUID, EventID>,
 }
 
 impl ProfUIDAllocator {
-    fn get_prof_uid(&mut self) -> ProfUID {
+    fn create_fresh_prof_uid(&mut self) -> ProfUID {
         self.next_prof_uid.0 += 1;
         self.next_prof_uid
+    }
+    fn find_or_create_prof_uid(&mut self, fevent: EventID) -> Option<ProfUID> {
+        if let Some(event) = fevent.existing() {
+            Some(*self.fevents.entry(event).or_insert_with(|| {
+                self.next_prof_uid.0 += 1;
+                self.next_prof_uid
+            }))
+        } else {
+            None
+        }
+    }
+    fn create_fevent_prof_uid(&mut self, fevent: EventID) -> ProfUID {
+        assert!(fevent.exists());
+        assert!(!self.used_fevents.contains(&fevent));
+        self.used_fevents.insert(fevent);
+        self.find_or_create_prof_uid(fevent).unwrap()
+    }
+    fn post_parse(&mut self) {
+        // Invert the mapping so we can lookup fevents from ProfUIDs too
+        for (event, prof_uid) in &self.fevents {
+            self.reverse_lookup.insert(*prof_uid, *event);
+        }
+        self.fevents.clear();
+        self.used_fevents.clear();
+    }
+    fn find_prof_uid_fevent(&self, prof_uid: ProfUID) -> EventID {
+        *self.reverse_lookup.get(&prof_uid).unwrap()
     }
 }
 
@@ -2929,30 +2964,13 @@ pub struct State {
     pub has_prof_data: bool,
     pub visible_nodes: Vec<NodeID>,
     pub source_locator: Vec<String>,
-    fevents: BTreeMap<EventID, ProfUID>,
     pub provenances: BTreeMap<ProvenanceID, Provenance>,
     pub backtraces: BTreeMap<BacktraceID, String>,
 }
 
 impl State {
     fn create_op(&mut self, op_id: OpID) -> &mut Operation {
-        let alloc = &mut self.prof_uid_allocator;
-        self.operations
-            .entry(op_id)
-            .or_insert_with(|| Operation::new(Base::new(alloc.get_prof_uid())))
-    }
-
-    fn find_or_create_prof_uid(&mut self, fevent: EventID) -> Option<ProfUID> {
-        if let Some(event) = fevent.existing() {
-            Some(
-                *self
-                    .fevents
-                    .entry(event)
-                    .or_insert_with(|| self.prof_uid_allocator.get_prof_uid()),
-            )
-        } else {
-            None
-        }
+        self.operations.entry(op_id).or_insert_with(Operation::new)
     }
 
     pub fn find_op(&self, op_id: OpID) -> Option<&Operation> {
@@ -2966,6 +2984,14 @@ impl State {
     fn find_op_provenance(&self, op_id: OpID) -> Option<&str> {
         self.find_op(op_id)
             .and_then(|op| op.provenance.and_then(|pid| self.find_provenance(pid)))
+    }
+
+    pub fn find_or_create_prof_uid(&mut self, fevent: EventID) -> Option<ProfUID> {
+        self.prof_uid_allocator.find_or_create_prof_uid(fevent)
+    }
+
+    pub fn find_prof_uid_fevent(&self, prof_uid: ProfUID) -> EventID {
+        self.prof_uid_allocator.find_prof_uid_fevent(prof_uid)
     }
 
     pub fn get_op_color(&self, op_id: OpID) -> Color {
@@ -3011,11 +3037,11 @@ impl State {
         // logged first, this will come back Some(_) and we'll store it below.
         let parent_id = self.create_op(op_id).parent_id;
         self.tasks.insert(op_id, proc_id);
-        let prof_uid = self.find_or_create_prof_uid(fevent).unwrap();
-        let creator_uid = self.find_or_create_prof_uid(creator);
+        let alloc = &mut self.prof_uid_allocator;
+        let creator_uid = alloc.find_or_create_prof_uid(creator);
         let proc = self.procs.get_mut(&proc_id).unwrap();
         proc.create_proc_entry(
-            Base::new(prof_uid),
+            Base::from_fevent(alloc, fevent),
             Some(op_id),
             parent_id,
             ProcEntryKind::Task(task_id, variant_id),
@@ -3048,11 +3074,11 @@ impl State {
     ) -> &mut ProcEntry {
         self.create_op(op_id);
         self.meta_tasks.insert((op_id, variant_id), proc_id);
-        let prof_uid = self.find_or_create_prof_uid(fevent).unwrap();
-        let creator_uid = self.find_or_create_prof_uid(creator);
+        let alloc = &mut self.prof_uid_allocator;
+        let creator_uid = alloc.find_or_create_prof_uid(creator);
         let proc = self.procs.get_mut(&proc_id).unwrap();
         proc.create_proc_entry(
-            Base::new(prof_uid),
+            Base::from_fevent(alloc, fevent),
             None,
             Some(op_id), // FIXME: should really make this None if op_id == 0 but backwards compatibilty with Python is hard
             ProcEntryKind::MetaTask(variant_id),
@@ -3081,11 +3107,11 @@ impl State {
         fevent: EventID,
     ) -> &mut ProcEntry {
         self.create_op(op_id);
-        let prof_uid = self.prof_uid_allocator.get_prof_uid();
-        let creator_uid = self.find_or_create_prof_uid(fevent);
+        let alloc = &mut self.prof_uid_allocator;
+        let creator_uid = alloc.find_or_create_prof_uid(fevent);
         let proc = self.procs.get_mut(&proc_id).unwrap();
         proc.create_proc_entry(
-            Base::new(prof_uid),
+            Base::new(alloc),
             None,
             if op_id != OpID::ZERO {
                 Some(op_id)
@@ -3107,11 +3133,11 @@ impl State {
         time_range: TimeRange,
         fevent: EventID,
     ) -> &mut ProcEntry {
-        let prof_uid = self.prof_uid_allocator.get_prof_uid();
-        let creator_uid = self.find_or_create_prof_uid(fevent);
+        let alloc = &mut self.prof_uid_allocator;
+        let creator_uid = alloc.find_or_create_prof_uid(fevent);
         let proc = self.procs.get_mut(&proc_id).unwrap();
         proc.create_proc_entry(
-            Base::new(prof_uid),
+            Base::new(alloc),
             None,
             None,
             ProcEntryKind::RuntimeCall(kind),
@@ -3130,11 +3156,11 @@ impl State {
         fevent: EventID,
     ) -> &mut ProcEntry {
         assert!(self.provenances.contains_key(&provenance));
-        let prof_uid = self.prof_uid_allocator.get_prof_uid();
-        let creator_uid = self.find_or_create_prof_uid(fevent);
+        let alloc = &mut self.prof_uid_allocator;
+        let creator_uid = alloc.find_or_create_prof_uid(fevent);
         let proc = self.procs.get_mut(&proc_id).unwrap();
         proc.create_proc_entry(
-            Base::new(prof_uid),
+            Base::new(alloc),
             None,
             None,
             ProcEntryKind::ApplicationCall(provenance),
@@ -3154,11 +3180,11 @@ impl State {
         time_range: TimeRange,
         fevent: EventID,
     ) -> &mut ProcEntry {
-        let prof_uid = self.prof_uid_allocator.get_prof_uid();
-        let creator_uid = self.find_or_create_prof_uid(fevent);
+        let alloc = &mut self.prof_uid_allocator;
+        let creator_uid = alloc.find_or_create_prof_uid(fevent);
         let proc = self.procs.get_mut(&proc_id).unwrap();
         proc.create_proc_entry(
-            Base::new(prof_uid),
+            Base::new(alloc),
             Some(op_id),
             None,
             ProcEntryKind::GPUKernel(task_id, variant_id),
@@ -3177,11 +3203,11 @@ impl State {
         creator: EventID,
         fevent: EventID,
     ) -> &mut ProcEntry {
-        let prof_uid = self.find_or_create_prof_uid(fevent).unwrap();
-        let creator_uid = self.find_or_create_prof_uid(creator);
+        let alloc = &mut self.prof_uid_allocator;
+        let creator_uid = alloc.find_or_create_prof_uid(creator);
         let proc = self.procs.get_mut(&proc_id).unwrap();
         proc.create_proc_entry(
-            Base::new(prof_uid),
+            Base::from_fevent(alloc, fevent),
             None,
             Some(op_id), // FIXME: should really make this None if op_id == 0 but backwards compatibilty with Python is hard
             ProcEntryKind::ProfTask,
@@ -3202,12 +3228,12 @@ impl State {
         collective: u32,
         copies: &'a mut BTreeMap<EventID, Copy>,
     ) -> &'a mut Copy {
-        let prof_uid = self.find_or_create_prof_uid(fevent).unwrap();
-        let creator_uid = self.find_or_create_prof_uid(creator);
+        let alloc = &mut self.prof_uid_allocator;
+        let creator_uid = alloc.find_or_create_prof_uid(creator);
         assert!(!copies.contains_key(&fevent));
         copies.entry(fevent).or_insert_with(|| {
             Copy::new(
-                Base::new(prof_uid),
+                Base::new(alloc),
                 time_range,
                 op_id,
                 size,
@@ -3226,12 +3252,12 @@ impl State {
         fevent: EventID,
         fills: &'a mut BTreeMap<EventID, Fill>,
     ) -> &'a mut Fill {
-        let prof_uid = self.find_or_create_prof_uid(fevent).unwrap();
-        let creator_uid = self.find_or_create_prof_uid(creator);
+        let alloc = &mut self.prof_uid_allocator;
+        let creator_uid = alloc.find_or_create_prof_uid(creator);
         assert!(!fills.contains_key(&fevent));
         fills
             .entry(fevent)
-            .or_insert_with(|| Fill::new(Base::new(prof_uid), time_range, op_id, size, creator_uid))
+            .or_insert_with(|| Fill::new(Base::new(alloc), time_range, op_id, size, creator_uid))
     }
 
     fn create_deppart(
@@ -3243,8 +3269,9 @@ impl State {
         creator: EventID,
     ) {
         self.create_op(op_id);
-        let base = Base::new(self.prof_uid_allocator.get_prof_uid()); // FIXME: construct here to avoid mutability conflict
-        let creator_uid = self.find_or_create_prof_uid(creator);
+        let alloc = &mut self.prof_uid_allocator;
+        let base = Base::new(alloc); // FIXME: construct here to avoid mutability conflict
+        let creator_uid = alloc.find_or_create_prof_uid(creator);
         let chan = self.find_deppart_chan_mut(node_id);
         chan.add_deppart(DepPart::new(base, part_op, time_range, op_id, creator_uid));
     }
@@ -3270,7 +3297,7 @@ impl State {
         let alloc = &mut self.prof_uid_allocator;
         insts
             .entry(inst_uid)
-            .or_insert_with(|| Inst::new(Base::new(alloc.get_prof_uid()), inst_uid))
+            .or_insert_with(|| Inst::new(Base::new(alloc), inst_uid))
     }
 
     pub fn find_inst(&self, inst_uid: InstUID) -> Option<&Inst> {
@@ -3357,6 +3384,7 @@ impl State {
                 }
             }
         }
+        self.prof_uid_allocator.post_parse();
         self.has_prof_data = true;
     }
 

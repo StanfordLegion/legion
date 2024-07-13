@@ -387,6 +387,9 @@ namespace Realm {
       void add_fence(GPUWorkFence *fence);
       void add_start_event(GPUWorkStart *start);
       void add_notification(GPUCompletionNotification *notification);
+      void add_event(CUevent event, GPUWorkFence *fence,
+                     GPUCompletionNotification *notification = NULL,
+                     GPUWorkStart *start = NULL);
       void wait_on_streams(const std::set<GPUStream *> &other_streams);
 
       // atomically checks rate limit counters and returns true if 'bytes'
@@ -403,10 +406,6 @@ namespace Realm {
     protected:
       // may only be tested with lock held
       bool has_work(void) const;
-
-      void add_event(CUevent event, GPUWorkFence *fence,
-                     GPUCompletionNotification *notification = NULL,
-                     GPUWorkStart *start = NULL);
 
       GPU *gpu;
       GPUWorker *worker;
@@ -1597,7 +1596,16 @@ namespace Realm {
 
 #ifdef REALM_CUDA_DYNAMIC_LOAD
   // cuda driver and/or runtime entry points
-#define CUDA_DRIVER_FNPTR(name) (name##_fnptr)
+#define CUDA_DRIVER_HAS_FNPTR(name) ((name##_fnptr) != nullptr)
+#define CUDA_DRIVER_FNPTR(name) (assert(name##_fnptr != nullptr), name##_fnptr)
+
+#if CUDA_VERSION < 12050
+    // Instead of defining this as part of CUDA_DRIVER_APIS, define it locally here if we
+    // know the definition isn't in cuda.h.  This allows us to use this driver function
+    // even if it is unavailable to our current toolkit
+    CUresult cuCtxRecordEvent(CUcontext hctx, CUevent event);
+    typedef decltype(&cuCtxRecordEvent) PFN_cuCtxRecordEvent;
+#endif
 
 #define CUDA_DRIVER_APIS(__op__)                                                         \
   __op__(cuModuleGetFunction);                                                           \
@@ -1677,7 +1685,8 @@ namespace Realm {
   __op__(cuStreamQuery);                                                                 \
   __op__(cuMemGetAddressRange);                                                          \
   __op__(cuPointerGetAttributes);                                                        \
-  __op__(cuLaunchHostFunc)
+  __op__(cuLaunchHostFunc);                                                              \
+  __op__(cuCtxRecordEvent)
 
 #if CUDA_VERSION >= 11030
 // cuda 11.3+ gives us handy PFN_... types

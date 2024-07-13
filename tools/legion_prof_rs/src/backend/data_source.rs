@@ -1068,16 +1068,28 @@ impl StateDataSource {
     }
 
     fn generate_creator_link(&self, prof_uid: ProfUID) -> Field {
-        let proc_id = self.state.prof_uid_proc.get(&prof_uid).unwrap();
-        let proc = self.state.procs.get(&proc_id).unwrap();
-        let entry = proc.find_entry(prof_uid).unwrap();
-        let op_name = entry.name(&self.state);
-        Field::ItemLink(ItemLink {
-            item_uid: entry.base().prof_uid.into(),
-            title: op_name,
-            interval: entry.time_range().into(),
-            entry_id: self.proc_entries.get(proc_id).unwrap().clone(),
-        })
+        // Not all ProfUIDs will have a processor since some of them
+        // might be referering to fevents that we never found
+        if let Some(proc_id) = self.state.prof_uid_proc.get(&prof_uid) {
+            let proc = self.state.procs.get(&proc_id).unwrap();
+            let entry = proc.find_entry(prof_uid).unwrap();
+            let op_name = entry.name(&self.state);
+            Field::ItemLink(ItemLink {
+                item_uid: entry.base().prof_uid.into(),
+                title: op_name,
+                interval: entry.time_range().into(),
+                entry_id: self.proc_entries.get(proc_id).unwrap().clone(),
+            })
+        } else {
+            // Convert the ProfUID back into an fevent so we can figure
+            // out which node it is on and tell the user that they need
+            // to load the logfile from that node if they want to see it
+            let node = self.state.find_prof_uid_fevent(prof_uid).node_id();
+            Field::String(format!(
+                "Unknown creator on node {}. Please load the logfile from that node to see it.",
+                node.0
+            ))
+        }
     }
 
     fn generate_proc_slot_meta_tile(
