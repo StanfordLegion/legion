@@ -647,7 +647,7 @@ impl Proc {
     fn record_event_wait(&mut self, task_uid: ProfUID, event: EventID, backtrace: BacktraceID) {
         self.event_waits
             .entry(task_uid)
-            .or_insert_with(|| BTreeMap::new())
+            .or_insert_with(BTreeMap::new)
             .insert(event, backtrace);
     }
 
@@ -735,7 +735,11 @@ impl Proc {
                             .waiters
                             .wait_intervals
                             .push(WaitInterval::from_event(
-                                wait.start, wait.ready, wait.end, wait.event, backtrace,
+                                wait.start,
+                                wait.ready,
+                                wait.end,
+                                wait.event.unwrap(),
+                                backtrace,
                             ));
                         to_remove.push(idx);
                         backtrace = None;
@@ -2181,14 +2185,14 @@ pub struct Base {
 impl Base {
     fn new(allocator: &mut ProfUIDAllocator) -> Self {
         Base {
-            prof_uid: allocator.create_fresh_prof_uid(),
+            prof_uid: allocator.create_fresh(),
             level: None,
             level_ready: None,
         }
     }
     fn from_fevent(allocator: &mut ProfUIDAllocator, fevent: EventID) -> Self {
         Base {
-            prof_uid: allocator.create_fevent_prof_uid(fevent),
+            prof_uid: allocator.create_object(fevent),
             level: None,
             level_ready: None,
         }
@@ -2305,7 +2309,7 @@ impl WaitInterval {
         start: Timestamp,
         ready: Timestamp,
         end: Timestamp,
-        event: Option<EventID>,
+        event: EventID,
         backtrace: Option<BacktraceID>,
     ) -> Self {
         assert!(start <= ready);
@@ -2315,7 +2319,7 @@ impl WaitInterval {
             ready,
             end,
             callee: None,
-            event,
+            event: Some(event),
             backtrace,
         }
     }
@@ -2838,11 +2842,11 @@ struct ProfUIDAllocator {
 }
 
 impl ProfUIDAllocator {
-    fn create_fresh_prof_uid(&mut self) -> ProfUID {
+    fn create_fresh(&mut self) -> ProfUID {
         self.next_prof_uid.0 += 1;
         self.next_prof_uid
     }
-    fn find_or_create_prof_uid(&mut self, fevent: EventID) -> Option<ProfUID> {
+    fn create_reference(&mut self, fevent: EventID) -> Option<ProfUID> {
         if let Some(event) = fevent.existing() {
             Some(*self.fevents.entry(event).or_insert_with(|| {
                 self.next_prof_uid.0 += 1;
@@ -2852,13 +2856,13 @@ impl ProfUIDAllocator {
             None
         }
     }
-    fn create_fevent_prof_uid(&mut self, fevent: EventID) -> ProfUID {
+    fn create_object(&mut self, fevent: EventID) -> ProfUID {
         assert!(fevent.exists());
         assert!(!self.used_fevents.contains(&fevent));
         self.used_fevents.insert(fevent);
-        self.find_or_create_prof_uid(fevent).unwrap()
+        self.create_reference(fevent).unwrap()
     }
-    fn post_parse(&mut self) {
+    fn complete_parse(&mut self) {
         // Invert the mapping so we can lookup fevents from ProfUIDs too
         for (event, prof_uid) in &self.fevents {
             self.reverse_lookup.insert(*prof_uid, *event);
@@ -2866,7 +2870,7 @@ impl ProfUIDAllocator {
         self.fevents.clear();
         self.used_fevents.clear();
     }
-    fn find_prof_uid_fevent(&self, prof_uid: ProfUID) -> EventID {
+    fn find_fevent(&self, prof_uid: ProfUID) -> EventID {
         *self.reverse_lookup.get(&prof_uid).unwrap()
     }
 }
@@ -2961,7 +2965,7 @@ pub struct State {
     pub index_partitions: BTreeMap<IPartID, IPart>,
     logical_regions: BTreeMap<(ISpaceID, FSpaceID, TreeID), Region>,
     pub field_spaces: BTreeMap<FSpaceID, FSpace>,
-    pub has_prof_data: bool,
+    has_prof_data: bool,
     pub visible_nodes: Vec<NodeID>,
     pub source_locator: Vec<String>,
     pub provenances: BTreeMap<ProvenanceID, Provenance>,
@@ -2986,12 +2990,12 @@ impl State {
             .and_then(|op| op.provenance.and_then(|pid| self.find_provenance(pid)))
     }
 
-    pub fn find_or_create_prof_uid(&mut self, fevent: EventID) -> Option<ProfUID> {
-        self.prof_uid_allocator.find_or_create_prof_uid(fevent)
+    pub fn create_reference(&mut self, fevent: EventID) -> Option<ProfUID> {
+        self.prof_uid_allocator.create_reference(fevent)
     }
 
-    pub fn find_prof_uid_fevent(&self, prof_uid: ProfUID) -> EventID {
-        self.prof_uid_allocator.find_prof_uid_fevent(prof_uid)
+    pub fn find_fevent(&self, prof_uid: ProfUID) -> EventID {
+        self.prof_uid_allocator.find_fevent(prof_uid)
     }
 
     pub fn get_op_color(&self, op_id: OpID) -> Color {
@@ -3038,7 +3042,7 @@ impl State {
         let parent_id = self.create_op(op_id).parent_id;
         self.tasks.insert(op_id, proc_id);
         let alloc = &mut self.prof_uid_allocator;
-        let creator_uid = alloc.find_or_create_prof_uid(creator);
+        let creator_uid = alloc.create_reference(creator);
         let proc = self.procs.get_mut(&proc_id).unwrap();
         proc.create_proc_entry(
             Base::from_fevent(alloc, fevent),
@@ -3075,7 +3079,7 @@ impl State {
         self.create_op(op_id);
         self.meta_tasks.insert((op_id, variant_id), proc_id);
         let alloc = &mut self.prof_uid_allocator;
-        let creator_uid = alloc.find_or_create_prof_uid(creator);
+        let creator_uid = alloc.create_reference(creator);
         let proc = self.procs.get_mut(&proc_id).unwrap();
         proc.create_proc_entry(
             Base::from_fevent(alloc, fevent),
@@ -3108,7 +3112,7 @@ impl State {
     ) -> &mut ProcEntry {
         self.create_op(op_id);
         let alloc = &mut self.prof_uid_allocator;
-        let creator_uid = alloc.find_or_create_prof_uid(fevent);
+        let creator_uid = alloc.create_reference(fevent);
         let proc = self.procs.get_mut(&proc_id).unwrap();
         proc.create_proc_entry(
             Base::new(alloc),
@@ -3134,7 +3138,7 @@ impl State {
         fevent: EventID,
     ) -> &mut ProcEntry {
         let alloc = &mut self.prof_uid_allocator;
-        let creator_uid = alloc.find_or_create_prof_uid(fevent);
+        let creator_uid = alloc.create_reference(fevent);
         let proc = self.procs.get_mut(&proc_id).unwrap();
         proc.create_proc_entry(
             Base::new(alloc),
@@ -3157,7 +3161,7 @@ impl State {
     ) -> &mut ProcEntry {
         assert!(self.provenances.contains_key(&provenance));
         let alloc = &mut self.prof_uid_allocator;
-        let creator_uid = alloc.find_or_create_prof_uid(fevent);
+        let creator_uid = alloc.create_reference(fevent);
         let proc = self.procs.get_mut(&proc_id).unwrap();
         proc.create_proc_entry(
             Base::new(alloc),
@@ -3181,7 +3185,7 @@ impl State {
         fevent: EventID,
     ) -> &mut ProcEntry {
         let alloc = &mut self.prof_uid_allocator;
-        let creator_uid = alloc.find_or_create_prof_uid(fevent);
+        let creator_uid = alloc.create_reference(fevent);
         let proc = self.procs.get_mut(&proc_id).unwrap();
         proc.create_proc_entry(
             Base::new(alloc),
@@ -3204,7 +3208,7 @@ impl State {
         fevent: EventID,
     ) -> &mut ProcEntry {
         let alloc = &mut self.prof_uid_allocator;
-        let creator_uid = alloc.find_or_create_prof_uid(creator);
+        let creator_uid = alloc.create_reference(creator);
         let proc = self.procs.get_mut(&proc_id).unwrap();
         proc.create_proc_entry(
             Base::from_fevent(alloc, fevent),
@@ -3229,7 +3233,7 @@ impl State {
         copies: &'a mut BTreeMap<EventID, Copy>,
     ) -> &'a mut Copy {
         let alloc = &mut self.prof_uid_allocator;
-        let creator_uid = alloc.find_or_create_prof_uid(creator);
+        let creator_uid = alloc.create_reference(creator);
         assert!(!copies.contains_key(&fevent));
         copies.entry(fevent).or_insert_with(|| {
             Copy::new(
@@ -3253,7 +3257,7 @@ impl State {
         fills: &'a mut BTreeMap<EventID, Fill>,
     ) -> &'a mut Fill {
         let alloc = &mut self.prof_uid_allocator;
-        let creator_uid = alloc.find_or_create_prof_uid(creator);
+        let creator_uid = alloc.create_reference(creator);
         assert!(!fills.contains_key(&fevent));
         fills
             .entry(fevent)
@@ -3271,7 +3275,7 @@ impl State {
         self.create_op(op_id);
         let alloc = &mut self.prof_uid_allocator;
         let base = Base::new(alloc); // FIXME: construct here to avoid mutability conflict
-        let creator_uid = alloc.find_or_create_prof_uid(creator);
+        let creator_uid = alloc.create_reference(creator);
         let chan = self.find_deppart_chan_mut(node_id);
         chan.add_deppart(DepPart::new(base, part_op, time_range, op_id, creator_uid));
     }
@@ -3384,8 +3388,12 @@ impl State {
                 }
             }
         }
-        self.prof_uid_allocator.post_parse();
         self.has_prof_data = true;
+    }
+
+    pub fn complete_parse(&mut self) -> bool {
+        self.prof_uid_allocator.complete_parse();
+        self.has_prof_data
     }
 
     fn compute_duration(&self, prof_uid: ProfUID) -> u64 {
@@ -3454,7 +3462,12 @@ impl State {
                         meta_task.time_range.spawn.unwrap() - meta_task.time_range.create.unwrap();
                     total_skew += skew;
                     // Find the creator processor for the creator
+                    // The meta task might not have a creator if it was started by an
+                    // external thread
                     if let Some(creator) = meta_task.creator {
+                        // The creator might not have a processor if it was the start-up
+                        // or endpoint meta-task which are not profiled currently or
+                        // if the user didn't give us a file for the node of the creator
                         if let Some(creator_proc) = self.prof_uid_proc.get(&creator) {
                             // Creator node should be different than execution node
                             assert!(creator_proc.node_id() != proc.proc_id.node_id());
@@ -3532,22 +3545,28 @@ impl State {
                     let spawn = meta_task.time_range.spawn.unwrap();
                     let mut create = meta_task.time_range.create.unwrap();
                     // If there was any skew shift the create time forward by the average skew amount
+                    // The meta task might not have a creator if it was started by an
+                    // external thread
                     if let Some(creator) = meta_task.creator {
-                        let creator_proc = self.prof_uid_proc.get(&creator).unwrap();
-                        let nodes = (creator_proc.node_id(), proc.proc_id.node_id());
-                        if let Some(skew) = skew_nodes.get(&nodes) {
-                            // Just truncate fractional nanoseconds, they won't matter
-                            create += Timestamp::from_ns(skew.1 as u64);
-                        }
-                        // If we still have skew we're just going to ignore it for now
-                        // Otherwise we can check the latency of message delivery
-                        if spawn <= create {
-                            // No skew
-                            let latency = create - spawn;
-                            if threshold <= latency.to_us() {
-                                bad_messages += 1;
+                        // The creator might not have a processor if it was the start-up
+                        // or endpoint meta-task which are not profiled currently or
+                        // if the user didn't give us a file for the node of the creator
+                        if let Some(creator_proc) = self.prof_uid_proc.get(&creator) {
+                            let nodes = (creator_proc.node_id(), proc.proc_id.node_id());
+                            if let Some(skew) = skew_nodes.get(&nodes) {
+                                // Just truncate fractional nanoseconds, they won't matter
+                                create += Timestamp::from_ns(skew.1 as u64);
                             }
-                            longest_latency = max(longest_latency, latency);
+                            // If we still have skew we're just going to ignore it for now
+                            // Otherwise we can check the latency of message delivery
+                            if spawn <= create {
+                                // No skew
+                                let latency = create - spawn;
+                                if threshold <= latency.to_us() {
+                                    bad_messages += 1;
+                                }
+                                longest_latency = max(longest_latency, latency);
+                            }
                         }
                     }
                 }
@@ -4435,7 +4454,7 @@ fn process_record(
                     *start,
                     *ready,
                     *end,
-                    event.existing(),
+                    event.existing().unwrap(),
                     None,
                 ));
         }
@@ -4456,7 +4475,7 @@ fn process_record(
                     *start,
                     *ready,
                     *end,
-                    event.existing(),
+                    event.existing().unwrap(),
                     None,
                 ));
         }
@@ -4636,7 +4655,7 @@ fn process_record(
             creator,
         } => {
             state.create_op(*op_id);
-            let creator_uid = state.find_or_create_prof_uid(*creator);
+            let creator_uid = state.create_reference(*creator);
             state.insts.entry(*inst_uid).or_insert_with(|| *mem_id);
             state
                 .create_inst(*inst_uid, insts)
@@ -4744,7 +4763,7 @@ fn process_record(
             event,
             backtrace_id,
         } => {
-            let task_uid = state.find_or_create_prof_uid(*fevent).unwrap();
+            let task_uid = state.create_reference(*fevent).unwrap();
             let proc = state.procs.get_mut(proc_id).unwrap();
             proc.record_event_wait(task_uid, *event, *backtrace_id);
         }

@@ -319,7 +319,7 @@ fn main() -> io::Result<()> {
         }
     }
 
-    if !state.has_prof_data {
+    if !state.complete_parse() {
         println!("Nothing to do");
         return Ok(());
     }

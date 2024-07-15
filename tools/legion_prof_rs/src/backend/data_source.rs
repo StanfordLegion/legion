@@ -1084,7 +1084,7 @@ impl StateDataSource {
             // Convert the ProfUID back into an fevent so we can figure
             // out which node it is on and tell the user that they need
             // to load the logfile from that node if they want to see it
-            let node = self.state.find_prof_uid_fevent(prof_uid).node_id();
+            let node = self.state.find_fevent(prof_uid).node_id();
             Field::String(format!(
                 "Unknown creator on node {}. Please load the logfile from that node to see it.",
                 node.0
