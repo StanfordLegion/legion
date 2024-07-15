@@ -20,6 +20,7 @@
 
 // nop, but helpful for IDEs
 #include "realm/mem_impl.h"
+#include <unordered_set>
 
 namespace Realm {
 
@@ -163,11 +164,9 @@ namespace Realm {
   }
 
   template <typename RT, typename TT>
-  inline size_t BasicRangeAllocator<RT, TT>::split_range(TT old_tag,
-                                                         const std::vector<TT> &new_tags,
-                                                         const std::vector<RT> &sizes,
-                                                         const std::vector<RT> &alignments,
-                                                         std::vector<RT> &allocs_first)
+  inline size_t BasicRangeAllocator<RT, TT>::split_range(
+      TT old_tag, const std::vector<TT> &new_tags, const std::vector<RT> &sizes,
+      const std::vector<RT> &alignments, std::vector<RT> &allocs_first)
   {
     typename std::map<TT, unsigned>::iterator it = allocated.find(old_tag);
     if(it == allocated.end()) {
@@ -198,7 +197,7 @@ namespace Realm {
 
     // First part reuse existing allocated range for the first tag
     RT offset = calculate_offset(prev->first, alignments[0]);
-    if ((sizes[0] + offset) <= remaining_size) {
+    if((sizes[0] + offset) <= remaining_size) {
       prev->last = prev->first + sizes[0] + offset;
 
       allocs_first[0] = prev->first + offset;
@@ -212,7 +211,7 @@ namespace Realm {
     for(size_t i = 1; i < n; i++) {
       size_t start = prev_idx > 0 ? prev->first : 0;
       RT offset = calculate_offset(start, alignments[i]);
-      if (remaining_size < (sizes[i] + offset))
+      if(remaining_size < (sizes[i] + offset))
         break;
       unsigned new_idx = alloc_range(prev->last, prev->last + sizes[i] + offset);
       allocated[new_tags[i]] = new_idx;
@@ -242,11 +241,27 @@ namespace Realm {
       Range *r_after = &ranges[after_idx];
       r_after->prev = prev_idx;
 
-      ranges[r_after->next_free].prev_free = after_idx;
-      ranges[r_after->prev_free].next_free = after_idx;
+      unsigned pf_idx = ranges[prev_idx].prev;
+      while((pf_idx != SENTINEL) && (ranges[pf_idx].prev_free == pf_idx)) {
+        pf_idx = ranges[pf_idx].prev;
+        assert(pf_idx != after_idx);
+      }
+      unsigned nf_idx = ranges[prev_idx].next;
+      while((nf_idx != SENTINEL) && (ranges[nf_idx].next_free == nf_idx)) {
+        nf_idx = ranges[nf_idx].next;
+        assert(nf_idx != after_idx);
+      }
+
+      r_after->prev_free = pf_idx;
+      r_after->next_free = nf_idx;
+      ranges[pf_idx].next_free = after_idx;
+      ranges[nf_idx].prev_free = after_idx;
+
+      // allocate might have moved the range
+      prev = &ranges[prev_idx];
+      prev->next = after_idx;
 
       prev_idx = after_idx;
-      prev->next = after_idx;
       prev = r_after;
 
       remaining_size = 0;
@@ -257,7 +272,148 @@ namespace Realm {
 
     assert(remaining_size == 0);
 
+#ifdef DEBUG_REALM
+    assert(free_list_has_cycle() == false);
+    assert(has_invalid_ranges() == false);
+    if (successful_allocations == 0) {
+      dump_allocator_status();
+    }
+#endif
+
     return successful_allocations;
+  }
+
+  template <typename RT, typename TT>
+  inline bool BasicRangeAllocator<RT, TT>::free_list_has_cycle()
+  {
+    if(ranges.empty()) {
+      return false;
+    }
+
+    unsigned tortoise = ranges[SENTINEL].next_free;
+    unsigned hare = ranges[SENTINEL].next_free;
+
+    while(true) {
+      tortoise = ranges[tortoise].next_free;
+      hare = ranges[ranges[hare].next_free].next_free;
+
+      if(tortoise == SENTINEL || hare == SENTINEL) {
+        return false;
+      }
+
+      if(tortoise == hare) {
+        std::cerr << "ERROR - found cycle at index:" << tortoise << std::endl;
+        return true;
+      }
+    }
+  }
+
+  template <typename RT, typename TT>
+  inline bool BasicRangeAllocator<RT, TT>::has_invalid_ranges()
+  {
+    // TODO(apryakhin@): Consider doing it more efficient.
+    std::unordered_set<unsigned> range_indices;
+    for(const auto &alloc : allocated) {
+      if (alloc.second == SENTINEL) continue;
+      if(!range_indices.insert(alloc.second).second) {
+        std::cerr << "ERROR: found duplicate range idx:" << alloc.second
+                  << " for tag:" << alloc.first;
+        return true;
+      }
+    }
+
+    for(unsigned idx = ranges[SENTINEL].next; idx != SENTINEL; idx = ranges[idx].next) {
+      if(ranges[idx].first > ranges[idx].last ||
+         ranges[idx].last > ranges[ranges[idx].next].first) {
+        std::cerr << "ERROR: found invalid range idx:" << idx;
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // TODO(apryakhin@): Consider returning an info struct.
+  template <typename RT, typename TT>
+  inline void BasicRangeAllocator<RT, TT>::dump_allocator_status()
+  {
+    size_t total_size = 0;
+    unsigned range_idx = ranges[SENTINEL].next;
+    RT prev_used_last = 0;
+    while(range_idx != SENTINEL) {
+      unsigned i = range_idx;
+      size_t size = ranges[i].last - ranges[i].first;
+      total_size += size;
+      prev_used_last = ranges[range_idx].last;
+      range_idx = ranges[range_idx].next;
+
+      std::cerr << "ordered_range_idx:" << i << " first:" << ranges[i].first
+                << " last:" << ranges[i].last << " size:" << size
+                << " gap:" << (ranges[i].first - prev_used_last)
+                << " prev_free:" << ranges[i].prev_free
+                << " next_free:" << ranges[i].next_free << std::endl;
+    }
+
+    size_t largest_used_blocksize = 0;
+    size_t total_used_size = 0;
+    for(auto alloc_it = allocated.begin(); alloc_it != allocated.end(); ++alloc_it) {
+      if(alloc_it->second == SENTINEL)
+        continue;
+      unsigned i = alloc_it->second;
+      size_t size = ranges[i].last - ranges[i].first;
+      if(largest_used_blocksize < size) {
+        largest_used_blocksize = size;
+      }
+      total_used_size += size;
+      std::cerr << "allocated_range_idx:" << i << " first:" << ranges[i].first
+                << " last:" << ranges[i].last << " prev:" << ranges[i].prev
+                << " next:" << ranges[i].next << " prev_free:" << ranges[i].prev_free
+                << " next_free:" << ranges[i].next_free << " size:" << size << std::endl;
+    }
+
+    // size_t num_adjacent_free_blocks = 0;
+    size_t max_size_after_defrag = 0;
+    size_t current_defrag_size = 0;
+    size_t largest_free_blocksize = 0;
+    size_t total_free_size = 0;
+    unsigned free_idx = ranges[SENTINEL].next_free;
+    RT prev_free_last = 0;
+    while(free_idx != SENTINEL) {
+      unsigned i = free_idx;
+      size_t size = ranges[i].last - ranges[i].first;
+
+      if(prev_free_last == ranges[i].first) {
+        // num_adjacent_free_blocks++;
+        current_defrag_size += size;
+      } else {
+        if(current_defrag_size > max_size_after_defrag) {
+          max_size_after_defrag = current_defrag_size;
+        }
+        current_defrag_size = size;
+      }
+
+      total_free_size += size;
+      if(largest_free_blocksize < size) {
+        largest_free_blocksize = size;
+      }
+      prev_free_last = ranges[free_idx].last;
+      free_idx = ranges[free_idx].next_free;
+
+      std::cerr << "free_range_idx:" << i << " first:" << ranges[i].first
+                << " last:" << ranges[i].last << " prev:" << ranges[i].prev
+                << " next:" << ranges[i].next << " size:" << size
+                << " gap:" << (ranges[i].first - prev_free_last) << std::endl;
+    }
+
+    if(current_defrag_size > max_size_after_defrag) {
+      max_size_after_defrag = current_defrag_size;
+    }
+
+    std::cerr << "%%Stats%% total_size:" << total_size
+              << " total_used_size:" << total_used_size
+              << " largest_used_blocksize:" << largest_used_blocksize
+              << " total_free_size:" << total_free_size
+              << " large_free_blocksize:" << largest_free_blocksize
+              << " max_defrag_block:" << max_size_after_defrag << std::endl;
   }
 
   template <typename RT, typename TT>
@@ -300,6 +456,11 @@ namespace Realm {
       allocated[tag] = SENTINEL;
       return true;
     }
+
+#ifdef DEBUG_REALM
+    //assert(free_list_has_cycle() == false);
+    //assert(has_invalid_ranges() == false);
+#endif
 
     // walk free ranges and just take the first that fits
     unsigned idx = ranges[SENTINEL].next_free;
@@ -380,12 +541,22 @@ namespace Realm {
 
 	allocated[tag] = idx;
 
+#ifdef DEBUG_REALM
+        //assert(free_list_has_cycle() == false);
+        //assert(has_invalid_ranges() == false);
+#endif
+
         return true;
       }
 
       // no, go to next one
       idx = r->next_free;
     }
+
+#ifdef DEBUG_REALM
+    dump_allocator_status();
+#endif
+
     // allocation failed
     return false;
   }

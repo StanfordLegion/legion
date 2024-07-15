@@ -257,6 +257,11 @@ namespace Realm {
                        const std::vector<RT> &sizes, const std::vector<RT> &alignment,
                        std::vector<RT> &allocs_first);
 
+    // TODO(apryakhin@): consider ifdefing for debug builds only
+    void dump_allocator_status();
+    bool free_list_has_cycle();
+    bool has_invalid_ranges();
+
   protected:
     unsigned first_free_range;
     unsigned alloc_range(RT first, RT last);
