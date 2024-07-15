@@ -2961,12 +2961,12 @@ namespace Realm {
     return (best_cost != 0);
   }
 
-  bool find_fastest_path(
-      const Node *nodes_info,
-      std::map<std::pair<realm_id_t, realm_id_t>, PathLRU *> &path_cache,
-      ChannelCopyInfo channel_copy_info, CustomSerdezID serdez_id, ReductionOpID redop_id,
-      size_t total_bytes, const std::vector<size_t> *src_frags,
-      const std::vector<size_t> *dst_frags, MemPathInfo &info, bool skip_final_memcpy)
+  bool find_fastest_path(const Node *nodes_info, PathCache &path_cache,
+                         ChannelCopyInfo channel_copy_info, CustomSerdezID serdez_id,
+                         ReductionOpID redop_id, size_t total_bytes,
+                         const std::vector<size_t> *src_frags,
+                         const std::vector<size_t> *dst_frags, MemPathInfo &info,
+                         bool skip_final_memcpy)
   {
     Memory src_mem = channel_copy_info.src_mem;
     Memory dst_mem = channel_copy_info.dst_mem;

@@ -175,6 +175,8 @@ protected:
         .Times(1)
         .WillRepeatedly(::testing::Return(cost));
   }
+
+  PathCache path_cache;
 };
 
 // TODO(apryakhin): Add tests with path cache
@@ -189,7 +191,6 @@ TEST_F(FFPTest, FFPNoChannels)
   size_t total_bytes = 16;
 
   MemPathInfo info;
-  std::map<std::pair<realm_id_t, realm_id_t>, PathLRU *> path_cache;
   bool ok = find_fastest_path(nodes.data(), path_cache, channel_info, /*serdez_id=*/0,
                               /*redop_id=*/0, total_bytes, &src_frags, &dst_frags, info);
 
@@ -219,7 +220,6 @@ TEST_F(FFPTest, FFPSrcDstDirectNoPath)
   mock_supports_path(channel_b, src_mem, dst_mem, &src_frags, &dst_frags, exp_cost_b);
 
   MemPathInfo info;
-  std::map<std::pair<realm_id_t, realm_id_t>, PathLRU *> path_cache;
   bool ok = find_fastest_path(nodes.data(), path_cache, channel_info, /*serdez_id=*/0,
                               /*redop_id=*/0, total_bytes, &src_frags, &dst_frags, info);
 
@@ -252,7 +252,6 @@ TEST_F(FFPTest, FFPSrcDstDirect)
   mock_supports_path(channel_b, src_mem, dst_mem, &src_frags, &dst_frags, exp_cost_b);
 
   MemPathInfo info;
-  std::map<std::pair<realm_id_t, realm_id_t>, PathLRU *> path_cache;
   bool ok = find_fastest_path(nodes.data(), path_cache, channel_info, /*serdez_id=*/0,
                               /*redop_id=*/0, total_bytes, &src_frags, &dst_frags, info);
 
@@ -297,7 +296,6 @@ TEST_F(FFPTest, FFPSrcIBDst)
   mock_supports_path(channel_b, src_ib_mem->me, dst_mem, nullptr, &dst_frags, 4, false);
 
   MemPathInfo info;
-  std::map<std::pair<realm_id_t, realm_id_t>, PathLRU *> path_cache;
   bool ok = find_fastest_path(nodes.data(), path_cache, channel_info, /*serdez_id=*/0,
                               /*redop_id=*/0, total_bytes, &src_frags, &dst_frags, info);
 
@@ -363,7 +361,6 @@ TEST_F(FFPTest, FFPSrcIBToIBDst)
   mock_supports_path(channel_b, dst_ib_mem->me, dst_mem, nullptr, &dst_frags, 4, false);
 
   MemPathInfo info;
-  std::map<std::pair<realm_id_t, realm_id_t>, PathLRU *> path_cache;
   bool ok = find_fastest_path(nodes.data(), path_cache, channel_info, /*serdez_id=*/0,
                               /*redop_id=*/0, total_bytes, &src_frags, &dst_frags, info);
 
