@@ -25255,7 +25255,7 @@ namespace Legion {
               "insufficient space reserved for dynamic allocations. This was "
               "an unbounded memory pool which means you're actually out of "
               "space in this memory because it only has %zd remaining free "
-              "bytes. We strongly recommend all users put bounds on their 
+              "bytes. We strongly recommend all users put bounds on their "
               "dynamic memory usage so they can detect if space will be "
               "available for task execution and if not select an alternative "
               "mapping.", footprint, get_task_name(), get_unique_id(),
