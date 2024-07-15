@@ -732,7 +732,7 @@ namespace Legion {
     public:
       void issue_default_mapper_warning(Operation *op, const char *call_name);
     public:
-      LegionProfInstance* create_profiling_instance(void);
+      LegionProfInstance* find_or_create_profiling_instance(void);
     public:
       Runtime *const runtime;
       // Event to trigger once the profiling is actually done
@@ -751,6 +751,7 @@ namespace Legion {
       LegionProfSerializer* serializer;
       mutable LocalLock profiler_lock;
       std::vector<LegionProfInstance*> instances;
+      std::map<Processor,LegionProfInstance*> processor_instances;
       std::map<uintptr_t,unsigned long long> backtrace_ids;
       unsigned long long next_backtrace_id;
       std::vector<Memory> recorded_memories;

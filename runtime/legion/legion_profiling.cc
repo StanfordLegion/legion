@@ -2429,6 +2429,9 @@ namespace Legion {
       assert(response.user_data_size() == sizeof(ProfilingInfo));
 #endif
       const ProfilingInfo *info = (const ProfilingInfo*)response.user_data();
+      // Need to look this up in case we're not doing local profiling
+      LegionProfInstance *profiler_instance =
+        find_or_create_profiling_instance();
       switch (info->kind)
       {
         case LEGION_PROF_TASK:
@@ -2437,9 +2440,8 @@ namespace Legion {
             // Check for predication and speculation
             if (response.get_measurement<
                 Realm::ProfilingMeasurements::OperationProcessorUsage>(usage)) {
-              implicit_profiler->process_proc_desc(usage.proc);
-              implicit_profiler->process_task(info, 
-                                                            response, usage);
+              profiler_instance->process_proc_desc(usage.proc);
+              profiler_instance->process_task(info, response, usage);
             }
             break;
           }
@@ -2449,8 +2451,8 @@ namespace Legion {
             // Check for predication and speculation
             if (response.get_measurement<
                 Realm::ProfilingMeasurements::OperationProcessorUsage>(usage)) {
-              implicit_profiler->process_proc_desc(usage.proc);
-              implicit_profiler->process_meta(info, response, usage); 
+              profiler_instance->process_proc_desc(usage.proc);
+              profiler_instance->process_meta(info, response, usage); 
             }
             break;
           }
@@ -2460,8 +2462,8 @@ namespace Legion {
             // Check for predication and speculation
             if (response.get_measurement<
                 Realm::ProfilingMeasurements::OperationProcessorUsage>(usage)) {
-              implicit_profiler->process_proc_desc(usage.proc);
-              implicit_profiler->process_message(info, response, usage);
+              profiler_instance->process_proc_desc(usage.proc);
+              profiler_instance->process_message(info, response, usage);
             }
             break;
           }
@@ -2471,9 +2473,9 @@ namespace Legion {
             // Check for predication and speculation
             if (response.get_measurement<
                 Realm::ProfilingMeasurements::OperationMemoryUsage>(usage)) {
-              implicit_profiler->process_mem_desc(usage.source);
-              implicit_profiler->process_mem_desc(usage.target);
-              implicit_profiler->process_copy(info, response, usage);
+              profiler_instance->process_mem_desc(usage.source);
+              profiler_instance->process_mem_desc(usage.target);
+              profiler_instance->process_copy(info, response, usage);
             }
             break;
           }
@@ -2483,8 +2485,8 @@ namespace Legion {
             // Check for predication and speculation
             if (response.get_measurement<
                 Realm::ProfilingMeasurements::OperationMemoryUsage>(usage)) {
-              implicit_profiler->process_mem_desc(usage.target);
-              implicit_profiler->process_fill(info, response, usage);
+              profiler_instance->process_mem_desc(usage.target);
+              profiler_instance->process_fill(info, response, usage);
             }
             break;
           }
@@ -2498,15 +2500,15 @@ namespace Legion {
                 response.get_measurement<
                     Realm::ProfilingMeasurements::InstanceMemoryUsage>(usage))
             {
-              implicit_profiler->process_mem_desc(usage.memory);
-	      implicit_profiler->process_inst_timeline(info,
+              profiler_instance->process_mem_desc(usage.memory);
+	      profiler_instance->process_inst_timeline(info,
                                                       response, usage, timeline);
             }
             break;
           }
         case LEGION_PROF_PARTITION:
           {
-            implicit_profiler->process_partition(info, response);
+            profiler_instance->process_partition(info, response);
             break;
           }
         default:
@@ -2517,8 +2519,8 @@ namespace Legion {
         long long t_stop = Realm::Clock::current_time_in_nanoseconds();
         const Processor p = Realm::Processor::get_executing_processor();
         const LgEvent finish_event(Processor::get_current_finish_event());
-        implicit_profiler->process_proc_desc(p);
-        implicit_profiler->record_proftask(p, info->op_id,
+        profiler_instance->process_proc_desc(p);
+        profiler_instance->record_proftask(p, info->op_id,
             t_start, t_stop, info->creator, finish_event);
       }
 #ifdef DEBUG_LEGION
@@ -2765,12 +2767,38 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    LegionProfInstance* LegionProfiler::create_profiling_instance(void)
+    LegionProfInstance* LegionProfiler::find_or_create_profiling_instance(void)
     //--------------------------------------------------------------------------
     {
+      if (implicit_profiler != NULL)
+        return implicit_profiler;
+      const Processor current = Processor::get_executing_processor();
+      // If the processor already exists then we can use an existing instance
+      // on anything except I/O processors which can have multiple threads
+      // running at the same time
+      if (current.exists() && (current.kind() != Processor::IO_PROC))
+      {
+        AutoLock p_lock(profiler_lock,1,false/*exclusive*/);
+        std::map<Processor,LegionProfInstance*>::const_iterator finder =
+          processor_instances.find(current);
+        if (finder != processor_instances.end())
+          return finder->second;
+      }
       LegionProfInstance *instance = new LegionProfInstance(this);
       // Take the lock and save the instance 
       AutoLock p_lock(profiler_lock);
+      if (current.exists() && (current.kind() != Processor::IO_PROC))
+      {
+        std::map<Processor,LegionProfInstance*>::const_iterator finder =
+          processor_instances.find(current);
+        if (finder != processor_instances.end())
+        {
+          delete instance;
+          return finder->second;
+        }
+        else
+          processor_instances[current] = instance;
+      }
       instances.push_back(instance);
       return instance;
     }
@@ -2780,7 +2808,7 @@ namespace Legion {
       : profiler(runtime->profiler), call_kind(call), start_time(0)
     //--------------------------------------------------------------------------
     {
-      if (profiler != NULL)
+      if (implicit_profiler != NULL)
         start_time = Realm::Clock::current_time_in_nanoseconds();
     }
 

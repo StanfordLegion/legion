@@ -121,10 +121,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LgEvent::record_event_wait(Realm::Backtrace &bt) const
+    void LgEvent::record_event_wait(LegionProfInstance *profiler,
+                                    Realm::Backtrace &bt) const
     //--------------------------------------------------------------------------
     {
-      implicit_profiler->record_event_wait(*this, bt);
+      profiler->record_event_wait(*this, bt);
     }
 
     /////////////////////////////////////////////////////////////
@@ -13729,6 +13730,8 @@ namespace Legion {
               assert(!has_shutdown); // should only be one per message
 #endif
               has_shutdown = true; 
+              // No profiling for shutdown messages
+              implicit_profiler = NULL;
               runtime->handle_shutdown_notification(derez,remote_address_space);
               break;
             }
@@ -13738,6 +13741,8 @@ namespace Legion {
               assert(!has_shutdown); // should only be one per message
 #endif
               has_shutdown = true;
+              // No profiling for shutdown messages
+              implicit_profiler = NULL;
               runtime->handle_shutdown_response(derez);
               break;
             }
@@ -17532,6 +17537,13 @@ namespace Legion {
       // run on any processor that has a dedicated core which is either any
       // CPU processor a utility processor. There's no need to use GPU or
       // I/O processors since they share the same cores as the utility cores. 
+      // In the future we can relax this to use any processor core that doesn't
+      // support multiple threads executing concurrently (e.g. I/O procs) as
+      // that could lead to a lot of profiling instances being made since this
+      // will clear the implicit_profiler if we're not self-profiling and then
+      // we'll have to make new instances in 
+      // LegionProfiler::find_or_create_profiling_instance the next time we
+      // go to profile anything on that processor.
       std::vector<Processor> prof_procs(local_utils.begin(), local_utils.end());
       for (std::set<Processor>::const_iterator it = local_procs.begin();
             it != local_procs.end(); it++)
@@ -30861,7 +30873,7 @@ namespace Legion {
       implicit_context = top_context;
       implicit_runtime = this;
       if ((profiler != NULL) && (implicit_profiler == NULL))
-        implicit_profiler = profiler->create_profiling_instance();
+        implicit_profiler = profiler->find_or_create_profiling_instance();
       // Add a reference to the top level context
       top_context->add_base_gc_ref(RUNTIME_REF);
       // Get an individual task to be the top-level task
@@ -31047,6 +31059,7 @@ namespace Legion {
             ctx->get_task_name(), ctx->get_unique_id())
       ctx->begin_wait(LgEvent::NO_LG_EVENT, true/*from application*/);
       implicit_context = NULL;
+      implicit_profiler = NULL;
     }
 
     //--------------------------------------------------------------------------
@@ -31060,11 +31073,9 @@ namespace Legion {
             ctx->get_task_name(), ctx->get_unique_id())
       ctx->end_wait(LgEvent::NO_LG_EVENT, true/*from application*/);
       if (implicit_runtime == NULL)
-      {
         implicit_runtime = this;
-        if (profiler != NULL)
-          implicit_profiler = profiler->create_profiling_instance();
-      }
+      if ((profiler != NULL) && (implicit_profiler == NULL))
+        implicit_profiler = profiler->find_or_create_profiling_instance();
       implicit_context = ctx;
       implicit_provenance = ctx->owner_task->get_unique_op_id();
     }
@@ -31083,6 +31094,7 @@ namespace Legion {
           NULL/*callback functor*/, NULL/*resource*/,  NULL/*freefunc*/,
           NULL/*metadataptr*/, 0/*metadatasize*/, effects);
       implicit_context = NULL;
+      implicit_profiler = NULL;
     }
 
     //--------------------------------------------------------------------------
@@ -32281,19 +32293,15 @@ namespace Legion {
 #endif
       Runtime *runtime = *((Runtime**)userdata); 
       if (implicit_runtime == NULL)
-      {
         implicit_runtime = runtime;
-        if (runtime->profiler != NULL)
-          implicit_profiler = runtime->profiler->create_profiling_instance();
-      }
       if (implicit_context != NULL)
         implicit_context = NULL;
+      // We don't profile this task
+      implicit_profiler = NULL;
       // Finalize the runtime and then delete it
       std::vector<RtEvent> shutdown_events;
       runtime->finalize_runtime(shutdown_events);
       delete runtime;
-      // Don't record waits on the event after this
-      implicit_profiler = NULL;
       // If we have any shutdown events we need to wait for them to have
       // finished before we return and end up marking ourselves finished
       if (!shutdown_events.empty())
@@ -32323,13 +32331,12 @@ namespace Legion {
       assert(implicit_reference_tracker == NULL);
 #endif
       if (implicit_runtime == NULL)
-      {
         implicit_runtime = runtime;
-        if (runtime->profiler != NULL)
-          implicit_profiler = runtime->profiler->create_profiling_instance();
-      }
       if (implicit_context != NULL)
         implicit_context = NULL;
+      if ((runtime->profiler != NULL) && (implicit_profiler == NULL))
+        implicit_profiler = 
+          runtime->profiler->find_or_create_profiling_instance();
       // We immediately bump the priority of all meta-tasks once they start
       // up to the highest level to ensure that they drain once they begin
       Processor::set_current_task_priority(LG_RUNNING_PRIORITY);
@@ -32874,13 +32881,15 @@ namespace Legion {
 #endif
       Runtime *runtime = *((Runtime**)userdata);
       if (implicit_runtime == NULL)
-      {
         implicit_runtime = runtime;
-        if (runtime->profiler != NULL)
-          implicit_profiler = runtime->profiler->create_profiling_instance();
-      }
       if (implicit_context != NULL)
         implicit_context = NULL;
+      // Only profile this if we're doing self profiling
+      if ((runtime->profiler == NULL) || !runtime->profiler->self_profile)
+        implicit_profiler = NULL;
+      else if (implicit_profiler == NULL)
+        implicit_profiler = 
+          runtime->profiler->find_or_create_profiling_instance();
       Realm::ProfilingResponse response(args, arglen);
       const ProfilingResponseBase *base = 
         (const ProfilingResponseBase*)response.user_data();
@@ -32938,13 +32947,11 @@ namespace Legion {
 #endif
       Runtime *runtime = *((Runtime**)userdata);
       if (implicit_runtime == NULL)
-      {
         implicit_runtime = runtime;
-        if (runtime->profiler != NULL)
-          implicit_profiler = runtime->profiler->create_profiling_instance();
-      }
       if (implicit_context != NULL)
         implicit_context = NULL;
+      // We don't profile this task
+      implicit_profiler = NULL;
       // Create the startup barrier and send it out
       RtBarrier startup_barrier(
         Realm::Barrier::create_barrier(runtime->total_address_spaces));
@@ -32964,13 +32971,11 @@ namespace Legion {
 #endif
       Deserializer derez(args, arglen);
       if (implicit_runtime == NULL)
-      {
         implicit_runtime = runtime;
-        if (runtime->profiler != NULL)
-          implicit_profiler = runtime->profiler->create_profiling_instance();
-      }
       if (implicit_context != NULL)
         implicit_context = NULL;
+      // We don't profile this task
+      implicit_profiler = NULL;
       runtime->handle_endpoint_creation(derez);
     }
 
@@ -32987,13 +32992,12 @@ namespace Legion {
       assert(implicit_reference_tracker == NULL);
 #endif
       if (implicit_runtime == NULL)
-      {
         implicit_runtime = runtime;
-        if (runtime->profiler != NULL)
-          implicit_profiler = runtime->profiler->create_profiling_instance();
-      }
       if (implicit_context != NULL)
         implicit_context = NULL;
+      if ((runtime->profiler != NULL) && (implicit_profiler == NULL))
+        implicit_profiler =
+          runtime->profiler->find_or_create_profiling_instance();
       // We immediately bump the priority of all meta-tasks once they start
       // up to the highest level to ensure that they drain once they begin
       Processor::set_current_task_priority(LG_RUNNING_PRIORITY);

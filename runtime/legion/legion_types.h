@@ -2895,7 +2895,8 @@ namespace Legion {
     protected:
       void begin_context_wait(Context ctx, bool from_application) const;
       void end_context_wait(Context ctx, bool from_application) const;
-      void record_event_wait(Realm::Backtrace &bt) const;
+      void record_event_wait(LegionProfInstance *profiler, 
+                             Realm::Backtrace &bt) const;
     };
 
     class PredEvent : public LgEvent {
@@ -3262,11 +3263,14 @@ namespace Legion {
       // Save the reference tracker that we have
       ImplicitReferenceTracker *local_tracker = implicit_reference_tracker;
       Internal::implicit_reference_tracker = NULL;
-      if (implicit_profiler != NULL)
+      LegionProfInstance *local_profiler = Internal::implicit_profiler;
+      if (local_profiler != NULL)
       {
+        // Cannot call back into wait while recording a wait
+        implicit_profiler = NULL;
         Realm::Backtrace bt;
         bt.capture_backtrace();
-        record_event_wait(bt);
+        record_event_wait(local_profiler, bt);
       }
       // Check to see if we have any local locks to notify
       if (Internal::local_lock_list != NULL)
@@ -3309,6 +3313,8 @@ namespace Legion {
       Internal::implicit_context = local_ctx;
       // Write the provenance information back
       Internal::implicit_provenance = local_provenance;
+      // Restore the local profiler
+      Internal::implicit_profiler = local_profiler;
 #ifdef DEBUG_LEGION_CALLERS
       Internal::implicit_task_kind = local_kind;
       Internal::implicit_task_caller = local_caller;
@@ -3351,11 +3357,14 @@ namespace Legion {
       // Save the reference tracker that we have
       ImplicitReferenceTracker *local_tracker = implicit_reference_tracker;
       Internal::implicit_reference_tracker = NULL;
-      if (implicit_profiler != NULL)
+      LegionProfInstance *local_profiler = Internal::implicit_profiler;
+      if (local_profiler != NULL)
       {
+        // Cannot call back into wait while recording a wait
+        implicit_profiler = NULL;
         Realm::Backtrace bt;
         bt.capture_backtrace();
-        record_event_wait(bt);
+        record_event_wait(local_profiler, bt);
       }
       // Check to see if we have any local locks to notify
       if (Internal::local_lock_list != NULL)
@@ -3398,6 +3407,8 @@ namespace Legion {
       Internal::implicit_context = local_ctx;
       // Write the provenance information back
       Internal::implicit_provenance = local_provenance;
+      // Restore the local profiler
+      Internal::implicit_profiler = local_profiler;
 #ifdef DEBUG_LEGION_CALLERS
       Internal::implicit_task_kind = local_kind;
       Internal::implicit_task_caller = local_caller;
