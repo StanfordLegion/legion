@@ -3455,18 +3455,20 @@ impl State {
                     total_skew += skew;
                     // Find the creator processor for the creator
                     if let Some(creator) = meta_task.creator {
-                        let creator_proc = self.prof_uid_proc.get(&creator).unwrap();
-                        // Creator node should be different than execution node
-                        assert!(creator_proc.node_id() != proc.proc_id.node_id());
-                        let nodes = (creator_proc.node_id(), proc.proc_id.node_id());
-                        let node_skew = skew_nodes.entry(nodes).or_insert_with(|| (0, 0.0, 0.0));
-                        // Wellford's algorithm for online variance calculation
-                        node_skew.0 += 1;
-                        let value = skew.to_ns() as f64;
-                        let delta = value - node_skew.1;
-                        node_skew.1 += delta / node_skew.0 as f64;
-                        let delta2 = value - node_skew.1;
-                        node_skew.2 += delta * delta2;
+                        if let Some(creator_proc) = self.prof_uid_proc.get(&creator) {
+                            // Creator node should be different than execution node
+                            assert!(creator_proc.node_id() != proc.proc_id.node_id());
+                            let nodes = (creator_proc.node_id(), proc.proc_id.node_id());
+                            let node_skew =
+                                skew_nodes.entry(nodes).or_insert_with(|| (0, 0.0, 0.0));
+                            // Wellford's algorithm for online variance calculation
+                            node_skew.0 += 1;
+                            let value = skew.to_ns() as f64;
+                            let delta = value - node_skew.1;
+                            node_skew.1 += delta / node_skew.0 as f64;
+                            let delta2 = value - node_skew.1;
+                            node_skew.2 += delta * delta2;
+                        }
                     }
                 }
             }
