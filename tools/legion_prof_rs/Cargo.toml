@@ -17,7 +17,7 @@ rust-version = "1.74"
 [features]
 default = ["archiver", "client", "server", "viewer"]
 archiver = ["dep:legion_prof_viewer"]
-client = ["dep:legion_prof_viewer", "dep:url", "legion_prof_viewer?/client"]
+client = ["dep:legion_prof_viewer", "legion_prof_viewer?/client"]
 server = ["dep:legion_prof_viewer", "legion_prof_viewer?/server"]
 viewer = ["dep:legion_prof_viewer"]
 
@@ -32,7 +32,7 @@ rayon = "1.7"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 legion_prof_viewer = { version = "0.2.2", optional = true }
-url = { version = "2", optional = true }
+url = { version = "2" }
 slice-group-by = "0.3" # because &[]::group_by is unstable
 log = "0.4"
 env_logger = "0.10"
