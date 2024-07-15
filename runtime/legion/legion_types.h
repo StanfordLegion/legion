@@ -2366,9 +2366,6 @@ namespace Legion {
     // changes to remote distributed collectable that can be
     // delayed and batched together.
     extern thread_local ImplicitReferenceTracker *implicit_reference_tracker; 
-#ifdef DEBUG_LEGION_WAITS
-    extern thread_local int meta_task_id;
-#endif
 #ifdef DEBUG_LEGION_CALLERS
     extern thread_local LgTaskID implicit_task_kind;
     extern thread_local LgTaskID implicit_task_caller;
@@ -3246,10 +3243,6 @@ namespace Legion {
     {
       if (!exists())
         return;
-#ifdef DEBUG_LEGION_WAITS
-      const int local_meta_task_id = Internal::meta_task_id;
-      const long long start = Realm::Clock::current_time_in_microseconds();
-#endif
       // Save the context locally
       Internal::TaskContext *local_ctx = Internal::implicit_context; 
       // Save the task provenance information
@@ -3326,12 +3319,6 @@ namespace Legion {
 #endif
       // Write the local reference tracker back
       Internal::implicit_reference_tracker = local_tracker;
-#ifdef DEBUG_LEGION_WAITS
-      Internal::meta_task_id = local_meta_task_id;
-      const long long stop = Realm::Clock::current_time_in_microseconds();
-      if (((stop - start) >= LIMIT) && (local_meta_task_id == BAD_TASK_ID))
-        assert(false);
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -3340,10 +3327,6 @@ namespace Legion {
     {
       if (!exists())
         return;
-#ifdef DEBUG_LEGION_WAITS
-      const int local_meta_task_id = Internal::meta_task_id;
-      const long long start = Realm::Clock::current_time_in_microseconds();
-#endif
       // Save the context locally
       Internal::TaskContext *local_ctx = Internal::implicit_context; 
       // Save the task provenance information
@@ -3420,12 +3403,6 @@ namespace Legion {
 #endif
       // Write the local reference tracker back
       Internal::implicit_reference_tracker = local_tracker;
-#ifdef DEBUG_LEGION_WAITS
-      Internal::meta_task_id = local_meta_task_id;
-      const long long stop = Realm::Clock::current_time_in_microseconds();
-      if (((stop - start) >= LIMIT) && (local_meta_task_id == BAD_TASK_ID))
-        assert(false);
-#endif
     }
 
   }; // namespace Internal 
