@@ -2082,9 +2082,10 @@ namespace Legion {
                           size_t *footprint /*= NULL*/)
     //--------------------------------------------------------------------------
     {
-      bool force_new_instances = (req.privilege==LEGION_REDUCE) ? true: false;
+      bool force_new_instances = false;
       // include all the fields in the region req for reduce privileges
       if (req.privilege == LEGION_REDUCE) {
+	force_new_instances = default_policy_select_reduc_instance_reuse(ctx) ? false: true;
 	needed_fields.clear();
 	needed_fields.insert(req.privilege_fields.begin(), req.privilege_fields.end());
       }
@@ -2296,12 +2297,17 @@ namespace Legion {
                                     bool &force_new_instances)
     //--------------------------------------------------------------------------
     {
-      // Do something special for reductions and
-      // it is not an explicit region-to-region copy
+      // We always set force_new_instances to false since we are
+      // deciding to optimize for minimizing memory usage instead
+      // of avoiding Write-After-Read (WAR) dependences
+      // for reduc privileges - we use the default policy
+      if (req.privilege == LEGION_REDUCE)
+	force_new_instances =
+	  default_policy_select_reduc_instance_reuse(ctx) ? false: true;
+      else
+	force_new_instances = false;
       if ((req.privilege == LEGION_REDUCE) && (mapping_kind != COPY_MAPPING))
       {
-        // Always make new reduction instances
-        force_new_instances = true;
         std::pair<Memory::Kind,ReductionOpID> constraint_key(
             target_memory.kind(), req.redop);
         std::map<std::pair<Memory::Kind,ReductionOpID>,LayoutConstraintID>::
@@ -2319,10 +2325,6 @@ namespace Legion {
         reduction_constraint_cache[constraint_key] = result;
         return result;
       }
-      // We always set force_new_instances to false since we are
-      // deciding to optimize for minimizing memory usage instead
-      // of avoiding Write-After-Read (WAR) dependences
-      force_new_instances = false;
       // See if we've already made a constraint set for this layout
       std::pair<Memory::Kind,FieldSpace> constraint_key(target_memory.kind(),
                                                req.region.get_field_space());
@@ -2473,8 +2475,7 @@ namespace Legion {
       // TODO: deal with task layout constraints that require multiple
       // region requirements to be mapped to the same instance
       std::vector<LogicalRegion> target_regions(1, target_region);
-      if (force_new ||
-          ((req.privilege == LEGION_REDUCE) && (kind != COPY_MAPPING))) {
+      if (force_new){
         if (!runtime->create_physical_instance(ctx, target_memory,
               constraints, target_regions, result, true/*acquire*/,
               0/*priority*/, tight_region_bounds, footprint))
@@ -3018,6 +3019,14 @@ namespace Legion {
     bool DefaultMapper::default_policy_select_close_virtual(
                           const MapperContext ctx,
                           const Close&        close)
+    //--------------------------------------------------------------------------
+    {
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    bool DefaultMapper::default_policy_select_reduc_instance_reuse(
+						   const MapperContext ctx)
     //--------------------------------------------------------------------------
     {
       return true;
