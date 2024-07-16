@@ -2052,7 +2052,9 @@ namespace Legion {
 		    auto finder =  req.privilege_fields.find(fid);
 		    if (finder != req.privilege_fields.end()) {
 		      // check specialized constraint
-		      if (index_constraints.specialized_constraint.conflicts(req.redop))
+                      const SpecializedConstraint constraint(
+                          LEGION_AFFINE_REDUCTION_SPECIALIZE, req.redop); 
+                      if (index_constraints.specialized_constraint.conflicts(constraint))
 			{
 			  log_mapper.error("Default mapper failed allocation for "
 			   "region requirement %d of task %s (UID %lld) in memory "
@@ -2071,6 +2073,7 @@ namespace Legion {
 	    }
 	}
     }
+
     //--------------------------------------------------------------------------
     bool DefaultMapper::default_create_custom_instances(MapperContext ctx,
                           Processor target_proc, Memory target_memory,
