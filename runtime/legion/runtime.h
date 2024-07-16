@@ -5088,7 +5088,7 @@ namespace Legion {
       assert(target.exists());
 #endif
       DETAILED_PROFILER(this, REALM_SPAWN_META_CALL);
-      if ((T::TASK_ID < LG_BEGIN_SHUTDOWN_TASK_IDS) && (profiler != NULL))
+      if (profiler != NULL)
       {
         Realm::ProfilingRequestSet requests;
         profiler->add_meta_request(requests, T::TASK_ID, args.provenance);
