@@ -25,7 +25,7 @@ class ReducMapper : public DefaultMapper
 public:
   ReducMapper(MapperRuntime *rt, Machine machine, Processor local,
                 const char *mapper_name);
-  bool default_policy_select_reduc_instance_reuse(const MapperContext ctx) override;
+  bool default_policy_select_reduction_instance_reuse(const MapperContext ctx) override;
 };
 
 ReducMapper::ReducMapper(MapperRuntime *rt, Machine machine, Processor local,
@@ -34,7 +34,7 @@ ReducMapper::ReducMapper(MapperRuntime *rt, Machine machine, Processor local,
 {
 }
 
-bool ReducMapper::default_policy_select_reduc_instance_reuse(const MapperContext ctx)
+bool ReducMapper::default_policy_select_reduction_instance_reuse(const MapperContext ctx)
 {
   return false;
 }

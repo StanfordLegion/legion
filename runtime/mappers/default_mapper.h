@@ -410,8 +410,8 @@ namespace Legion {
                                     std::deque<PhysicalInstance> &ranking);
       virtual bool default_policy_select_close_virtual(const MapperContext ctx,
                                                        const Close &close);
-      virtual bool default_policy_select_reduc_instance_reuse(const
-						      MapperContext ctx);
+      virtual bool default_policy_select_reduction_instance_reuse(const
+							  MapperContext ctx);
 
     protected: // help for generating random numbers
       long default_generate_random_integer(void) const;
