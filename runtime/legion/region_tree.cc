@@ -16559,6 +16559,7 @@ namespace Legion {
             continue;
           }
           const FieldMask overlap = check_mask & it->second;
+          bool skip_registering_region_dependece = false;
           if (!!overlap)
           {
             if (TRACK_DOM)
@@ -16601,6 +16602,7 @@ namespace Legion {
                         if(parent_dominates)
                         {
                           printf("FOUND PROPER ANCESTOR\n");
+                          skip_registering_region_dependece = true;
                           logical_analysis.point_wise_analyses.back().ancestor = &prev;
                           static_cast<IndexTask*>(user.op)->prev_index_tasks[user.idx] = std::pair<Operation*, unsigned>(prev.op, prev.gen);
                           static_cast<IndexTask*>(user.op)->prev_point_wise_mapping = true;
@@ -16609,7 +16611,7 @@ namespace Legion {
                       }
                     }
                   }
-                  if(logical_analysis.bail_point_wise_analysis)
+                  if(!skip_registering_region_dependece)
                   {
 #endif
                     printf("Registering dependence!\n");
@@ -16620,6 +16622,11 @@ namespace Legion {
                   user.op->register_region_dependence(user.idx, prev.op,
                                                       prev.gen, prev.idx,
                                                       dtype, overlap);
+#ifdef LEGION_SPY
+                  LegionSpy::log_mapping_dependence(
+                      user.op->get_context()->get_unique_id(),
+                      prev.uid, prev.idx, user.uid, user.idx, dtype);
+#endif
 #ifdef POINT_WISE_LOGICAL_ANALYSIS
                   }
                   else
@@ -16628,11 +16635,6 @@ namespace Legion {
                   }
 #endif
 
-#ifdef LEGION_SPY
-                  LegionSpy::log_mapping_dependence(
-                      user.op->get_context()->get_unique_id(),
-                      prev.uid, prev.idx, user.uid, user.idx, dtype);
-#endif
                   if (prev.shard_proj != NULL)
                   {
                    // Two operations from the same must epoch shouldn't

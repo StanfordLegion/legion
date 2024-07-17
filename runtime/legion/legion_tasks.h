@@ -565,7 +565,7 @@ namespace Legion {
       bool                                  first_mapping;
       std::vector<RtEvent>                  intra_space_mapping_dependences;
 #ifdef POINT_WISE_LOGICAL_ANALYSIS
-      std::vector<RtEvent>              point_wise_mapping_dependences;
+      std::vector<RtEvent>                  point_wise_mapping_dependences;
 #endif
       // Events that must be triggered before we are done mapping
       std::set<RtEvent>                     map_applied_conditions;
@@ -1297,7 +1297,7 @@ namespace Legion {
 #ifdef POINT_WISE_LOGICAL_ANALYSIS
     public:
       void recond_point_wise_dependence(LogicalRegion lr, RtEvent point_mapped);
-      RtEvent find_point_wise_dependence(LogicalRegion lr);
+      RtEvent find_point_wise_dependence(LogicalRegion lr, GenerationID gen);
 #endif
     public:
       // Methods for supporting intra-index-space mapping dependences

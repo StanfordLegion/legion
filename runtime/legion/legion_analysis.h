@@ -1476,7 +1476,7 @@ namespace Legion {
 #ifdef POINT_WISE_LOGICAL_ANALYSIS
     public:
       std::vector<PointWiseLogicalAnalysis> point_wise_analyses;
-      bool bail_point_wise_analysis = false;
+      bool bail_point_wise_analysis = true;
 #endif
     public:
       struct PendingClose : public LegionHeapify<PendingClose> {

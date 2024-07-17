@@ -7770,11 +7770,11 @@ namespace Legion {
           slice_owner->index_owner->prev_index_tasks.find(region_idx);
         assert(finder != slice_owner->index_owner->prev_index_tasks.end());
         IndexTask *prev_index_task = static_cast<IndexTask*>(finder->second.first);
-        GenerationID prev_task_gen_id = finder->second.second;
+        GenerationID prev_task_gen = finder->second.second;
 
-        if (prev_task_gen_id < prev_index_task->get_generation()) return;
+        if (prev_task_gen < prev_index_task->get_generation()) return;
 
-        RtEvent pre = prev_index_task->find_point_wise_dependence(lr);
+        RtEvent pre = prev_index_task->find_point_wise_dependence(lr, prev_task_gen);
         if (!std::binary_search(point_wise_mapping_dependences.begin(),
                   point_wise_mapping_dependences.end(), pre))
         {
@@ -9438,6 +9438,7 @@ namespace Legion {
         return;
 
       LogicalAnalysis logical_analysis(this, get_output_offset());
+      logical_analysis.bail_point_wise_analysis = false;
 
       unsigned req_count = get_region_count();
       for (unsigned i = 0; i < req_count; i++)
@@ -10336,10 +10337,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent IndexTask::find_point_wise_dependence(LogicalRegion lr)
+    RtEvent IndexTask::find_point_wise_dependence(LogicalRegion lr, GenerationID gen)
     //--------------------------------------------------------------------------
     {
       AutoLock o_lock(op_lock);
+
+      if (gen < get_generation()) return RtUserEvent::NO_RT_USER_EVENT;
+
       std::map<LogicalRegion,RtEvent>::iterator finder =
         point_wise_dependences.find(lr);
       if (finder != point_wise_dependences.end())

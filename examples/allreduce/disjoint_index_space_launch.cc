@@ -22,6 +22,11 @@
 #include "mappers/default_mapper.h"
 
 using namespace Legion;
+using namespace Legion::Mapping;
+
+enum {
+  POINT_WISE_LOGICAL_ANALYSIS_MAPPER_ID = 1,
+};
 
 enum TaskIDs {
   TOP_LEVEL_TASK_ID,
@@ -32,12 +37,116 @@ enum FieldIDs {
   FID_DATA,
 };
 
+// Select Task to map
+class PointWiseLogicalAnalysisMapper: public DefaultMapper {
+  private:
+    int current_point;
+    int current_point_count;
+    int total_point;
+    MapperEvent select_tasks_to_map_event;
+
+  public:
+    PointWiseLogicalAnalysisMapper(Machine m,
+        Runtime *rt, Processor p)
+      : DefaultMapper(rt->get_mapper_runtime(), m, p)
+    {
+      int num_iterations=2, num_points=4;
+      {
+        int argc = HighLevelRuntime::get_input_args().argc;
+        char **argv = HighLevelRuntime::get_input_args().argv;
+        for (int i = 1; i < argc; i++)
+        {
+          if (!strcmp(argv[i],"-i"))
+            num_iterations = atoi(argv[++i]);
+          if (!strcmp(argv[i],"-p"))
+            num_points = atoi(argv[++i]);
+        }
+      }
+      current_point = 0;
+      current_point_count = 0;
+      total_point = num_iterations;
+    }
+  public:
+		/*void select_task_options(const MapperContext ctx,
+														 const Task& task,
+																	 TaskOptions& output)
+    {
+      if (select_tasks_to_map_event.exists())
+        this->runtime->trigger_mapper_event(ctx, select_tasks_to_map_event);
+      DefaultMapper::select_task_options(ctx, task, output);
+    }*/
+
+    void select_tasks_to_map(const MapperContext          ctx,
+                             const SelectMappingInput&    input,
+                                   SelectMappingOutput&   output)
+    {
+      //DefaultMapper::select_tasks_to_map(ctx, input, output);
+      //return;
+      unsigned count = 0;
+      for (std::list<const Task*>::const_iterator it =
+            input.ready_tasks.begin(); (count < max_schedule_count) &&
+            (it != input.ready_tasks.end()); it++)
+      {
+        if (!(*it)->is_index_space)
+        {
+          output.map_tasks.insert(*it);
+          count ++;
+        }
+        else
+        {
+          Domain slice_domain = (*it)->get_slice_domain();
+          if (slice_domain.rect_data[0] == current_point)
+          {
+            output.map_tasks.insert(*it);
+            count ++;
+            if (++current_point_count == total_point)
+            {
+              current_point_count = 0;
+              current_point++;
+            }
+          }
+        }
+      }
+      if (count == 0)
+      {
+        select_tasks_to_map_event = this->runtime->create_mapper_event(ctx);
+        output.deferral_event = select_tasks_to_map_event;
+      }
+    }
+
+    virtual void slice_task(const MapperContext ctx,
+                            const Task& task,
+                            const SliceTaskInput& input,
+                                  SliceTaskOutput& output)
+    {
+      output.slices.resize(input.domain.get_volume());
+      unsigned idx = 0;
+      Rect<1> rect = input.domain;
+      for (PointInRectIterator<1> pir(rect); pir(); pir++, idx++)
+      {
+        Rect<1> slice(*pir, *pir);
+        output.slices[idx] = TaskSlice(slice,
+            task.target_proc,
+            false/*recurse*/, true/*stealable*/);
+      }
+    }
+
+    static void register_my_mapper(Machine m,
+                                   Runtime *rt,
+                                   const std::set<Processor> &local_procs)
+    {
+      for (auto proc: local_procs) {
+        rt->replace_default_mapper(new PointWiseLogicalAnalysisMapper(m, rt, proc), proc);
+      }
+    }
+};
+
 void top_level_task(const Task *task,
                     const std::vector<PhysicalRegion> &regions,
                     Context ctx, Runtime *runtime)
 {
   int num_points = 4;
-  int num_iterations = 1;
+  int num_iterations = 2;
   {
     const InputArgs &command_args = Runtime::get_input_args();
     for (int i = 1; i < command_args.argc; i++)
@@ -80,9 +189,8 @@ void top_level_task(const Task *task,
                         LEGION_READ_WRITE, LEGION_EXCLUSIVE, lr));
   intra_is_ordering_task_launcher.add_field(0, FID_DATA);
 
-  for (int idx = 1; idx <= num_iterations; idx++)
+  for (int idx = 0; idx < num_iterations; idx++)
   {
-    runtime->execute_index_space(ctx, intra_is_ordering_task_launcher);
     runtime->execute_index_space(ctx, intra_is_ordering_task_launcher);
   }
 
@@ -119,6 +227,8 @@ int main(int argc, char **argv)
     registrar.set_leaf();
     Runtime::preregister_task_variant<intra_is_ordering_task>(registrar, "intra_is_ordering_task");
   }
+
+	Runtime::add_registration_callback(PointWiseLogicalAnalysisMapper::register_my_mapper);
 
   return Runtime::start(argc, argv);
 }

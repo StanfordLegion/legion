@@ -7516,7 +7516,8 @@ namespace Legion {
       if (task_scheduler_enabled)
       {
         SchedulerArgs sched_args(local_proc);
-        runtime->issue_runtime_meta_task(sched_args, LG_LATENCY_WORK_PRIORITY);
+        //runtime->issue_runtime_meta_task(sched_args, LG_LATENCY_WORK_PRIORITY);
+        runtime->issue_runtime_meta_task(sched_args, LG_LOW_PRIORITY);
       }
       else
         outstanding_task_scheduler = false;
