@@ -2496,24 +2496,10 @@ namespace Legion {
      */
     struct PoolBounds {
     public:
-      // What other unbounded tasks are permitted if this is 
-      // also an unbounded pool
-      enum UnboundScope {
-        // Bounded pool so other allocations always permitted in parallel
-        BOUNDED_POOL,
-        // Nothing else is allowed to allocate in parallel
-        STRICT_UNBOUNDED_POOL,
-        // Only tasks in the same index space task launch
-        // are allowed to allocate in parallel
-        INDEX_TASK_SCOPE_UNBOUNDED_POOL,
-        // Anything else is allowed to allocate in parallel 
-        PERMISSIVE_UNBOUNDED_POOL,
-      };
-    public:
-      PoolBounds(UnboundScope s) 
+      PoolBounds(UnboundPoolScope s) 
         : size(0), alignment(0), scope(s) { }
       PoolBounds(size_t s = 0, uint32_t a = 16)
-        : size(s), alignment(a), scope(BOUNDED_POOL) { }
+        : size(s), alignment(a), scope(LEGION_BOUNDED_POOL) { }
       PoolBounds(const PoolBounds&) = default;
       PoolBounds(PoolBounds&&) = default;
       PoolBounds& operator=(const PoolBounds&) = default;
@@ -2521,7 +2507,7 @@ namespace Legion {
     public:
       size_t size; // upper bound of the pool in bytes
       uint32_t alignment; // maximum alignment supported
-      UnboundScope scope; // scope for unbound pools
+      UnboundPoolScope scope; // scope for unbound pools
     };
 
     /**

@@ -142,6 +142,7 @@ namespace Legion {
   typedef ::legion_resource_constraint_t ResourceKind;
   typedef ::legion_launch_constraint_t LaunchKind;
   typedef ::legion_specialized_constraint_t SpecializedKind;
+  typedef ::legion_unbounded_pool_scope_t UnboundPoolScope;
 
   // Forward declarations for user level objects
   // legion.h
