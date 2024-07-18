@@ -9138,6 +9138,7 @@ namespace Legion {
     bool MemoryManager::create_physical_instance(
                                 const LayoutConstraintSet &constraints,
                                 const std::vector<LogicalRegion> &regions,
+                                const TaskTreeCoordinates &coordinates,
                                 MappingInstance &result,
                                 Processor processor, bool acquire, 
                                 GCPriority priority, bool tight_bounds,
@@ -9161,6 +9162,10 @@ namespace Legion {
           rez.serialize<size_t>(regions.size());
           for (unsigned idx = 0; idx < regions.size(); idx++)
             rez.serialize(regions[idx]);
+          rez.serialize<size_t>(coordinates.size());
+          for (TaskTreeCoordinates::const_iterator it = 
+                coordinates.begin(); it != coordinates.end(); it++)
+            it->serialize(rez);
           constraints.serialize(rez);
           rez.serialize(processor);
           rez.serialize(priority);
@@ -9193,7 +9198,7 @@ namespace Legion {
         InstanceBuilder builder(regions, constraints, runtime, this,creator_id);
         builder.initialize(runtime->forest);
         // Acquire allocation privilege before doing anything
-        const RtEvent wait_on = acquire_allocation_privilege();
+        const RtEvent wait_on = acquire_allocation_privilege(coordinates);
         if (wait_on.exists())
           wait_on.wait();
         // Try to make the result
@@ -9218,6 +9223,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     bool MemoryManager::create_physical_instance(LayoutConstraints *constraints,
                                      const std::vector<LogicalRegion> &regions,
+                                     const TaskTreeCoordinates &coordinates,
                                      MappingInstance &result,
                                      Processor processor, bool acquire, 
                                      GCPriority priority, bool tight_bounds,
@@ -9241,6 +9247,10 @@ namespace Legion {
           rez.serialize<size_t>(regions.size());
           for (unsigned idx = 0; idx < regions.size(); idx++)
             rez.serialize(regions[idx]);
+          rez.serialize<size_t>(coordinates.size());
+          for (TaskTreeCoordinates::const_iterator it = 
+                coordinates.begin(); it != coordinates.end(); it++)
+            it->serialize(rez);
           rez.serialize(constraints->layout_id);
           rez.serialize(processor);
           rez.serialize(priority);
@@ -9273,7 +9283,7 @@ namespace Legion {
         InstanceBuilder builder(regions,*constraints, runtime, this,creator_id);
         builder.initialize(runtime->forest);
         // Acquire allocation privilege before doing anything
-        const RtEvent wait_on = acquire_allocation_privilege();
+        const RtEvent wait_on = acquire_allocation_privilege(coordinates);
         if (wait_on.exists())
           wait_on.wait();
         // Try to make the instance
@@ -9299,6 +9309,7 @@ namespace Legion {
     bool MemoryManager::find_or_create_physical_instance(
                                   const LayoutConstraintSet &constraints,
                                   const std::vector<LogicalRegion> &regions,
+                                  const TaskTreeCoordinates &coordinates,
                                   MappingInstance &result, bool &created, 
                                   Processor processor,
                                   bool acquire, GCPriority priority,
@@ -9329,6 +9340,10 @@ namespace Legion {
           rez.serialize<size_t>(regions.size());
           for (unsigned idx = 0; idx < regions.size(); idx++)
             rez.serialize(regions[idx]);
+          rez.serialize<size_t>(coordinates.size());
+          for (TaskTreeCoordinates::const_iterator it = 
+                coordinates.begin(); it != coordinates.end(); it++)
+            it->serialize(rez);
           constraints.serialize(rez);
           rez.serialize(processor);
           rez.serialize(priority);
@@ -9364,7 +9379,7 @@ namespace Legion {
         builder.initialize(runtime->forest); 
         // First get our allocation privileges so we're the only
         // one trying to do any allocations
-        const RtEvent wait_on = acquire_allocation_privilege();
+        const RtEvent wait_on = acquire_allocation_privilege(coordinates);
         if (wait_on.exists())
           wait_on.wait();
         // Since this is find or acquire, first see if we can find
@@ -9401,6 +9416,7 @@ namespace Legion {
     bool MemoryManager::find_or_create_physical_instance(
                                 LayoutConstraints *constraints, 
                                 const std::vector<LogicalRegion> &regions,
+                                const TaskTreeCoordinates &coordinates,
                                 MappingInstance &result, bool &created,
                                 Processor processor,
                                 bool acquire, GCPriority priority, 
@@ -9431,6 +9447,10 @@ namespace Legion {
           rez.serialize<size_t>(regions.size());
           for (unsigned idx = 0; idx < regions.size(); idx++)
             rez.serialize(regions[idx]);
+          rez.serialize<size_t>(coordinates.size());
+          for (TaskTreeCoordinates::const_iterator it = 
+                coordinates.begin(); it != coordinates.end(); it++)
+            it->serialize(rez);
           rez.serialize(constraints->layout_id);
           rez.serialize(processor);
           rez.serialize(priority);
@@ -9466,7 +9486,7 @@ namespace Legion {
         builder.initialize(runtime->forest);
         // First get our allocation privileges so we're the only
         // one trying to do any allocations
-        const RtEvent wait_on = acquire_allocation_privilege();
+        const RtEvent wait_on = acquire_allocation_privilege(coordinates);
         if (wait_on.exists())
           wait_on.wait();
         // Since this is find or acquire, first see if we can find
@@ -9802,6 +9822,11 @@ namespace Legion {
       {
         case CREATE_INSTANCE_CONSTRAINTS:
           {
+            size_t num_coordinates;
+            derez.deserialize(num_coordinates);
+            TaskTreeCoordinates coordinates(num_coordinates);
+            for (unsigned idx = 0; idx < num_coordinates; idx++)
+              coordinates[idx].deserialize(derez);
             LayoutConstraintSet constraints;
             constraints.deserialize(derez);
             Processor processor;
@@ -9827,7 +9852,7 @@ namespace Legion {
             LayoutConstraintKind local_kind;
             unsigned local_index;
             bool success = create_physical_instance(constraints, regions, 
-                                 result, processor, false/*acquire*/,
+                                 coordinates, result,processor,false/*acquire*/,
                                  priority, tight_region_bounds,
                                  &local_kind, &local_index, &local_footprint,
                                  creator_id, true/*remote*/);
@@ -9865,6 +9890,11 @@ namespace Legion {
           }
         case CREATE_INSTANCE_LAYOUT:
           {
+            size_t num_coordinates;
+            derez.deserialize(num_coordinates);
+            TaskTreeCoordinates coordinates(num_coordinates);
+            for (unsigned idx = 0; idx < num_coordinates; idx++)
+              coordinates[idx].deserialize(derez);
             LayoutConstraintID layout_id;
             derez.deserialize(layout_id);
             Processor processor;
@@ -9892,7 +9922,7 @@ namespace Legion {
             LayoutConstraintKind local_kind;
             unsigned local_index;
             bool success = create_physical_instance(constraints, regions, 
-                                 result, processor, false/*acquire*/,
+                                 coordinates, result,processor,false/*acquire*/,
                                  priority, tight_region_bounds,
                                  &local_kind, &local_index, &local_footprint,
                                  creator_id, true/*remote*/);
@@ -9929,6 +9959,11 @@ namespace Legion {
           }
         case FIND_OR_CREATE_CONSTRAINTS:
           {
+            size_t num_coordinates;
+            derez.deserialize(num_coordinates);
+            TaskTreeCoordinates coordinates(num_coordinates);
+            for (unsigned idx = 0; idx < num_coordinates; idx++)
+              coordinates[idx].deserialize(derez);
             LayoutConstraintSet constraints;
             constraints.deserialize(derez);
             Processor processor;
@@ -9955,7 +9990,7 @@ namespace Legion {
             unsigned local_index;
             bool created;
             bool success = find_or_create_physical_instance(constraints, 
-                                regions, result, created, processor,
+                                regions, coordinates, result, created,processor,
                                 false/*acquire*/, priority, tight_bounds,
                                 &local_kind, &local_index,
                                 &local_footprint, creator_id, true/*remote*/);
@@ -9993,6 +10028,11 @@ namespace Legion {
           }
         case FIND_OR_CREATE_LAYOUT:
           {
+            size_t num_coordinates;
+            derez.deserialize(num_coordinates);
+            TaskTreeCoordinates coordinates(num_coordinates);
+            for (unsigned idx = 0; idx < num_coordinates; idx++)
+              coordinates[idx].deserialize(derez);
             LayoutConstraintID layout_id;
             derez.deserialize(layout_id);
             Processor processor;
@@ -10021,7 +10061,7 @@ namespace Legion {
             unsigned local_index;
             bool created;
             bool success = find_or_create_physical_instance(constraints, 
-                                 regions, result, created, processor,
+                                 regions, coordinates, result,created,processor,
                                  false/*acquire*/, priority, tight_bounds,
                                  &local_kind, &local_index,
                                  &local_footprint, creator_id, true/*remote*/);
@@ -10717,7 +10757,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent MemoryManager::acquire_allocation_privilege(void)
+    RtEvent MemoryManager::acquire_allocation_privilege(
+                                         const TaskTreeCoordinates &coordinates)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -27246,6 +27287,7 @@ namespace Legion {
     bool Runtime::create_physical_instance(Memory target_memory,
                                      const LayoutConstraintSet &constraints,
                                      const std::vector<LogicalRegion> &regions,
+                                     const TaskTreeCoordinates &coordinates,
                                      MappingInstance &result,
                                      Processor processor, 
                                      bool acquire, GCPriority priority,
@@ -27259,9 +27301,9 @@ namespace Legion {
       {
         LayoutConstraintKind unsat_kind = LEGION_SPECIALIZED_CONSTRAINT;
         unsigned unsat_index = 0;
-        if (!manager->create_physical_instance(constraints, regions, result,
-                         processor, acquire, priority, tight_bounds,
-                         &unsat_kind, &unsat_index, footprint, creator_id))
+        if (!manager->create_physical_instance(constraints, regions, 
+              coordinates, result, processor, acquire, priority, tight_bounds,
+              &unsat_kind, &unsat_index, footprint, creator_id))
         {
           *unsat = constraints.convert_unsatisfied(unsat_kind, unsat_index);
           return false;
@@ -27270,15 +27312,16 @@ namespace Legion {
           return true;
       }
       else
-        return manager->create_physical_instance(constraints, regions, result,
-                         processor, acquire, priority, tight_bounds,
-                         NULL, NULL, footprint, creator_id);
+        return manager->create_physical_instance(constraints, regions, 
+            coordinates, result, processor, acquire, priority, tight_bounds,
+            NULL, NULL, footprint, creator_id);
     }
 
     //--------------------------------------------------------------------------
     bool Runtime::create_physical_instance(Memory target_memory,
                                      LayoutConstraints *constraints,
                                      const std::vector<LogicalRegion> &regions,
+                                     const TaskTreeCoordinates &coordinates,
                                      MappingInstance &result,
                                      Processor processor,
                                      bool acquire, GCPriority priority,
@@ -27292,9 +27335,9 @@ namespace Legion {
       {
         LayoutConstraintKind unsat_kind = LEGION_SPECIALIZED_CONSTRAINT;
         unsigned unsat_index = 0;
-        if (!manager->create_physical_instance(constraints, regions, result,
-                         processor, acquire, priority, tight_bounds,
-                         &unsat_kind, &unsat_index, footprint, creator_id))
+        if (!manager->create_physical_instance(constraints, regions, 
+              coordinates, result, processor, acquire, priority,
+              tight_bounds, &unsat_kind, &unsat_index, footprint, creator_id))
         {
           *unsat = constraints->convert_unsatisfied(unsat_kind, unsat_index);
           return false;
@@ -27303,15 +27346,16 @@ namespace Legion {
           return true;
       }
       else
-        return manager->create_physical_instance(constraints, regions, result,
-                         processor, acquire, priority, tight_bounds,
-                         NULL, NULL, footprint, creator_id);
+        return manager->create_physical_instance(constraints, regions, 
+            coordinates, result, processor, acquire, priority, tight_bounds,
+            NULL, NULL, footprint, creator_id);
     }
 
     //--------------------------------------------------------------------------
     bool Runtime::find_or_create_physical_instance(Memory target_memory,
                                      const LayoutConstraintSet &constraints,
                                      const std::vector<LogicalRegion> &regions,
+                                     const TaskTreeCoordinates &coordinates,
                                      MappingInstance &result, bool &created, 
                                      Processor processor,
                                      bool acquire, GCPriority priority,
@@ -27325,10 +27369,9 @@ namespace Legion {
       {
         LayoutConstraintKind unsat_kind = LEGION_SPECIALIZED_CONSTRAINT;
         unsigned unsat_index = 0;
-        if (!manager->find_or_create_physical_instance(constraints, regions, 
-                         result, created, processor, acquire, 
-                         priority, tight_bounds, &unsat_kind, &unsat_index,
-                         footprint, creator_id))
+        if (!manager->find_or_create_physical_instance(constraints, regions,
+              coordinates, result, created, processor, acquire, priority,
+              tight_bounds, &unsat_kind, &unsat_index, footprint, creator_id))
         {
           *unsat = constraints.convert_unsatisfied(unsat_kind, unsat_index);
           return false;
@@ -27338,14 +27381,15 @@ namespace Legion {
       }
       else
         return manager->find_or_create_physical_instance(constraints, regions, 
-                         result, created, processor, acquire, 
-                         priority, tight_bounds,NULL,NULL,footprint,creator_id);
+            coordinates, result, created, processor, acquire, priority,
+            tight_bounds, NULL, NULL, footprint, creator_id);
     }
 
     //--------------------------------------------------------------------------
     bool Runtime::find_or_create_physical_instance(Memory target_memory,
                                     LayoutConstraints *constraints,
                                     const std::vector<LogicalRegion> &regions,
+                                    const TaskTreeCoordinates &coordinates,
                                     MappingInstance &result, bool &created, 
                                     Processor processor,
                                     bool acquire, GCPriority priority,
@@ -27360,9 +27404,8 @@ namespace Legion {
         LayoutConstraintKind unsat_kind = LEGION_SPECIALIZED_CONSTRAINT;
         unsigned unsat_index = 0;
         if (!manager->find_or_create_physical_instance(constraints, regions,
-                           result, created, processor, acquire, 
-                           priority, tight_bounds, &unsat_kind, &unsat_index,
-                           footprint, creator_id))
+              coordinates, result, created, processor, acquire, priority,
+              tight_bounds, &unsat_kind, &unsat_index, footprint, creator_id))
         {
           *unsat = constraints->convert_unsatisfied(unsat_kind, unsat_index);
           return false;
@@ -27372,8 +27415,8 @@ namespace Legion {
       }
       else
         return manager->find_or_create_physical_instance(constraints, regions,
-                     result, created, processor, acquire, 
-                     priority, tight_bounds, NULL, NULL, footprint, creator_id);
+            coordinates, result, created, processor, acquire, priority,
+            tight_bounds, NULL, NULL, footprint, creator_id);
     }
 
     //--------------------------------------------------------------------------

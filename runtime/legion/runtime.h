@@ -1648,6 +1648,7 @@ namespace Legion {
     public:
       bool create_physical_instance(const LayoutConstraintSet &contraints,
                                     const std::vector<LogicalRegion> &regions,
+                                    const TaskTreeCoordinates &coordinates,
                                     MappingInstance &result,
                                     Processor processor, bool acquire, 
                                     GCPriority priority, bool tight_bounds,
@@ -1656,6 +1657,7 @@ namespace Legion {
                                     UniqueID creator_id, bool remote = false);
       bool create_physical_instance(LayoutConstraints *constraints,
                                     const std::vector<LogicalRegion> &regions,
+                                    const TaskTreeCoordinates &coordinates,
                                     MappingInstance &result,
                                     Processor processor, bool acquire, 
                                     GCPriority priority, bool tight_bounds,
@@ -1665,6 +1667,7 @@ namespace Legion {
       bool find_or_create_physical_instance(
                                     const LayoutConstraintSet &constraints,
                                     const std::vector<LogicalRegion> &regions,
+                                    const TaskTreeCoordinates &coordinates,
                                     MappingInstance &result, bool &created, 
                                     Processor processor,
                                     bool acquire, GCPriority priority, 
@@ -1675,6 +1678,7 @@ namespace Legion {
       bool find_or_create_physical_instance(
                                     LayoutConstraints *constraints,
                                     const std::vector<LogicalRegion> &regions,
+                                    const TaskTreeCoordinates &coordinates,
                                     MappingInstance &result, bool &created, 
                                     Processor processor,
                                     bool acquire, GCPriority priority, 
@@ -1756,8 +1760,9 @@ namespace Legion {
       void check_instance_deletions(const std::vector<PhysicalManager*> &del);
     protected:
       // We serialize all allocation attempts in a memory in order to 
-      // ensure find_and_create calls will remain atomic
-      RtEvent acquire_allocation_privilege(void);
+      // ensure find_and_create calls will remain atomic and are also
+      // ordered with respect to any unbound pool allocations
+      RtEvent acquire_allocation_privilege(const TaskTreeCoordinates &coords);
       void release_allocation_privilege(void);
       PhysicalManager* allocate_physical_instance(InstanceBuilder &builder,
                                           size_t *footprint,
@@ -4014,6 +4019,7 @@ namespace Legion {
       bool create_physical_instance(Memory target_memory,
                                     const LayoutConstraintSet &constraints,
                                     const std::vector<LogicalRegion> &regions,
+                                    const TaskTreeCoordinates &coordinates,
                                     MappingInstance &result,
                                     Processor processor, bool acquire, 
                                     GCPriority priority, bool tight_bounds,
@@ -4022,6 +4028,7 @@ namespace Legion {
       bool create_physical_instance(Memory target_memory, 
                                     LayoutConstraints *constraints,
                                     const std::vector<LogicalRegion> &regions,
+                                    const TaskTreeCoordinates &coordinates,
                                     MappingInstance &result,
                                     Processor processor, bool acquire, 
                                     GCPriority priority, bool tight_bounds,
@@ -4030,6 +4037,7 @@ namespace Legion {
       bool find_or_create_physical_instance(Memory target_memory,
                                     const LayoutConstraintSet &constraints,
                                     const std::vector<LogicalRegion> &regions,
+                                    const TaskTreeCoordinates &coordinates,
                                     MappingInstance &result, bool &created, 
                                     Processor processor,
                                     bool acquire, GCPriority priority,
@@ -4039,6 +4047,7 @@ namespace Legion {
       bool find_or_create_physical_instance(Memory target_memory,
                                     LayoutConstraints *constraints,
                                     const std::vector<LogicalRegion> &regions,
+                                    const TaskTreeCoordinates &coordinates,
                                     MappingInstance &result, bool &created, 
                                     Processor processor,
                                     bool acquire, GCPriority priority,

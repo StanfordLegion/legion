@@ -1189,17 +1189,23 @@ namespace Legion {
       if (regions.empty())
         return false;
       check_region_consistency(ctx, "create_physical_instance", regions);
-      if (acquire && (ctx->acquired_instances == NULL))
+      if (ctx->operation == NULL)
       {
         REPORT_LEGION_WARNING(LEGION_WARNING_IGNORING_ACQUIRE_REQUEST,
-                        "Ignoring acquire request to create_physical_instance "
-                        "in unsupported mapper call %s in mapper %s", 
-                        get_mapper_call_name(ctx->kind), get_mapper_name());
-        acquire = false;
+            "Ignoring request to create_physical_instance in unsupported "
+            "mapper call %s in mapper %s. Physical instances can only be " 
+            "created in mapper calls associated with a Mappable operation.",
+            get_mapper_call_name(ctx->kind), get_mapper_name());
+        return false;
       }
+#ifdef DEBUG_LEGION
+      assert(ctx->acquired_instances != NULL);
+#endif
       pause_mapper_call(ctx);
+      TaskTreeCoordinates coordinates;
+      ctx->operation->compute_task_tree_coordinates(coordinates);
       bool success = runtime->create_physical_instance(target_memory, 
-        constraints, regions, result, processor, acquire, priority, 
+        constraints, regions, coordinates, result, processor, acquire, priority,
         tight_region_bounds, unsat, footprint, (ctx->operation == NULL) ? 
           0 : ctx->operation->get_unique_op_id());
       if (success && acquire)
@@ -1224,21 +1230,26 @@ namespace Legion {
       if (regions.empty())
         return false;
       check_region_consistency(ctx, "create_physical_instance", regions);
-      if (acquire && (ctx->acquired_instances == NULL))
+      if (ctx->operation == NULL)
       {
         REPORT_LEGION_WARNING(LEGION_WARNING_IGNORING_ACQUIRE_REQUEST,
-                        "Ignoring acquire request to create_physical_instance "
-                        "in unsupported mapper call %s in mapper %s", 
-                        get_mapper_call_name(ctx->kind), get_mapper_name());
-        acquire = false;
+            "Ignoring request to create_physical_instance in unsupported "
+            "mapper call %s in mapper %s. Physical instances can only be " 
+            "created in mapper calls associated with a Mappable operation.",
+            get_mapper_call_name(ctx->kind), get_mapper_name());
+        return false;
       }
+#ifdef DEBUG_LEGION
+      assert(ctx->acquired_instances != NULL);
+#endif
       pause_mapper_call(ctx);
+      TaskTreeCoordinates coordinates;
+      ctx->operation->compute_task_tree_coordinates(coordinates);
       LayoutConstraints *cons = runtime->find_layout_constraints(layout_id);
       bool success = runtime->create_physical_instance(target_memory, cons,
-                      regions, result, processor, acquire, priority,
-                      tight_region_bounds, unsat, footprint,
-                      (ctx->operation == NULL) ? 0 :
-                        ctx->operation->get_unique_op_id());
+          regions, coordinates, result, processor, acquire, priority,
+          tight_region_bounds, unsat, footprint, (ctx->operation == NULL) ? 0 :
+            ctx->operation->get_unique_op_id());
       if (success && acquire)
         record_acquired_instance(ctx, result.impl, true/*created*/);
       resume_mapper_call(ctx, MAPPER_CREATE_PHYSICAL_INSTANCE_CALL);
@@ -1262,17 +1273,26 @@ namespace Legion {
         return false;
       check_region_consistency(ctx, "find_or_create_physical_instance",
                                regions);
-      if (acquire && (ctx->acquired_instances == NULL))
+      if (ctx->operation == NULL)
       {
         REPORT_LEGION_WARNING(LEGION_WARNING_IGNORING_ACQUIRE_REQUEST,
-                        "Ignoring acquire request to find_or_create_physical"
-                        "_instance in unsupported mapper call %s in mapper %s",
-                        get_mapper_call_name(ctx->kind), get_mapper_name());
-        acquire = false;
+            "Ignoring request to find_or_create_physical_instance in "
+            "unsupported mapper call %s in mapper %s. Physical instances "
+            "can only be created in mapper calls associated with a "
+            "Mappable operation. Legion will still attempt the find "
+            "part of this call.",
+            get_mapper_call_name(ctx->kind), get_mapper_name());
+        return find_physical_instance(ctx, target_memory, constraints,
+            regions, result, acquire, tight_region_bounds);
       }
+#ifdef DEBUG_LEGION
+      assert(ctx->acquired_instances != NULL);
+#endif
       pause_mapper_call(ctx);
+      TaskTreeCoordinates coordinates;
+      ctx->operation->compute_task_tree_coordinates(coordinates);
       bool success = runtime->find_or_create_physical_instance(target_memory,
-                constraints, regions, result, created, processor, 
+                constraints, regions, coordinates, result, created, processor,
                 acquire, priority, tight_region_bounds, unsat, footprint,
                 (ctx->operation == NULL) ? 0 :
                  ctx->operation->get_unique_op_id());
@@ -1299,18 +1319,27 @@ namespace Legion {
         return false;
       check_region_consistency(ctx, "find_or_create_physical_instance",
                                regions);
-      if (acquire && (ctx->acquired_instances == NULL))
+      if (ctx->operation == NULL)
       {
         REPORT_LEGION_WARNING(LEGION_WARNING_IGNORING_ACQUIRE_REQUEST,
-                        "Ignoring acquire request to find_or_create_physical"
-                        "_instance in unsupported mapper call %s in mapper %s",
-                        get_mapper_call_name(ctx->kind), get_mapper_name());
-        acquire = false;
+            "Ignoring request to find_or_create_physical_instance in "
+            "unsupported mapper call %s in mapper %s. Physical instances "
+            "can only be created in mapper calls associated with a "
+            "Mappable operation. Legion will still attempt the find "
+            "part of this call.",
+            get_mapper_call_name(ctx->kind), get_mapper_name());
+        return find_physical_instance(ctx, target_memory, layout_id,
+            regions, result, acquire, tight_region_bounds);
       }
+#ifdef DEBUG_LEGION
+      assert(ctx->acquired_instances != NULL);
+#endif
       pause_mapper_call(ctx);
+      TaskTreeCoordinates coordinates;
+      ctx->operation->compute_task_tree_coordinates(coordinates);
       LayoutConstraints *cons = runtime->find_layout_constraints(layout_id);
       bool success = runtime->find_or_create_physical_instance(target_memory,
-                 cons, regions, result, created, processor,
+                 cons, regions, coordinates, result, created, processor,
                  acquire, priority, tight_region_bounds, unsat, footprint,
                  (ctx->operation == NULL) ? 0 : 
                   ctx->operation->get_unique_op_id());
