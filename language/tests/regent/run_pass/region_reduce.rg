@@ -13,6 +13,9 @@
 -- limitations under the License.
 
 import "regent"
+local launcher = require("std/launcher")
+local cmapper = launcher.build_library("reduc_mapper")
+local c = regentlib.c
 
 -- Do each of these reductions multiple times so we know they're
 -- folding properly.
@@ -90,4 +93,4 @@ end
 task main()
   regentlib.assert(f() == -2636, "test failed")
 end
-regentlib.start(main)
+launcher.launch(main, "region_reduce", cmapper.register_mappers, {"-lreduc_mapper"})

@@ -7,12 +7,12 @@ use clap::{Args, Parser, Subcommand};
 
 use rayon::prelude::*;
 
+use url::Url;
+
 #[cfg(feature = "client")]
 use legion_prof_viewer::{
     app, deferred_data::DeferredDataSource, http::client::HTTPClientDataSource,
 };
-#[cfg(feature = "client")]
-use url::Url;
 
 #[cfg(feature = "archiver")]
 use legion_prof::backend::archiver;
