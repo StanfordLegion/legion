@@ -16093,45 +16093,45 @@ namespace Legion {
       inline DeferredBuffer(Memory::Kind kind, 
                             const Domain &bounds,
                             const FT *initial_value = NULL,
-                            size_t alignment = 16,
+                            size_t alignment = std::alignment_of<FT>(),
                             bool fortran_order_dims = false);
       inline DeferredBuffer(const Rect<N,T> &bounds, 
                             Memory::Kind kind,
                             const FT *initial_value = NULL,
-                            size_t alignment = 16,
+                            size_t alignment = std::alignment_of<FT>(),
                             bool fortran_order_dims = false);
       // Explicit memory
       inline DeferredBuffer(Memory memory, 
                             const Domain &bounds,
                             const FT *initial_value = NULL,
-                            size_t alignment = 16,
+                            size_t alignment = std::alignment_of<FT>(),
                             bool fortran_order_dims = false);
       inline DeferredBuffer(const Rect<N,T> &bounds, 
                             Memory memory,
                             const FT *initial_value = NULL,
-                            size_t alignment = 16,
+                            size_t alignment = std::alignment_of<FT>(),
                             bool fortran_order_dims = false);
     public: // Explicit ordering
       inline DeferredBuffer(Memory::Kind kind,
                             const Domain &bounds,
                             std::array<DimensionKind,N> ordering,
                             const FT *initial_value = NULL,
-                            size_t alignment = 16);
+                            size_t alignment = std::alignment_of<FT>());
       inline DeferredBuffer(const Rect<N,T> &bounds,
                             Memory::Kind kind,
                             std::array<DimensionKind,N> ordering,
                             const FT *initial_value = NULL,
-                            size_t alignment = 16);
+                            size_t alignment = std::alignment_of<FT>());
       inline DeferredBuffer(Memory memory,
                             const Domain &bounds,
                             std::array<DimensionKind,N> ordering,
                             const FT *initial_value = NULL,
-                            size_t alignment = 16);
+                            size_t alignment = std::alignment_of<FT>());
       inline DeferredBuffer(const Rect<N,T> &bounds,
                             Memory memory,
                             std::array<DimensionKind,N> ordering,
                             const FT *initial_value = NULL,
-                            size_t alignment = 16);
+                            size_t alignment = std::alignment_of<FT>());
     protected:
       Memory get_memory_from_kind(Memory::Kind kind);
       void initialize_layout(size_t alignment, bool fortran_order_dims);
@@ -16197,7 +16197,7 @@ namespace Legion {
 #endif
            >::DeferredBuffer(Memory::Kind kind, const Domain &space,
                              const FT *initial_value/* = NULL*/,
-                             size_t alignment/* = 16*/,
+                             size_t alignment/* = alignof(FT)*/,
                              bool fortran_order_dims/* = false*/)
     //--------------------------------------------------------------------------
     {
@@ -16225,7 +16225,7 @@ namespace Legion {
 #endif
            >::DeferredBuffer(const Rect<N,T> &rect, Memory::Kind kind,
                              const FT *initial_value /*= NULL*/,
-                             size_t alignment/* = 16*/,
+                             size_t alignment/* = alignof(FT)*/,
                              bool fortran_order_dims /*= false*/)
     //--------------------------------------------------------------------------
     {
@@ -16248,7 +16248,7 @@ namespace Legion {
 #endif
            >::DeferredBuffer(Memory memory, const Domain &space,
                              const FT *initial_value/* = NULL*/,
-                             size_t alignment/* = 16*/,
+                             size_t alignment/* = alignof(FT)*/,
                              bool fortran_order_dims/* = false*/)
     //--------------------------------------------------------------------------
     {
@@ -16275,7 +16275,7 @@ namespace Legion {
 #endif
            >::DeferredBuffer(const Rect<N,T> &rect, Memory memory,
                              const FT *initial_value /*= NULL*/,
-                             size_t alignment/* = 16*/,
+                             size_t alignment/* = alignof(FT)*/,
                              bool fortran_order_dims /*= false*/)
     //--------------------------------------------------------------------------
     {
@@ -16298,7 +16298,7 @@ namespace Legion {
            >::DeferredBuffer(Memory::Kind kind, const Domain &space,
                              std::array<DimensionKind,N> _ordering,
                              const FT *initial_value/* = NULL*/,
-                             size_t _alignment/* = 16*/)
+                             size_t _alignment/* = alignof(FT)*/)
       : ordering(_ordering), alignment(_alignment)
     //--------------------------------------------------------------------------
     {
@@ -16326,7 +16326,7 @@ namespace Legion {
            >::DeferredBuffer(const Rect<N,T> &rect, Memory::Kind kind,
                              std::array<DimensionKind,N> _ordering,
                              const FT *initial_value /*= NULL*/,
-                             size_t _alignment/* = 16*/)
+                             size_t _alignment/* = alignof(FT)*/)
       : ordering(_ordering), alignment(_alignment)
     //--------------------------------------------------------------------------
     {
@@ -16349,7 +16349,7 @@ namespace Legion {
            >::DeferredBuffer(Memory memory, const Domain &space,
                              std::array<DimensionKind,N> _ordering,
                              const FT *initial_value/* = NULL*/,
-                             size_t _alignment/* = 16*/)
+                             size_t _alignment/* = alignof(FT)*/)
       : ordering(_ordering), alignment(_alignment)
     //--------------------------------------------------------------------------
     {
@@ -16376,7 +16376,7 @@ namespace Legion {
            >::DeferredBuffer(const Rect<N,T> &rect, Memory memory,
                              std::array<DimensionKind,N> _ordering,
                              const FT *initial_value /*= NULL*/,
-                             size_t _alignment/* = 16*/)
+                             size_t _alignment/* = alignof(FT)*/)
       : ordering(_ordering), alignment(_alignment)
     //--------------------------------------------------------------------------
     {
