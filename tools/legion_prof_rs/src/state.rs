@@ -2990,7 +2990,7 @@ impl State {
             .and_then(|op| op.provenance.and_then(|pid| self.find_provenance(pid)))
     }
 
-    pub fn create_reference(&mut self, fevent: EventID) -> Option<ProfUID> {
+    fn create_fevent_reference(&mut self, fevent: EventID) -> Option<ProfUID> {
         self.prof_uid_allocator.create_reference(fevent)
     }
 
@@ -4655,7 +4655,7 @@ fn process_record(
             creator,
         } => {
             state.create_op(*op_id);
-            let creator_uid = state.create_reference(*creator);
+            let creator_uid = state.create_fevent_reference(*creator);
             state.insts.entry(*inst_uid).or_insert_with(|| *mem_id);
             state
                 .create_inst(*inst_uid, insts)
@@ -4763,7 +4763,7 @@ fn process_record(
             event,
             backtrace_id,
         } => {
-            let task_uid = state.create_reference(*fevent).unwrap();
+            let task_uid = state.create_fevent_reference(*fevent).unwrap();
             let proc = state.procs.get_mut(proc_id).unwrap();
             proc.record_event_wait(task_uid, *event, *backtrace_id);
         }
