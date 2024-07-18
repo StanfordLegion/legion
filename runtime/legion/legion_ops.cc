@@ -1851,7 +1851,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       parent_ctx->compute_task_tree_coordinates(coords);
-      coords.push_back(ContextCoordinate(context_index, DomainPoint()));
+      coords.emplace_back(get_task_tree_coordinate());
+    }
+
+    //--------------------------------------------------------------------------
+    ContextCoordinate Operation::get_task_tree_coordinate(void) const
+    //--------------------------------------------------------------------------
+    {
+      return ContextCoordinate(context_index, DomainPoint());
     }
 
     //--------------------------------------------------------------------------
@@ -19982,6 +19989,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       pack_local_remote_operation(rez);      
+      const ContextCoordinate coordinate = get_task_tree_coordinate();
+      rez.serialize(coordinate.index_point);
     }
 
     //--------------------------------------------------------------------------
@@ -21371,6 +21380,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       pack_local_remote_operation(rez);
+      const ContextCoordinate coordinate = get_task_tree_coordinate();
+      rez.serialize(coordinate.index_point);
     }
 
     //--------------------------------------------------------------------------
@@ -24053,13 +24064,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       pack_remote_base(rez);
+      rez.serialize(index_point); 
     }
 
     //--------------------------------------------------------------------------
     void RemoteAttachOp::unpack(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      // Nothing for the moment
+      derez.deserialize(index_point);
     }
 
     ///////////////////////////////////////////////////////////// 
@@ -24139,13 +24151,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       pack_remote_base(rez);
+      rez.serialize(index_point);
     }
 
     //--------------------------------------------------------------------------
     void RemoteDetachOp::unpack(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      // Nothing for the moment
+      derez.deserialize(index_point);
     }
 
     ///////////////////////////////////////////////////////////// 

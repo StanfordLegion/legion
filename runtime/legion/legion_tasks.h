@@ -363,6 +363,8 @@ namespace Legion {
       virtual DomainPoint get_shard_point(void) const;
       virtual Domain get_shard_domain(void) const;
       virtual void set_context_index(uint64_t index);
+      virtual ContextCoordinate get_task_tree_coordinate(void) const
+        { return ContextCoordinate(context_index, index_point); }
     public:
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
@@ -440,6 +442,8 @@ namespace Legion {
         { return map_applied_conditions; }
       inline RtEvent get_profiling_reported(void) const
         { return profiling_reported; }
+      virtual ContextCoordinate get_task_tree_coordinate(void) const
+        { return ContextCoordinate(context_index, index_point); }
     public:
       RtEvent perform_versioning_analysis(const bool post_mapper);
       virtual bool replicate_task(void);
@@ -787,7 +791,7 @@ namespace Legion {
       virtual Domain get_shard_domain(void) const
         { return Domain(DomainPoint(0),DomainPoint(0)); }
       virtual Operation* get_origin_operation(void) 
-        { return is_remote() ? orig_task : this; }
+        { return is_remote() ? orig_task : this; } 
     public:
       Future initialize_task(InnerContext *ctx,
                              const TaskLauncher &launcher,
