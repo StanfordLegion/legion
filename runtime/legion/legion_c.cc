@@ -3558,7 +3558,7 @@ legion_deferred_buffer_char_##DIM##d_create( \
   Memory::Kind kind = CObjectWrapper::unwrap(kind_); \
  \
   return CObjectWrapper::wrap( \
-      new DeferredBufferChar##DIM##D(bounds, kind, initial_value)); \
+      new DeferredBufferChar##DIM##D(bounds, kind, initial_value, 16)); \
 }
 LEGION_FOREACH_N(CREATE_BUFFER)
 #undef CREATE_BUFFER
