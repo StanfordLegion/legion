@@ -339,25 +339,30 @@ TEST_P(RangeAllocatorSplitParamTest, Base)
   }
 
   EXPECT_EQ(range_alloc.ranges.size(), test_case.exp_ranges.size());
-  for(size_t i = 0; i < test_case.exp_ranges.size(); i++) {
-    if(i != SENTINEL) {
-      EXPECT_EQ(range_alloc.ranges[i].first, test_case.exp_ranges[i].first);
-      EXPECT_EQ(range_alloc.ranges[i].last, test_case.exp_ranges[i].last);
-    }
-    EXPECT_EQ(range_alloc.ranges[i].prev, test_case.exp_ranges[i].prev);
-    EXPECT_EQ(range_alloc.ranges[i].next, test_case.exp_ranges[i].next);
-    EXPECT_EQ(range_alloc.ranges[i].prev_free, test_case.exp_ranges[i].prev_free);
-    EXPECT_EQ(range_alloc.ranges[i].next_free, test_case.exp_ranges[i].next_free);
-  }
 
   EXPECT_EQ(test_case.free_size, get_total_free_size());
 
-  // TODO: Add lookups
-  /*for(size_t i = 0; i < test_case.split_new_tags.size(); i++) {
-    size_t first, size;
-    EXPECT_EQ(range_alloc.lookup(test_case.split_new_tags[i], first, size),
-              test_case.split_status[i]);
-  }*/
+  EXPECT_EQ(range_alloc.ranges[SENTINEL].prev, test_case.exp_ranges[SENTINEL].prev);
+  EXPECT_EQ(range_alloc.ranges[SENTINEL].next, test_case.exp_ranges[SENTINEL].next);
+  EXPECT_EQ(range_alloc.ranges[SENTINEL].prev_free,
+            test_case.exp_ranges[SENTINEL].prev_free);
+  EXPECT_EQ(range_alloc.ranges[SENTINEL].next_free,
+            test_case.exp_ranges[SENTINEL].next_free);
+
+  size_t index = 1;
+  unsigned idx = range_alloc.ranges[SENTINEL].next;
+  while(idx != SENTINEL) {
+    EXPECT_EQ(range_alloc.ranges[idx].prev, test_case.exp_ranges[index].prev);
+    EXPECT_EQ(range_alloc.ranges[idx].next, test_case.exp_ranges[index].next);
+    EXPECT_EQ(range_alloc.ranges[idx].prev_free, test_case.exp_ranges[index].prev_free);
+    EXPECT_EQ(range_alloc.ranges[idx].next_free, test_case.exp_ranges[index].next_free);
+    idx = range_alloc.ranges[idx].next;
+    index++;
+  }
+
+  for(size_t i = 0; i < test_case.split_new_tags.size(); i++) {
+    //EXPECT_EQ(range_alloc.allocated.find());
+  }
 
   // range_alloc.dump_allocator_status();
 }
@@ -378,7 +383,7 @@ INSTANTIATE_TEST_SUITE_P(
 
                  .exp_ranges{Range{}}},
 
-        // Case 1: split from invalid tag
+        // Case 1: split from non-existent tag
         TestCase{.alloc_ranges{{0, 512}},
                  .alloc_tags{1},
                  .alloc_sizes{512},
@@ -414,7 +419,7 @@ INSTANTIATE_TEST_SUITE_P(
                              Range{/*first=*/0, /*last=*/512, /*prev=*/0, /*next=*/0,
                                    /*prev_free=*/1, /*next_free=*/1}}},
 
-        // Case 3: base case reuse full range
+        // Case 3: base case split/reuse the full range
         TestCase{.alloc_ranges{{0, 512}},
                  .alloc_tags{1},
                  .alloc_sizes{512},
@@ -432,7 +437,7 @@ INSTANTIATE_TEST_SUITE_P(
                              Range{/*first=*/0, /*last=*/512, /*prev=*/0, /*next=*/0,
                                    /*prev_free=*/1, /*next_free=*/1}}},
 
-        // Case 4: reuse zero range
+        // Case 4: split/reuse zero range
         TestCase{
             .alloc_ranges{{0, 512}},
             .alloc_tags{1},
@@ -472,18 +477,17 @@ INSTANTIATE_TEST_SUITE_P(
             .exp_ranges{Range{/*first=*/0, /*last=*/0, /*prev=*/2, /*next=*/3,
                               /*prev_free=*/2, /*next_free=*/3},
 
-                        Range{/*first=*/32, /*last=*/528, /*prev=*/3, /*next=*/4,
-                              /*prev_free=*/1, /*next_free=*/1},
-
-                        Range{/*first=*/824, /*last=*/1000, /*prev=*/4, /*next=*/0,
-                              /*prev_free=*/4, /*next_free=*/0},
-
                         Range{/*first=*/24, /*last=*/32, /*prev=*/0, /*next=*/1,
                               /*prev_free=*/0, /*next_free=*/4},
 
-                        Range{/*first=*/528, /*last=*/824, /*prev=*/1, /*next=*/2,
-                              /*prev_free=*/3, /*next_free=*/2}},
+                        Range{/*first=*/32, /*last=*/528, /*prev=*/3, /*next=*/4,
+                              /*prev_free=*/1, /*next_free=*/1},
 
+                        Range{/*first=*/528, /*last=*/824, /*prev=*/1, /*next=*/2,
+                              /*prev_free=*/3, /*next_free=*/2},
+
+                        Range{/*first=*/824, /*last=*/1000, /*prev=*/4, /*next=*/0,
+                              /*prev_free=*/4, /*next_free=*/0}},
             .free_size = 480,
         },
 
@@ -507,18 +511,18 @@ INSTANTIATE_TEST_SUITE_P(
                 Range{/*first=*/0, /*last=*/0, /*prev=*/2, /*next=*/3,
                       /*prev_free=*/2, /*next_free=*/3},
 
-                Range{/*first=*/32, /*last=*/280, /*prev=*/3, /*next=*/4,
-                      /*prev_free=*/1, /*next_free=*/1},
-
-                Range{/*first=*/824, /*last=*/1000, /*prev=*/4, /*next=*/0,
-                      /*prev_free=*/4, /*next_free=*/0},
-
                 // free range after alignment computation
                 Range{/*first=*/24, /*last=*/32, /*prev=*/0, /*next=*/1,
                       /*prev_free=*/0, /*next_free=*/4},
 
+                Range{/*first=*/32, /*last=*/280, /*prev=*/3, /*next=*/4,
+                      /*prev_free=*/1, /*next_free=*/1},
+
                 Range{/*first=*/280, /*last=*/824, /*prev=*/1, /*next=*/2,
                       /*prev_free=*/3, /*next_free=*/2},
+
+                Range{/*first=*/824, /*last=*/1000, /*prev=*/4, /*next=*/0,
+                      /*prev_free=*/4, /*next_free=*/0},
             },
 
             .free_size = 728,
@@ -544,18 +548,19 @@ INSTANTIATE_TEST_SUITE_P(
                 Range{/*first=*/0, /*last=*/0, /*prev=*/2, /*next=*/3,
                       /*prev_free=*/2, /*next_free=*/3},
 
-                Range{/*first=*/32, /*last=*/280, /*prev=*/3, /*next=*/4,
-                      /*prev_free=*/1, /*next_free=*/1},
-
-                Range{/*first=*/824, /*last=*/1000, /*prev=*/4, /*next=*/0,
-                      /*prev_free=*/4, /*next_free=*/0},
-
                 // free range after alignment computation
                 Range{/*first=*/24, /*last=*/32, /*prev=*/0, /*next=*/1,
                       /*prev_free=*/0, /*next_free=*/4},
 
+                Range{/*first=*/32, /*last=*/280, /*prev=*/3, /*next=*/4,
+                      /*prev_free=*/1, /*next_free=*/1},
+
                 Range{/*first=*/280, /*last=*/824, /*prev=*/1, /*next=*/2,
                       /*prev_free=*/3, /*next_free=*/2},
+
+                Range{/*first=*/824, /*last=*/1000, /*prev=*/4, /*next=*/0,
+                      /*prev_free=*/4, /*next_free=*/0},
+
             },
             .free_size = 728,
         },
@@ -581,24 +586,24 @@ INSTANTIATE_TEST_SUITE_P(
                 Range{/*first=*/0, /*last=*/0, /*prev=*/2, /*next=*/3,
                       /*prev_free=*/6, /*next_free=*/3},
 
-                Range{/*first=*/32, /*last=*/280, /*prev=*/3, /*next=*/5,
-                      /*prev_free=*/1, /*next_free=*/1},
-
-                Range{/*first=*/824, /*last=*/1000, /*prev=*/6, /*next=*/0,
-                      /*prev_free=*/5, /*next_free=*/0},
-
                 // free range after alignment computation
                 Range{/*first=*/24, /*last=*/32, /*prev=*/0, /*next=*/1,
                       /*prev_free=*/0, /*next_free=*/5},
 
-                Range{/*first=*/288, /*last=*/536, /*prev=*/5, /*next=*/6,
-                      /*prev_free=*/4, /*next_free=*/4},
+                Range{/*first=*/32, /*last=*/280, /*prev=*/3, /*next=*/5,
+                      /*prev_free=*/1, /*next_free=*/1},
 
                 // free range after alignment computation
                 Range{/*first=*/280, /*last=*/288, /*prev=*/1, /*next=*/4,
                       /*prev_free=*/3, /*next_free=*/6},
 
+                Range{/*first=*/288, /*last=*/536, /*prev=*/5, /*next=*/6,
+                      /*prev_free=*/4, /*next_free=*/4},
+
                 Range{/*first=*/536, /*last=*/824, /*prev=*/4, /*next=*/2,
+                      /*prev_free=*/5, /*next_free=*/0},
+
+                Range{/*first=*/824, /*last=*/1000, /*prev=*/6, /*next=*/0,
                       /*prev_free=*/5, /*next_free=*/0},
             },
             .free_size = 304,

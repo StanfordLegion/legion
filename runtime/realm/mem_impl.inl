@@ -215,7 +215,7 @@ namespace Realm {
     if(prev_idx == SENTINEL) {
       // trivial case - zero-size ranges
       for(size_t i = 0; i < n; i++) {
-        allocated[new_tags[i]] = SENTINEL;
+        //allocated[new_tags[i]] = SENTINEL;
       }
       return n;
     }
