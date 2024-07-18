@@ -3720,7 +3720,7 @@ namespace Legion {
     class DeferredValue {
     public:
       DeferredValue(T initial_value,
-                    size_t alignment = 16);
+                    size_t alignment = std::alignment_of<T>());
     public:
       __CUDA_HD__
       inline T read(void) const;
@@ -3755,7 +3755,8 @@ namespace Legion {
     template<typename REDOP, bool EXCLUSIVE=false>
     class DeferredReduction: public DeferredValue<typename REDOP::RHS> {
     public:
-      DeferredReduction(size_t alignment = 16);
+      DeferredReduction(
+          size_t alignment = std::alignment_of<typename REDOP::RHS>());
     public:
       __CUDA_HD__
       inline void reduce(typename REDOP::RHS val) const;
@@ -3831,45 +3832,45 @@ namespace Legion {
       DeferredBuffer(Memory::Kind kind, 
                      const Domain &bounds,
                      const T *initial_value = NULL,
-                     size_t alignment = 16,
+                     size_t alignment = std::alignment_of<T>(),
                      bool fortran_order_dims = false);
       DeferredBuffer(const Rect<DIM,COORD_T> &bounds, 
                      Memory::Kind kind,
                      const T *initial_value = NULL,
-                     size_t alignment = 16,
+                     size_t alignment = std::alignment_of<T>(),
                      bool fortran_order_dims = false);
     public: // Constructors specifying a specific memory
       DeferredBuffer(Memory memory, 
                      const Domain &bounds,
                      const T *initial_value = NULL,
-                     size_t alignment = 16,
+                     size_t alignment = std::alignment_of<T>(),
                      bool fortran_order_dims = false);
       DeferredBuffer(const Rect<DIM,COORD_T> &bounds, 
                      Memory memory,
                      const T *initial_value = NULL,
-                     size_t alignment = 16,
+                     size_t alignment = std::alignment_of<T>(),
                      bool fortran_order_dims = false);
     public: // Constructors specifying a specific ordering
       DeferredBuffer(Memory::Kind kind,
                      const Domain &bounds,
                      std::array<DimensionKind,DIM> ordering,
                      const T *initial_value = NULL,
-                     size_t alignment = 16);
+                     size_t alignment = std::alignment_of<T>());
       DeferredBuffer(const Rect<DIM,COORD_T> &bounds,
                      Memory::Kind kind,
                      std::array<DimensionKind,DIM> ordering,
                      const T *initial_value = NULL,
-                     size_t alignment = 16);
+                     size_t alignment = std::alignment_of<T>());
       DeferredBuffer(Memory memory,
                      const Domain &bounds,
                      std::array<DimensionKind,DIM> ordering,
                      const T *initial_value = NULL,
-                     size_t alignment = 16);
+                     size_t alignment = std::alignment_of<T>());
       DeferredBuffer(const Rect<DIM,COORD_T> &bounds,
                      Memory memory,
                      std::array<DimensionKind,DIM> ordering,
                      const T *initial_value = NULL,
-                     size_t alignment = 16);
+                     size_t alignment = std::alignment_of<T>());
     protected:
       Memory get_memory_from_kind(Memory::Kind kind);
       void initialize_layout(size_t alignment, bool fortran_order_dims);
