@@ -278,15 +278,20 @@ struct TestCase {
   std::vector<size_t> alloc_sizes;
   std::vector<size_t> alloc_aligns;
 
-  std::vector<int> split_old_tags;
-  std::vector<int> split_status;
+  // std::vector<int> split_old_tag;
+  // std::vector<int> split_status;
 
-  std::vector<int> split_new_tags;
-  // std::vector<bool> split_lookups_exp;
-  std::vector<size_t> split_sizes;
-  std::vector<size_t> split_aligns;
-  std::vector<size_t> exp_split_offsets;
+  struct SplitOp {
+    int old_tag;
+    int good_allocs;
+    std::vector<int> new_tags;
+    // std::vector<bool> split_lookups_exp;
+    std::vector<size_t> sizes;
+    std::vector<size_t> aligns;
+    std::vector<size_t> exp_offsets;
+  };
 
+  std::vector<SplitOp> split_ops;
   std::vector<BasicRangeAllocator<size_t, int>::Range> exp_ranges;
 
   size_t free_size;
@@ -326,45 +331,50 @@ TEST_P(RangeAllocatorSplitParamTest, Base)
                                      test_case.alloc_aligns[i], offset));
   }
 
-  for(size_t i = 0; i < test_case.split_old_tags.size(); i++) {
-    std::vector<size_t> offsets(test_case.split_new_tags.size());
-    EXPECT_EQ(range_alloc.split_range(test_case.split_old_tags[i],
-                                      test_case.split_new_tags, test_case.split_sizes,
-                                      test_case.split_aligns, offsets),
-              test_case.split_status[i]);
+  range_alloc.dump_allocator_status();
 
-    for(size_t j = 0; j < test_case.exp_split_offsets.size(); j++) {
-      EXPECT_EQ(offsets[j], test_case.exp_split_offsets[j]);
+  for(TestCase::SplitOp op : test_case.split_ops) {
+
+    // for(size_t i = 0; i < test_case.split_old_tag.size(); i++) {
+    std::vector<size_t> offsets(op.new_tags.size());
+    EXPECT_EQ(
+        range_alloc.split_range(op.old_tag, op.new_tags, op.sizes, op.aligns, offsets),
+        op.good_allocs);
+
+    for(size_t j = 0; j < offsets.size(); j++) {
+      EXPECT_EQ(offsets[j], op.exp_offsets[j]);
     }
   }
 
-  EXPECT_EQ(range_alloc.ranges.size(), test_case.exp_ranges.size());
-
   EXPECT_EQ(test_case.free_size, get_total_free_size());
 
-  EXPECT_EQ(range_alloc.ranges[SENTINEL].prev, test_case.exp_ranges[SENTINEL].prev);
-  EXPECT_EQ(range_alloc.ranges[SENTINEL].next, test_case.exp_ranges[SENTINEL].next);
-  EXPECT_EQ(range_alloc.ranges[SENTINEL].prev_free,
-            test_case.exp_ranges[SENTINEL].prev_free);
-  EXPECT_EQ(range_alloc.ranges[SENTINEL].next_free,
-            test_case.exp_ranges[SENTINEL].next_free);
+  if(!test_case.exp_ranges.empty()) {
+    EXPECT_EQ(range_alloc.ranges.size(), test_case.exp_ranges.size());
 
-  size_t index = 1;
-  unsigned idx = range_alloc.ranges[SENTINEL].next;
-  while(idx != SENTINEL) {
-    EXPECT_EQ(range_alloc.ranges[idx].prev, test_case.exp_ranges[index].prev);
-    EXPECT_EQ(range_alloc.ranges[idx].next, test_case.exp_ranges[index].next);
-    EXPECT_EQ(range_alloc.ranges[idx].prev_free, test_case.exp_ranges[index].prev_free);
-    EXPECT_EQ(range_alloc.ranges[idx].next_free, test_case.exp_ranges[index].next_free);
-    idx = range_alloc.ranges[idx].next;
-    index++;
+    EXPECT_EQ(range_alloc.ranges[SENTINEL].prev, test_case.exp_ranges[SENTINEL].prev);
+    EXPECT_EQ(range_alloc.ranges[SENTINEL].next, test_case.exp_ranges[SENTINEL].next);
+    EXPECT_EQ(range_alloc.ranges[SENTINEL].prev_free,
+              test_case.exp_ranges[SENTINEL].prev_free);
+    EXPECT_EQ(range_alloc.ranges[SENTINEL].next_free,
+              test_case.exp_ranges[SENTINEL].next_free);
+
+    size_t index = 1;
+    unsigned idx = range_alloc.ranges[SENTINEL].next;
+    while(idx != SENTINEL) {
+      EXPECT_EQ(range_alloc.ranges[idx].prev, test_case.exp_ranges[index].prev);
+      EXPECT_EQ(range_alloc.ranges[idx].next, test_case.exp_ranges[index].next);
+      EXPECT_EQ(range_alloc.ranges[idx].prev_free, test_case.exp_ranges[index].prev_free);
+      EXPECT_EQ(range_alloc.ranges[idx].next_free, test_case.exp_ranges[index].next_free);
+      idx = range_alloc.ranges[idx].next;
+      index++;
+    }
   }
 
-  for(size_t i = 0; i < test_case.split_new_tags.size(); i++) {
-    //EXPECT_EQ(range_alloc.allocated.find());
-  }
+  // for(size_t i = 0; i < test_case.split_new_tags.size(); i++) {
+  // EXPECT_EQ(range_alloc.allocated.find());
+  //}
 
-  // range_alloc.dump_allocator_status();
+  range_alloc.dump_allocator_status();
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -372,15 +382,12 @@ INSTANTIATE_TEST_SUITE_P(
     testing::Values(
 
         // Case 0: split empty
-        TestCase{.split_old_tags{1},
-                 .split_status{0},
-
-                 .split_new_tags{7},
-                 .split_sizes{512},
-                 .split_aligns{8},
-
-                 .exp_split_offsets{0},
-
+        TestCase{.split_ops{{.old_tag = 1,
+                             .good_allocs = 0,
+                             .new_tags{7},
+                             .sizes{512},
+                             .aligns{8},
+                             .exp_offsets{0}}},
                  .exp_ranges{Range{}}},
 
         // Case 1: split from non-existent tag
@@ -389,13 +396,12 @@ INSTANTIATE_TEST_SUITE_P(
                  .alloc_sizes{512},
                  .alloc_aligns{8},
 
-                 .split_old_tags{2},
-                 .split_status{0},
-                 .split_new_tags{7},
-                 .split_sizes{512},
-                 .split_aligns{8},
-
-                 .exp_split_offsets{0},
+                 .split_ops{{.old_tag = 2,
+                             .good_allocs = 0,
+                             .new_tags{7},
+                             .sizes{512},
+                             .aligns{8},
+                             .exp_offsets{0}}},
 
                  .exp_ranges{Range{/*first=*/0, /*last=*/0, /*prev=*/1, /*next=*/1},
                              Range{/*first=*/0, /*last=*/512, /*prev=*/0, /*next=*/0,
@@ -407,13 +413,12 @@ INSTANTIATE_TEST_SUITE_P(
                  .alloc_sizes{512},
                  .alloc_aligns{8},
 
-                 .split_old_tags{1},
-                 .split_status{1},
-                 .split_new_tags{1},
-                 .split_sizes{512},
-                 .split_aligns{8},
-
-                 .exp_split_offsets{0},
+                 .split_ops{{.old_tag = 1,
+                             .good_allocs = 1,
+                             .new_tags{1},
+                             .sizes{512},
+                             .aligns{8},
+                             .exp_offsets{0}}},
 
                  .exp_ranges{Range{/*first=*/0, /*last=*/0, /*prev=*/1, /*next=*/1},
                              Range{/*first=*/0, /*last=*/512, /*prev=*/0, /*next=*/0,
@@ -425,13 +430,12 @@ INSTANTIATE_TEST_SUITE_P(
                  .alloc_sizes{512},
                  .alloc_aligns{8},
 
-                 .split_old_tags{1},
-                 .split_status{1},
-                 .split_new_tags{7},
-                 .split_sizes{512},
-                 .split_aligns{8},
-
-                 .exp_split_offsets{0},
+                 .split_ops{{.old_tag = 1,
+                             .good_allocs = 1,
+                             .new_tags{7},
+                             .sizes{512},
+                             .aligns{8},
+                             .exp_offsets{0}}},
 
                  .exp_ranges{Range{/*first=*/0, /*last=*/0, /*prev=*/1, /*next=*/1},
                              Range{/*first=*/0, /*last=*/512, /*prev=*/0, /*next=*/0,
@@ -444,13 +448,12 @@ INSTANTIATE_TEST_SUITE_P(
             .alloc_sizes{0},
             .alloc_aligns{1},
 
-            .split_old_tags{1},
-            .split_status{1},
-            .split_new_tags{7},
-            .split_sizes{0},
-            .split_aligns{8},
-
-            .exp_split_offsets{0},
+            .split_ops{{.old_tag = 1,
+                        .good_allocs = 1,
+                        .new_tags{7},
+                        .sizes{0},
+                        .aligns{8},
+                        .exp_offsets{0}}},
 
             .exp_ranges{Range{/*first=*/0, /*last=*/0, /*next=*/1, /*prev=*/1,
                               /*prev_free=*/1, /*next_free=*/1},
@@ -466,13 +469,12 @@ INSTANTIATE_TEST_SUITE_P(
             .alloc_sizes{800},
             .alloc_aligns{24},
 
-            .split_old_tags{1},
-            .split_status{1},
-            .split_new_tags{7},
-            .split_sizes{496},
-            .split_aligns{16},
-
-            .exp_split_offsets{32},
+            .split_ops{{.old_tag = 1,
+                        .good_allocs = 1,
+                        .new_tags{7},
+                        .sizes{496},
+                        .aligns{16},
+                        .exp_offsets{32}}},
 
             .exp_ranges{Range{/*first=*/0, /*last=*/0, /*prev=*/2, /*next=*/3,
                               /*prev_free=*/2, /*next_free=*/3},
@@ -498,14 +500,12 @@ INSTANTIATE_TEST_SUITE_P(
             .alloc_sizes{800},
             .alloc_aligns{24},
 
-            .split_old_tags{1},
-            .split_status{1},
-
-            .split_new_tags{7, 8},
-            .split_sizes{248, 1024},
-            .split_aligns{16, 24},
-
-            .exp_split_offsets{32, 0},
+            .split_ops{{.old_tag = 1,
+                        .good_allocs = 1,
+                        .new_tags{7, 8},
+                        .sizes{248, 1024},
+                        .aligns{16, 24},
+                        .exp_offsets{32, 0}}},
 
             .exp_ranges{
                 Range{/*first=*/0, /*last=*/0, /*prev=*/2, /*next=*/3,
@@ -535,14 +535,12 @@ INSTANTIATE_TEST_SUITE_P(
             .alloc_sizes{800},
             .alloc_aligns{24},
 
-            .split_old_tags{1},
-            .split_status{1},
-
-            .split_new_tags{7, 7},
-            .split_sizes{248, 248},
-            .split_aligns{16, 24},
-
-            .exp_split_offsets{32, 0},
+            .split_ops{{.old_tag = 1,
+                        .good_allocs = 1,
+                        .new_tags{7, 7},
+                        .sizes{248, 248},
+                        .aligns{16, 24},
+                        .exp_offsets{32, 0}}},
 
             .exp_ranges{
                 Range{/*first=*/0, /*last=*/0, /*prev=*/2, /*next=*/3,
@@ -573,14 +571,12 @@ INSTANTIATE_TEST_SUITE_P(
             .alloc_sizes{800},
             .alloc_aligns{24},
 
-            .split_old_tags{1},
-            .split_status{2},
-
-            .split_new_tags{7, 8},
-            .split_sizes{248, 248},
-            .split_aligns{16, 24},
-
-            .exp_split_offsets{32, 288},
+            .split_ops{{.old_tag = 1,
+                        .good_allocs = 2,
+                        .new_tags{7, 8},
+                        .sizes{248, 248},
+                        .aligns{16, 24},
+                        .exp_offsets{32, 288}}},
 
             .exp_ranges{
                 Range{/*first=*/0, /*last=*/0, /*prev=*/2, /*next=*/3,
@@ -607,4 +603,66 @@ INSTANTIATE_TEST_SUITE_P(
                       /*prev_free=*/5, /*next_free=*/0},
             },
             .free_size = 304,
-        }));
+        },
+
+        // Case 9: run multiple even splits
+        TestCase{
+            .alloc_ranges{{0, 256}},
+            .alloc_tags{1, 2},
+            .alloc_sizes{128, 128},
+            .alloc_aligns{16, 16},
+
+            .split_ops{{.old_tag = 1,
+                        .good_allocs = 4,
+                        .new_tags{41, 42, 43, 44},
+                        .sizes{32, 32, 32, 32},
+                        .aligns{16, 16, 16, 16},
+                        .exp_offsets{0, 32, 64, 96}},
+                       {.old_tag = 2,
+                        .good_allocs = 4,
+                        .new_tags{45, 46, 47, 48},
+                        .sizes{32, 32, 32, 32},
+                        .aligns{16, 16, 16, 16},
+                        .exp_offsets{128, 160, 192, 224}}},
+            // TODO(apryakhin@): Check ranges
+            .free_size = 0,
+        },
+
+        // Case 10: run multiple split that result in fragmentation
+        TestCase{
+            .alloc_ranges{{0, 256}},
+            .alloc_tags{1, 2, 3, 4},
+            .alloc_sizes{64, 64, 64, 64},
+            .alloc_aligns{16, 16, 16, 16},
+
+            .split_ops{
+                {.old_tag = 1,
+                 .good_allocs = 1,
+                 .new_tags{41},
+                 .sizes{60},
+                 .aligns{1},
+                 .exp_offsets{0}},
+                {.old_tag = 2,
+                 .good_allocs = 1,
+                 .new_tags{42},
+                 .sizes{60},
+                 .aligns{1},
+                 .exp_offsets{64}},
+                {.old_tag = 3,
+                 .good_allocs = 1,
+                 .new_tags{43},
+                 .sizes{60},
+                 .aligns{1},
+                 .exp_offsets{128}},
+                {.old_tag = 4,
+                 .good_allocs = 1,
+                 .new_tags{44},
+                 .sizes{60},
+                 .aligns{1},
+                 .exp_offsets{192}},
+            },
+            // TODO(apryakhin@): Check ranges
+            .free_size = 16,
+        }
+
+        ));
