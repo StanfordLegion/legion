@@ -5,25 +5,24 @@
 
 using namespace Realm;
 
-class RangeAllocatorTestsWithParams : public ::testing::Test {
+class RangeAllocatorTest : public ::testing::Test {
 protected:
   const unsigned int SENTINEL = BasicRangeAllocator<size_t, int>::SENTINEL;
+  BasicRangeAllocator<size_t, int> range_alloc;
 };
 
-TEST_F(RangeAllocatorTestsWithParams, DeallocateNonExistent)
+TEST_F(RangeAllocatorTest, DeallocateNonExistent)
 {
-  BasicRangeAllocator<size_t, int> range_alloc;
   range_alloc.deallocate(42, /*missiok_ok=*/true);
 }
 
-TEST_F(RangeAllocatorTestsWithParams, LookupEmptyAllocator)
+TEST_F(RangeAllocatorTest, LookupEmptyAllocator)
 {
   size_t start = 0, size = 0;
-  BasicRangeAllocator<size_t, int> range_alloc;
   EXPECT_FALSE(range_alloc.lookup(0, start, size));
 }
 
-TEST_F(RangeAllocatorTestsWithParams, AllocateAndLookupInvalidRange)
+TEST_F(RangeAllocatorTest, AllocateAndLookupInvalidRange)
 {
   const int range_tag = 42;
   size_t offset = 0;
@@ -38,7 +37,7 @@ TEST_F(RangeAllocatorTestsWithParams, AllocateAndLookupInvalidRange)
   EXPECT_FALSE(range_alloc.lookup(range_tag - 1, start, size));
 }
 
-TEST_F(RangeAllocatorTestsWithParams, AllocateAndLookupSingleRange)
+TEST_F(RangeAllocatorTest, AllocateAndLookupSingleRange)
 {
   const int range_tag = 42;
   size_t offset = 0;
@@ -46,7 +45,6 @@ TEST_F(RangeAllocatorTestsWithParams, AllocateAndLookupSingleRange)
   std::vector<int> tags{2, 3};
   std::vector<size_t> sizes{512, 256};
   std::vector<size_t> alignment{16, 16};
-  BasicRangeAllocator<size_t, int> range_alloc;
 
   range_alloc.add_range(0, 1024);
   EXPECT_TRUE(range_alloc.allocate(range_tag, 512, 16, offset));
@@ -56,305 +54,7 @@ TEST_F(RangeAllocatorTestsWithParams, AllocateAndLookupSingleRange)
   EXPECT_EQ(size, 512);
 }
 
-TEST_F(RangeAllocatorTestsWithParams, SplitRangeEmpty)
-{
-  size_t offset = 0;
-  std::vector<int> tags{2, 3};
-  std::vector<size_t> sizes{512, 256};
-  std::vector<size_t> alignment{16, 16};
-  std::vector<size_t> offsets{0, 0};
-  BasicRangeAllocator<size_t, int> range_alloc;
-
-  EXPECT_FALSE(range_alloc.allocate(0, 512, 16, offset));
-  EXPECT_EQ(range_alloc.split_range(1, tags, sizes, alignment, offsets), 0);
-
-  for(size_t i = 0; i < offsets.size(); i++) {
-    EXPECT_EQ(offsets[0], 0);
-  }
-}
-
-TEST_F(RangeAllocatorTestsWithParams, SplitRangeIvalidID)
-{
-  size_t offset = 0;
-  std::vector<int> tags{2, 3};
-  std::vector<size_t> sizes{512, 256};
-  std::vector<size_t> alignment{16, 16};
-  std::vector<size_t> offsets{0, 0};
-  BasicRangeAllocator<size_t, int> range_alloc;
-
-  range_alloc.add_range(0, 1024);
-  EXPECT_TRUE(range_alloc.allocate(7, 512, 16, offset));
-
-  EXPECT_EQ(range_alloc.split_range(8, tags, sizes, alignment, offsets), 0);
-
-  for(size_t i = 0; i < offsets.size(); i++) {
-    EXPECT_EQ(offsets[0], 0);
-  }
-}
-
-TEST_F(RangeAllocatorTestsWithParams, SplitRangeInvalidSize)
-{
-  size_t offset = 0;
-  std::vector<int> tags{1, 2};
-  std::vector<size_t> sizes{512, 256};
-  std::vector<size_t> alignment{16, 16};
-  std::vector<size_t> offsets{0, 0};
-  BasicRangeAllocator<size_t, int> range_alloc;
-
-  range_alloc.add_range(0, 1024);
-  EXPECT_TRUE(range_alloc.allocate(7, 512, 16, offset));
-
-  EXPECT_EQ(range_alloc.split_range(7, tags, sizes, alignment, offsets), 1);
-
-  for(size_t i = 0; i < offsets.size(); i++) {
-    EXPECT_EQ(offsets[0], 0);
-  }
-}
-
-// TODO: alignment test
-// requested range with alignment should exceed the existing range
-TEST_F(RangeAllocatorTestsWithParams, ReuseFailureDueToAlignment)
-{
-  const size_t old_range_size = 200;
-  const int old_range_alignment = 1;
-  const int old_range_tag = 42;
-  const int new_range_tag = 43;
-  size_t offset = 0;
-  std::vector<int> tags{new_range_tag};
-  std::vector<size_t> sizes{100};
-  std::vector<size_t> alignment{16};
-  std::vector<size_t> offsets{0};
-  BasicRangeAllocator<size_t, int> range_alloc;
-
-  range_alloc.add_range(0, old_range_size);
-  EXPECT_TRUE(range_alloc.allocate(old_range_tag, 100, old_range_alignment, offset));
-  EXPECT_TRUE(range_alloc.allocate(old_range_tag + 1, 100, old_range_alignment, offset));
-
-  EXPECT_EQ(range_alloc.split_range(old_range_tag + 1, tags, sizes, alignment, offsets),
-            0);
-}
-
-TEST_F(RangeAllocatorTestsWithParams, ReuseZeroRange)
-{
-  const int old_range_tag = 42;
-  const int new_range_tag = 43;
-  size_t offset = 0;
-  size_t old_start = 0, old_size = 0;
-  size_t new_start = 0, new_size = 0;
-  std::vector<int> tags{new_range_tag};
-  std::vector<size_t> sizes{0};
-  std::vector<size_t> alignment{16};
-  std::vector<size_t> offsets{0};
-  BasicRangeAllocator<size_t, int> range_alloc;
-
-  range_alloc.add_range(0, 2);
-  EXPECT_TRUE(range_alloc.allocate(old_range_tag, 0, 1, offset));
-  EXPECT_TRUE(range_alloc.allocate(old_range_tag + 1, 0, 1, offset));
-  const size_t num_ranges = range_alloc.ranges.size();
-  EXPECT_EQ(range_alloc.split_range(old_range_tag, tags, sizes, alignment, offsets),
-            tags.size());
-  EXPECT_FALSE(range_alloc.lookup(old_range_tag, old_start, old_size));
-  EXPECT_TRUE(range_alloc.lookup(new_range_tag, new_start, new_size));
-
-  EXPECT_EQ(range_alloc.ranges.size(), num_ranges);
-  EXPECT_EQ(offsets.size(), 1);
-  EXPECT_EQ(offsets[0], 0);
-  EXPECT_EQ(old_start, 0);
-  EXPECT_EQ(old_size, 0);
-  EXPECT_EQ(new_start, 0);
-  EXPECT_EQ(new_size, 0);
-}
-
-TEST_F(RangeAllocatorTestsWithParams, ReuseRange)
-{
-  const int old_range_tag = 42;
-  const int new_range_tag = 43;
-  size_t offset = 0;
-  size_t old_start = 0, old_size = 0;
-  size_t new_start = 0, new_size = 0;
-  std::vector<int> tags{new_range_tag};
-  std::vector<size_t> sizes{512};
-  std::vector<size_t> alignment{16};
-  std::vector<size_t> offsets{0};
-  BasicRangeAllocator<size_t, int> range_alloc;
-
-  range_alloc.add_range(0, 512);
-  EXPECT_TRUE(range_alloc.allocate(old_range_tag, 512, 16, offset));
-  EXPECT_TRUE(range_alloc.lookup(old_range_tag, old_start, old_size));
-  EXPECT_EQ(range_alloc.split_range(old_range_tag, tags, sizes, alignment, offsets),
-            tags.size());
-  EXPECT_FALSE(range_alloc.lookup(old_range_tag, old_start, old_size));
-  EXPECT_TRUE(range_alloc.lookup(new_range_tag, new_start, new_size));
-
-  EXPECT_EQ(new_start, old_start);
-  EXPECT_EQ(new_size, old_size);
-  EXPECT_EQ(range_alloc.ranges.size(), 2);
-  EXPECT_EQ(range_alloc.ranges[0].last, 0);
-  EXPECT_EQ(range_alloc.ranges[0].prev, 1);
-  EXPECT_EQ(range_alloc.ranges[0].next, 1);
-  EXPECT_EQ(range_alloc.ranges[0].prev_free, SENTINEL);
-  EXPECT_EQ(range_alloc.ranges[0].next_free, SENTINEL);
-
-  EXPECT_EQ(range_alloc.ranges[1].first, offsets[0]);
-  EXPECT_EQ(range_alloc.ranges[1].first, new_start);
-  EXPECT_EQ(range_alloc.ranges[1].last, new_start + new_size);
-  EXPECT_EQ(range_alloc.ranges[1].prev, 0);
-  EXPECT_EQ(range_alloc.ranges[1].next, 0);
-  EXPECT_EQ(range_alloc.ranges[1].prev_free, 1);
-  EXPECT_EQ(range_alloc.ranges[1].next_free, 1);
-}
-
-// TODO: Test when splitting on smaller size
-
-TEST_F(RangeAllocatorTestsWithParams, SplitRange)
-{
-  const int old_range_tag = 42;
-  size_t offset = 0;
-  std::vector<int> tags{7, 14};
-  std::vector<size_t> sizes{256, 256};
-  std::vector<size_t> alignment{16, 16};
-  std::vector<size_t> offsets{0, 0};
-  std::vector<size_t> new_starts(2);
-  std::vector<size_t> new_sizes(2);
-  std::vector<size_t> new_offsets(2);
-  BasicRangeAllocator<size_t, int> range_alloc;
-
-  range_alloc.add_range(0, 768);
-  EXPECT_TRUE(range_alloc.allocate(old_range_tag, 512, 16, offset));
-  EXPECT_EQ(range_alloc.split_range(old_range_tag, tags, sizes, alignment, offsets),
-            tags.size());
-  for(size_t i = 0; i < tags.size(); i++) {
-    EXPECT_TRUE(range_alloc.lookup(tags[i], new_starts[i], new_sizes[i]));
-  }
-
-  EXPECT_EQ(range_alloc.ranges.size(), 4);
-
-  {
-    // check .first
-    EXPECT_EQ(range_alloc.ranges[0].last, 0);
-    EXPECT_EQ(range_alloc.ranges[0].prev, 2);
-    EXPECT_EQ(range_alloc.ranges[0].next, 1);
-    EXPECT_EQ(range_alloc.ranges[0].prev_free, 2);
-    EXPECT_EQ(range_alloc.ranges[0].next_free, 2);
-  }
-
-  {
-    EXPECT_EQ(range_alloc.ranges[1].first, offsets[0]);
-    EXPECT_EQ(range_alloc.ranges[1].first, new_starts[0]);
-    EXPECT_EQ(range_alloc.ranges[1].last, new_starts[0] + new_sizes[0]);
-    EXPECT_EQ(range_alloc.ranges[1].prev, 0);
-    EXPECT_EQ(range_alloc.ranges[1].next, 3);
-    EXPECT_EQ(range_alloc.ranges[1].prev_free, 1);
-    EXPECT_EQ(range_alloc.ranges[1].next_free, 1);
-  }
-
-  {
-    EXPECT_EQ(range_alloc.ranges[2].first, 512);
-    EXPECT_EQ(range_alloc.ranges[2].last, 768);
-    EXPECT_EQ(range_alloc.ranges[2].prev, 3);
-    EXPECT_EQ(range_alloc.ranges[2].next, 0);
-    EXPECT_EQ(range_alloc.ranges[2].prev_free, SENTINEL);
-    EXPECT_EQ(range_alloc.ranges[2].next_free, SENTINEL);
-  }
-
-  {
-    EXPECT_EQ(range_alloc.ranges[3].first, offsets[1]);
-    EXPECT_EQ(range_alloc.ranges[3].first, new_starts[1]);
-    EXPECT_EQ(range_alloc.ranges[3].last, new_starts[1] + new_sizes[1]);
-    EXPECT_EQ(range_alloc.ranges[3].prev, 1);
-    EXPECT_EQ(range_alloc.ranges[3].next, 2);
-    EXPECT_EQ(range_alloc.ranges[3].prev_free, 3);
-    EXPECT_EQ(range_alloc.ranges[3].next_free, 3);
-  }
-}
-
-TEST_F(RangeAllocatorTestsWithParams, SplitRangeAndProduceFreeRange)
-{
-  const int old_range_tag = 42;
-  size_t offset = 0;
-  std::vector<int> tags{7, 14};
-  std::vector<size_t> sizes{256, 256};
-  std::vector<size_t> alignment{16, 16};
-  std::vector<size_t> offsets{0, 0};
-  std::vector<size_t> new_starts(2);
-  std::vector<size_t> new_sizes(2);
-  std::vector<size_t> new_offsets(2);
-  BasicRangeAllocator<size_t, int> range_alloc;
-
-  range_alloc.add_range(0, 768);
-  EXPECT_TRUE(range_alloc.allocate(old_range_tag, 768, 16, offset));
-  EXPECT_EQ(range_alloc.split_range(old_range_tag, tags, sizes, alignment, offsets),
-            tags.size());
-  for(size_t i = 0; i < tags.size(); i++) {
-    EXPECT_TRUE(range_alloc.lookup(tags[i], new_starts[i], new_sizes[i]));
-  }
-
-  EXPECT_EQ(range_alloc.ranges.size(), 4);
-
-  {
-    // check .first
-    EXPECT_EQ(range_alloc.ranges[0].last, 0);
-    EXPECT_EQ(range_alloc.ranges[0].prev, 3);
-    EXPECT_EQ(range_alloc.ranges[0].next, 1);
-    EXPECT_EQ(range_alloc.ranges[0].prev_free, 3);
-    EXPECT_EQ(range_alloc.ranges[0].next_free, 3);
-  }
-
-  {
-    EXPECT_EQ(range_alloc.ranges[1].first, offsets[0]);
-    EXPECT_EQ(range_alloc.ranges[1].first, new_starts[0]);
-    EXPECT_EQ(range_alloc.ranges[1].last, new_starts[0] + new_sizes[0]);
-    EXPECT_EQ(range_alloc.ranges[1].prev, 0);
-    EXPECT_EQ(range_alloc.ranges[1].next, 2);
-    EXPECT_EQ(range_alloc.ranges[1].prev_free, 1);
-    EXPECT_EQ(range_alloc.ranges[1].next_free, 1);
-  }
-
-  {
-    EXPECT_EQ(range_alloc.ranges[2].first, offsets[1]);
-    EXPECT_EQ(range_alloc.ranges[2].first, new_starts[1]);
-    EXPECT_EQ(range_alloc.ranges[2].last, new_starts[1] + new_sizes[1]);
-    EXPECT_EQ(range_alloc.ranges[2].prev, 1);
-    EXPECT_EQ(range_alloc.ranges[2].next, 3);
-    EXPECT_EQ(range_alloc.ranges[2].prev_free, 2);
-    EXPECT_EQ(range_alloc.ranges[2].next_free, 2);
-  }
-
-  {
-    EXPECT_EQ(range_alloc.ranges[3].first, 512);
-    EXPECT_EQ(range_alloc.ranges[3].last, 768);
-    EXPECT_EQ(range_alloc.ranges[3].prev, 2);
-    EXPECT_EQ(range_alloc.ranges[3].next, 0);
-    EXPECT_EQ(range_alloc.ranges[3].prev_free, SENTINEL);
-    EXPECT_EQ(range_alloc.ranges[3].next_free, SENTINEL);
-  }
-}
-
-// TODO(apryakhin@): Add test case to show the fragmentation after
-// multiple split_range calls.
-TEST_F(RangeAllocatorTestsWithParams, ReuseRangeAndProduceFreeRange)
-{
-  int old_range_tag = 1;
-  size_t offset = 0;
-  std::vector<int> tags{101};
-  std::vector<size_t> sizes{16};
-  std::vector<size_t> alignment{1};
-  std::vector<size_t> offsets{0};
-  BasicRangeAllocator<size_t, int> range_alloc;
-  range_alloc.add_range(0, 512);
-
-  for(int i = 0; i < 10; i++) {
-    EXPECT_TRUE(range_alloc.allocate(old_range_tag, sizes[0] * 2, 1, offset));
-    EXPECT_EQ(range_alloc.split_range(old_range_tag, tags, sizes, alignment, offsets),
-              tags.size());
-    old_range_tag++;
-    tags[0]++;
-  }
-
-  EXPECT_EQ(range_alloc.ranges.size(), 22);
-}
-
-TEST_F(RangeAllocatorTestsWithParams, TestExplicitRangesWithCycle)
+TEST_F(RangeAllocatorTest, TestExplicitRangesWithCycle)
 {
   BasicRangeAllocator<size_t, int> alloc;
 
@@ -385,7 +85,7 @@ TEST_F(RangeAllocatorTestsWithParams, TestExplicitRangesWithCycle)
   EXPECT_TRUE(alloc.free_list_has_cycle());
 }
 
-TEST_F(RangeAllocatorTestsWithParams, TestExplicitRangesNoCycle)
+TEST_F(RangeAllocatorTest, TestExplicitRangesNoCycle)
 {
   BasicRangeAllocator<size_t, int> alloc;
 
@@ -415,7 +115,7 @@ TEST_F(RangeAllocatorTestsWithParams, TestExplicitRangesNoCycle)
   EXPECT_FALSE(alloc.free_list_has_cycle());
 }
 
-TEST_F(RangeAllocatorTestsWithParams, TestExplicitRangesOverlapping)
+TEST_F(RangeAllocatorTest, TestExplicitRangesOverlapping)
 {
   BasicRangeAllocator<size_t, int> alloc;
 
@@ -454,7 +154,7 @@ TEST_F(RangeAllocatorTestsWithParams, TestExplicitRangesOverlapping)
   EXPECT_TRUE(alloc.has_invalid_ranges());
 }
 
-TEST_F(RangeAllocatorTestsWithParams, TestExplicitRangesInvalidSize)
+TEST_F(RangeAllocatorTest, TestExplicitRangesInvalidSize)
 {
   BasicRangeAllocator<size_t, int> alloc;
 
@@ -493,7 +193,7 @@ TEST_F(RangeAllocatorTestsWithParams, TestExplicitRangesInvalidSize)
   EXPECT_TRUE(alloc.has_invalid_ranges());
 }
 
-TEST_F(RangeAllocatorTestsWithParams, TestExplicitRangesValid)
+TEST_F(RangeAllocatorTest, TestExplicitRangesValid)
 {
   BasicRangeAllocator<size_t, int> alloc;
 
@@ -532,7 +232,7 @@ TEST_F(RangeAllocatorTestsWithParams, TestExplicitRangesValid)
   EXPECT_FALSE(alloc.has_invalid_ranges());
 }
 
-TEST_F(RangeAllocatorTestsWithParams, TestExplicitRangesSharedTags)
+TEST_F(RangeAllocatorTest, TestExplicitRangesSharedTags)
 {
   BasicRangeAllocator<size_t, int> alloc;
 
@@ -570,3 +270,336 @@ TEST_F(RangeAllocatorTestsWithParams, TestExplicitRangesSharedTags)
 
   EXPECT_TRUE(alloc.has_invalid_ranges());
 }
+
+struct TestCase {
+  std::vector<std::pair<size_t, size_t>> alloc_ranges;
+
+  std::vector<int> alloc_tags;
+  std::vector<size_t> alloc_sizes;
+  std::vector<size_t> alloc_aligns;
+
+  std::vector<int> split_old_tags;
+  std::vector<int> split_status;
+
+  std::vector<int> split_new_tags;
+  // std::vector<bool> split_lookups_exp;
+  std::vector<size_t> split_sizes;
+  std::vector<size_t> split_aligns;
+  std::vector<size_t> exp_split_offsets;
+
+  std::vector<BasicRangeAllocator<size_t, int>::Range> exp_ranges;
+
+  size_t free_size;
+};
+
+typedef BasicRangeAllocator<size_t, int>::Range Range;
+
+class RangeAllocatorSplitParamTest : public ::testing::TestWithParam<TestCase> {
+protected:
+  const unsigned int SENTINEL = BasicRangeAllocator<size_t, int>::SENTINEL;
+  size_t get_total_free_size()
+  {
+    size_t total_free_size = 0;
+    const std::vector<Range> &ranges = range_alloc.ranges;
+    unsigned free_idx = ranges[SENTINEL].next_free;
+    while(free_idx != SENTINEL) {
+      total_free_size += (ranges[free_idx].last - ranges[free_idx].first);
+      free_idx = ranges[free_idx].next_free;
+    }
+    return total_free_size;
+  }
+  BasicRangeAllocator<size_t, int> range_alloc;
+};
+
+TEST_P(RangeAllocatorSplitParamTest, Base)
+{
+  auto test_case = GetParam();
+
+  for(size_t i = 0; i < test_case.alloc_ranges.size(); i++) {
+    range_alloc.add_range(test_case.alloc_ranges[i].first,
+                          test_case.alloc_ranges[i].second);
+  }
+
+  for(size_t i = 0; i < test_case.alloc_tags.size(); i++) {
+    size_t offset = 0;
+    EXPECT_TRUE(range_alloc.allocate(test_case.alloc_tags[i], test_case.alloc_sizes[i],
+                                     test_case.alloc_aligns[i], offset));
+  }
+
+  for(size_t i = 0; i < test_case.split_old_tags.size(); i++) {
+    std::vector<size_t> offsets(test_case.split_new_tags.size());
+    EXPECT_EQ(range_alloc.split_range(test_case.split_old_tags[i],
+                                      test_case.split_new_tags, test_case.split_sizes,
+                                      test_case.split_aligns, offsets),
+              test_case.split_status[i]);
+
+    for(size_t j = 0; j < test_case.exp_split_offsets.size(); j++) {
+      EXPECT_EQ(offsets[j], test_case.exp_split_offsets[j]);
+    }
+  }
+
+  EXPECT_EQ(range_alloc.ranges.size(), test_case.exp_ranges.size());
+  for(size_t i = 0; i < test_case.exp_ranges.size(); i++) {
+    if(i != SENTINEL) {
+      EXPECT_EQ(range_alloc.ranges[i].first, test_case.exp_ranges[i].first);
+      EXPECT_EQ(range_alloc.ranges[i].last, test_case.exp_ranges[i].last);
+    }
+    EXPECT_EQ(range_alloc.ranges[i].prev, test_case.exp_ranges[i].prev);
+    EXPECT_EQ(range_alloc.ranges[i].next, test_case.exp_ranges[i].next);
+    EXPECT_EQ(range_alloc.ranges[i].prev_free, test_case.exp_ranges[i].prev_free);
+    EXPECT_EQ(range_alloc.ranges[i].next_free, test_case.exp_ranges[i].next_free);
+  }
+
+  EXPECT_EQ(test_case.free_size, get_total_free_size());
+
+  // TODO: Add lookups
+  /*for(size_t i = 0; i < test_case.split_new_tags.size(); i++) {
+    size_t first, size;
+    EXPECT_EQ(range_alloc.lookup(test_case.split_new_tags[i], first, size),
+              test_case.split_status[i]);
+  }*/
+
+  // range_alloc.dump_allocator_status();
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    RangeAlloc, RangeAllocatorSplitParamTest,
+    testing::Values(
+
+        // Case 0: split empty
+        TestCase{.split_old_tags{1},
+                 .split_status{0},
+
+                 .split_new_tags{7},
+                 .split_sizes{512},
+                 .split_aligns{8},
+
+                 .exp_split_offsets{0},
+
+                 .exp_ranges{Range{}}},
+
+        // Case 1: split from invalid tag
+        TestCase{.alloc_ranges{{0, 512}},
+                 .alloc_tags{1},
+                 .alloc_sizes{512},
+                 .alloc_aligns{8},
+
+                 .split_old_tags{2},
+                 .split_status{0},
+                 .split_new_tags{7},
+                 .split_sizes{512},
+                 .split_aligns{8},
+
+                 .exp_split_offsets{0},
+
+                 .exp_ranges{Range{/*first=*/0, /*last=*/0, /*prev=*/1, /*next=*/1},
+                             Range{/*first=*/0, /*last=*/512, /*prev=*/0, /*next=*/0,
+                                   /*prev_free=*/1, /*next_free=*/1}}},
+
+        // Case 2: split into the existing tag ??
+        TestCase{.alloc_ranges{{0, 512}},
+                 .alloc_tags{1},
+                 .alloc_sizes{512},
+                 .alloc_aligns{8},
+
+                 .split_old_tags{1},
+                 .split_status{1},
+                 .split_new_tags{1},
+                 .split_sizes{512},
+                 .split_aligns{8},
+
+                 .exp_split_offsets{0},
+
+                 .exp_ranges{Range{/*first=*/0, /*last=*/0, /*prev=*/1, /*next=*/1},
+                             Range{/*first=*/0, /*last=*/512, /*prev=*/0, /*next=*/0,
+                                   /*prev_free=*/1, /*next_free=*/1}}},
+
+        // Case 3: base case reuse full range
+        TestCase{.alloc_ranges{{0, 512}},
+                 .alloc_tags{1},
+                 .alloc_sizes{512},
+                 .alloc_aligns{8},
+
+                 .split_old_tags{1},
+                 .split_status{1},
+                 .split_new_tags{7},
+                 .split_sizes{512},
+                 .split_aligns{8},
+
+                 .exp_split_offsets{0},
+
+                 .exp_ranges{Range{/*first=*/0, /*last=*/0, /*prev=*/1, /*next=*/1},
+                             Range{/*first=*/0, /*last=*/512, /*prev=*/0, /*next=*/0,
+                                   /*prev_free=*/1, /*next_free=*/1}}},
+
+        // Case 4: reuse zero range
+        TestCase{
+            .alloc_ranges{{0, 512}},
+            .alloc_tags{1},
+            .alloc_sizes{0},
+            .alloc_aligns{1},
+
+            .split_old_tags{1},
+            .split_status{1},
+            .split_new_tags{7},
+            .split_sizes{0},
+            .split_aligns{8},
+
+            .exp_split_offsets{0},
+
+            .exp_ranges{Range{/*first=*/0, /*last=*/0, /*next=*/1, /*prev=*/1,
+                              /*prev_free=*/1, /*next_free=*/1},
+                        Range{/*first=*/0, /*last=*/512}},
+
+            .free_size = 512,
+        },
+
+        // Case 5: reuse range with different alignment and create a free block in front
+        TestCase{
+            .alloc_ranges{{24, 1000}},
+            .alloc_tags{1},
+            .alloc_sizes{800},
+            .alloc_aligns{24},
+
+            .split_old_tags{1},
+            .split_status{1},
+            .split_new_tags{7},
+            .split_sizes{496},
+            .split_aligns{16},
+
+            .exp_split_offsets{32},
+
+            .exp_ranges{Range{/*first=*/0, /*last=*/0, /*prev=*/2, /*next=*/3,
+                              /*prev_free=*/2, /*next_free=*/3},
+
+                        Range{/*first=*/32, /*last=*/528, /*prev=*/3, /*next=*/4,
+                              /*prev_free=*/1, /*next_free=*/1},
+
+                        Range{/*first=*/824, /*last=*/1000, /*prev=*/4, /*next=*/0,
+                              /*prev_free=*/4, /*next_free=*/0},
+
+                        Range{/*first=*/24, /*last=*/32, /*prev=*/0, /*next=*/1,
+                              /*prev_free=*/0, /*next_free=*/4},
+
+                        Range{/*first=*/528, /*last=*/824, /*prev=*/1, /*next=*/2,
+                              /*prev_free=*/3, /*next_free=*/2}},
+
+            .free_size = 480,
+        },
+
+        // Case 6: split range with second layout going OOM
+        TestCase{
+            .alloc_ranges{{24, 1000}},
+            .alloc_tags{1},
+            .alloc_sizes{800},
+            .alloc_aligns{24},
+
+            .split_old_tags{1},
+            .split_status{1},
+
+            .split_new_tags{7, 8},
+            .split_sizes{248, 1024},
+            .split_aligns{16, 24},
+
+            .exp_split_offsets{32, 0},
+
+            .exp_ranges{
+                Range{/*first=*/0, /*last=*/0, /*prev=*/2, /*next=*/3,
+                      /*prev_free=*/2, /*next_free=*/3},
+
+                Range{/*first=*/32, /*last=*/280, /*prev=*/3, /*next=*/4,
+                      /*prev_free=*/1, /*next_free=*/1},
+
+                Range{/*first=*/824, /*last=*/1000, /*prev=*/4, /*next=*/0,
+                      /*prev_free=*/4, /*next_free=*/0},
+
+                // free range after alignment computation
+                Range{/*first=*/24, /*last=*/32, /*prev=*/0, /*next=*/1,
+                      /*prev_free=*/0, /*next_free=*/4},
+
+                Range{/*first=*/280, /*last=*/824, /*prev=*/1, /*next=*/2,
+                      /*prev_free=*/3, /*next_free=*/2},
+            },
+
+            .free_size = 728,
+        },
+
+        // Case 7: split range with duplicated tag
+        TestCase{
+            .alloc_ranges{{24, 1000}},
+            .alloc_tags{1},
+            .alloc_sizes{800},
+            .alloc_aligns{24},
+
+            .split_old_tags{1},
+            .split_status{1},
+
+            .split_new_tags{7, 7},
+            .split_sizes{248, 248},
+            .split_aligns{16, 24},
+
+            .exp_split_offsets{32, 0},
+
+            .exp_ranges{
+                Range{/*first=*/0, /*last=*/0, /*prev=*/2, /*next=*/3,
+                      /*prev_free=*/2, /*next_free=*/3},
+
+                Range{/*first=*/32, /*last=*/280, /*prev=*/3, /*next=*/4,
+                      /*prev_free=*/1, /*next_free=*/1},
+
+                Range{/*first=*/824, /*last=*/1000, /*prev=*/4, /*next=*/0,
+                      /*prev_free=*/4, /*next_free=*/0},
+
+                // free range after alignment computation
+                Range{/*first=*/24, /*last=*/32, /*prev=*/0, /*next=*/1,
+                      /*prev_free=*/0, /*next_free=*/4},
+
+                Range{/*first=*/280, /*last=*/824, /*prev=*/1, /*next=*/2,
+                      /*prev_free=*/3, /*next_free=*/2},
+            },
+            .free_size = 728,
+        },
+
+        // Case 8: split range on different layouts and create free blocks in
+        // front
+        TestCase{
+            .alloc_ranges{{24, 1000}},
+            .alloc_tags{1},
+            .alloc_sizes{800},
+            .alloc_aligns{24},
+
+            .split_old_tags{1},
+            .split_status{2},
+
+            .split_new_tags{7, 8},
+            .split_sizes{248, 248},
+            .split_aligns{16, 24},
+
+            .exp_split_offsets{32, 288},
+
+            .exp_ranges{
+                Range{/*first=*/0, /*last=*/0, /*prev=*/2, /*next=*/3,
+                      /*prev_free=*/6, /*next_free=*/3},
+
+                Range{/*first=*/32, /*last=*/280, /*prev=*/3, /*next=*/5,
+                      /*prev_free=*/1, /*next_free=*/1},
+
+                Range{/*first=*/824, /*last=*/1000, /*prev=*/6, /*next=*/0,
+                      /*prev_free=*/5, /*next_free=*/0},
+
+                // free range after alignment computation
+                Range{/*first=*/24, /*last=*/32, /*prev=*/0, /*next=*/1,
+                      /*prev_free=*/0, /*next_free=*/5},
+
+                Range{/*first=*/288, /*last=*/536, /*prev=*/5, /*next=*/6,
+                      /*prev_free=*/4, /*next_free=*/4},
+
+                // free range after alignment computation
+                Range{/*first=*/280, /*last=*/288, /*prev=*/1, /*next=*/4,
+                      /*prev_free=*/3, /*next_free=*/6},
+
+                Range{/*first=*/536, /*last=*/824, /*prev=*/4, /*next=*/2,
+                      /*prev_free=*/5, /*next_free=*/0},
+            },
+            .free_size = 304,
+        }));
