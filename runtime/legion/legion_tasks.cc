@@ -323,7 +323,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool TaskOp::is_forward_progress_task(void) const
+    bool TaskOp::is_forward_progress_task(void)
     //--------------------------------------------------------------------------
     {
       if (!is_index_space)
@@ -369,6 +369,10 @@ namespace Legion {
             break;
           }
         }
+      }
+      else if (static_cast<SliceTask*>(this)->need_forward_progress())
+      {
+        is_forward_progress = true;
       }
       else
         is_forward_progress = true;
@@ -4160,7 +4164,6 @@ namespace Legion {
       // and we need that to happen in program order
       if (!point_wise_mapping_dependences.empty())
       {
-        printf("GOT point wise dependence\n");
         const RtEvent ready =
           Runtime::merge_events(point_wise_mapping_dependences);
         point_wise_mapping_dependences.clear();
@@ -12269,6 +12272,14 @@ namespace Legion {
       index_owner->record_output_registered(registered);
       Runtime::trigger_event(applied);
     }
+
+    //--------------------------------------------------------------------------
+    bool SliceTask::need_forward_progress(void)
+    {
+      return index_owner->prev_point_wise_mapping ||
+        index_owner->next_point_wise_mapping;
+    }
+    //--------------------------------------------------------------------------
 
     //--------------------------------------------------------------------------
     void SliceTask::rendezvous_concurrent_mapped(const DomainPoint &point,

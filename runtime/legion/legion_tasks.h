@@ -160,7 +160,7 @@ namespace Legion {
                                            std::set<RtEvent> &applied) const;
     public:
       bool is_remote(void) const;
-      bool is_forward_progress_task(void) const;
+      bool is_forward_progress_task(void);
       inline bool is_stolen(void) const { return (steal_count > 0); }
       inline bool is_origin_mapped(void) const { return map_origin; }
       inline bool is_replicable(void) const { return replicate; }
@@ -741,6 +741,8 @@ namespace Legion {
         bool concurrent_poisoned;
       protected:
         bool children_commit_invoked;
+      protected:
+        bool point_wise_mapping;
       protected:
         Future predicate_false_future;
         void *predicate_false_result;
@@ -1559,6 +1561,8 @@ namespace Legion {
       static void handle_concurrent_allreduce_response(Deserializer &derez);
       static void handle_remote_output_extents(Deserializer &derez);
       static void handle_remote_output_registration(Deserializer &derez);
+    public:
+      bool need_forward_progress(void);
     protected:
       friend class IndexTask;
       friend class PointTask;

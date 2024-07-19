@@ -16614,8 +16614,6 @@ namespace Legion {
                   if(!skip_registering_region_dependece)
                   {
 #endif
-                    printf("Registering dependence!\n");
-
                   // If we can validate a region record which of our
                   // predecessors regions we are validating, otherwise
                   // just register a normal dependence
@@ -16628,10 +16626,6 @@ namespace Legion {
                       prev.uid, prev.idx, user.uid, user.idx, dtype);
 #endif
 #ifdef POINT_WISE_LOGICAL_ANALYSIS
-                  }
-                  else
-                  {
-                    printf("Not Registering dependence!\n");
                   }
 #endif
 

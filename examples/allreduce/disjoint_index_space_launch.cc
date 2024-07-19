@@ -24,6 +24,8 @@
 using namespace Legion;
 using namespace Legion::Mapping;
 
+#define ITERATIONS 2
+
 enum {
   POINT_WISE_LOGICAL_ANALYSIS_MAPPER_ID = 1,
 };
@@ -50,7 +52,7 @@ class PointWiseLogicalAnalysisMapper: public DefaultMapper {
         Runtime *rt, Processor p)
       : DefaultMapper(rt->get_mapper_runtime(), m, p)
     {
-      int num_iterations=2, num_points=4;
+      int num_iterations=ITERATIONS;
       {
         int argc = HighLevelRuntime::get_input_args().argc;
         char **argv = HighLevelRuntime::get_input_args().argv;
@@ -58,8 +60,6 @@ class PointWiseLogicalAnalysisMapper: public DefaultMapper {
         {
           if (!strcmp(argv[i],"-i"))
             num_iterations = atoi(argv[++i]);
-          if (!strcmp(argv[i],"-p"))
-            num_points = atoi(argv[++i]);
         }
       }
       current_point = 0;
@@ -67,21 +67,10 @@ class PointWiseLogicalAnalysisMapper: public DefaultMapper {
       total_point = num_iterations;
     }
   public:
-		/*void select_task_options(const MapperContext ctx,
-														 const Task& task,
-																	 TaskOptions& output)
-    {
-      if (select_tasks_to_map_event.exists())
-        this->runtime->trigger_mapper_event(ctx, select_tasks_to_map_event);
-      DefaultMapper::select_task_options(ctx, task, output);
-    }*/
-
     void select_tasks_to_map(const MapperContext          ctx,
                              const SelectMappingInput&    input,
                                    SelectMappingOutput&   output)
     {
-      //DefaultMapper::select_tasks_to_map(ctx, input, output);
-      //return;
       unsigned count = 0;
       for (std::list<const Task*>::const_iterator it =
             input.ready_tasks.begin(); (count < max_schedule_count) &&
@@ -146,7 +135,7 @@ void top_level_task(const Task *task,
                     Context ctx, Runtime *runtime)
 {
   int num_points = 4;
-  int num_iterations = 2;
+  int num_iterations = ITERATIONS;
   {
     const InputArgs &command_args = Runtime::get_input_args();
     for (int i = 1; i < command_args.argc; i++)
