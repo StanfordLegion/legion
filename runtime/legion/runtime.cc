@@ -7516,7 +7516,12 @@ namespace Legion {
       if (task_scheduler_enabled)
       {
         SchedulerArgs sched_args(local_proc);
-        runtime->issue_runtime_meta_task(sched_args, LG_LATENCY_WORK_PRIORITY);
+        // If we need to recursively run the scheduler then we do so with
+        // a lower priority than other meta-tasks to ensure that those other
+        // meta tasks can continue to make forward progress and the scheduler
+        // cannot starve other tasks.
+        runtime->issue_runtime_meta_task(sched_args,
+            LG_THROUGHPUT_WORK_PRIORITY);
       }
       else
         outstanding_task_scheduler = false;
@@ -7531,6 +7536,8 @@ namespace Legion {
 #endif
       outstanding_task_scheduler = true;
       SchedulerArgs sched_args(local_proc);
+      // This is waking the scheduler up so give it higher priority in
+      // order to ensure that we can get tasks mapped and running sooner
       runtime->issue_runtime_meta_task(sched_args, LG_LATENCY_WORK_PRIORITY);
     } 
 
@@ -8214,8 +8221,12 @@ namespace Legion {
               // Launch a task to remove the deferred mapper 
               // event when it triggers
               DeferMapperSchedulerArgs args(this, map_id, wait_on);
-              runtime->issue_runtime_meta_task(args, 
-                  LG_LATENCY_DEFERRED_PRIORITY, wait_on);
+              // If we need to recursively run the scheduler then we do so with
+              // a lower priority than other meta-tasks to ensure that those 
+              // other meta tasks can continue to make forward progress and the
+              // scheduler cannot starve other tasks
+              runtime->issue_runtime_meta_task(args,
+                  LG_THROUGHPUT_WORK_PRIORITY, wait_on);
               // We can continue because there is nothing 
               // left to do for this mapper
               continue;
