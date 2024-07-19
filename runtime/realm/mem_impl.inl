@@ -206,7 +206,9 @@ namespace Realm {
     assert(n == sizes.size() && n == alignments.size());
     assert(allocs_first.size() == n);
 
-    unsigned prev_idx = it->second;
+    unsigned range_idx = it->second;
+    unsigned prev_idx = range_idx;
+
     Range *prev = &ranges[prev_idx];
     unsigned next_idx = prev->next;
 
@@ -232,7 +234,7 @@ namespace Realm {
       prev->last = alloc_first + sizes[0];
 
       if(prev->first != alloc_first) {
-        unsigned new_idx = insert_free_block(prev_idx, prev->first, alloc_first);
+        unsigned new_idx = insert_free_block(range_idx, prev->first, alloc_first);
         prev = &ranges[prev_idx];
         Range *new_prev = &ranges[new_idx];
         prev->first = alloc_first;
@@ -259,7 +261,7 @@ namespace Realm {
       }
 
       size_t start = prev->last;
-      //size_t start = prev_idx > 0 ? prev->first : 0;
+      // size_t start = prev_idx > 0 ? prev->first : 0;
       RT offset = calculate_offset(start, alignments[i]);
       if(remaining_size < (sizes[i] + offset))
         break;
@@ -269,7 +271,8 @@ namespace Realm {
       unsigned new_idx = alloc_range(alloc_first, alloc_first + sizes[i]);
 
       if(start != alloc_first) {
-        unsigned free_idx = insert_free_block(prev_idx, start, alloc_first);
+        unsigned free_idx = insert_free_block(range_idx, start, alloc_first);
+
         prev = &ranges[prev_idx];
         Range *new_prev = &ranges[free_idx];
 
@@ -303,8 +306,9 @@ namespace Realm {
     // Last part create new free range for the remaining size
     if(remaining_size > 0) {
       unsigned after_idx =
-          insert_free_block(prev_idx, prev->last, prev->last + remaining_size);
+          insert_free_block(range_idx, prev->last, prev->last + remaining_size);
       Range *r_after = &ranges[after_idx];
+
       r_after->prev = prev_idx;
       prev = &ranges[prev_idx];
       prev->next = after_idx;
@@ -322,7 +326,7 @@ namespace Realm {
 #ifdef DEBUG_REALM
     bool has_cycle = free_list_has_cycle();
     bool invalid = has_invalid_ranges();
-    if (has_cycle || invalid) {
+    if(has_cycle || invalid) {
       dump_allocator_status();
       assert(has_cycle == false);
       assert(invalid == false);
@@ -463,6 +467,8 @@ namespace Realm {
               << " total_free_size:" << total_free_size
               << " large_free_blocksize:" << largest_free_blocksize
               << " max_defrag_block:" << max_size_after_defrag << std::endl;
+
+    //assert(total_size == total_used_size + total_free_size);
   }
 
   template <typename RT, typename TT>

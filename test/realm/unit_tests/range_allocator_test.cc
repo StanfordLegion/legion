@@ -331,16 +331,11 @@ TEST_P(RangeAllocatorSplitParamTest, Base)
                                      test_case.alloc_aligns[i], offset));
   }
 
-  range_alloc.dump_allocator_status();
-
   for(TestCase::SplitOp op : test_case.split_ops) {
-
-    // for(size_t i = 0; i < test_case.split_old_tag.size(); i++) {
     std::vector<size_t> offsets(op.new_tags.size());
     EXPECT_EQ(
         range_alloc.split_range(op.old_tag, op.new_tags, op.sizes, op.aligns, offsets),
         op.good_allocs);
-
     for(size_t j = 0; j < offsets.size(); j++) {
       EXPECT_EQ(offsets[j], op.exp_offsets[j]);
     }
@@ -370,11 +365,10 @@ TEST_P(RangeAllocatorSplitParamTest, Base)
     }
   }
 
+  // TODO(apryakhin@)
   // for(size_t i = 0; i < test_case.split_new_tags.size(); i++) {
   // EXPECT_EQ(range_alloc.allocated.find());
   //}
-
-  range_alloc.dump_allocator_status();
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -580,29 +574,29 @@ INSTANTIATE_TEST_SUITE_P(
 
             .exp_ranges{
                 Range{/*first=*/0, /*last=*/0, /*prev=*/2, /*next=*/3,
-                      /*prev_free=*/6, /*next_free=*/3},
+                      /*prev_free=*/2, /*next_free=*/3},
 
                 // free range after alignment computation
                 Range{/*first=*/24, /*last=*/32, /*prev=*/0, /*next=*/1,
-                      /*prev_free=*/0, /*next_free=*/5},
+                      /*prev_free=*/0, /*next_free=*/6},
 
                 Range{/*first=*/32, /*last=*/280, /*prev=*/3, /*next=*/5,
                       /*prev_free=*/1, /*next_free=*/1},
 
                 // free range after alignment computation
                 Range{/*first=*/280, /*last=*/288, /*prev=*/1, /*next=*/4,
-                      /*prev_free=*/3, /*next_free=*/6},
+                      /*prev_free=*/6, /*next_free=*/2},
 
                 Range{/*first=*/288, /*last=*/536, /*prev=*/5, /*next=*/6,
                       /*prev_free=*/4, /*next_free=*/4},
 
                 Range{/*first=*/536, /*last=*/824, /*prev=*/4, /*next=*/2,
-                      /*prev_free=*/5, /*next_free=*/0},
+                      /*prev_free=*/3, /*next_free=*/5},
 
                 Range{/*first=*/824, /*last=*/1000, /*prev=*/6, /*next=*/0,
                       /*prev_free=*/5, /*next_free=*/0},
             },
-            .free_size = 304,
+            .free_size = 480,
         },
 
         // Case 9: run multiple even splits
@@ -663,6 +657,36 @@ INSTANTIATE_TEST_SUITE_P(
             },
             // TODO(apryakhin@): Check ranges
             .free_size = 16,
+        },
+
+        // Case 11: Reuse range and produce a free block due to
+        // alignment followed by splitting the newly created range into
+        // another set of ranges each of which also produce a free
+        // block.
+        TestCase{
+            .alloc_ranges{{24, 1000}},
+            .alloc_tags{1},
+            .alloc_sizes{800},
+            .alloc_aligns{24},
+
+            .split_ops{
+
+                {.old_tag = 1,
+                 .good_allocs = 1,
+                 .new_tags{7},
+                 .sizes{496},
+                 .aligns{16},
+                 .exp_offsets{32}},
+
+                {.old_tag = 7,
+                 .good_allocs = 2,
+                 .new_tags{8, 9},
+                 .sizes{200, 200},
+                 .aligns{12, 24},
+                 .exp_offsets{36, 240}}},
+
+            // TODO(apryakhin@): Check ranges
+            .free_size = 576,
         }
 
         ));
