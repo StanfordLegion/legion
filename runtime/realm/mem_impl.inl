@@ -168,10 +168,9 @@ namespace Realm {
                                                                  RT alloc_first,
                                                                  RT alloc_last)
   {
-    Range *prev = &ranges[prev_idx];
     unsigned new_idx = alloc_range(alloc_first, alloc_last);
     Range *new_prev = &ranges[new_idx];
-    prev = &ranges[prev_idx];
+    Range* prev = &ranges[prev_idx];
 
     unsigned pf_idx = ranges[prev_idx].prev;
     while((pf_idx != SENTINEL) && (ranges[pf_idx].prev_free == pf_idx)) {
@@ -468,7 +467,7 @@ namespace Realm {
               << " large_free_blocksize:" << largest_free_blocksize
               << " max_defrag_block:" << max_size_after_defrag << std::endl;
 
-    //assert(total_size == total_used_size + total_free_size);
+    assert(total_size == total_used_size + total_free_size);
   }
 
   template <typename RT, typename TT>
