@@ -64,6 +64,38 @@ namespace Legion {
     };
 
     /**
+     * \class TaskTreeCoordinates
+     * This represents a stack of context coordinates at every level of the
+     * task tree from the root down to the current task or operation
+     */
+    class TaskTreeCoordinates {
+    public:
+      bool operator<(const TaskTreeCoordinates &rhs) const;
+      bool operator==(const TaskTreeCoordinates &rhs) const;
+    public:
+      inline void clear(void) { coordinates.clear(); }
+      inline bool empty(void) const { return coordinates.empty(); }
+      inline size_t size(void) const { return coordinates.size(); }
+      inline ContextCoordinate& back(void) { return coordinates.back(); }
+      inline const ContextCoordinate& back(void) const
+        { return coordinates.back(); }
+      inline ContextCoordinate& operator[](unsigned idx) 
+        { return coordinates[idx]; }
+      inline const ContextCoordinate& operator[](unsigned idx) const
+        { return coordinates[idx]; }
+      inline void emplace_back(ContextCoordinate &&coordinate)
+        { coordinates.emplace_back(coordinate); }
+      inline void reserve(size_t size) { coordinates.reserve(size); }
+      inline void swap(TaskTreeCoordinates &coords)
+        { coordinates.swap(coords.coordinates); }
+    public:
+      void serialize(Serializer &rez) const;
+      void deserialize(Deserializer &derez);
+    private:
+      std::vector<ContextCoordinate> coordinates;
+    };
+
+    /**
      * \struct LogicalUser
      * A class for representing logical users of a logical 
      * region including the necessary information to

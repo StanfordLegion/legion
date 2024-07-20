@@ -1324,7 +1324,7 @@ namespace Legion {
         // Get the coordinates for the parent task
         parent_ctx->compute_task_tree_coordinates(context_coordinates);
         // Then add our coordinates for our task
-        context_coordinates.push_back(ContextCoordinate(
+        context_coordinates.emplace_back(ContextCoordinate(
               owner_task->get_context_index(), owner_task->index_point));
       }
 #ifdef LEGION_GC
@@ -3386,10 +3386,7 @@ namespace Legion {
       for (unsigned idx = 0; idx < virtual_indexes.size(); idx++)
         rez.serialize(virtual_indexes[idx]);
       rez.serialize(find_parent_context()->did);
-      rez.serialize<size_t>(context_coordinates.size());
-      for (TaskTreeCoordinates::const_iterator it =
-            context_coordinates.begin(); it != context_coordinates.end(); it++)
-        it->serialize(rez);
+      context_coordinates.serialize(rez);
       Provenance *provenance = owner_task->get_provenance();
       if (provenance != NULL)
         provenance->serialize(rez);
@@ -12470,7 +12467,7 @@ namespace Legion {
       set_executing_processor(p);
       // This coordinate represents the name of the unique top-level task
       // launched by this instance of the Legion runtime
-      context_coordinates.push_back(ContextCoordinate(0/*context index*/,
+      context_coordinates.emplace_back(ContextCoordinate(0/*context index*/,
             DomainPoint(Point<2>(normal_id, implicit_id))));
     }
 
@@ -23162,11 +23159,7 @@ namespace Legion {
         local_virtual_mapped[index] = true;
       }
       derez.deserialize(parent_context_did);
-      size_t num_coordinates;
-      derez.deserialize(num_coordinates);
-      context_coordinates.resize(num_coordinates);
-      for (unsigned idx = 0; idx < num_coordinates; idx++)
-        context_coordinates[idx].deserialize(derez);
+      context_coordinates.deserialize(derez);
       provenance = Provenance::deserialize(derez);
       if (provenance != NULL)
         provenance->add_reference();

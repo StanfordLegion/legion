@@ -1244,10 +1244,7 @@ namespace Legion {
           rez.serialize(target);
           rez.serialize(known_upper_bound_size);
           rez.serialize(task_uid);
-          rez.serialize<size_t>(coordinates.size());
-          for (TaskTreeCoordinates::const_iterator it =
-                coordinates.begin(); it != coordinates.end(); it++)
-            it->serialize(rez);
+          coordinates.serialize(rez);
           rez.serialize(wait_on);
           rez.serialize(&result);
         }
@@ -3150,12 +3147,8 @@ namespace Legion {
       derez.deserialize(known_upper_bound_size);
       UniqueID creator_uid;
       derez.deserialize(creator_uid);
-      size_t num_coordinates;
-      derez.deserialize(num_coordinates);
-      TaskTreeCoordinates coordinates(num_coordinates);
-      for (TaskTreeCoordinates::iterator it =
-            coordinates.begin(); it != coordinates.end(); it++)
-        it->deserialize(derez);
+      TaskTreeCoordinates coordinates;
+      coordinates.deserialize(derez);
       RtUserEvent done_event;
       derez.deserialize(done_event);
       bool *result;
@@ -8544,12 +8537,8 @@ namespace Legion {
       }
       else
       {
-        size_t num_coordinates;
-        derez.deserialize(num_coordinates);
-        TaskTreeCoordinates coordinates(num_coordinates);
-        for (TaskTreeCoordinates::iterator it =
-              coordinates.begin(); it != coordinates.end(); it++)
-          it->deserialize(derez);
+        TaskTreeCoordinates coordinates;
+        coordinates.deserialize(derez);
         return new UnboundPool(manager, coordinates);
       }
     }
@@ -8830,10 +8819,7 @@ namespace Legion {
 #endif
       rez.serialize(manager->memory);
       rez.serialize<size_t>(0);
-      rez.serialize<size_t>(coordinates.size());
-      for (TaskTreeCoordinates::const_iterator it =
-            coordinates.begin(); it != coordinates.end(); it++)
-        it->serialize(rez);
+      coordinates.serialize(rez);
       // Clear the manager since we packed it
       manager = NULL;
     }
@@ -9113,10 +9099,7 @@ namespace Legion {
           rez.serialize<size_t>(regions.size());
           for (unsigned idx = 0; idx < regions.size(); idx++)
             rez.serialize(regions[idx]);
-          rez.serialize<size_t>(coordinates.size());
-          for (TaskTreeCoordinates::const_iterator it = 
-                coordinates.begin(); it != coordinates.end(); it++)
-            it->serialize(rez);
+          coordinates.serialize(rez);
           constraints.serialize(rez);
           rez.serialize(processor);
           rez.serialize(priority);
@@ -9198,10 +9181,7 @@ namespace Legion {
           rez.serialize<size_t>(regions.size());
           for (unsigned idx = 0; idx < regions.size(); idx++)
             rez.serialize(regions[idx]);
-          rez.serialize<size_t>(coordinates.size());
-          for (TaskTreeCoordinates::const_iterator it = 
-                coordinates.begin(); it != coordinates.end(); it++)
-            it->serialize(rez);
+          coordinates.serialize(rez);
           rez.serialize(constraints->layout_id);
           rez.serialize(processor);
           rez.serialize(priority);
@@ -9291,10 +9271,7 @@ namespace Legion {
           rez.serialize<size_t>(regions.size());
           for (unsigned idx = 0; idx < regions.size(); idx++)
             rez.serialize(regions[idx]);
-          rez.serialize<size_t>(coordinates.size());
-          for (TaskTreeCoordinates::const_iterator it = 
-                coordinates.begin(); it != coordinates.end(); it++)
-            it->serialize(rez);
+          coordinates.serialize(rez);
           constraints.serialize(rez);
           rez.serialize(processor);
           rez.serialize(priority);
@@ -9398,10 +9375,7 @@ namespace Legion {
           rez.serialize<size_t>(regions.size());
           for (unsigned idx = 0; idx < regions.size(); idx++)
             rez.serialize(regions[idx]);
-          rez.serialize<size_t>(coordinates.size());
-          for (TaskTreeCoordinates::const_iterator it = 
-                coordinates.begin(); it != coordinates.end(); it++)
-            it->serialize(rez);
+          coordinates.serialize(rez);
           rez.serialize(constraints->layout_id);
           rez.serialize(processor);
           rez.serialize(priority);
@@ -9773,11 +9747,8 @@ namespace Legion {
       {
         case CREATE_INSTANCE_CONSTRAINTS:
           {
-            size_t num_coordinates;
-            derez.deserialize(num_coordinates);
-            TaskTreeCoordinates coordinates(num_coordinates);
-            for (unsigned idx = 0; idx < num_coordinates; idx++)
-              coordinates[idx].deserialize(derez);
+            TaskTreeCoordinates coordinates;
+            coordinates.deserialize(derez);
             LayoutConstraintSet constraints;
             constraints.deserialize(derez);
             Processor processor;
@@ -9841,11 +9812,8 @@ namespace Legion {
           }
         case CREATE_INSTANCE_LAYOUT:
           {
-            size_t num_coordinates;
-            derez.deserialize(num_coordinates);
-            TaskTreeCoordinates coordinates(num_coordinates);
-            for (unsigned idx = 0; idx < num_coordinates; idx++)
-              coordinates[idx].deserialize(derez);
+            TaskTreeCoordinates coordinates;
+            coordinates.deserialize(derez);
             LayoutConstraintID layout_id;
             derez.deserialize(layout_id);
             Processor processor;
@@ -9910,11 +9878,8 @@ namespace Legion {
           }
         case FIND_OR_CREATE_CONSTRAINTS:
           {
-            size_t num_coordinates;
-            derez.deserialize(num_coordinates);
-            TaskTreeCoordinates coordinates(num_coordinates);
-            for (unsigned idx = 0; idx < num_coordinates; idx++)
-              coordinates[idx].deserialize(derez);
+            TaskTreeCoordinates coordinates;
+            coordinates.deserialize(derez);
             LayoutConstraintSet constraints;
             constraints.deserialize(derez);
             Processor processor;
@@ -9979,11 +9944,8 @@ namespace Legion {
           }
         case FIND_OR_CREATE_LAYOUT:
           {
-            size_t num_coordinates;
-            derez.deserialize(num_coordinates);
-            TaskTreeCoordinates coordinates(num_coordinates);
-            for (unsigned idx = 0; idx < num_coordinates; idx++)
-              coordinates[idx].deserialize(derez);
+            TaskTreeCoordinates coordinates;
+            coordinates.deserialize(derez);
             LayoutConstraintID layout_id;
             derez.deserialize(layout_id);
             Processor processor;
@@ -11252,10 +11214,7 @@ namespace Legion {
           RezCheck z(rez);
           rez.serialize(memory);
           rez.serialize(creator_uid);
-          rez.serialize<size_t>(coordinates.size());
-          for (TaskTreeCoordinates::const_iterator it =
-                coordinates.begin(); it != coordinates.end(); it++)
-            it->serialize(rez);
+          coordinates.serialize(rez);
           rez.serialize(optional);
           rez.serialize(&result);
           rez.serialize(ready);
@@ -11361,12 +11320,8 @@ namespace Legion {
       derez.deserialize(memory);
       UniqueID creator_uid;
       derez.deserialize(creator_uid);
-      size_t num_coordinates;
-      derez.deserialize(num_coordinates);
-      TaskTreeCoordinates coordinates(num_coordinates);
-      for (TaskTreeCoordinates::iterator it =
-            coordinates.begin(); it != coordinates.end(); it++)
-        it->deserialize(derez);
+      TaskTreeCoordinates coordinates;
+      coordinates.deserialize(derez);
       PoolBounds bounds;
       derez.deserialize(bounds);
       MemoryPool **result;
@@ -11558,10 +11513,7 @@ namespace Legion {
           rez.serialize(&result);
           rez.serialize(wait_on);
           rez.serialize(creator_uid);
-          rez.serialize<size_t>(coordinates.size());
-          for (TaskTreeCoordinates::const_iterator it =
-                coordinates.begin(); it != coordinates.end(); it++)
-            it->serialize(rez);
+          coordinates.serialize(rez);
           rez.serialize(size);
         }
         runtime->send_create_future_instance_request(owner_space, rez);
@@ -14684,12 +14636,8 @@ namespace Legion {
       derez.deserialize(done);
       UniqueID uid;
       derez.deserialize(uid);
-      size_t num_coordinates;
-      derez.deserialize(num_coordinates);
-      TaskTreeCoordinates coordinates(num_coordinates);
-      for (TaskTreeCoordinates::iterator it =
-            coordinates.begin(); it != coordinates.end(); it++)
-        it->deserialize(derez);
+      TaskTreeCoordinates coordinates;
+      coordinates.deserialize(derez);
       size_t size;
       derez.deserialize(size);
 

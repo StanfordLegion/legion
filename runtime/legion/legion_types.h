@@ -2641,7 +2641,7 @@ namespace Legion {
     typedef unsigned long long IndexSpaceExprID;
     struct ContextCoordinate;
     typedef ContextCoordinate TraceLocalID;
-    typedef std::vector<ContextCoordinate> TaskTreeCoordinates;
+    class TaskTreeCoordinates;
     // Helper for encoding templates
     struct NT_TemplateHelper : 
       public Realm::DynamicTemplates::ListProduct2<Realm::DIMCOUNTS, 

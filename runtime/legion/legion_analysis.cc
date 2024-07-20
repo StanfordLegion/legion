@@ -35,6 +35,32 @@ namespace Legion {
     LEGION_EXTERN_LOGGER_DECLARATIONS
 
     /////////////////////////////////////////////////////////////
+    // Task Tree Coordinates
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    void TaskTreeCoordinates::serialize(Serializer &rez) const 
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize<size_t>(coordinates.size());
+      for (std::vector<ContextCoordinate>::const_iterator it =
+            coordinates.begin(); it != coordinates.end(); it++)
+        it->serialize(rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void TaskTreeCoordinates::deserialize(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      size_t num_coordinates;
+      derez.deserialize(num_coordinates);
+      coordinates.resize(num_coordinates);
+      for (std::vector<ContextCoordinate>::iterator it =
+            coordinates.begin(); it != coordinates.end(); it++)
+        it->deserialize(derez);
+    }
+
+    /////////////////////////////////////////////////////////////
     // Users and Info 
     /////////////////////////////////////////////////////////////
 
