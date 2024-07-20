@@ -1897,7 +1897,7 @@ namespace Legion {
                                      Memory memory, const PoolBounds &bounds)
     //--------------------------------------------------------------------------
     {
-      if (!memory.exists() || (bounds.size == 0))
+      if (!memory.exists() || !bounds.is_bounded() || (bounds.size == 0))
         return false;
       // Only support this in map-task calls
       if (ctx->kind != MAP_TASK_CALL)

@@ -11218,8 +11218,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     MemoryPool* MemoryManager::create_memory_pool(UniqueID creator_uid,
-                                      TaskTreeCoordinates &coordinates,
-                                      const std::optional<PoolBounds> &optional)
+                     TaskTreeCoordinates &coordinates, const PoolBounds &bounds)
     //--------------------------------------------------------------------------
     {
       if (!is_owner)
@@ -11232,7 +11231,7 @@ namespace Legion {
           rez.serialize(memory);
           rez.serialize(creator_uid);
           coordinates.serialize(rez);
-          rez.serialize(optional);
+          rez.serialize(bounds);
           rez.serialize(&result);
           rez.serialize(ready);
         }
@@ -11240,9 +11239,8 @@ namespace Legion {
         ready.wait();
         return result;
       }
-      if (optional.has_value())
+      if (bounds.is_bounded())
       {
-        const PoolBounds &bounds = optional.value();
 #ifdef DEBUG_LEGION
         // Caller should have filtered size 0 pools before this
         assert(bounds.size > 0);
@@ -15605,8 +15603,7 @@ namespace Legion {
             if (leaf_variant)
             {
               rez.serialize<size_t>(leaf_pool_bounds.size());
-              for (std::map<Memory::Kind,
-                    std::optional<PoolBounds> >::const_iterator it =
+              for (std::map<Memory::Kind,PoolBounds>::const_iterator it =
                     leaf_pool_bounds.begin(); it !=
                     leaf_pool_bounds.end(); it++)
               {

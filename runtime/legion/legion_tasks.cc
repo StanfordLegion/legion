@@ -4615,14 +4615,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void SingleTask::create_leaf_memory_pools(VariantImpl *variant,
-               std::map<Memory,std::optional<PoolBounds> > &dynamic_pool_bounds)
+                               std::map<Memory,PoolBounds> &dynamic_pool_bounds)
     //--------------------------------------------------------------------------
     {
       if (dynamic_pool_bounds.empty() && variant->leaf_pool_bounds.empty())
         return;
       // Fill in the dynamic pool bounds with the static versions
-      for (std::map<Memory::Kind,std::optional<PoolBounds> >::const_iterator
-            it = variant->leaf_pool_bounds.begin(); it !=
+      for (std::map<Memory::Kind,PoolBounds>::const_iterator it =
+            variant->leaf_pool_bounds.begin(); it !=
             variant->leaf_pool_bounds.end(); it++)
       {
         // This might occur if we're doing origin mapping on a remote node
@@ -4645,17 +4645,17 @@ namespace Legion {
         const Memory target = query.first();
         // Check to see if we also got a dynamic memory pool bound, if we 
         // did then it needs to tighten what already existed
-        std::map<Memory,std::optional<PoolBounds> >::const_iterator finder =
+        std::map<Memory,PoolBounds>::const_iterator finder =
           dynamic_pool_bounds.find(target);
         if (finder != dynamic_pool_bounds.end())
         {
-          if (it->second.has_value())
+          if (it->second.is_bounded())
           {
             MemoryManager *manager = runtime->find_memory_manager(target);
-            if (finder->second.has_value())
+            if (finder->second.is_bounded())
             {
-              const PoolBounds &static_bounds = it->second.value();
-              const PoolBounds &dynamic_bounds = finder->second.value();
+              const PoolBounds &static_bounds = it->second;
+              const PoolBounds &dynamic_bounds = finder->second;
               if (static_bounds.size < dynamic_bounds.size)
                 REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                     "Mapper %s dynamically requested %zd bytes for pool"
@@ -4687,7 +4687,7 @@ namespace Legion {
                   "refinements of the upper bounds provided by the chosen "
                   "task variant.", mapper->get_mapper_name(),
                   manager->get_name(), get_task_name(), get_unique_id(),
-                  variant->vid, it->second.value().size);
+                  variant->vid, it->second.size);
           }
           else
           {
@@ -4715,7 +4715,7 @@ namespace Legion {
         }
         else
         {
-          if (!it->second.has_value() && runtime->runtime_warnings)
+          if (!it->second.is_bounded() && runtime->runtime_warnings)
           {
             const char *mem_names[] = {
 #define MEM_NAMES(name, desc) #name,
@@ -4739,7 +4739,7 @@ namespace Legion {
       std::map<Memory,MemoryPool*> acquired_pools;
       acquired_pools.swap(leaf_memory_pools);
       // Now we can go through and create the pools for use by this task
-      for (std::map<Memory,std::optional<PoolBounds> >::const_iterator it =
+      for (std::map<Memory,PoolBounds>::const_iterator it =
             dynamic_pool_bounds.begin(); it != dynamic_pool_bounds.end(); it++)
       {
         MemoryManager *manager = runtime->find_memory_manager(it->first);
@@ -4752,10 +4752,10 @@ namespace Legion {
                 "of task %s (UID %lld) for creating dynamic memory pool.", 
                 manager->get_name(), it->first.id, get_task_name(),
                 get_unique_id());
-        if (it->second.has_value())
+        if (it->second.is_bounded())
         {
           // Skip creation of pools of size zero
-          if (it->second.value().size == 0)
+          if (it->second.size == 0)
             continue;
           // Check to see if acquired a memory pool for this already
           std::map<Memory,MemoryPool*>::iterator finder =
@@ -4792,7 +4792,7 @@ namespace Legion {
               "finding out that you're out of memory this way you should "
               "instead use the 'MapperRuntime::acquire_pool' call to make "
               "sure that memory can be reserved for all pools in advance.",
-              it->second.value().size, get_task_name(), get_unique_id(),
+              it->second.size, get_task_name(), get_unique_id(),
               manager->get_name())
         leaf_memory_pools.emplace(std::make_pair(it->first, pool));
       }
@@ -4824,9 +4824,8 @@ namespace Legion {
       TaskTreeCoordinates coordinates;
       compute_task_tree_coordinates(coordinates);
       MemoryManager *manager = runtime->find_memory_manager(memory);
-      const std::optional<PoolBounds> optional(bounds);
       MemoryPool *pool =
-        manager->create_memory_pool(get_unique_id(), coordinates, optional);
+        manager->create_memory_pool(get_unique_id(), coordinates, bounds);
       if (pool == NULL)
         return false;
       leaf_memory_pools[memory] = pool;

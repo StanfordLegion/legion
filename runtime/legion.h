@@ -2504,6 +2504,8 @@ namespace Legion {
       PoolBounds(PoolBounds&&) = default;
       PoolBounds& operator=(const PoolBounds&) = default;
       PoolBounds& operator=(PoolBounds&&) = default;
+      inline bool is_bounded(void) const
+        { return (scope == LEGION_BOUNDED_POOL); }
     public:
       size_t size; // upper bound of the pool in bytes
       uint32_t alignment; // maximum alignment supported

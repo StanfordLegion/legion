@@ -473,7 +473,7 @@ namespace Legion {
       void perform_post_mapping(const TraceInfo &trace_info);
       void check_future_return_bounds(FutureInstance *instance) const;
       void create_leaf_memory_pools(VariantImpl *impl,
-          std::map<Memory,std::optional<PoolBounds> > &dynamic_pool_bounds);
+          std::map<Memory,PoolBounds> &dynamic_pool_bounds);
     public:
       bool acquire_leaf_memory_pool(Memory memory, const PoolBounds &bounds);
       void release_leaf_memory_pool(Memory memory);
