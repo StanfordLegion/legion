@@ -36,15 +36,6 @@
   #include <dlfcn.h>
 #endif
 
-#ifdef REALM_CUDA_DYNAMIC_LOAD
-  #ifndef REALM_USE_DLFCN
-    #error dynamic loading of CUDA driver/runtime requires use of dlfcn!
-  #endif
-  #ifdef REALM_USE_CUDART_HIJACK
-    #error REALM_CUDA_DYNAMIC_LOAD and REALM_USE_CUDART_HIJACK both enabled!
-  #endif
-#endif
-
 #include "realm/mutex.h"
 #include "realm/utils.h"
 
@@ -58,6 +49,12 @@
 #include <sstream>
 #include <iomanip>
 #include <algorithm>
+
+#if CUDA_VERSION < 11030
+// Define cuGetProcAddress if it isn't defined, so we can query for it's existence later
+typedef CUresult CUDAAPI (*PFN_cuGetProcAddress)(const char *, void **, int, int);
+#define CU_GET_PROC_ADDRESS_DEFAULT 0
+#endif
 
 #define IS_DEFAULT_STREAM(stream)   \
   (((stream) == 0) || ((stream) == CU_STREAM_LEGACY) || ((stream) == CU_STREAM_PER_THREAD))
@@ -95,21 +92,17 @@ namespace Realm {
     bool nvml_initialized = false;
     CUresult cuda_init_code = CUDA_ERROR_UNKNOWN;
 
-#ifdef REALM_CUDA_DYNAMIC_LOAD
     bool cuda_api_fnptrs_loaded = false;
 
-  #if CUDA_VERSION >= 11030
-    // cuda 11.3+ gives us handy PFN_... types
-    #define DEFINE_FNPTR(name) \
-      PFN_ ## name name ## _fnptr = 0;
-  #else
-    // before cuda 11.3, we have to rely on typeof/decltype
-    #define DEFINE_FNPTR(name) \
-      decltype(&name) name ## _fnptr = 0;
-  #endif
-    CUDA_DRIVER_APIS(DEFINE_FNPTR);
-  #undef DEFINE_FNPTR
+#if CUDA_VERSION >= 11030
+// cuda 11.3+ gives us handy PFN_... types
+#define DEFINE_FNPTR(name, ver) PFN_##name name##_fnptr = 0;
+#else
+// before cuda 11.3, we have to rely on typeof/decltype
+#define DEFINE_FNPTR(name, ver) decltype(&name) name##_fnptr = 0;
 #endif
+    CUDA_DRIVER_APIS(DEFINE_FNPTR);
+#undef DEFINE_FNPTR
 
     static unsigned ctz(uint64_t v) {
 #ifdef REALM_ON_WINDOWS
@@ -1640,10 +1633,28 @@ namespace Realm {
       }
 
       if((ThreadLocal::context_sync_required > 0) ||
-	 ((ThreadLocal::context_sync_required < 0) && gpu_proc->gpu->module->config->cfg_task_context_sync))
-        gpu_proc->ctxsync.add_fence(fence);
-      else
-	fence->enqueue_on_stream(s);
+         ((ThreadLocal::context_sync_required < 0) &&
+          gpu_proc->gpu->module->config->cfg_task_context_sync)) {
+#if(CUDA_VERSION >= 12050)
+        // If this driver supports retrieving an event for the context's current work,
+        // retrieve and wait for it.  This will still over-synchronize with work from the
+        // DMA engine, but at least this is completely asynchronous and doesn't require a
+        // separate thread.
+        if(CUDA_DRIVER_HAS_FNPTR(cuCtxRecordEvent)) {
+          CUevent e = gpu_proc->gpu->event_pool.get_event();
+          CHECK_CU(CUDA_DRIVER_FNPTR(cuCtxRecordEvent)(gpu_proc->gpu->context, e));
+          CHECK_CU(CUDA_DRIVER_FNPTR(cuStreamWaitEvent)(s->get_stream(), e, 0));
+          s->add_event(e, fence);
+        } else
+#endif
+        {
+          // Add the context sync to the thread
+          gpu_proc->ctxsync.add_fence(fence);
+        }
+      } else {
+        // Just wait for the fence
+        fence->enqueue_on_stream(s);
+      }
 
       // A useful debugging macro
 #ifdef FORCE_GPU_STREAM_SYNCHRONIZE
@@ -4189,70 +4200,91 @@ namespace Realm {
       return ss;
     }
 
-#ifdef REALM_CUDA_DYNAMIC_LOAD
-    static bool resolve_cuda_api_fnptrs(bool required)
-    {
-      if(cuda_api_fnptrs_loaded)
-        return true;
+#ifndef STRINGIFY
+#define STRINGIFY(s) #s
+#endif
 
-      // driver symbols have to come from a dynamic libcuda
-#ifdef REALM_USE_DLFCN
+    template <typename Fn>
+    static void cuGetProcAddress_stable(PFN_cuGetProcAddress loader, Fn &fnptr,
+                                        const char *name, int version,
+                                        const char *err_msg)
+    {
+      CUresult ret = CUDA_SUCCESS;
+      // When using cuGetProcAddress, we need to make sure to specify the either the
+      // version the API was introduced, or the current compilation version, whichever is
+      // newer.  This is to deal with CUDA changing the API signature for the same API,
+      // but allows us to retrieve APIs from drivers newer than what we're compiling with
+#if CUDA_VERSION < 12000
+      ret = (loader)(name, reinterpret_cast<void **>(&fnptr),
+                     std::max(CUDA_VERSION, version), CU_GET_PROC_ADDRESS_DEFAULT);
+#else
+      // cuGetProcAddress changed signature in 12.0+ to include more diagnostic
+      // information we don't need.
+      ret =
+          (loader)(name, reinterpret_cast<void **>(&fnptr),
+                   std::max(CUDA_VERSION, version), CU_GET_PROC_ADDRESS_DEFAULT, nullptr);
+#endif
+      if(ret != CUDA_SUCCESS) {
+        REPORT_CU_ERROR(Logger::LEVEL_INFO, err_msg, ret);
+      }
+    }
+
+    static bool resolve_cuda_api_fnptrs(void)
+    {
+      if(cuda_api_fnptrs_loaded) {
+        return true;
+      }
+
+      PFN_cuGetProcAddress cuGetProcAddress_fnptr = nullptr;
+
+#if defined(REALM_USE_LIBDL)
       log_gpu.info() << "dynamically loading libcuda.so";
       void *libcuda = dlopen("libcuda.so.1", RTLD_NOW);
       if(!libcuda) {
-        if(required) {
-          log_gpu.fatal() << "could not open libcuda.so: " << strerror(errno);
-          abort();
-        } else {
-          log_gpu.info() << "could not open libcuda.so: " << strerror(errno);
-          return false;
-        }
+        log_gpu.info() << "could not open libcuda.so: " << strerror(errno);
+        return false;
       }
-#if CUDA_VERSION >= 11030
-      // cuda 11.3+ provides cuGetProcAddress to handle versioning nicely
-      PFN_cuGetProcAddress_v11030 cuGetProcAddress_fnptr =
-          reinterpret_cast<PFN_cuGetProcAddress_v11030>(
-              dlsym(libcuda, "cuGetProcAddress"));
-      if (cuGetProcAddress_fnptr) {
-#define DRIVER_GET_FNPTR(name)                                                 \
-  CHECK_CU((cuGetProcAddress_fnptr)(#name, (void **)&name##_fnptr,             \
-                                    CUDA_VERSION,                              \
-                                    CU_GET_PROC_ADDRESS_DEFAULT));
+      // Use the symbol we get from the dynamically loaded library
+      cuGetProcAddress_fnptr = reinterpret_cast<decltype(cuGetProcAddress_fnptr)>(
+          dlsym(libcuda, STRINGIFY(cuGetProcAddress)));
+#elif CUDA_VERSION >= 11030
+      // Use the statically available symbol
+      cuGetProcAddress_fnptr = &cuGetProcAddress;
+#endif
+
+      if(cuGetProcAddress_fnptr != nullptr) {
+#define DRIVER_GET_FNPTR(name, ver)                                                      \
+  cuGetProcAddress_stable(cuGetProcAddress_fnptr, name##_fnptr, #name, ver,              \
+                          "Could not retrieve symbol " #name);
+
         CUDA_DRIVER_APIS(DRIVER_GET_FNPTR);
 #undef DRIVER_GET_FNPTR
-      } else  // if cuGetProcAddress is not found, fallback to dlsym path
-#endif
-      {
-    // before cuda 11.3, we have to dlsym things, but rely on cuda.h's
-    //  compile-time translation to versioned function names
-#define STRINGIFY(s) #s
-#define DRIVER_GET_FNPTR(name)                                                 \
-  do {                                                                         \
-    void *sym = dlsym(libcuda, STRINGIFY(name));                               \
-    if (!sym) {                                                                \
-      log_gpu.fatal() << "symbol '" STRINGIFY(                                 \
-          name) " missing from libcuda.so!";                                   \
-      abort();                                                                 \
-    }                                                                          \
-    name##_fnptr = reinterpret_cast<decltype(&name)>(sym);                     \
-  } while (0)
-
-    CUDA_DRIVER_APIS(DRIVER_GET_FNPTR);
-
+      } else {
+#if defined(REALM_USE_LIBDL)
+#define DRIVER_GET_FNPTR(name, ver)                                                      \
+  if(CUDA_SUCCESS != (nullptr != (name##_fnptr = reinterpret_cast<decltype(&name)>(      \
+                                      dlsym(libcuda, STRINGIFY(name)))))) {              \
+    log_gpu.info() << "Could not retrieve symbol " #name;                                \
+  }
+        CUDA_DRIVER_APIS(DRIVER_GET_FNPTR)
 #undef DRIVER_GET_FNPTR
-#undef STRINGIFY
+#else
+#define DRIVER_GET_FNPTR(name, ver) name##_fnptr = &name;
+        // Only enumerate the driver apis for the base toolkit version, extra features
+        // cannot be enumerated
+        CUDA_DRIVER_APIS_BASE(DRIVER_GET_FNPTR);
+#undef DRIVER_GET_FNPTR
+#endif /* REALM_USE_LIBDL */
       }
-#endif  // REALM_USE_DLFCN
 
       cuda_api_fnptrs_loaded = true;
 
       return true;
     }
-#endif
 
     static bool resolve_nvml_api_fnptrs()
     {
-#ifdef REALM_USE_DLFCN
+#ifdef REALM_USE_LIBDL
       void *libnvml = NULL;
       if (nvml_api_fnptrs_loaded)
         return true;
@@ -4263,19 +4295,16 @@ namespace Realm {
         return false;
       }
 
-#define STRINGIFY(s) #s
-#define DRIVER_GET_FNPTR(name)                                                     \
-      do {                                                                         \
-        void *sym = dlsym(libnvml, STRINGIFY(name));                               \
-        if (!sym) {                                                                \
-          log_gpu.info() << "symbol '" STRINGIFY(                                  \
-              name) " missing from libnvidia-ml.so!";                              \
-        }                                                                          \
-        name##_fnptr = reinterpret_cast<decltype(&name)>(sym);                     \
-      } while (0)
+#define DRIVER_GET_FNPTR(name)                                                           \
+  do {                                                                                   \
+    void *sym = dlsym(libnvml, STRINGIFY(name));                                         \
+    if(!sym) {                                                                           \
+      log_gpu.info() << "symbol '" STRINGIFY(name) " missing from libnvidia-ml.so!";     \
+    }                                                                                    \
+    name##_fnptr = reinterpret_cast<decltype(&name)>(sym);                               \
+  } while(0)
 
       NVML_APIS(DRIVER_GET_FNPTR);
-#undef STRINGIFY
 #undef DRIVER_GET_FNPTR
 
       nvml_api_fnptrs_loaded = true;
@@ -4288,15 +4317,13 @@ namespace Realm {
     /*static*/ ModuleConfig *CudaModule::create_module_config(RuntimeImpl *runtime)
     {
       CudaModuleConfig *config = new CudaModuleConfig();
-#ifdef REALM_CUDA_DYNAMIC_LOAD
       // load the cuda lib
-      if(!resolve_cuda_api_fnptrs(false)) {
+      if(!resolve_cuda_api_fnptrs()) {
         // warning was printed in resolve function
         delete config;
-        return NULL;
+        return nullptr;
       }
-#endif
-      if (config->discover_resource() == false) {
+      if(!config->discover_resource()) {
         log_gpu.error("We are not able to discover the CUDA resources.");
       }
       return config;
@@ -4762,7 +4789,7 @@ namespace Realm {
       // make sure we hear about any changes to the size of the replicated
       //  heap
       runtime->repl_heap.add_listener(rh_listener);
-
+#ifdef REALM_USE_LIBDL
       cuhook_register_callback_fnptr =
           (PFN_cuhook_register_callback)dlsym(NULL, "cuhook_register_callback");
       cuhook_start_task_fnptr = (PFN_cuhook_start_task)dlsym(NULL, "cuhook_start_task");
@@ -4772,6 +4799,7 @@ namespace Realm {
         cuhook_register_callback_fnptr();
         cuhook_enabled = true;
       }
+#endif
       initialization_complete.store_release(true);
       { // Initialization is complete, signal all pending active message handlers
         AutoLock<> al(cudaipc_mutex);

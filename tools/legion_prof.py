@@ -3732,7 +3732,9 @@ class State(object):
             "PhysicalInstDimOrderDesc": self.log_physical_inst_layout_dim_desc,
             "PhysicalInstanceUsage": self.log_physical_inst_usage,
             "IndexSpaceSizeDesc": self.log_index_space_size_desc,
-            "CalibrationErr": self.log_calibration_err
+            "CalibrationErr": self.log_calibration_err,
+            "BacktraceDesc": self.log_backtrace_desc,
+            "EventWaitInfo": self.log_event_wait
             #"UserInfo": self.log_user_info
         }
         self.current_node_id: Optional[int] = None
@@ -3871,6 +3873,16 @@ class State(object):
     @typecheck
     def log_calibration_err(self, calibration_err: int) -> None:
         self.calibration_err = calibration_err
+
+    # BacktraceDesc
+    @typecheck
+    def log_backtrace_desc(self, backtrace_id: int, backtrace:str) -> None:
+        pass
+
+    # EventWaitInfo
+    @typecheck
+    def log_event_wait(self, proc_id: int, fevent: int, wait_event: int, backtrace_id: int) -> None:
+        pass
 
     # PhysicalInstRegionDesc
     @typecheck
@@ -4096,7 +4108,7 @@ class State(object):
     # TaskWaitInfo
     @typecheck
     def log_task_wait_info(self, op_id: int, task_id: int, variant_id: int, 
-                           wait_start: int, wait_ready: int, wait_end: int
+                           wait_start: int, wait_ready: int, wait_end: int, wait_event: int
     ) -> None:
         variant = self.find_or_create_variant(task_id, variant_id)
         task = self.find_or_create_task(op_id, variant)
@@ -4108,7 +4120,7 @@ class State(object):
     # MetaWaitInfo
     @typecheck
     def log_meta_wait_info(self, op_id: int, lg_id: int, 
-                           wait_start: int, wait_ready: int, wait_end: int
+                           wait_start: int, wait_ready: int, wait_end: int, wait_event: int
     ) -> None:
         op = self.find_or_create_op(op_id)
         variant = self.find_or_create_meta_variant(lg_id)
