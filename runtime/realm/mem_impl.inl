@@ -170,7 +170,6 @@ namespace Realm {
   {
     unsigned new_idx = alloc_range(alloc_first, alloc_last);
     Range *new_prev = &ranges[new_idx];
-    Range* prev = &ranges[prev_idx];
 
     unsigned pf_idx = ranges[prev_idx].prev;
     while((pf_idx != SENTINEL) && (ranges[pf_idx].prev_free == pf_idx)) {
