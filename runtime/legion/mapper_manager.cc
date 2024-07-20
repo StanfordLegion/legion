@@ -1879,8 +1879,15 @@ namespace Legion {
         return false;
       }
       pause_mapper_call(ctx);
-      const bool result = future.impl->find_or_create_application_instance(
-                                memory, ctx->operation->get_unique_op_id()); 
+#ifdef DEBUG_LEGION
+      assert(ctx->operation != NULL);
+      SingleTask *task = dynamic_cast<SingleTask*>(ctx->operation);
+      assert(task != NULL);
+#else
+      SingleTask *task = static_cast<SingleTask*>(ctx->operation);
+#endif
+      const bool result = future.impl->request_application_instance(
+          memory, task, true/*can fail*/);
       resume_mapper_call(ctx, MAPPER_ACQUIRE_FUTURE_CALL);
       return result;
     }

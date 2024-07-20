@@ -11739,8 +11739,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       MemoryManager *manager = runtime->find_memory_manager(memory);
-      FutureInstance *instance = 
-        manager->create_future_instance(get_unique_id(), size);
+      FutureInstance *instance = manager->create_future_instance(
+          get_unique_id(), context_coordinates, size);
       if (instance == NULL)
         REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
             "Failed to allocate space for a future for task %s (UID %lld) "
@@ -11768,7 +11768,7 @@ namespace Legion {
       MemoryManager *manager = runtime->find_memory_manager(memory);
       RtEvent use_event;
       PhysicalInstance instance = manager->create_task_local_instance(
-          get_unique_id(), unique_event, layout, use_event);
+         get_unique_id(), context_coordinates, unique_event, layout, use_event);
       if (!instance.exists())
         REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
             "Failed to allocate DeferredBuffer/Value/Reduction for task %s "
@@ -23614,10 +23614,7 @@ namespace Legion {
                                          TaskTreeCoordinates &coordinates) const
     //--------------------------------------------------------------------------
     {
-      InnerContext *parent_ctx = owner_task->get_context();
-      parent_ctx->compute_task_tree_coordinates(coordinates);
-      coordinates.push_back(ContextCoordinate(
-            owner_task->get_context_index(), owner_task->index_point));
+      owner_task->compute_task_tree_coordinates(coordinates);
     }
 
     //--------------------------------------------------------------------------
@@ -25059,13 +25056,16 @@ namespace Legion {
         memory_pools.find(memory);
       if (finder == memory_pools.end())
       {
+        TaskTreeCoordinates coordinates;
+        compute_task_tree_coordinates(coordinates); 
         MemoryManager *manager = runtime->find_memory_manager(memory);
         // A tiny bit of backwards compatibility here for system level
         // futures in which case we know this will go to the fast path of
         // just calling malloc without relying on Realm's allocator
         if ((memory == runtime->runtime_system_memory) &&
             (size <= LEGION_MAX_RETURN_SIZE))
-          return manager->create_future_instance(get_unique_id(), size);
+          return manager->create_future_instance(
+              get_unique_id(), coordinates, size);
         // WE'RE ABOUT TO DO SOMETHING DANGEROUS!
         // The user didn't bother to pre-allocate a pool so we're going
         // to try to make an immediate instance that has no event precondition
@@ -25073,7 +25073,7 @@ namespace Legion {
         // given an instance with a precondition we cannot wait for it under
         // any circumstances without risking a deadlock
         FutureInstance *instance = manager->create_future_instance(
-            get_unique_id(), size, true/*unbound*/);
+            get_unique_id(), coordinates, size);
         if (instance != NULL)
         {
           if (instance->is_immediate())
@@ -25176,8 +25176,10 @@ namespace Legion {
         // If we can do that then we can still use that instance, but if we're
         // given an instance with a precondition we cannot wait for it under
         // any circumstances without risking a deadlock
+        TaskTreeCoordinates coordinates;
+        compute_task_tree_coordinates(coordinates);
         const PhysicalInstance instance = manager->create_task_local_instance(
-            get_unique_id(), unique_event, layout, use_event, true/*unbound*/);
+            get_unique_id(), coordinates, unique_event, layout, use_event);
         if (footprint == 0)
         {
 #ifdef DEBUG_LEGION

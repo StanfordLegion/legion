@@ -1435,8 +1435,10 @@ namespace Legion {
         {
           MemoryManager *manager = 
             runtime->find_memory_manager(reduction_instance.load()->memory);
+          TaskTreeCoordinates coordinates;
+          compute_task_tree_coordinates(coordinates);
           FutureInstance *shadow_instance = manager->create_future_instance(
-              unique_op_id, reduction_op->sizeof_rhs);
+              unique_op_id, coordinates, reduction_op->sizeof_rhs);
           all_reduce_collective->set_shadow_instance(shadow_instance);
         }
       }
@@ -5924,8 +5926,10 @@ namespace Legion {
             (target->size > LEGION_MAX_RETURN_SIZE))
         {
           MemoryManager *manager = runtime->find_memory_manager(target->memory);
+          TaskTreeCoordinates coordinates;
+          compute_task_tree_coordinates(coordinates);
           FutureInstance *shadow_instance = manager->create_future_instance(
-              unique_op_id, redop->sizeof_rhs);
+              unique_op_id, coordinates, redop->sizeof_rhs);
           all_reduce_collective->set_shadow_instance(shadow_instance);
         }
       }

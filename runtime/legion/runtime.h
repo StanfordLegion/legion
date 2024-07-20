@@ -299,23 +299,14 @@ namespace Legion {
       struct PendingInstance {
       public:
         PendingInstance(void)
-          : instance(NULL), op(NULL), creator_uid(0) { }
-        PendingInstance(FutureInstance *i)
-          : instance(i), op(NULL), creator_uid(0) { }
-        PendingInstance(Operation *o, RtUserEvent a)
-          : instance(NULL), op(o), creator_uid(0), 
-            alloc_ready(a) { }
-        PendingInstance(UniqueID uid, RtUserEvent a)
-          : instance(NULL), op(NULL), creator_uid(uid),
-            alloc_ready(a) { }
+          : instance(NULL), creator_uid(0) { }
+        PendingInstance(FutureInstance *i, UniqueID u)
+          : instance(i), creator_uid(u) { }
       public:
         FutureInstance *instance;
-        Operation *op;
         UniqueID creator_uid;
-        RtUserEvent alloc_ready;
         ApUserEvent inst_ready;
         RtEvent safe_inst_ready;
-        std::set<AddressSpaceID> can_fail_remote_requests;
       };
       struct FutureInstanceTracker {
       public:
@@ -372,13 +363,13 @@ namespace Legion {
                              bool silence_warnings, const char *warning_string);
       void report_incompatible_accessor(const char *accessor_kind,
                                         PhysicalInstance instance);
-      bool find_or_create_application_instance(Memory target, UniqueID uid);
-      RtEvent request_application_instance(Memory target, SingleTask *task,
-                       UniqueID uid, AddressSpaceID source, 
-                       bool can_fail = false, 
-                       size_t known_upper_bound_size = SIZE_MAX);
+      bool request_application_instance(Memory target, SingleTask *task,
+          bool can_fail = false, size_t known_upper_bound_size = SIZE_MAX);
+      bool find_or_create_application_instance(Memory target, 
+          size_t known_upper_bound_size, UniqueID task_uid,
+          const TaskTreeCoordinates &coordinates);
       ApEvent find_application_instance_ready(Memory target, SingleTask *task);
-      RtEvent request_runtime_instance(Operation *op);
+      void request_runtime_instance(Operation *op);
       RtEvent find_runtime_instance_ready(void);
       const void *find_runtime_buffer(TaskContext *ctx, size_t &expected_size);
       ApEvent copy_to(FutureInstance *target, Operation *op,
@@ -438,13 +429,10 @@ namespace Legion {
       void create_pending_instances(void); // must be holding lock
       FutureInstance* find_or_create_instance(Memory memory,ApEvent &inst_ready,
           bool silence_warnings, const char *warning_string);
-      // Must be holding the lock when calling create_instance
-      FutureInstance* create_instance(Memory memory, Operation *op,
-                                      UniqueID creator_uid = 0);
+      FutureInstance* create_instance(Operation *op, Memory memory,size_t size);
       // Must be holding the lock when calling initialize_instance
-      ApEvent record_instance(Operation *op, FutureInstance *instance);
+      ApEvent record_instance(FutureInstance *instance, UniqueID creator_uid);
       Memory find_best_source(Memory target) const;
-      void notify_allocation_failure(Memory target);
       void mark_sampled(void);
       void broadcast_result(void); // must be holding lock
       void record_subscription(AddressSpaceID subscriber, bool need_lock);
@@ -462,7 +450,7 @@ namespace Legion {
       static void handle_future_subscription(Deserializer &derez, Runtime *rt,
                                              AddressSpaceID source);
       static void handle_future_create_instance_request(Deserializer &derez,
-                                                        Runtime *runtime);
+                                    Runtime *runtime, AddressSpaceID source);
       static void handle_future_create_instance_response(Deserializer &derez,
                                                          Runtime *runtime);
     public:
@@ -503,11 +491,11 @@ namespace Legion {
       // The event denoting when all the effects represented by
       // this future are actually complete
       ApEvent future_complete;
+      // Event for when the future size is set if needed
+      RtUserEvent future_size_ready;
     private:
       // Instances that need to be made once we set the future
       std::map<Memory,PendingInstance> pending_instances;
-      // Events representing when remote instances have been allocated
-      std::map<Memory,RtUserEvent> remote_instance_allocations;
     private:
       Processor callback_proc;
       FutureFunctor *callback_functor;
@@ -592,6 +580,8 @@ namespace Legion {
       ApEvent initialize(const ReductionOp *redop, Operation *op,
                          ApEvent precondition);
       ApEvent copy_from(FutureInstance *source, Operation *op,
+                        ApEvent precondition);
+      ApEvent copy_from(FutureInstance *source, UniqueID uid,
                         ApEvent precondition);
       ApEvent reduce_from(FutureInstance *source, Operation *op,
                           const ReductionOpID redop_id,
@@ -1528,7 +1518,7 @@ namespace Legion {
      */
     class UnboundPool : public MemoryPool {
     public:
-      UnboundPool(MemoryManager *manager);
+      UnboundPool(MemoryManager *manager, TaskTreeCoordinates &coordinates);
       virtual ~UnboundPool(void) override;
       virtual size_t query_memory_limit(void) override;
       virtual size_t query_available_memory(void) override;
@@ -1540,6 +1530,7 @@ namespace Legion {
       virtual void free_instance(PhysicalInstance instance) override;
       virtual void serialize(Serializer &rez) override;
     private:
+      TaskTreeCoordinates coordinates;
       MemoryManager *manager;
     };
 
@@ -1714,18 +1705,19 @@ namespace Legion {
       static void handle_notify_collected_instances(Deserializer &derez,
                                                     Runtime *runtime);
     public:
-      FutureInstance* create_future_instance(UniqueID creator_id, size_t size,
-                                             bool unbound = false);
+      FutureInstance* create_future_instance(UniqueID creator_id, 
+          const TaskTreeCoordinates &coordinates, size_t size);
       void free_future_instance(PhysicalInstance inst, size_t size,
                                 RtEvent free_event);
       PhysicalInstance create_task_local_instance(UniqueID creator_uid,
-          LgEvent unique_event, Realm::InstanceLayoutGeneric *layout,
-          RtEvent &use_event, bool unbound = false);
+          const TaskTreeCoordinates &coordinates, LgEvent unique_event,
+          Realm::InstanceLayoutGeneric *layout, RtEvent &use_event);
       void free_task_local_instance(PhysicalInstance instance,
                                   RtEvent precondition = RtEvent::NO_RT_EVENT);
       size_t query_available_memory(void); 
       MemoryPool* create_memory_pool(UniqueID creator_uid, 
-                                     const std::optional<PoolBounds> &bounds);
+          TaskTreeCoordinates &coordinates,
+          const std::optional<PoolBounds> &bounds);
       void release_unbound_pool(void);
       static void handle_create_memory_pool_request(Deserializer &derez,
           Runtime *runtime, AddressSpaceID source);
@@ -3818,7 +3810,8 @@ namespace Legion {
                                      AddressSpaceID source);
       void handle_future_subscription(Deserializer &derez, 
                                       AddressSpaceID source);
-      void handle_future_create_instance_request(Deserializer &derez);
+      void handle_future_create_instance_request(Deserializer &derez,
+                                                 AddressSpaceID source);
       void handle_future_create_instance_response(Deserializer &derez);
       void handle_future_map_future_request(Deserializer &derez,
                                             AddressSpaceID source);

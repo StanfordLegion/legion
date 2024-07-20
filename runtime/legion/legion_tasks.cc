@@ -2498,12 +2498,8 @@ namespace Legion {
         for (unsigned idx = 0; idx < num_future_memories; idx++)
         {
           derez.deserialize(future_memories[idx]);
-          const RtEvent future_mapped =
-            futures[idx].impl->request_application_instance(
-                future_memories[idx], this, unique_op_id,
-                future_memories[idx].address_space());
-          if (future_mapped.exists())
-            ready_events.insert(future_mapped);
+          futures[idx].impl->request_application_instance(
+              future_memories[idx], this);
         }
         size_t num_task_requests;
         derez.deserialize(num_task_requests);
@@ -2885,11 +2881,8 @@ namespace Legion {
                 future_memories[idx].address_space(), target_space,
                 this->target_proc.id)
           // Request the future memories be created
-          const RtEvent future_mapped =
-            futures[idx].impl->request_application_instance(
-              future_memories[idx], this, unique_op_id, target_space);
-          if (future_mapped.exists())
-            map_applied_conditions.insert(future_mapped); 
+          futures[idx].impl->request_application_instance(
+              future_memories[idx], this);
         }
         // Handle any unmapped futures too
         Memory target_memory = Memory::NO_MEMORY;
@@ -2904,11 +2897,7 @@ namespace Legion {
               target_memory = runtime->runtime_system_memory;
           }
           future_memories.push_back(target_memory);
-          const RtEvent future_mapped =
-            futures[idx].impl->request_application_instance(
-              target_memory, this, unique_op_id, target_space);
-          if (future_mapped.exists())
-            map_applied_conditions.insert(future_mapped);
+          futures[idx].impl->request_application_instance(target_memory, this);
         }
       }
       // Sort out any profiling requests that we need to perform
@@ -3529,11 +3518,7 @@ namespace Legion {
         for (unsigned idx = 0; idx < futures.size(); idx++)
         {
           const Memory memory = future_memories[idx];
-          const RtEvent future_mapped =
-            futures[idx].impl->request_application_instance(memory, this,
-               unique_op_id, memory.address_space());
-          if (future_mapped.exists())
-            map_applied_conditions.insert(future_mapped);
+          futures[idx].impl->request_application_instance(memory, this);
         }
       }
       // Make sure to propagate any future sizes that we know about here
@@ -4792,8 +4777,11 @@ namespace Legion {
               "amount of dynamic memory required by a task is truly unbounded.",
               mapper->get_mapper_name(), manager->get_name(),
               get_task_name(), get_unique_id())
+        // Recompute these each time as they might be consumed each time
+        TaskTreeCoordinates coordinates;
+        compute_task_tree_coordinates(coordinates);
         MemoryPool *pool =
-          manager->create_memory_pool(get_unique_id(), it->second);
+          manager->create_memory_pool(get_unique_id(), coordinates, it->second);
         if (pool == NULL)
           REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
               "Failed to reserve a dynamic memory pool of %zd bytes for "
@@ -4833,9 +4821,12 @@ namespace Legion {
         delete finder->second;
         leaf_memory_pools.erase(finder);
       }
+      TaskTreeCoordinates coordinates;
+      compute_task_tree_coordinates(coordinates);
       MemoryManager *manager = runtime->find_memory_manager(memory);
       const std::optional<PoolBounds> optional(bounds);
-      MemoryPool *pool = manager->create_memory_pool(get_unique_id(), optional);
+      MemoryPool *pool =
+        manager->create_memory_pool(get_unique_id(), coordinates, optional);
       if (pool == NULL)
         return false;
       leaf_memory_pools[memory] = pool;
@@ -6903,13 +6894,13 @@ namespace Legion {
       // Check to see if we are stealable, if not and we have not
       // yet been sent remotely, then send the state now
       RezCheck z(rez);
+      parent_ctx->pack_inner_context(rez);
       pack_single_task(rez, target);
       rez.serialize<size_t>(output_region_options.size());
       for (unsigned idx = 0; idx < output_region_options.size(); idx++)
         rez.serialize(output_region_options[idx]);
       rez.serialize(orig_task);
       rez.serialize(remote_unique_id);
-      parent_ctx->pack_inner_context(rez);
       rez.serialize(top_level_task);
       if (!elide_future_return)
       {
@@ -6942,6 +6933,8 @@ namespace Legion {
     {
       DETAILED_PROFILER(runtime, INDIVIDUAL_UNPACK_TASK_CALL);
       DerezCheck z(derez);
+      // Figure out what our parent context is
+      parent_ctx = InnerContext::unpack_inner_context(derez, runtime);
       unpack_single_task(derez, ready_events);
       size_t output_regions_size = 0;
       derez.deserialize(output_regions_size);
@@ -6951,8 +6944,6 @@ namespace Legion {
       derez.deserialize(orig_task);
       derez.deserialize(remote_unique_id);
       set_current_proc(current);
-      // Figure out what our parent context is
-      parent_ctx = InnerContext::unpack_inner_context(derez, runtime);
       derez.deserialize(top_level_task);
       // Quick check to see if we've been sent back to our original node
       if (!is_remote())
@@ -7650,6 +7641,9 @@ namespace Legion {
     {
       DETAILED_PROFILER(runtime, POINT_UNPACK_TASK_CALL);
       DerezCheck z(derez);
+      // Get the context information from our slice owner
+      parent_ctx = slice_owner->get_context();
+      parent_task = parent_ctx->get_task();
       unpack_single_task(derez, ready_events);
       derez.deserialize(orig_task);
       if (concurrent_task)
@@ -7661,9 +7655,6 @@ namespace Legion {
         derez.deserialize(concurrent_postcondition);
       }
       set_current_proc(current);
-      // Get the context information from our slice owner
-      parent_ctx = slice_owner->get_context();
-      parent_task = parent_ctx->get_task();
       set_provenance(slice_owner->get_provenance());
       // We should always just apply these things now since we were mapped 
       // on the owner node
@@ -8141,14 +8132,14 @@ namespace Legion {
 #endif
       SingleTask::activate();
       set_current_proc(proc);
-      std::set<RtEvent> ready_events;
-      unpack_single_task(derez, ready_events);
       stealable = false;
       replicate = false;
       parent_ctx = parent;
       shard_manager = manager;
       shard_manager->add_base_resource_ref(SINGLE_TASK_REF);
       selected_variant = variant;
+      std::set<RtEvent> ready_events;
+      unpack_single_task(derez, ready_events);
       // If we have any region requirements then they are all collective
       check_collective_regions.resize(regions.size());
       for (unsigned idx = 0; idx < regions.size(); idx++)
@@ -10009,6 +10000,8 @@ namespace Legion {
       if (serdez_redop_fns == NULL) 
       {
         reduction_instances.reserve(target_mems.size());
+        TaskTreeCoordinates coordinates;
+        compute_task_tree_coordinates(coordinates);
         int runtime_visible_index = -1;
         for (std::vector<Memory>::const_iterator it =
               target_mems.begin(); it != target_mems.end(); it++)
@@ -10018,7 +10011,7 @@ namespace Legion {
             runtime_visible_index = reduction_instances.size();
           MemoryManager *manager = runtime->find_memory_manager(*it);
           reduction_instances.push_back(manager->create_future_instance(
-                unique_op_id,reduction_op->sizeof_rhs));
+                unique_op_id, coordinates, reduction_op->sizeof_rhs));
         }
         // This is an important optimization: if we're doing a small
         // reduction value we always want the reduction instance to
@@ -10031,7 +10024,7 @@ namespace Legion {
           MemoryManager *manager = 
             runtime->find_memory_manager(runtime->runtime_system_memory);
           reduction_instances.push_back(manager->create_future_instance(
-                unique_op_id, reduction_op->sizeof_rhs));
+                unique_op_id, coordinates, reduction_op->sizeof_rhs));
         }
         if (runtime_visible_index > 0)
           std::swap(reduction_instances.front(), 
@@ -10056,10 +10049,7 @@ namespace Legion {
         if ((redop_initial_value.impl != NULL) &&
             (parent_ctx->get_task()->get_shard_id() == 0))
         {
-          const RtEvent ready =
-            redop_initial_value.impl->request_runtime_instance(this);
-          if (ready.exists() && !ready.has_triggered())
-            ready.wait();
+          redop_initial_value.impl->request_runtime_instance(this);
           const void *value = redop_initial_value.impl->find_runtime_buffer(
               parent_ctx, serdez_redop_state_size); 
           serdez_redop_state = malloc(serdez_redop_state_size);
@@ -10666,6 +10656,7 @@ namespace Legion {
 #endif
         reduction_instances.reserve(serdez_redop_targets.size());
         int runtime_visible_index = -1;
+        TaskTreeCoordinates coordinates;
         for (std::vector<Memory>::const_iterator it =
               serdez_redop_targets.begin(); it !=
               serdez_redop_targets.end(); it++)
@@ -10680,9 +10671,11 @@ namespace Legion {
           }
           else
           {
+            if (coordinates.empty())
+              compute_task_tree_coordinates(coordinates);
             MemoryManager *manager = runtime->find_memory_manager(*it);
             reduction_instances.push_back(manager->create_future_instance(
-                  unique_op_id, serdez_redop_state_size));
+                  unique_op_id, coordinates, serdez_redop_state_size));
           }
         }
         if (runtime_visible_index < 0)
