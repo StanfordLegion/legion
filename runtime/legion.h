@@ -96,6 +96,7 @@ namespace Legion {
       inline bool operator!=(const IndexSpace &rhs) const;
       inline bool operator<(const IndexSpace &rhs) const;
       inline bool operator>(const IndexSpace &rhs) const;
+      inline std::size_t hash(void) const;
       inline IndexSpaceID get_id(void) const { return id; }
       inline IndexTreeID get_tree_id(void) const { return tid; }
       inline bool exists(void) const { return (id != 0); }
@@ -151,6 +152,7 @@ namespace Legion {
       inline bool operator!=(const IndexPartition &rhs) const;
       inline bool operator<(const IndexPartition &rhs) const;
       inline bool operator>(const IndexPartition &rhs) const;
+      inline std::size_t hash(void) const;
       inline IndexPartitionID get_id(void) const { return id; }
       inline IndexTreeID get_tree_id(void) const { return tid; }
       inline bool exists(void) const { return (id != 0); }
@@ -209,6 +211,7 @@ namespace Legion {
       inline bool operator!=(const FieldSpace &rhs) const;
       inline bool operator<(const FieldSpace &rhs) const;
       inline bool operator>(const FieldSpace &rhs) const;
+      inline std::size_t hash(void) const;
       inline FieldSpaceID get_id(void) const { return id; }
       inline bool exists(void) const { return (id != 0); }
     private:
@@ -243,6 +246,7 @@ namespace Legion {
       inline bool operator==(const LogicalRegion &rhs) const;
       inline bool operator!=(const LogicalRegion &rhs) const;
       inline bool operator<(const LogicalRegion &rhs) const;
+      std::size_t hash(void) const;
     public:
       inline IndexSpace get_index_space(void) const { return index_space; }
       inline FieldSpace get_field_space(void) const { return field_space; }
@@ -310,6 +314,7 @@ namespace Legion {
       inline bool operator==(const LogicalPartition &rhs) const;
       inline bool operator!=(const LogicalPartition &rhs) const;
       inline bool operator<(const LogicalPartition &rhs) const;
+      std::size_t hash(void) const;
     public:
       inline IndexPartition get_index_partition(void) const 
         { return index_partition; }
@@ -1195,6 +1200,7 @@ namespace Legion {
         { return impl < f.impl; }
       Future& operator=(const Future &f);
       Future& operator=(Future &&f) noexcept;
+      std::size_t hash(void) const;
     public:
       /**
        * Wait on the result of this future.  Return
@@ -1410,6 +1416,7 @@ namespace Legion {
         { return get_future(point); }
       FutureMap& operator=(const FutureMap &f);
       FutureMap& operator=(FutureMap &&f) noexcept;
+      std::size_t hash(void) const;
     public:
       /**
        * Block until we can return the result for the
@@ -2489,7 +2496,10 @@ namespace Legion {
      */
     struct PoolBounds {
     public:
-      PoolBounds(size_t s = 0, uint32_t a = 16) : size(s), alignment(a) { }
+      PoolBounds(UnboundPoolScope s) 
+        : size(0), alignment(0), scope(s) { }
+      PoolBounds(size_t s = 0, uint32_t a = 16)
+        : size(s), alignment(a), scope(LEGION_BOUNDED_POOL) { }
       PoolBounds(const PoolBounds&) = default;
       PoolBounds(PoolBounds&&) = default;
       PoolBounds& operator=(const PoolBounds&) = default;
@@ -2497,6 +2507,7 @@ namespace Legion {
     public:
       size_t size; // upper bound of the pool in bytes
       uint32_t alignment; // maximum alignment supported
+      UnboundPoolScope scope; // scope for unbound pools
     };
 
     /**
@@ -2549,12 +2560,10 @@ namespace Legion {
       // request that the runtime preserve a pool in the memory of
       // the corresponding kind with the closest affinity to the target
       // processor for handling dynamic memory allocations during the
-      // execution of the task. Setting an empty optional upper bound 
-      // will indicate that no bound can be provided and the runtime 
-      // should block all future allocations in that memory until the 
-      // task is done. Note that requesting an unbound memory allocation
-      // will likely result in severe performance degradations.
-      std::map<Memory::Kind,std::optional<PoolBounds> > leaf_pool_bounds;
+      // execution of the task. Pool bounds can also be set to request
+      // an unbounded pool allocation. Note that requesting an unbound 
+      // memory allocation will likely result in severe performance degradation.
+      std::map<Memory::Kind,PoolBounds> leaf_pool_bounds;
     public:
       // TaskIDs for which this variant can serve as a generator
       std::set<TaskID>                  generator_tasks;
@@ -2598,6 +2607,7 @@ namespace Legion {
         { return (impl == reg.impl); }
       inline bool operator<(const PhysicalRegion &reg) const
         { return (impl < reg.impl); }
+      std::size_t hash(void) const;
     public:
       /**
        * Check to see if this represents a mapped physical region. 
@@ -3711,7 +3721,7 @@ namespace Legion {
     class DeferredValue {
     public:
       DeferredValue(T initial_value,
-                    size_t alignment = 16);
+                    size_t alignment = std::alignment_of<T>());
     public:
       __CUDA_HD__
       inline T read(void) const;
@@ -3746,7 +3756,8 @@ namespace Legion {
     template<typename REDOP, bool EXCLUSIVE=false>
     class DeferredReduction: public DeferredValue<typename REDOP::RHS> {
     public:
-      DeferredReduction(size_t alignment = 16);
+      DeferredReduction(
+          size_t alignment = std::alignment_of<typename REDOP::RHS>());
     public:
       __CUDA_HD__
       inline void reduce(typename REDOP::RHS val) const;
@@ -3822,45 +3833,45 @@ namespace Legion {
       DeferredBuffer(Memory::Kind kind, 
                      const Domain &bounds,
                      const T *initial_value = NULL,
-                     size_t alignment = 16,
+                     size_t alignment = std::alignment_of<T>(),
                      bool fortran_order_dims = false);
       DeferredBuffer(const Rect<DIM,COORD_T> &bounds, 
                      Memory::Kind kind,
                      const T *initial_value = NULL,
-                     size_t alignment = 16,
+                     size_t alignment = std::alignment_of<T>(),
                      bool fortran_order_dims = false);
     public: // Constructors specifying a specific memory
       DeferredBuffer(Memory memory, 
                      const Domain &bounds,
                      const T *initial_value = NULL,
-                     size_t alignment = 16,
+                     size_t alignment = std::alignment_of<T>(),
                      bool fortran_order_dims = false);
       DeferredBuffer(const Rect<DIM,COORD_T> &bounds, 
                      Memory memory,
                      const T *initial_value = NULL,
-                     size_t alignment = 16,
+                     size_t alignment = std::alignment_of<T>(),
                      bool fortran_order_dims = false);
     public: // Constructors specifying a specific ordering
       DeferredBuffer(Memory::Kind kind,
                      const Domain &bounds,
                      std::array<DimensionKind,DIM> ordering,
                      const T *initial_value = NULL,
-                     size_t alignment = 16);
+                     size_t alignment = std::alignment_of<T>());
       DeferredBuffer(const Rect<DIM,COORD_T> &bounds,
                      Memory::Kind kind,
                      std::array<DimensionKind,DIM> ordering,
                      const T *initial_value = NULL,
-                     size_t alignment = 16);
+                     size_t alignment = std::alignment_of<T>());
       DeferredBuffer(Memory memory,
                      const Domain &bounds,
                      std::array<DimensionKind,DIM> ordering,
                      const T *initial_value = NULL,
-                     size_t alignment = 16);
+                     size_t alignment = std::alignment_of<T>());
       DeferredBuffer(const Rect<DIM,COORD_T> &bounds,
                      Memory memory,
                      std::array<DimensionKind,DIM> ordering,
                      const T *initial_value = NULL,
-                     size_t alignment = 16);
+                     size_t alignment = std::alignment_of<T>());
     protected:
       Memory get_memory_from_kind(Memory::Kind kind);
       void initialize_layout(size_t alignment, bool fortran_order_dims);
@@ -10341,6 +10352,7 @@ namespace Legion {
 }; // namespace Legion
 
 #include "legion/legion.inl"
+
 // Include this here so we get the mapper interface in the header file
 // We have to put it here though since the mapper interface depends
 // on the rest of the legion interface

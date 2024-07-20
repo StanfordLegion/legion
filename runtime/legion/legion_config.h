@@ -2120,6 +2120,18 @@ typedef enum legion_domain_max_rect_dim_t {
 #undef LEGION_DEPRECATED_ENUM
 #undef LEGION_DEPRECATED_ENUM_FROM
 
+typedef enum legion_unbound_pool_scope_t {
+  // Bounded pool so other allocations always permitted in parallel
+  LEGION_BOUNDED_POOL,
+  // Nothing else is allowed to allocate in parallel
+  LEGION_STRICT_UNBOUNDED_POOL,
+  // Only tasks in the same index space task launch
+  // are allowed to allocate in parallel
+  LEGION_INDEX_TASK_UNBOUNDED_POOL,
+  // Anything else is allowed to allocate in parallel 
+  LEGION_PERMISSIVE_UNBOUNDED_POOL,
+} legion_unbounded_pool_scope_t;
+
 //==========================================================================
 //                                Types
 //==========================================================================

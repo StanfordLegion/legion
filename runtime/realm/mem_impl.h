@@ -257,6 +257,8 @@ namespace Realm {
                        const std::vector<RT> &sizes, const std::vector<RT> &alignment,
                        std::vector<RT> &allocs_first);
 
+    unsigned insert_free_block(unsigned prev_idx, RT alloc_first, RT alloc_last);
+
     // TODO(apryakhin@): consider ifdefing for debug builds only
     void dump_allocator_status();
     bool free_list_has_cycle();

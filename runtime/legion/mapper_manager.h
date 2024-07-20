@@ -34,8 +34,8 @@ namespace Legion {
       const MappingCallKind             kind;
       Operation*const                   operation;
       std::map<PhysicalManager*,unsigned/*count*/>* acquired_instances;
-      unsigned long long                start_time;
-      unsigned long long                pause_time;
+      long long                         start_time;
+      long long                         pause_time;
       bool                              reentrant_disabled;
     };
 

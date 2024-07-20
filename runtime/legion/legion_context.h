@@ -608,8 +608,8 @@ namespace Legion {
       void initialize_overhead_profiler(void);
       inline void begin_runtime_call(void);
       inline void end_runtime_call(void);
-      inline void begin_wait(bool from_application);
-      inline void end_wait(bool from_application);
+      inline void begin_wait(LgEvent event, bool from_application);
+      inline void end_wait(LgEvent event, bool from_application);
       void start_profiling_range(void);
       void stop_profiling_range(const char *provenance);
       void remap_unmapped_regions(LogicalTrace *current_trace,
@@ -679,12 +679,12 @@ namespace Legion {
       };
       OverheadProfiler *overhead_profiler; 
     protected:
-      class ImplicitProfiler {
+      class ImplicitTaskProfiler {
       public:
-        std::vector<std::pair<long long,long long> > waits; 
+        std::deque<LegionProfInstance::WaitInfo> waits;
         long long start_time;
       };
-      ImplicitProfiler *implicit_profiler;
+      ImplicitTaskProfiler *implicit_task_profiler;
     protected:
       std::map<LocalVariableID,
                std::pair<void*,void (*)(void*)> > task_local_variables;
@@ -3984,7 +3984,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    inline void TaskContext::begin_wait(bool from_application)
+    inline void TaskContext::begin_wait(LgEvent event, bool from_application)
     //--------------------------------------------------------------------------
     {
       if (overhead_profiler != NULL)
@@ -3998,15 +3998,16 @@ namespace Legion {
           overhead_profiler->application_time += diff;
         overhead_profiler->previous_profiling_time = current;
       }
-      if (implicit_profiler != NULL)
+      if (implicit_task_profiler != NULL)
       {
         const long long current = Realm::Clock::current_time_in_nanoseconds();
-        implicit_profiler->waits.emplace_back(std::make_pair(current, current));
+        implicit_task_profiler->waits.emplace_back(
+            LegionProfInstance::WaitInfo{ current, current, current, event });
       }
     }
 
     //--------------------------------------------------------------------------
-    inline void TaskContext::end_wait(bool from_application)
+    inline void TaskContext::end_wait(LgEvent event, bool from_application)
     //--------------------------------------------------------------------------
     {
       if (overhead_profiler != NULL)
@@ -4017,10 +4018,20 @@ namespace Legion {
         overhead_profiler->wait_time += diff;
         overhead_profiler->previous_profiling_time = current;
       }
-      if (implicit_profiler != NULL)
+      if (implicit_task_profiler != NULL)
       {
         const long long current = Realm::Clock::current_time_in_nanoseconds();
-        implicit_profiler->waits.back().second = current;
+#ifdef DEBUG_LEGION
+        assert(!implicit_task_profiler->waits.empty());
+#endif
+        LegionProfInstance::WaitInfo &info = 
+          implicit_task_profiler->waits.back();
+#ifdef DEBUG_LEGION
+        assert(info.wait_event == event);
+#endif
+        // Assume that implicit tasks resume as soon as the event is triggered
+        info.wait_ready = current;
+        info.wait_end = current;
       }
     }
 

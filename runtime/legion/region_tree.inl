@@ -2625,7 +2625,7 @@ namespace Legion {
         {
           if (context->runtime->legion_spy_enabled)
             this->log_index_space_points(tight_space);
-          if (context->runtime->profiler != NULL)
+          if (implicit_profiler != NULL)
             this->log_profiler_index_space_points(tight_space);
         }
       }
@@ -2751,22 +2751,22 @@ namespace Legion {
             dense_volume = tight_space.bounds.volume();
             sparse_volume = tight_space.volume();
           }
-        context->runtime->profiler->record_index_space_size(
+        implicit_profiler->register_index_space_size(
                           handle.get_id(), dense_volume, sparse_volume, !is_dense);
         // Iterate over the rectangles and print them out
         for (Realm::IndexSpaceIterator<DIM,T> itr(tight_space);
               itr.valid; itr.step())
         {
           if (itr.rect.volume() == 1)
-            context->runtime->profiler->record_index_space_point(
+            implicit_profiler->record_index_space_point(
                 handle.get_id(), Point<DIM,T>(itr.rect.lo));
           else
-            context->runtime->profiler->record_index_space_rect(
+            implicit_profiler->record_index_space_rect(
                 handle.get_id(), Rect<DIM,T>(itr.rect));
         }
       }
       else
-        context->runtime->profiler->record_empty_index_space(handle.get_id());
+        implicit_profiler->register_empty_index_space(handle.get_id());
     }
 
     //--------------------------------------------------------------------------

@@ -164,6 +164,33 @@ namespace Realm {
   }
 
   template <typename RT, typename TT>
+  inline unsigned BasicRangeAllocator<RT, TT>::insert_free_block(unsigned prev_idx,
+                                                                 RT alloc_first,
+                                                                 RT alloc_last)
+  {
+    unsigned new_idx = alloc_range(alloc_first, alloc_last);
+    Range *new_prev = &ranges[new_idx];
+
+    unsigned pf_idx = ranges[prev_idx].prev;
+    while((pf_idx != SENTINEL) && (ranges[pf_idx].prev_free == pf_idx)) {
+      pf_idx = ranges[pf_idx].prev;
+      assert(pf_idx != new_idx);
+    }
+    unsigned nf_idx = ranges[prev_idx].next;
+    while((nf_idx != SENTINEL) && (ranges[nf_idx].next_free == nf_idx)) {
+      nf_idx = ranges[nf_idx].next;
+      assert(nf_idx != new_idx);
+    }
+
+    new_prev->prev_free = pf_idx;
+    new_prev->next_free = nf_idx;
+    ranges[pf_idx].next_free = new_idx;
+    ranges[nf_idx].prev_free = new_idx;
+
+    return new_idx;
+  }
+
+  template <typename RT, typename TT>
   inline size_t BasicRangeAllocator<RT, TT>::split_range(
       TT old_tag, const std::vector<TT> &new_tags, const std::vector<RT> &sizes,
       const std::vector<RT> &alignments, std::vector<RT> &allocs_first)
@@ -177,7 +204,9 @@ namespace Realm {
     assert(n == sizes.size() && n == alignments.size());
     assert(allocs_first.size() == n);
 
-    unsigned prev_idx = it->second;
+    unsigned range_idx = it->second;
+    unsigned prev_idx = range_idx;
+
     Range *prev = &ranges[prev_idx];
     unsigned next_idx = prev->next;
 
@@ -198,9 +227,23 @@ namespace Realm {
     // First part reuse existing allocated range for the first tag
     RT offset = calculate_offset(prev->first, alignments[0]);
     if((sizes[0] + offset) <= remaining_size) {
-      prev->last = prev->first + sizes[0] + offset;
+      RT alloc_first = prev->first + offset;
 
-      allocs_first[0] = prev->first + offset;
+      prev->last = alloc_first + sizes[0];
+
+      if(prev->first != alloc_first) {
+        unsigned new_idx = insert_free_block(range_idx, prev->first, alloc_first);
+        prev = &ranges[prev_idx];
+        Range *new_prev = &ranges[new_idx];
+        prev->first = alloc_first;
+
+        new_prev->prev = prev->prev;
+        new_prev->next = prev_idx;
+        ranges[prev->prev].next = new_idx;
+        prev->prev = new_idx;
+      }
+
+      allocs_first[0] = alloc_first;
 
       allocated[new_tags[0]] = prev_idx;
       remaining_size -= (sizes[0] + offset);
@@ -209,18 +252,42 @@ namespace Realm {
 
     // Second part create new ranges for the remaining requested tags
     for(size_t i = 1; i < n; i++) {
-      size_t start = prev_idx > 0 ? prev->first : 0;
+      // TODO(apryakhin@): Consider doing hard exit if we have a
+      // duplicate tag.
+      if(allocated.find(new_tags[i]) != allocated.end()) {
+        continue;
+      }
+
+      size_t start = prev->last;
+      // size_t start = prev_idx > 0 ? prev->first : 0;
       RT offset = calculate_offset(start, alignments[i]);
       if(remaining_size < (sizes[i] + offset))
         break;
-      unsigned new_idx = alloc_range(prev->last, prev->last + sizes[i] + offset);
+
+      RT alloc_first = start + offset;
+
+      unsigned new_idx = alloc_range(alloc_first, alloc_first + sizes[i]);
+
+      if(start != alloc_first) {
+        unsigned free_idx = insert_free_block(range_idx, start, alloc_first);
+
+        prev = &ranges[prev_idx];
+        Range *new_prev = &ranges[free_idx];
+
+        new_prev->prev = prev_idx;
+        new_prev->next = new_idx;
+        ranges[prev_idx].next = free_idx;
+
+        prev_idx = free_idx;
+      }
+
       allocated[new_tags[i]] = new_idx;
       remaining_size -= (sizes[i] + offset);
       successful_allocations++;
 
       Range *new_prev = &ranges[new_idx];
 
-      allocs_first[i] = new_prev->first + offset;
+      allocs_first[i] = new_prev->first;
 
       prev = &ranges[prev_idx];
 
@@ -236,31 +303,13 @@ namespace Realm {
 
     // Last part create new free range for the remaining size
     if(remaining_size > 0) {
-      RT alloc_last = prev->last;
-      unsigned after_idx = alloc_range(alloc_last, alloc_last + remaining_size);
+      unsigned after_idx =
+          insert_free_block(range_idx, prev->last, prev->last + remaining_size);
       Range *r_after = &ranges[after_idx];
+
       r_after->prev = prev_idx;
-
-      unsigned pf_idx = ranges[prev_idx].prev;
-      while((pf_idx != SENTINEL) && (ranges[pf_idx].prev_free == pf_idx)) {
-        pf_idx = ranges[pf_idx].prev;
-        assert(pf_idx != after_idx);
-      }
-      unsigned nf_idx = ranges[prev_idx].next;
-      while((nf_idx != SENTINEL) && (ranges[nf_idx].next_free == nf_idx)) {
-        nf_idx = ranges[nf_idx].next;
-        assert(nf_idx != after_idx);
-      }
-
-      r_after->prev_free = pf_idx;
-      r_after->next_free = nf_idx;
-      ranges[pf_idx].next_free = after_idx;
-      ranges[nf_idx].prev_free = after_idx;
-
-      // allocate might have moved the range
       prev = &ranges[prev_idx];
       prev->next = after_idx;
-
       prev_idx = after_idx;
       prev = r_after;
 
@@ -273,10 +322,12 @@ namespace Realm {
     assert(remaining_size == 0);
 
 #ifdef DEBUG_REALM
-    assert(free_list_has_cycle() == false);
-    assert(has_invalid_ranges() == false);
-    if (successful_allocations == 0) {
+    bool has_cycle = free_list_has_cycle();
+    bool invalid = has_invalid_ranges();
+    if(has_cycle || invalid) {
       dump_allocator_status();
+      assert(has_cycle == false);
+      assert(invalid == false);
     }
 #endif
 
@@ -317,7 +368,7 @@ namespace Realm {
       if (alloc.second == SENTINEL) continue;
       if(!range_indices.insert(alloc.second).second) {
         std::cerr << "ERROR: found duplicate range idx:" << alloc.second
-                  << " for tag:" << alloc.first;
+                  << " for tag:" << alloc.first << std::endl;
         return true;
       }
     }
@@ -325,7 +376,7 @@ namespace Realm {
     for(unsigned idx = ranges[SENTINEL].next; idx != SENTINEL; idx = ranges[idx].next) {
       if(ranges[idx].first > ranges[idx].last ||
          ranges[idx].last > ranges[ranges[idx].next].first) {
-        std::cerr << "ERROR: found invalid range idx:" << idx;
+        std::cerr << "ERROR: found invalid range idx:" << idx << std::endl;
         return true;
       }
     }
@@ -414,6 +465,8 @@ namespace Realm {
               << " total_free_size:" << total_free_size
               << " large_free_blocksize:" << largest_free_blocksize
               << " max_defrag_block:" << max_size_after_defrag << std::endl;
+
+    assert(total_size == total_used_size + total_free_size);
   }
 
   template <typename RT, typename TT>
