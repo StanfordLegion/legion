@@ -2496,7 +2496,10 @@ namespace Legion {
      */
     struct PoolBounds {
     public:
-      PoolBounds(size_t s = 0, uint32_t a = 16) : size(s), alignment(a) { }
+      PoolBounds(UnboundPoolScope s) 
+        : size(0), alignment(0), scope(s) { }
+      PoolBounds(size_t s = 0, uint32_t a = 16)
+        : size(s), alignment(a), scope(LEGION_BOUNDED_POOL) { }
       PoolBounds(const PoolBounds&) = default;
       PoolBounds(PoolBounds&&) = default;
       PoolBounds& operator=(const PoolBounds&) = default;
@@ -2504,8 +2507,8 @@ namespace Legion {
     public:
       size_t size; // upper bound of the pool in bytes
       uint32_t alignment; // maximum alignment supported
+      UnboundPoolScope scope; // scope for unbound pools
     };
-
 
     /**
      * \struct TaskVariantRegistrar
@@ -2557,12 +2560,10 @@ namespace Legion {
       // request that the runtime preserve a pool in the memory of
       // the corresponding kind with the closest affinity to the target
       // processor for handling dynamic memory allocations during the
-      // execution of the task. Setting an empty optional upper bound 
-      // will indicate that no bound can be provided and the runtime 
-      // should block all future allocations in that memory until the 
-      // task is done. Note that requesting an unbound memory allocation
-      // will likely result in severe performance degradations.
-      std::map<Memory::Kind,std::optional<PoolBounds> > leaf_pool_bounds;
+      // execution of the task. Pool bounds can also be set to request
+      // an unbounded pool allocation. Note that requesting an unbound 
+      // memory allocation will likely result in severe performance degradation.
+      std::map<Memory::Kind,PoolBounds> leaf_pool_bounds;
     public:
       // TaskIDs for which this variant can serve as a generator
       std::set<TaskID>                  generator_tasks;
