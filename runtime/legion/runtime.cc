@@ -1845,9 +1845,13 @@ namespace Legion {
         subscribed.wait();
       const size_t size = previous->get_untyped_size();
       ApEvent complete = previous->get_complete_event();
+      ApEvent ready;
       FutureInstance *instance = NULL;
       if (size > 0)
+      {
         instance = create_instance(op, runtime->runtime_system_memory, size);
+        ready = previous->copy_to(instance, op, ApEvent::NO_AP_EVENT);
+      }
       AutoLock f_lock(future_lock);
       if (!empty.load() || (callback_functor != NULL))
         REPORT_LEGION_ERROR(ERROR_DUPLICATE_FUTURE_SET,
@@ -1862,7 +1866,11 @@ namespace Legion {
 #endif
       future_size = size;
       if (instance != NULL)
-        record_instance(instance, op->get_unique_op_id());
+      {
+        instances.emplace(std::make_pair(instance->memory, 
+              FutureInstanceTracker(instance, ready)));
+        local_visible_memory = instance->memory;
+      }
       const void *meta = previous->get_metadata(&metasize);
       if (metasize > 0)
         save_metadata(meta, metasize);
