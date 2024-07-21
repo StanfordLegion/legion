@@ -51,6 +51,8 @@ namespace Legion {
       inline bool operator==(const ContextCoordinate &rhs) const
         { return ((context_index == rhs.context_index) && 
                   (index_point == rhs.index_point)); }
+      inline bool operator!=(const ContextCoordinate &rhs) const
+        { return !((*this) == rhs); }
       inline bool operator<(const ContextCoordinate &rhs) const
         { if (context_index < rhs.context_index) return true;
           if (context_index > rhs.context_index) return false;
@@ -70,8 +72,9 @@ namespace Legion {
      */
     class TaskTreeCoordinates {
     public:
-      bool operator<(const TaskTreeCoordinates &rhs) const;
       bool operator==(const TaskTreeCoordinates &rhs) const;
+      bool operator!=(const TaskTreeCoordinates &rhs) const;
+      bool same_index_space(const TaskTreeCoordinates &rhs) const;
     public:
       inline void clear(void) { coordinates.clear(); }
       inline bool empty(void) const { return coordinates.empty(); }

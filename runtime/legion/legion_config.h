@@ -2123,7 +2123,7 @@ typedef enum legion_domain_max_rect_dim_t {
 typedef enum legion_unbound_pool_scope_t {
   // Bounded pool so other allocations always permitted in parallel
   LEGION_BOUNDED_POOL,
-  // Nothing else is allowed to allocate in parallel
+  // Only allocations for the same task are permitted in parallel
   LEGION_STRICT_UNBOUNDED_POOL,
   // Only tasks in the same index space task launch
   // are allowed to allocate in parallel

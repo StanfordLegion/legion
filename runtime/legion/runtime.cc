@@ -8851,7 +8851,8 @@ namespace Legion {
         is_owner(is_owner_memory(m, rt->address_space)),
         capacity(m.capacity()), remaining_capacity(capacity), runtime(rt),
         outstanding_task_local_allocations(0),
-        outstanding_unbounded_allocations(0)
+        outstanding_unbounded_allocations(0),
+        unbounded_pool_scope(LEGION_BOUNDED_POOL)
     //--------------------------------------------------------------------------
     {
 #if defined(LEGION_USE_CUDA) || defined(LEGION_USE_HIP)
@@ -10697,26 +10698,102 @@ namespace Legion {
       AutoLock m_lock(manager_lock);
       if (!pending_allocation_attempts.empty())
       {
-#ifdef DEBUG_LEGION
-        assert(!pending_allocation_attempts.back().exists());
-#endif
-        const RtUserEvent wait_on = Runtime::create_rt_user_event();
-        pending_allocation_attempts.back() = wait_on;
-        pending_allocation_attempts.push_back(RtUserEvent::NO_RT_USER_EVENT);
-        return wait_on;
-      }
-      else if (outstanding_unbounded_allocations > 0)
-      {
-        pending_allocation_attempts.push_back(RtUserEvent::NO_RT_USER_EVENT);
-        // Check to see if we've already made a transition event
-        if (!transition_event.exists())
-          transition_event = Runtime::create_rt_user_event();
-        return transition_event;
+        // See if we're prepending or appending
+        // We prepend if we're bypassing an unbounded pool allocation
+        // which only occurs for strict and index task scopes
+        if ((unbounded_pool_scope == LEGION_STRICT_UNBOUNDED_POOL) &&
+            (unbounded_coordinates == coordinates))
+        {
+          // See if the front allocation has the same coordinates, if it
+          // does then we insert ourselves after it, if not then we insert
+          // ourselves in front of it
+          std::pair<RtUserEvent,const TaskTreeCoordinates*> &front =
+            pending_allocation_attempts.front();
+          if (*front.second == unbounded_coordinates)
+          {
+            std::pair<RtUserEvent,const TaskTreeCoordinates*> current = front;
+            pending_allocation_attempts.pop_front();
+            const RtUserEvent wait_on = Runtime::create_rt_user_event();
+            pending_allocation_attempts.emplace_front(
+                std::make_pair(wait_on, &coordinates));
+            pending_allocation_attempts.emplace_front(current);
+            return wait_on;
+          }
+          else
+          {
+            // We're the first allocation bypassing, so just add
+            // ourselves to the front of the list
+            pending_allocation_attempts.emplace_front(std::make_pair(
+                  RtUserEvent::NO_RT_USER_EVENT, &coordinates));
+            return RtEvent::NO_RT_EVENT;
+          }
+        }
+        else if ((unbounded_pool_scope == LEGION_INDEX_TASK_UNBOUNDED_POOL) &&
+            unbounded_coordinates.same_index_space(coordinates))
+        {
+          // See if the front allocation has the same index space task 
+          // coordinates, if it does then we insert ourselves after it,
+          // if not then we insert ourselves in front of it
+          std::pair<RtUserEvent,const TaskTreeCoordinates*> &front =
+            pending_allocation_attempts.front();
+          if (unbounded_coordinates.same_index_space(*front.second))
+          {
+            std::pair<RtUserEvent,const TaskTreeCoordinates*> current = front;
+            pending_allocation_attempts.pop_front();
+            const RtUserEvent wait_on = Runtime::create_rt_user_event();
+            pending_allocation_attempts.emplace_front(
+                std::make_pair(wait_on, &coordinates));
+            pending_allocation_attempts.emplace_front(current);
+            return wait_on;
+          }
+          else
+          {
+            // We're the first allocation bypassing, so just add
+            // ourselves to the front of the list
+            pending_allocation_attempts.emplace_front(std::make_pair(
+                  RtUserEvent::NO_RT_USER_EVENT, &coordinates));
+            return RtEvent::NO_RT_EVENT;
+          }
+        }
+        else
+        {
+          // Appending like normal to a list of pending allocations
+          const RtUserEvent wait_on = Runtime::create_rt_user_event();
+          pending_allocation_attempts.emplace_back(
+              std::make_pair(wait_on, &coordinates));     
+          return wait_on;
+        }
       }
       else
       {
-        pending_allocation_attempts.push_back(RtUserEvent::NO_RT_USER_EVENT);
-        return RtEvent::NO_RT_EVENT;
+        // We have no current pending allocations, see if we have an
+        // unbounded pool that we need to bypass
+        if ((unbounded_pool_scope == LEGION_STRICT_UNBOUNDED_POOL) &&
+            (unbounded_coordinates != coordinates))
+        {
+          // Cannot bypass with different coordinates
+          const RtUserEvent wait_on = Runtime::create_rt_user_event();
+          pending_allocation_attempts.emplace_back(
+              std::make_pair(wait_on, &coordinates));     
+          return wait_on;
+        }
+        else if ((unbounded_pool_scope == LEGION_INDEX_TASK_UNBOUNDED_POOL) &&
+            !unbounded_coordinates.same_index_space(coordinates))
+        {
+          // Cannot bypass without being in the same index space task
+          const RtUserEvent wait_on = Runtime::create_rt_user_event();
+          pending_allocation_attempts.emplace_back(
+              std::make_pair(wait_on, &coordinates));     
+          return wait_on;
+        }
+        else
+        {
+          // No unbounded pool or a permissive one so we can do our
+          // allocation immediately, put in our guard allocation
+          pending_allocation_attempts.emplace_back(std::make_pair(
+                RtUserEvent::NO_RT_USER_EVENT, &coordinates));
+          return RtEvent::NO_RT_EVENT;
+        }
       }
     }
 
@@ -10732,16 +10809,50 @@ namespace Legion {
         AutoLock m_lock(manager_lock);
 #ifdef DEBUG_LEGION
         assert(!pending_allocation_attempts.empty());
-        assert(outstanding_unbounded_allocations == 0);
 #endif
-        to_trigger = pending_allocation_attempts.front();
+        // Pop the current pending allocation off the list
         pending_allocation_attempts.pop_front();
-        if (transition_event.exists() && pending_allocation_attempts.empty() &&
+        if (!pending_allocation_attempts.empty())
+        {
+          const std::pair<RtUserEvent,const TaskTreeCoordinates*> &next =
+            pending_allocation_attempts.front();
+#ifdef DEBUG_LEGION
+          assert(next.first.exists());
+#endif
+          // If we're in an unbounded pool, see if the next allocation
+          // can also bypass the current one, if we're not in one of those
+          // scenarios then we can always start the next allocation
+          switch (unbounded_pool_scope)
+          {
+            case LEGION_BOUNDED_POOL:
+            case LEGION_PERMISSIVE_UNBOUNDED_POOL:
+              {
+                to_trigger = next.first;
+                break;
+              }
+            case LEGION_STRICT_UNBOUNDED_POOL:
+              {
+                if (*next.second == unbounded_coordinates)
+                  to_trigger = next.first;
+                break;
+              }
+            case LEGION_INDEX_TASK_UNBOUNDED_POOL:
+              {
+                if (unbounded_coordinates.same_index_space(*next.second))
+                  to_trigger = next.first;
+                break;
+              }
+            default:
+              assert(false);
+          }
+        }
+        else if (unbounded_transition_event.exists() && 
             (outstanding_task_local_allocations == 0))
         {
-          // Signal to the unbounded waiter that it can try again to start
-          Runtime::trigger_event(transition_event);
-          transition_event = RtUserEvent::NO_RT_USER_EVENT;
+          // Notify the unbounded pools that they can try again since
+          // there are no more outstanding
+          to_trigger = unbounded_transition_event;
+          unbounded_transition_event = RtUserEvent::NO_RT_USER_EVENT;
         }
       }
       if (to_trigger.exists())
@@ -11266,35 +11377,79 @@ namespace Legion {
       }
       else
       {
-        // Creating an unbound pool so we need to take the lock and block all
-        // pending allocations from anything that is not an unbound pool
         // Spin wait until we have can mark that there is an unbound pool 
+        // associated with these particular coordinates
         RtEvent wait_on;
         do {
           wait_on.wait();
+          wait_on = RtEvent::NO_RT_EVENT;
           AutoLock m_lock(manager_lock);
+          // First check to see if there is an unbounded pool that we
+          // are consistent with, if so then we can break out early
           if (outstanding_unbounded_allocations > 0)
           {
-            // If we already have outstanding unbounded allocations then we
-            // know we can add ourselves to the list immediately as well
-            outstanding_unbounded_allocations++;
-            wait_on = RtEvent::NO_RT_EVENT;
+            switch (unbounded_pool_scope)
+            {
+              case LEGION_STRICT_UNBOUNDED_POOL:
+                {
+                  if (coordinates != unbounded_coordinates)
+                  {
+                    if (!unbounded_transition_event.exists())
+                      unbounded_transition_event =
+                        Runtime::create_rt_user_event();
+                    wait_on = unbounded_transition_event;
+                  }
+                  else
+                    outstanding_unbounded_allocations++;
+                  break;
+                }
+              case LEGION_INDEX_TASK_UNBOUNDED_POOL:
+                {
+                  if (!coordinates.same_index_space(unbounded_coordinates) ||
+                      (bounds.scope == LEGION_STRICT_UNBOUNDED_POOL))
+                  {
+                    if (!unbounded_transition_event.exists())
+                      unbounded_transition_event =
+                        Runtime::create_rt_user_event();
+                    wait_on = unbounded_transition_event;
+                  }
+                  else
+                    outstanding_unbounded_allocations++;
+                  break;
+                }
+              case LEGION_PERMISSIVE_UNBOUNDED_POOL:
+                {
+                  if (bounds.scope != LEGION_PERMISSIVE_UNBOUNDED_POOL)
+                  {
+                    if (!unbounded_transition_event.exists())
+                      unbounded_transition_event =
+                        Runtime::create_rt_user_event();
+                    wait_on = unbounded_transition_event;
+                  }
+                  else
+                    outstanding_unbounded_allocations++;
+                  break;
+                }
+              default:
+                assert(false);
+            }
           }
-          else if (!pending_allocation_attempts.empty() || 
+          else if (!pending_allocation_attempts.empty() ||
               (outstanding_task_local_allocations > 0))
           {
             // If there are other outstanding allocations we need to wait
             // for them to finish before we can start an unbounded allocation
-            if (!transition_event.exists())
-              transition_event = Runtime::create_rt_user_event();
-            wait_on = transition_event;
+            if (!unbounded_transition_event.exists())
+              unbounded_transition_event = Runtime::create_rt_user_event();
+            wait_on = unbounded_transition_event;
           }
           else
           {
             // If there are no outstanding allocations then we can start
             // a new unbounded allocation
             outstanding_unbounded_allocations++;
-            wait_on = RtEvent::NO_RT_EVENT;
+            unbounded_pool_scope = bounds.scope;
+            unbounded_coordinates.swap(coordinates);
           }
         } while (wait_on.exists());
         return new UnboundPool(this, coordinates);
@@ -11314,14 +11469,44 @@ namespace Legion {
 #endif
       if (--outstanding_unbounded_allocations > 0)
         return;
-      if (transition_event.exists())
+      // Wake up any waiting allocations attempts
+      if (!pending_allocation_attempts.empty())
       {
+        if (unbounded_pool_scope == LEGION_STRICT_UNBOUNDED_POOL)
+        {
+          // If the coordinates match it is already running so only
+          // trigger the event if coordinates do not match
+          const std::pair<RtUserEvent,const TaskTreeCoordinates*> &front =
+            pending_allocation_attempts.front();
+          if (*front.second != unbounded_coordinates)
+          {
 #ifdef DEBUG_LEGION
-        assert(!pending_allocation_attempts.empty() || 
-            (outstanding_task_local_allocations > 0));
+            assert(front.first.exists());
 #endif
-        Runtime::trigger_event(transition_event);
-        transition_event = RtUserEvent::NO_RT_USER_EVENT;
+            Runtime::trigger_event(front.first);
+          }
+        }
+        else if (unbounded_pool_scope == LEGION_INDEX_TASK_UNBOUNDED_POOL)
+        {
+          // If the coordinates are from the same index space then it
+          // is running already so only trigger if they are not
+          const std::pair<RtUserEvent,const TaskTreeCoordinates*> &front =
+            pending_allocation_attempts.front();
+          if (!front.second->same_index_space(unbounded_coordinates))
+          {
+#ifdef DEBUG_LEGION
+            assert(front.first.exists());
+#endif
+            Runtime::trigger_event(front.first);
+          }
+        }
+      }
+      unbounded_pool_scope = LEGION_BOUNDED_POOL;
+      unbounded_coordinates.clear();
+      if (unbounded_transition_event.exists())
+      {
+        Runtime::trigger_event(unbounded_transition_event);
+        unbounded_transition_event = RtUserEvent::NO_RT_USER_EVENT;
       }
     }
 
@@ -11377,11 +11562,11 @@ namespace Legion {
       Runtime::trigger_event(ready);
     }
 
-#if 0
     //--------------------------------------------------------------------------
     PhysicalInstance MemoryManager::create_task_local_instance(
-        UniqueID creator_uid, LgEvent unique_event,
-        Realm::InstanceLayoutGeneric *layout, RtEvent &use_event, bool unbound)
+        UniqueID creator_uid, const TaskTreeCoordinates &coordinates,
+        LgEvent unique_event, Realm::InstanceLayoutGeneric *layout, 
+        RtEvent &use_event)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -11395,15 +11580,36 @@ namespace Legion {
       // allocations occurring when we do this (unless it is coming from
       // an unbound pool in which case we can ignore this check
       RtEvent wait_on;
-      if (!unbound)
       {
         AutoLock m_lock(manager_lock);
         outstanding_task_local_allocations++;
-        if (outstanding_unbounded_allocations > 0)
+        switch (unbounded_pool_scope)
         {
-          if (!transition_event.exists())
-            transition_event = Runtime::create_rt_user_event();
-          wait_on = transition_event;
+          case LEGION_BOUNDED_POOL:
+          case LEGION_PERMISSIVE_UNBOUNDED_POOL:
+            break;
+          case LEGION_STRICT_UNBOUNDED_POOL:
+            {
+              if (coordinates != unbounded_coordinates)
+              {
+                if (!unbounded_transition_event.exists())
+                  unbounded_transition_event = Runtime::create_rt_user_event();
+                wait_on = unbounded_transition_event;
+              }
+              break;
+            }
+          case LEGION_INDEX_TASK_UNBOUNDED_POOL:
+            {
+              if (!unbounded_coordinates.same_index_space(coordinates))
+              {
+                if (!unbounded_transition_event.exists())
+                  unbounded_transition_event = Runtime::create_rt_user_event();
+                wait_on = unbounded_transition_event;
+              }
+              break;
+            }
+          default:
+            assert(false);
         }
       }
       if (wait_on.exists())
@@ -11469,29 +11675,24 @@ namespace Legion {
               runtime->address_space, memory, layout->bytes_used, 
               capacity, remaining_capacity, collectable_instances);
       } while (!collector->collection_complete());
-      if (!unbound)
-      {
-        AutoLock m_lock(manager_lock);
-#ifdef DEBUG_LEGION
-        assert(outstanding_task_local_allocations > 0);
-        assert(outstanding_unbounded_allocations == 0);
-#endif
-        outstanding_task_local_allocations--;
-        // Wake up an unbounded allocation pool creation attempt if there
-        // are no more normal allocations going on
-        if (transition_event.exists() && pending_allocation_attempts.empty() &&
-            (outstanding_task_local_allocations == 0))
-        {
-          Runtime::trigger_event(transition_event);
-          transition_event = RtUserEvent::NO_RT_USER_EVENT;
-        }
-      }
       if (collector != NULL)
         delete collector;
       delete layout;
+      // Retake the lock and mark that our allocation is done
+      AutoLock m_lock(manager_lock);
+#ifdef DEBUG_LEGION
+      assert(outstanding_task_local_allocations > 0);
+#endif
+      outstanding_task_local_allocations--;
+      if (unbounded_transition_event.exists() &&
+          pending_allocation_attempts.empty() && 
+          (outstanding_task_local_allocations == 0))
+      {
+        Runtime::trigger_event(unbounded_transition_event);
+        unbounded_transition_event = RtUserEvent::NO_RT_USER_EVENT;
+      }
       return instance;
     }
-#endif
 
     //--------------------------------------------------------------------------
     void MemoryManager::free_task_local_instance(PhysicalInstance instance,

@@ -1816,14 +1816,19 @@ namespace Legion {
                std::greater<GCPriority> > collectable_instances;
       // Keep track of outstanding requests for allocations which
       // will be tried in the order that they arrive
-      std::deque<RtUserEvent> pending_allocation_attempts;
+      std::deque<std::pair<RtUserEvent,
+        const TaskTreeCoordinates*> > pending_allocation_attempts;
       // Track how many outstanding local instance allocations there are
       unsigned outstanding_task_local_allocations;
       // Track how many outstanding unbounded allocators there are
       unsigned outstanding_unbounded_allocations;
+      // Keep track of the current unbounded pool scope
+      UnboundPoolScope unbounded_pool_scope;
+      // If we have an unbounded pool then track the task tree coordinates
+      TaskTreeCoordinates unbounded_coordinates;
       // Allocation transition event for switching between bounded
       // and unbounded modes
-      RtUserEvent transition_event;
+      RtUserEvent unbounded_transition_event;
     protected:
       std::set<Memory> visible_memories;
     protected:
