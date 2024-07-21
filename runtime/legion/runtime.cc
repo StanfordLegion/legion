@@ -1327,6 +1327,8 @@ namespace Legion {
         }
         need_subscribe = !subscription_event.exists();
       }
+      if (known_upper_bound_size == 0)
+        return true;
       if (need_subscribe)
         subscribe();
 #ifdef DEBUG_LEGION
@@ -2131,7 +2133,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(future_size > 0);
+      assert(size > 0);
       assert(instances.find(memory) == instances.end());
       assert(memory.address_space() == runtime->address_space);
 #endif
