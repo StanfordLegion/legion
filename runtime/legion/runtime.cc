@@ -1297,6 +1297,7 @@ namespace Legion {
           return true;
         if (pending_instances.find(target) != pending_instances.end())
           return true;
+        need_subscribe = !subscription_event.exists();
         // Check to see if we know the size of the future yet
         if (known_upper_bound_size == SIZE_MAX)
         {
@@ -1312,6 +1313,11 @@ namespace Legion {
               future_size_ready = Runtime::create_rt_user_event();
             const RtEvent wait_on = future_size_ready;
             f_lock.release();
+            if (need_subscribe)
+            {
+              subscribe();
+              need_subscribe = false;
+            }
             wait_on.wait();
             f_lock.reacquire();
 #ifdef DEBUG_LEGION
@@ -1325,7 +1331,6 @@ namespace Legion {
             known_upper_bound_size = future_size;
           }
         }
-        need_subscribe = !subscription_event.exists();
       }
       if (known_upper_bound_size == 0)
         return true;
@@ -1396,6 +1401,7 @@ namespace Legion {
         }
         else if (local_visible_memory.exists())
           return;
+        need_subscribe = !subscription_event.exists();
         // Don't have a local instance yet so we need to make one
         // See if we know the upper bound size of the future
         if (future_size_set)
@@ -1410,6 +1416,11 @@ namespace Legion {
             future_size_ready = Runtime::create_rt_user_event();
           const RtEvent wait_on = future_size_ready;
           f_lock.release();
+          if (need_subscribe)
+          {
+            subscribe();
+            need_subscribe = false;
+          }
           wait_on.wait();
           f_lock.reacquire();
 #ifdef DEBUG_LEGION
@@ -1428,7 +1439,6 @@ namespace Legion {
             return;
           known_upper_bound_size = future_size;
         }
-        need_subscribe = !subscription_event.exists();
       }
       if (need_subscribe)
         subscribe();
@@ -2488,6 +2498,12 @@ namespace Legion {
       if (!pending_instances.empty())
         create_pending_instances();
       empty.store(false);
+      // If we have a future size ready then trigger it now
+      if (future_size_ready.exists())
+      {
+        Runtime::trigger_event(future_size_ready);
+        future_size_ready = RtUserEvent::NO_RT_USER_EVENT;
+      }
       if (subscription_event.exists())
       {
         Runtime::trigger_event(subscription_event);
