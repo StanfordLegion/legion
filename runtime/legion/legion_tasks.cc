@@ -4817,47 +4817,52 @@ namespace Legion {
         }
         else 
         {
-          // Check to make sure we're not using the wrong scope with
-          // a concurrent index task launch or collective mappings
-          if (concurrent_task)
-            REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
-                "Mapper %s dynamically requested a "  
-                "strict unbounded memory pool in %s memory for "
-                "concurrent task %s (UID %lld). Strict unbounded "
-                "memory pools are not permitted to be used when "
-                "mapping concurrent index space tasks because they "
-                "can lead to deadlocks. Instead you should use either "
-                "LEGION_INDEX_TASK_UNBOUNDED_POOL or "
-                "LEGION_PERMISSIVE_UNBOUNDED_POOL scope when specifying "
-                "the kind of unbound memory pool for this task.",
-                mapper->get_mapper_name(), manager->get_name(),
-                get_task_name(), get_unique_id())
-          else if (!check_collective_regions.empty())
-            REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
-                "Mapper %s dynamically requested a " 
-                "strict unbounded memory pool in %s memory for "
-                "task %s (UID %lld) while also requesting a "
-                "collective mapping of %zd region requirements. "
-                "Strict unbounded memory pools are not permitted to be "
-                "used in conjunction with collective mapping because they "
-                "can lead to deadlocks. Instead you should use "
-                "LEGION_INDEX_TASK_UNBOUNDED_POOL or "
-                "LEGION_PERMISSIVE_UNBOUNDED_POOL scope for any unbounded "
-                "memory pools for this task or alternatively choosen not "
-                "to perform collective mapping of any region requirements.",
-                mapper->get_mapper_name(), manager->get_name(), get_task_name(),
-                get_unique_id(), check_collective_regions.size())
-          if (runtime->runtime_warnings &&
-              (variant->leaf_pool_bounds.find(it->first.kind()) ==
-               variant->leaf_pool_bounds.end()))
-            REPORT_LEGION_WARNING(LEGION_WARNING_UNBOUND_MEMORY_POOL,
-                "Mapper %s requested an unbound memory pool in %s memory for "
-                "leaf task %s (UID %lld). Unbound memory pools are very bad "
-                "for performance and we strongly encourage all users to avoid "
-                "using them except for extenuating circumstances when the "
-                "amount of dynamic memory required by a task is truly "
-                "unbounded.", mapper->get_mapper_name(), manager->get_name(),
-                get_task_name(), get_unique_id())
+          // We don't allow strict unbounded memory pools to be used
+          // along with concurrent index space tasks or tasks that are
+          // going to perform collective mapping of region requirements
+          if (it->second.scope == LEGION_STRICT_UNBOUNDED_POOL)
+          {
+            if (concurrent_task)
+              REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                  "Mapper %s dynamically requested a "  
+                  "strict unbounded memory pool in %s memory for "
+                  "concurrent task %s (UID %lld). Strict unbounded "
+                  "memory pools are not permitted to be used when "
+                  "mapping concurrent index space tasks because they "
+                  "can lead to deadlocks. Instead you should use either "
+                  "LEGION_INDEX_TASK_UNBOUNDED_POOL or "
+                  "LEGION_PERMISSIVE_UNBOUNDED_POOL scope when specifying "
+                  "the kind of unbound memory pool for this task.",
+                  mapper->get_mapper_name(), manager->get_name(),
+                  get_task_name(), get_unique_id())
+            else if (!check_collective_regions.empty())
+              REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                  "Mapper %s dynamically requested a " 
+                  "strict unbounded memory pool in %s memory for "
+                  "task %s (UID %lld) while also requesting a "
+                  "collective mapping of %zd region requirements. "
+                  "Strict unbounded memory pools are not permitted to be "
+                  "used in conjunction with collective mapping because they "
+                  "can lead to deadlocks. Instead you should use "
+                  "LEGION_INDEX_TASK_UNBOUNDED_POOL or "
+                  "LEGION_PERMISSIVE_UNBOUNDED_POOL scope for any unbounded "
+                  "memory pools for this task or alternatively choosen not "
+                  "to perform collective mapping of any region requirements.",
+                  mapper->get_mapper_name(), manager->get_name(),
+                  get_task_name(), get_unique_id(),
+                  check_collective_regions.size())
+            if (runtime->runtime_warnings &&
+                (variant->leaf_pool_bounds.find(it->first.kind()) ==
+                 variant->leaf_pool_bounds.end()))
+              REPORT_LEGION_WARNING(LEGION_WARNING_UNBOUND_MEMORY_POOL,
+                  "Mapper %s requested an unbound memory pool in %s memory for "
+                  "leaf task %s (UID %lld). Unbound memory pools are very bad "
+                  "for performance and we strongly encourage all users to avoid"
+                  " using them except for extenuating circumstances when the "
+                  "amount of dynamic memory required by a task is truly "
+                  "unbounded.", mapper->get_mapper_name(), manager->get_name(),
+                  get_task_name(), get_unique_id())
+          }
         }
         // Recompute these each time as they might be consumed each time
         TaskTreeCoordinates coordinates;
