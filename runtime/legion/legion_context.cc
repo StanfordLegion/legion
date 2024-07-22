@@ -25182,6 +25182,7 @@ namespace Legion {
           assert(instance.exists());
           assert(!use_event.exists());
 #endif
+          task_local_instances[instance] = unique_event;
           return instance;
         }
         if (instance.exists())
@@ -25201,6 +25202,7 @@ namespace Legion {
                 "or dynamically at the point that the task is mapped.",
                 get_task_name(), get_unique_id(), footprint,
                 manager->get_name())
+            task_local_instances[instance] = unique_event;
             return instance;
           }
           else
