@@ -8790,6 +8790,7 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(manager != NULL);
+      assert(!coords.empty());
 #endif
       coordinates.swap(coords);
     }
@@ -11475,7 +11476,7 @@ namespace Legion {
             // a new unbounded allocation
             outstanding_unbounded_allocations++;
             unbounded_pool_scope = bounds.scope;
-            unbounded_coordinates.swap(coordinates);
+            unbounded_coordinates = coordinates;
           }
         } while (wait_on.exists());
         return new UnboundPool(this, coordinates);
