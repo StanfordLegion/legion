@@ -603,41 +603,82 @@ namespace Realm {
     void LocalManagedMemory::reuse_allocated_range(
         RegionInstanceImpl *old_inst, std::vector<RegionInstanceImpl *> &new_insts)
     {
-      AutoLock<> al(allocator_mutex);
-
-#ifdef DEBUG_REALM
-      for(const PendingAlloc &alloc : pending_allocs) {
-        if(alloc.inst == old_inst) {
-          for(RegionInstanceImpl *inst : new_insts)
-            inst->notify_allocation(AllocationResult::ALLOC_INSTANT_FAILURE, 0,
-                                    TimeLimit::responsive());
-          return;
-        }
-      }
-
-      for(const PendingRelease &release : pending_releases) {
-        if(release.inst == old_inst) {
-          for(RegionInstanceImpl *inst : new_insts)
-            inst->notify_allocation(AllocationResult::ALLOC_INSTANT_FAILURE, 0,
-                                    TimeLimit::responsive());
-          return;
-        }
-      }
-#endif
-
-      size_t num_insts = new_insts.size();
-      std::vector<RegionInstance> tags(num_insts);
-      std::vector<size_t> sizes(num_insts);
-      std::vector<size_t> alignments(num_insts);
-      for(size_t i = 0; i < num_insts; i++) {
-        sizes[i] = new_insts[i]->metadata.layout->bytes_used;
-        alignments[i] = new_insts[i]->metadata.layout->alignment_reqd;
-        tags[i] = new_insts[i]->me;
-      }
-
+      // Check to see if this is an exteranl instance or not
+      size_t allocated = 0;
+      const size_t num_insts = new_insts.size();
       std::vector<size_t> offsets(num_insts, 0);
-      size_t allocated =
-          current_allocator.split_range(old_inst->me, tags, sizes, alignments, offsets);
+      if(old_inst->metadata.ext_resource != 0) {
+        // This is an external instance so we can just split it as long as the
+        // sizes are going to be fit in the footprint of the original instance
+        // We do not need to update the allocator since it doesn't know about
+        // the range for this instance anyway
+        ExternalMemoryResource *res =
+            dynamic_cast<ExternalMemoryResource *>(old_inst->metadata.ext_resource);
+        if(res != 0) {
+          const uintptr_t mem_base = reinterpret_cast<uintptr_t>(get_direct_ptr(0, 0));
+          size_t bytes_used = 0;
+          uintptr_t inst_offset = res->base;
+          for(unsigned idx = 0; idx < num_insts; idx++) {
+            const size_t size = new_insts[idx]->metadata.layout->bytes_used;
+            const size_t alignment = new_insts[idx]->metadata.layout->alignment_reqd;
+            size_t offset = 0;
+            if(alignment) {
+              const size_t remainder = inst_offset % alignment;
+              if(remainder)
+                offset = alignment - remainder;
+            }
+            bytes_used += (offset + size);
+            // Check to see if this instance is going to fit
+            if(res->size_in_bytes < bytes_used)
+              break;
+            inst_offset += offset;
+            // underflow is ok here - it'll work itself out when we add the mem_base
+            //  back in on accesses
+            offsets[idx] = inst_offset - mem_base;
+            inst_offset += size;
+            // Allocation for this instance succeeded
+            allocated++;
+          }
+        } else {
+          log_inst.warning()
+              << "attempt to redistrict unsupported external resource: mem=" << me
+              << " resource=" << *(old_inst->metadata.ext_resource);
+        }
+      } else {
+        // Common case path for redistricting normal instances
+        std::vector<RegionInstance> tags(num_insts);
+        std::vector<size_t> sizes(num_insts);
+        std::vector<size_t> alignments(num_insts);
+        for(size_t i = 0; i < num_insts; i++) {
+          sizes[i] = new_insts[i]->metadata.layout->bytes_used;
+          alignments[i] = new_insts[i]->metadata.layout->alignment_reqd;
+          tags[i] = new_insts[i]->me;
+        }
+        AutoLock<> al(allocator_mutex);
+#ifdef DEBUG_REALM
+        for(const PendingAlloc &alloc : pending_allocs) {
+          if(alloc.inst == old_inst) {
+            al.release();
+            for(RegionInstanceImpl *inst : new_insts)
+              inst->notify_allocation(AllocationResult::ALLOC_INSTANT_FAILURE, 0,
+                                      TimeLimit::responsive());
+            return;
+          }
+        }
+
+        for(const PendingRelease &release : pending_releases) {
+          if(release.inst == old_inst) {
+            al.release();
+            for(RegionInstanceImpl *inst : new_insts)
+              inst->notify_allocation(AllocationResult::ALLOC_INSTANT_FAILURE, 0,
+                                      TimeLimit::responsive());
+            return;
+          }
+        }
+#endif
+        allocated =
+            current_allocator.split_range(old_inst->me, tags, sizes, alignments, offsets);
+      }
       for(unsigned idx = 0; idx < num_insts; idx++)
         new_insts[idx]->notify_allocation((idx < allocated)
                                               ? AllocationResult::ALLOC_INSTANT_SUCCESS
