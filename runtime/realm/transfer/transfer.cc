@@ -4512,16 +4512,17 @@ namespace Realm {
 
 	Memory dst_mem = dsts[i].inst.get_location();
 	MemPathInfo path_info;
-	bool ok = find_shortest_path(Memory::NO_MEMORY, dst_mem, serdez_id,
-                                     0 /*redop_id*/,
-				     path_info);
-	if(!ok) {
-	  log_new_dma.fatal() << "FATAL: no fill path found for " << dst_mem << " (serdez=" << serdez_id << ")";
-	  assert(0);
-	}
+        ChannelCopyInfo copy_info(Memory::NO_MEMORY, dst_mem);
+        bool ok = find_fastest_path(copy_info, serdez_id, 0, domain_size, nullptr,
+                                    nullptr, path_info);
+        if(!ok) {
+          log_new_dma.fatal() << "FATAL: no fill path found for " << dst_mem
+                              << " (serdez=" << serdez_id << ")";
+          assert(0);
+        }
 
-	size_t pathlen = path_info.xd_channels.size();
-	size_t xd_idx = graph.xd_nodes.size();
+        size_t pathlen = path_info.xd_channels.size();
+        size_t xd_idx = graph.xd_nodes.size();
         size_t ib_idx = graph.ib_edges.size();
         size_t ib_alloc_size = 0;
         graph.xd_nodes.resize(xd_idx + pathlen);

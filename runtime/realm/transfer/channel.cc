@@ -1324,6 +1324,8 @@ namespace Realm {
                                            size_t total_write_bytes)
   {
     bool in_done = false;
+    assert(input_control.remaining_count >= total_read_bytes);
+    assert(output_control.remaining_count >= total_write_bytes);
     if(input_control.current_io_port >= 0) {
       XferPort *in_port = &input_ports[input_control.current_io_port];
 
@@ -5591,8 +5593,8 @@ namespace Realm {
 						      XFER_MEM_FILL,
 						      "memfill channel")
   {
-    unsigned bw = 10000; // HACK - estimate at 10 GB/s
-    unsigned latency = 100; // HACK - estimate at 100ns
+    unsigned bw = 128000;         // HACK - estimate at 128 GB/s
+    unsigned latency = 100;       // HACK - estimate at 100ns
     unsigned frag_overhead = 100; // HACK - estimate at 100ns
 
     // all local cpu memories are valid dests

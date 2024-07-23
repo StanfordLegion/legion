@@ -119,10 +119,16 @@ namespace Realm {
       int pci_busid;
       int pci_domainid;
       int pci_deviceid;
-      size_t pci_bandwidth; // Current enabled pci-e bandwidth
+      size_t c2c_bandwidth = 0;      // Current enabled c2c bandwidth
+      size_t pci_bandwidth = 0;      // Current enabled pci-e bandwidth
+      size_t nvswitch_bandwidth = 0; // Current enabled nvswitch bandwidth
       bool host_gpu_same_va = false;
       std::vector<size_t> logical_peer_bandwidth;
       std::vector<size_t> logical_peer_latency;
+      // Fabric information for this gpu
+      bool fabric_supported = false;
+      unsigned fabric_clique = -1U;
+      CUuuid fabric_uuid = {0};
 
 #ifdef REALM_USE_CUDART_HIJACK
       cudaDeviceProp prop;
@@ -649,6 +655,8 @@ namespace Realm {
       GPUStream *get_next_task_stream(bool create = false);
       GPUStream *get_next_d2d_stream();
 
+      void launch_batch_affine_fill_kernel(void *fill_info, size_t dim, size_t elemSize,
+                                           size_t volume, GPUStream *stream);
       void launch_batch_affine_kernel(void *copy_info, size_t dim,
                                       size_t elemSize, size_t volume,
                                       GPUStream *stream);
@@ -949,9 +957,8 @@ namespace Realm {
 
     class GPUZCMemory : public LocalManagedMemory {
     public:
-      GPUZCMemory(Memory _me, CUdeviceptr _gpu_base,
-                  void *_cpu_base, size_t _size,
-                  MemoryKind _kind, Memory::Kind _lowlevel_kind);
+      GPUZCMemory(GPU *gpu, Memory _me, CUdeviceptr _gpu_base, void *_cpu_base,
+                  size_t _size, MemoryKind _kind, Memory::Kind _lowlevel_kind);
 
       virtual ~GPUZCMemory(void);
 
@@ -1140,6 +1147,7 @@ namespace Realm {
                                        size_t fill_total);
 
       long submit(Request **requests, long nr);
+      GPU *get_gpu() const { return src_gpu; }
 
     protected:
       friend class GPUIndirectXferDes;
@@ -1203,6 +1211,7 @@ namespace Realm {
                                        size_t fill_total);
 
       long submit(Request** requests, long nr);
+      GPU *get_gpu() const { return src_gpu; }
 
     private:
       GPU* src_gpu;
@@ -1520,7 +1529,7 @@ namespace Realm {
       /// assured
       /// @param mem_hdl CUipcMemHandle e.g. retrieved from GPUAllocation::get_ipc_handle
       /// @return The GPUAllocation, or nullptr if unsuccessful
-      static GPUAllocation *open_ipc(GPU *gpu, CUipcMemHandle mem_hdl);
+      static GPUAllocation *open_ipc(GPU *gpu, const CUipcMemHandle &mem_hdl);
       /// @brief Retrieves the GPUAllocation given the OsHandle
       /// @param gpu GPU this allocation is destined for and for which it's lifetime is
       /// assured
@@ -1539,15 +1548,18 @@ namespace Realm {
       /// @param size Size of the requested allocation
       /// @param peer_enabled True if this memory needs to be accessible by this GPU's
       /// peers
+      /// @param is_local True if the memory decribed by \p hdl is local to the current
+      /// physical system (determined by some other mechanism, like hostname, etc)
       /// @return The GPUAllocation, or nullptr if unsuccessful
-      static GPUAllocation *open_fabric(GPU *gpu, CUmemFabricHandle &hdl, size_t size,
-                                        bool peer_enabled = true);
+      static GPUAllocation *open_fabric(GPU *gpu, const CUmemFabricHandle &hdl,
+                                        size_t size, bool peer_enabled = true,
+                                        bool is_local = false);
 #endif
 
     private:
       CUresult map_allocation(GPU *gpu, CUmemGenericAllocationHandle handle, size_t size,
                               CUdeviceptr va = 0, size_t offset = 0,
-                              bool peer_enabled = false);
+                              bool peer_enabled = false, bool map_host = false);
 
 #if CUDA_VERSION >= 11000
       /// @brief Helper function to return the aligned size for the allocation given the
@@ -1680,6 +1692,7 @@ namespace Realm {
   __op__(cuMemUnmap, CUDA_VERSION);                                                      \
   __op__(cuMemSetAccess, CUDA_VERSION);                                                  \
   __op__(cuMemGetAllocationGranularity, CUDA_VERSION);                                   \
+  __op__(cuMemGetAllocationPropertiesFromHandle, CUDA_VERSION);                          \
   __op__(cuMemExportToShareableHandle, CUDA_VERSION);                                    \
   __op__(cuMemImportFromShareableHandle, CUDA_VERSION);                                  \
   __op__(cuStreamWaitEvent, CUDA_VERSION);                                               \
@@ -1714,6 +1727,12 @@ namespace Realm {
 #define NVML_11_APIS(__op__)
 #endif
 
+#if NVML_API_VERSION >= 12
+#define NVML_12_APIS(__op__) __op__(nvmlDeviceGetGpuFabricInfo)
+#else
+#define NVML_12_APIS(__op__)
+#endif
+
 #if CUDA_VERSION < 11040
     // Define an NVML api that doesn't exist prior to CUDA Toolkit 11.5, but should
     // exist in systems that require it that we need to support (we'll detect it's
@@ -1745,7 +1764,9 @@ namespace Realm {
   __op__(nvmlDeviceGetNvLinkRemotePciInfo);                                              \
   __op__(nvmlDeviceGetNvLinkRemoteDeviceType);                                           \
   __op__(nvmlDeviceGetDeviceHandleFromMigDeviceHandle);                                  \
-  NVML_11_APIS(__op__);
+  __op__(nvmlDeviceGetFieldValues);                                                      \
+  NVML_11_APIS(__op__);                                                                  \
+  NVML_12_APIS(__op__);
 
 #define DECL_FNPTR_EXTERN(name) extern decltype(&name) name##_fnptr;
     NVML_APIS(DECL_FNPTR_EXTERN)
