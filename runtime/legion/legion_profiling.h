@@ -107,6 +107,27 @@ namespace Legion {
 
     class LegionProfDesc {
     public:
+      struct ProcDesc {
+      public:
+        ProcID proc_id;
+        ProcKind kind;
+#ifdef LEGION_USE_CUDA
+        Realm::Cuda::Uuid cuda_device_uuid;
+#endif
+      };
+      struct MemDesc {
+      public:
+        MemID mem_id;
+        MemKind kind;
+        unsigned long long capacity;
+      };
+      struct ProcMemDesc {
+      public:
+        ProcID proc_id;
+        MemID mem_id;
+        unsigned bandwidth;
+        unsigned latency;
+      };
       struct TaskKind {
       public:
         TaskID task_id;
@@ -419,28 +440,7 @@ namespace Legion {
         timestamp_t start, stop;
         ProcID proc_id;
         LgEvent finish_event;
-      };
-      struct ProcDesc {
-      public:
-        ProcID proc_id;
-        ProcKind kind;
-#ifdef LEGION_USE_CUDA
-        Realm::Cuda::Uuid cuda_device_uuid;
-#endif
-      };
-      struct MemDesc {
-      public:
-        MemID mem_id;
-        MemKind kind;
-        unsigned long long capacity;
-      };
-      struct ProcMemDesc {
-      public:
-        ProcID proc_id;
-        MemID mem_id;
-        unsigned bandwidth;
-        unsigned latency;
-      };
+      }; 
       struct EventWaitInfo {
       public:
         ProcID proc_id;
@@ -599,9 +599,6 @@ namespace Legion {
       std::deque<MapperCallInfo> mapper_call_infos;
       std::deque<RuntimeCallInfo> runtime_call_infos;
       std::deque<ApplicationCallInfo> application_call_infos;
-      std::deque<MemDesc> mem_desc_infos;
-      std::deque<ProcDesc> proc_desc_infos;
-      std::deque<ProcMemDesc> proc_mem_aff_desc_infos;
       std::deque<EventWaitInfo> event_wait_infos;
       // keep track of MemIDs/ProcIDs to avoid duplicate entries
       std::vector<MemID> mem_ids;
@@ -658,8 +655,9 @@ namespace Legion {
                                  const char *variant_name);
       unsigned long long find_backtrace_id(Realm::Backtrace &bt);
     public:
-      bool has_memory_desc(Memory m);
-      bool has_processor_desc(Processor p);
+      void record_memory(Memory m);
+      void record_processor(Processor p);
+      void record_affinities(std::vector<Memory> &memories_to_log);
     public:
       void add_task_request(Realm::ProfilingRequestSet &requests, TaskID tid, 
                             VariantID vid, UniqueID task_uid, Processor p);
