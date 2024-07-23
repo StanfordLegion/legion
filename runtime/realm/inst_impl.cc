@@ -429,6 +429,25 @@ namespace Realm {
 	        Memory::NO_MEMORY);
     }
 
+    Event RegionInstance::redistrict(RegionInstance &instance,
+                                     const InstanceLayoutGeneric *layout,
+                                     const ProfilingRequestSet &prs, Event wait_on)
+    {
+      MemoryImpl *mem_impl = get_runtime()->get_memory_impl(*this);
+      RegionInstanceImpl *inst_impl = mem_impl->get_instance(*this);
+      return inst_impl->redistrict(&instance, &layout, 1, &prs, wait_on);
+    }
+
+    Event RegionInstance::redistrict(RegionInstance *instances,
+                                     const InstanceLayoutGeneric **layouts,
+                                     size_t num_layouts, const ProfilingRequestSet *prs,
+                                     Event wait_on)
+    {
+      MemoryImpl *mem_impl = get_runtime()->get_memory_impl(*this);
+      RegionInstanceImpl *inst_impl = mem_impl->get_instance(*this);
+      return inst_impl->redistrict(instances, layouts, num_layouts, prs, wait_on);
+    }
+
     /*static*/ Event RegionInstance::create_instance(RegionInstance& inst,
 						     Memory memory,
 						     InstanceLayoutGeneric *ilg,
@@ -512,11 +531,11 @@ namespace Realm {
 
       NodeID target_node = ID(target).proc_owner_node();
       if(target_node == Network::my_node_id) {
-	// local metadata request
-	return r_impl->request_metadata();
+        // local metadata request
+        return r_impl->request_metadata();
       } else {
-	// prefetch on other node's behalf
-	return r_impl->prefetch_metadata(target_node);
+        // prefetch on other node's behalf
+        return r_impl->prefetch_metadata(target_node);
       }
     }
 
@@ -933,6 +952,84 @@ namespace Realm {
       return ready_event;
     }
 
+    Event RegionInstanceImpl::redistrict(RegionInstance *instances,
+                                         const InstanceLayoutGeneric **layouts,
+                                         size_t num_layouts,
+                                         const ProfilingRequestSet *prs, Event wait_on)
+    {
+      if(num_layouts == 0 || layouts == nullptr || instances == nullptr) {
+        return Event::NO_EVENT;
+      }
+
+      std::vector<RegionInstanceImpl *> insts(num_layouts);
+      MemoryImpl *m_impl = get_runtime()->get_memory_impl(memory);
+
+      // TODO(apryakhin): Handle redistricting from non-owner node
+      assert(NodeID(ID(me).instance_owner_node()) == Network::my_node_id);
+
+      for(size_t i = 0; i < num_layouts; i++) {
+        insts[i] = m_impl->new_instance();
+        insts[i]->metadata.layout = layouts[i]->clone();
+      }
+
+      // Attempt to reuse allocated range of existing instance
+      MemoryImpl::AllocationResult alloc_status =
+          m_impl->reuse_allocated_range(this, insts);
+      if(alloc_status != MemoryImpl::ALLOC_INSTANT_SUCCESS) {
+        // On failure, just recycle back the instance ids
+        for(size_t i = 0; i < num_layouts; i++) {
+          insts[i]->recycle_instance();
+        }
+        Event event = GenEventImpl::create_genevent()->current_event();
+        GenEventImpl::trigger(event, /*poisoned=*/true);
+        return event;
+      }
+
+      for(size_t i = 0; i < num_layouts; i++) {
+        if(!prs[i].empty()) {
+          insts[i]->requests = prs[i];
+          insts[i]->measurements.import_requests(insts[i]->requests);
+          if(insts[i]
+                 ->measurements
+                 .wants_measurement<ProfilingMeasurements::InstanceTimeline>()) {
+            insts[i]->timeline.record_create_time();
+          }
+        }
+      }
+
+      // We managed to reuse the allocated instance, now set metadata.
+      size_t offset = 0;
+      for(size_t i = 0; i < num_layouts; i++) {
+        assert(insts[i]);
+        instances[i] = insts[i]->me;
+        insts[i]->metadata.layout->compile_lookup_program(
+            insts[i]->metadata.lookup_program);
+        insts[i]->metadata.inst_offset = metadata.inst_offset + offset;
+        NodeSet early_reqs;
+        insts[i]->metadata.mark_valid(early_reqs);
+
+        insts[i]->metadata.need_alloc_result = false;
+
+        if(!early_reqs.empty()) {
+          send_metadata(early_reqs);
+        }
+        offset += layouts[i]->bytes_used;
+      }
+
+      for(size_t i = 0; i < num_layouts; i++) {
+        if(insts[i]
+               ->measurements
+               .wants_measurement<ProfilingMeasurements::InstanceTimeline>()) {
+          insts[i]->timeline.record_ready_time();
+        }
+      }
+
+      // TODO(apryakhin@): Consider deleting this instance
+      // notify_deallocation();
+
+      return Event::NO_EVENT;
+    }
+
     void RegionInstanceImpl::send_metadata(const NodeSet& early_reqs)
     {
       log_inst.debug() << "sending instance metadata to early requestors: isnt=" << me;
@@ -1345,10 +1442,10 @@ namespace Realm {
                              affine->offset +
                              affine->strides.dot(affine->bounds.lo) +
                              it->second.rel_offset);
-      size_t total_bytes = (it->second.size_in_bytes + 
-                            affine->strides[0] * (affine->bounds.hi -
-                                                  affine->bounds.lo));
- 
+      size_t total_bytes =
+          (it->second.size_in_bytes +
+           affine->strides[0] * (affine->bounds.hi[0] - affine->bounds.lo[0]));
+
       base = mem->get_direct_ptr(start_offset, total_bytes);
       if (!base) return false;
 

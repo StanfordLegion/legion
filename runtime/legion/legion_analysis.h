@@ -208,8 +208,6 @@ namespace Legion {
       virtual bool remove_recorder_reference(void) = 0;
       virtual void pack_recorder(Serializer &rez) = 0;
     public:
-      virtual void record_completion_event(ApEvent lhs,
-                             unsigned op_kind, const TraceLocalID &tlid) = 0;
       virtual void record_replay_mapping(ApEvent lhs, unsigned op_kind,
                            const TraceLocalID &tlid, bool register_memo) = 0;
       virtual void request_term_event(ApUserEvent &term_event) = 0;
@@ -255,7 +253,8 @@ namespace Legion {
 #endif
                            ApEvent precondition, PredEvent pred_guard,
                            LgEvent src_unique, LgEvent dst_unique,
-                           int priority, CollectiveKind collective) = 0;
+                           int priority, CollectiveKind collective,
+                           bool record_effect) = 0;
       virtual void record_issue_across(const TraceLocalID &tlid, ApEvent &lhs,
                            ApEvent collective_precondition, 
                            ApEvent copy_precondition,
@@ -294,7 +293,7 @@ namespace Legion {
 #endif
                            ApEvent precondition, PredEvent pred_guard,
                            LgEvent unique_event, int priority, 
-                           CollectiveKind collective) = 0;
+                           CollectiveKind collective, bool record_effect) = 0;
       virtual void record_fill_inst(ApEvent lhs, IndexSpaceExpression *expr,
                            const UniqueInst &dst_inst,
                            const FieldMask &fill_mask,
@@ -316,7 +315,7 @@ namespace Legion {
                          const std::deque<InstanceSet> &physical_instances,
                          std::set<RtEvent> &applied_events) = 0;
       virtual void record_complete_replay(const TraceLocalID &tlid,
-                                          ApEvent pre, ApEvent post,
+                                          ApEvent pre,
                                           std::set<RtEvent> &applied) = 0;
       virtual void record_reservations(const TraceLocalID &tlid,
                                 const std::map<Reservation,bool> &locks,
@@ -334,7 +333,6 @@ namespace Legion {
                                 public Collectable {
     public:
       enum RemoteTraceKind {
-        REMOTE_TRACE_RECORD_COMPLETION_EVENT,
         REMOTE_TRACE_RECORD_REPLAY_MAPPING,
         REMOTE_TRACE_REQUEST_TERM_EVENT,
         REMOTE_TRACE_CREATE_USER_EVENT,
@@ -368,8 +366,6 @@ namespace Legion {
       virtual bool remove_recorder_reference(void);
       virtual void pack_recorder(Serializer &rez); 
     public:
-      virtual void record_completion_event(ApEvent lhs, unsigned op_kind,
-                                           const TraceLocalID &tlid);
       virtual void record_replay_mapping(ApEvent lhs, unsigned op_kind,
                            const TraceLocalID &tlid, bool register_memo);
       virtual void request_term_event(ApUserEvent &term_event);
@@ -411,7 +407,8 @@ namespace Legion {
 #endif
                            ApEvent precondition, PredEvent pred_guard,
                            LgEvent src_unique, LgEvent dst_unique,
-                           int priority, CollectiveKind collective);
+                           int priority, CollectiveKind collective,
+                           bool record_effect);
       virtual void record_issue_across(const TraceLocalID &tlid, ApEvent &lhs,
                            ApEvent collective_precondition, 
                            ApEvent copy_precondition,
@@ -449,7 +446,7 @@ namespace Legion {
 #endif
                            ApEvent precondition, PredEvent pred_guard,
                            LgEvent unique_event, int priority,
-                           CollectiveKind collective);
+                           CollectiveKind collective, bool record_effect);
       virtual void record_fill_inst(ApEvent lhs, IndexSpaceExpression *expr,
                            const UniqueInst &dst_inst,
                            const FieldMask &fill_mask,
@@ -471,7 +468,7 @@ namespace Legion {
                           const std::deque<InstanceSet> &physical_instances,
                           std::set<RtEvent> &applied_events);
       virtual void record_complete_replay(const TraceLocalID &tlid,
-                                          ApEvent pre, ApEvent post,
+                                          ApEvent pre,
                                           std::set<RtEvent> &applied);
       virtual void record_reservations(const TraceLocalID &tlid,
                                 const std::map<Reservation,bool> &locks,
@@ -595,11 +592,11 @@ namespace Legion {
           base_sanity_check();
           rec->record_mapper_output(tlid, output, physical_instances, applied);
         }
-      inline void record_complete_replay(ApEvent pre, ApEvent post,
-                                         std::set<RtEvent> &applied) const
+      inline void record_complete_replay(std::set<RtEvent> &applied,
+                                  ApEvent pre = ApEvent::NO_AP_EVENT) const
         {
           base_sanity_check();
-          rec->record_complete_replay(tlid, pre, post, applied);
+          rec->record_complete_replay(tlid, pre, applied);
         }
       inline void record_reservations(const TraceLocalID &tlid,
                       const std::map<Reservation,bool> &reservations,
@@ -661,7 +658,8 @@ namespace Legion {
 #endif
                           ApEvent precondition, PredEvent pred_guard,
                           LgEvent src_unique, LgEvent dst_unique,
-                          int priority, CollectiveKind collective) const
+                          int priority, CollectiveKind collective,
+                          bool record_effect) const
         {
           sanity_check();
           rec->record_issue_copy(tlid, result, expr, src_fields,
@@ -671,7 +669,7 @@ namespace Legion {
 #endif
                                  precondition, pred_guard,
                                  src_unique, dst_unique,
-                                 priority, collective);
+                                 priority, collective, record_effect);
         }
       inline void record_issue_fill(ApEvent &result,
                           IndexSpaceExpression *expr,
@@ -684,7 +682,8 @@ namespace Legion {
 #endif
                           ApEvent precondition, PredEvent pred_guard,
                           LgEvent unique_event, int priority,
-                          CollectiveKind collective) const
+                          CollectiveKind collective,
+                          bool record_effect) const
         {
           sanity_check();
           rec->record_issue_fill(tlid, result, expr, fields, 
@@ -693,7 +692,8 @@ namespace Legion {
                                  fill_uid, handle, tree_id,
 #endif
                                  precondition, pred_guard,
-                                 unique_event, priority, collective);
+                                 unique_event, priority,
+                                 collective, record_effect);
         }
       inline void record_issue_across(ApEvent &result,
                                       ApEvent collective_precondition,
@@ -3311,6 +3311,7 @@ namespace Legion {
         TraceViewSet *precondition_updates;
         TraceViewSet *anticondition_updates;
         TraceViewSet *postcondition_updates;
+        std::set<IndexSpaceExpression*> *const expr_references;
         const RtUserEvent done_event;
         const bool forward_to_owner;
         const bool filter_invalidations;

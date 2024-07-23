@@ -89,7 +89,11 @@ namespace Realm {
 				   const ExternalInstanceResource *res,
 				   const ProfilingRequestSet& prs,
 				   Event wait_on);
-      
+
+      Event redistrict(RegionInstance *instances, const InstanceLayoutGeneric **layouts,
+                       size_t num_layouts, const ProfilingRequestSet *prs,
+                       Event wait_on = Event::NO_EVENT);
+
       // the life cycle of an instance is defined in part by when the
       //  allocation and deallocation of storage occurs, but that is managed
       //  by the memory, which uses these callbacks to notify us

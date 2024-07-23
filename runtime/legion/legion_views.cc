@@ -2363,7 +2363,9 @@ namespace Legion {
                                                    applied_events,
                                                    manager,
                                                    precondition,
-                                                   predicate_guard);
+                                                   predicate_guard,
+                                                   COLLECTIVE_NONE,
+                                                   fill_restricted);
       // Save the result
       if (manage_dst_events && result.exists())
         add_copy_user(false/*reading*/, 0/*redop*/, result, 
@@ -2476,7 +2478,8 @@ namespace Legion {
 #endif
                                             precondition, predicate_guard,
                                             source_manager->get_unique_event(),
-                                            manager->get_unique_event());
+                                            manager->get_unique_event(),
+                                            COLLECTIVE_NONE, copy_restricted);
         if (result.exists())
         {
           source_view->add_copy_user(true/*reading*/, 0/*redop*/, result,
@@ -5281,7 +5284,8 @@ namespace Legion {
                                  std::set<RtEvent> &applied_events,
                                  PhysicalManager *manager,
                                  ApEvent precondition, PredEvent pred_guard,
-                                 CollectiveKind collective_kind)
+                                 CollectiveKind collective_kind,
+                                 bool fill_restricted)
     //--------------------------------------------------------------------------
     {
       if (value_size.load() == 0)
@@ -5294,7 +5298,7 @@ namespace Legion {
           if (!value_ready.exists())
             value_ready = Runtime::create_rt_user_event();
           DeferIssueFill args(this, op, fill_expr, trace_info, dst_fields,
-                      manager, precondition, pred_guard, collective_kind);
+           manager, precondition, pred_guard, collective_kind, fill_restricted);
           const RtEvent issued = runtime->issue_runtime_meta_task(args,
               LG_LATENCY_DEFERRED_PRIORITY, value_ready);
           // If we're recording this, then this needs to be a precondition
@@ -5318,7 +5322,7 @@ namespace Legion {
 #endif
                                    precondition, pred_guard,
                                    manager->get_unique_event(),
-                                   collective_kind);
+                                   collective_kind, fill_restricted);
     }
 
     //--------------------------------------------------------------------------
@@ -5327,13 +5331,15 @@ namespace Legion {
                                        const PhysicalTraceInfo &info,
                                        const std::vector<CopySrcDstField> &dst,
                                        PhysicalManager *man, ApEvent pre,
-                                       PredEvent guard, CollectiveKind collect)
+                                       PredEvent guard, CollectiveKind collect,
+                                       bool fill_restrict)
       : LgTaskArgs<DeferIssueFill>(o->get_unique_op_id()),
         view(v), op(o), fill_expr(expr),
         trace_info(new PhysicalTraceInfo(info)),
         dst_fields(new std::vector<CopySrcDstField>(dst)),
         manager(man), precondition(pre), pred_guard(guard),
-        collective(collect), done(Runtime::create_ap_user_event(&info))
+        collective(collect), done(Runtime::create_ap_user_event(&info)),
+        fill_restricted(fill_restrict)
     //--------------------------------------------------------------------------
     {
       view->add_base_resource_ref(META_TASK_REF);
@@ -5350,7 +5356,7 @@ namespace Legion {
       const ApEvent result = dargs->view->issue_fill(dargs->op,dargs->fill_expr,
           *(dargs->trace_info), *(dargs->dst_fields), dummy_applied,
           dargs->manager, dargs->precondition, dargs->pred_guard,
-          dargs->collective);
+          dargs->collective, dargs->fill_restricted);
 #ifdef DEBUG_LEGION
       assert(dummy_applied.empty());
 #endif
@@ -7493,7 +7499,7 @@ namespace Legion {
 #endif
               Runtime::merge_events(&local_info, src_pre, dst_pre,precondition),
               predicate_guard, source_manager->get_unique_event(),
-              local_unique, COLLECTIVE_BROADCAST);
+              local_unique, COLLECTIVE_BROADCAST, copy_restricted);
           if (local_info.recording)
           {
             const UniqueInst src_inst(it->first);
@@ -9277,7 +9283,8 @@ namespace Legion {
                                                      local_manager,
                                                      dst_precondition,
                                                      predicate_guard,
-                                                     COLLECTIVE_FILL);
+                                                     COLLECTIVE_FILL,
+                                                     fill_restricted);
         if (result.exists())
         {
           if (ready_event.exists())
@@ -9490,7 +9497,8 @@ namespace Legion {
             local_manager->tree_id, dst_inst.tid,
 #endif
             precondition, predicate_guard,
-            local_manager->get_unique_event(), dst_unique_event, collective);
+            local_manager->get_unique_event(), dst_unique_event,
+            collective, false/*copy restricted*/);
       // Record the user
       if (copy_post.exists())
         local_view->add_copy_user(true/*reading*/, 0/*redop*/, copy_post,
@@ -9663,7 +9671,7 @@ namespace Legion {
           src_inst.tid, local_manager->tree_id,
 #endif
           local_pre, predicate_guard, src_unique_event,
-          local_manager->get_unique_event(), collective_kind);
+          local_manager->get_unique_event(), collective_kind, copy_restricted);
       if (local_info.recording)
       {
         const UniqueInst dst_inst(local_view);
@@ -9908,7 +9916,8 @@ namespace Legion {
               local_manager->tree_id, dst_manager->tree_id,
 #endif
               dst_pre, predicate_guard, local_manager->get_unique_event(),
-              dst_manager->get_unique_event(), collective_kind);
+              dst_manager->get_unique_event(), collective_kind,
+              false/*copy restricted*/);
           if (dst_post.exists())
           {
             // Keep the reads in order to to prevent contention on 
@@ -9979,7 +9988,8 @@ namespace Legion {
               src_manager->tree_id, dst_manager->tree_id,
 #endif
               dst_pre, predicate_guard, src_manager->get_unique_event(),
-              dst_manager->get_unique_event(), collective_kind);
+              dst_manager->get_unique_event(), collective_kind,
+              false/*copy restricted*/);
           if (dst_post.exists())
           {
             if (has_instance_events)
@@ -10688,7 +10698,8 @@ namespace Legion {
             src_inst.tid, dst_manager->tree_id,
 #endif
             reduce_pre, predicate_guard, src_unique_event,
-            dst_manager->get_unique_event(), COLLECTIVE_REDUCECAST);
+            dst_manager->get_unique_event(), COLLECTIVE_REDUCECAST,
+            copy_restricted);
         if (reduce_done.exists())
         {
           local_done_events.push_back(reduce_done);
@@ -11869,7 +11880,7 @@ namespace Legion {
           local_manager->tree_id, dst_inst.tid,
 #endif
           precondition, predicate_guard, local_manager->get_unique_event(),
-          dst_unique_event, collective_kind);
+          dst_unique_event, collective_kind, false/*copy restricted*/);
       // Trigger the output
       Runtime::trigger_event(&trace_info, result, reduce_post);
       // Save the result, note that this reading of this final reduction
@@ -12005,7 +12016,8 @@ namespace Legion {
                 local_manager->tree_id, src_manager->tree_id,
 #endif
                 reduce_pre, predicate_guard, src_manager->get_unique_event(),
-                local_manager->get_unique_event(), collective_kind);
+                local_manager->get_unique_event(), collective_kind,
+                false/*copy restricted*/);
           // Clear the redop in case we're reading them next
           clear_redop(local_fields[it->first]);
           // Save the state for later
@@ -12087,7 +12099,8 @@ namespace Legion {
                 dst_manager->tree_id, src_manager->tree_id,
 #endif
                 reduce_pre, predicate_guard, src_manager->get_unique_event(),
-                dst_manager->get_unique_event(), collective_kind);
+                dst_manager->get_unique_event(), collective_kind,
+                false/*copy restricted*/);
           if (reduce_post.exists())
           {
             if (!prepare_allreduce)
@@ -12316,7 +12329,8 @@ namespace Legion {
             local_manager->tree_id, dst_inst.tid,
 #endif
             src_pre, predicate_guard, local_manager->get_unique_event(),
-            dst_unique_event, COLLECTIVE_HAMMER_REDUCTION);
+            dst_unique_event, COLLECTIVE_HAMMER_REDUCTION,
+            false/*copy restricted*/);
         if (copy_post.exists())
         {
           done_events.push_back(copy_post);
@@ -12700,7 +12714,7 @@ namespace Legion {
 #endif
                 instance_events[0], predicate_guard,
                 local_views[0]->manager->get_unique_event(),
-                COLLECTIVE_BUTTERFLY_ALLREDUCE);
+                COLLECTIVE_BUTTERFLY_ALLREDUCE, false/*restricted*/);
             if (trace_info.recording)
             {
               const UniqueInst dst_inst(local_views[0]);
@@ -12942,7 +12956,7 @@ namespace Legion {
 #endif
                 instance_events[dst_inst_index], predicate_guard,
                 local_views[dst_inst_index]->manager->get_unique_event(),
-                COLLECTIVE_BUTTERFLY_ALLREDUCE);
+                COLLECTIVE_BUTTERFLY_ALLREDUCE, false/*restricted*/);
           if (trace_info.recording)
           {
             const UniqueInst dst_inst(local_views[dst_inst_index]);
@@ -12964,7 +12978,7 @@ namespace Legion {
               local_precondition, predicate_guard,
               local_views[src_inst_index]->manager->get_unique_event(),
               local_views[dst_inst_index]->manager->get_unique_event(),
-              COLLECTIVE_BUTTERFLY_ALLREDUCE);
+              COLLECTIVE_BUTTERFLY_ALLREDUCE, false/*copy restricted*/);
           std::vector<ApEvent> dst_events;
           if (local_post.exists())
           {
@@ -13433,7 +13447,7 @@ namespace Legion {
               it->src_inst.tid, dst_inst.tid,
 #endif
               pre, predicate_guard, it->src_unique_event, dst_unique_event,
-              COLLECTIVE_BUTTERFLY_ALLREDUCE);
+              COLLECTIVE_BUTTERFLY_ALLREDUCE, false/*copy restricted*/);
           if (trace_info.recording)
             trace_info.record_copy_insts(post, copy_expression, it->src_inst,
                 dst_inst, copy_mask, copy_mask, redop, applied_events);
@@ -13509,7 +13523,7 @@ namespace Legion {
 #endif
           precondition, finder->second.predicate_guard, src_unique_event,
           local_views[finder->second.dst_index]->manager->get_unique_event(),
-          COLLECTIVE_BUTTERFLY_ALLREDUCE);
+          COLLECTIVE_BUTTERFLY_ALLREDUCE, false/*copy restricted*/);
       std::set<RtEvent> applied_events;
       if (finder->second.trace_info->recording)
         finder->second.trace_info->record_copy_insts(copy_post,

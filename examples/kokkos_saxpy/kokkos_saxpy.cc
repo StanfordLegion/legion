@@ -138,8 +138,8 @@ public:
 				       typename execution_space::memory_space> y_ofs = acc_y.accessor;
 
       Kokkos::RangePolicy<execution_space> range(runtime->get_executing_processor(ctx).kokkos_work_space(),
-						 subspace.lo.x,
-						 subspace.hi.x + 1);
+						 subspace.lo[0],
+						 subspace.hi[0] + 1);
       Kokkos::parallel_for(range,
 			   SaxpyFunctor<execution_space>(args.alpha, x_ofs, y_ofs));
     }
@@ -185,15 +185,15 @@ public:
       //   (i.e. the subspace on which you have privileges matches what
       //   KokkosBlas is going to compute over), you can just use
       //   OffsetView::view() to convert
-      assert(x.begin(0) == subspace.lo.x);
+      assert(x.begin(0) == subspace.lo[0]);
       x_rel = x.view();
 
       // option 2: if you're not sure what the OffsetView's bounds are
       //   (or if you just like more self-documenting code) you can create
       //   the subview with the exact bounds you want and then convert that
       y_rel = Kokkos::Experimental::subview(y,
-					    std::make_pair(subspace.lo.x,
-							   subspace.hi.x + 1))
+					    std::make_pair(subspace.lo[0],
+							   subspace.hi[0] + 1))
 	.view();
 
       // the KokkosBlas::dot implementation that returns a float directly
@@ -217,8 +217,8 @@ public:
     }
 #endif
     Kokkos::RangePolicy<execution_space> range(runtime->get_executing_processor(ctx).kokkos_work_space(),
-					       subspace.lo.x,
-					       subspace.hi.x + 1);
+					       subspace.lo[0],
+					       subspace.hi[0] + 1);
     float sum = 0.0f;
     // Kokkos does not support CUDA lambdas by default - check that they
     //  are present
@@ -259,7 +259,7 @@ public:
 		 Kokkos::LayoutStride,
 		 typename execution_space::memory_space> view = acc.accessor;
 
-    size_t n_elements = subspace.hi.x - subspace.lo.x + 1;
+    size_t n_elements = subspace.hi[0] - subspace.lo[0] + 1;
     Kokkos::RangePolicy<execution_space> range(runtime->get_executing_processor(ctx).kokkos_work_space(),
 					       0, n_elements);
     Kokkos::parallel_for(range,
@@ -267,7 +267,7 @@ public:
 			   // using a relative address, but value to store
 			   //  is based on global index
 			   // have to use a relative address!
-			   view(i) = (i + subspace.lo.x) + offset;
+			   view(i) = (i + subspace.lo[0]) + offset;
 			 });
   }
 };

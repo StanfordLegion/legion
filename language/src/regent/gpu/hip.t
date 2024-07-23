@@ -23,7 +23,7 @@ local common = require("regent/gpu/common")
 local hiphelper = {}
 
 local RuntimeAPI = terralib.includecstring [[
-#define __HIP_PLATFORM_HCC__ 1
+#define __HIP_PLATFORM_AMD__ 1
 #include <hip/hip_runtime.h>
 hipStream_t hipGetTaskStream();
 //#include "realm/hip/hiphijack_api.h"
@@ -52,8 +52,8 @@ function hiphelper.driver_library_link_flags()
   -- If the hijack is turned off, we need extra dependencies to link
   -- the generated HIP code correctly
   if base.c.REGENT_USE_HIJACK == 0 then
-    local hip_path = os.getenv("HIP_PATH")
-    return terralib.newlist({"-L" .. hip_path .. "/lib", "-lamdhip64"})
+    local rocm_path = os.getenv("ROCM_PATH")
+    return terralib.newlist({"-L" .. rocm_path .. "/lib", "-lamdhip64"})
   end
   return terralib.newlist()
 end
@@ -211,13 +211,18 @@ function hiphelper.jit_compile_kernels_and_register(kernels)
     device_paths = device_paths .. " " .. v
   end
 
-  local hip_path = os.getenv("HIP_PATH")
-  local rocm_path = os.getenv("ROCM_PATH") or (hip_path and hip_path .. "/..")
-  local llvm_path = rocm_path and (rocm_path .. "/llvm/bin/") or ""
+  local regent_llvm = os.getenv("REGENT_LLVM_PATH")
+  local llvm_path
+  if regent_llvm then
+    llvm_path = regent_llvm .. "/bin/"
+  else
+    local rocm_path = os.getenv("ROCM_PATH")
+    llvm_path = rocm_path and (rocm_path .. "/llvm/bin/") or ""
+  end
 
-  os.execute(pr(llvm_path .. "ld.lld -shared -plugin-opt=mcpu=" .. arch .. " -plugin-opt=-amdgpu-internalize-symbols -plugin-opt=O3 -plugin-opt=-amdgpu-early-inline-all=true -plugin-opt=-amdgpu-function-calls=false -o " .. device_so .. " " .. device_o .. " " .. device_paths))
+  assert(os.execute(pr(llvm_path .. "ld.lld -shared -plugin-opt=mcpu=" .. arch .. " -plugin-opt=-amdgpu-internalize-symbols -plugin-opt=O3 -plugin-opt=-amdgpu-early-inline-all=true -plugin-opt=-amdgpu-function-calls=false -o " .. device_so .. " " .. device_o .. " " .. device_paths)) == 0)
 
-  os.execute(pr(llvm_path .. "clang-offload-bundler --inputs=/dev/null," .. device_so .. " --type=o --outputs=" .. bundle_o .. " --targets=host-x86_64-unknown-linux-gnu,hipv4-amdgcn-amd-amdhsa--" .. arch))
+  assert(os.execute(pr(llvm_path .. "clang-offload-bundler --inputs=/dev/null," .. device_so .. " --type=o --outputs=" .. bundle_o .. " --targets=host-x86_64-unknown-linux-gnu,hipv4-amdgcn-amd-amdhsa--" .. arch)) == 0)
 
   local f = assert(io.open(bundle_o, "rb"))
   local bundle_contents = f:read("*all")

@@ -155,7 +155,7 @@ def run_prof(out_dir, logfiles, verbose, py_exe_path):
 
 def run_prof_rs(out_dir, logfiles, verbose, legion_prof_rs):
     result_dir = os.path.join(out_dir, 'legion_prof_rs')
-    cmd = [legion_prof_rs, '-o', result_dir,] + logfiles
+    cmd = [legion_prof_rs, 'legacy', '-o', result_dir,] + logfiles
     if verbose: print('Running', ' '.join(cmd))
     proc = subprocess.Popen(
         cmd,
@@ -169,7 +169,7 @@ def run_prof_rs(out_dir, logfiles, verbose, legion_prof_rs):
 
 def run_prof_rs_archive(out_dir, logfiles, verbose, legion_prof_rs):
     result_dir = os.path.join(out_dir, 'legion_prof_rs_archive')
-    cmd = [legion_prof_rs, '--archive', '--levels', '3', '--zstd-compression', '1', '-o', result_dir,] + logfiles
+    cmd = [legion_prof_rs, 'archive', '--levels', '3', '--zstd-compression', '1', '-o', result_dir,] + logfiles
     if verbose: print('Running', ' '.join(cmd))
     proc = subprocess.Popen(
         cmd,

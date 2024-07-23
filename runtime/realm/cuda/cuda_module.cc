@@ -3608,6 +3608,7 @@ namespace Realm {
 
     GPUAllocation &GPU::add_allocation(GPUAllocation &&alloc)
     {
+      AutoLock<> al(alloc_mutex);
       assert(((!!alloc) && (alloc.get_dptr() != 0)) && "Given allocation is not valid!");
       return allocations.emplace(std::make_pair(alloc.get_dptr(), std::move(alloc)))
           .first->second;
@@ -4289,7 +4290,7 @@ namespace Realm {
       CudaModuleConfig *config = new CudaModuleConfig();
 #ifdef REALM_CUDA_DYNAMIC_LOAD
       // load the cuda lib
-      if(!resolve_cuda_api_fnptrs(true)) {
+      if(!resolve_cuda_api_fnptrs(false)) {
         // warning was printed in resolve function
         delete config;
         return NULL;
@@ -4303,10 +4304,14 @@ namespace Realm {
 
     /*static*/ Module *CudaModule::create_module(RuntimeImpl *runtime)
     {
+      ModuleConfig *uncasted_config = runtime->get_module_config("cuda");
+      if(!uncasted_config) {
+        return nullptr;
+      }
+
       CudaModule *m = new CudaModule(runtime);
 
-      CudaModuleConfig *config =
-          checked_cast<CudaModuleConfig *>(runtime->get_module_config("cuda"));
+      CudaModuleConfig *config = checked_cast<CudaModuleConfig *>(uncasted_config);
       assert(config != nullptr);
       assert(config->finish_configured);
       assert(m->name == config->get_name());
@@ -4387,8 +4392,22 @@ namespace Realm {
           if(nvml_initialized) {
             // Convert uuid bytes to uuid string for nvml
             std::string uuid = convert_uuid(info->uuid);
-            CHECK_NVML(
-                NVML_FNPTR(nvmlDeviceGetHandleByUUID)(uuid.c_str(), &info->nvml_dev));
+            if(NVML_SUCCESS !=
+               NVML_FNPTR(nvmlDeviceGetHandleByUUID)(uuid.c_str(), &info->nvml_dev)) {
+              // Unfortunately, CUDA doesn't provide a way to query if a device is in MIG
+              // or not, and for some god awful reason NVML decided it must prefix the
+              // UUID with either GPU- or MIG-.  So try 'GPU-' first, if it fails, try
+              // 'MIG-'.
+              uuid[0] = 'M';
+              uuid[1] = 'I';
+              uuid[2] = 'G';
+              CHECK_NVML(
+                  NVML_FNPTR(nvmlDeviceGetHandleByUUID)(uuid.c_str(), &info->nvml_dev));
+              // Then translate it to a physical device handle since that's all we'll
+              // really be caring about for the following queries
+              CHECK_NVML(NVML_FNPTR(nvmlDeviceGetDeviceHandleFromMigDeviceHandle)(
+                  info->nvml_dev, &info->nvml_dev));
+            }
             unsigned int gen, buswidth;
             // Rates in MB/s from https://en.wikipedia.org/wiki/PCI_Express
             static const unsigned int rates[] = {250, 500, 985, 1969, 3938, 7563, 15125};

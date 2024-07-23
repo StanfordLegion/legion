@@ -31,8 +31,6 @@
 #include <algorithm>
 #include <sstream>
 
-#define LEGION_PROF_SELF_PROFILE
-
 #ifdef DETAILED_LEGION_PROF
 #define DETAILED_PROFILER(runtime, call) \
   DetailedProfiler __detailed_profiler(runtime, call)
@@ -109,6 +107,11 @@ namespace Legion {
 
     class LegionProfDesc {
     public:
+      struct MapperName {
+        MapperID mapper_id;
+        ProcID mapper_proc;
+        const char *name;
+      };
       struct MapperCallDesc {
       public:
         unsigned kind;
@@ -160,7 +163,12 @@ namespace Legion {
       public:
         long long zero_time;
       };
-
+      struct Provenance {
+      public:
+        ProvenanceID pid;
+        const char *provenance;
+        size_t size;
+      };
     };
 
     class LegionProfInstance {
@@ -182,7 +190,7 @@ namespace Legion {
         UniqueID op_id;
         UniqueID parent_id;
         unsigned kind;
-        const char *provenance;
+        ProvenanceID provenance;
       };
       struct MultiTask {
       public:
@@ -324,6 +332,14 @@ namespace Legion {
         LgEvent creator;
         LgEvent finish_event;
       };
+      struct MessageInfo : public MetaInfo {
+      public:
+        // Spawn is recorded on the creator node while
+        // create is recorded on the destination node
+        // We use that to detect network congestion and
+        // cases of timing skew
+        timestamp_t spawn;
+      };
       struct CopyInstInfo {
       public:
         MemID src, dst;
@@ -377,6 +393,8 @@ namespace Legion {
       };
       struct MapperCallInfo {
       public:
+        MapperID mapper;
+        ProcID mapper_proc;
         MappingCallKind kind;
         UniqueID op_id;
         timestamp_t start, stop;
@@ -386,6 +404,12 @@ namespace Legion {
       struct RuntimeCallInfo {
       public:
         RuntimeCallKind kind;
+        timestamp_t start, stop;
+        ProcID proc_id;
+        LgEvent finish_event;
+      };
+      struct ApplicationCallInfo {
+        ProvenanceID pid;
         timestamp_t start, stop;
         ProcID proc_id;
         LgEvent finish_event;
@@ -411,7 +435,6 @@ namespace Legion {
         unsigned bandwidth;
         unsigned latency;
       };
-#ifdef LEGION_PROF_SELF_PROFILE
       struct ProfTaskInfo {
       public:
         ProcID proc_id;
@@ -420,7 +443,6 @@ namespace Legion {
         LgEvent creator;
         LgEvent finish_event;
       };
-#endif
       struct ProfilingInfo : public ProfilingResponseBase {
       public:
         ProfilingInfo(ProfilingResponseHandler *h);
@@ -429,6 +451,7 @@ namespace Legion {
         union {
           size_t id2;
           InstanceNameClosure *closure;
+          long long spawn_time;
         } extra;
         UniqueID op_id;
         LgEvent creator;
@@ -516,17 +539,19 @@ namespace Legion {
       void process_proc_mem_aff_desc(const Memory &m);
       void process_proc_mem_aff_desc(const Processor &p);
     public:
-      void record_mapper_call(Processor proc, MappingCallKind kind, 
+      void record_mapper_call(Processor proc, MapperID mapper,
+                              Processor mapper_proc, MappingCallKind kind,
                               UniqueID uid, timestamp_t start,
                               timestamp_t stop, LgEvent finish_event);
       void record_runtime_call(Processor proc, RuntimeCallKind kind,
                                timestamp_t start, timestamp_t stop,
                                LgEvent finish_event);
-#ifdef LEGION_PROF_SELF_PROFILE
+      void record_application_range(Processor proc, ProvenanceID pid,
+                                    timestamp_t start, timestamp_t stop,
+                                    LgEvent finish_event);
     public:
       void record_proftask(Processor p, UniqueID op_id, timestamp_t start,
           timestamp_t stop, LgEvent creator, LgEvent finish_event);
-#endif
     public:
       void dump_state(LegionProfSerializer *serializer);
       size_t dump_inter(LegionProfSerializer *serializer, const double over);
@@ -556,22 +581,22 @@ namespace Legion {
       std::deque<PhysicalInstanceUsage> phy_inst_usage;
       std::deque<IndexSpaceSizeDesc> index_space_size_desc;
       std::deque<MetaInfo> meta_infos;
+      std::deque<MessageInfo> message_infos;
       std::deque<CopyInfo> copy_infos;
       std::deque<FillInfo> fill_infos;
       std::deque<InstTimelineInfo> inst_timeline_infos;
       std::deque<PartitionInfo> partition_infos;
       std::deque<MapperCallInfo> mapper_call_infos;
       std::deque<RuntimeCallInfo> runtime_call_infos;
+      std::deque<ApplicationCallInfo> application_call_infos;
       std::deque<MemDesc> mem_desc_infos;
       std::deque<ProcDesc> proc_desc_infos;
       std::deque<ProcMemDesc> proc_mem_aff_desc_infos;
       // keep track of MemIDs/ProcIDs to avoid duplicate entries
       std::vector<MemID> mem_ids;
       std::vector<ProcID> proc_ids;
-#ifdef LEGION_PROF_SELF_PROFILE
     private:
       std::deque<ProfTaskInfo> prof_task_infos;
-#endif
     };
 
     class LegionProfiler : public ProfilingResponseHandler {
@@ -609,7 +634,8 @@ namespace Legion {
                      const size_t footprint_threshold,
                      const size_t target_latency,
                      const size_t minimum_call_threshold,
-                     const bool slow_config_ok);
+                     const bool slow_config_ok,
+                     const bool self_profile);
       LegionProfiler(const LegionProfiler &rhs) = delete;
       virtual ~LegionProfiler(void);
     public:
@@ -626,6 +652,9 @@ namespace Legion {
       void register_operation(Operation *op);
       void register_multi_task(Operation *op, TaskID task_id);
       void register_slice_owner(UniqueID pid, UniqueID id);
+    public:
+      bool has_memory_desc(Memory m);
+      bool has_processor_desc(Processor p);
     public:
       void add_task_request(Realm::ProfilingRequestSet &requests, TaskID tid, 
                             VariantID vid, UniqueID task_uid, Processor p);
@@ -702,15 +731,20 @@ namespace Legion {
                                    sparse_size,
                                    bool is_sparse);
     public:
+      void record_mapper_name(MapperID mapper, Processor p, const char *name);
       void record_mapper_call_kinds(const char *const *const mapper_call_names,
                                     unsigned int num_mapper_call_kinds);
-      void record_mapper_call(MappingCallKind kind, UniqueID uid,
-                              timestamp_t start, timestamp_t stop);
+      void record_mapper_call(MapperID mapper, Processor mapper_proc,
+       MappingCallKind kind, UniqueID uid, timestamp_t start, timestamp_t stop);
     public:
       void record_runtime_call_kinds(const char *const *const runtime_calls,
                                      unsigned int num_runtime_call_kinds);
       void record_runtime_call(RuntimeCallKind kind, timestamp_t start,
                                timestamp_t stop);
+      void record_provenance(ProvenanceID pid, 
+                             const char *provenance, size_t size);
+      void record_application_range(ProvenanceID pid,
+                                    timestamp_t start, timestamp_t stop);
     public:
       void record_implicit(UniqueID op_id, TaskID tid, Processor proc,
                            long long start, long long stop,
@@ -744,10 +778,14 @@ namespace Legion {
       const long long output_target_latency;
       // Target processor on which to launch jobs
       const Processor target_proc;
+      // Whether we are self-profiling
+      const bool self_profile;
     private:
       LegionProfSerializer* serializer;
       mutable LocalLock profiler_lock;
       std::vector<LegionProfInstance*> instances;
+      std::vector<Memory> recorded_memories;
+      std::vector<Processor> recorded_processors;
 #ifdef DEBUG_LEGION
       unsigned total_outstanding_requests[LEGION_PROF_LAST];
 #else

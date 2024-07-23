@@ -17,6 +17,13 @@ struct Dummy {
   void init(ID _me, unsigned _init_owner) { me = me; }
   ID me;
   Dummy *next_free = nullptr;
+
+  static ID make_id(const Dummy &dummy, int owner, ID::IDType index)
+  {
+    ID id;
+    id.id = index;
+    return id;
+  }
 };
 
 TEST(DynamicTableTest, CheckEmptyDynamicTable)

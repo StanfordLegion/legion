@@ -355,32 +355,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RemoteTraceRecorder::record_completion_event(ApEvent lhs,
-                                     unsigned op_kind, const TraceLocalID &tlid)
-    //--------------------------------------------------------------------------
-    {
-      if (runtime->address_space != origin_space)
-      {
-        RtUserEvent applied = Runtime::create_rt_user_event(); 
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(remote_tpl);
-          rez.serialize(REMOTE_TRACE_RECORD_COMPLETION_EVENT);
-          rez.serialize(applied);
-          rez.serialize(lhs);
-          rez.serialize(op_kind);
-          tlid.serialize(rez);
-        }
-        runtime->send_remote_trace_update(origin_space, rez);
-        AutoLock a_lock(applied_lock);
-        applied_events.insert(applied);
-      }
-      else
-        remote_tpl->record_completion_event(lhs, op_kind, tlid);
-    }
-
-    //--------------------------------------------------------------------------
     void RemoteTraceRecorder::record_replay_mapping(ApEvent lhs,
                  unsigned op_kind, const TraceLocalID &tlid, bool register_memo)
     //--------------------------------------------------------------------------
@@ -705,7 +679,8 @@ namespace Legion {
                                              LgEvent src_unique,
                                              LgEvent dst_unique,
                                              int priority,
-                                             CollectiveKind collective)
+                                             CollectiveKind collective,
+                                             bool copy_restricted)
     //--------------------------------------------------------------------------
     {
       if (runtime->address_space != origin_space)
@@ -743,6 +718,7 @@ namespace Legion {
           rez.serialize(dst_unique);
           rez.serialize(priority);
           rez.serialize(collective);
+          rez.serialize<bool>(copy_restricted);
         }
         runtime->send_remote_trace_update(origin_space, rez);
         // Wait to see if lhs changes
@@ -755,7 +731,8 @@ namespace Legion {
                               src_tree_id, dst_tree_id,
 #endif
                               precondition, pred_guard,
-                              src_unique, dst_unique, priority, collective);
+                              src_unique, dst_unique, priority,
+                              collective, copy_restricted);
     }
 
     //--------------------------------------------------------------------------
@@ -862,7 +839,8 @@ namespace Legion {
                                              PredEvent pred_guard,
                                              LgEvent unique_event,
                                              int priority,
-                                             CollectiveKind collective)
+                                             CollectiveKind collective,
+                                             bool fill_restricted)
     //--------------------------------------------------------------------------
     {
       if (runtime->address_space != origin_space)
@@ -893,6 +871,7 @@ namespace Legion {
           rez.serialize(unique_event);
           rez.serialize(priority);
           rez.serialize(collective);
+          rez.serialize<bool>(fill_restricted);
         }
         runtime->send_remote_trace_update(origin_space, rez);
         // Wait to see if lhs changes
@@ -905,7 +884,8 @@ namespace Legion {
                                       fill_uid, handle, tree_id,
 #endif
                                       precondition, pred_guard,
-                                      unique_event, priority, collective);
+                                      unique_event, priority,
+                                      collective, fill_restricted);
     }
 
     //--------------------------------------------------------------------------
@@ -1046,7 +1026,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RemoteTraceRecorder::record_complete_replay(const TraceLocalID &tlid, 
-                    ApEvent pre, ApEvent post, std::set<RtEvent> &local_applied)
+                                  ApEvent pre, std::set<RtEvent> &local_applied)
     //--------------------------------------------------------------------------
     {
       if (runtime->address_space != origin_space)
@@ -1060,14 +1040,13 @@ namespace Legion {
           rez.serialize(applied);
           tlid.serialize(rez);
           rez.serialize(pre);
-          rez.serialize(post);
         }
         runtime->send_remote_trace_update(origin_space, rez);
         // Don't use the applied_events!
         local_applied.insert(applied);
       }
       else
-        remote_tpl->record_complete_replay(tlid, pre, post, local_applied);
+        remote_tpl->record_complete_replay(tlid, pre, local_applied);
     }
 
     //--------------------------------------------------------------------------
@@ -1151,20 +1130,6 @@ namespace Legion {
       derez.deserialize(kind);
       switch (kind)
       {
-        case REMOTE_TRACE_RECORD_COMPLETION_EVENT:
-          {
-            RtUserEvent applied;
-            derez.deserialize(applied);
-            ApEvent lhs;
-            derez.deserialize(lhs);
-            unsigned op_kind;
-            derez.deserialize(op_kind);
-            TraceLocalID tlid;
-            tlid.deserialize(derez);
-            tpl->record_completion_event(lhs, op_kind, tlid);
-            Runtime::trigger_event(applied);
-            break;
-          }
         case REMOTE_TRACE_RECORD_REPLAY_MAPPING:
           {
             RtUserEvent applied;
@@ -1367,6 +1332,8 @@ namespace Legion {
             derez.deserialize(priority);
             CollectiveKind collective;
             derez.deserialize(collective);
+            bool copy_restricted;
+            derez.deserialize<bool>(copy_restricted);
             // Use this to track if lhs changes
             const ApUserEvent lhs_copy = lhs;
             // Do the base call
@@ -1377,7 +1344,7 @@ namespace Legion {
 #endif
                                    precondition, pred_guard,
                                    src_unique, dst_unique,
-                                   priority, collective);
+                                   priority, collective, copy_restricted);
             if (lhs != lhs_copy)
             {
               Serializer rez;
@@ -1470,6 +1437,8 @@ namespace Legion {
             derez.deserialize(priority);
             CollectiveKind collective;
             derez.deserialize(collective);
+            bool fill_restricted;
+            derez.deserialize<bool>(fill_restricted);
             // Use this to track if lhs changes
             const ApUserEvent lhs_copy = lhs; 
             // Do the base call
@@ -1479,7 +1448,8 @@ namespace Legion {
                                    fill_uid, handle, tree_id,
 #endif
                                    precondition, pred_guard,
-                                   unique_event, priority, collective);
+                                   unique_event, priority,
+                                   collective, fill_restricted);
             if (lhs != lhs_copy)
             {
               Serializer rez;
@@ -1628,11 +1598,10 @@ namespace Legion {
             derez.deserialize(applied);
             TraceLocalID tlid;
             tlid.deserialize(derez);
-            ApEvent pre, post;
+            ApEvent pre;
             derez.deserialize(pre);
-            derez.deserialize(post);
             std::set<RtEvent> applied_events;
-            tpl->record_complete_replay(tlid, pre, post, applied_events);
+            tpl->record_complete_replay(tlid, pre, applied_events);
             if (!applied_events.empty())
               Runtime::trigger_event(applied,
                   Runtime::merge_events(applied_events));
@@ -5814,7 +5783,7 @@ namespace Legion {
 #endif
               it->first->register_region_dependence(0/*index*/, finder->second,
                   finder->second->get_generation(), 0/*index*/,
-                  LEGION_TRUE_DEPENDENCE, false/*validates*/, overlap);
+                  LEGION_TRUE_DEPENDENCE, overlap);
             }
           }
           path_node = path_node->get_parent();
@@ -5937,7 +5906,7 @@ namespace Legion {
           0/*index*/, LEGION_TRUE_DEPENDENCE);
 #endif
       finder->second->register_region_dependence(0/*index*/, user->op,
-        user->gen, user->idx, LEGION_TRUE_DEPENDENCE, false/*validates*/, mask);
+        user->gen, user->idx, LEGION_TRUE_DEPENDENCE, mask);
       finder->second->update_close_mask(mask);
     }
 
@@ -5960,7 +5929,7 @@ namespace Legion {
       // Record a dependence on the internal operation for ourself
       op->register_region_dependence(internal_op->get_internal_index(),
           internal_op, internal_op->get_generation(), 0/*internal idx*/,
-          LEGION_TRUE_DEPENDENCE, false/*validates*/, internal_mask);
+          LEGION_TRUE_DEPENDENCE, internal_mask);
 #ifdef LEGION_SPY
       LegionSpy::log_mapping_dependence(context->get_unique_id(),
           internal_op->get_unique_op_id(), 0/*index*/, op->get_unique_op_id(),
@@ -9459,14 +9428,8 @@ namespace Legion {
             false/*track*/, applied_events);
       if (output_aggregator != NULL)
       {
-#ifdef DEBUG_LEGION
-        assert(output_aggregator->track_events);
-#endif
-        const ApEvent effect =
-          output_aggregator->issue_updates(trace_info, term_event,
-                                           true/*restricted output*/);
-        if (effect.exists())
-          op->record_completion_effect(effect, applied_events);
+        output_aggregator->issue_updates(trace_info, term_event,
+                                         true/*restricted output*/);
         if (output_aggregator->effects_applied.has_triggered())
           applied_events.insert(output_aggregator->effects_applied);
         if (output_aggregator->release_guards(op->runtime, applied_events))
@@ -10977,14 +10940,8 @@ namespace Legion {
                             false/*track*/, applied_events);
       if (output_aggregator != NULL)
       {
-#ifdef DEBUG_LEGION
-        assert(output_aggregator->track_events);
-#endif
-        const ApEvent effect =
-          output_aggregator->issue_updates(trace_info, precondition,
-                                           true/*restricted output*/);
-        if (effect.exists())
-          op->record_completion_effect(effect, applied_events);
+        output_aggregator->issue_updates(trace_info, precondition,
+                                         true/*restricted output*/);
         if (output_aggregator->effects_applied.has_triggered())
           applied_events.insert(output_aggregator->effects_applied);
         if (output_aggregator->release_guards(op->runtime, applied_events))
@@ -16835,7 +16792,7 @@ namespace Legion {
             continue;
           if (aggregator == NULL)
             aggregator = new CopyFillAggregator(runtime->forest, analysis,
-                                NULL/*no previous guard*/, true/*track*/);
+                                NULL/*no previous guard*/, false/*track*/);
           aggregator->record_update(it->first.first, NULL/*no manager*/,
               it->first.second, overlap, overlap_expr, trace_info,
               trace_info.recording ? this : NULL);
@@ -18570,7 +18527,7 @@ namespace Legion {
               }
               if (aggregator == NULL)
                 aggregator = new CopyFillAggregator(runtime->forest, analysis,
-                        NULL/*no previous guard*/, true/*track*/, true_guard);
+                        NULL/*no previous guard*/, false/*track*/, true_guard);
               aggregator->record_fill(inst_view, fill_view, overlap, fill_expr,
                                       true_guard, this);
             }
@@ -18633,7 +18590,7 @@ namespace Legion {
             // Physical instance so we can just record the predicated fill
             if (aggregator == NULL)
               aggregator = new CopyFillAggregator(runtime->forest, analysis,
-                      NULL/*no previous guard*/, true/*track*/, true_guard);
+                      NULL/*no previous guard*/, false/*track*/, true_guard);
             aggregator->record_fill(it->first->as_instance_view(),
                                 fill_view, overlap, expr, true_guard, this);
           }
@@ -20227,73 +20184,47 @@ namespace Legion {
         precondition_updates(preconditions),
         anticondition_updates(anticonditions),
         postcondition_updates(postconditions),
+        expr_references(new std::set<IndexSpaceExpression*>()),
         done_event(Runtime::create_rt_user_event()), forward_to_owner(forward),
         filter_invalidations(filter)
     //--------------------------------------------------------------------------
     {
       for (ExprLogicalViews::const_iterator it =
             valid.begin(); it != valid.end(); it++)
-        it->first->add_base_expression_reference(META_TASK_REF);
+        if (expr_references->insert(it->first).second)
+          it->first->add_base_expression_reference(META_TASK_REF);
       valid_updates->swap(valid);
       for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
             init.begin(); it != init.end(); it++)
-        it->first->add_base_expression_reference(META_TASK_REF);
+        if (expr_references->insert(it->first).second)
+          it->first->add_base_expression_reference(META_TASK_REF);
       initialized_updates->swap(init);
       for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
             invd.begin(); it != invd.end(); it++)
-        it->first->add_base_expression_reference(META_TASK_REF);
+        if (expr_references->insert(it->first).second)
+          it->first->add_base_expression_reference(META_TASK_REF);
       invalidated_updates->swap(invd);
       for (ExprReductionViews::const_iterator rit =
             reductions.begin(); rit != reductions.end(); rit++)
         for (std::list<std::pair<InstanceView*,IndexSpaceExpression*> >::
               const_iterator it = rit->second.begin();
               it != rit->second.end(); it++)
-          it->second->add_base_expression_reference(META_TASK_REF);
+          if (expr_references->insert(it->second).second)
+            it->second->add_base_expression_reference(META_TASK_REF);
       reduction_updates->swap(reductions);
       for (ExprInstanceViews::const_iterator it =
             restricted.begin(); it != restricted.end(); it++)
-        it->first->add_base_expression_reference(META_TASK_REF);
+        if (expr_references->insert(it->first).second)
+          it->first->add_base_expression_reference(META_TASK_REF);
       restricted_updates->swap(restricted);
       for (ExprInstanceViews::const_iterator it =
             released.begin(); it != released.end(); it++)
-        it->first->add_base_expression_reference(META_TASK_REF);
+        if (expr_references->insert(it->first).second)
+          it->first->add_base_expression_reference(META_TASK_REF);
       released_updates->swap(released);
       read_only_updates->swap(read_only);
       reduction_fill_updates->swap(reduc_fill);
       applied_events.push_back(done_event);
-    }
-
-    //--------------------------------------------------------------------------
-    void EquivalenceSet::DeferApplyStateArgs::release_references(void) const
-    //--------------------------------------------------------------------------
-    {
-      for (ExprLogicalViews::const_iterator it =
-            valid_updates->begin(); it != valid_updates->end(); it++)
-        if (it->first->remove_base_expression_reference(META_TASK_REF))
-          delete it->first;
-      for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
-           initialized_updates->begin(); it != initialized_updates->end(); it++)
-        if (it->first->remove_base_expression_reference(META_TASK_REF))
-          delete it->first;
-      for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
-           invalidated_updates->begin(); it != invalidated_updates->end(); it++)
-        if (it->first->remove_base_expression_reference(META_TASK_REF))
-          delete it->first;
-      for (ExprReductionViews::const_iterator rit =
-            reduction_updates->begin(); rit != reduction_updates->end(); rit++)
-        for (std::list<std::pair<InstanceView*,IndexSpaceExpression*> >::
-              const_iterator it = rit->second.begin(); 
-              it != rit->second.end(); it++)
-          if (it->second->remove_base_expression_reference(META_TASK_REF))
-            delete it->second;
-      for (ExprInstanceViews::const_iterator it =
-            restricted_updates->begin(); it != restricted_updates->end(); it++)
-        if (it->first->remove_base_expression_reference(META_TASK_REF))
-          delete it->first;
-      for (ExprInstanceViews::const_iterator it =
-            released_updates->begin(); it != released_updates->end(); it++)
-        if (it->first->remove_base_expression_reference(META_TASK_REF))
-          delete it->first;
     }
 
     //--------------------------------------------------------------------------
@@ -20315,7 +20246,11 @@ namespace Legion {
             Runtime::merge_events(applied_events));
       else
         Runtime::trigger_event(dargs->done_event);
-      dargs->release_references();
+      for (std::set<IndexSpaceExpression*>::const_iterator it =
+            dargs->expr_references->begin(); it !=
+            dargs->expr_references->end(); it++)
+        if ((*it)->remove_base_expression_reference(META_TASK_REF))
+          delete (*it);
       delete dargs->valid_updates;
       delete dargs->initialized_updates;
       delete dargs->invalidated_updates;
@@ -20324,6 +20259,7 @@ namespace Legion {
       delete dargs->released_updates;
       delete dargs->read_only_updates;
       delete dargs->reduction_fill_updates;
+      delete dargs->expr_references;
     }
 
     //--------------------------------------------------------------------------

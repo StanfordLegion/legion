@@ -71,8 +71,9 @@ namespace Realm {
   {
     LEAF_TYPE *leaf = new LEAF_TYPE(0, first_index, last_index);
     const IT last_ofs = (((IT)1) << LEAF_BITS) - 1;
+
     for(IT i = 0; i <= last_ofs; i++)
-      leaf->elems[i].init(make_id(leaf->elems[0], owner, first_index + i), owner);
+      leaf->elems[i].init(ET::make_id(leaf->elems[0], owner, first_index + i), owner);
     // leaf->elems[i].init(ID(ET::ID_TYPE, owner, first_index +
     // i).convert<typeof(leaf->elems[0].me)>(), owner);
 

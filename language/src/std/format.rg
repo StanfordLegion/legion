@@ -159,6 +159,12 @@ local function format_value(macro_name, node, value, value_type, modifiers)
     format_str = "{lo=" .. lo_format .. ", hi=" .. hi_format .. "}"
     format_args:insertall(lo_args)
     format_args:insertall(hi_args)
+  elseif std.is_complex_type(value_type) then
+    local real_format, real_args = format_value(macro_name, node, rexpr value.real end, value_type.base_type, modifiers)
+    local imag_format, imag_args = format_value(macro_name, node, rexpr value.imag end, value_type.base_type, modifiers)
+    format_str = real_format .. " + " .. imag_format .. "j"
+    format_args:insertall(real_args)
+    format_args:insertall(imag_args)
   elseif std.is_string(value_type) then
     return format_value(macro_name, node, rexpr [rawstring](value) end, rawstring, modifiers)
   else

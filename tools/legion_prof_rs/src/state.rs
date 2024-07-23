@@ -2,6 +2,7 @@ use std::cmp::{max, Ordering, Reverse};
 use std::collections::{BTreeMap, BTreeSet, BinaryHeap};
 use std::convert::TryFrom;
 use std::fmt;
+use std::num::NonZeroU64;
 use std::sync::OnceLock;
 
 use derive_more::{Add, From, LowerHex, Sub};
@@ -380,8 +381,9 @@ pub trait ContainerEntry {
 pub enum ProcEntryKind {
     Task(TaskID, VariantID),
     MetaTask(VariantID),
-    MapperCall(MapperCallKindID),
+    MapperCall(MapperID, ProcID, MapperCallKindID),
     RuntimeCall(RuntimeCallKindID),
+    ApplicationCall(ProvenanceID),
     GPUKernel(TaskID, VariantID),
     ProfTask,
 }
@@ -476,7 +478,7 @@ impl ContainerEntry for ProcEntry {
             ProcEntryKind::MetaTask(variant_id) => {
                 state.meta_variants.get(&variant_id).unwrap().name.clone()
             }
-            ProcEntryKind::MapperCall(kind) => {
+            ProcEntryKind::MapperCall(_, _, kind) => {
                 let name = &state.mapper_call_kinds.get(&kind).unwrap().name;
                 if let Some(initiation_op_id) = initiation_op {
                     format!("Mapper Call {} for {}", name, initiation_op_id.0)
@@ -487,6 +489,7 @@ impl ContainerEntry for ProcEntry {
             ProcEntryKind::RuntimeCall(kind) => {
                 state.runtime_call_kinds.get(&kind).unwrap().name.clone()
             }
+            ProcEntryKind::ApplicationCall(prov) => state.find_provenance(prov).unwrap().to_owned(),
             ProcEntryKind::GPUKernel(task_id, variant_id) => {
                 let task_name = &state.task_kinds.get(&task_id).unwrap().name;
                 let variant_name = &state.variants.get(&(task_id, variant_id)).unwrap().name;
@@ -524,11 +527,14 @@ impl ContainerEntry for ProcEntry {
             ProcEntryKind::MetaTask(variant_id) => {
                 state.meta_variants.get(&variant_id).unwrap().color.unwrap()
             }
-            ProcEntryKind::MapperCall(kind) => {
+            ProcEntryKind::MapperCall(_, _, kind) => {
                 state.mapper_call_kinds.get(&kind).unwrap().color.unwrap()
             }
             ProcEntryKind::RuntimeCall(kind) => {
                 state.runtime_call_kinds.get(&kind).unwrap().color.unwrap()
+            }
+            ProcEntryKind::ApplicationCall(prov) => {
+                state.provenances.get(&prov).unwrap().color.unwrap()
             }
             ProcEntryKind::ProfTask => {
                 // FIXME don't hardcode this here
@@ -699,7 +705,9 @@ impl Proc {
         let mut subcalls = BTreeMap::new();
         for (uid, entry) in self.entries.iter() {
             match entry.kind {
-                ProcEntryKind::MapperCall(_) | ProcEntryKind::RuntimeCall(_) => {
+                ProcEntryKind::MapperCall(..)
+                | ProcEntryKind::RuntimeCall(_)
+                | ProcEntryKind::ApplicationCall(_) => {
                     let task_uid = fevents.get(&entry.fevent).unwrap();
                     let call_start = entry.time_range.start.unwrap();
                     let call_stop = entry.time_range.stop.unwrap();
@@ -754,6 +762,8 @@ impl Proc {
                             *call_stop,
                             *call_stop,
                         ));
+                        // Keep the wait intervals sorted by starting time
+                        next_entry.waiters.wait_intervals.sort_by_key(|w| w.start);
                         found = true;
                         break;
                     } else {
@@ -767,6 +777,8 @@ impl Proc {
                         *call_stop,
                         *call_stop,
                     ));
+                    // Keep the wait intervals sorted by starting time
+                    task_entry.waiters.wait_intervals.sort_by_key(|w| w.start);
                 }
                 // Update the operation info for the calls
                 let call_entry = self.entries.get_mut(&call_uid).unwrap();
@@ -1334,72 +1346,30 @@ impl ContainerEntry for ChanEntry {
 
 pub type ChanPoint = TimePoint<ProfUID, Timestamp>;
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, TryFromPrimitive)]
-#[repr(u32)]
-pub enum ChanKind {
-    Copy = 0,
-    Fill = 1,
-    Gather = 2,
-    Scatter = 3,
-    DepPart = 4,
-}
-
-impl fmt::Display for ChanKind {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", self)
-    }
-}
-
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct ChanID {
-    pub src: Option<MemID>,
-    pub dst: Option<MemID>,
-    pub channel_kind: ChanKind,
+pub enum ChanID {
+    Copy { src: MemID, dst: MemID },
+    Fill { dst: MemID },
+    Gather { dst: MemID },
+    Scatter { src: MemID },
+    DepPart { node_id: NodeID },
 }
 
 impl ChanID {
     fn new_copy(src: MemID, dst: MemID) -> Self {
-        ChanID {
-            src: Some(src),
-            dst: Some(dst),
-            channel_kind: ChanKind::Copy,
-        }
+        ChanID::Copy { src, dst }
     }
     fn new_fill(dst: MemID) -> Self {
-        ChanID {
-            src: None,
-            dst: Some(dst),
-            channel_kind: ChanKind::Fill,
-        }
+        ChanID::Fill { dst }
     }
     fn new_gather(dst: MemID) -> Self {
-        ChanID {
-            src: None,
-            dst: Some(dst),
-            channel_kind: ChanKind::Gather,
-        }
+        ChanID::Gather { dst }
     }
     fn new_scatter(src: MemID) -> Self {
-        ChanID {
-            src: Some(src),
-            dst: None,
-            channel_kind: ChanKind::Scatter,
-        }
+        ChanID::Scatter { src }
     }
-    fn new_deppart() -> Self {
-        ChanID {
-            src: None,
-            dst: None,
-            channel_kind: ChanKind::DepPart,
-        }
-    }
-
-    pub fn node_id(&self) -> Option<NodeID> {
-        if self.src.is_some() {
-            self.src.map(|src| src.node_id())
-        } else {
-            self.dst.map(|dst| dst.node_id())
-        }
+    fn new_deppart(node_id: NodeID) -> Self {
+        ChanID::DepPart { node_id }
     }
 }
 
@@ -2037,6 +2007,26 @@ impl Color {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+pub struct MapperID(pub u32);
+
+#[derive(Debug)]
+pub struct Mapper {
+    pub mapper_id: MapperID,
+    pub proc_id: ProcID,
+    pub name: String,
+}
+
+impl Mapper {
+    fn new(mapper_id: MapperID, proc_id: ProcID, name: &str) -> Self {
+        Mapper {
+            mapper_id,
+            proc_id,
+            name: name.to_owned(),
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct MapperCallKindID(pub u32);
 
 #[derive(Debug)]
@@ -2085,6 +2075,28 @@ impl RuntimeCallKind {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+pub struct ProvenanceID(pub NonZeroU64);
+
+#[derive(Debug)]
+pub struct Provenance {
+    pub name: String,
+    pub color: Option<Color>,
+}
+
+impl Provenance {
+    fn new(name: &str) -> Self {
+        Provenance {
+            name: name.to_owned(),
+            color: None,
+        }
+    }
+    fn set_color(&mut self, color: Color) -> &mut Self {
+        self.color = Some(color);
+        self
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct TaskID(pub u32);
 
 #[derive(Debug)]
@@ -2114,7 +2126,7 @@ pub struct VariantID(pub u32);
 pub struct Variant {
     variant_id: VariantID,
     message: bool,
-    ordered_vc: bool,
+    _ordered_vc: bool, // Not used currently
     pub name: String,
     task_id: Option<TaskID>,
     pub color: Option<Color>,
@@ -2125,7 +2137,7 @@ impl Variant {
         Variant {
             variant_id,
             message,
-            ordered_vc,
+            _ordered_vc: ordered_vc,
             name: name.to_owned(),
             task_id: None,
             color: None,
@@ -2173,6 +2185,11 @@ impl Base {
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct TimeRange {
+    // Unlike other TimeRange components, spawn is measured on the node that
+    // spawns a (meta-)task, and therefore can potentially skew relative to the
+    // other Timestamp values, whereas all the other four values are measured
+    // all on the same node so will all be temporally consistent.
+    pub spawn: Option<Timestamp>,
     pub create: Option<Timestamp>,
     pub ready: Option<Timestamp>,
     pub start: Option<Timestamp>,
@@ -2180,20 +2197,40 @@ pub struct TimeRange {
 }
 
 impl TimeRange {
-    fn new_full(create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp) -> Self {
+    fn new_message(
+        spawn: Timestamp,
+        create: Timestamp,
+        ready: Timestamp,
+        start: Timestamp,
+        stop: Timestamp,
+    ) -> Self {
         assert!(create <= ready);
         assert!(ready <= start);
         assert!(start <= stop);
         TimeRange {
+            spawn: Some(spawn),
             create: Some(create),
             ready: Some(ready),
             start: Some(start),
             stop: Some(stop),
         }
     }
-    fn new_start(start: Timestamp, stop: Timestamp) -> Self {
+    fn new_full(create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp) -> Self {
+        assert!(create <= ready);
+        assert!(ready <= start);
         assert!(start <= stop);
         TimeRange {
+            spawn: None,
+            create: Some(create),
+            ready: Some(ready),
+            start: Some(start),
+            stop: Some(stop),
+        }
+    }
+    fn new_call(start: Timestamp, stop: Timestamp) -> Self {
+        assert!(start <= stop);
+        TimeRange {
+            spawn: None,
             create: None,
             ready: None,
             start: Some(start),
@@ -2202,6 +2239,7 @@ impl TimeRange {
     }
     fn new_empty() -> Self {
         TimeRange {
+            spawn: None,
             create: None,
             ready: None,
             start: None,
@@ -2334,7 +2372,7 @@ pub struct Operation {
     pub base: Base,
     pub parent_id: Option<OpID>,
     pub kind: Option<OpKindID>,
-    pub provenance: Option<String>,
+    pub provenance: Option<ProvenanceID>,
     pub operation_inst_infos: Vec<OperationInstInfo>,
 }
 
@@ -2358,14 +2396,24 @@ impl Operation {
         self.kind = Some(kind);
         self
     }
-    fn set_provenance(&mut self, provenance: &str) -> &mut Self {
-        self.provenance = Some(provenance.to_owned());
+    fn set_provenance(&mut self, provenance: Option<ProvenanceID>) -> &mut Self {
+        assert!(self.provenance.is_none());
+        self.provenance = provenance;
         self
     }
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct EventID(pub u64);
+
+impl EventID {
+    // Important: keep this in sync with realm/id.h
+    // EVENT:   tag:1 = 0b1, creator_node:16, gen_event_idx:27, generation:20
+    // owner_node = proc_id[63:47]
+    pub fn node_id(&self) -> NodeID {
+        NodeID((self.0 >> 47) & ((1 << 16) - 1))
+    }
+}
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct InstUID(pub u64);
@@ -2595,7 +2643,6 @@ impl Fill {
     }
 
     fn add_channel(&mut self) {
-        // sanity check
         assert!(self.chan_id.is_none());
         assert!(!self.fill_inst_infos.is_empty());
         let chan_dst = self.fill_inst_infos[0]._dst;
@@ -2688,12 +2735,13 @@ struct LFSR {
 impl LFSR {
     fn new(size: u64) -> Self {
         let needed_bits = (size as f64).log2().floor() as u32 + 1;
-        let seed_configuration = 0b1010010011110011;
+        let seed_configuration = 0b101001001111001110100011;
         LFSR {
-            register: (seed_configuration & (((1 << needed_bits) - 1) << (16 - needed_bits)))
-                >> (16 - needed_bits),
+            register: (seed_configuration & (((1 << needed_bits) - 1) << (24 - needed_bits)))
+                >> (24 - needed_bits),
             bits: needed_bits,
             max_value: 1 << needed_bits,
+            // Polynomials from https://en.wikipedia.org/wiki/Linear-feedback_shift_register#Example_polynomials_for_maximal_LFSRs
             taps: match needed_bits {
                 2 => vec![2, 1],
                 3 => vec![3, 2],
@@ -2709,8 +2757,16 @@ impl LFSR {
                 13 => vec![13, 12, 11, 8],
                 14 => vec![14, 13, 12, 2],
                 15 => vec![15, 14],
-                16 => vec![16, 14, 13, 11],
-                _ => unreachable!(), // if we need more than 16 bits that is a lot tasks
+                16 => vec![16, 15, 13, 4],
+                17 => vec![17, 14],
+                18 => vec![18, 11],
+                19 => vec![19, 18, 17, 14],
+                20 => vec![20, 17],
+                21 => vec![21, 19],
+                22 => vec![22, 21],
+                23 => vec![23, 18],
+                24 => vec![24, 23, 22, 17],
+                _ => unreachable!(), // if we need more than 24 bits that is a lot tasks
             },
         }
     }
@@ -2816,6 +2872,7 @@ pub struct State {
     pub tasks: BTreeMap<OpID, ProcID>,
     pub multi_tasks: BTreeMap<OpID, MultiTask>,
     pub last_time: Timestamp,
+    pub mappers: BTreeMap<(MapperID, ProcID), Mapper>,
     pub mapper_call_kinds: BTreeMap<MapperCallKindID, MapperCallKind>,
     pub runtime_call_kinds: BTreeMap<RuntimeCallKindID, RuntimeCallKind>,
     pub insts: BTreeMap<InstUID, MemID>,
@@ -2827,6 +2884,7 @@ pub struct State {
     pub visible_nodes: Vec<NodeID>,
     pub source_locator: Vec<String>,
     pub fevents: BTreeMap<EventID, ProfUID>,
+    pub provenances: BTreeMap<ProvenanceID, Provenance>,
 }
 
 impl State {
@@ -2846,7 +2904,8 @@ impl State {
     }
 
     fn find_op_provenance(&self, op_id: OpID) -> Option<&str> {
-        self.find_op(op_id).and_then(|op| op.provenance.as_deref())
+        self.find_op(op_id)
+            .and_then(|op| op.provenance.and_then(|pid| self.find_provenance(pid)))
     }
 
     pub fn get_op_color(&self, op_id: OpID) -> Color {
@@ -2871,6 +2930,10 @@ impl State {
         }
 
         Color::BLACK
+    }
+
+    pub fn find_provenance(&self, pid: ProvenanceID) -> Option<&str> {
+        self.provenances.get(&pid).map(|p| p.name.as_str())
     }
 
     fn create_task(
@@ -2951,6 +3014,8 @@ impl State {
 
     fn create_mapper_call(
         &mut self,
+        mapper_id: MapperID,
+        mapper_proc: ProcID,
         kind: MapperCallKindID,
         proc_id: ProcID,
         op_id: OpID,
@@ -2968,7 +3033,7 @@ impl State {
             } else {
                 None
             },
-            ProcEntryKind::MapperCall(kind),
+            ProcEntryKind::MapperCall(mapper_id, mapper_proc, kind),
             time_range,
             fevent,
             fevent,
@@ -2992,6 +3057,30 @@ impl State {
             None,
             None,
             ProcEntryKind::RuntimeCall(kind),
+            time_range,
+            fevent,
+            fevent,
+            &mut self.op_prof_uid,
+            &mut self.prof_uid_proc,
+            &mut self.fevents,
+        )
+    }
+
+    fn create_application_call(
+        &mut self,
+        provenance: ProvenanceID,
+        proc_id: ProcID,
+        time_range: TimeRange,
+        fevent: EventID,
+    ) -> &mut ProcEntry {
+        assert!(self.provenances.contains_key(&provenance));
+        let alloc = &mut self.prof_uid_allocator;
+        let proc = self.procs.get_mut(&proc_id).unwrap();
+        proc.create_proc_entry(
+            Base::new(alloc),
+            None,
+            None,
+            ProcEntryKind::ApplicationCall(provenance),
             time_range,
             fevent,
             fevent,
@@ -3093,6 +3182,7 @@ impl State {
 
     fn create_deppart(
         &mut self,
+        node_id: NodeID,
         op_id: OpID,
         part_op: DepPartKind,
         time_range: TimeRange,
@@ -3100,7 +3190,7 @@ impl State {
     ) {
         self.create_op(op_id);
         let base = Base::new(&mut self.prof_uid_allocator); // FIXME: construct here to avoid mutability conflict
-        let chan = self.find_deppart_chan_mut();
+        let chan = self.find_deppart_chan_mut(node_id);
         chan.add_deppart(DepPart::new(base, part_op, time_range, op_id, creator));
     }
 
@@ -3110,8 +3200,8 @@ impl State {
             .or_insert_with(|| Chan::new(chan_id))
     }
 
-    fn find_deppart_chan_mut(&mut self) -> &mut Chan {
-        let chan_id = ChanID::new_deppart();
+    fn find_deppart_chan_mut(&mut self, node_id: NodeID) -> &mut Chan {
+        let chan_id = ChanID::new_deppart(node_id);
         self.chans
             .entry(chan_id)
             .or_insert_with(|| Chan::new(chan_id))
@@ -3161,6 +3251,7 @@ impl State {
         // immediately linked to their associated memory from the
         // logs. Therefore we defer this process until all records
         // have been processed.
+        let mut node = None;
         let mut insts = BTreeMap::new();
         let mut copies = BTreeMap::new();
         let mut fills = BTreeMap::new();
@@ -3168,12 +3259,14 @@ impl State {
             process_record(
                 record,
                 self,
+                &mut node,
                 &mut insts,
                 &mut copies,
                 &mut fills,
                 call_threshold,
             );
         }
+
         // put inst into memories
         for inst in insts.into_values() {
             if let Some(mem_id) = inst.mem_id {
@@ -3255,30 +3348,120 @@ impl State {
         assert!(threshold >= 0.0);
         assert!((0.0..100.0).contains(&warn_percentage));
 
+        // First go through and compute the skew between the nodes
+        let mut skew_messages = 0;
         let mut total_messages = 0;
-        let mut bad_messages = 0;
-        let mut longest_latency = Timestamp::from_us(0);
+        let mut total_skew = Timestamp::ZERO;
+        let mut skew_nodes = BTreeMap::new();
         for proc in self.procs.values() {
             for ((_, variant_id), meta_tasks) in &proc.meta_tasks {
                 let variant = self.meta_variants.get(variant_id).unwrap();
-                if !variant.message || variant.ordered_vc {
+                if !variant.message {
                     continue;
                 }
                 total_messages += meta_tasks.len();
                 for meta_uid in meta_tasks {
                     let meta_task = proc.entry(*meta_uid);
-                    let latency =
-                        meta_task.time_range.ready.unwrap() - meta_task.time_range.create.unwrap();
-                    if threshold <= latency.to_us() {
-                        bad_messages += 1;
+                    // Check for the presence of skew
+                    if meta_task.time_range.spawn.unwrap() <= meta_task.time_range.create.unwrap() {
+                        continue;
                     }
-                    longest_latency = max(longest_latency, latency);
+                    skew_messages += 1;
+                    let skew =
+                        meta_task.time_range.spawn.unwrap() - meta_task.time_range.create.unwrap();
+                    total_skew += skew;
+                    // Creator node (fevent) should be different than execution node
+                    assert!(meta_task.fevent.node_id() != proc.proc_id.node_id());
+                    let nodes = (meta_task.fevent.node_id(), proc.proc_id.node_id());
+                    let node_skew = skew_nodes.entry(nodes).or_insert_with(|| (0, 0.0, 0.0));
+                    // Wellford's algorithm for online variance calculation
+                    node_skew.0 += 1;
+                    let value = skew.to_ns() as f64;
+                    let delta = value - node_skew.1;
+                    node_skew.1 += delta / node_skew.0 as f64;
+                    let delta2 = value - node_skew.1;
+                    node_skew.2 += delta * delta2;
                 }
             }
         }
         if total_messages == 0 {
             return;
         }
+        if skew_messages != 0 {
+            println!("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! WARNING !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+            println!(
+                "Detected timing skew! Legion Prof found {} messages between nodes \
+                    that appear to have been sent before the (meta-)task on the \
+                    creating node started (which is clearly impossible because messages \
+                    can't time-travel into the future). The average skew was at least {:.2} us. \
+                    Please report this case to the Legion developers along with an \
+                    accompanying Legion Prof profile and a description of the machine \
+                    it was run on so we can understand why the timing skew is occuring. \
+                    In the meantime you can still use this profile to performance debug \
+                    but you should be aware that the relative position of boxes on \
+                    different nodes might not be accurate.",
+                skew_messages,
+                total_skew.to_us() / skew_messages as f64
+            );
+            for (nodes, skew) in skew_nodes.iter() {
+                // Compute the average skew
+                println!(
+                    "Node {} appears to be {} us behind node {} for {} messages with standard deviation {} us.",
+                    nodes.0 .0,
+                    skew.1 / 1000.0, // convert to us
+                    nodes.1 .0,
+                    skew.0,
+                    skew.2.sqrt() / 1000.0 // convert variance to standard deviation and then to us
+                );
+                // Skew is hopefully only going in one direction, if not warn ourselves
+                let alt = (nodes.1, nodes.0);
+                if skew_nodes.contains_key(&alt) {
+                    println!(
+                        "WARNING: detected bi-directional skew between nodes {} and {}",
+                        nodes.0 .0, nodes.1 .0
+                    );
+                }
+            }
+            println!("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! WARNING !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+        }
+
+        // Now we can go through and look for long-latency messages while also taking
+        // into account any skew that we might have observed going the other way
+
+        let mut bad_messages = 0;
+        let mut longest_latency = Timestamp::ZERO;
+
+        for proc in self.procs.values() {
+            for ((_, variant_id), meta_tasks) in &proc.meta_tasks {
+                let variant = self.meta_variants.get(variant_id).unwrap();
+                if !variant.message {
+                    continue;
+                }
+                for meta_uid in meta_tasks {
+                    let meta_task = proc.entry(*meta_uid);
+                    // Check if there was skew to begin with
+                    let spawn = meta_task.time_range.spawn.unwrap();
+                    let mut create = meta_task.time_range.create.unwrap();
+                    // If there was any skew shift the create time forward by the average skew amount
+                    let nodes = (meta_task.fevent.node_id(), proc.proc_id.node_id());
+                    if let Some(skew) = skew_nodes.get(&nodes) {
+                        // Just truncate fractional nanoseconds, they won't matter
+                        create += Timestamp::from_ns(skew.1 as u64);
+                    }
+                    // If we still have skew we're just going to ignore it for now
+                    // Otherwise we can check the latency of message delivery
+                    if spawn <= create {
+                        // No skew
+                        let latency = create - spawn;
+                        if threshold <= latency.to_us() {
+                            bad_messages += 1;
+                        }
+                        longest_latency = max(longest_latency, latency);
+                    }
+                }
+            }
+        }
+
         let percentage = 100.0 * bad_messages as f64 / total_messages as f64;
         if warn_percentage <= percentage {
             for _ in 0..5 {
@@ -3335,7 +3518,8 @@ impl State {
             + self.meta_variants.len()
             + self.op_kinds.len()
             + self.mapper_call_kinds.len()
-            + self.runtime_call_kinds.len()) as u64;
+            + self.runtime_call_kinds.len()
+            + self.provenances.len()) as u64;
         let mut lfsr = LFSR::new(num_colors);
         let num_colors = lfsr.max_value;
         for variant in self.variants.values_mut() {
@@ -3361,6 +3545,9 @@ impl State {
         for kind in self.runtime_call_kinds.values_mut() {
             kind.set_color(compute_color(lfsr.next(), num_colors));
         }
+        for prov in self.provenances.values_mut() {
+            prov.set_color(compute_color(lfsr.next(), num_colors));
+        }
     }
 
     pub fn filter_output(&mut self) {
@@ -3374,39 +3561,44 @@ impl State {
             }
         }
 
-        let mut memid_to_be_deleted: Vec<MemID> = Vec::new();
+        let mut memid_to_be_deleted = BTreeSet::new();
         for (mem_id, mem) in self.mems.iter_mut() {
             let node_id = mem.mem_id.node_id();
             if !self.visible_nodes.contains(&node_id) {
                 mem.visible = false;
-                memid_to_be_deleted.push(*mem_id);
+                memid_to_be_deleted.insert(*mem_id);
             }
         }
 
         for (_, chan) in self.chans.iter_mut() {
-            let mut src_node_id: Option<NodeID> = None;
-            let mut dst_node_id: Option<NodeID> = None;
-            if let Some(src_mem) = chan.chan_id.src {
-                src_node_id = Some(src_mem.node_id());
-            }
-            if let Some(dst_mem) = chan.chan_id.dst {
-                dst_node_id = Some(dst_mem.node_id());
-            }
-            // DepPart
-            if src_node_id.is_none() && dst_node_id.is_none() {
-                continue;
-            } else {
-                if !src_node_id.map_or(false, |n| self.visible_nodes.contains(&n))
-                    && !dst_node_id.map_or(false, |n| self.visible_nodes.contains(&n))
-                {
-                    chan.visible = false;
-                } else {
-                    // we need to keep memory if it is chan.src/dst
-                    if let Some(src_mem) = chan.chan_id.src {
-                        memid_to_be_deleted.retain(|value| *value != src_mem);
+            match chan.chan_id {
+                ChanID::Copy { src, dst } => {
+                    if !self.visible_nodes.contains(&src.node_id())
+                        && !self.visible_nodes.contains(&dst.node_id())
+                    {
+                        chan.visible = false;
+                    } else {
+                        memid_to_be_deleted.remove(&src);
+                        memid_to_be_deleted.remove(&dst);
                     }
-                    if let Some(dst_mem) = chan.chan_id.dst {
-                        memid_to_be_deleted.retain(|value| *value != dst_mem);
+                }
+                ChanID::Fill { dst } | ChanID::Gather { dst } => {
+                    if !self.visible_nodes.contains(&dst.node_id()) {
+                        chan.visible = false;
+                    } else {
+                        memid_to_be_deleted.remove(&dst);
+                    }
+                }
+                ChanID::Scatter { src } => {
+                    if !self.visible_nodes.contains(&src.node_id()) {
+                        chan.visible = false;
+                    } else {
+                        memid_to_be_deleted.remove(&src);
+                    }
+                }
+                ChanID::DepPart { node_id } => {
+                    if !self.visible_nodes.contains(&node_id) {
+                        chan.visible = false;
                     }
                 }
             }
@@ -3462,24 +3654,26 @@ impl SpyState {
     }
 
     fn create_spy_op(&mut self, op: OpID, pre: EventID, post: EventID) {
-        let old = self.spy_ops.insert(op, SpyOp::new(pre, post));
-        // Apparently we can end up with duplicate logging containing NO_EVENTs
-        if let Some(SpyOp {
-            precondition,
-            postcondition,
-        }) = old
-        {
-            assert!(precondition == pre || precondition.0 == 0);
-            assert!(postcondition == post || postcondition.0 == 0);
+        let entry = self
+            .spy_ops
+            .entry(op)
+            .or_insert_with(|| SpyOp::new(pre, post));
+        if pre.0 != 0 {
+            assert!(entry.precondition == pre || entry.precondition.0 == 0);
+            entry.precondition = pre;
+            self.spy_op_by_precondition
+                .entry(pre)
+                .or_insert_with(BTreeSet::new)
+                .insert(op);
         }
-        self.spy_op_by_precondition
-            .entry(pre)
-            .or_insert_with(BTreeSet::new)
-            .insert(op);
-        self.spy_op_by_postcondition
-            .entry(post)
-            .or_insert_with(BTreeSet::new)
-            .insert(op);
+        if post.0 != 0 {
+            assert!(entry.postcondition == post || entry.postcondition.0 == 0);
+            entry.postcondition = post;
+            self.spy_op_by_postcondition
+                .entry(post)
+                .or_insert_with(BTreeSet::new)
+                .insert(op);
+        }
     }
 
     fn create_spy_op_parent(&mut self, parent: OpID, child: OpID) {
@@ -3810,12 +4004,23 @@ impl SpyState {
 fn process_record(
     record: &Record,
     state: &mut State,
+    node: &mut Option<NodeID>,
     insts: &mut BTreeMap<InstUID, Inst>,
     copies: &mut BTreeMap<EventID, Copy>,
     fills: &mut BTreeMap<EventID, Fill>,
     call_threshold: Timestamp,
 ) {
     match record {
+        Record::MapperName {
+            mapper_id,
+            mapper_proc,
+            name,
+        } => {
+            state
+                .mappers
+                .entry((*mapper_id, *mapper_proc))
+                .or_insert_with(|| Mapper::new(*mapper_id, *mapper_proc, name));
+        }
         Record::MapperCallDesc { kind, name } => {
             state
                 .mapper_call_kinds
@@ -3874,11 +4079,17 @@ fn process_record(
                 resilient: *resilient,
             };
         }
-        Record::MachineDesc { num_nodes, .. } => {
+        Record::MachineDesc {
+            node_id, num_nodes, ..
+        } => {
+            *node = Some(*node_id);
             state.num_nodes = *num_nodes;
         }
         Record::ZeroTime { zero_time } => {
             state.zero_time = TimestampDelta(*zero_time);
+        }
+        Record::Provenance { pid, provenance } => {
+            state.provenances.insert(*pid, Provenance::new(provenance));
         }
         Record::CalibrationErr { calibration_err } => {
             state._calibration_err = *calibration_err;
@@ -4096,7 +4307,7 @@ fn process_record(
                 .create_op(*op_id)
                 .set_parent_id(*parent_id)
                 .set_kind(kind)
-                .set_provenance(provenance);
+                .set_provenance(*provenance);
             // Hack: we have to do this in two places, because we don't know what
             // order the logger calls are going to come in. If the task gets
             // logged first, this will come back Some(_) and we'll store it below.
@@ -4188,7 +4399,7 @@ fn process_record(
             if gpu_start > *gpu_stop {
                 gpu_start = *gpu_stop - Timestamp::ONE;
             }
-            let gpu_range = TimeRange::new_start(gpu_start, *gpu_stop);
+            let gpu_range = TimeRange::new_call(gpu_start, *gpu_stop);
             state.create_gpu_kernel(*op_id, *proc_id, *task_id, *variant_id, gpu_range, *fevent);
             let time_range = TimeRange::new_full(*create, *ready, *start, *stop);
             state.create_task(
@@ -4214,6 +4425,22 @@ fn process_record(
             fevent,
         } => {
             let time_range = TimeRange::new_full(*create, *ready, *start, *stop);
+            state.create_meta(*op_id, *lg_id, *proc_id, time_range, *creator, *fevent);
+            state.update_last_time(*stop);
+        }
+        Record::MessageInfo {
+            op_id,
+            lg_id,
+            proc_id,
+            spawn,
+            create,
+            ready,
+            start,
+            stop,
+            creator,
+            fevent,
+        } => {
+            let time_range = TimeRange::new_message(*spawn, *create, *ready, *start, *stop);
             state.create_meta(*op_id, *lg_id, *proc_id, time_range, *creator, *fevent);
             state.update_last_time(*stop);
         }
@@ -4329,10 +4556,12 @@ fn process_record(
                 Err(_) => panic!("bad deppart kind"),
             };
             let time_range = TimeRange::new_full(*create, *ready, *start, *stop);
-            state.create_deppart(*op_id, part_op, time_range, *creator);
+            state.create_deppart(node.unwrap(), *op_id, part_op, time_range, *creator);
             state.update_last_time(*stop);
         }
         Record::MapperCallInfo {
+            mapper_id,
+            mapper_proc,
             kind,
             op_id,
             start,
@@ -4343,8 +4572,16 @@ fn process_record(
             // Check to make sure it is above the call threshold
             if call_threshold <= (*stop - *start) {
                 assert!(state.mapper_call_kinds.contains_key(kind));
-                let time_range = TimeRange::new_start(*start, *stop);
-                state.create_mapper_call(*kind, *proc_id, *op_id, time_range, *fevent);
+                let time_range = TimeRange::new_call(*start, *stop);
+                state.create_mapper_call(
+                    *mapper_id,
+                    *mapper_proc,
+                    *kind,
+                    *proc_id,
+                    *op_id,
+                    time_range,
+                    *fevent,
+                );
                 state.update_last_time(*stop);
             }
         }
@@ -4358,10 +4595,21 @@ fn process_record(
             // Check to make sure that it is above the call threshold
             if call_threshold <= (*stop - *start) {
                 assert!(state.runtime_call_kinds.contains_key(kind));
-                let time_range = TimeRange::new_start(*start, *stop);
+                let time_range = TimeRange::new_call(*start, *stop);
                 state.create_runtime_call(*kind, *proc_id, time_range, *fevent);
                 state.update_last_time(*stop);
             }
+        }
+        Record::ApplicationCallInfo {
+            provenance,
+            start,
+            stop,
+            proc_id,
+            fevent,
+        } => {
+            let time_range = TimeRange::new_call(*start, *stop);
+            state.create_application_call(*provenance, *proc_id, time_range, *fevent);
+            state.update_last_time(*stop);
         }
         Record::ProfTaskInfo {
             proc_id,
@@ -4371,7 +4619,7 @@ fn process_record(
             creator,
             fevent,
         } => {
-            let time_range = TimeRange::new_start(*start, *stop);
+            let time_range = TimeRange::new_call(*start, *stop);
             state.create_prof_task(*proc_id, *op_id, time_range, *creator, *fevent);
             state.update_last_time(*stop);
         }

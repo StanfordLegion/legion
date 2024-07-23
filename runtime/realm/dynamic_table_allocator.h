@@ -20,13 +20,6 @@
 #include "realm/mutex.h"
 
 namespace Realm {
-  class ProcessorGroupImpl;
-  class MemoryImpl;
-  class IBMemory;
-  class ProcessorImpl;
-  class RegionInstanceImpl;
-  class NetworkSegment;
-
   template <typename _ET, size_t _INNER_BITS, size_t _LEAF_BITS>
   class DynamicTableAllocator {
   public:
@@ -42,44 +35,6 @@ namespace Realm {
     typedef DynamicTableNode<ET, 1 << LEAF_BITS, LT, IT> LEAF_TYPE;
     typedef DynamicTableFreeList<DynamicTableAllocator<ET, _INNER_BITS, _LEAF_BITS>>
         FreeList;
-
-    template <typename T>
-    static ID make_id(const T &dummy, int owner, IT index)
-    {
-      ID id;
-      id.id = index;
-      return id;
-    }
-
-    // hack for now - these should be factored out
-    static ID make_id(const GenEventImpl &dummy, int owner, IT index)
-    {
-      return ID::make_event(owner, index, 0);
-    }
-    static ID make_id(const BarrierImpl &dummy, int owner, IT index)
-    {
-      return ID::make_barrier(owner, index, 0);
-    }
-    static Reservation make_id(const ReservationImpl &dummy, int owner, IT index)
-    {
-      return ID::make_reservation(owner, index).convert<Reservation>();
-    }
-    static Processor make_id(const ProcessorGroupImpl &dummy, int owner, IT index)
-    {
-      return ID::make_procgroup(owner, 0, index).convert<Processor>();
-    }
-    static ID make_id(const SparsityMapImplWrapper &dummy, int owner, IT index)
-    {
-      return ID::make_sparsity(owner, 0, index);
-    }
-    static CompletionQueue make_id(const CompQueueImpl &dummy, int owner, IT index)
-    {
-      return ID::make_compqueue(owner, index).convert<CompletionQueue>();
-    }
-    static ID make_id(const SubgraphImpl &dummy, int owner, IT index)
-    {
-      return ID::make_subgraph(owner, 0, index);
-    }
 
     static std::vector<FreeList *> &get_registered_freelists(Mutex *&lock);
 

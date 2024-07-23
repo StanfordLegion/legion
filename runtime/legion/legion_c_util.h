@@ -169,6 +169,7 @@ namespace Legion {
       typedef std::map<FieldID, const char *> FieldMap;
       NEW_OPAQUE_WRAPPER(legion_field_map_t, FieldMap *);
       NEW_OPAQUE_WRAPPER(legion_point_transform_functor_t, PointTransformFunctor *);
+      NEW_OPAQUE_WRAPPER(legion_task_variant_registrar_t, TaskVariantRegistrar *);
 #undef NEW_OPAQUE_WRAPPER
 #ifdef __ICC
 // icpc complains about "error #858: type qualifier on return type is meaningless"
@@ -718,9 +719,10 @@ namespace Legion {
         assert(false);
         return NULL;
       }
-      virtual const std::string& get_provenance_string(bool human=true) const {
+      virtual const std::string_view& get_provenance_string(
+          bool human=true) const {
         assert(false);
-        return (*new std::string());
+        return (*new std::string_view());
       }
       virtual bool has_parent_task(void) const {
         assert(false);
