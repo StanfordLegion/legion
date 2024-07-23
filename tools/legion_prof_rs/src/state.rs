@@ -2451,7 +2451,7 @@ impl Operation {
         self
     }
     fn set_kind(&mut self, kind: OpKindID) -> &mut Self {
-        assert!(self.kind.is_none());
+        assert!(self.kind.map_or(true, |x| x == kind));
         self.kind = Some(kind);
         self
     }
