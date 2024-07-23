@@ -58,12 +58,15 @@ namespace Realm {
 
     Memory::Kind Memory::kind(void) const
     {
-      return get_runtime()->get_memory_impl(*this)->get_kind();
+      return (*this == Memory::NO_MEMORY)
+                 ? NO_MEMKIND
+                 : get_runtime()->get_memory_impl(*this)->get_kind();
     }
 
     size_t Memory::capacity(void) const
     {
-      return get_runtime()->get_memory_impl(*this)->size;
+      return (*this == Memory::NO_MEMORY) ? 0
+                                          : get_runtime()->get_memory_impl(*this)->size;
     }
 
     // reports a problem with a memory in general (this is primarily for fault injection)

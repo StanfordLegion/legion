@@ -132,6 +132,7 @@ void do_single_dim(Memory src_mem, Memory dst_mem, int log2_size,
       bounds.hi[i] = (1 << (log2_size / N)) - 1;
   }
   IndexSpace<N> is(bounds);
+  log_app.print() << "is=" << is << " ftsz=" << sizeof(FT);
 
   Rect<N> bounds_pad;
   for(int i = 0; i < N; i++) {

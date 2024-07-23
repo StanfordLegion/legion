@@ -323,8 +323,8 @@ static void display_node_data(std::vector<CopyOperation> &graph)
       src = dst;
     }
     std::vector<Realm::Machine::MemoryMemoryAffinity> affinity;
-    if (Realm::Machine::get_machine().get_mem_mem_affinity(affinity, src,
-                                                           dst) == 0) {
+    if(Realm::Machine::get_machine().get_mem_mem_affinity(affinity, src, dst, false) ==
+       0) {
       Realm::Machine::MemoryMemoryAffinity fake_aff;
       fake_aff.m1 = src;
       fake_aff.m2 = dst;
