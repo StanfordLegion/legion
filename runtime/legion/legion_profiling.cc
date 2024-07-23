@@ -1949,7 +1949,7 @@ namespace Legion {
       proc.proc_id = p.id;
       proc.kind = p.kind();
 #ifdef LEGION_USE_CUDA
-      if (!Realm::Cuda::get_cuda_device_info(p, &proc.cuda_device_uuid))
+      if (!Realm::Cuda::get_cuda_device_uuid(p, &proc.cuda_device_uuid))
         proc.cuda_device_uuid[0] = 0;
 #endif
       serializer->serialize(proc);
@@ -1993,7 +1993,7 @@ namespace Legion {
             proc.proc_id = mit->p.id;
             proc.kind = mit->p.kind();
 #ifdef LEGION_USE_CUDA
-            if (!Realm::Cuda::get_cuda_device_info(mit->p, 
+            if (!Realm::Cuda::get_cuda_device_uuid(mit->p, 
                   &proc.cuda_device_uuid))
               proc.cuda_device_uuid[0] = 0;
 #endif
