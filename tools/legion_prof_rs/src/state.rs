@@ -3049,10 +3049,7 @@ impl State {
         self.tasks.insert(op_id, proc_id);
         let alloc = &mut self.prof_uid_allocator;
         let creator_uid = alloc.create_reference(creator);
-        let proc = self
-            .procs
-            .entry(proc_id)
-            .or_insert_with(|| Proc::new(proc_id));
+        let proc = self.procs.create_proc(proc_id);
         proc.create_proc_entry(
             Base::from_fevent(alloc, fevent),
             Some(op_id),
@@ -3089,10 +3086,7 @@ impl State {
         self.meta_tasks.insert((op_id, variant_id), proc_id);
         let alloc = &mut self.prof_uid_allocator;
         let creator_uid = alloc.create_reference(creator);
-        let proc = self
-            .procs
-            .entry(proc_id)
-            .or_insert_with(|| Proc::new(proc_id));
+        let proc = self.procs.create_proc(proc_id);
         proc.create_proc_entry(
             Base::from_fevent(alloc, fevent),
             None,
@@ -3125,10 +3119,7 @@ impl State {
         self.create_op(op_id);
         let alloc = &mut self.prof_uid_allocator;
         let creator_uid = alloc.create_reference(fevent);
-        let proc = self
-            .procs
-            .entry(proc_id)
-            .or_insert_with(|| Proc::new(proc_id));
+        let proc = self.procs.create_proc(proc_id);
         proc.create_proc_entry(
             Base::new(alloc),
             None,
@@ -3154,10 +3145,7 @@ impl State {
     ) -> &mut ProcEntry {
         let alloc = &mut self.prof_uid_allocator;
         let creator_uid = alloc.create_reference(fevent);
-        let proc = self
-            .procs
-            .entry(proc_id)
-            .or_insert_with(|| Proc::new(proc_id));
+        let proc = self.procs.create_proc(proc_id);
         proc.create_proc_entry(
             Base::new(alloc),
             None,
@@ -3180,10 +3168,7 @@ impl State {
         assert!(self.provenances.contains_key(&provenance));
         let alloc = &mut self.prof_uid_allocator;
         let creator_uid = alloc.create_reference(fevent);
-        let proc = self
-            .procs
-            .entry(proc_id)
-            .or_insert_with(|| Proc::new(proc_id));
+        let proc = self.procs.create_proc(proc_id);
         proc.create_proc_entry(
             Base::new(alloc),
             None,
@@ -3207,10 +3192,7 @@ impl State {
     ) -> &mut ProcEntry {
         let alloc = &mut self.prof_uid_allocator;
         let creator_uid = alloc.create_reference(fevent);
-        let proc = self
-            .procs
-            .entry(proc_id)
-            .or_insert_with(|| Proc::new(proc_id));
+        let proc = self.procs.create_proc(proc_id);
         proc.create_proc_entry(
             Base::new(alloc),
             Some(op_id),
@@ -3233,10 +3215,7 @@ impl State {
     ) -> &mut ProcEntry {
         let alloc = &mut self.prof_uid_allocator;
         let creator_uid = alloc.create_reference(creator);
-        let proc = self
-            .procs
-            .entry(proc_id)
-            .or_insert_with(|| Proc::new(proc_id));
+        let proc = self.procs.create_proc(proc_id);
         proc.create_proc_entry(
             Base::from_fevent(alloc, fevent),
             None,
@@ -4139,6 +4118,16 @@ impl SpyState {
     }
 }
 
+trait CreateProc {
+    fn create_proc(&mut self, proc_id: ProcID) -> &mut Proc;
+}
+
+impl CreateProc for BTreeMap<ProcID, Proc> {
+    fn create_proc(&mut self, proc_id: ProcID) -> &mut Proc {
+        self.entry(proc_id).or_insert_with(|| Proc::new(proc_id))
+    }
+}
+
 fn process_record(
     record: &Record,
     state: &mut State,
@@ -4237,11 +4226,7 @@ fn process_record(
                 Ok(x) => x,
                 Err(_) => panic!("bad processor kind"),
             };
-            state
-                .procs
-                .entry(*proc_id)
-                .or_insert_with(|| Proc::new(*proc_id))
-                .set_kind(kind);
+            state.procs.create_proc(*proc_id).set_kind(kind);
         }
         Record::MemDesc {
             mem_id,
