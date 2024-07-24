@@ -45,6 +45,8 @@ namespace Legion {
       Provenance& operator=(const Provenance &rhs) = delete;
     public:
       void initialize(void);
+      bool parse_provenance_parts(const std::string &input,
+                             std::string &human_part, std::string &machine_part);
       void serialize(Serializer &rez) const;
       static void serialize_null(Serializer &rez);
       static Provenance* deserialize(Deserializer &derez);
@@ -54,6 +56,8 @@ namespace Legion {
     public:
       const ProvenanceID pid;
       const std::string full;
+      std::string full_machine;
+      std::string full_human;
     public:
       // Keep the human and machine parts of the provenance string
       std::string_view human, machine;

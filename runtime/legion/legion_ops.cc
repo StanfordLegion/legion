@@ -71,17 +71,103 @@ namespace Legion {
       assert(!full.empty());
 #endif
       const char *prov = full.c_str();
-      unsigned split = 0;
-      while (split < full.size())
-      {
-        if (prov[split] == delimeter)
-          break;
-        split++;
+      if (prov[0] == '{') {
+        full_machine.assign(prov);
       }
-      if (split > 0)
-        human = std::string_view(prov, split);
-      if ((split+1) < full.size())
-        machine = std::string_view(prov+split+1);
+      else {
+        parse_provenance_parts(full, full_human, full_machine);
+      }
+      human = std::string_view(full_human);
+      machine = std::string_view(full_machine);
+    }
+
+    //--------------------------------------------------------------------------
+    bool Provenance::parse_provenance_parts(const std::string &input,
+                             std::string &human_part, std::string &machine_part)
+    //--------------------------------------------------------------------------
+    {
+      size_t len = input.length();
+
+      // shortest valid input: ["",{}]
+      if (input.length() < 7) {
+        return false;
+      }
+
+      // must start with: ["
+      if (input[0] != '[' || input[1] != '"') {
+        return false;
+      }
+
+      // must end with: }]
+      if (input[len-2] != '}' || input[len-1] != ']') {
+        return false;
+      }
+
+
+      std::stringstream ss_h;
+      bool human_closed = false;
+
+      size_t i = 2;
+      for (; i < len; ++i) {
+        if (input[i] == '\\') {;
+          if (i+1 >= len) {
+            return false;
+          }
+          switch (input[i+1]) {
+            case '"':
+            case '\\':
+            case '/':
+              ss_h << input[i+1];
+              break;
+            case 'b':
+              ss_h << '\b';
+              break;
+            case 'f':
+              ss_h << '\f';
+              break;
+            case 'n':
+              ss_h << '\n';
+              break;
+            case 'r':
+              ss_h << '\r';
+              break;
+            case 't':
+              ss_h << '\t';
+              break;
+            case 'u':
+              return false; // Unicode is unsupported
+            default:
+              return false; // Bad escape
+          }
+          ++i;
+        } else if (input[i] == '"') {
+          human_closed = true;
+          break;
+        } else {
+          ss_h << input[i];
+        }
+      }
+
+      if (!human_closed) {
+        return false;
+      }
+
+      human_part = ss_h.str();
+
+      for (; i < len-1; ++i) {
+        if (input[i] == '{') {
+          break;
+        }
+      }
+
+      // machine part never opened
+      if (i == len-1) {
+        return false;
+      }
+
+      machine_part.assign(input.c_str() + i, input.c_str() + len - 1);
+
+      return true;
     }
 
     //--------------------------------------------------------------------------
