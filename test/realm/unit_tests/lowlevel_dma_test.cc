@@ -50,6 +50,22 @@ struct TestCase {
   int best_ch_idx;
   XferDesKind best_kind;
   bool status;
+
+  friend std::ostream &operator<<(std::ostream &os, const TestCase &tc)
+  {
+    os << "src: " << tc.src << "\n"
+       << "dst: " << tc.dst << "\n"
+       << "total_bytes: " << tc.total_bytes << "\n"
+       << "best_cost: " << tc.best_cost << "\n"
+       << "best_ch_node: " << tc.best_ch_node << "\n"
+       << "best_ch_idx: " << tc.best_ch_idx << "\n"
+       << "best_kind: " << tc.best_kind << "\n"
+       << "status: " << (tc.status ? "true" : "false") << "\n";
+    for(size_t i = 0; i < tc.channels.size(); ++i) {
+      os << "channel[" << i << "]: " << *(tc.channels[i]) << "\n";
+    }
+    return os;
+  }
 };
 
 class FindBestChannelTest : public ::testing::TestWithParam<TestCase> {
@@ -88,8 +104,7 @@ TEST_P(FindBestChannelTest, Base)
   if(test_case.best_ch_node != -1) {
     EXPECT_EQ(best_channel,
               nodes[test_case.best_ch_node].dma_channels[test_case.best_ch_idx])
-        << " Target Node: " << test_case.best_ch_node
-        << " Target Channel Index: " << test_case.best_ch_idx;
+        << test_case;
   }
 }
 
@@ -183,6 +198,22 @@ struct FFPTestCase {
   size_t total_bytes;
   MemPathInfo info;
   bool status;
+
+  friend std::ostream &operator<<(std::ostream &os, const FFPTestCase &ftc)
+  {
+    os << "src: " << ftc.src << "\n"
+       << "dst: " << ftc.dst << "\n"
+       << "total_bytes: " << ftc.total_bytes << "\n"
+       << "status: " << (ftc.status ? "true" : "false") << "\n";
+    for(size_t i = 0; i < ftc.channels.size(); ++i) {
+      os << "input channel[" << i << "]: " << *(ftc.channels[i]) << "\n";
+    }
+
+    for(size_t i = 0; i < ftc.info.path.size(); ++i) {
+      os << "path[" << i << "]: " << (ftc.info.path[i]) << "\n";
+    }
+    return os;
+  }
 };
 
 class FFPTest : public ::testing::TestWithParam<FFPTestCase> {
@@ -223,6 +254,7 @@ TEST_P(FFPTest, Base)
   for(size_t i = 0; i < test_case.info.path.size(); i++) {
     EXPECT_EQ(info.path[i], test_case.info.path[i]);
   }
+  // TODO(apryakhin@): Also compare info channels.
   // EXPECT_EQ(info.xd_channels.size(), test_case.info.xd_channels.size());
 }
 
