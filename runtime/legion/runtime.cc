@@ -6299,26 +6299,15 @@ namespace Legion {
            << "the same extents to all the fields in the same output region.";
         REPORT_LEGION_ERROR(ERROR_INVALID_OUTPUT_SIZE, "%s", ss.str().c_str());
       }
-      if (instance.exists())
-      {
-        if (instance.get_location() != manager->get_memory())
-          REPORT_LEGION_ERROR(ERROR_INVALID_OUTPUT_SIZE,
-            "Field %u of output region %u of task %s (UID: %lld) is requested "
-            "to have an instance on memory " IDFMT ", but the returned instance"
-            " is allocated on memory " IDFMT ".",
-            field_id, index, context->owner_task->get_task_name(),
-            context->owner_task->get_unique_op_id(),
-            manager->get_memory().id, instance.get_location().id);
-
-        // Check to see if we've already escaped this instance or not
-        // Note the instance could also be a true external Realm instance
-        // that the user has given us that we are taking ownership of
-        if (context->is_task_local_instance(instance))
-          // The realm instance backing a deferred buffer is currently tagged as
-          // a task local instance, so we need to tell the runtime that the 
-          // instance now escapes the context.
-          context->escape_task_local_instance(instance);
-      }
+      if (instance.exists() && 
+          (instance.get_location() != manager->get_memory()))
+        REPORT_LEGION_ERROR(ERROR_INVALID_OUTPUT_SIZE,
+          "Field %u of output region %u of task %s (UID: %lld) is requested "
+          "to have an instance on memory " IDFMT ", but the returned instance"
+          " is allocated on memory " IDFMT ".",
+          field_id, index, context->owner_task->get_task_name(),
+          context->owner_task->get_unique_op_id(),
+          manager->get_memory().id, instance.get_location().id);
       if (grouped_fields && !returned_instances.empty())
       {
         // Make sure that all the fields have the same instance
@@ -6381,32 +6370,17 @@ namespace Legion {
             runtime->profiler->add_inst_request(requests,
                       context->get_unique_id(), unique_event);
           }
-          PhysicalInstance instance;
+          PhysicalInstance instance = pit->first;
           const size_t footprint = layout->bytes_used;
-          if (pit->first.exists())
+          if (instance.exists())
           {
-#ifdef DEBUG_LEGION
-            MemoryManager::TaskLocalInstanceAllocator allocator;
-            ProfilingResponseBase base(&allocator);
-            Realm::ProfilingRequest &req = requests.add_request(
-                runtime->find_utility_group(), LG_LEGION_PROFILING_ID,
-                &base, sizeof(base), LG_RESOURCE_PRIORITY);
-            req.add_measurement<
-              Realm::ProfilingMeasurements::InstanceAllocResult>();
-#endif
-            // We have an existing instance so we need to redistrict it
-            PhysicalInstance copy = pit->first; // constness is stupid
-            const RtEvent ready(copy.redistrict(instance, layout, requests));
-            delete layout;
-#ifdef DEBUG_LEGION
-#ifndef NDEBUG
-            const bool success =
-#endif
-              allocator.succeeded();
-            assert(success);
-#endif
+            LgEvent unique_event = manager->get_unique_event();
+            const RtEvent ready = context->escape_task_local_instance(
+                instance, 1/*count*/, &instance, &unique_event, 
+                (const Realm::InstanceLayoutGeneric**)&layout);
             if (manager->update_physical_instance(instance, ready, footprint))
               delete manager;
+            delete layout;
           }
           else
           {
@@ -6423,14 +6397,8 @@ namespace Legion {
           // Use redistricting to make N instances for each manager
           std::vector<Realm::InstanceLayoutGeneric*> 
             layouts(pit->second.size());
-          std::vector<Realm::ProfilingRequestSet> requests(pit->second.size());
+          std::vector<LgEvent> unique_events(pit->second.size());
           std::vector<PhysicalManager*> managers(pit->second.size());
-#ifdef DEBUG_LEGION
-          std::vector<MemoryManager::TaskLocalInstanceAllocator>
-            allocators(pit->second.size());
-          std::vector<ProfilingResponseBase> bases;
-          bases.reserve(allocators.size());
-#endif
           for (unsigned idx = 0; idx < layouts.size(); idx++)
           {
             const FieldID field_id = pit->second[idx];
@@ -6460,40 +6428,12 @@ namespace Legion {
             }
             layouts[idx] = region->row_source->create_layout(*constraints,
                 fields, sizes, false/*compact*/, NULL, NULL, NULL, alignment);
-            if (runtime->profiler != NULL)
-            {
-              const LgEvent unique_event = manager->get_unique_event();
-#ifdef DEBUG_LEGION
-              assert(unique_event.exists());
-              
-#endif
-              runtime->profiler->add_inst_request(requests[idx],
-                        context->get_unique_id(), unique_event);
-            }
-#ifdef DEBUG_LEGION
-            bases.emplace_back(ProfilingResponseBase(&allocators[idx]));
-            Realm::ProfilingRequest &req = requests[idx].add_request(
-                runtime->find_utility_group(), LG_LEGION_PROFILING_ID,
-                &bases[idx], sizeof(bases[idx]), LG_RESOURCE_PRIORITY);
-            req.add_measurement<
-              Realm::ProfilingMeasurements::InstanceAllocResult>();
-#endif
+            unique_events[idx] = manager->get_unique_event();
           }
           std::vector<PhysicalInstance> instances(layouts.size());
-          PhysicalInstance copy = pit->first; // constness is stupid
-          const RtEvent ready(copy.redistrict(&instances.front(),
-              (const Realm::InstanceLayoutGeneric**)&layouts.front(),
-              layouts.size(), &requests.front()));
-#ifdef DEBUG_LEGION
-          for (unsigned idx = 0; idx < allocators.size(); idx++)
-          {
-#ifndef NDEBUG
-            const bool success =
-#endif
-              allocators[idx].succeeded();
-            assert(success);
-          }
-#endif
+          const RtEvent ready = context->escape_task_local_instance(pit->first,
+              instances.size(), &instances.front(), &unique_events.front(), 
+              (const Realm::InstanceLayoutGeneric**)&layouts.front());
           for (unsigned idx = 0; idx < instances.size(); idx++)
           {
             if (managers[idx]->update_physical_instance(instances[idx],
@@ -8589,24 +8529,35 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ConcretePool::ConcretePool(PhysicalInstance inst, size_t remain,
         size_t alignment, RtEvent use, MemoryManager *man)
-      : MemoryPool(alignment), manager(man), remaining_instance(inst),
-        remaining_use_event(use), remaining_bytes(remain), offset(0),
-        limit(remain)
+      : MemoryPool(alignment), manager(man), limit(remain),
+        remaining_bytes(remain), first_unused_range(SENTINEL)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(manager != NULL);
-      assert(remaining_instance.exists());
+      assert(inst.exists());
 #endif
+      backing_instances.emplace(std::make_pair(inst, use));
+      // If we're on the local node for the instance then set up the ranges
+      const void *base = inst.pointer_untyped(0, 0);
+      if (base != NULL)
+      {
+        // Initialize the first range with the full allocated space
+        Range &r = ranges.emplace_back(Range());
+        r.first = reinterpret_cast<uintptr_t>(base);
+        r.last = r.first + limit;
+        r.prev = r.next = r.prev_free = r.next_free = SENTINEL;
+        r.instance = inst;
+        const unsigned log2_size = floor_log2(limit);
+        size_based_free_lists.resize(log2_size+1, SENTINEL);
+        size_based_free_lists[log2_size] = 0;
+      }
     }
 
     //--------------------------------------------------------------------------
     ConcretePool::~ConcretePool(void)
     //--------------------------------------------------------------------------
     {
-      if (remaining_instance.exists())
-        manager->free_task_local_instance(remaining_instance, 
-                                          remaining_use_event);
     }
 
     //--------------------------------------------------------------------------
@@ -8630,6 +8581,14 @@ namespace Legion {
     {
       if (remaining_bytes < size)
         return NULL;
+      // Align futures on the largest power of 2 that divides the size of 
+      // field, but cap at 128 bytes for GPUs
+      size_t alignment = std::min<size_t>(size & ~(size-1), 128);
+      uintptr_t start = 0;
+      const unsigned range_index = allocate(size, alignment, start);
+      if (range_index == SENTINEL)
+        return NULL;
+      // Create the layout for the future
       const std::vector<Realm::FieldID> fids(1, 0/*field id*/);
       const std::vector<size_t> sizes(1, size);
       const int dim_order[1] = { 0 };
@@ -8640,26 +8599,20 @@ namespace Legion {
       Realm::InstanceLayoutGeneric *layout =
         Realm::InstanceLayoutGeneric::choose_instance_layout<1,coord_t>(
             rect_space, constraints, dim_order);
-      // Create the layout for the future
-      // Align futures on the largest power of 2 that divides the size of 
-      // field, but cap at 128 bytes for GPUs
-      layout->alignment_reqd = std::min<size_t>(size & ~(size-1), 128);
+      layout->alignment_reqd = alignment;
+      // Futures are always going to escape out of this pool and ownership
+      // will be taken by the caller so we escape them eagerly
       LgEvent unique_event;
-      if (manager->runtime->legion_spy_enabled || 
-          (manager->runtime->profiler != NULL))
-      {
-        RtUserEvent unique = Runtime::create_rt_user_event();
-        Runtime::trigger_event(unique);
-        unique_event = unique;
-      }
-      RtEvent use_event;
-      PhysicalInstance instance = allocate_instance(creator_uid,
-          unique_event, layout, use_event);
+      PhysicalInstance instance;
+      RtEvent use_event = escape_range(range_index, 1/*num_results*/,
+          &instance, &unique_event, 
+          (const Realm::InstanceLayoutGeneric**)&layout, creator_uid);
+      delete layout;
 #ifdef DEBUG_LEGION
       assert(instance.exists());
 #endif
-      return new FutureInstance(NULL/*data*/, size, false/*external*/,
-          true/*own allocation*/, unique_event, instance,
+      return new FutureInstance(reinterpret_cast<const void*>(start), size, 
+          false/*external*/, true/*own allocation*/, unique_event, instance,
           Processor::NO_PROC, use_event);
     }
 
@@ -8673,99 +8626,696 @@ namespace Legion {
       // Should have been checked earlier
       assert(layout->alignment_reqd <= max_alignment);
 #endif
-      size_t needed_bytes = layout->bytes_used;
-      // Check to see extra padding is needed for the layout 
-      size_t remainder = offset % layout->alignment_reqd;
-      if (remainder > 0)
-        needed_bytes += (layout->alignment_reqd - remainder);
-      if (remaining_bytes < needed_bytes)
+      if (layout->bytes_used == 0)
       {
-        delete layout;
-        return PhysicalInstance::NO_INST;
+        // Special case for empty instances
+        Realm::InstanceLayoutGeneric *layout = create_layout(0, 1);
+        PhysicalInstance instance;
+        const Realm::ProfilingRequestSet empty_requests;
+        use_event = RtEvent(PhysicalInstance::create_instance(
+              instance, manager->memory, layout, empty_requests));
+#ifdef DEBUG_LEGION
+        assert(instance.exists());
+        assert(allocated.find(instance) == allocated.end());
+#endif
+        allocated[instance] = SENTINEL;
+        return instance;
       }
-#ifdef DEBUG_LEGION
-      MemoryManager::TaskLocalInstanceAllocator allocator;
-      ProfilingResponseBase base(&allocator);
-#endif
-      if (remaining_bytes == needed_bytes)
+      // Iterate over the free lists from smallest to largets looking
+      // for a hole that is big enough to store the instance
+      uintptr_t start = 0;
+      unsigned range_index = 
+        allocate(layout->bytes_used, layout->alignment_reqd, start);
+      if (range_index != SENTINEL)
       {
-        // Exactly the right size so we can do the singular redistricting
-        Realm::ProfilingRequestSet requests;
+        // Allocation succeeded
+        // Make an external instance for the data
+        const size_t offset = start - ranges.front().first;
+        const Point<1> start(offset);
+        const Point<1> stop(offset + layout->bytes_used - 1);
+        const Rect<1> bounds(start, stop);
+        const Range &range = ranges[range_index];
+        Realm::ExternalInstanceResource *external_resource =
+          range.instance.generate_resource_info(
+              Realm::IndexSpaceGeneric(bounds), FID, false/*read only*/);
+        // We don't profile intermediate instances like this since no
+        // Legion operations will happen on them until they're escaped
+        PhysicalInstance instance;
+        const Realm::ProfilingRequestSet empty_requests;
+        // Normally Realm insists that we use suggested_memory() to 
+        // name the memory but since we know this pool is backed by
+        // a normal Realm instance we can use that memory
+        use_event = RtEvent(PhysicalInstance::create_external_instance(
+              instance, manager->memory, layout, *external_resource,
+              empty_requests, backing_instances[range.instance]));
 #ifdef DEBUG_LEGION
-        Realm::ProfilingRequest &req = requests.add_request(
-            manager->runtime->find_utility_group(), LG_LEGION_PROFILING_ID,
-            &base, sizeof(base), LG_RESOURCE_PRIORITY);
-        req.add_measurement<
-          Realm::ProfilingMeasurements::InstanceAllocResult>();
+        assert(instance.exists());
+        assert(allocated.find(instance) == allocated.end());
 #endif
-        if (manager->runtime->profiler != NULL)
-          manager->runtime->profiler->add_inst_request(requests, creator_uid,
-                                                       unique_event);
-        PhysicalInstance result;
-        use_event = RtEvent(remaining_instance.redistrict(result,
-              layout, requests, remaining_use_event));
-        delete layout;
-        remaining_instance = PhysicalInstance::NO_INST;
-        remaining_bytes = 0;
-#ifdef DEBUG_LEGION
-#ifndef NDEBUG
-        const bool success =
-#endif
-          allocator.succeeded();
-        assert(success);
-#endif
-        return result;
+        // Store it in the allocated data structure
+        allocated[instance] = range_index;
+        return instance;
       }
       else
+        return PhysicalInstance::NO_INST;
+    }
+
+    //--------------------------------------------------------------------------
+    bool ConcretePool::contains_instance(PhysicalInstance instance) const
+    //--------------------------------------------------------------------------
+    {
+      return (allocated.find(instance) != allocated.end());
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent ConcretePool::escape_task_local_instance(PhysicalInstance instance,
+          size_t num_results, PhysicalInstance *results, LgEvent *unique_events,
+          const Realm::InstanceLayoutGeneric **layouts, UniqueID creator_uid)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(instance.exists());
+#endif
+      std::map<PhysicalInstance,unsigned>::iterator finder = 
+        allocated.find(instance);
+#ifdef DEBUG_LEGION
+      assert(finder != allocated.end());
+#endif
+      RtEvent result;
+      if (layouts == NULL)
       {
-        remaining_bytes -= needed_bytes;
-        // Make a new layout for the remainder 
-        Realm::InstanceLayoutOpaque opaque(remaining_bytes, 1/*alignment*/);
-        // Split the instance into two remaining instances
-        Realm::ProfilingRequestSet requests[2];
+        // Handle the case where we are escaping a deferred buffer/value
+        // to become a future and we're just going to reuse the same layout
 #ifdef DEBUG_LEGION
-        Realm::ProfilingRequest &req = requests[1].add_request(
-            manager->runtime->find_utility_group(), LG_LEGION_PROFILING_ID,
-            &base, sizeof(base), LG_RESOURCE_PRIORITY);
-        req.add_measurement<
-          Realm::ProfilingMeasurements::InstanceAllocResult>();
+        assert(num_results == 1);
 #endif
-        if (manager->runtime->profiler != NULL)
-        {
-          manager->runtime->profiler->add_inst_request(requests[0], creator_uid,
-                                                       unique_event);
-          RtUserEvent remaining_unique = Runtime::create_rt_user_event();
-          Runtime::trigger_event(remaining_unique);
-          manager->runtime->profiler->add_inst_request(requests[1], creator_uid,
-                                                       remaining_unique);
-        }
-        PhysicalInstance results[2];
-        const Realm::InstanceLayoutGeneric *layouts[2] = { layout, &opaque };
-        use_event = RtEvent(remaining_instance.redistrict(results,
-              layouts, 2/*layouts*/, requests, remaining_use_event));
-        delete layout;
-        remaining_use_event = use_event;
-        remaining_instance = results[1];
-        offset = (offset + needed_bytes) % max_alignment;
-#ifdef DEBUG_LEGION
-#ifndef NDEBUG
-        const bool success =
-#endif
-          allocator.succeeded();
-        assert(success);
-#endif
-        return results[0];
+        const Realm::InstanceLayoutGeneric *layout = instance.get_layout();
+        layouts = &layout;
+        result = escape_range(finder->second, num_results, results,
+            unique_events, layouts, creator_uid);
       }
+      else
+        result = escape_range(finder->second, num_results, results,
+            unique_events, layouts, creator_uid);
+      // Remove the allocated instance
+      allocated.erase(finder);
+      // Destroy the external instance that we created
+      instance.destroy();
+      return result;
     }
 
     //--------------------------------------------------------------------------
     void ConcretePool::free_instance(PhysicalInstance instance)
     //--------------------------------------------------------------------------
     {
-      // For now we're just going to pass this through to the memory manager
-      // but we might consider trying to keep it around to satisfy future
-      // instance requests that users might make
-      manager->free_task_local_instance(instance);
+#ifdef DEBUG_LEGION
+      assert(instance.exists());
+#endif
+      std::map<PhysicalInstance,unsigned>::iterator finder = 
+        allocated.find(instance);
+#ifdef DEBUG_LEGION
+      assert(finder != allocated.end());
+#endif
+      if (finder->second != SENTINEL)
+        deallocate(finder->second);
+      allocated.erase(finder);
+      // Finally destroy the external Realm instance that we made
+      instance.destroy();
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned ConcretePool::allocate(
+                          size_t size, size_t alignment, uintptr_t &alloc_first)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(size > 0);
+#endif
+      // Walk the free lists from the smallest one big enough to have holes
+      // up to the one with the largest holes to find the smallest hole
+      // that we can use for this allocation
+      for (unsigned idx = floor_log2(size); 
+            idx < size_based_free_lists.size(); idx++)
+      {
+        unsigned index = size_based_free_lists[idx];
+        while (index != SENTINEL)
+        {
+          Range *r = &ranges[index];
+
+          size_t offset = 0;
+          if (alignment > 0)
+          {
+            size_t remainder = r->first % alignment;
+            if (remainder > 0)
+              offset = alignment - remainder;
+          }
+          // do we have enough space?
+          if ((r->last - r->first) < (size + offset))
+          {
+            // No, keep going
+            index = r->next_free;
+            continue;
+          }
+          // We have enough space
+          // but we we may to chop things up to make the exact range
+          alloc_first = r->first + offset;
+          uintptr_t alloc_last = alloc_first + size;
+          // do we need to carve off a new (free) block before us?
+          if (offset > 0)
+          {
+            unsigned new_index = alloc_range(r->first, alloc_first,r->instance);
+            Range &new_prev = ranges[new_index];
+            r = &ranges[index];  // alloc may have moved this!
+
+            r->first = alloc_first;
+            // insert into all-block dllist
+            new_prev.prev = r->prev;
+            new_prev.next = index;
+            if (r->prev != SENTINEL)
+              ranges[r->prev].next = new_index;
+            r->prev = new_index;
+            // Insert into the free list of the appropriate size
+            add_to_free_list(new_index, new_prev); 
+          }
+
+          // Remove this from the current size free list
+          remove_from_free_list(index, *r);
+          // see if we have leftover space and need to make a new range
+          // to reprsent the remainder
+          if (alloc_last != r->last) 
+          {
+            // case 2 - leftover at end - put in new range
+            unsigned after_index = alloc_range(alloc_last, r->last,r->instance);
+            Range &r_after = ranges[after_index];
+            r = &ranges[index];  // alloc may have moved this!
+            r->last = alloc_last;
+
+            // r_after goes after r in all block list
+            r_after.prev = index;
+            r_after.next = r->next;
+            r->next = after_index;
+            if (r_after.next != SENTINEL)
+              ranges[r_after.next].prev = after_index;
+            // Put r_after in the free list of the right size
+            add_to_free_list(after_index, r_after);
+          }
+
+          // tie this off because we use it to detect allocated-ness
+          r->prev_free = r->next_free = index;
+          // Decrement the number of free bytes available
+#ifdef DEBUG_LEGION
+          assert(size <= remaining_bytes);
+#endif
+          remaining_bytes -= size;
+          return index;
+        }
+      }
+      // Failed to perform the allocation
+      return SENTINEL;
+    }
+
+    //--------------------------------------------------------------------------
+    void ConcretePool::deallocate(unsigned index)
+    //--------------------------------------------------------------------------
+    {
+      Range& r = ranges[index];
+      // Add these bytes back into the available pool
+      remaining_bytes += (r.last - r.first);
+#ifdef DEBUG_LEGION
+      assert(remaining_bytes <= limit);
+#endif
+      // See if the previous range is free so we can merge with it
+      const unsigned pf_idx = r.prev;
+      const bool merge_prev = (pf_idx != SENTINEL) && 
+        (ranges[pf_idx].prev_free != pf_idx);
+      // See if the next range is free so we can merge with it
+      const unsigned nf_idx = r.next;
+      const bool merge_next = (nf_idx != SENTINEL) &&
+        (ranges[nf_idx].next_free != nf_idx);
+
+      // four cases - ordered to match the allocation cases
+      if (!merge_next) 
+      {
+        if (!merge_prev) 
+        {
+          // case 1 - no merging (exact match)
+          // just add ourselves to the free list
+          add_to_free_list(index, r);
+        } 
+        else 
+        {
+          // case 2 - merge before
+          // merge ourselves into the range before
+          Range& r_before = ranges[pf_idx];
+          remove_from_free_list(pf_idx, r_before);
+
+          r_before.last = r.last;
+          r_before.next = r.next;
+          ranges[r.next].prev = pf_idx;
+          add_to_free_list(pf_idx, r_before);
+          free_range(index);
+        }
+      } 
+      else 
+      {
+        if (!merge_prev) 
+        {
+          // case 3 - merge after
+          // merge ourselves into the range after
+          Range& r_after = ranges[nf_idx];
+          remove_from_free_list(nf_idx, r_after);
+
+          r_after.first = r.first;
+          r_after.prev = r.prev;
+          ranges[r.prev].next = nf_idx;
+          add_to_free_list(nf_idx, r_after);
+          free_range(index);
+        } 
+        else 
+        {
+          // case 4 - merge both
+          // merge both ourselves and range after into range before
+          Range& r_before = ranges[pf_idx];
+          remove_from_free_list(pf_idx, r_before);
+          Range& r_after = ranges[nf_idx];
+          remove_from_free_list(nf_idx, r_after);
+
+          r_before.last = r_after.last;
+          // adjust both normal list and free list
+          r_before.next = r_after.next;
+          ranges[r_after.next].prev = pf_idx;
+
+          add_to_free_list(pf_idx, r_before);
+          free_range(index);
+          free_range(nf_idx);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned ConcretePool::alloc_range(uintptr_t first, uintptr_t last,
+                                       PhysicalInstance instance)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(first < last); // should not be allocating empty ranges
+#endif
+      // find/make a free index in the range list for this range
+      unsigned new_idx;
+      if (first_unused_range != SENTINEL) 
+      {
+        new_idx = first_unused_range;
+        first_unused_range = ranges[new_idx].next;
+      }
+      else 
+      {
+        new_idx = ranges.size();
+        ranges.resize(new_idx + 1);
+      }
+      ranges[new_idx].first = first;
+      ranges[new_idx].last = last;
+      ranges[new_idx].instance = instance;
+      return new_idx;
+    }
+
+    //--------------------------------------------------------------------------
+    void ConcretePool::free_range(unsigned index)
+    //--------------------------------------------------------------------------
+    {
+      ranges[index].next = first_unused_range;
+      first_unused_range = index;
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent ConcretePool::escape_range(unsigned index, size_t num_results,
+        PhysicalInstance *results, LgEvent *unique_events,
+        const Realm::InstanceLayoutGeneric **layouts, UniqueID creator_uid)
+    //--------------------------------------------------------------------------
+    {
+      Range *range = &ranges[index];
+      // First update the ranges 
+      // If there is any padding needed for alignment before the first
+      // instance then we'll add that range to the free list
+      unsigned prev_index = SENTINEL;
+      unsigned next_index = SENTINEL;
+      uintptr_t offset = range->first;
+      if (layouts[0]->alignment_reqd > 0)
+      {
+        size_t remainder = offset % layouts[0]->alignment_reqd;
+        if (remainder > 0)
+        {
+          offset += (layouts[0]->alignment_reqd - remainder);
+          prev_index = alloc_range(range->first, offset, range->instance);
+          // Update the original range to start later
+          range = &ranges[index]; // vector might have resized
+          range->first = offset;
+          // Add the new previous range into the linked list
+          Range &prev_range = ranges[prev_index];
+          prev_range.prev = range->prev;
+          prev_range.next = index;
+          range->prev = prev_index; 
+          if (prev_range.prev != SENTINEL)
+            ranges[prev_range.prev].next = prev_index;
+          // Deallocate the previous range
+          deallocate(prev_index);
+        }
+      }
+      offset += layouts[0]->bytes_used;
+      // Note this throws away padding bytes between instances, but those
+      // were unlikely to matter to anyone anyway since it's unlikely they'll
+      // be able to be used for anything
+      for (unsigned idx = 1; idx < num_results; idx++)
+      {
+        if (layouts[idx]->alignment_reqd > 0)
+        {
+          size_t remainder = offset % layouts[idx]->alignment_reqd;
+          if (remainder > 0)
+            offset += (layouts[idx]->alignment_reqd - remainder);
+        }
+        offset += layouts[idx]->bytes_used;
+      }
+      // Do the same thing with any leftover bytes at the end of the range
+      // after considering how the new instances will be laid out
+      if (offset < range->last)
+      {
+        next_index = alloc_range(offset, range->last, range->instance);
+        // Update the original range to start later
+        range = &ranges[index]; // vector might have resized
+        range->last = offset;
+        // Add the new next range into the linked list
+        Range &next_range = ranges[next_index];
+        next_range.prev = index;
+        next_range.next = range->next;
+        range->next = next_index;
+        if (next_range.next != SENTINEL)
+          ranges[next_range.next].prev = next_index;
+        // Deallocate the next range
+        deallocate(next_index);
+      }
+      // Find the first and last range with the same backing instance
+      unsigned current = range->prev;
+      prev_index = index;
+      while (current != SENTINEL)
+      {
+        const Range &current_range = ranges[current];
+        if (current_range.instance != range->instance)
+          break;
+        prev_index = current;
+        current = current_range.prev;
+      }
+      current = range->next;
+      next_index = index;
+      while (current != SENTINEL)
+      {
+        const Range &current_range = ranges[current];
+        if (current_range.instance != range->instance)
+          break;
+        next_index = current;
+        current = current_range.next;
+      }
+      // Perform instance redistricting to create all the new instances
+      std::map<PhysicalInstance,RtEvent>::iterator
+        finder = backing_instances.find(range->instance);
+#ifdef DEBUG_LEGION
+      assert(finder != backing_instances.end());
+#endif
+      RtEvent result;
+#ifdef DEBUG_LEGION
+      std::vector<MemoryManager::TaskLocalInstanceAllocator> allocators;
+      allocators.reserve(num_results+2);
+      std::vector<ProfilingResponseBase> bases;
+      bases.reserve(num_results+2);
+#endif
+      if ((prev_index != index) || (index != next_index))
+      {
+        std::vector<LgEvent> extra_unique_events;
+        std::vector<const Realm::InstanceLayoutGeneric*> extra_layouts;
+        if (prev_index != index)
+        {
+          const Range &prev_range = ranges[prev_index];
+          size_t size = range->first - prev_range.first;
+          size_t offset = prev_range.first - ranges.front().first;
+          extra_layouts.push_back(create_layout(size, 1/*alignment*/, offset));
+          if (manager->runtime->profiler != NULL)
+          {
+            const RtUserEvent unique = Runtime::create_rt_user_event();
+            Runtime::trigger_event(unique);
+            extra_unique_events.push_back(unique);
+          }
+          else
+            extra_unique_events.push_back(LgEvent::NO_LG_EVENT);
+        }
+        for (unsigned idx = 0; idx < num_results; idx++)
+        {
+          extra_layouts.push_back(layouts[idx]);
+          if ((manager->runtime->profiler != NULL) && 
+              !unique_events[idx].exists())
+          {
+            const RtUserEvent unique = Runtime::create_rt_user_event();
+            Runtime::trigger_event(unique);
+            unique_events[idx] = unique;
+          }
+          extra_unique_events.push_back(unique_events[idx]);
+        }
+        if (next_index != index)
+        {
+          const Range &next_range = ranges[next_index];
+          size_t size = next_range.last - range->last;
+          size_t offset = range->last - ranges.front().first;
+          extra_layouts.push_back(create_layout(size, 1/*alignment*/, offset));
+          if (manager->runtime->profiler != NULL)
+          {
+            const RtUserEvent unique = Runtime::create_rt_user_event();
+            Runtime::trigger_event(unique);
+            extra_unique_events.push_back(unique);
+          }
+          else
+            extra_unique_events.push_back(LgEvent::NO_LG_EVENT);
+        }
+#ifdef DEBUG_LEGION
+        allocators.resize(extra_layouts.size());
+#endif
+        std::vector<Realm::ProfilingRequestSet> requests(extra_layouts.size());
+        for (unsigned idx = 0; idx < requests.size(); idx++)
+        {
+          if (manager->runtime->profiler != NULL)
+            manager->runtime->profiler->add_inst_request(requests[idx],
+                                  creator_uid, extra_unique_events[idx]);
+#ifdef DEBUG_LEGION
+          bases.emplace_back(ProfilingResponseBase(&allocators[idx]));
+          Realm::ProfilingRequest &req = requests[idx].add_request(
+              manager->runtime->find_utility_group(), LG_LEGION_PROFILING_ID,
+              &bases[idx], sizeof(bases[idx]), LG_RESOURCE_PRIORITY);
+          req.add_measurement<
+            Realm::ProfilingMeasurements::InstanceAllocResult>();
+#endif
+        }
+        std::vector<PhysicalInstance> extra_instances(extra_layouts.size());
+        result = RtEvent(range->instance.redistrict(&extra_instances.front(),
+              &extra_layouts.front(), extra_layouts.size(),
+              &requests.front(), finder->second));
+
+        if (prev_index != index)
+        {
+          // Update all the previous ranges with the new backing instance
+          backing_instances.emplace(
+              std::make_pair(extra_instances.front(), result));
+          while (prev_index != index)
+          {
+            Range &prev_range = ranges[prev_index];
+            prev_range.instance = extra_instances.front();
+            prev_index = prev_range.next;
+          }
+          delete extra_layouts.front();
+          // Copy over the names of the newly created instances
+          for (unsigned idx = 0; idx < num_results; idx++)
+            results[idx] = extra_instances[idx+1];
+        }
+        else
+        {
+          // Copy over the names of the newly created instances
+          for (unsigned idx = 0; idx < num_results; idx++)
+            results[idx] = extra_instances[idx];
+        }
+        if (next_index != index)
+        {
+          // Update all the next ranges with the new backing instance
+          backing_instances.emplace(
+              std::make_pair(extra_instances.back(), result));
+          while (next_index != SENTINEL)
+          {
+            Range &next_range = ranges[next_index];
+            if (next_range.instance != finder->first)
+              break;
+            next_range.instance = extra_instances.back();
+            next_index = next_range.next;
+          }
+          delete extra_layouts.back();
+        }
+      }
+      else
+      {
+#ifdef DEBUG_LEGION
+        allocators.resize(num_results);
+#endif
+        // We're literally redistricting exactly the instance we want
+        // with no space left over at the beginning or the end
+        std::vector<Realm::ProfilingRequestSet> requests(num_results);
+        for (unsigned idx = 0; idx < num_results; idx++)
+        {
+          if (manager->runtime->profiler != NULL)
+          {
+            if (!unique_events[idx].exists())
+            {
+              const RtUserEvent unique = Runtime::create_rt_user_event();
+              Runtime::trigger_event(unique);
+              unique_events[idx] = unique;
+            }
+            manager->runtime->profiler->add_inst_request(requests[idx],
+                                      creator_uid, unique_events[idx]);
+          }
+#ifdef DEBUG_LEGION
+          bases.emplace_back(ProfilingResponseBase(&allocators[idx]));
+          Realm::ProfilingRequest &req = requests[idx].add_request(
+              manager->runtime->find_utility_group(), LG_LEGION_PROFILING_ID,
+              &bases[idx], sizeof(bases[idx]), LG_RESOURCE_PRIORITY);
+          req.add_measurement<
+            Realm::ProfilingMeasurements::InstanceAllocResult>();
+#endif
+        }
+        result = RtEvent(range->instance.redistrict(results, layouts,
+              num_results, &requests.front(), finder->second));
+        // Nothing to update here since we're just going to leave the
+        // existing range in place as though it is allocated and it
+        // will never be deallocated
+      }
+#ifdef DEBUG_LEGION
+      for (unsigned idx = 0; idx < allocators.size(); idx++)
+      {
+#ifndef NDEBUG
+        const bool success =
+#endif
+          allocators[idx].succeeded();
+        assert(success);
+      }
+#endif
+      // Mark the current range as having escaped
+      range->instance = PhysicalInstance::NO_INST;
+      // Remove the backing instance from the map
+      backing_instances.erase(finder);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    void ConcretePool::release_pool(RtEvent done)
+    //--------------------------------------------------------------------------
+    {
+      // Iterate over all the remaining backing stores delete them
+      // once the done event is triggered
+      for (std::map<PhysicalInstance,RtEvent>::const_iterator it =
+            backing_instances.begin(); it != backing_instances.end(); it++)
+        it->first.destroy(Runtime::merge_events(it->second, done));
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ unsigned ConcretePool::floor_log2(uint64_t size)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(size > 0);
+#endif
+      // Round down to the nearest power of two to figure out which range
+      // to put it in using DeBruijin algorithm to compute integer log2
+      // Taken from Hacker's Delight
+      static const unsigned tab64[64] = {
+          63,  0, 58,  1, 59, 47, 53,  2,
+          60, 39, 48, 27, 54, 33, 42,  3,
+          61, 51, 37, 40, 49, 18, 28, 20,
+          55, 30, 34, 11, 43, 14, 22,  4,
+          62, 57, 46, 52, 38, 26, 32, 41,
+          50, 36, 17, 19, 29, 10, 13, 21,
+          56, 45, 25, 31, 35, 16,  9, 12,
+          44, 24, 15,  8, 23,  7,  6,  5 };
+      uint64_t value = size;
+      value |= value >> 1;
+      value |= value >> 2;
+      value |= value >> 4;
+      value |= value >> 8;
+      value |= value >> 16;
+      value |= value >> 32;
+      return tab64[
+        ((uint64_t)((value - (value >> 1))*0x07EDD5E59A4E28C2)) >> 58];
+    }
+
+    //--------------------------------------------------------------------------
+    void ConcretePool::add_to_free_list(unsigned index, Range &range)
+    //--------------------------------------------------------------------------
+    {
+      const size_t size = range.last - range.first;
+      const unsigned log2_size = floor_log2(size); 
+      if (size_based_free_lists.size() <= log2_size)
+        size_based_free_lists.resize(log2_size+1, SENTINEL);
+      // Insert the range into the list such that it maintains a sorted
+      // list from smallest to largest
+      unsigned prev = SENTINEL;
+      unsigned next = size_based_free_lists[log2_size];
+      while (next != SENTINEL)
+      {
+        Range &next_range = ranges[next]; 
+        const size_t next_size = next_range.last - next_range.first;
+        if (size <= next_size)
+        {
+          // We can insert this here and we're done
+          range.prev_free = next_range.prev_free;
+          if (range.prev_free == SENTINEL)
+            size_based_free_lists[log2_size] = index;
+          else
+            ranges[range.prev_free].next_free = index;
+          range.next_free = next;
+          next_range.prev_free = index;
+          return;
+        }
+        // Step to the next entry
+        prev = next;
+        next = next_range.next_free;
+      }
+      // If we get here then we're adding ourselves to the end of the list
+      range.prev_free = prev;
+      range.next_free = SENTINEL;
+      if (prev == SENTINEL)
+        size_based_free_lists[log2_size] = index;
+      else
+        ranges[prev].next_free = index;
+    }
+
+    //--------------------------------------------------------------------------
+    void ConcretePool::remove_from_free_list(unsigned index, Range &range)
+    //--------------------------------------------------------------------------
+    {
+      if (range.prev_free != SENTINEL)
+      {
+        if (range.next_free != SENTINEL)
+        {
+          // Remove an item in the middle of the list
+          ranges[range.prev_free].next_free = range.next_free;
+          ranges[range.next_free].prev_free = range.prev_free;
+        }
+        else // last item in the list can just be removed
+          ranges[range.prev_free].next_free = SENTINEL;
+      }
+      else
+      {
+        // We're the first item in the list
+        const size_t size = range.last - range.first;
+        const unsigned log2_size = floor_log2(size);
+#ifdef DEBUG_LEGION
+        assert(log2_size < size_based_free_lists.size());
+        assert(size_based_free_lists[log2_size] == index);
+#endif
+        if (range.next_free != SENTINEL)
+          ranges[range.next_free].prev_free = SENTINEL;
+        size_based_free_lists[log2_size] = range.prev_free;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -8774,13 +9324,38 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(remaining_bytes > 0);
-      assert(remaining_instance.exists());
+      assert(backing_instances.size() == 1);
 #endif
       rez.serialize(manager->memory);
       rez.serialize(remaining_bytes);
       rez.serialize(max_alignment);
-      rez.serialize(remaining_instance);
-      rez.serialize(remaining_use_event);
+      std::map<PhysicalInstance,RtEvent>::const_iterator finder = 
+        backing_instances.begin();
+      rez.serialize(finder->first);
+      rez.serialize(finder->second);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ Realm::InstanceLayoutGeneric* ConcretePool::create_layout(
+                                   size_t size, size_t alignment, size_t offset)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(alignment > 0);
+#endif
+      const DomainT<1,coord_t> bounds = (size == 0) ?
+        Rect<1>(1, 0) : Rect<1>(offset, Point<1>(offset + size - 1));
+      const std::vector<Realm::FieldID> field_ids(1, FID);
+      const std::vector<size_t> field_sizes(1, sizeof(uint8_t));
+      Realm::InstanceLayoutConstraints constraints(field_ids, field_sizes,
+                                                 0/*blocking*/);
+      const int dim_order[] = {0};
+      Realm::InstanceLayoutGeneric *layout =
+        Realm::InstanceLayoutGeneric::choose_instance_layout(bounds,
+                                                             constraints,
+                                                             dim_order);
+      layout->alignment_reqd = alignment;
+      return layout;
     }
 
     //--------------------------------------------------------------------------
@@ -8799,8 +9374,6 @@ namespace Legion {
     UnboundPool::~UnboundPool(void)
     //--------------------------------------------------------------------------
     {
-      if (manager != NULL)
-        manager->release_unbound_pool();
     }
 
     //--------------------------------------------------------------------------
@@ -8845,6 +9418,25 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool UnboundPool::contains_instance(PhysicalInstance instance) const
+    //--------------------------------------------------------------------------
+    {
+      // We don't track any instances we made
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent UnboundPool::escape_task_local_instance(PhysicalInstance instance,
+          size_t num_results, PhysicalInstance *result, LgEvent *unique_events,
+          const Realm::InstanceLayoutGeneric **layouts, UniqueID creator_uid)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return RtEvent::NO_RT_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
     void UnboundPool::free_instance(PhysicalInstance instance)
     //--------------------------------------------------------------------------
     {
@@ -8852,6 +9444,16 @@ namespace Legion {
       assert(manager != NULL);
 #endif
       manager->free_task_local_instance(instance);   
+    }
+
+    //--------------------------------------------------------------------------
+    void UnboundPool::release_pool(RtEvent done)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(manager != NULL);
+#endif
+      manager->release_unbound_pool();
     }
 
     //--------------------------------------------------------------------------
@@ -8864,8 +9466,10 @@ namespace Legion {
       rez.serialize(manager->memory);
       rez.serialize<size_t>(0);
       coordinates.serialize(rez);
+#ifdef DEBUG_LEGION
       // Clear the manager since we packed it
       manager = NULL;
+#endif
     }
 
     /////////////////////////////////////////////////////////////
@@ -11385,8 +11989,8 @@ namespace Legion {
 #endif
         // Creating a normal memory pool so create a task local instance
         // for the requested number of bytes and and then make a pool for it  
-        Realm::InstanceLayoutOpaque *layout =
-          new Realm::InstanceLayoutOpaque(bounds.size, bounds.alignment);
+        Realm::InstanceLayoutGeneric *layout =
+          ConcretePool::create_layout(bounds.size, bounds.alignment); 
         LgEvent unique_event;
         if (runtime->profiler != NULL)
         {

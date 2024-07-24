@@ -542,8 +542,10 @@ namespace Legion {
                       const void *metadataptr, size_t metadatasize, 
                       ApEvent effects);
       virtual void post_end_task(void) = 0;
-      bool is_task_local_instance(PhysicalInstance instance);
-      LgEvent escape_task_local_instance(PhysicalInstance instance);
+      virtual RtEvent escape_task_local_instance(PhysicalInstance instance,
+          size_t num_results, PhysicalInstance *results, LgEvent *unique_events,
+          const Realm::InstanceLayoutGeneric **layouts = NULL);
+      virtual void release_task_local_instances(ApEvent effects);
       FutureInstance* copy_to_future_inst(const void *value, size_t size);
       virtual void handle_mispredication(void);
     public:
@@ -622,7 +624,6 @@ namespace Legion {
     public:
       void yield(void);
       void concurrent_task_barrier(void);
-      void release_task_local_instances(void);
     public:
       void increment_inlined(void);
       void decrement_inlined(void);
@@ -3906,6 +3907,10 @@ namespace Legion {
                       const void *metadataptr, size_t metadatasize,
                       ApEvent effects);
       virtual void post_end_task(void);
+      virtual RtEvent escape_task_local_instance(PhysicalInstance instance,
+          size_t num_results, PhysicalInstance *results, LgEvent *unique_events,
+          const Realm::InstanceLayoutGeneric **layouts = NULL);
+      virtual void release_task_local_instances(ApEvent effects);
       virtual void handle_mispredication(void);
     public:
       virtual void destroy_lock(Lock l);

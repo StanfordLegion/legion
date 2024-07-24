@@ -690,11 +690,15 @@ namespace Legion {
         assert(res != NULL);
         assert(freefunc == NULL);
 #endif
+        // Find the unique event for this instance if there is one
+        LgEvent unique_event;
         // escape this task local instance
-        LgEvent unique = escape_task_local_instance(deferred_result_instance);
+        const RtEvent ready = escape_task_local_instance(
+            deferred_result_instance, 1/*size*/, 
+            &deferred_result_instance, &unique_event);
         instance = new FutureInstance(res, res_size,
-            false/*external*/, true/*own alloc*/,
-            unique, deferred_result_instance);
+            false/*external*/, true/*own alloc*/, unique_event,
+            deferred_result_instance, executing_processor, ready);
       }
       else if (resource != NULL)
       {
@@ -760,25 +764,7 @@ namespace Legion {
         owned = callback_owned;
       } 
       // Once there are no more escaping instances we can release the rest
-      if (!task_local_instances.empty())
-      {
-        RtEvent done;
-        if (effects.exists())
-          done = Runtime::protect_event(effects);
-        for (std::map<PhysicalInstance,LgEvent>::iterator it =
-             task_local_instances.begin(); it !=
-             task_local_instances.end(); ++it)
-        {
-          MemoryManager *manager =
-            runtime->find_memory_manager(it->first.get_location());
-#ifdef LEGION_MALLOC_INSTANCES
-          manager->free_legion_instance(done, it->first);
-#else
-          manager->free_task_local_instance(it->first, done);
-#endif
-        }
-        task_local_instances.clear();
-      }
+      release_task_local_instances(effects);
       // Grab some information before doing the next step in case it
       // results in the deletion of 'this'
 #ifdef DEBUG_LEGION
@@ -833,25 +819,110 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool TaskContext::is_task_local_instance(PhysicalInstance instance)
+    RtEvent TaskContext::escape_task_local_instance(PhysicalInstance instance,
+        size_t num_results, PhysicalInstance *results, LgEvent *unique_events,
+        const Realm::InstanceLayoutGeneric **layouts)
     //--------------------------------------------------------------------------
     {
-      return task_local_instances.find(instance) != task_local_instances.end();
+#ifdef DEBUG_LEGION
+      assert(num_results > 0);
+      assert((layouts != NULL) || (num_results > 1));
+#endif
+      std::map<PhysicalInstance,LgEvent>::iterator finder =
+        task_local_instances.find(instance);
+      if (finder != task_local_instances.end())
+      {
+        // Special case where we can reuse the existing instance because
+        // we're escaping this into exactly one other instance with the
+        // same unique event result
+        if ((layouts == NULL) && (num_results == 1) &&
+            (!unique_events[0].exists() || 
+             (unique_events[0] == finder->second)))
+        {
+          unique_events[0] = finder->second;
+          task_local_instances.erase(finder);
+          return RtEvent::NO_RT_EVENT;
+        }
+        // Everything else falls through and we redistrict instance
+        task_local_instances.erase(finder);
+      }
+      std::vector<Realm::ProfilingRequestSet> requests(num_results);
+#ifdef DEBUG_LEGION
+      std::vector<MemoryManager::TaskLocalInstanceAllocator>
+        allocators(num_results);
+      std::vector<ProfilingResponseBase> bases;
+      bases.reserve(num_results);
+#endif
+      for (unsigned idx = 0; idx < num_results; idx++)
+      {
+        if (runtime->profiler != NULL)
+        {
+          if (!unique_events[idx].exists())
+          {
+            const RtUserEvent unique = Runtime::create_rt_user_event();
+            Runtime::trigger_event(unique);
+            unique_events[idx] = unique;
+          }
+          runtime->profiler->add_inst_request(requests[idx],
+                              get_unique_id(), unique_events[idx]);
+        }
+#ifdef DEBUG_LEGION
+        bases.emplace_back(ProfilingResponseBase(&allocators[idx]));
+        Realm::ProfilingRequest &req = requests[idx].add_request(
+            runtime->find_utility_group(), LG_LEGION_PROFILING_ID,
+            &bases[idx], sizeof(bases[idx]), LG_RESOURCE_PRIORITY);
+        req.add_measurement<
+          Realm::ProfilingMeasurements::InstanceAllocResult>();
+#endif
+      }
+      RtEvent ready;
+      if (layouts == NULL)
+      {
+#ifdef DEBUG_LEGION
+        assert(num_results == 1);
+#endif
+        const Realm::InstanceLayoutGeneric *layout = instance.get_layout();
+        ready = RtEvent(instance.redistrict(results, &layout,
+              num_results, &requests.front()));
+      }
+      else
+        ready = RtEvent(instance.redistrict(results, layouts,
+            num_results, &requests.front()));
+#ifdef DEBUG_LEGION
+      for (unsigned idx = 0; idx < allocators.size(); idx++)
+      {
+#ifndef NDEBUG
+        const bool success =
+#endif
+          allocators[idx].succeeded();
+        assert(success);
+      }
+#endif
+      return ready;
     }
 
     //--------------------------------------------------------------------------
-    LgEvent TaskContext::escape_task_local_instance(PhysicalInstance instance)
+    void TaskContext::release_task_local_instances(ApEvent effects)
     //--------------------------------------------------------------------------
     {
-      std::map<PhysicalInstance,LgEvent>::iterator finder =
-        task_local_instances.find(instance);
-#ifdef DEBUG_LEGION
-      assert(finder != task_local_instances.end());
+      if (task_local_instances.empty())
+        return;
+      RtEvent done;
+      if (effects.exists())
+        done = Runtime::protect_event(effects);
+      for (std::map<PhysicalInstance,LgEvent>::iterator it =
+           task_local_instances.begin(); it !=
+           task_local_instances.end(); ++it)
+      {
+        MemoryManager *manager =
+          runtime->find_memory_manager(it->first.get_location());
+#ifdef LEGION_MALLOC_INSTANCES
+        manager->free_legion_instance(done, it->first);
+#else
+        manager->free_task_local_instance(it->first, done);
 #endif
-      const LgEvent result = finder->second;
-      // Remove the instance from the set of task local instances
-      task_local_instances.erase(finder);
-      return result;
+      }
+      task_local_instances.clear();
     }
 
     //--------------------------------------------------------------------------
@@ -25336,15 +25407,6 @@ namespace Legion {
         if (owner_task->is_concurrent())
           runtime->end_concurrent_task(executing_processor);
       }
-      if (!memory_pools.empty())
-      {
-        for (std::map<Memory,MemoryPool*>::const_iterator it =
-              memory_pools.begin(); it != memory_pools.end(); it++)
-          delete it->second;
-#ifdef DEBUG_LEGION
-        memory_pools.clear();
-#endif
-      }
       // No need to unmap the physical regions, they never had events
       TaskContext::end_task(res, res_size, owned, deferred_result_instance,
           callback_functor,resource,freefunc,metadataptr,metadatasize,effects);
@@ -25356,6 +25418,85 @@ namespace Legion {
     {
       // We don't have any children so we can just record them committed
       owner_task->trigger_children_committed();
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent LeafContext::escape_task_local_instance(PhysicalInstance instance,
+        size_t num_results, PhysicalInstance *results, LgEvent *unique_events,
+        const Realm::InstanceLayoutGeneric **layouts)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(num_results > 0);
+      assert((layouts != NULL) || (num_results > 1));
+#endif
+      if (!memory_pools.empty())
+      {
+        // See if this is an instance that we made
+        std::map<PhysicalInstance,LgEvent>::iterator finder =
+          task_local_instances.find(instance);
+        if (finder != task_local_instances.end())
+        {
+          // Special case where we can reuse the existing instance because
+          // we're escaping this into exactly one other instance with the
+          // same unique event result
+          if ((layouts == NULL) && (num_results == 1) &&
+              !unique_events[0].exists() && 
+              (unique_events[0] == finder->second))
+            unique_events[0] = finder->second;
+          // See if this is in a memory for which we have a pool
+          std::map<Memory,MemoryPool*>::iterator pool_finder =
+            memory_pools.find(instance.get_location());
+          if ((pool_finder != memory_pools.end()) &&
+              pool_finder->second->contains_instance(instance))
+          {
+            task_local_instances.erase(finder);
+            return pool_finder->second->escape_task_local_instance(instance,
+                num_results, results, unique_events, layouts, get_unique_id());
+          }
+        }
+      }
+      // Otherwise we fall through and do the base case at this point
+      return TaskContext::escape_task_local_instance(instance, num_results,
+          results, unique_events, layouts);
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::release_task_local_instances(ApEvent effects)
+    //--------------------------------------------------------------------------
+    {
+      if (task_local_instances.empty() && memory_pools.empty())
+        return;
+      RtEvent done;
+      if (effects.exists())
+        done = Runtime::protect_event(effects);
+      for (std::map<PhysicalInstance,LgEvent>::iterator it =
+           task_local_instances.begin(); it !=
+           task_local_instances.end(); ++it)
+      {
+        // Check to see if we have a memory pool that contains this in which
+        // case we shouldn't actually free up the instance like this
+        std::map<Memory,MemoryPool*>::const_iterator finder =
+          memory_pools.find(it->first.get_location());
+        if ((finder != memory_pools.end()) &&
+            finder->second->contains_instance(it->first))
+          continue;
+        MemoryManager *manager =
+          runtime->find_memory_manager(it->first.get_location());
+#ifdef LEGION_MALLOC_INSTANCES
+        manager->free_legion_instance(done, it->first);
+#else
+        manager->free_task_local_instance(it->first, done);
+#endif
+      }
+      task_local_instances.clear();
+      for (std::map<Memory,MemoryPool*>::iterator it =
+            memory_pools.begin(); it != memory_pools.end(); it++)
+      {
+        it->second->release_pool(done);
+        delete it->second;
+      }
+      memory_pools.clear();
     }
 
     //--------------------------------------------------------------------------

@@ -1469,7 +1469,12 @@ namespace Legion {
       virtual PhysicalInstance allocate_instance(UniqueID creator_uid,
           LgEvent unique_event, Realm::InstanceLayoutGeneric *layout,
           RtEvent &use_event) = 0;
+      virtual bool contains_instance(PhysicalInstance instance) const = 0;
+      virtual RtEvent escape_task_local_instance(PhysicalInstance instance,
+          size_t num_results, PhysicalInstance *result, LgEvent *unique_events,
+          const Realm::InstanceLayoutGeneric **layouts, UniqueID creator) = 0;
       virtual void free_instance(PhysicalInstance instance) = 0;
+      virtual void release_pool(RtEvent done) = 0;
     public:
       virtual void serialize(Serializer &rez) = 0;
       static MemoryPool* deserialize(Deserializer &derez, Runtime *runtime);
@@ -1485,6 +1490,13 @@ namespace Legion {
      * instance that we will redistrict to split off into new instances
      */
     class ConcretePool : public MemoryPool {
+    private:
+      struct Range {
+        uintptr_t first, last;  // half-open range: [first, last)
+        unsigned prev, next;  // double-linked list of all ranges (by index)
+        unsigned prev_free, next_free; // double-linked list of just free ranges
+        PhysicalInstance instance;
+      };
     public:
       ConcretePool(PhysicalInstance instance, size_t size, size_t alignment, 
           RtEvent use_event, MemoryManager *manager);
@@ -1496,15 +1508,48 @@ namespace Legion {
       virtual PhysicalInstance allocate_instance(UniqueID creator_uid,
           LgEvent unique_event, Realm::InstanceLayoutGeneric *layout,
           RtEvent &use_event) override;
+      virtual bool contains_instance(PhysicalInstance instance) const override;
+      virtual RtEvent escape_task_local_instance(PhysicalInstance instance,
+          size_t num_results, PhysicalInstance *result, LgEvent *unique_events,
+          const Realm::InstanceLayoutGeneric **layouts, UniqueID uid) override;
       virtual void free_instance(PhysicalInstance instance) override;
+      virtual void release_pool(RtEvent done) override;
       virtual void serialize(Serializer &rez) override;
     private:
+      unsigned allocate(size_t size, size_t alignment, uintptr_t &start);
+      void deallocate(unsigned index);
+      unsigned alloc_range(uintptr_t first, uintptr_t last,
+                           PhysicalInstance backing);
+      void free_range(unsigned index);
+      void add_to_free_list(unsigned index, Range &r);
+      void remove_from_free_list(unsigned index, Range &r);
+      RtEvent escape_range(unsigned index, size_t num_results,
+          PhysicalInstance *results, LgEvent *unique_events,
+          const Realm::InstanceLayoutGeneric **layouts, UniqueID creator);
+      static unsigned floor_log2(uint64_t size);
+    public:
+      static constexpr FieldID FID = 0;
+      static Realm::InstanceLayoutGeneric* create_layout(size_t size,
+          size_t alignment, size_t offset = 0);
+    private:
       MemoryManager *const manager;
-      PhysicalInstance remaining_instance;
-      RtEvent remaining_use_event;
-      size_t remaining_bytes;
-      size_t offset;
       const size_t limit;
+      size_t remaining_bytes;
+    private: 
+      static constexpr unsigned SENTINEL = std::numeric_limits<unsigned>::max();
+      std::vector<Range> ranges;
+      // Each external instance has a range that it corresponds to
+      std::map<PhysicalInstance,unsigned> allocated;
+      // Each backing instance has a start range and use event
+      std::map<PhysicalInstance,RtEvent> backing_instances;
+      // Free lists associated with a specific sizes by powers of 2
+      // entry[0] = sizes from [2^0,2^1)
+      // entry[1] = sizes from [2^1,2^2)
+      // entry[2] = sizes from [2^2,2^3)
+      // ...
+      std::vector<unsigned> size_based_free_lists;
+      // Linked list of ranges not currently be used
+      unsigned first_unused_range;
     };
 
     /**
@@ -1527,7 +1572,12 @@ namespace Legion {
       virtual PhysicalInstance allocate_instance(UniqueID creator_uid,
           LgEvent unique_event, Realm::InstanceLayoutGeneric *layout,
           RtEvent &use_event) override;
+      virtual bool contains_instance(PhysicalInstance instance) const override;
+      virtual RtEvent escape_task_local_instance(PhysicalInstance instance,
+          size_t num_results, PhysicalInstance *result, LgEvent *unique_events,
+          const Realm::InstanceLayoutGeneric **layouts, UniqueID uid) override;
       virtual void free_instance(PhysicalInstance instance) override;
+      virtual void release_pool(RtEvent done) override;
       virtual void serialize(Serializer &rez) override;
     private:
       TaskTreeCoordinates coordinates;
