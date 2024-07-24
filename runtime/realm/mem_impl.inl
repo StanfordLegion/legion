@@ -164,33 +164,6 @@ namespace Realm {
   }
 
   template <typename RT, typename TT>
-  inline unsigned BasicRangeAllocator<RT, TT>::insert_free_block(unsigned prev_idx,
-                                                                 RT alloc_first,
-                                                                 RT alloc_last)
-  {
-    unsigned new_idx = alloc_range(alloc_first, alloc_last);
-    Range *new_prev = &ranges[new_idx];
-
-    unsigned pf_idx = ranges[prev_idx].prev;
-    while((pf_idx != SENTINEL) && (ranges[pf_idx].prev_free == pf_idx)) {
-      pf_idx = ranges[pf_idx].prev;
-      assert(pf_idx != new_idx);
-    }
-    unsigned nf_idx = ranges[prev_idx].next;
-    while((nf_idx != SENTINEL) && (ranges[nf_idx].next_free == nf_idx)) {
-      nf_idx = ranges[nf_idx].next;
-      assert(nf_idx != new_idx);
-    }
-
-    new_prev->prev_free = pf_idx;
-    new_prev->next_free = nf_idx;
-    ranges[pf_idx].next_free = new_idx;
-    ranges[nf_idx].prev_free = new_idx;
-
-    return new_idx;
-  }
-
-  template <typename RT, typename TT>
   inline size_t BasicRangeAllocator<RT, TT>::split_range(
       TT old_tag, const std::vector<TT> &new_tags, const std::vector<RT> &sizes,
       const std::vector<RT> &alignments, std::vector<RT> &allocs_first)
@@ -222,6 +195,7 @@ namespace Realm {
 
     RT remaining_size = prev->last - prev->first;
 
+    std::vector<unsigned> idx_to_free;
     size_t successful_allocations = 0;
 
     // First part reuse existing allocated range for the first tag
@@ -232,15 +206,21 @@ namespace Realm {
       prev->last = alloc_first + sizes[0];
 
       if(prev->first != alloc_first) {
-        unsigned new_idx = insert_free_block(range_idx, prev->first, alloc_first);
+        unsigned new_idx = alloc_range(prev->first, alloc_first);
+
         prev = &ranges[prev_idx];
         Range *new_prev = &ranges[new_idx];
         prev->first = alloc_first;
+
+        new_prev->prev_free = new_idx;
+        new_prev->next_free = new_idx;
 
         new_prev->prev = prev->prev;
         new_prev->next = prev_idx;
         ranges[prev->prev].next = new_idx;
         prev->prev = new_idx;
+
+        idx_to_free.push_back(new_idx);
       }
 
       allocs_first[0] = alloc_first;
@@ -269,16 +249,20 @@ namespace Realm {
       unsigned new_idx = alloc_range(alloc_first, alloc_first + sizes[i]);
 
       if(start != alloc_first) {
-        unsigned free_idx = insert_free_block(range_idx, start, alloc_first);
+        unsigned free_idx = alloc_range(start, alloc_first);
 
         prev = &ranges[prev_idx];
         Range *new_prev = &ranges[free_idx];
 
+        new_prev->prev_free = free_idx;
+        new_prev->next_free = free_idx;
+
         new_prev->prev = prev_idx;
         new_prev->next = new_idx;
         ranges[prev_idx].next = free_idx;
-
         prev_idx = free_idx;
+
+        idx_to_free.push_back(free_idx);
       }
 
       allocated[new_tags[i]] = new_idx;
@@ -303,14 +287,20 @@ namespace Realm {
 
     // Last part create new free range for the remaining size
     if(remaining_size > 0) {
-      unsigned after_idx =
-          insert_free_block(range_idx, prev->last, prev->last + remaining_size);
+      unsigned after_idx = alloc_range(prev->last, prev->last + remaining_size);
+
       Range *r_after = &ranges[after_idx];
+
+      r_after->prev_free = after_idx;
+      r_after->next_free = after_idx;
 
       r_after->prev = prev_idx;
       prev = &ranges[prev_idx];
       prev->next = after_idx;
       prev_idx = after_idx;
+
+      idx_to_free.push_back(after_idx);
+
       prev = r_after;
 
       remaining_size = 0;
@@ -318,6 +308,10 @@ namespace Realm {
 
     prev->next = next_idx;
     ranges[next_idx].prev = prev_idx;
+
+    for(const unsigned idx : idx_to_free) {
+      deallocate(idx);
+    }
 
     assert(remaining_size == 0);
 
@@ -615,28 +609,19 @@ namespace Realm {
   }
 
   template <typename RT, typename TT>
-  inline void BasicRangeAllocator<RT,TT>::deallocate(TT tag,
-						     bool missing_ok /*= false*/)
+  inline void BasicRangeAllocator<RT, TT>::deallocate(unsigned del_idx)
   {
-    typename std::map<TT, unsigned>::iterator it = allocated.find(tag);
-    if(it == allocated.end()) {
-      assert(missing_ok);
-      return;
-    }
-    unsigned del_idx = it->second;
-    allocated.erase(it);
-
     // if there was no Range associated with this tag, it was an zero-size
     //  allocation, and there's nothing to add to the free list
     if(del_idx == SENTINEL)
       return;
 
-    Range& r = ranges[del_idx];
+    Range &r = ranges[del_idx];
 
     unsigned pf_idx = r.prev;
     while((pf_idx != SENTINEL) && (ranges[pf_idx].prev_free == pf_idx)) {
       pf_idx = ranges[pf_idx].prev;
-      assert(pf_idx != del_idx);  // wrapping around would be bad
+      assert(pf_idx != del_idx); // wrapping around would be bad
     }
     unsigned nf_idx = r.next;
     while((nf_idx != SENTINEL) && (ranges[nf_idx].next_free == nf_idx)) {
@@ -651,69 +636,83 @@ namespace Realm {
     // four cases - ordered to match the allocation cases
     if(!merge_next) {
       if(!merge_prev) {
-	// case 1 - no merging (exact match)
-	// just add ourselves to the free list
-	r.prev_free = pf_idx;
-	r.next_free = nf_idx;
-	ranges[pf_idx].next_free = del_idx;
-	ranges[nf_idx].prev_free = del_idx;
+        // case 1 - no merging (exact match)
+        // just add ourselves to the free list
+        r.prev_free = pf_idx;
+        r.next_free = nf_idx;
+        ranges[pf_idx].next_free = del_idx;
+        ranges[nf_idx].prev_free = del_idx;
       } else {
-	// case 2 - merge before
-	// merge ourselves into the range before
-	Range& r_before = ranges[pf_idx];
+        // case 2 - merge before
+        // merge ourselves into the range before
+        Range &r_before = ranges[pf_idx];
 
-	r_before.last = r.last;
-	r_before.next = r.next;
-	ranges[r.next].prev = pf_idx;
-	// r_before was already in free list, so no changes to that
+        r_before.last = r.last;
+        r_before.next = r.next;
+        ranges[r.next].prev = pf_idx;
+        // r_before was already in free list, so no changes to that
 
 #ifdef DEBUG_REALM
-	by_first.erase(r.first);
+        by_first.erase(r.first);
 #endif
-	free_range(del_idx);
+        free_range(del_idx);
       }
     } else {
       if(!merge_prev) {
-	// case 3 - merge after
-	// merge ourselves into the range after
-	Range& r_after = ranges[nf_idx];
+        // case 3 - merge after
+        // merge ourselves into the range after
+        Range &r_after = ranges[nf_idx];
 
 #ifdef DEBUG_REALM
-	by_first[r.first] = nf_idx;
-	by_first.erase(r_after.first);
+        by_first[r.first] = nf_idx;
+        by_first.erase(r_after.first);
 #endif
 
-	r_after.first = r.first;
-	r_after.prev = r.prev;
-	ranges[r.prev].next = nf_idx;
-	// r_after was already in the free list, so no changes to that
+        r_after.first = r.first;
+        r_after.prev = r.prev;
+        ranges[r.prev].next = nf_idx;
+        // r_after was already in the free list, so no changes to that
 
-	free_range(del_idx);
+        free_range(del_idx);
       } else {
-	// case 4 - merge both
-	// merge both ourselves and range after into range before
-	Range& r_before = ranges[pf_idx];
-	Range& r_after = ranges[nf_idx];
+        // case 4 - merge both
+        // merge both ourselves and range after into range before
+        Range &r_before = ranges[pf_idx];
+        Range &r_after = ranges[nf_idx];
 
-	r_before.last = r_after.last;
+        r_before.last = r_after.last;
 #ifdef DEBUG_REALM
-	by_first.erase(r.first);
-	by_first.erase(r_after.first);
+        by_first.erase(r.first);
+        by_first.erase(r_after.first);
 #endif
 
-	// adjust both normal list and free list
-	r_before.next = r_after.next;
-	ranges[r_after.next].prev = pf_idx;
+        // adjust both normal list and free list
+        r_before.next = r_after.next;
+        ranges[r_after.next].prev = pf_idx;
 
-	r_before.next_free = r_after.next_free;
-	ranges[r_after.next_free].prev_free = pf_idx;
+        r_before.next_free = r_after.next_free;
+        ranges[r_after.next_free].prev_free = pf_idx;
 
-	free_range(del_idx);
-	free_range(nf_idx);
+        free_range(del_idx);
+        free_range(nf_idx);
       }
     }
   }
-  
+
+  template <typename RT, typename TT>
+  inline void BasicRangeAllocator<RT, TT>::deallocate(TT tag, bool missing_ok /*= false*/)
+  {
+    typename std::map<TT, unsigned>::iterator it = allocated.find(tag);
+    if(it == allocated.end()) {
+      assert(missing_ok);
+      return;
+    }
+    unsigned del_idx = it->second;
+    allocated.erase(it);
+
+    deallocate(del_idx);
+  }
+
   template <typename RT, typename TT>
   inline bool BasicRangeAllocator<RT,TT>::lookup(TT tag, RT& first, RT& size)
   {
