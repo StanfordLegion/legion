@@ -4631,28 +4631,28 @@ namespace Realm {
             //                    << " src_inst=" << srcs[i].inst << " frags=" << PrettyVector<size_t>(src_frags)
             //                    << " dst_inst=" << dsts[i].inst << " frags=" << PrettyVector<size_t>(dst_frags);
 
-	    MemPathInfo path_info;
+            MemPathInfo path_info;
             bool ok = find_fastest_path(get_runtime()->nodes, path_cache,
                                         ChannelCopyInfo{src_mem, dst_mem}, serdez_id,
                                         0 /*redop_id*/, domain_size * combined_field_size,
                                         &src_frags, &dst_frags, path_info);
             if(!ok) {
-	      log_new_dma.fatal() << "FATAL: no path found from " << src_mem << " to " << dst_mem << " (serdez=" << serdez_id << ")";
-	      assert(0);
-	    }
-	    size_t pathlen = path_info.xd_channels.size();
-	    size_t xd_idx = graph.xd_nodes.size();
-	    size_t ib_idx = graph.ib_edges.size();
-	    size_t ib_alloc_size = 0;
-	    graph.xd_nodes.resize(xd_idx + pathlen);
-	    if(pathlen > 1) {
-	      graph.ib_edges.resize(ib_idx + pathlen - 1);
-	      ib_alloc_size = compute_ib_size(combined_field_size,
-					      domain_size,
-					      serdez_id);
-	    }
-	    for(size_t j = 0; j < pathlen; j++) {
-	      TransferGraph::XDTemplate& xdn = graph.xd_nodes[xd_idx++];
+              log_new_dma.fatal() << "FATAL: no path found from " << src_mem << " to "
+                                  << dst_mem << " (serdez=" << serdez_id << ")";
+              assert(0);
+            }
+            size_t pathlen = path_info.xd_channels.size();
+            size_t xd_idx = graph.xd_nodes.size();
+            size_t ib_idx = graph.ib_edges.size();
+            size_t ib_alloc_size = 0;
+            graph.xd_nodes.resize(xd_idx + pathlen);
+            if(pathlen > 1) {
+              graph.ib_edges.resize(ib_idx + pathlen - 1);
+              ib_alloc_size =
+                  compute_ib_size(combined_field_size, domain_size, serdez_id);
+            }
+            for(size_t j = 0; j < pathlen; j++) {
+              TransferGraph::XDTemplate &xdn = graph.xd_nodes[xd_idx++];
 
               // xdn.kind = path_info.xd_kinds[j];
               xdn.factory = path_info.xd_channels[j]->get_factory();
