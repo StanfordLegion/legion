@@ -25490,7 +25490,7 @@ namespace Legion {
 #endif
       }
       task_local_instances.clear();
-      for (std::map<Memory,MemoryPool*>::iterator it =
+      for (std::map<Memory,MemoryPool*>::const_iterator it =
             memory_pools.begin(); it != memory_pools.end(); it++)
       {
         it->second->release_pool(done);
