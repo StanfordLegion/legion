@@ -8777,6 +8777,8 @@ namespace Legion {
             continue;
           }
           // We have enough space
+          // Remove this from the current size free list
+          remove_from_free_list(index, *r);
           // but we we may to chop things up to make the exact range
           alloc_first = r->first + offset;
           uintptr_t alloc_last = alloc_first + size;
@@ -8786,7 +8788,6 @@ namespace Legion {
             unsigned new_index = alloc_range(r->first, alloc_first,r->instance);
             Range &new_prev = ranges[new_index];
             r = &ranges[index];  // alloc may have moved this!
-
             r->first = alloc_first;
             // insert into all-block dllist
             new_prev.prev = r->prev;
@@ -8797,11 +8798,8 @@ namespace Legion {
             // Insert into the free list of the appropriate size
             add_to_free_list(new_index, new_prev); 
           }
-
-          // Remove this from the current size free list
-          remove_from_free_list(index, *r);
           // see if we have leftover space and need to make a new range
-          // to reprsent the remainder
+          // to represent the remainder
           if (alloc_last != r->last) 
           {
             // case 2 - leftover at end - put in new range
@@ -8809,7 +8807,6 @@ namespace Legion {
             Range &r_after = ranges[after_index];
             r = &ranges[index];  // alloc may have moved this!
             r->last = alloc_last;
-
             // r_after goes after r in all block list
             r_after.prev = index;
             r_after.next = r->next;
@@ -8819,7 +8816,6 @@ namespace Legion {
             // Put r_after in the free list of the right size
             add_to_free_list(after_index, r_after);
           }
-
           // tie this off because we use it to detect allocated-ness
           r->prev_free = r->next_free = index;
           // Decrement the number of free bytes available

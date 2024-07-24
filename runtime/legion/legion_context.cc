@@ -826,7 +826,7 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(num_results > 0);
-      assert((layouts != NULL) || (num_results > 1));
+      assert((layouts != NULL) || (num_results == 1));
 #endif
       std::map<PhysicalInstance,LgEvent>::iterator finder =
         task_local_instances.find(instance);
@@ -25428,7 +25428,7 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(num_results > 0);
-      assert((layouts != NULL) || (num_results > 1));
+      assert((layouts != NULL) || (num_results == 1));
 #endif
       if (!memory_pools.empty())
       {
@@ -25445,7 +25445,7 @@ namespace Legion {
               (unique_events[0] == finder->second))
             unique_events[0] = finder->second;
           // See if this is in a memory for which we have a pool
-          std::map<Memory,MemoryPool*>::iterator pool_finder =
+          std::map<Memory,MemoryPool*>::const_iterator pool_finder =
             memory_pools.find(instance.get_location());
           if ((pool_finder != memory_pools.end()) &&
               pool_finder->second->contains_instance(instance))
@@ -25496,7 +25496,9 @@ namespace Legion {
         it->second->release_pool(done);
         delete it->second;
       }
+#ifdef DEBUG_LEGION
       memory_pools.clear();
+#endif
     }
 
     //--------------------------------------------------------------------------
