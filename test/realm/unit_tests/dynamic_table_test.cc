@@ -9,7 +9,7 @@
 using namespace Realm;
 
 struct Dummy {
-  void init(ID _me, unsigned _init_owner) { me = me; }
+  void init(ID _me, unsigned _init_owner) { me = _me; }
   ID me;
   Dummy *next_free = nullptr;
 
