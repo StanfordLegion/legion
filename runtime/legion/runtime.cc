@@ -9310,7 +9310,7 @@ namespace Legion {
 #endif
         if (range.next_free != SENTINEL)
           ranges[range.next_free].prev_free = SENTINEL;
-        size_based_free_lists[log2_size] = range.prev_free;
+        size_based_free_lists[log2_size] = range.next_free;
       }
     }
 
