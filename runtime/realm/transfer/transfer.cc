@@ -4493,7 +4493,8 @@ namespace Realm {
 	Memory dst_mem = dsts[i].inst.get_location();
 	MemPathInfo path_info;
         ChannelCopyInfo copy_info(Memory::NO_MEMORY, dst_mem);
-        bool ok = find_fastest_path(copy_info, serdez_id, 0, domain_size, nullptr,
+        bool ok = find_fastest_path(get_runtime()->nodes, path_cache,
+                                    copy_info, serdez_id, 0, domain_size, nullptr,
                                     nullptr, path_info);
         if(!ok) {
           log_new_dma.fatal() << "FATAL: no fill path found for " << dst_mem
