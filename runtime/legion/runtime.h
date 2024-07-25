@@ -1523,6 +1523,7 @@ namespace Legion {
       void free_range(unsigned index);
       void add_to_free_list(unsigned index, Range &r);
       void remove_from_free_list(unsigned index, Range &r);
+      void grow_hole(unsigned index, Range &r, uintptr_t bound, bool before);
       RtEvent escape_range(unsigned index, size_t num_results,
           PhysicalInstance *results, LgEvent *unique_events,
           const Realm::InstanceLayoutGeneric **layouts, UniqueID creator);

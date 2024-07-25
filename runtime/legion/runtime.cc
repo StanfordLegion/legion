@@ -8863,12 +8863,9 @@ namespace Legion {
           // case 2 - merge before
           // merge ourselves into the range before
           Range& r_before = ranges[pf_idx];
-          remove_from_free_list(pf_idx, r_before);
-
-          r_before.last = r.last;
+          grow_hole(pf_idx, r_before, r.last, false/*before*/);
           r_before.next = r.next;
           ranges[r.next].prev = pf_idx;
-          add_to_free_list(pf_idx, r_before);
           free_range(index);
         }
       } 
@@ -8879,12 +8876,9 @@ namespace Legion {
           // case 3 - merge after
           // merge ourselves into the range after
           Range& r_after = ranges[nf_idx];
-          remove_from_free_list(nf_idx, r_after);
-
-          r_after.first = r.first;
+          grow_hole(nf_idx, r_after, r.first, true/*before*/);
           r_after.prev = r.prev;
           ranges[r.prev].next = nf_idx;
-          add_to_free_list(nf_idx, r_after);
           free_range(index);
         } 
         else 
@@ -8892,16 +8886,14 @@ namespace Legion {
           // case 4 - merge both
           // merge both ourselves and range after into range before
           Range& r_before = ranges[pf_idx];
-          remove_from_free_list(pf_idx, r_before);
           Range& r_after = ranges[nf_idx];
           remove_from_free_list(nf_idx, r_after);
+          grow_hole(pf_idx, r_before, r_after.last, false/*before*/);
 
-          r_before.last = r_after.last;
           // adjust both normal list and free list
           r_before.next = r_after.next;
           ranges[r_after.next].prev = pf_idx;
 
-          add_to_free_list(pf_idx, r_before);
           free_range(index);
           free_range(nf_idx);
         }
@@ -9311,6 +9303,55 @@ namespace Legion {
         if (range.next_free != SENTINEL)
           ranges[range.next_free].prev_free = SENTINEL;
         size_based_free_lists[log2_size] = range.next_free;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ConcretePool::grow_hole(unsigned index, Range &range,
+                                 uintptr_t bound, bool before)
+    //--------------------------------------------------------------------------
+    {
+      unsigned old_bin = floor_log2(range.last - range.first);
+      size_t new_size =
+        (before ? range.last : bound) - (before ? bound : range.first);
+      unsigned new_bin = floor_log2(new_size);
+      if (old_bin == new_bin)
+      {
+        if (before)
+          range.first = bound;
+        else
+          range.last = bound;
+        // Bubble ourselves up the free list to keep things sorted
+        while (range.next_free != SENTINEL) 
+        {
+          unsigned next_index = range.next_free;
+          Range &next_range = ranges[next_index]; 
+          size_t next_size = next_range.last - next_range.first;
+          if (new_size <= next_size)
+            break;
+          // Swap places with the next range
+          if (range.prev_free != SENTINEL)
+            ranges[range.prev_free].next_free = next_index;
+          if (next_range.next_free != SENTINEL)
+            ranges[next_range.next_free].prev_free = index;
+          next_range.prev_free = range.prev_free;
+          range.next_free = next_range.next_free;
+          range.prev_free = next_index;
+          next_range.next_free = index;
+          // Make sure to handle the case where we're the first entry
+          // in the free lists
+          if (size_based_free_lists[old_bin] == index)
+            size_based_free_lists[old_bin] = next_index;
+        }
+      }
+      else
+      {
+        remove_from_free_list(index, range);
+        if (before)
+          range.first = bound;
+        else
+          range.last = bound;
+        add_to_free_list(index, range);
       }
     }
 
