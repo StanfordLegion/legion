@@ -46,7 +46,7 @@
 #include "realm/bgwork.h"
 #include "realm/activemsg.h"
 #include "realm/repl_heap.h"
-#include "realm/dynamic_table_allocator.h"
+#include "realm/dynamic_table.h"
 
 #include "realm/shm.h"
 #include <unordered_map>
