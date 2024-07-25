@@ -351,4 +351,3 @@ const static FFPTestCase kFFPTestCases[] = {
 };
 
 INSTANTIATE_TEST_SUITE_P(FindFastestPath, FFPTest, testing::ValuesIn(kFFPTestCases));
-
