@@ -102,12 +102,30 @@ namespace Realm {
       PathLRUIterator find(const LRUKey &key);
       PathLRUIterator end(void);
     };
-    
+
+    typedef std::map<std::pair<realm_id_t, realm_id_t>, PathLRU *> PathCache;
+
     bool find_shortest_path(Memory src_mem, Memory dst_mem,
 			    CustomSerdezID serdez_id,
                             ReductionOpID redop_id,
 			    MemPathInfo& info,
 			    bool skip_final_memcpy = false);
+
+    // Returns true if successfully found a DMA channel that has a minimum
+    // transfer cost from source to destination memories.
+    bool find_best_channel_for_memories(
+        const Node *nodes_info, ChannelCopyInfo channel_copy_info,
+        CustomSerdezID src_serdez_id, CustomSerdezID dst_serdez_id,
+        ReductionOpID redop_id, size_t total_bytes, const std::vector<size_t> *src_frags,
+        const std::vector<size_t> *dst_frags, uint64_t &best_cost, Channel *&best_channel,
+        XferDesKind &best_kind);
+
+    bool find_fastest_path(const Node *nodes_info, PathCache &path_cache,
+                           ChannelCopyInfo channel_copy_info, CustomSerdezID serdez_id,
+                           ReductionOpID redop_id, size_t total_bytes,
+                           const std::vector<size_t> *src_frags,
+                           const std::vector<size_t> *dst_frags, MemPathInfo &info,
+                           bool skip_final_memcpy = false);
 
     class AsyncFileIOContext : public BackgroundWorkItem {
     public:

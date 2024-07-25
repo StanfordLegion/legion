@@ -1036,7 +1036,7 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
     let proc_records: BTreeMap<_, _> = procs
         .par_iter()
         .filter(|proc| !proc.is_empty() && proc.is_visible())
-        .flat_map(|proc| match proc.kind {
+        .flat_map(|proc| match proc.kind.unwrap() {
             ProcKind::GPU => vec![
                 (proc, Some(DeviceKind::Device)),
                 (proc, Some(DeviceKind::Host)),

@@ -100,9 +100,9 @@ namespace Legion {
                              const LegionProfInstance::CopyInfo&) = 0;
       virtual void serialize(const LegionProfInstance::FillInstInfo&,
                              const LegionProfInstance::FillInfo&) = 0;
-      virtual void serialize(const LegionProfInstance::ProcDesc&) = 0;
-      virtual void serialize(const LegionProfInstance::MemDesc&) = 0;
-      virtual void serialize(const LegionProfInstance::ProcMemDesc&) = 0;
+      virtual void serialize(const LegionProfDesc::ProcDesc&) = 0;
+      virtual void serialize(const LegionProfDesc::MemDesc&) = 0;
+      virtual void serialize(const LegionProfDesc::ProcMemDesc&) = 0;
       virtual void serialize(const LegionProfDesc::Backtrace&) = 0;
       virtual void serialize(const LegionProfInstance::EventWaitInfo&) = 0;
       virtual void serialize(const LegionProfInstance::ProfTaskInfo&) = 0;
@@ -170,9 +170,9 @@ namespace Legion {
                      const LegionProfInstance::CopyInfo&);
       void serialize(const LegionProfInstance::FillInstInfo&,
                      const LegionProfInstance::FillInfo&);
-      void serialize(const LegionProfInstance::ProcDesc&);
-      void serialize(const LegionProfInstance::MemDesc&);
-      void serialize(const LegionProfInstance::ProcMemDesc&);
+      void serialize(const LegionProfDesc::ProcDesc&);
+      void serialize(const LegionProfDesc::MemDesc&);
+      void serialize(const LegionProfDesc::ProcMemDesc&);
       void serialize(const LegionProfDesc::Backtrace&);
       void serialize(const LegionProfInstance::EventWaitInfo&);
       void serialize(const LegionProfInstance::ProfTaskInfo&);
@@ -300,9 +300,9 @@ namespace Legion {
                      const LegionProfInstance::CopyInfo&);
       void serialize(const LegionProfInstance::FillInstInfo&,
                      const LegionProfInstance::FillInfo&);
-      void serialize(const LegionProfInstance::ProcDesc&);
-      void serialize(const LegionProfInstance::MemDesc&);
-      void serialize(const LegionProfInstance::ProcMemDesc&);
+      void serialize(const LegionProfDesc::ProcDesc&);
+      void serialize(const LegionProfDesc::MemDesc&);
+      void serialize(const LegionProfDesc::ProcMemDesc&);
       void serialize(const LegionProfDesc::Backtrace&);
       void serialize(const LegionProfInstance::EventWaitInfo&);
       void serialize(const LegionProfInstance::ProfTaskInfo&);
