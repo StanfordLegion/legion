@@ -48,7 +48,6 @@ TEST(DynamicTableTest, LookupMultipleEntries)
   const int leaf_bits = 4;
   DynamicTable<DynamicTableAllocator<Dummy, 1, leaf_bits>> dtable;
   std::vector<int> ids { 0, 15, 16, 33 };
-  int id0 = 0, id1 = 15, id2 = 16, id3 = 33;
 
   std::vector<Dummy *> entries(ids.size());
   for(int i = 0; i < ids.size(); i++) {
@@ -56,7 +55,7 @@ TEST(DynamicTableTest, LookupMultipleEntries)
   }
 
   EXPECT_EQ(dtable.max_entries(), 64);
-  for(int i = 0; i < ids.size(); i++) {
+  for(size_t i = 0; i < ids.size(); i++) {
     EXPECT_TRUE(dtable.has_entry(ids[i]));
     EXPECT_NE(entries[i], nullptr);
   }
@@ -75,7 +74,7 @@ TEST(DynamicTableTest, LookupTheLimit)
   }
 
   EXPECT_EQ(dtable.max_entries(), index);
-  for(int i = 0; i < entries.size(); i++) {
+  for(size_t i = 0; i < entries.size(); i++) {
     EXPECT_NE(entries[i], nullptr);
   }
 }
