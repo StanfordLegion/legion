@@ -963,18 +963,7 @@ namespace Legion {
         return;
       mem_ids.push_back(m.id);
       std::sort(mem_ids.begin(), mem_ids.end());
-      // Do a quick check to see if we've recorded this in a different thread
-      // This helps deduplicates when users are running with force_kthreads
-      if (owner->has_memory_desc(m))
-        return;
-      mem_desc_infos.emplace_back(MemDesc());
-      MemDesc &info = mem_desc_infos.back();
-      info.mem_id = m.id;
-      info.kind  = m.kind();
-      info.capacity = m.capacity();
-      const size_t diff = sizeof(MemDesc);
-      owner->update_footprint(diff, this);
-      process_proc_mem_aff_desc(m);
+      owner->record_memory(m);
     }
 
     //--------------------------------------------------------------------------
@@ -985,57 +974,7 @@ namespace Legion {
         return;
       proc_ids.push_back(p.id);
       std::sort(proc_ids.begin(), proc_ids.end());
-      // Do a quick check to see if we've recorded this in a different thread
-      // This helps deduplicates when users are running with force_kthreads
-      if (owner->has_processor_desc(p))
-        return;
-      proc_desc_infos.emplace_back(ProcDesc());
-      ProcDesc &info = proc_desc_infos.back();
-      info.proc_id = p.id;
-      info.kind = p.kind();
-#ifdef LEGION_USE_CUDA
-      if(!Realm::Cuda::get_cuda_device_uuid(p, &info.cuda_device_uuid)) {
-        info.cuda_device_uuid[0] = 0;
-      }
-#endif
-      const size_t diff = sizeof(ProcDesc);
-      owner->update_footprint(diff, this);
-      process_proc_mem_aff_desc(p);
-    }
-
-    //--------------------------------------------------------------------------
-    void LegionProfInstance::process_proc_mem_aff_desc(const Memory &m)
-    //--------------------------------------------------------------------------
-    {
-      // record ALL memory<->processor affinities for consistency + if needed in the future
-      std::vector<ProcessorMemoryAffinity> affinities;
-      Machine::get_machine().get_proc_mem_affinity(affinities, Processor::NO_PROC, m);
-      for (std::vector<ProcessorMemoryAffinity>::const_iterator it =
-             affinities.begin(); it != affinities.end(); it++)
-      {
-        process_proc_desc(it->p);
-        proc_mem_aff_desc_infos.emplace_back(ProcMemDesc());
-        ProcMemDesc &info = proc_mem_aff_desc_infos.back();
-        info.proc_id = it->p.id;
-        info.mem_id = m.id;
-        info.bandwidth = it->bandwidth;
-        info.latency = it->latency;
-        owner->update_footprint(sizeof(ProcMemDesc), this);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void LegionProfInstance::process_proc_mem_aff_desc(const Processor &p)
-    //--------------------------------------------------------------------------
-    {
-      // record ALL processor<->memory affinities for consistency
-      // and for possible querying in the future
-      std::vector<ProcessorMemoryAffinity> affinities;
-      Machine::get_machine().get_proc_mem_affinity(affinities, p);
-      for (std::vector<ProcessorMemoryAffinity>::const_iterator it =
-             affinities.begin(); it != affinities.end(); it++) {
-        process_mem_desc(it->m); // add memory + affinity
-      }
+      owner->record_processor(p);
     }
 
     //--------------------------------------------------------------------------
@@ -1199,22 +1138,6 @@ namespace Legion {
     void LegionProfInstance::dump_state(LegionProfSerializer *serializer)
     //--------------------------------------------------------------------------
     {
-      for (std::deque<MemDesc>::const_iterator it =
-            mem_desc_infos.begin(); it != mem_desc_infos.end(); it++)
-      {
-        serializer->serialize(*it);
-      }
-      for (std::deque<ProcDesc>::const_iterator it =
-            proc_desc_infos.begin(); it != proc_desc_infos.end(); it++)
-      {
-        serializer->serialize(*it);
-      }
-      for (std::deque<ProcMemDesc>::const_iterator it =
-            proc_mem_aff_desc_infos.begin();
-           it != proc_mem_aff_desc_infos.end(); it++)
-      {
-        serializer->serialize(*it);
-      }
       for (std::deque<OperationInstance>::const_iterator it = 
             operation_instances.begin(); it != operation_instances.end(); it++)
       {
@@ -1425,9 +1348,6 @@ namespace Legion {
       inst_timeline_infos.clear();
       partition_infos.clear();
       mapper_call_infos.clear();
-      mem_desc_infos.clear();
-      proc_desc_infos.clear();
-      proc_mem_aff_desc_infos.clear();
       event_wait_infos.clear();
     }
 
@@ -1441,36 +1361,6 @@ namespace Legion {
       // Scale our latency by how much we are over the space limit
       const long long t_stop = t_start + over * owner->output_target_latency;
       size_t diff = 0; 
-      while (!mem_desc_infos.empty())
-        {
-          MemDesc &front = mem_desc_infos.front();
-          serializer->serialize(front);
-          diff += sizeof(front);
-          mem_desc_infos.pop_front();
-          const long long t_curr = Realm::Clock::current_time_in_microseconds();
-          if (t_curr >= t_stop)
-            return diff;
-        }
-      while (!proc_desc_infos.empty())
-        {
-          ProcDesc &front = proc_desc_infos.front();
-          serializer->serialize(front);
-          diff += sizeof(front);
-          proc_desc_infos.pop_front();
-          const long long t_curr = Realm::Clock::current_time_in_microseconds();
-          if (t_curr >= t_stop)
-            return diff;
-        }
-      while (!proc_mem_aff_desc_infos.empty())
-        {
-          ProcMemDesc &front = proc_mem_aff_desc_infos.front();
-          serializer->serialize(front);
-          diff += sizeof(front);
-          proc_mem_aff_desc_infos.pop_front();
-          const long long t_curr = Realm::Clock::current_time_in_microseconds();
-          if (t_curr >= t_stop)
-            return diff;
-        }
       while (!operation_instances.empty())
       {
         OperationInstance &front = operation_instances.front();
@@ -2023,41 +1913,108 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool LegionProfiler::has_memory_desc(Memory m)
+    void LegionProfiler::record_memory(Memory m)
     //--------------------------------------------------------------------------
     {
       {
         AutoLock p_lock(profiler_lock,1,false/*exclusive*/);
         if (std::binary_search(recorded_memories.begin(),
               recorded_memories.end(), m))
-          return true;
+          return;
       }
       AutoLock p_lock(profiler_lock);
       if (std::binary_search(recorded_memories.begin(),
             recorded_memories.end(), m))
-        return true;
-      recorded_memories.push_back(m);
-      std::sort(recorded_memories.begin(), recorded_memories.end());
-      return false;
+        return;
+      // Also log all the affinities for this memory
+      std::vector<Memory> memories_to_log(1, m);
+      record_affinities(memories_to_log); 
     }
 
     //--------------------------------------------------------------------------
-    bool LegionProfiler::has_processor_desc(Processor p)
+    void LegionProfiler::record_processor(Processor p)
     //--------------------------------------------------------------------------
     {
       {
         AutoLock p_lock(profiler_lock,1,false/*exclusive*/);
         if (std::binary_search(recorded_processors.begin(),
               recorded_processors.end(), p))
-          return true;
+          return;
       }
       AutoLock p_lock(profiler_lock);
       if (std::binary_search(recorded_processors.begin(),
             recorded_processors.end(), p))
-        return true;
+        return;
+      LegionProfDesc::ProcDesc proc;
+      proc.proc_id = p.id;
+      proc.kind = p.kind();
+#ifdef LEGION_USE_CUDA
+      if (!Realm::Cuda::get_cuda_device_uuid(p, &proc.cuda_device_uuid))
+        proc.cuda_device_uuid[0] = 0;
+#endif
+      serializer->serialize(proc);
       recorded_processors.push_back(p);
       std::sort(recorded_processors.begin(), recorded_processors.end());
-      return false;
+      std::vector<Memory> memories_to_log;
+      std::vector<ProcessorMemoryAffinity> affinities;
+      runtime->machine.get_proc_mem_affinity(affinities, p);
+      for (std::vector<ProcessorMemoryAffinity>::const_iterator pit =
+            affinities.begin(); pit != affinities.end(); pit++)
+        if (!std::binary_search(recorded_memories.begin(),
+              recorded_memories.end(), pit->m))
+          memories_to_log.push_back(pit->m);
+      record_affinities(memories_to_log);
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfiler::record_affinities(std::vector<Memory> &memories_to_log)
+    //--------------------------------------------------------------------------
+    {
+      while (!memories_to_log.empty())
+      {
+        const Memory m = memories_to_log.back();
+        memories_to_log.pop_back();
+        // Eagerly log the processor description to the logging file so 
+        // that it appears before anything that needs it
+        const LegionProfDesc::MemDesc mem = { m.id, m.kind(), m.capacity() };
+        serializer->serialize(mem);
+        recorded_memories.push_back(m);
+        std::sort(recorded_memories.begin(), recorded_memories.end());
+        std::vector<ProcessorMemoryAffinity> memory_affinities;
+        runtime->machine.get_proc_mem_affinity(
+            memory_affinities, Processor::NO_PROC, m);
+        for (std::vector<ProcessorMemoryAffinity>::const_iterator mit =
+              memory_affinities.begin(); mit != memory_affinities.end(); mit++)
+        {
+          if (!std::binary_search(recorded_processors.begin(),
+                recorded_processors.end(), mit->p))
+          {
+            LegionProfDesc::ProcDesc proc;
+            proc.proc_id = mit->p.id;
+            proc.kind = mit->p.kind();
+#ifdef LEGION_USE_CUDA
+            if (!Realm::Cuda::get_cuda_device_uuid(mit->p, 
+                  &proc.cuda_device_uuid))
+              proc.cuda_device_uuid[0] = 0;
+#endif
+            serializer->serialize(proc);
+            recorded_processors.push_back(mit->p);
+            std::sort(recorded_processors.begin(), recorded_processors.end());
+            std::vector<ProcessorMemoryAffinity> processor_affinities;
+            runtime->machine.get_proc_mem_affinity(
+                processor_affinities, mit->p);
+            for (std::vector<ProcessorMemoryAffinity>::const_iterator pit =
+                  processor_affinities.begin(); pit != 
+                  processor_affinities.end(); pit++)
+              if (!std::binary_search(recorded_memories.begin(),
+                    recorded_memories.end(), pit->m))
+                memories_to_log.push_back(pit->m);
+          }
+          const LegionProfDesc::ProcMemDesc info =
+            { mit->p.id, m.id, mit->bandwidth, mit->latency };
+          serializer->serialize(info); 
+        }
+      }
     }
 
     //--------------------------------------------------------------------------

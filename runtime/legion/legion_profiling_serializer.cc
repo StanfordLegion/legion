@@ -1258,7 +1258,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LegionProfBinarySerializer::serialize(
-                                      const LegionProfInstance::ProcDesc& proc_desc)
+                                      const LegionProfDesc::ProcDesc& proc_desc)
     //--------------------------------------------------------------------------
     {
       int ID = PROC_DESC_ID;
@@ -1284,7 +1284,7 @@ namespace Legion {
     }
     //--------------------------------------------------------------------------
     void LegionProfBinarySerializer::serialize(
-                                        const LegionProfInstance::MemDesc& mem_desc)
+                                        const LegionProfDesc::MemDesc& mem_desc)
     //--------------------------------------------------------------------------
     {
       int ID = MEM_DESC_ID;
@@ -1296,7 +1296,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LegionProfBinarySerializer::serialize(
-                                          const LegionProfInstance::ProcMemDesc &pm)
+                                          const LegionProfDesc::ProcMemDesc &pm)
     //--------------------------------------------------------------------------
     {
       int ID = PROC_MEM_DESC_ID;
@@ -2113,7 +2113,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LegionProfASCIISerializer::serialize(
-                                 const LegionProfInstance::ProcDesc &proc_desc)
+                                 const LegionProfDesc::ProcDesc &proc_desc)
     //--------------------------------------------------------------------------
     {
       log_prof.print("Prof Proc Desc " IDFMT " %d",
@@ -2132,7 +2132,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LegionProfASCIISerializer::serialize(
-                                   const LegionProfInstance::MemDesc &mem_desc)
+                                   const LegionProfDesc::MemDesc &mem_desc)
     //--------------------------------------------------------------------------
     {
       log_prof.print("Prof Mem Desc " IDFMT " %d %llu",
@@ -2141,7 +2141,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LegionProfASCIISerializer::serialize(
-                                    const LegionProfInstance::ProcMemDesc &pm)
+                                    const LegionProfDesc::ProcMemDesc &pm)
     //--------------------------------------------------------------------------
     {
       log_prof.print("Prof Mem Proc Affinity Desc " IDFMT " " IDFMT " %u %u",
