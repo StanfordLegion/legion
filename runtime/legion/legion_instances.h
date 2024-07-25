@@ -393,11 +393,10 @@ namespace Legion {
       bool collect(RtEvent &collected, AutoLock *i_lock = NULL);
       void notify_remote_deletion(void);
       RtEvent set_garbage_collection_priority(MapperID mapper_id, Processor p, 
-                                  AddressSpaceID source, GCPriority priority);
+                                              GCPriority priority);
+      RtEvent broadcast_garbage_collection_priority_update(GCPriority priority);
       void perform_deletion(AddressSpaceID source, AutoLock *i_lock = NULL);
       void force_deletion(void);
-      RtEvent update_garbage_collection_priority(AddressSpaceID source,
-                                                 GCPriority priority);
       RtEvent attach_external_instance(void);
       void detach_external_instance(void);
       bool has_visible_from(const std::set<Memory> &memories) const;

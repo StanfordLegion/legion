@@ -1793,7 +1793,10 @@ namespace Legion {
         gc_state = COLLECTABLE_GC_STATE;
         // If we're an eagerly allocated instance start the collection
         // immediately since there's no point in re-use
-        if (kind == EAGER_INSTANCE_KIND)
+        // Similarly if this instance is set to eager collection priority
+        // then we try to do that now
+        if ((kind == EAGER_INSTANCE_KIND) || 
+            (min_gc_priority == LEGION_GC_EAGER_PRIORITY))
         {
           RtEvent dummy_ready;
           collect(dummy_ready, &i_lock);
@@ -2598,82 +2601,95 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RtEvent PhysicalManager::set_garbage_collection_priority(MapperID mapper_id,
-                        Processor p, AddressSpaceID source, GCPriority priority)
+                                               Processor p, GCPriority priority)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(!is_external_instance());
 #endif
-      RtEvent wait_on;
       RtUserEvent done_event;
+      RtEvent wait_on, updated;
       bool remove_never_reference = false;
+      bool broadcast_priority_update = false;
       { 
         const std::pair<MapperID,Processor> key(mapper_id, p);
         AutoLock i_lock(inst_lock);
         // If this thing is already deleted then there is nothing to do
         if (gc_state == COLLECTED_GC_STATE)
           return RtEvent::NO_RT_EVENT;
-        std::map<std::pair<MapperID,Processor>,GCPriority>::iterator finder =
-          mapper_gc_priorities.find(key);
-        if (finder == mapper_gc_priorities.end())
+        if (mapper_gc_priorities.empty())
         {
-          mapper_gc_priorities[key] = priority;
-          if (min_gc_priority <= priority)
-            return RtEvent::NO_RT_EVENT;
+          // First mapper priority to be set which means we need to update
+          // the min_gc_priority to be the initial value
+          mapper_gc_priorities.emplace(std::make_pair(key, priority));
+          // Always fall through to send the update because we were
+          // effectively in an uninitialized state before
         }
         else
         {
-          // See if we're the minimum priority
-          if (min_gc_priority < finder->second)
+          std::map<std::pair<MapperID,Processor>,GCPriority>::iterator finder =
+            mapper_gc_priorities.find(key);
+          if (finder == mapper_gc_priorities.end())
           {
-            // We weren't one of the minimum priorities before
-            finder->second = priority;
+            mapper_gc_priorities[key] = priority;
             if (min_gc_priority <= priority)
               return RtEvent::NO_RT_EVENT;
-            // Otherwise fall through and update the min priority
           }
           else
           {
-            // We were one of the minimum priorities before
-#ifdef DEBUG_LEGION
-            assert(finder->second == min_gc_priority);
-#endif
-            // If things don't change then there is nothing to do
-            if (finder->second == priority)
-              return RtEvent::NO_RT_EVENT;
-            finder->second = priority;
-            if (min_gc_priority < priority)
+            // See if we're the minimum priority
+            if (min_gc_priority < finder->second)
             {
-              // Raising one of the old minimum priorities
-              // See what the new min priority is
-              for (std::map<std::pair<MapperID,Processor>,GCPriority>::
-                    const_iterator it = mapper_gc_priorities.begin(); it !=
-                    mapper_gc_priorities.end(); it++)
-              {
-                // If the new minimum priority is still the same we're done
-                if (it->second == min_gc_priority)
-                  return RtEvent::NO_RT_EVENT;
-                if (it->second < priority)
-                  priority = it->second;
-              }
-#ifdef DEBUG_LEGION
-              // If we get here then we're increasing the minimum priority
-              assert(min_gc_priority < priority);
-#endif
+              // We weren't one of the minimum priorities before
+              finder->second = priority;
+              if (min_gc_priority <= priority)
+                return RtEvent::NO_RT_EVENT;
+              // Otherwise fall through and update the min priority
             }
-            // Else lowering the minimum priority
-          }
-        }
-        // If we get here then we're changing the minimum priority
+            else
+            {
+              // We were one of the minimum priorities before
 #ifdef DEBUG_LEGION
-        assert(priority != min_gc_priority);
+              assert(finder->second == min_gc_priority);
 #endif
+              // If things don't change then there is nothing to do
+              if (finder->second == priority)
+                return RtEvent::NO_RT_EVENT;
+              finder->second = priority;
+              if (min_gc_priority < priority)
+              {
+                // Raising one of the old minimum priorities
+                // See what the new min priority is
+                for (std::map<std::pair<MapperID,Processor>,GCPriority>::
+                      const_iterator it = mapper_gc_priorities.begin(); it !=
+                      mapper_gc_priorities.end(); it++)
+                {
+                  // If the new minimum priority is still the same we're done
+                  if (it->second == min_gc_priority)
+                    return RtEvent::NO_RT_EVENT;
+                  if (it->second < priority)
+                    priority = it->second;
+                }
+#ifdef DEBUG_LEGION
+                // If we get here then we're increasing the minimum priority
+                assert(min_gc_priority < priority);
+#endif
+              }
+              // Else lowering the minimum priority
+            }
+          }
+#ifdef DEBUG_LEGION
+          // If we get here then we're changing the minimum priority
+          assert(priority != min_gc_priority);
+#endif
+        }
         // Only deal with never collection refs on the owner node where
         // the ultimate garbage collection decisions are to be made
         if (is_owner())
         {
           if (priority < min_gc_priority)
           {
+            // Transitioning to a smaller priority
 #ifdef DEBUG_LEGION
             assert(LEGION_GC_NEVER_PRIORITY < min_gc_priority);
 #endif
@@ -2712,12 +2728,30 @@ namespace Legion {
               valid_references.fetch_add(1);
 #endif
             }
+            if (min_gc_priority == LEGION_GC_EAGER_PRIORITY)
+              // Tell the remote nodes they no longer need to
+              // check for each deletion
+              broadcast_priority_update = true;
           }
-          else
+          else if (min_gc_priority < priority)
           {
+            // Transitioning to a larger priority 
+            if (priority == LEGION_GC_EAGER_PRIORITY)
+            {
+              // If we're eagerly collectable then we try 
+              // to delete this now, otherwise eager priority 
+              // needs to be broadcasted out to all other nodes
+              // in case they become locally valid and then 
+              // invalid they need to know to check for that 
+              // as soon as they see it
+              if (!collect(updated, &i_lock))
+                broadcast_priority_update = true;
+            }
             if (min_gc_priority == LEGION_GC_NEVER_PRIORITY)
               remove_never_reference = true;
           }
+          // Else we were uninitialize before and this is the
+          // first time a mapper has set the priority
         }
         min_gc_priority = priority;
         // Make an event for when the priority updates are done
@@ -2728,9 +2762,28 @@ namespace Legion {
       // If we make it here then we need to do the update
       if (wait_on.exists() && !wait_on.has_triggered())
         wait_on.wait();
-      // Record the priority update
-      const RtEvent updated = 
-        update_garbage_collection_priority(source, priority);
+      // Perform any updates for this priority
+      if (is_owner())
+      {
+        memory_manager->set_garbage_collection_priority(this, priority); 
+        if (broadcast_priority_update)
+          updated = broadcast_garbage_collection_priority_update(priority);
+      }
+      else
+      {
+        const RtUserEvent done = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize(priority);
+          rez.serialize(done);
+          rez.serialize<bool>(false); // broadcast
+        }
+        pack_global_ref();
+        runtime->send_gc_priority_update(owner_space, rez);
+        updated = done;
+      }
       if (remove_never_reference && remove_base_valid_ref(NEVER_GC_REF))
         assert(false); // should never end up deleting ourselves
       Runtime::trigger_event(done_event, updated);
@@ -2749,24 +2802,32 @@ namespace Legion {
       derez.deserialize(priority);
       RtUserEvent done;
       derez.deserialize(done);
+      bool broadcast;
+      derez.deserialize<bool>(broadcast);
 
       PhysicalManager *manager = static_cast<PhysicalManager*>(
           runtime->find_distributed_collectable(did));
 
-      // To avoid collisiions with existing local mappers which could lead
-      // to aliasing of priority updates, we use "invalid" processor IDs
-      // here that will never conflict with existing processor IDs
-      // Note that the NO_PROC is a valid processor ID for mappers in the
-      // case where the mapper handles all the processors in a node. We
-      // therefore always add the owner address space to the source to 
-      // produce a non-zero processor ID. Note that this formulation also
-      // avoid conflicts from different remote sources.
-      const Processor fake_proc = { source + manager->owner_space };
+      if (!broadcast)
+      {
+        // To avoid collisiions with existing local mappers which could lead
+        // to aliasing of priority updates, we use "invalid" processor IDs
+        // here that will never conflict with existing processor IDs
+        // Note that the NO_PROC is a valid processor ID for mappers in the
+        // case where the mapper handles all the processors in a node. We
+        // therefore always add the owner address space to the source to 
+        // produce a non-zero processor ID. Note that this formulation also
+        // avoid conflicts from different remote sources.
+        const Processor fake_proc = { source + manager->owner_space };
 #ifdef DEBUG_LEGION
-      assert(fake_proc.id != 0);
+        assert(fake_proc.id != 0);
 #endif
-      Runtime::trigger_event(done, manager->set_garbage_collection_priority(
-                        0/*default mapper ID*/, fake_proc, source, priority));
+        Runtime::trigger_event(done, manager->set_garbage_collection_priority(
+                                0/*default mapper ID*/, fake_proc, priority));
+      }
+      else
+        Runtime::trigger_event(done,
+            manager->broadcast_garbage_collection_priority_update(priority));
       manager->unpack_global_ref();
     }
 
@@ -3262,29 +3323,95 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent PhysicalManager::update_garbage_collection_priority(
-                                     AddressSpaceID source, GCPriority priority)
+    RtEvent PhysicalManager::broadcast_garbage_collection_priority_update(
+                                                            GCPriority priority)
     //--------------------------------------------------------------------------
     {
-      if (!is_owner())
+      std::vector<RtEvent> done_events;
+      // Send out the messages to perform the broadcast
+      if ((collective_mapping != NULL) && 
+          collective_mapping->contains(local_space))
       {
-        const RtUserEvent done = Runtime::create_rt_user_event();
-        Serializer rez;
+        std::vector<AddressSpaceID> children;
+        collective_mapping->get_children(owner_space, local_space, children);
+        for (std::vector<AddressSpaceID>::const_iterator it =
+              children.begin(); it != children.end(); it++)
         {
-          RezCheck z(rez);
-          rez.serialize(did);
-          rez.serialize(priority);
-          rez.serialize(done);
+          const RtUserEvent done = Runtime::create_rt_user_event();
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(did);
+            rez.serialize(priority);
+            rez.serialize(done);
+            rez.serialize<bool>(true); // broadcast
+          }
+          pack_global_ref();
+          runtime->send_gc_priority_update(*it, rez);
+          done_events.push_back(done);
         }
-        pack_global_ref();
-        runtime->send_gc_priority_update(owner_space, rez);
-        return done;
       }
-      else
+      if (is_owner() && (count_remote_instances() > 0))
       {
-        memory_manager->set_garbage_collection_priority(this, priority);
-        return RtEvent::NO_RT_EVENT;
+        struct UpdateFunctor {
+          UpdateFunctor(PhysicalManager *m, Runtime *rt, 
+                        std::vector<RtEvent> &d, GCPriority p)
+            : manager(m), runtime(rt), done_events(d), priority(p) { }
+          inline void apply(AddressSpaceID target)
+          {
+            if (target == runtime->address_space)
+              return;
+            const RtUserEvent done = Runtime::create_rt_user_event();
+            Serializer rez;
+            {
+              RezCheck z(rez);
+              rez.serialize(manager->did);
+              rez.serialize(priority);
+              rez.serialize(done);
+              rez.serialize<bool>(true); // broadcast
+            }
+            manager->pack_global_ref();
+            runtime->send_gc_priority_update(target, rez);
+            done_events.push_back(done);
+          }
+          PhysicalManager *const manager;
+          Runtime *const runtime;
+          std::vector<RtEvent> &done_events;
+          const GCPriority priority;
+        };
+        UpdateFunctor functor(this, runtime, done_events, priority);
+        map_over_remote_instances(functor);
       }
+      RtEvent result;
+      if (!done_events.empty())
+        result = Runtime::merge_events(done_events);
+      // Take the lock and perform our local update
+      AutoLock i_lock(inst_lock);
+      if (priority != LEGION_GC_EAGER_PRIORITY)
+      {
+        // If we have mapper opinions we can reset this to whatever their
+        // current opinions are, otherwise we set it to whatever the new
+        // priority is
+        if (!mapper_gc_priorities.empty())
+        {
+          for (std::map<std::pair<MapperID,Processor>,GCPriority>::
+                const_iterator it = mapper_gc_priorities.begin(); it !=
+                mapper_gc_priorities.end(); it++)
+            if (it->second < min_gc_priority)
+              min_gc_priority = it->second;
+        }
+        else
+          min_gc_priority = priority;
+      }
+      else if (mapper_gc_priorities.empty())
+      {
+        // Only need to set the to eager priority if there are no mapper
+        // opinions because if there are mapper opinions either they 
+        // already set us to eager priority or they've changed their
+        // minds in between and we've lost the race
+        min_gc_priority = LEGION_GC_EAGER_PRIORITY;
+      }
+      return result;
     }
 
     //--------------------------------------------------------------------------

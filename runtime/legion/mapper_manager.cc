@@ -1458,7 +1458,7 @@ namespace Legion {
       if (!manager->is_external_instance())
       {
         const RtEvent ready = manager->set_garbage_collection_priority(
-                mapper_id, processor, runtime->address_space, priority);
+                                        mapper_id, processor, priority);
         if (ready.exists() && !ready.has_triggered())
           ready.wait();
       }
