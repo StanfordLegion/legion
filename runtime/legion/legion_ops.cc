@@ -37,7 +37,6 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     /*static*/ constexpr std::string_view Provenance::no_provenance;
-    /*static*/ constexpr char Provenance::delimeter;
 
     //--------------------------------------------------------------------------
     Provenance::Provenance(ProvenanceID p, const char *prov)
@@ -70,104 +69,99 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!full.empty());
 #endif
-      const char *prov = full.c_str();
-      if (prov[0] == '{') {
-        full_machine.assign(prov);
+      if (!parse_provenance_parts())
+      {
+        // If we have a bracket assume this whole this is a JSON string
+        // and therefore we're going to assume the whole thing is JSON
+        // Otherwise if things don't parse then everything is the just
+        // the human readable string.
+        if (full[0] == '{')
+          machine = std::string_view(full.c_str());
+        else
+          human = std::string_view(full.c_str());
       }
-      else {
-        parse_provenance_parts(full, full_human, full_machine);
-      }
-      human = std::string_view(full_human);
-      machine = std::string_view(full_machine);
     }
 
     //--------------------------------------------------------------------------
-    bool Provenance::parse_provenance_parts(const std::string &input,
-                             std::string &human_part, std::string &machine_part)
+    bool Provenance::parse_provenance_parts(void)
     //--------------------------------------------------------------------------
     {
-      size_t len = input.length();
+      {
+        size_t len = full.length();
 
-      // shortest valid input: ["",{}]
-      if (input.length() < 7) {
-        return false;
+        // shortest valid input: ["",{}]
+        if (len < 7)
+          return false;
+
+        // must start with: ["
+        if (full[0] != '[' || full[1] != '"')
+          return false;
+
+        // must end with: }]
+        if (full[len-2] != '}' || full[len-1] != ']')
+          return false;
       }
 
-      // must start with: ["
-      if (input[0] != '[' || input[1] != '"') {
-        return false;
-      }
-
-      // must end with: }]
-      if (input[len-2] != '}' || input[len-1] != ']') {
-        return false;
-      }
-
-
-      std::stringstream ss_h;
+      unsigned human_size = 0;
       bool human_closed = false;
-
-      size_t i = 2;
-      for (; i < len; ++i) {
-        if (input[i] == '\\') {;
-          if (i+1 >= len) {
+      std::string::iterator it = full.begin()+2;
+      for (; it != full.end(); it++) {
+        if (*it == '\\') {
+          // Remove the escape character
+          it = full.erase(it);
+          if (it == full.end())
             return false;
-          }
-          switch (input[i+1]) {
+          switch (*it) {
             case '"':
             case '\\':
             case '/':
-              ss_h << input[i+1];
               break;
             case 'b':
-              ss_h << '\b';
+              *it = '\b';
               break;
             case 'f':
-              ss_h << '\f';
+              *it = '\f';
               break;
             case 'n':
-              ss_h << '\n';
+              *it = '\n';
               break;
             case 'r':
-              ss_h << '\r';
+              *it = '\r';
               break;
             case 't':
-              ss_h << '\t';
+              *it = '\t';
               break;
             case 'u':
               return false; // Unicode is unsupported
             default:
               return false; // Bad escape
           }
-          ++i;
-        } else if (input[i] == '"') {
+          human_size++;
+        } else if (*it == '"') {
           human_closed = true;
           break;
-        } else {
-          ss_h << input[i];
-        }
+        } else
+          human_size++;
       }
 
-      if (!human_closed) {
+      if (!human_closed)
         return false;
-      }
 
-      human_part = ss_h.str();
+      human = std::string_view(full.c_str()+2, human_size);
 
-      for (; i < len-1; ++i) {
-        if (input[i] == '{') {
-          break;
+      for (; it != full.end(); it++) {
+        if (*it == '{') {
+          size_t offset = std::distance(full.begin(), it);
+          // Start from our current offset and go to the
+          // end but don't include the closing ']'
+          machine = std::string_view(full.c_str()+offset,
+              full.length() - (offset+1));
+          return true;
         }
       }
 
       // machine part never opened
-      if (i == len-1) {
-        return false;
-      }
-
-      machine_part.assign(input.c_str() + i, input.c_str() + len - 1);
-
-      return true;
+      return false;
     }
 
     //--------------------------------------------------------------------------

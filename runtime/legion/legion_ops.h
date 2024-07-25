@@ -45,8 +45,7 @@ namespace Legion {
       Provenance& operator=(const Provenance &rhs) = delete;
     public:
       void initialize(void);
-      bool parse_provenance_parts(const std::string &input,
-                             std::string &human_part, std::string &machine_part);
+      bool parse_provenance_parts(void);
       void serialize(Serializer &rez) const;
       static void serialize_null(Serializer &rez);
       static Provenance* deserialize(Deserializer &derez);
@@ -55,16 +54,12 @@ namespace Legion {
       inline const char* machine_str(void) const { return machine.data(); }
     public:
       const ProvenanceID pid;
-      const std::string full;
-      std::string full_machine;
-      std::string full_human;
     public:
+      std::string full;
       // Keep the human and machine parts of the provenance string
       std::string_view human, machine;
       // Useful for cases where interfaces want a string
       static constexpr std::string_view no_provenance = std::string_view();
-      // Delimiter for the machine readable part of the string
-      static constexpr char delimeter = '$';
     };
 
     /**
