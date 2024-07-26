@@ -9130,13 +9130,11 @@ namespace Legion {
           // Update all the next ranges with the new backing instance
           backing_instances.emplace(
               std::make_pair(extra_instances.back(), result));
-          while (next_index != SENTINEL)
+          while (next_index != index)
           {
             Range &next_range = ranges[next_index];
-            if (next_range.instance != finder->first)
-              break;
             next_range.instance = extra_instances.back();
-            next_index = next_range.next;
+            next_index = next_range.prev;
           }
           delete extra_layouts.back();
         }
