@@ -36,15 +36,6 @@
   #include <dlfcn.h>
 #endif
 
-#ifdef REALM_CUDA_DYNAMIC_LOAD
-  #ifndef REALM_USE_DLFCN
-    #error dynamic loading of CUDA driver/runtime requires use of dlfcn!
-  #endif
-  #ifdef REALM_USE_CUDART_HIJACK
-    #error REALM_CUDA_DYNAMIC_LOAD and REALM_USE_CUDART_HIJACK both enabled!
-  #endif
-#endif
-
 #include "realm/mutex.h"
 #include "realm/utils.h"
 
@@ -59,6 +50,12 @@
 #include <iomanip>
 #include <algorithm>
 
+#if CUDA_VERSION < 11030
+// Define cuGetProcAddress if it isn't defined, so we can query for it's existence later
+typedef CUresult CUDAAPI (*PFN_cuGetProcAddress)(const char *, void **, int, int);
+#define CU_GET_PROC_ADDRESS_DEFAULT 0
+#endif
+
 #define IS_DEFAULT_STREAM(stream)   \
   (((stream) == 0) || ((stream) == CU_STREAM_LEGACY) || ((stream) == CU_STREAM_PER_THREAD))
 
@@ -72,6 +69,12 @@ namespace Realm {
 
   namespace Cuda {
 
+    enum CudaIpcResponseType
+    {
+      CUDA_IPC_RESPONSE_TYPE_IPC = 0,
+      CUDA_IPC_RESPONSE_TYPE_FABRIC,
+    };
+
     /// @brief Helper structure for describing a particular memory being imported via CUDA
     /// IPC
     struct CudaIpcResponseEntry {
@@ -81,8 +84,19 @@ namespace Realm {
       Memory mem;
       /// The base GPU address from the source GPU in the source process
       uintptr_t base_ptr = 0;
-      /// IPC handle to be opened for the underlying memory
-      CUipcMemHandle handle;
+      size_t size = 0;
+      CudaIpcResponseType type = CUDA_IPC_RESPONSE_TYPE_IPC;
+      union CudaIpcHandle {
+        /// IPC handle to be opened for the underlying memory
+        CUipcMemHandle ipc_handle;
+#if CUDA_VERSION >= 12030
+        struct CudaFabricInfo {
+          unsigned clique_id;
+          CUuuid cluster_uuid;
+          CUmemFabricHandle handle;
+        } fabric;
+#endif
+      } data;
     };
 
     Logger log_gpu("gpu");
@@ -95,21 +109,17 @@ namespace Realm {
     bool nvml_initialized = false;
     CUresult cuda_init_code = CUDA_ERROR_UNKNOWN;
 
-#ifdef REALM_CUDA_DYNAMIC_LOAD
     bool cuda_api_fnptrs_loaded = false;
 
-  #if CUDA_VERSION >= 11030
-    // cuda 11.3+ gives us handy PFN_... types
-    #define DEFINE_FNPTR(name) \
-      PFN_ ## name name ## _fnptr = 0;
-  #else
-    // before cuda 11.3, we have to rely on typeof/decltype
-    #define DEFINE_FNPTR(name) \
-      decltype(&name) name ## _fnptr = 0;
-  #endif
-    CUDA_DRIVER_APIS(DEFINE_FNPTR);
-  #undef DEFINE_FNPTR
+#if CUDA_VERSION >= 11030
+// cuda 11.3+ gives us handy PFN_... types
+#define DEFINE_FNPTR(name, ver) PFN_##name name##_fnptr = 0;
+#else
+// before cuda 11.3, we have to rely on typeof/decltype
+#define DEFINE_FNPTR(name, ver) decltype(&name) name##_fnptr = 0;
 #endif
+    CUDA_DRIVER_APIS(DEFINE_FNPTR);
+#undef DEFINE_FNPTR
 
     static unsigned ctz(uint64_t v) {
 #ifdef REALM_ON_WINDOWS
@@ -1640,10 +1650,28 @@ namespace Realm {
       }
 
       if((ThreadLocal::context_sync_required > 0) ||
-	 ((ThreadLocal::context_sync_required < 0) && gpu_proc->gpu->module->config->cfg_task_context_sync))
-        gpu_proc->ctxsync.add_fence(fence);
-      else
-	fence->enqueue_on_stream(s);
+         ((ThreadLocal::context_sync_required < 0) &&
+          gpu_proc->gpu->module->config->cfg_task_context_sync)) {
+#if(CUDA_VERSION >= 12050)
+        // If this driver supports retrieving an event for the context's current work,
+        // retrieve and wait for it.  This will still over-synchronize with work from the
+        // DMA engine, but at least this is completely asynchronous and doesn't require a
+        // separate thread.
+        if(CUDA_DRIVER_HAS_FNPTR(cuCtxRecordEvent)) {
+          CUevent e = gpu_proc->gpu->event_pool.get_event();
+          CHECK_CU(CUDA_DRIVER_FNPTR(cuCtxRecordEvent)(gpu_proc->gpu->context, e));
+          CHECK_CU(CUDA_DRIVER_FNPTR(cuStreamWaitEvent)(s->get_stream(), e, 0));
+          s->add_event(e, fence);
+        } else
+#endif
+        {
+          // Add the context sync to the thread
+          gpu_proc->ctxsync.add_fence(fence);
+        }
+      } else {
+        // Just wait for the fence
+        fence->enqueue_on_stream(s);
+      }
 
       // A useful debugging macro
 #ifdef FORCE_GPU_STREAM_SYNCHRONIZE
@@ -2131,8 +2159,9 @@ namespace Realm {
 
       CHECK_CU(CUDA_DRIVER_FNPTR(cuLaunchKernel)(func_info.func, num_blocks, 1, 1,
                                                  num_threads, 1, 1, 0,
-                                                 stream->get_stream(), args, NULL));
+                                                 stream->get_stream(), args, nullptr));
     }
+
     void GPU::launch_transpose_kernel(MemcpyTransposeInfo<size_t> &copy_info,
                                       size_t elem_size, GPUStream *stream)
     {
@@ -2181,6 +2210,23 @@ namespace Realm {
       launch_kernel(func_info, copy_info, volume, stream);
     }
 
+    void GPU::launch_batch_affine_fill_kernel(void *fill_info, size_t dim,
+                                              size_t elem_size, size_t volume,
+                                              GPUStream *stream)
+    {
+      size_t log_elem_size = std::min(static_cast<size_t>(ctz(elem_size)),
+                                      CUDA_MEMCPY_KERNEL_MAX2_LOG2_BYTES - 1);
+
+      assert((1ULL << log_elem_size) == elem_size);
+      assert(dim <= REALM_MAX_DIM);
+      assert(dim >= 1);
+
+      // TODO: probably replace this
+      // with a better data-structure
+      GPUFuncInfo &func_info = batch_fill_affine_kernels[dim - 1][log_elem_size];
+      launch_kernel(func_info, fill_info, volume, stream);
+    }
+
     void GPU::launch_batch_affine_kernel(void *copy_info, size_t dim,
                                          size_t elem_size, size_t volume,
                                          GPUStream *stream) {
@@ -2199,13 +2245,13 @@ namespace Realm {
 
     const GPU::CudaIpcMapping *GPU::find_ipc_mapping(Memory mem) const
     {
-      for(std::vector<CudaIpcMapping>::const_iterator it = cudaipc_mappings.begin();
-          it != cudaipc_mappings.end();
-          ++it)
-        if(it->mem == mem)
-          return &*it;
+      for(const CudaIpcMapping &mapping : cudaipc_mappings) {
+        if(mapping.mem == mem) {
+          return &mapping;
+        }
+      }
 
-      return 0;
+      return nullptr;
     }
 
     bool GPUProcessor::register_task(Processor::TaskFuncID func_id,
@@ -2943,12 +2989,13 @@ namespace Realm {
     //
     // class GPUZCMemory
 
-    GPUZCMemory::GPUZCMemory(Memory _me,
-			     CUdeviceptr _gpu_base, void *_cpu_base, size_t _size,
-                             MemoryKind _kind, Memory::Kind _lowlevel_kind)
+    GPUZCMemory::GPUZCMemory(GPU *gpu, Memory _me, CUdeviceptr _gpu_base, void *_cpu_base,
+                             size_t _size, MemoryKind _kind, Memory::Kind _lowlevel_kind)
       : LocalManagedMemory(_me, _size, _kind, 256, _lowlevel_kind, 0)
-      , gpu_base(_gpu_base), cpu_base((char *)_cpu_base)
+      , gpu_base(_gpu_base)
+      , cpu_base((char *)_cpu_base)
     {
+      add_module_specific(new CudaDeviceMemoryInfo(gpu->context));
       // advertise ourselves as a host or managed memory, as appropriate
       NetworkSegmentInfo::MemoryType mtype;
       if(_kind == MemoryImpl::MKIND_MANAGED)
@@ -3053,6 +3100,7 @@ namespace Realm {
       , gpu(_gpu)
       , base(_base)
     {
+      add_module_specific(new CudaDeviceMemoryInfo(gpu->context));
       // advertise for potential gpudirect support
       local_segment.assign(NetworkSegmentInfo::CudaDeviceMem,
 			   reinterpret_cast<void *>(_base), _size,
@@ -3745,29 +3793,11 @@ namespace Realm {
       // To prevent bit-rot, and because there's no advantage to not using the
       // cuMemMap APIs, use them by default unless we need a feature they
       // don't support.
-      if(!gpu->module->config->cfg_use_cuda_ipc && mmap_supported &&
-         !(rdma_supported && !mmap_supports_rdma)) {
+      if((!gpu->module->config->cfg_use_cuda_ipc || gpu->info->fabric_supported) &&
+         mmap_supported && !(rdma_supported && !mmap_supports_rdma)) {
         CUmemAllocationProp mem_prop;
         memset(&mem_prop, 0, sizeof(mem_prop));
         mem_prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
-        // TODO: Replace with shareable handle type
-#if defined(REALM_ON_WINDOWS)
-        mem_prop.requestedHandleTypes = CU_MEM_HANDLE_TYPE_WIN32;
-#else
-        mem_prop.requestedHandleTypes = CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR;
-#endif
-#if CUDA_VERSION >= 12030
-        int fabric_supported = 0;
-        CUDA_DRIVER_FNPTR(cuDeviceGetAttribute)
-        (&fabric_supported, CU_DEVICE_ATTRIBUTE_HANDLE_TYPE_FABRIC_SUPPORTED,
-         gpu->info->device);
-        // If fabric handles are supported, enable them as well
-        if(fabric_supported != 0) {
-          mem_prop.requestedHandleTypes = static_cast<CUmemAllocationHandleType>(
-              static_cast<int>(mem_prop.requestedHandleTypes) |
-              static_cast<int>(CU_MEM_HANDLE_TYPE_FABRIC));
-        }
-#endif
         mem_prop.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
         mem_prop.location.id = gpu->info->index;
         mem_prop.win32HandleMetaData = GPUAllocation::get_win32_shared_attributes();
@@ -3775,8 +3805,24 @@ namespace Realm {
         // TODO: check if fb_mem actually needs to be rdma capable
         mem_prop.allocFlags.gpuDirectRDMACapable = mmap_supports_rdma;
         mem_prop.allocFlags.usage = 0;
-        alloc = GPUAllocation::allocate_mmap(gpu, mem_prop, size, 0,
-                                             /*peer_enabled=*/true);
+        // Try fabric first.  This can fail for a number of reasons, but most commonly,
+        // it's because the application isn't bound to an IMEX channel
+        if(gpu->info->fabric_supported != 0) {
+#if CUDA_VERSION >= 12030
+          mem_prop.requestedHandleTypes = CU_MEM_HANDLE_TYPE_FABRIC;
+#endif
+          alloc = GPUAllocation::allocate_mmap(gpu, mem_prop, size, 0,
+                                               /*peer_enabled=*/true);
+        }
+        if(alloc == nullptr) {
+#if defined(REALM_ON_WINDOWS)
+          mem_prop.requestedHandleTypes = CU_MEM_HANDLE_TYPE_WIN32;
+#else
+          mem_prop.requestedHandleTypes = CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR;
+#endif
+          alloc = GPUAllocation::allocate_mmap(gpu, mem_prop, size, 0,
+                                               /*peer_enabled=*/true);
+        }
       } else
 #endif
       {
@@ -4189,70 +4235,91 @@ namespace Realm {
       return ss;
     }
 
-#ifdef REALM_CUDA_DYNAMIC_LOAD
-    static bool resolve_cuda_api_fnptrs(bool required)
-    {
-      if(cuda_api_fnptrs_loaded)
-        return true;
+#ifndef STRINGIFY
+#define STRINGIFY(s) #s
+#endif
 
-      // driver symbols have to come from a dynamic libcuda
-#ifdef REALM_USE_DLFCN
+    template <typename Fn>
+    static void cuGetProcAddress_stable(PFN_cuGetProcAddress loader, Fn &fnptr,
+                                        const char *name, int version,
+                                        const char *err_msg)
+    {
+      CUresult ret = CUDA_SUCCESS;
+      // When using cuGetProcAddress, we need to make sure to specify the either the
+      // version the API was introduced, or the current compilation version, whichever is
+      // newer.  This is to deal with CUDA changing the API signature for the same API,
+      // but allows us to retrieve APIs from drivers newer than what we're compiling with
+#if CUDA_VERSION < 12000
+      ret = (loader)(name, reinterpret_cast<void **>(&fnptr),
+                     std::max(CUDA_VERSION, version), CU_GET_PROC_ADDRESS_DEFAULT);
+#else
+      // cuGetProcAddress changed signature in 12.0+ to include more diagnostic
+      // information we don't need.
+      ret =
+          (loader)(name, reinterpret_cast<void **>(&fnptr),
+                   std::max(CUDA_VERSION, version), CU_GET_PROC_ADDRESS_DEFAULT, nullptr);
+#endif
+      if(ret != CUDA_SUCCESS) {
+        REPORT_CU_ERROR(Logger::LEVEL_INFO, err_msg, ret);
+      }
+    }
+
+    static bool resolve_cuda_api_fnptrs(void)
+    {
+      if(cuda_api_fnptrs_loaded) {
+        return true;
+      }
+
+      PFN_cuGetProcAddress cuGetProcAddress_fnptr = nullptr;
+
+#if defined(REALM_USE_LIBDL)
       log_gpu.info() << "dynamically loading libcuda.so";
       void *libcuda = dlopen("libcuda.so.1", RTLD_NOW);
       if(!libcuda) {
-        if(required) {
-          log_gpu.fatal() << "could not open libcuda.so: " << strerror(errno);
-          abort();
-        } else {
-          log_gpu.info() << "could not open libcuda.so: " << strerror(errno);
-          return false;
-        }
+        log_gpu.info() << "could not open libcuda.so: " << strerror(errno);
+        return false;
       }
-#if CUDA_VERSION >= 11030
-      // cuda 11.3+ provides cuGetProcAddress to handle versioning nicely
-      PFN_cuGetProcAddress_v11030 cuGetProcAddress_fnptr =
-          reinterpret_cast<PFN_cuGetProcAddress_v11030>(
-              dlsym(libcuda, "cuGetProcAddress"));
-      if (cuGetProcAddress_fnptr) {
-#define DRIVER_GET_FNPTR(name)                                                 \
-  CHECK_CU((cuGetProcAddress_fnptr)(#name, (void **)&name##_fnptr,             \
-                                    CUDA_VERSION,                              \
-                                    CU_GET_PROC_ADDRESS_DEFAULT));
+      // Use the symbol we get from the dynamically loaded library
+      cuGetProcAddress_fnptr = reinterpret_cast<decltype(cuGetProcAddress_fnptr)>(
+          dlsym(libcuda, STRINGIFY(cuGetProcAddress)));
+#elif CUDA_VERSION >= 11030
+      // Use the statically available symbol
+      cuGetProcAddress_fnptr = &cuGetProcAddress;
+#endif
+
+      if(cuGetProcAddress_fnptr != nullptr) {
+#define DRIVER_GET_FNPTR(name, ver)                                                      \
+  cuGetProcAddress_stable(cuGetProcAddress_fnptr, name##_fnptr, #name, ver,              \
+                          "Could not retrieve symbol " #name);
+
         CUDA_DRIVER_APIS(DRIVER_GET_FNPTR);
 #undef DRIVER_GET_FNPTR
-      } else  // if cuGetProcAddress is not found, fallback to dlsym path
-#endif
-      {
-    // before cuda 11.3, we have to dlsym things, but rely on cuda.h's
-    //  compile-time translation to versioned function names
-#define STRINGIFY(s) #s
-#define DRIVER_GET_FNPTR(name)                                                 \
-  do {                                                                         \
-    void *sym = dlsym(libcuda, STRINGIFY(name));                               \
-    if (!sym) {                                                                \
-      log_gpu.fatal() << "symbol '" STRINGIFY(                                 \
-          name) " missing from libcuda.so!";                                   \
-      abort();                                                                 \
-    }                                                                          \
-    name##_fnptr = reinterpret_cast<decltype(&name)>(sym);                     \
-  } while (0)
-
-    CUDA_DRIVER_APIS(DRIVER_GET_FNPTR);
-
+      } else {
+#if defined(REALM_USE_LIBDL)
+#define DRIVER_GET_FNPTR(name, ver)                                                      \
+  if(CUDA_SUCCESS != (nullptr != (name##_fnptr = reinterpret_cast<decltype(&name)>(      \
+                                      dlsym(libcuda, STRINGIFY(name)))))) {              \
+    log_gpu.info() << "Could not retrieve symbol " #name;                                \
+  }
+        CUDA_DRIVER_APIS(DRIVER_GET_FNPTR)
 #undef DRIVER_GET_FNPTR
-#undef STRINGIFY
+#else
+#define DRIVER_GET_FNPTR(name, ver) name##_fnptr = &name;
+        // Only enumerate the driver apis for the base toolkit version, extra features
+        // cannot be enumerated
+        CUDA_DRIVER_APIS_BASE(DRIVER_GET_FNPTR);
+#undef DRIVER_GET_FNPTR
+#endif /* REALM_USE_LIBDL */
       }
-#endif  // REALM_USE_DLFCN
 
       cuda_api_fnptrs_loaded = true;
 
       return true;
     }
-#endif
 
     static bool resolve_nvml_api_fnptrs()
     {
-#ifdef REALM_USE_DLFCN
+#ifdef REALM_USE_LIBDL
       void *libnvml = NULL;
       if (nvml_api_fnptrs_loaded)
         return true;
@@ -4263,19 +4330,16 @@ namespace Realm {
         return false;
       }
 
-#define STRINGIFY(s) #s
-#define DRIVER_GET_FNPTR(name)                                                     \
-      do {                                                                         \
-        void *sym = dlsym(libnvml, STRINGIFY(name));                               \
-        if (!sym) {                                                                \
-          log_gpu.info() << "symbol '" STRINGIFY(                                  \
-              name) " missing from libnvidia-ml.so!";                              \
-        }                                                                          \
-        name##_fnptr = reinterpret_cast<decltype(&name)>(sym);                     \
-      } while (0)
+#define DRIVER_GET_FNPTR(name)                                                           \
+  do {                                                                                   \
+    void *sym = dlsym(libnvml, STRINGIFY(name));                                         \
+    if(!sym) {                                                                           \
+      log_gpu.info() << "symbol '" STRINGIFY(name) " missing from libnvidia-ml.so!";     \
+    }                                                                                    \
+    name##_fnptr = reinterpret_cast<decltype(&name)>(sym);                               \
+  } while(0)
 
       NVML_APIS(DRIVER_GET_FNPTR);
-#undef STRINGIFY
 #undef DRIVER_GET_FNPTR
 
       nvml_api_fnptrs_loaded = true;
@@ -4288,18 +4352,50 @@ namespace Realm {
     /*static*/ ModuleConfig *CudaModule::create_module_config(RuntimeImpl *runtime)
     {
       CudaModuleConfig *config = new CudaModuleConfig();
-#ifdef REALM_CUDA_DYNAMIC_LOAD
       // load the cuda lib
-      if(!resolve_cuda_api_fnptrs(false)) {
+      if(!resolve_cuda_api_fnptrs()) {
         // warning was printed in resolve function
         delete config;
-        return NULL;
+        return nullptr;
       }
-#endif
-      if (config->discover_resource() == false) {
+      if(!config->discover_resource()) {
         log_gpu.error("We are not able to discover the CUDA resources.");
       }
       return config;
+    }
+
+    template <typename T>
+    static void get_nvml_field_value(const nvmlFieldValue_t &field_value, T &value)
+    {
+      if(field_value.nvmlReturn != NVML_SUCCESS) {
+        return;
+      }
+      switch(field_value.valueType) {
+      case NVML_VALUE_TYPE_DOUBLE:
+        value = static_cast<T>(field_value.value.dVal);
+        break;
+#if CUDA_VERSION >= 12020
+      case NVML_VALUE_TYPE_SIGNED_INT:
+        value = static_cast<T>(field_value.value.siVal);
+        break;
+#endif
+      case NVML_VALUE_TYPE_SIGNED_LONG_LONG:
+        value = static_cast<T>(field_value.value.sllVal);
+        break;
+      case NVML_VALUE_TYPE_UNSIGNED_INT:
+        value = static_cast<T>(field_value.value.uiVal);
+        break;
+      case NVML_VALUE_TYPE_UNSIGNED_LONG:
+        value = static_cast<T>(field_value.value.ulVal);
+        break;
+      case NVML_VALUE_TYPE_UNSIGNED_LONG_LONG:
+        value = static_cast<T>(field_value.value.ullVal);
+        break;
+      default:
+        log_gpu.info("Unknown nvml field value %d",
+                     static_cast<int>(field_value.valueType));
+        break;
+      }
     }
 
     /*static*/ Module *CudaModule::create_module(RuntimeImpl *runtime)
@@ -4380,6 +4476,14 @@ namespace Realm {
           (&attribute_value, CU_DEVICE_ATTRIBUTE_CAN_USE_HOST_POINTER_FOR_REGISTERED_MEM,
            info->device);
           info->host_gpu_same_va = !!attribute_value;
+#if CUDA_VERSION >= 12030
+          CUDA_DRIVER_FNPTR(cuDeviceGetAttribute)
+          (&attribute_value, CU_DEVICE_ATTRIBUTE_HANDLE_TYPE_FABRIC_SUPPORTED,
+           info->device);
+#else
+          attribute_value = 0;
+#endif
+          info->fabric_supported = !!attribute_value;
           // Assume x16 PCI-e 2.0 = 8000 MB/s, which is reasonable for most
           // systems
           info->pci_bandwidth = 8000;
@@ -4432,6 +4536,30 @@ namespace Realm {
                 info->nvml_dev, info->MAX_NUMA_NODE_LEN, info->numa_node_affinity,
                 NVML_AFFINITY_SCOPE_NODE));
 #endif
+#if NVML_API_VERSION >= 12
+            {
+              nvmlGpuFabricInfo_t fabric_info;
+              if((NVML_FNPTR(nvmlDeviceGetGpuFabricInfo) != nullptr) &&
+                 (NVML_SUCCESS ==
+                  NVML_FNPTR(nvmlDeviceGetGpuFabricInfo)(info->nvml_dev, &fabric_info))) {
+                if(fabric_info.status != NVML_SUCCESS) {
+                  log_gpu.info() << "Unable to retrieve fabric information from NVML, "
+                                    "fabric import/export may not work properly";
+                } else {
+                  // NVML decided to change the name of this field between minor versions,
+                  // but NVML doesn't have a way to distinguish between minor versions, so
+                  // we have to use CUDA_VERSION...
+#if CUDA_VERSION >= 12030
+                  info->fabric_clique = fabric_info.cliqueId;
+#else
+                  info->fabric_clique = fabric_info.partitionId;
+#endif
+                  memcpy(info->fabric_uuid.bytes, fabric_info.clusterUuid,
+                         sizeof(fabric_info.clusterUuid));
+                }
+              }
+            }
+#endif
           }
 
           // For fast lookups, check if we actually have a numa preference
@@ -4449,15 +4577,38 @@ namespace Realm {
           infos.push_back(info);
         }
 
-        size_t nvswitch_bandwidth = 0;
         if (nvml_initialized) {
-          for (std::vector<GPUInfo *>::iterator it = infos.begin();
-              it != infos.end(); ++it) {
-            GPUInfo *info = *it;
-            // NVLINK link rates (in MB/s) based off
-            // https://en.wikipedia.org/wiki/NVLink
-            static const size_t nvlink_bandwidth_rates[] = {20000, 25000, 25000,
-                                                            23610};
+          for(GPUInfo *info : infos) {
+            nvmlFieldValue_t values[] = {
+#if CUDA_VERSION >= 12000
+              {NVML_FI_DEV_NVLINK_GET_SPEED, 0},
+#else
+              {NVML_FI_DEV_NVLINK_SPEED_MBPS_L0, 0}
+#endif
+#if CUDA_VERSION >= 12030
+              {NVML_FI_DEV_C2C_LINK_GET_STATUS, 0},
+              {NVML_FI_DEV_C2C_LINK_COUNT, 0},
+              {NVML_FI_DEV_C2C_LINK_GET_MAX_BW, 0},
+#endif
+            };
+
+            CHECK_NVML(NVML_FNPTR(nvmlDeviceGetFieldValues)(
+                info->nvml_dev, sizeof(values) / sizeof(values[0]), values));
+#if CUDA_VERSION >= 12030
+            int c2c_status = 0;
+            get_nvml_field_value(values[1], c2c_status);
+            if(c2c_status != 0) {
+              size_t c2c_rate = 0;
+              size_t c2c_count = 0;
+              get_nvml_field_value(values[2], c2c_count);
+              get_nvml_field_value(values[3], c2c_rate);
+              info->c2c_bandwidth = c2c_count * c2c_rate;
+            }
+#endif
+
+            size_t nvlink_rate = 0;
+            get_nvml_field_value(values[0], nvlink_rate);
+
             // Iterate each of the links for this GPU and find what's on the other end
             // of the link, adding this link's bandwidth to the accumulated peer pair
             // bandwidth.
@@ -4465,20 +4616,10 @@ namespace Realm {
               nvmlIntNvLinkDeviceType_t dev_type;
               nvmlEnableState_t link_state;
               nvmlPciInfo_t pci_info;
-              unsigned int nvlink_version;
               nvmlReturn_t status =
                   NVML_FNPTR(nvmlDeviceGetNvLinkState)(info->nvml_dev, i, &link_state);
               if(status != NVML_SUCCESS || link_state != NVML_FEATURE_ENABLED) {
                 continue;
-              }
-
-              CHECK_NVML(NVML_FNPTR(nvmlDeviceGetNvLinkVersion)(info->nvml_dev, i,
-                                                                &nvlink_version));
-              if(nvlink_version >
-                sizeof(nvlink_bandwidth_rates) / sizeof(nvlink_bandwidth_rates[0])) {
-                // Found an unknown nvlink version, so assume the newest version we know
-                nvlink_version =
-                    sizeof(nvlink_bandwidth_rates) / sizeof(nvlink_bandwidth_rates[0]) - 1;
               }
 
               if(NVML_FNPTR(nvmlDeviceGetNvLinkRemoteDeviceType) != nullptr) {
@@ -4488,14 +4629,6 @@ namespace Realm {
                 // GetNvLinkRemoteDeviceType not found, probably an older nvml driver, so
                 // assume GPU
                 dev_type = NVML_NVLINK_DEVICE_TYPE_GPU;
-              }
-
-              unsigned nvlink_bandwidth = nvlink_bandwidth_rates[nvlink_version];
-              if ((info->major == 8) && (info->minor > 2)) {
-                // NVML has no way of querying the minor version of nvlink, but
-                // nvlink 3.1 used with non-GA100 ampere systems has significantly
-                // less bandwidth per lane
-                nvlink_bandwidth = 14063;
               }
 
               if(dev_type == NVML_NVLINK_DEVICE_TYPE_GPU) {
@@ -4511,7 +4644,7 @@ namespace Realm {
                     infos[peer_gpu_idx]->pci_domainid == static_cast<int>(pci_info.domain)) {
                     // Found the peer device on the other end of the link!  Add this link's
                     // bandwidth to the logical peer link
-                    info->logical_peer_bandwidth[peer_gpu_idx] += nvlink_bandwidth;
+                    info->logical_peer_bandwidth[peer_gpu_idx] += nvlink_rate;
                     info->logical_peer_latency[peer_gpu_idx] = 100;
                     break;
                   }
@@ -4530,7 +4663,7 @@ namespace Realm {
               } else if((info == infos[0]) && (dev_type == NVML_NVLINK_DEVICE_TYPE_SWITCH)) {
                 // Accumulate the link bandwidth for one gpu and assume symmetry
                 // across all GPUs, and all GPus have access to the NVSWITCH fabric
-                nvswitch_bandwidth += nvlink_bandwidth;
+                info->nvswitch_bandwidth += nvlink_rate;
               } else if((info == infos[0]) && (dev_type == NVML_NVLINK_DEVICE_TYPE_IBMNPU)) {
                 // TODO: use the npu_bandwidth for sysmem affinities
                 // npu_bandwidth += nvlink_bandwidth;
@@ -4552,8 +4685,9 @@ namespace Realm {
             CHECK_CU(CUDA_DRIVER_FNPTR(cuDeviceGetAttribute)(
                 &buswidth, CU_DEVICE_ATTRIBUTE_GLOBAL_MEMORY_BUS_WIDTH,
                 infos[i]->device));
+            // Account for double-data rate memories
             infos[i]->logical_peer_bandwidth[i] =
-                (125ULL * memclk * buswidth) / 1000000ULL;
+                (250ULL * memclk * buswidth) / 1000000ULL;
             infos[i]->logical_peer_latency[i] =
                 std::max(1ULL, 10000000ULL / memclk);
             log_gpu.info() << "GPU #" << i << " local memory: "
@@ -4573,9 +4707,9 @@ namespace Realm {
                 // Not nvlink (otherwise this would have been enumerated
                 // earlier), so assume this is NVSWITCH (if we detected nvswitch
                 // earlier) or PCIe
-                infos[i]->logical_peer_bandwidth[j] = std::max(
-                    nvswitch_bandwidth,
-                    std::min(infos[i]->pci_bandwidth, infos[j]->pci_bandwidth));
+                infos[i]->logical_peer_bandwidth[j] =
+                    std::max(infos[i]->nvswitch_bandwidth,
+                             std::min(infos[i]->pci_bandwidth, infos[j]->pci_bandwidth));
                 infos[i]->logical_peer_latency[j] = 400;
               }
               log_gpu.info()
@@ -4762,7 +4896,7 @@ namespace Realm {
       // make sure we hear about any changes to the size of the replicated
       //  heap
       runtime->repl_heap.add_listener(rh_listener);
-
+#ifdef REALM_USE_LIBDL
       cuhook_register_callback_fnptr =
           (PFN_cuhook_register_callback)dlsym(NULL, "cuhook_register_callback");
       cuhook_start_task_fnptr = (PFN_cuhook_start_task)dlsym(NULL, "cuhook_start_task");
@@ -4772,11 +4906,7 @@ namespace Realm {
         cuhook_register_callback_fnptr();
         cuhook_enabled = true;
       }
-      initialization_complete.store_release(true);
-      { // Initialization is complete, signal all pending active message handlers
-        AutoLock<> al(cudaipc_mutex);
-        cudaipc_condvar.broadcast();
-      }
+#endif
     }
 
     // create any memories provided by this module (default == do nothing)
@@ -4795,44 +4925,38 @@ namespace Realm {
           (*it)->create_dynamic_fb_memory(runtime, config->cfg_dynfb_max_size);
 
       // Allocate and assign sysmem memories
-      size_t total_host_mem = config->cfg_zc_mem_size + config->cfg_zc_ib_size;
-      if((total_host_mem > 0) && !gpus.empty()) {
+      if(!gpus.empty()) {
         IBMemory *ib_mem = nullptr;
-        CUdeviceptr allocation_gpu_base = 0;
-        char *allocation_cpu_base = nullptr;
-        {
-          // Allocate this host memory on GPU 0 for bookkeeping
-          // TODO: For performance reasons, we'll want to allocate separate host memories
-          // for each GPU tied to a specific numa node that is closest to a particular GPU
-          GPUAllocation *alloc =
-              GPUAllocation::allocate_host(gpus[0], total_host_mem, true, false, true);
-          if(alloc == nullptr) {
-            log_gpu.fatal() << "Insufficient device-mappable host memory: "
-                            << total_host_mem << " total bytes needed";
-            abort();
-          }
-          allocation_gpu_base = alloc->get_dptr();
-          allocation_cpu_base = static_cast<char *>(alloc->get_hptr());
-
-          // right now there are assumptions in several places that unified addressing
-          // keeps the CPU and GPU addresses the same
-          assert(allocation_cpu_base == (char *)allocation_gpu_base);
-        }
 
         if(config->cfg_zc_mem_size > 0) {
+          GPUAllocation *alloc = GPUAllocation::allocate_host(
+              gpus[0], config->cfg_zc_mem_size, /*peer_enabled=*/true, /*shareable=*/true,
+              /*same_va=*/true);
+          if(alloc == nullptr) {
+            log_gpu.fatal() << "Insufficient zero-copy device-mappable host memory: "
+                            << config->cfg_zc_mem_size << " total bytes needed";
+            abort();
+          }
           Memory m = runtime->next_local_memory_id();
-          zcmem_cpu_base = allocation_cpu_base;
-          zcmem = new GPUZCMemory(m, allocation_gpu_base, zcmem_cpu_base,
+          zcmem = new GPUZCMemory(gpus[0], m, alloc->get_dptr(), alloc->get_hptr(),
                                   config->cfg_zc_mem_size, MemoryImpl::MKIND_ZEROCOPY,
                                   Memory::Kind::Z_COPY_MEM);
           runtime->add_memory(zcmem);
         }
 
         if(config->cfg_zc_ib_size > 0) {
+          GPUAllocation *alloc = GPUAllocation::allocate_host(
+              gpus[0], config->cfg_zc_ib_size, /*peer_enabled=*/true, /*shareable=*/true,
+              /*same_va=*/false);
+          if(alloc == nullptr) {
+            log_gpu.fatal() << "Insufficient ib device-mappable host memory: "
+                            << config->cfg_zc_ib_size << " total bytes needed";
+            abort();
+          }
           Memory m = runtime->next_local_ib_memory_id();
-          zcib_cpu_base = allocation_cpu_base + config->cfg_zc_mem_size;
           ib_mem = new IBMemory(m, config->cfg_zc_ib_size, MemoryImpl::MKIND_ZEROCOPY,
-                                Memory::Z_COPY_MEM, zcib_cpu_base, 0);
+                                Memory::Z_COPY_MEM, alloc->get_hptr(), nullptr);
+          ib_mem->add_module_specific(new CudaDeviceMemoryInfo(gpus[0]->context));
           runtime->add_ib_memory(ib_mem);
         }
 
@@ -4874,7 +4998,7 @@ namespace Realm {
         uvm_base = reinterpret_cast<void *>(uvm_gpu_base);
         Memory m = runtime->next_local_memory_id();
         uvmmem =
-            new GPUZCMemory(m, uvm_gpu_base, uvm_base, config->cfg_uvm_mem_size,
+            new GPUZCMemory(gpus[0], m, uvm_gpu_base, uvm_base, config->cfg_uvm_mem_size,
                             MemoryImpl::MKIND_MANAGED, Memory::Kind::GPU_MANAGED_MEM);
         runtime->add_memory(uvmmem);
 
@@ -4892,6 +5016,45 @@ namespace Realm {
                 << "GPU #" << gpu->info->index
                 << " is not capable of concurrent access to managed memory!";
           }
+        }
+      }
+    }
+
+    template <typename Container>
+    static void enumerate_ipc_entries(std::vector<CudaIpcResponseEntry> &entries,
+                                      Container container)
+    {
+      for(typename Container::value_type const mem : container) {
+        CudaIpcResponseEntry entry;
+        const CudaDeviceMemoryInfo *cdm =
+            mem->template find_module_specific<CudaDeviceMemoryInfo>();
+        if((cdm == nullptr) || (mem->size == 0)) {
+          continue;
+        }
+        CUdeviceptr dptr = reinterpret_cast<CUdeviceptr>(mem->get_direct_ptr(0, 0));
+        if(dptr != 0) {
+          GPUAllocation &alloc = cdm->gpu->allocations[dptr];
+          entry.src_gpu_uuid = cdm->gpu->info->uuid;
+          entry.mem = mem->me;
+          entry.base_ptr = dptr;
+          entry.size = mem->size;
+          if(alloc.get_ipc_handle(entry.data.ipc_handle)) {
+            entry.type = CUDA_IPC_RESPONSE_TYPE_IPC;
+          }
+#if CUDA_VERSION >= 12030
+          else if(alloc.get_fabric_handle(entry.data.fabric.handle)) {
+            entry.type = CUDA_IPC_RESPONSE_TYPE_FABRIC;
+            entry.data.fabric.clique_id = cdm->gpu->info->fabric_clique;
+            memcpy(entry.data.fabric.cluster_uuid.bytes,
+                   cdm->gpu->info->fabric_uuid.bytes,
+                   sizeof(cdm->gpu->info->fabric_uuid.bytes));
+          }
+#endif
+          else {
+            continue;
+          }
+
+          entries.push_back(entry);
         }
       }
     }
@@ -4927,40 +5090,40 @@ namespace Realm {
         all_local_mems.insert(local_ib_mems.begin(), local_ib_mems.end());
         // </NEW_DMA>
         assert(all_local_mems.size() == (local_ib_mems.size() + local_mems.size()));
-        for(MemoryImpl *memImpl : all_local_mems) {
+        for(MemoryImpl *mem_impl : all_local_mems) {
           // ignore FB/ZC/managed memories or anything that doesn't have a
           //   "direct" pointer
-          if((memImpl->kind == MemoryImpl::MKIND_GPUFB) ||
-             (memImpl->kind == MemoryImpl::MKIND_ZEROCOPY) ||
-             (memImpl->kind == MemoryImpl::MKIND_MANAGED))
+          if((mem_impl->kind == MemoryImpl::MKIND_GPUFB) ||
+             (mem_impl->kind == MemoryImpl::MKIND_ZEROCOPY) ||
+             (mem_impl->kind == MemoryImpl::MKIND_MANAGED))
             continue;
 
           // skip any memory that's over the max size limit for host
           //  registration
           if((config->cfg_hostreg_limit > 0) &&
-             (memImpl->size > config->cfg_hostreg_limit)) {
-            log_gpu.info() << "memory " << memImpl->me
-                           << " is larger than hostreg limit (" << memImpl->size << " > "
+             (mem_impl->size > config->cfg_hostreg_limit)) {
+            log_gpu.info() << "memory " << mem_impl->me
+                           << " is larger than hostreg limit (" << mem_impl->size << " > "
                            << config->cfg_hostreg_limit << ") - skipping registration";
             continue;
           }
 
-          void *base = memImpl->get_direct_ptr(0, memImpl->size);
+          void *base = mem_impl->get_direct_ptr(0, mem_impl->size);
           if(base == 0) {
             continue;
           }
 
           GPUAllocation *alloc =
-              GPUAllocation::register_allocation(gpus[0], base, memImpl->size);
+              GPUAllocation::register_allocation(gpus[0], base, mem_impl->size);
           if(alloc == nullptr) {
-            log_gpu.info() << "failed to register mem " << memImpl->me << " (" << base
-                           << " + " << memImpl->size << ")";
+            log_gpu.info() << "failed to register mem " << mem_impl->me << " (" << base
+                           << " + " << mem_impl->size << ")";
             continue;
           }
 
           // Make sure each gpu knows that this is a pinned sysmem it can use
           for(GPU *gpu : gpus) {
-            gpu->pinned_sysmems.insert(memImpl->me);
+            gpu->pinned_sysmems.insert(mem_impl->me);
           }
         }
       }
@@ -4968,6 +5131,11 @@ namespace Realm {
       // ask any ipc-able nodes to share handles with us
       if(config->cfg_use_cuda_ipc && !gpus.empty()) {
         NodeSet ipc_peers = Network::shared_peers;
+        // If this is a fabric enabled system, then we need to query all ranks in the
+        // system for mappings (assume all GPUs are fabric enabled)
+        if(gpus[0]->info->fabric_supported) {
+          ipc_peers = Network::all_peers;
+        }
 
         if(!ipc_peers.empty()) {
           log_cudaipc.info() << "Sending cuda ipc handles to " << ipc_peers.size()
@@ -4975,28 +5143,8 @@ namespace Realm {
           const Node &n = get_runtime()->nodes[Network::my_node_id];
           std::vector<CudaIpcResponseEntry> entries;
           // Find all the memories that are exportable via CUDA-IPC
-          for(MemoryImpl *const memImpl : n.memories) {
-            CudaIpcResponseEntry entry;
-            const CudaDeviceMemoryInfo *cdm =
-                memImpl->find_module_specific<CudaDeviceMemoryInfo>();
-            if((cdm == nullptr) || (memImpl->size == 0)) {
-              continue;
-            }
-            CUdeviceptr dptr =
-                reinterpret_cast<CUdeviceptr>(memImpl->get_direct_ptr(0, 0));
-            if(dptr != 0) {
-              AutoGPUContext agc(cdm->gpu);
-              CUresult ret = CUDA_DRIVER_FNPTR(cuIpcGetMemHandle)(&entry.handle, dptr);
-              log_cudaipc.info() << "getmem handle " << std::hex << dptr << ' '
-                                 << memImpl->me << ' ' << std::dec << " -> " << ret;
-              if(ret == CUDA_SUCCESS) {
-                entry.src_gpu_uuid = cdm->gpu->info->uuid;
-                entry.mem = memImpl->me;
-                entry.base_ptr = dptr;
-                entries.push_back(entry);
-              }
-            }
-          }
+          enumerate_ipc_entries(entries, n.memories);
+          enumerate_ipc_entries(entries, n.ib_memories);
 
           // Broadcast all the IPC handles to all my peers
           // TODO: this could be replaced with ipc_mailbox
@@ -5015,13 +5163,18 @@ namespace Realm {
           amsg.add_payload(entries.data(), datalen);
           amsg.commit();
 
+          log_cudaipc.debug() << "Sent " << entries.size() << " IPC entries";
+
           {
             // Wait for all the ipc_peers to send their IPC handles back to us
-            AutoLock<> al(cuda_module_singleton->cudaipc_mutex);
-            log_cudaipc.spew() << "Waiting for cudaipc responses...";
-            while(cuda_module_singleton->cudaipc_responses_received.load_acquire() !=
-                  ipc_peers.size()) {
-              cuda_module_singleton->cudaipc_condvar.wait();
+            AutoLock<> al(cudaipc_mutex);
+            log_cudaipc.debug() << "Waiting for cudaipc responses...";
+
+            cudaipc_responses_received.store_release(ipc_peers.size());
+            initialization_complete.store_release(true);
+            cudaipc_condvar.broadcast();
+            while(cuda_module_singleton->cudaipc_responses_received.load_acquire() != 0) {
+              cudaipc_condvar.wait();
             }
           }
         }
@@ -5344,6 +5497,7 @@ namespace Realm {
     {
       const CudaIpcResponseEntry *entries = nullptr;
       assert(cuda_module_singleton != nullptr);
+      bool allow_ipc = true;
 
       log_cudaipc.debug() << "IPC request from " << sender;
 
@@ -5382,8 +5536,8 @@ namespace Realm {
                     sizeof(local_hostname)) != 0) &&
            (args.hostid != gethostid())) {
           log_cudaipc.info() << "Sender " << sender
-                             << " is not an ipc-capable node, skipping import";
-          goto Done;
+                             << " is not an ipc-capable node, skipping ipc import";
+          allow_ipc = false;
         }
       }
       data = static_cast<const char *>(data) + HOST_NAME_MAX;
@@ -5393,51 +5547,86 @@ namespace Realm {
       entries = static_cast<const CudaIpcResponseEntry *>(data);
       assert(datalen == (args.count * sizeof(CudaIpcResponseEntry)));
 
+      // For each entry
+      //  if type == fabric: find a gpu with the same clique/cluster, import it and peer
+      //  access for everyone with the same clique/cluster
+      //    for each gpu: add an ipc mapping
+      //  if type == ipc and allow IPC:
+      //    for each gpu: open_ipc(), add an ipc mapping.
       for(GPU *gpu : cuda_module_singleton->gpus) {
-        AutoGPUContext agc(gpu);
-
-        // attempt to import each entry
-        for(unsigned i = 0; i < args.count; i++) {
-          GPUAllocation *alloc = GPUAllocation::open_ipc(gpu, entries[i].handle);
-          if(alloc == nullptr) {
-            log_cudaipc.info() << "Failed to open ipc handle from " << sender
-                               << "! Skipping";
-            continue;
-          }
-
+        for(size_t i = 0; i < args.count; i++) {
+          const CudaIpcResponseEntry &entry = entries[i];
           GPU::CudaIpcMapping mapping;
+          GPUAllocation *alloc = nullptr;
+
           mapping.src_gpu = nullptr;
           mapping.owner = sender;
-          mapping.mem = entries[i].mem;
-          mapping.local_base = alloc->get_dptr();
-          mapping.address_offset = entries[i].base_ptr - alloc->get_dptr();
+          mapping.mem = entry.mem;
 
-          // Find and track the source gpu for this mapping
           for(GPU *mapping_gpu : cuda_module_singleton->gpus) {
             if(memcmp(&mapping_gpu->info->uuid, &entries[i].src_gpu_uuid,
                       sizeof(mapping_gpu->info->uuid)) == 0) {
               mapping.src_gpu = mapping_gpu;
             }
           }
-          {
+
+          switch(entry.type) {
+          case CUDA_IPC_RESPONSE_TYPE_IPC:
+            if(allow_ipc) {
+              alloc = GPUAllocation::open_ipc(gpu, entry.data.ipc_handle);
+            }
+            break;
+#if CUDA_VERSION >= 12030
+          case CUDA_IPC_RESPONSE_TYPE_FABRIC:
+            // TODO(cperry): Seperate this out such that we can leverage the same VA
+            // across all GPUs that can import this memory to reduce the import time cost
+            if((gpu->info->fabric_clique == entry.data.fabric.clique_id) &&
+               (memcmp(gpu->info->fabric_uuid.bytes, entry.data.fabric.cluster_uuid.bytes,
+                       sizeof(gpu->info->fabric_uuid.bytes)) == 0)) {
+              alloc =
+                  GPUAllocation::open_fabric(gpu, entry.data.fabric.handle, entry.size,
+                                             false, false); // Should be allow_ipc
+            }
+            break;
+#endif
+          default:
+            log_cudaipc.fatal("Invalid ipc entry type received: %d",
+                              static_cast<int>(entry.type));
+            break;
+          }
+
+          if(alloc != nullptr) {
             AutoLock<> al(cuda_module_singleton->cudaipc_mutex);
+
+            if(alloc->get_hptr() != nullptr) {
+              gpu->pinned_sysmems.insert(entry.mem);
+            }
+
+            mapping.local_base = alloc->get_dptr();
+            mapping.address_offset = entry.base_ptr - alloc->get_dptr();
+
             gpu->cudaipc_mappings.push_back(mapping);
 
             // do we have a stream for this target?
-            if(gpu->cudaipc_streams.count(sender) == 0)
+            if(gpu->cudaipc_streams.count(sender) == 0) {
+              AutoGPUContext ag(gpu);
               gpu->cudaipc_streams[sender] = new GPUStream(gpu, gpu->worker);
+            }
+          } else {
+            log_cudaipc.info("Unable to import given memory from sender %u",
+                             static_cast<unsigned>(sender));
           }
         }
       }
+
     Done:
     {
       // Count the number of peers that have been received and signal to continue
       // initialization when all of them have been recieved.  This needs to be done for
       // every message received in order to unblock module initialization
       AutoLock<> al(cuda_module_singleton->cudaipc_mutex);
-      if((cuda_module_singleton->cudaipc_responses_received.fetch_add_acqrel(1) + 1) ==
-         Network::shared_peers.size()) {
-        log_cudaipc.spew() << "Signalling completion!";
+      if((cuda_module_singleton->cudaipc_responses_received.fetch_sub_acqrel(1)) == 1) {
+        log_cudaipc.debug() << "Signalling completion!";
         cuda_module_singleton->cudaipc_condvar.signal();
       }
     }
@@ -5540,7 +5729,7 @@ namespace Realm {
       }
       res = CUDA_DRIVER_FNPTR(cuMemExportToShareableHandle)(&handle, mmap_handle,
                                                             CU_MEM_HANDLE_TYPE_FABRIC, 0);
-      if(res == CUDA_SUCCESS) {
+      if(res != CUDA_SUCCESS) {
         REPORT_CU_ERROR(Logger::LEVEL_INFO, "cuMemExportToShareableHandle", res);
       }
       return res == CUDA_SUCCESS;
@@ -5590,6 +5779,7 @@ namespace Realm {
       }
 
       if(shareable) {
+        alloc.has_ipc_handle = true;
         CHECK_CU(CUDA_DRIVER_FNPTR(cuIpcGetMemHandle)(&alloc.ipc_handle, alloc.dev_ptr));
       }
 
@@ -5603,11 +5793,22 @@ namespace Realm {
     {
       CUresult ret = CUDA_SUCCESS;
       GPUAllocation alloc;
+#if CUDA_VERSION >= 12030
+      bool map_host = prop.location.type == CU_MEM_LOCATION_TYPE_HOST_NUMA;
+#else
+      bool map_host = false;
+#endif
 
       size = GPUAllocation::align_size(prop, size);
 
-      CHECK_CU(CUDA_DRIVER_FNPTR(cuMemCreate)(&alloc.mmap_handle, size, &prop, 0));
-      ret = alloc.map_allocation(gpu, alloc.mmap_handle, size, vaddr, 0, peer_enabled);
+      ret = CUDA_DRIVER_FNPTR(cuMemCreate)(&alloc.mmap_handle, size, &prop, 0);
+      if(ret != CUDA_SUCCESS) {
+        REPORT_CU_ERROR(Logger::LEVEL_INFO, "cuMemCreate", ret);
+        return nullptr;
+      }
+
+      ret = alloc.map_allocation(gpu, alloc.mmap_handle, size, vaddr, 0, peer_enabled,
+                                 map_host);
       if(ret != CUDA_SUCCESS) {
         REPORT_CU_ERROR(Logger::LEVEL_INFO, "cuMemCreate", ret);
         CHECK_CU(CUDA_DRIVER_FNPTR(cuMemRelease)(alloc.mmap_handle));
@@ -5627,12 +5828,50 @@ namespace Realm {
       GPUAllocation alloc;
       AutoGPUContext ac(gpu);
       unsigned int cuda_flags = CU_MEMHOSTALLOC_DEVICEMAP;
-      // TODO: if not shareable, then just use cuMemHostAlloc
-      //       if shareable:
-      //         if CUDA_VERSION > 12.3 && fabric_supported: cuMemMap with fabric handle
-      //         if !same_va || gpu->info->host_gpu_same_va: create_shm() +
-      //         cuMemHostRegister else error; // Can't do shareable in this case
-      assert(!shareable);
+
+      if(shareable) {
+#if CUDA_VERSION >= 12030
+        int numa = -1;
+        GPUAllocation *shared_alloc = nullptr;
+        if((CUDA_SUCCESS ==
+            CUDA_DRIVER_FNPTR(cuDeviceGetAttribute)(
+                &numa, CU_DEVICE_ATTRIBUTE_HOST_NUMA_ID, gpu->info->device)) &&
+           (numa >= 0)) {
+          CUmemAllocationProp mem_prop;
+          memset(&mem_prop, 0, sizeof(mem_prop));
+          mem_prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
+          mem_prop.location.type = CU_MEM_LOCATION_TYPE_HOST_NUMA;
+          mem_prop.location.id = numa;
+          mem_prop.win32HandleMetaData = GPUAllocation::get_win32_shared_attributes();
+
+          // Try fabric first.  This can fail for a number of reasons, but most commonly,
+          // it's because the application isn't bound to an IMEX channel
+          if(gpu->info->fabric_supported) {
+#if CUDA_VERSION >= 12030
+            mem_prop.requestedHandleTypes = CU_MEM_HANDLE_TYPE_FABRIC;
+#endif
+            shared_alloc = allocate_mmap(gpu, mem_prop, size, 0, peer_enabled);
+            if(shared_alloc != nullptr) {
+              return shared_alloc;
+            }
+          }
+
+          // Fallback to OS handle.
+#if defined(REALM_ON_WINDOWS)
+          mem_prop.requestedHandleTypes = CU_MEM_HANDLE_TYPE_WIN32;
+#else
+          mem_prop.requestedHandleTypes = CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR;
+#endif
+
+          shared_alloc = allocate_mmap(gpu, mem_prop, size, 0, peer_enabled);
+          if(shared_alloc != nullptr) {
+            return shared_alloc;
+          }
+          // Fallback to non-shareable if, for some reason, the platform cannot allocate
+          // the memory
+        }
+#endif
+      }
 
       if(peer_enabled) {
         cuda_flags |= CU_MEMHOSTALLOC_PORTABLE;
@@ -5703,7 +5942,8 @@ namespace Realm {
         alloc.owns_va = true;
       } else {
         // This allocation is already registered, so check if the allocation range is
-        // actually pinned, then track it without releasing it ourselves
+        // actually pinned, then track it without releasing it ourselves (weak_ptr
+        // semantics)
         size_t registered_size = 0;
         CUdeviceptr base_addr = 0;
         void *values[] = {(void *)&base_addr, (void *)&size};
@@ -5729,7 +5969,8 @@ namespace Realm {
       return &gpu->add_allocation(std::move(alloc));
     }
 
-    /*static*/ GPUAllocation *GPUAllocation::open_ipc(GPU *gpu, CUipcMemHandle mem_hdl)
+    /*static*/ GPUAllocation *GPUAllocation::open_ipc(GPU *gpu,
+                                                      const CUipcMemHandle &mem_hdl)
     {
       CUresult ret = CUDA_SUCCESS;
       GPUAllocation alloc;
@@ -5755,6 +5996,8 @@ namespace Realm {
 #if CUDA_VERSION >= 11000
       GPUAllocation alloc;
       CUmemGenericAllocationHandle cuda_hdl;
+      CUmemAllocationProp mem_prop{};
+      bool map_host = false;
       void *casted_handle = reinterpret_cast<void *>(static_cast<uintptr_t>(hdl));
 #if defined(REALM_ON_WINDOWS)
       CUmemAllocationHandleType handle_type = CU_MEM_HANDLE_TYPE_WIN32;
@@ -5764,8 +6007,14 @@ namespace Realm {
 
       CHECK_CU(CUDA_DRIVER_FNPTR(cuMemImportFromShareableHandle)(&cuda_hdl, casted_handle,
                                                                  handle_type));
+      CHECK_CU(
+          CUDA_DRIVER_FNPTR(cuMemGetAllocationPropertiesFromHandle)(&mem_prop, cuda_hdl));
+#if CUDA_VERSION >= 12030
+      map_host = (mem_prop.location.type == CU_MEM_LOCATION_TYPE_HOST_NUMA);
+#endif
 
-      if(alloc.map_allocation(gpu, cuda_hdl, size, 0, 0, peer_enabled) != CUDA_SUCCESS) {
+      if(alloc.map_allocation(gpu, cuda_hdl, size, 0, 0, peer_enabled, map_host) !=
+         CUDA_SUCCESS) {
         CHECK_CU(CUDA_DRIVER_FNPTR(cuMemRelease)(cuda_hdl));
         return nullptr;
       }
@@ -5781,18 +6030,29 @@ namespace Realm {
     }
 
 #if CUDA_VERSION >= 12030
-    /*static*/ GPUAllocation *GPUAllocation::open_fabric(GPU *gpu, CUmemFabricHandle &hdl,
-                                                         size_t size,
-                                                         bool peer_enabled /*= true*/)
+    /*static*/ GPUAllocation *
+    GPUAllocation::open_fabric(GPU *gpu, const CUmemFabricHandle &hdl, size_t size,
+                               bool peer_enabled /*= true*/, bool is_local /* = false*/)
     {
       GPUAllocation alloc;
       CUmemGenericAllocationHandle cuda_hdl;
+      CUmemAllocationProp mem_prop{};
       CUmemAllocationHandleType handle_type = CU_MEM_HANDLE_TYPE_FABRIC;
 
-      CHECK_CU(CUDA_DRIVER_FNPTR(cuMemImportFromShareableHandle)(&cuda_hdl, &hdl,
-                                                                 handle_type));
+      CHECK_CU(CUDA_DRIVER_FNPTR(cuMemImportFromShareableHandle)(
+          &cuda_hdl, const_cast<void *>(reinterpret_cast<const void *>(&hdl)),
+          handle_type));
 
-      if(alloc.map_allocation(gpu, cuda_hdl, size, 0, 0, peer_enabled) != CUDA_SUCCESS) {
+      CHECK_CU(
+          CUDA_DRIVER_FNPTR(cuMemGetAllocationPropertiesFromHandle)(&mem_prop, cuda_hdl));
+
+      // Unfortunately HOST_NUMA memory cannot be mapped to the CPU if it exists on
+      // another node, only to the GPU.
+
+      if(alloc.map_allocation(
+             gpu, cuda_hdl, size, 0, 0, peer_enabled,
+             is_local && (mem_prop.location.type == CU_MEM_LOCATION_TYPE_HOST_NUMA)) !=
+         CUDA_SUCCESS) {
         CHECK_CU(CUDA_DRIVER_FNPTR(cuMemRelease)(cuda_hdl));
         return nullptr;
       }
@@ -5807,7 +6067,8 @@ namespace Realm {
     CUresult GPUAllocation::map_allocation(GPU *gpu, CUmemGenericAllocationHandle handle,
                                            size_t size, CUdeviceptr vaddr /*= 0*/,
                                            size_t offset /*= 0*/,
-                                           bool peer_enabled /*= false*/)
+                                           bool peer_enabled /*= false*/,
+                                           bool map_host /*= false*/)
     {
       CUresult res = CUDA_SUCCESS;
       std::vector<CUmemAccessDesc> desc(1);
@@ -5845,11 +6106,27 @@ namespace Realm {
           peer_offset++;
         }
       }
+      if(map_host) {
+#if CUDA_VERSION >= 12030
+        // Map this to the CPU as well!
+        desc.push_back({});
+        desc.back().flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
+        desc.back().location.type = CU_MEM_LOCATION_TYPE_HOST_NUMA;
+        desc.back().location.id = 0;
+#else
+        res = CUDA_ERROR_NOT_SUPPORTED;
+        goto Done;
+#endif // CUDA_VERSION >= 12000
+      }
 
       res = CUDA_DRIVER_FNPTR(cuMemSetAccess)(dev_ptr, size, desc.data(), desc.size());
       if(res != CUDA_SUCCESS) {
         REPORT_CU_ERROR(Logger::LEVEL_INFO, "cuMemSetAccess", res);
         goto Done;
+      }
+
+      if(map_host) {
+        host_ptr = reinterpret_cast<void *>(dev_ptr);
       }
 
     Done:
@@ -5919,6 +6196,7 @@ namespace Realm {
           CHECK_CU(CUDA_DRIVER_FNPTR(cuMemAddressFree)(alloc.dev_ptr, alloc.size));
         }
         alloc.dev_ptr = 0;
+        alloc.host_ptr = nullptr;
       }
     }
 #endif

@@ -305,3 +305,21 @@ namespace Legion {
   };
 };
 
+namespace std {
+
+  template<>
+  struct hash<Legion::Mapping::PhysicalInstance> {
+    inline std::size_t operator()(
+        const Legion::Mapping::PhysicalInstance &instance) const
+    { return instance.hash(); }
+  };
+
+  template<>
+  struct hash<Legion::Mapping::CollectiveView> {
+    inline std::size_t operator()(
+        const Legion::Mapping::CollectiveView &view) const
+    { return view.hash(); }
+  };
+
+}; // namespace std
+

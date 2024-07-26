@@ -53,7 +53,9 @@ list(APPEND REALM_TESTS
   multiaffine
   machine_config
   rsrv_acquire_poisoned
+  refcount_image_test
   inst_chain_redistrict
+  refcount_preimage_test
   )
 
 if(Legion_USE_CUDA)
@@ -96,9 +98,6 @@ foreach(test IN LISTS REALM_TESTS)
     set_target_cuda_standard(${test} STANDARD ${Legion_CUDA_STANDARD})
     set_target_cuda_architectures(${test} ARCHITECTURES ${Legion_CUDA_ARCH})
     set_target_cuda_warnings_and_errors(${test} WARN_AS_ERROR ${Legion_BUILD_WARN_AS_ERROR})
-    # Remove this once the Realm::Point class is updated
-    target_compile_options(${test} PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:
-                             -Xcudafe=--diag_suppress=1444>)
   elseif(HIPSRC_${test})
     hip_add_executable(${test} ${test}.cc ${HIPSRC_${test}})
   else()
@@ -138,11 +137,13 @@ set(TESTARGS_simple_reduce     -all)
 set(TESTARGS_sparse_construct  -verbose)
 # FIXME: https://github.com/StanfordLegion/legion/issues/1635
 # set(TESTARGS_cuda_arrays       -ll:gpu 1)
-set(TESTARGS_scatter_test       -ll:gpu 1)
-set(TESTARGS_transpose_test       -ll:gpu 1 -unit_test 1)
-set(TESTARGS_cuda_memcpy_test      -ll:gpu 1 -sparse 64 -gap 0 -chunks 32 -test-sparse -rects 8 -verify)
-set(TESTARGS_machine_config_args    -test_args 1 -ll:cpu 4 -ll:util 2 -ll:io 1 -ll:csize 16 -ll:stacksize 4 -ll:pin_util 1 -ll:ext_sysmem 0 -ll:rsize 2 -ll:nsize 2 -ll:ncsize 1 -ll:ncpu 1 -numa:pin)
-set(TESTARGS_cuda_transpose_test      -ll:gpu 1)
+set(TESTARGS_task_stream         -ll:gpu 1)
+set(TESTARGS_scatter_test        -ll:gpu 1)
+set(TESTARGS_transpose_test      -ll:gpu 1 -unit_test 1)
+set(TESTARGS_cuda_memcpy_test    -ll:gpu 1 -sparse 64 -gap 0 -chunks 32 -test-sparse -rects 8 -verify)
+set(TESTARGS_machine_config_args -test_args 1 -ll:cpu 4 -ll:util 2 -ll:io 1 -ll:csize 16 -ll:stacksize 4 -ll:pin_util 1 -ll:ext_sysmem 0 -ll:rsize 2 -ll:nsize 2 -ll:ncsize 1 -ll:ncpu 1 -numa:pin)
+set(TESTARGS_cuda_transpose_test -ll:gpu 1)
+set(TESTARGS_cuda_scatter_test   -ll:gpu 1)
 
 if(Legion_USE_CUDA)
   list(APPEND TESTARGS_machine_config_args -ll:gpu 1 -ll:fsize 1024 -ll:zsize 8 -ll:ib_fsize 16 -ll:ib_zsize 32 -ll:msize 64 -cuda:dynfb 1 -cuda:dynfb_max 128 -ll:streams 2 -ll:d2d_streams 2)

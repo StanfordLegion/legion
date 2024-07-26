@@ -198,7 +198,6 @@ namespace Realm {
       sparsity.id = 0;
       return sparsity;
     }
-
     // construct and fill in a sparsity map
     SparsityMapImplWrapper *wrap = get_runtime()->get_available_sparsity_impl(Network::my_node_id);
     SparsityMap<N,T> sparsity = wrap->me.convert<SparsityMap<N,T> >();
@@ -257,7 +256,9 @@ namespace Realm {
   {
     if(map_impl.load() != 0) {
       if(need_refcount) {
-        log_dpops.warning() << "leaking map:" << me << " refs:" << references.load();
+        log_dpops.fatal() << "leaking sparsity map me:" << me
+                          << " refs:" << references.load()
+                          << " node:" << Network::my_node_id;
         assert(0);
       }
       (*map_deleter)(map_impl.load());
@@ -313,6 +314,7 @@ namespace Realm {
   void SparsityMapImplWrapper::remove_references(unsigned count)
   {
     if(need_refcount) {
+      assert(references.load() >= count);
       if(references.fetch_sub_acqrel(count) == count) {
         assert(Network::my_node_id == NodeID(me.sparsity_creator_node()) ||
                subscribers.empty());

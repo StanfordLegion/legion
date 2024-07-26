@@ -24,6 +24,7 @@
 #include "realm/utils.h"
 
 #include <iostream>
+#include <type_traits>
 
 namespace Realm {
 
@@ -38,65 +39,65 @@ namespace Realm {
 
   // adding this as a parameter to a templated method uses SFINAE to only allow
   //  the template to be instantiated with an integral type
-#define ONLY_IF_INTEGRAL(T) \
-  typename enable_if<is_integral<T2>::value, monostate>::type = monostate()
-#define ONLY_IF_INTEGRAL_DEFN(T) \
-  typename enable_if<is_integral<T2>::value, monostate>::type /*= monostate()*/
-  
-  // a Point is a tuple describing a point in an N-dimensional space - the default "base type"
+#define ONLY_IF_INTEGRAL(Type) std::enable_if_t<std::is_integral<Type>::value, Type>
+
+  // a Point is a tuple describing a point in an N-dimensional space - the default "base
+  // type"
   //  for each dimension is int, but 64-bit indices are supported as well
-
-  // only a few methods exist directly on a Point<N,T>:
-  // 1) trivial constructor
-  // 2) [for N <= 4] constructor taking N arguments of type T
-  // 3) default copy constructor
-  // 4) default assignment operator
-  // 5) operator[] to access individual components
-
-  // specializations for N <= 4 defined in point.inl
   template <int N, typename T>
   struct REALM_PUBLIC_API Point {
-    [[deprecated("The \"Point::x,y,z,w\" members will be removed in the next Realm "
-                 "release. Please switch to using Point::operator[] instead.")]] T x,
-        y, z, w;
-    [[deprecated(
-        "The \"Point::rest\" data member will be removed in the next Realm release. "
-        "Please switch to using Point::operator[] instead.")]] T rest[N - 4];
 
+    typedef ONLY_IF_INTEGRAL(T) value_type;
+    value_type values[N]; // use operator[] instead
+
+    Point(void) = default;
     REALM_CUDA_HD
-    Point(void);
-    REALM_CUDA_HD
-    explicit Point(T val);
-    // construct from any integral value
-    template <typename T2>
-    REALM_CUDA_HD
-    explicit Point(T2 val,
-		   ONLY_IF_INTEGRAL(T2)); // same value for all dimensions
-    template <typename T2>
-    REALM_CUDA_HD
-    explicit Point(T2 vals[N], ONLY_IF_INTEGRAL(T2));
+    explicit Point(value_type val);
+    template <typename Arg0, typename Arg1, typename... Args>
+    REALM_CUDA_HD Point(Arg0 val0, Arg1 val1, Args... vals);
+    // construct from any integral value, same for all dimensions
+    template <typename T2, std::enable_if_t<std::is_integral<T2>::value, bool> = true>
+    REALM_CUDA_HD explicit Point(T2 val);
+    template <typename T2, std::enable_if_t<std::is_integral<T2>::value, bool> = true>
+    REALM_CUDA_HD explicit Point(T2 vals[N]);
     // copies allow type coercion (assuming the underlying type does)
     template <typename T2>
-    REALM_CUDA_HD
-    Point(const Point<N, T2>& copy_from);
+    REALM_CUDA_HD Point(const Point<N, T2> &copy_from);
     template <typename T2>
-    REALM_CUDA_HD
-    Point<N,T>& operator=(const Point<N, T2>& copy_from);
+    REALM_CUDA_HD Point<N, T> &operator=(const Point<N, T2> &copy_from);
 
     REALM_CUDA_HD
-    T& operator[](int index);
+    T &operator[](int index);
     REALM_CUDA_HD
-    const T& operator[](int index) const;
+    const T &operator[](int index) const;
 
     template <typename T2>
-    REALM_CUDA_HD
-    T dot(const Point<N, T2>& rhs) const;
+    REALM_CUDA_HD T dot(const Point<N, T2> &rhs) const;
+
+    // 1-4D accessors.  These will only be available if the class's dimensioned allow for
+    // it, otherwise it is a compiler error to use them
+    REALM_CUDA_HD T &x();
+    REALM_CUDA_HD T &y();
+    REALM_CUDA_HD T &z();
+    REALM_CUDA_HD T &w();
+    REALM_CUDA_HD const T &x() const;
+    REALM_CUDA_HD const T &y() const;
+    REALM_CUDA_HD const T &z() const;
+    REALM_CUDA_HD const T &w() const;
 
     REALM_CUDA_HD
-    static Point<N,T> ZEROES(void);
+    static constexpr Point<N, T> ZEROES(void);
     REALM_CUDA_HD
-    static Point<N,T> ONES(void);
+    static constexpr Point<N, T> ONES(void);
   };
+
+  /// @brief Helper function to initialize Point from a list of types without needing to
+  /// explicitly specify the dimension or type of the resulting Point.
+  template <typename T = int, typename... U>
+  [[nodiscard]] constexpr auto make_point(const U &...rest) -> Point<sizeof...(rest), T>
+  {
+    return Point<sizeof...(rest), ONLY_IF_INTEGRAL(T)>(rest...);
+  }
 
   template <int N, typename T>
   std::ostream& operator<<(std::ostream& os, const Point<N,T>& p);
@@ -285,7 +286,6 @@ namespace std {
 #include "realm/point.inl"
 
 #undef ONLY_IF_INTEGRAL
-#undef ONLY_IF_INTEGRAL_DEFN
 
 #endif // ifndef REALM_POINT_H
 

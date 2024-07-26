@@ -467,7 +467,7 @@ def setup_terra(llvm_version, terra_url, terra_branch, terra_binary, terra_lua, 
                 extract(prefix_dir, bin_tarball, 'xz')
 
         # also download the corresponding LLVM binary, if applicable
-        llvm_versions = {'1.1.0': None, '1.2.0': '18.1.7'}
+        llvm_versions = {'1.2.0': '18.1.7'}
         llvm_triples = {('Linux', 'x86_64'): 'x86_64-linux-gnu'}
         llvm_install_dir = None
         if release_version in llvm_versions and (terra_system, terra_processor) in llvm_triples:
@@ -663,11 +663,11 @@ if __name__ == '__main__':
         help='Use Make to build Terra.')
     parser.add_argument(
         '--gasnet-version', dest='gasnet_version', required=False,
-        default=os.environ.get('GASNET_VERSION', 'GASNet-2023.9.0'),
+        default=os.environ.get('GASNET_VERSION', 'GASNet-2024.5.0'),
         help='Select GASNet version.')
     parser.add_argument(
         '--gasnet-config-version', dest='gasnet_config_version', required=False,
-        default='034ada74927746e8bfa21d43b527a052118e2def', # master as of 2024-05-28
+        default='d7cc06907cc66e2a3f968e19ea17a80650b16a3b', # master as of 2024-07-19
         help='Select version of the GASNet configuration/build tool.')
     parser.add_argument(
         '-j', dest='thread_count', nargs='?', type=int,

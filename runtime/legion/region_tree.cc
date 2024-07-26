@@ -3403,8 +3403,8 @@ namespace Legion {
         // still be getting notifications to compute the complete
         if (complete < 0)
           result->initialize_disjoint_complete_notifications();
-        else if ((runtime->profiler != NULL) && result->is_owner())
-          runtime->profiler->record_index_partition(parent->handle.id,
+        else if ((implicit_profiler != NULL) && result->is_owner())
+          implicit_profiler->register_index_partition(parent->handle.id,
               p.id, disjoint, result->color);
         result->register_with_runtime();
       }
@@ -5093,12 +5093,12 @@ namespace Legion {
         memcpy(&ptr, &buffer, sizeof(ptr));
         LegionSpy::log_index_space_name(handle.id, ptr);
       }
-      if (runtime->profiler && (LEGION_NAME_SEMANTIC_TAG == tag))
+      if ((implicit_profiler != NULL) && (LEGION_NAME_SEMANTIC_TAG == tag))
       {
         const char *ptr = NULL;
         static_assert(sizeof(buffer) == sizeof(ptr));
         memcpy(&ptr, &buffer, sizeof(ptr));
-	runtime->profiler->record_index_space(handle.id, ptr);
+	implicit_profiler->register_index_space(handle.id, ptr);
       }
     }
 
@@ -5121,12 +5121,12 @@ namespace Legion {
         memcpy(&ptr, &buffer, sizeof(ptr));
         LegionSpy::log_index_partition_name(handle.id, ptr);
       }
-      if (runtime->profiler && (LEGION_NAME_SEMANTIC_TAG == tag))
+      if ((implicit_profiler != NULL) && (LEGION_NAME_SEMANTIC_TAG == tag))
       {
         const char *ptr = NULL;
         static_assert(sizeof(buffer) == sizeof(ptr));
         memcpy(&ptr, &buffer, sizeof(ptr));
-	runtime->profiler->record_index_part(handle.id, ptr);
+	implicit_profiler->register_index_part(handle.id, ptr);
       }
     }
 
@@ -5149,12 +5149,12 @@ namespace Legion {
         memcpy(&ptr, &buffer, sizeof(ptr));
         LegionSpy::log_field_space_name(handle.id, ptr);
       }
-      if (runtime->profiler && (LEGION_NAME_SEMANTIC_TAG == tag))
+      if ((implicit_profiler != NULL) && (LEGION_NAME_SEMANTIC_TAG == tag))
       {
         const char *ptr = NULL;
         static_assert(sizeof(buffer) == sizeof(ptr));
         memcpy(&ptr, &buffer, sizeof(ptr));
-	runtime->profiler->record_field_space(handle.id, ptr);
+	implicit_profiler->register_field_space(handle.id, ptr);
       }
     }
 
@@ -5178,12 +5178,12 @@ namespace Legion {
         memcpy(&ptr, &buf, sizeof(ptr));
         LegionSpy::log_field_name(handle.id, fid, ptr);
       }
-      if (runtime->profiler && (LEGION_NAME_SEMANTIC_TAG == tag))
+      if ((implicit_profiler != NULL) && (LEGION_NAME_SEMANTIC_TAG == tag))
       {
         const char *ptr = NULL;
         static_assert(sizeof(buf) == sizeof(ptr));
         memcpy(&ptr, &buf, sizeof(ptr));
-	runtime->profiler->record_field(handle.id, fid, size, ptr); 
+	implicit_profiler->register_field(handle.id, fid, size, ptr); 
       }
     }
 
@@ -5207,12 +5207,12 @@ namespace Legion {
         LegionSpy::log_logical_region_name(handle.index_space.id,
             handle.field_space.id, handle.tree_id, ptr);
       }
-      if (runtime->profiler && (LEGION_NAME_SEMANTIC_TAG == tag))
+      if ((implicit_profiler != NULL) && (LEGION_NAME_SEMANTIC_TAG == tag))
       {
         const char *ptr = NULL;
         static_assert(sizeof(buffer) == sizeof(ptr));
         memcpy(&ptr, &buffer, sizeof(ptr));
-	runtime->profiler->record_logical_region(handle.index_space.id,
+	implicit_profiler->register_logical_region(handle.index_space.id,
             handle.field_space.id, handle.tree_id, ptr);
       }
     }
@@ -9554,8 +9554,8 @@ namespace Legion {
           if (runtime->legion_spy_enabled)
             LegionSpy::log_index_subspace(handle.id, is.id, 
                 runtime->address_space, result->get_domain_point_color());
-          if (runtime->profiler != NULL)
-            runtime->profiler->record_index_subspace(handle.id, is.id,
+          if (implicit_profiler != NULL)
+            implicit_profiler->register_index_subspace(handle.id, is.id,
                 result->get_domain_point_color());
           return result;
         }
@@ -10157,8 +10157,8 @@ namespace Legion {
             complete.store((parent_volume == total_children_volume));
           }
         }
-        if (context->runtime->profiler != NULL)
-          context->runtime->profiler->record_index_partition(parent->handle.id,
+        if (implicit_profiler != NULL)
+          implicit_profiler->register_index_partition(parent->handle.id,
               handle.id, disjoint.load(), color);
       }
       has_disjoint.store(true);
