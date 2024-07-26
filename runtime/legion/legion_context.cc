@@ -25374,7 +25374,7 @@ namespace Legion {
             REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
               "Failed to allocate DeferredBuffer/Value/Reduction of %zd bytes "
               "for leaf task %s (UID %lld) in %s memory because the memory is "
-              "fragmented. There are still %zd bytes free in the pool %zd "
+              "fragmented. There are still %zd bytes free in the pool of %zd "
               "bytes but they are sufficiently fragmented such that a hole of "
               "%zd bytes aligned on a %zd byte boundary cannot be found. We "
               "recommend you check the order of allocations and alignment "
