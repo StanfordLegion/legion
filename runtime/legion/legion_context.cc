@@ -11813,13 +11813,28 @@ namespace Legion {
       FutureInstance *instance = manager->create_future_instance(
           get_unique_id(), context_coordinates, size);
       if (instance == NULL)
-        REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
-            "Failed to allocate space for a future for task %s (UID %lld) "
-            "in %s memory of size %zd bytes. If you receive this error then "
-            "you really are out of memory. You have two options: either "
-            "increase the size of this memory when configuring Realm, or "
-            "find a bigger machine.", get_task_name(), get_unique_id(),
-            manager->get_name(), size)
+      {
+        const size_t remaining = manager->query_available_memory();
+        if (size <= remaining)
+          REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
+              "Failed to allocate space for a future for task %s (UID %lld) "
+              "in %s memory of size %zd bytes. There are still %zd bytes "
+              "free in the memory, but they are fragmented such that a hole "
+              "of %zd bytes could not be found. We recommend you check the "
+              "order of allocations and alignment requirements to try to "
+              "minimize the amount of padding between instances. Otherwise "
+              "you will need to increase the size of the memory.", 
+              get_task_name(), get_unique_id(), manager->get_name(),
+              size, remaining, size)
+        else
+          REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
+              "Failed to allocate space for a future for task %s (UID %lld) "
+              "in %s memory of size %zd bytes. If you receive this error then "
+              "you really are out of memory. You have two options: either "
+              "increase the size of this memory when configuring Realm, or "
+              "find a bigger machine.", get_task_name(), get_unique_id(),
+              manager->get_name(), size)
+      }
       return instance;
     }
 
@@ -11841,13 +11856,29 @@ namespace Legion {
       PhysicalInstance instance = manager->create_task_local_instance(
          get_unique_id(), context_coordinates, unique_event, layout, use_event);
       if (!instance.exists())
-        REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
-            "Failed to allocate DeferredBuffer/Value/Reduction for task %s "
-            "(UID %lld) in %s memory of size %zd bytes. If you receive this "
-            "error then you  really are out of memory. You have two options: "
-            "increase the size of this memory when configuring Realm, or "
-            "find a bigger machine.", get_task_name(), get_unique_id(), 
-            manager->get_name(), layout->bytes_used)
+      {
+        const size_t remaining = manager->query_available_memory();
+        if (layout->bytes_used <= remaining)
+          REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
+              "Failed to allocate DeferredBuffer/Value/Reduction for task %s "
+              "(UID %lld) in %s memory of size %zd bytes. There are still %zd "
+              "bytes free in the memory, but they are fragmented such that a "
+              "hole of %zd bytes aligned on a %zd byte boundary could not be "
+              "found. We recommend you check the order of allocations and "
+              "alignment requirements to try to minimize the amount of padding "
+              "between instances. Otherwise you will need to increase the size "
+              "of the memory.", get_task_name(), get_unique_id(),
+              manager->get_name(), layout->bytes_used, remaining,
+              layout->bytes_used, layout->alignment_reqd)
+        else
+          REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
+              "Failed to allocate DeferredBuffer/Value/Reduction for task %s "
+              "(UID %lld) in %s memory of size %zd bytes. If you receive this "
+              "error then you really are out of memory. You have two options: "
+              "increase the size of this memory when configuring Realm, or "
+              "find a bigger machine.", get_task_name(), get_unique_id(), 
+              manager->get_name(), layout->bytes_used)
+      }
       task_local_instances[instance] = unique_event;
       // Make sure that it is safe to use this instance before handing it back
       if (use_event.exists())
@@ -25182,14 +25213,32 @@ namespace Legion {
         const size_t pool_limit = finder->second->query_memory_limit();
         const size_t memory_limit = manager->query_available_memory();
         if (pool_limit > 0)
-          REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
-              "Failed to allocate %zd bytes for future needed by leaf task %s "
-              "(UID %lld) in %s memory because there was insufficient space "
-              "reserved for dynamic allocations. Only %zd bytes remain of %zd "
-              "reserved bytes. This means that you set your upper bound for "
-              "the amount of dynamic memory required for this task too low.",
-              size, get_task_name(), get_unique_id(), manager->get_name(),
-              finder->second->query_available_memory(), pool_limit)
+        {
+          const size_t remaining = finder->second->query_available_memory();
+          if (remaining < size)
+            REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
+                "Failed to allocate %zd bytes for future needed by leaf task %s"
+                " (UID %lld) in %s memory because there was insufficient space "
+                "reserved for dynamic allocations. Only %zd bytes remain of %zd"
+                " reserved bytes. This means that you set your upper bound for "
+                "the amount of dynamic memory required for this task too low.",
+                size, get_task_name(), get_unique_id(), manager->get_name(),
+                remaining, pool_limit)
+          else
+            REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
+                "Failed to allocate %zd bytes for future needed by leaf task %s"
+                " (UID %lld) in %s memory because the pool reserved for dynamic"
+                " memory allocations has become fragmented. There are still %zd"
+                " bytes remaining in the pool of %zd bytes, but they are "
+                "fragmented such that a hole of %zd bytes cannot be found. We "
+                "recommend you check the order of allocations and alignment "
+                "requirements to try to minimize the amount of padding between "
+                "instances. Otherwise you will need to request a larger pool "
+                "for dynamic allocations that considers the necessary padding "
+                "required between instances to satisfy your alignment needs.",
+                size, get_task_name(), get_unique_id(), manager->get_name(),
+                remaining, pool_limit, size)
+        }
         else if (memory_limit < size)
           REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
               "Failed to allocate %zd bytes for future needed by leaf task %s "
@@ -25310,15 +25359,32 @@ namespace Legion {
         const size_t pool_limit = finder->second->query_memory_limit();
         const size_t memory_limit = manager->query_available_memory();
         if (pool_limit > 0)
-          REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
+        {
+          const size_t remaining = finder->second->query_available_memory();
+          if (remaining < footprint)
+            REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
+                "Failed to allocate DeferredBuffer/Value/Reduction of %zd "
+                "bytes for leaf task %s (UID %lld) in %s memory because "
+                "there was insufficient space reserved for dynamic allocations."
+                " Only %zd bytes remain of %zd reserved bytes. This means that "
+                "you set your upper bound for the amount of dynamic memory "
+                "required for this task too low.", footprint, get_task_name(),
+                get_unique_id(), manager->get_name(), remaining, pool_limit)
+          else
+            REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
               "Failed to allocate DeferredBuffer/Value/Reduction of %zd bytes "
-              "for leaf task %s (UID %lld) in %s memory because there was "
-              "insufficient space reserved for dynamic allocations. Only %zd "
-              "bytes remain of %zd reserved bytes. This means that you set "
-              "your upper bound for the amount of dynamic memory "
-              "required for this task too low.", footprint,
-              get_task_name(), get_unique_id(), manager->get_name(),
-              finder->second->query_available_memory(), pool_limit)
+              "for leaf task %s (UID %lld) in %s memory because the memory is "
+              "fragmented. There are still %zd bytes free in the pool %zd "
+              "bytes but they are sufficiently fragmented such that a hole of "
+              "%zd bytes aligned on a %zd byte boundary cannot be found. We "
+              "recommend you check the order of allocations and alignment "
+              "requirements to try to minimize the amount of padding between "
+              "instances. Otherwise you will need to request a larger pool "
+              "for dynamic allocations that considers the necessary padding "
+              "required between instances to satisfy your alignment needs.",
+              footprint, get_task_name(), get_unique_id(), manager->get_name(),
+              remaining, pool_limit, footprint, layout->alignment_reqd)
+        }
         else if (memory_limit < footprint)
           REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
               "Failed to allocate DeferredBuffer/Value/Reduction of %zd bytes "
