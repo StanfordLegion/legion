@@ -346,30 +346,22 @@ TEST_P(RangeAllocatorSplitParamTest, Base)
   EXPECT_EQ(test_case.free_size, get_total_free_size());
 
   if(!test_case.exp_ranges.empty()) {
-    // EXPECT_EQ(range_alloc.ranges.size(), test_case.exp_ranges.size());
-
-    EXPECT_EQ(range_alloc.ranges[SENTINEL].prev, test_case.exp_ranges[SENTINEL].prev);
-    EXPECT_EQ(range_alloc.ranges[SENTINEL].next, test_case.exp_ranges[SENTINEL].next);
-    EXPECT_EQ(range_alloc.ranges[SENTINEL].prev_free,
-              test_case.exp_ranges[SENTINEL].prev_free);
-    EXPECT_EQ(range_alloc.ranges[SENTINEL].next_free,
-              test_case.exp_ranges[SENTINEL].next_free);
+    //EXPECT_EQ(range_alloc.ranges.size(), test_case.exp_ranges.size());
 
     size_t index = 1;
     unsigned idx = range_alloc.ranges[SENTINEL].next;
     while(idx != SENTINEL) {
-      EXPECT_EQ(range_alloc.ranges[idx].prev, test_case.exp_ranges[index].prev)
+      EXPECT_EQ(range_alloc.ranges[idx].first, test_case.exp_ranges[index].first)
           << " index:" << index;
-      EXPECT_EQ(range_alloc.ranges[idx].next, test_case.exp_ranges[index].next)
-          << " index:" << index;
-      EXPECT_EQ(range_alloc.ranges[idx].prev_free, test_case.exp_ranges[index].prev_free)
-          << " index:" << index;
-      EXPECT_EQ(range_alloc.ranges[idx].next_free, test_case.exp_ranges[index].next_free)
+      EXPECT_EQ(range_alloc.ranges[idx].last, test_case.exp_ranges[index].last)
           << " index:" << index;
       idx = range_alloc.ranges[idx].next;
       index++;
     }
   }
+
+  EXPECT_FALSE(range_alloc.free_list_has_cycle());
+  EXPECT_FALSE(range_alloc.has_invalid_ranges());
 
   // TODO(apryakhin@)
   // for(size_t i = 0; i < test_case.split_new_tags.size(); i++) {
@@ -485,7 +477,7 @@ INSTANTIATE_TEST_SUITE_P(
                         Range{/*first=*/32, /*last=*/528, /*prev=*/3, /*next=*/2,
                               /*prev_free=*/1, /*next_free=*/1},
 
-                        Range{/*first=*/528, /*last=*/100, /*prev=*/1, /*next=*/0,
+                        Range{/*first=*/528, /*last=*/1000, /*prev=*/1, /*next=*/0,
                               /*prev_free=*/3, /*next_free=*/0}},
 
             .free_size = 480,
