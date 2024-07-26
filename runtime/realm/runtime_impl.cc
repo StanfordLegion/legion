@@ -2223,6 +2223,13 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
 
 	  add_proc_mem_affinities(machine,
 				  procs_by_kind[k],
+				  mems_by_kind[Memory::SOCKET_MEM],
+				  100, // "large" bandwidth
+				  5   // "small" latency
+				  );
+
+	  add_proc_mem_affinities(machine,
+				  procs_by_kind[k],
 				  mems_by_kind[Memory::DISK_MEM],
 				  5,   // "low" bandwidth
 				  100 // "high" latency
