@@ -346,7 +346,7 @@ TEST_P(RangeAllocatorSplitParamTest, Base)
   EXPECT_EQ(test_case.free_size, get_total_free_size());
 
   if(!test_case.exp_ranges.empty()) {
-    //EXPECT_EQ(range_alloc.ranges.size(), test_case.exp_ranges.size());
+    // EXPECT_EQ(range_alloc.ranges.size(), test_case.exp_ranges.size());
 
     size_t index = 1;
     unsigned idx = range_alloc.ranges[SENTINEL].next;
@@ -395,9 +395,8 @@ INSTANTIATE_TEST_SUITE_P(
                              .aligns{8},
                              .exp_offsets{0}}},
 
-                 .exp_ranges{Range{/*first=*/0, /*last=*/0, /*prev=*/1, /*next=*/1},
-                             Range{/*first=*/0, /*last=*/512, /*prev=*/0, /*next=*/0,
-                                   /*prev_free=*/1, /*next_free=*/1}}},
+                 .exp_ranges{Range{/*first=*/0, /*last=*/0},
+                             Range{/*first=*/0, /*last=*/512}}},
 
         // Case 2: split into the existing tag ??
         TestCase{.alloc_ranges{{0, 512}},
@@ -412,9 +411,8 @@ INSTANTIATE_TEST_SUITE_P(
                              .aligns{8},
                              .exp_offsets{0}}},
 
-                 .exp_ranges{Range{/*first=*/0, /*last=*/0, /*prev=*/1, /*next=*/1},
-                             Range{/*first=*/0, /*last=*/512, /*prev=*/0, /*next=*/0,
-                                   /*prev_free=*/1, /*next_free=*/1}}},
+                 .exp_ranges{Range{/*first=*/0, /*last=*/0},
+                             Range{/*first=*/0, /*last=*/512}}},
 
         // Case 3: base case split/reuse the full range
         TestCase{.alloc_ranges{{0, 512}},
@@ -429,9 +427,8 @@ INSTANTIATE_TEST_SUITE_P(
                              .aligns{8},
                              .exp_offsets{0}}},
 
-                 .exp_ranges{Range{/*first=*/0, /*last=*/0, /*prev=*/1, /*next=*/1},
-                             Range{/*first=*/0, /*last=*/512, /*prev=*/0, /*next=*/0,
-                                   /*prev_free=*/1, /*next_free=*/1}}},
+                 .exp_ranges{Range{/*first=*/0, /*last=*/0},
+                             Range{/*first=*/0, /*last=*/512}}},
 
         // Case 4: split/reuse zero range
         TestCase{
@@ -447,9 +444,7 @@ INSTANTIATE_TEST_SUITE_P(
                         .aligns{8},
                         .exp_offsets{0}}},
 
-            .exp_ranges{Range{/*first=*/0, /*last=*/0, /*next=*/1, /*prev=*/1,
-                              /*prev_free=*/1, /*next_free=*/1},
-                        Range{/*first=*/0, /*last=*/512}},
+            .exp_ranges{Range{/*first=*/0, /*last=*/0}, Range{/*first=*/0, /*last=*/512}},
 
             .free_size = 512,
         },
@@ -468,17 +463,13 @@ INSTANTIATE_TEST_SUITE_P(
                         .aligns{16},
                         .exp_offsets{32}}},
 
-            .exp_ranges{Range{/*first=*/0, /*last=*/0, /*prev=*/2, /*next=*/3,
-                              /*prev_free=*/2, /*next_free=*/3},
+            .exp_ranges{Range{/*first=*/0, /*last=*/0},
 
-                        Range{/*first=*/24, /*last=*/32, /*prev=*/0, /*next=*/1,
-                              /*prev_free=*/0, /*next_free=*/2},
+                        Range{/*first=*/24, /*last=*/32},
 
-                        Range{/*first=*/32, /*last=*/528, /*prev=*/3, /*next=*/2,
-                              /*prev_free=*/1, /*next_free=*/1},
+                        Range{/*first=*/32, /*last=*/528},
 
-                        Range{/*first=*/528, /*last=*/1000, /*prev=*/1, /*next=*/0,
-                              /*prev_free=*/3, /*next_free=*/0}},
+                        Range{/*first=*/528, /*last=*/1000}},
 
             .free_size = 480,
         },
@@ -498,18 +489,14 @@ INSTANTIATE_TEST_SUITE_P(
                         .exp_offsets{32, 0}}},
 
             .exp_ranges{
-                Range{/*first=*/0, /*last=*/0, /*prev=*/2, /*next=*/3,
-                      /*prev_free=*/2, /*next_free=*/3},
+                Range{/*first=*/0, /*last=*/0},
 
                 // free range after alignment computation
-                Range{/*first=*/24, /*last=*/32, /*prev=*/0, /*next=*/1,
-                      /*prev_free=*/0, /*next_free=*/2},
+                Range{/*first=*/24, /*last=*/32},
 
-                Range{/*first=*/32, /*last=*/280, /*prev=*/3, /*next=*/2,
-                      /*prev_free=*/1, /*next_free=*/1},
+                Range{/*first=*/32, /*last=*/280},
 
-                Range{/*first=*/280, /*last=*/1000, /*prev=*/1, /*next=*/0,
-                      /*prev_free=*/3, /*next_free=*/0},
+                Range{/*first=*/280, /*last=*/1000},
             },
 
             .free_size = 728,
@@ -530,18 +517,11 @@ INSTANTIATE_TEST_SUITE_P(
                         .exp_offsets{32, 0}}},
 
             .exp_ranges{
-                Range{/*first=*/0, /*last=*/0, /*prev=*/2, /*next=*/3,
-                      /*prev_free=*/2, /*next_free=*/3},
-
+                Range{/*first=*/0, /*last=*/0},
                 // free range after alignment computation
-                Range{/*first=*/24, /*last=*/32, /*prev=*/0, /*next=*/1,
-                      /*prev_free=*/0, /*next_free=*/2},
-
-                Range{/*first=*/32, /*last=*/280, /*prev=*/3, /*next=*/2,
-                      /*prev_free=*/1, /*next_free=*/1},
-
-                Range{/*first=*/280, /*last=*/1000, /*prev=*/1, /*next=*/0,
-                      /*prev_free=*/3, /*next_free=*/0},
+                Range{/*first=*/24, /*last=*/32},
+                Range{/*first=*/32, /*last=*/280},
+                Range{/*first=*/280, /*last=*/1000},
 
             },
             .free_size = 728,
@@ -563,25 +543,14 @@ INSTANTIATE_TEST_SUITE_P(
                         .exp_offsets{32, 288}}},
 
             .exp_ranges{
-                Range{/*first=*/0, /*last=*/0, /*prev=*/2, /*next=*/3,
-                      /*prev_free=*/2, /*next_free=*/3},
-
+                Range{/*first=*/0, /*last=*/0},
                 // free range after alignment computation
-                Range{/*first=*/24, /*last=*/32, /*prev=*/0, /*next=*/1,
-                      /*prev_free=*/0, /*next_free=*/5},
-
-                Range{/*first=*/32, /*last=*/280, /*prev=*/3, /*next=*/5,
-                      /*prev_free=*/1, /*next_free=*/1},
-
+                Range{/*first=*/24, /*last=*/32},
+                Range{/*first=*/32, /*last=*/280},
                 // free range after alignment computation
-                Range{/*first=*/280, /*last=*/288, /*prev=*/1, /*next=*/4,
-                      /*prev_free=*/3, /*next_free=*/2},
-
-                Range{/*first=*/288, /*last=*/536, /*prev=*/5, /*next=*/2,
-                      /*prev_free=*/4, /*next_free=*/4},
-
-                Range{/*first=*/536, /*last=*/1000, /*prev=*/4, /*next=*/0,
-                      /*prev_free=*/5, /*next_free=*/0},
+                Range{/*first=*/280, /*last=*/288},
+                Range{/*first=*/288, /*last=*/536},
+                Range{/*first=*/536, /*last=*/1000},
             },
             .free_size = 480,
         },
