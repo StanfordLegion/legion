@@ -81,6 +81,11 @@ class MessageBuffer {
     }
     line() << "  CHOSEN INSTANCES:";
     report(task.regions, output.chosen_instances);
+    line() << "  MEMORY POOLS:";
+    for (auto&& [memory, bounds]: output.leaf_pool_bounds) {
+      line() << "    Memory " << memory << " of kind " << to_string(memory.kind())
+             << ": " << to_string(bounds);
+    }
   }
  private:
   MapperRuntime* const runtime;
