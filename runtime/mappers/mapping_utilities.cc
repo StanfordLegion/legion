@@ -1125,6 +1125,24 @@ namespace Legion {
       }
 
       //------------------------------------------------------------------------
+      std::string to_string(const PoolBounds& bounds)
+      //------------------------------------------------------------------------
+      {
+        switch (bounds.scope) {
+          case LEGION_BOUNDED_POOL: {
+            std::stringstream ss;
+            ss << "BOUNDED_POOL(size=" << bounds.size
+               << ",alignment=" << bounds.alignment << ")";
+            return std::move(ss).str();
+          }
+          case LEGION_STRICT_UNBOUNDED_POOL: return "STRICT_UNBOUNDED_POOL";
+          case LEGION_INDEX_TASK_UNBOUNDED_POOL: return "INDEX_TASK_UNBOUNDED_POOL";
+          case LEGION_PERMISSIVE_UNBOUNDED_POOL: return "PERMISSIVE_UNBOUNDED_POOL";
+          default: assert(false); return "";
+        }
+      }
+
+      //------------------------------------------------------------------------
       template<int DIM>
       static std::string to_string(const DomainT<DIM>& dom)
       //------------------------------------------------------------------------

@@ -294,6 +294,8 @@ namespace Legion {
 
       const char* to_string(CoherenceProperty prop);
 
+      std::string to_string(const PoolBounds& bounds);
+
       std::string to_string(MapperRuntime* runtime,
                             const MapperContext ctx,
                             const Domain& dom);
