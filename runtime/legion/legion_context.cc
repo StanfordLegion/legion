@@ -890,11 +890,11 @@ namespace Legion {
 #endif
         const Realm::InstanceLayoutGeneric *layout = instance.get_layout();
         ready = RtEvent(instance.redistrict(results, &layout,
-              num_results, &requests.front(), safe_effects));
+              num_results, &requests.front()));
       }
       else
         ready = RtEvent(instance.redistrict(results, layouts,
-            num_results, &requests.front(), safe_effects));
+            num_results, &requests.front()));
 #ifdef DEBUG_LEGION
       for (unsigned idx = 0; idx < allocators.size(); idx++)
       {
