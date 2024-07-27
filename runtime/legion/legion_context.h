@@ -546,7 +546,8 @@ namespace Legion {
           RtEvent effects, size_t num_results, PhysicalInstance *results, 
           LgEvent *unique_events,
           const Realm::InstanceLayoutGeneric **layouts = NULL);
-      virtual void release_task_local_instances(RtEvent safe_effects);
+      virtual void release_task_local_instances(ApEvent effects,
+                                                RtEvent safe_effects);
       FutureInstance* copy_to_future_inst(const void *value, size_t size);
       virtual void handle_mispredication(void);
     public:
@@ -3912,7 +3913,8 @@ namespace Legion {
           RtEvent effects, size_t num_results, PhysicalInstance *results, 
           LgEvent *unique_events,
           const Realm::InstanceLayoutGeneric **layouts = NULL);
-      virtual void release_task_local_instances(RtEvent safe_effects);
+      virtual void release_task_local_instances(ApEvent effects,
+                                                RtEvent safe_effects);
       virtual void handle_mispredication(void);
     public:
       virtual void destroy_lock(Lock l);

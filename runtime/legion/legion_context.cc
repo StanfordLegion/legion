@@ -771,12 +771,7 @@ namespace Legion {
         owned = callback_owned;
       } 
       // Once there are no more escaping instances we can release the rest
-      if (!task_local_instances.empty())
-      {
-        if (effects.exists() && !safe_effects.exists())
-          safe_effects = Runtime::protect_event(effects);
-        release_task_local_instances(safe_effects);
-      }
+      release_task_local_instances(effects, safe_effects);
       // Grab some information before doing the next step in case it
       // results in the deletion of 'this'
 #ifdef DEBUG_LEGION
@@ -914,11 +909,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TaskContext::release_task_local_instances(RtEvent safe_effects)
+    void TaskContext::release_task_local_instances(ApEvent effects, 
+                                                   RtEvent safe_effects)
     //--------------------------------------------------------------------------
     {
       if (task_local_instances.empty())
         return;
+      if (effects.exists() && !safe_effects.exists())
+        safe_effects = Runtime::protect_event(effects);
       for (std::map<PhysicalInstance,LgEvent>::iterator it =
            task_local_instances.begin(); it !=
            task_local_instances.end(); ++it)
@@ -25538,11 +25536,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LeafContext::release_task_local_instances(RtEvent safe_effects)
+    void LeafContext::release_task_local_instances(ApEvent effects,
+                                                   RtEvent safe_effects)
     //--------------------------------------------------------------------------
     {
       if (task_local_instances.empty() && memory_pools.empty())
         return;
+      if (effects.exists() && !safe_effects.exists())
+        safe_effects = Runtime::protect_event(effects);
       for (std::map<PhysicalInstance,LgEvent>::iterator it =
            task_local_instances.begin(); it !=
            task_local_instances.end(); ++it)
