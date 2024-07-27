@@ -16164,127 +16164,119 @@ namespace Legion {
               // with reductions of kind A, switch to reductions of
               // kind B, and then switch back to reductions of kind A
               // which will make it unsafe to re-use the instance
-              bool found_covered = already_valid && 
+              const bool found_covered = already_valid && 
                 total_valid_instances[red_view].is_set(fidx);
-              std::set<IndexSpaceExpression*> found_exprs;
               // We only need to do this check if it's not already-covered
               // In the case where we know that it is already covered
               // at this point it is restricted, so everything is being
               // flushed to it anyway
               if (!found_covered)
               {
+                // Scan backwards over the list of reduction instances for
+                // this field looking for our reduction instance to see if
+                // there are any parts that need to be initialized. While
+                // doing this, we also have to check for the ABA problem 
+                // on reduction instances described in Legion issue #545 
+                // where we start out with reductions of kind A, switch 
+                // to reductions of kind B, and then switch back to 
+                // reductions of kind A which will make it unsafe to 
+                // re-use the instance
+                IndexSpaceExpression *fill_expr = expr;
+                // We'll try to merge the fill expr with an existing entry
+                // if we can but we can only do that if it is not masked off
+                // by different reduction operators
+                bool fill_expr_merged = false;
+                std::map<ReductionOpID,IndexSpaceExpression*> masked_exprs;
                 for (std::list<std::pair<InstanceView*,
-                      IndexSpaceExpression*> >::iterator it =
-                      field_views.begin(); it != field_views.end(); it++)
+                      IndexSpaceExpression*> >::reverse_iterator it =
+                      field_views.rbegin(); it != field_views.rend(); it++)
                 {
-                  if (!red_view->aliases(it->first))
+                  if (red_view->aliases(it->first))
                   {
-                    if (!found_covered && found_exprs.empty())
-                      continue;
-                    if (it->first->get_redop() == view_redop)
-                      continue;
-                    // Check for intersection
-                    if (found_covered)
+                    // Check for the ABA problem
+                    for (std::map<ReductionOpID,IndexSpaceExpression*>::
+                          const_iterator mit = masked_exprs.begin();
+                          mit != masked_exprs.end(); mit++)
                     {
-                      if (!expr_covers && (expr != it->second))
-                      {
-                        IndexSpaceExpression *overlap = 
-                          runtime->forest->intersect_index_spaces(expr, 
-                                                                  it->second);
-                        if (overlap->is_empty())
-                          continue;
-                      }
+                      IndexSpaceExpression *overlap = (it->second != set_expr) ?
+                        runtime->forest->intersect_index_spaces(
+                            mit->second, it->second) : mit->second;
+                      if (!overlap->is_empty())
+                        // If we make it here, report the ABA violation
+                        REPORT_LEGION_FATAL(LEGION_FATAL_REDUCTION_ABA_PROBLEM,
+                            "Unsafe re-use of reduction instance detected due "
+                            "to alternating un-flushed reduction operations "
+                            "%d and %d. Please report this use case to the "
+                            "Legion developer's mailing list so that we can "
+                            "help you address it.", mit->first, view_redop)
                     }
-                    else
+                    if ((fill_expr == it->second) || (it->second == set_expr))
                     {
-                      // Check each of the individual expressions for overlap
-                      bool all_disjoint = true;
-                      for (std::set<IndexSpaceExpression*>::const_iterator 
-                            fit = found_exprs.begin(); 
-                            fit != found_exprs.end(); fit++)
+                      // We found ourself with an expression that covers the
+                      // remainder needed to fill so we are done because we
+                      // are already initialized for all of our points
+                      fill_expr = NULL;
+                      break;
+                    }
+                    IndexSpaceExpression *overlap = 
+                      runtime->forest->intersect_index_spaces(
+                          fill_expr, it->second);
+                    if (!overlap->is_empty())
+                    {
+                      if (overlap->get_volume() == fill_expr->get_volume())
                       {
-                        IndexSpaceExpression *overlap = 
-                          runtime->forest->intersect_index_spaces(it->second,
-                                                                  *fit);
-                        if (overlap->is_empty())
-                          continue;
-                        all_disjoint = false;
+                        // We've initialized all our points so we're done
+                        fill_expr = NULL;
                         break;
                       }
-                      if (all_disjoint)
-                        continue;
-                    }
-                    // If we make it here, report the ABA violation
-                    REPORT_LEGION_FATAL(LEGION_FATAL_REDUCTION_ABA_PROBLEM,
-                        "Unsafe re-use of reduction instance detected due "
-                        "to alternating un-flushed reduction operations "
-                        "%d and %d. Please report this use case to the "
-                        "Legion developer's mailing list so that we can "
-                        "help you address it.", view_redop,
-                        it->first->get_redop())
-                  }
-                  else if (!found_covered)
-                  {
-                    if (!expr_covers)
-                    {
-                      if (expr != it->second)
+                      if ((fill_expr == expr) && masked_exprs.empty())
                       {
-                        IndexSpaceExpression *overlap = 
-                          runtime->forest->intersect_index_spaces(expr,
-                                                            it->second);
-                        if (overlap->get_volume() < expr->get_volume())
-                        {
-                          found_exprs.insert(overlap);
-                          // Promote this to be the union of the two
-                          if (overlap->get_volume() < 
-                              it->second->get_volume())
-                          {
-                            IndexSpaceExpression *union_expr =
-                              runtime->forest->union_index_spaces(expr,
-                                                            it->second);
-                            union_expr->add_nested_expression_reference(did);
-                            if (it->second->
-                                remove_nested_expression_reference(did))
-                              delete it->second;
-                            it->second = union_expr;
-                          }
-                          else
-                          {
-                            expr->add_nested_expression_reference(did);
-                            if (it->second->
-                                remove_nested_expression_reference(did))
-                              delete it->second;
-                            it->second = expr;
-                          }
-                        }
-                        else
-                          found_covered = true;
-                      }
-                      else
-                        found_covered = true;
-                    }
-                    else
-                    {
-                      if ((it->second != set_expr) &&
-                          (it->second->get_volume() < set_expr->get_volume()))
-                      {
-                        found_exprs.insert(it->second);
-                        // Promote this up to the full set expression
-                        set_expr->add_nested_expression_reference(did);
-                        // Since we're going to use the old expression, we 
-                        // need to keep it live until the end of the task
-                        it->second->add_base_expression_reference(
-                                                               LIVE_EXPR_REF);
-                        ImplicitReferenceTracker::record_live_expression(
-                                                                  it->second);
-                        // Now we can remove the previous live reference
-                        if (it->second->
-                            remove_nested_expression_reference(did))
+                        // If the fill expr is still the original expression
+                        // then that means we haven't recorded the reduction
+                        // instance in the list yet so we need to do that now
+                        // If the overlap covers the current expression then
+                        // we can just use the fill expression as the new
+                        // expression since it covers the current one. We know
+                        // this is safe because of the check above confirming
+                        // that we are disjoint with any prior masked exprs
+                        IndexSpaceExpression *merged_expr =
+                          (overlap->get_volume() == it->second->get_volume()) ?
+                          fill_expr : runtime->forest->union_index_spaces(
+                              fill_expr, it->second);
+                        if (it->second->remove_nested_expression_reference(did))
                           delete it->second;
-                        it->second = set_expr;
+                        merged_expr->add_nested_expression_reference(did);
+                        it->second = merged_expr;
+                        fill_expr_merged = true;
                       }
+                      // Keep the remainder of the points to be initialized
+                      // Need to keep iterating to check for the ABA problem
+                      fill_expr = runtime->forest->subtract_index_spaces(
+                          fill_expr, overlap);
+#ifdef DEBUG_LEGION
+                      assert(fill_expr != expr);
+#endif
+                    }
+                  }
+                  else if (it->first->get_redop() != view_redop)
+                  {
+                    // Look for masked expressions if this is different
+                    // kind of reduction operator on the same field
+                    IndexSpaceExpression *overlap = (it->second != set_expr) ?  
+                      runtime->forest->intersect_index_spaces(
+                          fill_expr, it->second) : fill_expr;
+                    if (!overlap->is_empty())
+                    {
+                      ReductionOpID masked_redop = it->first->get_redop();
+                      // Save this into the set of masked expressions
+                      std::map<ReductionOpID,IndexSpaceExpression*>::iterator
+                        finder = masked_exprs.find(masked_redop);
+                      // If we already had an expression then merge it
+                      if (finder != masked_exprs.end())
+                        finder->second = runtime->forest->union_index_spaces(
+                            finder->second, overlap);
                       else
-                        found_covered = true;
+                        masked_exprs[masked_redop] = overlap;
                     }
                   }
                 }
@@ -16292,37 +16284,25 @@ namespace Legion {
                 // These are also the expressions that we need to add to the
                 // fields views set since they won't be described by prior
                 // reductions already on the list
-                if (!found_covered)
+                if (fill_expr != NULL)
                 {
                   FieldMask fill_mask;
                   fill_mask.set_bit(fidx);
-                  if (!found_exprs.empty())
+                  fill_exprs.insert(fill_expr, fill_mask);
+                  // If the fill_expr is still the expr then we didn't find any
+                  // prior uses of this reduction instance so we need to ecord
+                  // the reduction instance with its expression in the list. 
+                  if (!fill_expr_merged)
                   {
-                    guard_fill_mask.set_bit(fidx);
-                    // See if the union dominates the expression, if not
-                    // put in the difference
-                    IndexSpaceExpression *union_expr = 
-                      runtime->forest->union_index_spaces(found_exprs);
-                    if (union_expr->get_volume() < expr->get_volume())
-                    {
-                      IndexSpaceExpression *diff_expr =
-                        runtime->forest->subtract_index_spaces(expr,
-                                                          union_expr);
-                      fill_exprs.insert(diff_expr, fill_mask);
-                      red_view->add_nested_valid_ref(did);
-                      diff_expr->add_nested_expression_reference(did);
-                      field_views.push_back(std::make_pair(red_view,
-                                                           diff_expr));
-                    }
-                  }
-                  else
-                  {
-                    fill_exprs.insert(expr, fill_mask);
-                    // No previous exprs, so record the full thing
                     red_view->add_nested_valid_ref(did);
-                    expr->add_nested_expression_reference(did);
-                    field_views.push_back(std::make_pair(red_view, expr));
+                    fill_expr->add_nested_expression_reference(did);
+                    field_views.push_back(std::make_pair(red_view, fill_expr));
                   }
+                  if (fill_expr != expr)
+                    // If we were previously initialized for any points then
+                    // we need to record a guard mask on this field to make
+                    // sure we pick up dependences on any fills
+                    guard_fill_mask.set_bit(fidx);
                 }
                 else
                   guard_fill_mask.set_bit(fidx);
