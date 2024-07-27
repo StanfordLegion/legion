@@ -2140,8 +2140,8 @@ namespace Legion {
         return result;
       }
       else
-        record_instance(instance, (implicit_context == NULL) ? 0 :
-            implicit_context->get_unique_id());
+        inst_ready = record_instance(instance, 
+            (implicit_context == NULL) ? 0 : implicit_context->get_unique_id());
       return instance;
     }
 
