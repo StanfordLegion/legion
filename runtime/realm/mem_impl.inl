@@ -168,10 +168,9 @@ namespace Realm {
       TT old_tag, const std::vector<TT> &new_tags, const std::vector<RT> &sizes,
       const std::vector<RT> &alignments, std::vector<RT> &allocs_first)
   {
-    typename std::map<TT, unsigned>::const_iterator it = allocated.find(old_tag);
-    if(it == allocated.end()) {
+    typename std::map<TT, unsigned>::iterator it = allocated.find(old_tag);
+    if(it == allocated.end())
       return 0;
-    }
 
     const size_t n = new_tags.size();
     assert(n == sizes.size() && n == alignments.size());
@@ -181,6 +180,8 @@ namespace Realm {
     if (range_idx == SENTINEL) {
       // this is a zero-sized range so we can redistrict only to zero-sized instances
       for (size_t i = 0; i < n; i++) {
+        // No need to check for duplicate tags here since they are going
+        // to be assigned the same sentinel value anyway
         if (sizes[i]) {
           deallocate(old_tag);
           return i;
@@ -193,6 +194,7 @@ namespace Realm {
 
     Range *r = &ranges[range_idx];
     for (size_t i = 0; i < n; i++) {
+      assert(allocated.find(new_tags[i]) == allocated.end());
       if (sizes[i]) {
         RT offset = calculate_offset(r->first, alignments[i]);
         // do we have enough space?
@@ -241,6 +243,12 @@ namespace Realm {
         // tie this off because we use it to detect allocated-ness
         new_range.prev_free = new_range.next_free = new_idx;
         allocated[new_tags[i]] = new_idx;
+        // Detect the case where the old range is empty
+        if (r->first == r->last) {
+          free_range(range_idx);
+          allocated.erase(it);
+          return (i+1);
+        }
       } else { // Zero-sized instances are easy
         allocated[new_tags[i]] = SENTINEL;
       }
