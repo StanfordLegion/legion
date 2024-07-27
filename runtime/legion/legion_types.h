@@ -456,7 +456,6 @@ namespace Legion {
       LG_MALLOC_INSTANCE_TASK_ID,
       LG_FREE_INSTANCE_TASK_ID,
       LG_DEFER_TRACE_UPDATE_TASK_ID,
-      LG_FINALIZE_OUTPUT_ID,
       LG_DEFER_DELETE_FUTURE_INSTANCE_TASK_ID,
       LG_FREE_EXTERNAL_TASK_ID,
       LG_DEFER_CONSENSUS_MATCH_TASK_ID,
@@ -564,7 +563,6 @@ namespace Legion {
         "Malloc Instance",                                        \
         "Free Instance",                                          \
         "Defer Trace Update",                                     \
-        "Finalize Output Region Instance",                        \
         "Defer Delete Future Instance",                           \
         "Free External Allocation",                               \
         "Defer Consensus Match",                                  \

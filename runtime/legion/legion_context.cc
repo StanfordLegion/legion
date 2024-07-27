@@ -335,7 +335,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TaskContext::finalize_output_regions(void)
+    void TaskContext::finalize_output_regions(RtEvent safe_effects)
     //--------------------------------------------------------------------------
     {
       for (unsigned idx = 0; idx < output_regions.size(); ++idx)
@@ -352,7 +352,7 @@ namespace Legion {
             owner_task->get_task_name(), owner_task->get_unique_id(),
             unbound_field, idx);
         }
-        output_region.impl->finalize();
+        output_region.impl->finalize(safe_effects);
       }
       // Clear this to remove references in output region data structures
       output_regions.clear();
@@ -655,8 +655,13 @@ namespace Legion {
     { 
       // Finalize output regions by setting realm instances created during
       // task execution to the output regions' physical managers
+      RtEvent safe_effects;
       if (!output_regions.empty())
-        finalize_output_regions(); 
+      {
+        if (effects.exists())
+          safe_effects = Runtime::protect_event(effects);
+        finalize_output_regions(safe_effects); 
+      }
       if (!user_profiling_ranges.empty())
         REPORT_LEGION_ERROR(ERROR_MISMATCHED_PROFILING_RANGE,
             "Detected mismatched profiling range calls, missing %zd stop calls "
@@ -692,9 +697,11 @@ namespace Legion {
 #endif
         // Find the unique event for this instance if there is one
         LgEvent unique_event;
+        if (effects.exists() && !safe_effects.exists())
+          safe_effects = Runtime::protect_event(effects);
         // escape this task local instance
         const RtEvent ready = escape_task_local_instance(
-            deferred_result_instance, 1/*size*/, 
+            deferred_result_instance, safe_effects, 1/*size*/, 
             &deferred_result_instance, &unique_event);
         instance = new FutureInstance(res, res_size,
             false/*external*/, true/*own alloc*/, unique_event,
@@ -764,7 +771,12 @@ namespace Legion {
         owned = callback_owned;
       } 
       // Once there are no more escaping instances we can release the rest
-      release_task_local_instances(effects);
+      if (!task_local_instances.empty())
+      {
+        if (effects.exists() && !safe_effects.exists())
+          safe_effects = Runtime::protect_event(effects);
+        release_task_local_instances(safe_effects);
+      }
       // Grab some information before doing the next step in case it
       // results in the deletion of 'this'
 #ifdef DEBUG_LEGION
@@ -820,8 +832,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RtEvent TaskContext::escape_task_local_instance(PhysicalInstance instance,
-        size_t num_results, PhysicalInstance *results, LgEvent *unique_events,
-        const Realm::InstanceLayoutGeneric **layouts)
+        RtEvent safe_effects, size_t num_results, PhysicalInstance *results,
+        LgEvent *unique_events, const Realm::InstanceLayoutGeneric **layouts)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -883,11 +895,11 @@ namespace Legion {
 #endif
         const Realm::InstanceLayoutGeneric *layout = instance.get_layout();
         ready = RtEvent(instance.redistrict(results, &layout,
-              num_results, &requests.front()));
+              num_results, &requests.front(), safe_effects));
       }
       else
         ready = RtEvent(instance.redistrict(results, layouts,
-            num_results, &requests.front()));
+            num_results, &requests.front(), safe_effects));
 #ifdef DEBUG_LEGION
       for (unsigned idx = 0; idx < allocators.size(); idx++)
       {
@@ -902,14 +914,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TaskContext::release_task_local_instances(ApEvent effects)
+    void TaskContext::release_task_local_instances(RtEvent safe_effects)
     //--------------------------------------------------------------------------
     {
       if (task_local_instances.empty())
         return;
-      RtEvent done;
-      if (effects.exists())
-        done = Runtime::protect_event(effects);
       for (std::map<PhysicalInstance,LgEvent>::iterator it =
            task_local_instances.begin(); it !=
            task_local_instances.end(); ++it)
@@ -917,9 +926,9 @@ namespace Legion {
         MemoryManager *manager =
           runtime->find_memory_manager(it->first.get_location());
 #ifdef LEGION_MALLOC_INSTANCES
-        manager->free_legion_instance(done, it->first);
+        manager->free_legion_instance(safe_effects, it->first);
 #else
-        manager->free_task_local_instance(it->first, done);
+        manager->free_task_local_instance(it->first, safe_effects);
 #endif
       }
       task_local_instances.clear();
@@ -25488,8 +25497,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RtEvent LeafContext::escape_task_local_instance(PhysicalInstance instance,
-        size_t num_results, PhysicalInstance *results, LgEvent *unique_events,
-        const Realm::InstanceLayoutGeneric **layouts)
+        RtEvent safe_effects, size_t num_results, PhysicalInstance *results,
+        LgEvent *unique_events, const Realm::InstanceLayoutGeneric **layouts)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -25518,24 +25527,22 @@ namespace Legion {
           {
             task_local_instances.erase(finder);
             return pool_finder->second->escape_task_local_instance(instance,
-                num_results, results, unique_events, layouts, get_unique_id());
+                safe_effects, num_results, results, unique_events, layouts,
+                get_unique_id());
           }
         }
       }
       // Otherwise we fall through and do the base case at this point
-      return TaskContext::escape_task_local_instance(instance, num_results,
-          results, unique_events, layouts);
+      return TaskContext::escape_task_local_instance(instance, safe_effects,
+          num_results, results, unique_events, layouts);
     }
 
     //--------------------------------------------------------------------------
-    void LeafContext::release_task_local_instances(ApEvent effects)
+    void LeafContext::release_task_local_instances(RtEvent safe_effects)
     //--------------------------------------------------------------------------
     {
       if (task_local_instances.empty() && memory_pools.empty())
         return;
-      RtEvent done;
-      if (effects.exists())
-        done = Runtime::protect_event(effects);
       for (std::map<PhysicalInstance,LgEvent>::iterator it =
            task_local_instances.begin(); it !=
            task_local_instances.end(); ++it)
@@ -25550,16 +25557,16 @@ namespace Legion {
         MemoryManager *manager =
           runtime->find_memory_manager(it->first.get_location());
 #ifdef LEGION_MALLOC_INSTANCES
-        manager->free_legion_instance(done, it->first);
+        manager->free_legion_instance(safe_effects, it->first);
 #else
-        manager->free_task_local_instance(it->first, done);
+        manager->free_task_local_instance(it->first, safe_effects);
 #endif
       }
       task_local_instances.clear();
       for (std::map<Memory,MemoryPool*>::const_iterator it =
             memory_pools.begin(); it != memory_pools.end(); it++)
       {
-        it->second->release_pool(done);
+        it->second->release_pool(safe_effects);
         delete it->second;
       }
 #ifdef DEBUG_LEGION

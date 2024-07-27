@@ -543,9 +543,10 @@ namespace Legion {
                       ApEvent effects);
       virtual void post_end_task(void) = 0;
       virtual RtEvent escape_task_local_instance(PhysicalInstance instance,
-          size_t num_results, PhysicalInstance *results, LgEvent *unique_events,
+          RtEvent effects, size_t num_results, PhysicalInstance *results, 
+          LgEvent *unique_events,
           const Realm::InstanceLayoutGeneric **layouts = NULL);
-      virtual void release_task_local_instances(ApEvent effects);
+      virtual void release_task_local_instances(RtEvent safe_effects);
       FutureInstance* copy_to_future_inst(const void *value, size_t size);
       virtual void handle_mispredication(void);
     public:
@@ -606,7 +607,7 @@ namespace Legion {
       void add_output_region(const OutputRequirement &req,
                              const InstanceSet &instances,
                              bool global_indexing, bool valid, bool grouped);
-      void finalize_output_regions(void);
+      void finalize_output_regions(RtEvent safe_effects);
       void initialize_overhead_profiler(void);
       inline void begin_runtime_call(void);
       inline void end_runtime_call(void);
@@ -3908,9 +3909,10 @@ namespace Legion {
                       ApEvent effects);
       virtual void post_end_task(void);
       virtual RtEvent escape_task_local_instance(PhysicalInstance instance,
-          size_t num_results, PhysicalInstance *results, LgEvent *unique_events,
+          RtEvent effects, size_t num_results, PhysicalInstance *results, 
+          LgEvent *unique_events,
           const Realm::InstanceLayoutGeneric **layouts = NULL);
-      virtual void release_task_local_instances(ApEvent effects);
+      virtual void release_task_local_instances(RtEvent safe_effects);
       virtual void handle_mispredication(void);
     public:
       virtual void destroy_lock(Lock l);

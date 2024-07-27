@@ -1010,20 +1010,8 @@ namespace Legion {
                        PhysicalInstance instance,
                        const LayoutConstraintSet *constraints,
                        bool check_constraints);
-    private:
-      struct FinalizeOutputArgs : public LgTaskArgs<FinalizeOutputArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_FINALIZE_OUTPUT_ID;
-      public:
-        FinalizeOutputArgs(OutputRegionImpl *r)
-          : LgTaskArgs<FinalizeOutputArgs>(implicit_provenance),
-            region(r) { }
-        OutputRegionImpl *region;
-      };
     public:
-      void finalize(void);
-    public:
-      static void handle_finalize_output(const void *args);
+      void finalize(RtEvent safe_effects);
     public:
       bool is_complete(FieldID &unbound_field) const;
     public:
@@ -1471,7 +1459,8 @@ namespace Legion {
           RtEvent &use_event) = 0;
       virtual bool contains_instance(PhysicalInstance instance) const = 0;
       virtual RtEvent escape_task_local_instance(PhysicalInstance instance,
-          size_t num_results, PhysicalInstance *result, LgEvent *unique_events,
+          RtEvent safe_effects, size_t num_results, PhysicalInstance *result, 
+          LgEvent *unique_events,
           const Realm::InstanceLayoutGeneric **layouts, UniqueID creator) = 0;
       virtual void free_instance(PhysicalInstance instance) = 0;
       virtual void release_pool(RtEvent done) = 0;
@@ -1510,7 +1499,8 @@ namespace Legion {
           RtEvent &use_event) override;
       virtual bool contains_instance(PhysicalInstance instance) const override;
       virtual RtEvent escape_task_local_instance(PhysicalInstance instance,
-          size_t num_results, PhysicalInstance *result, LgEvent *unique_events,
+          RtEvent safe_effects, size_t num_results, PhysicalInstance *result,
+          LgEvent *unique_events,
           const Realm::InstanceLayoutGeneric **layouts, UniqueID uid) override;
       virtual void free_instance(PhysicalInstance instance) override;
       virtual void release_pool(RtEvent done) override;
@@ -1575,7 +1565,8 @@ namespace Legion {
           RtEvent &use_event) override;
       virtual bool contains_instance(PhysicalInstance instance) const override;
       virtual RtEvent escape_task_local_instance(PhysicalInstance instance,
-          size_t num_results, PhysicalInstance *result, LgEvent *unique_events,
+          RtEvent safe_effects, size_t num_results, PhysicalInstance *result,
+          LgEvent *unique_events,
           const Realm::InstanceLayoutGeneric **layouts, UniqueID uid) override;
       virtual void free_instance(PhysicalInstance instance) override;
       virtual void release_pool(RtEvent done) override;

@@ -6325,7 +6325,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void OutputRegionImpl::finalize(void)
+    void OutputRegionImpl::finalize(RtEvent safe_effects)
     //--------------------------------------------------------------------------
     {
       // Transpose the returned instances 
@@ -6376,7 +6376,7 @@ namespace Legion {
           {
             LgEvent unique_event = manager->get_unique_event();
             const RtEvent ready = context->escape_task_local_instance(
-                instance, 1/*count*/, &instance, &unique_event, 
+                instance, safe_effects, 1/*count*/, &instance, &unique_event,
                 (const Realm::InstanceLayoutGeneric**)&layout);
             if (manager->update_physical_instance(instance, ready, footprint))
               delete manager;
@@ -6432,7 +6432,8 @@ namespace Legion {
           }
           std::vector<PhysicalInstance> instances(layouts.size());
           const RtEvent ready = context->escape_task_local_instance(pit->first,
-              instances.size(), &instances.front(), &unique_events.front(), 
+              safe_effects, instances.size(), &instances.front(),
+              &unique_events.front(), 
               (const Realm::InstanceLayoutGeneric**)&layouts.front());
           for (unsigned idx = 0; idx < instances.size(); idx++)
           {
@@ -6477,17 +6478,6 @@ namespace Legion {
           }
         }
       }
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void OutputRegionImpl::handle_finalize_output(const void *args)
-    //--------------------------------------------------------------------------
-    {
-      const FinalizeOutputArgs *finalize_args = (const FinalizeOutputArgs*)args;
-      OutputRegionImpl *region = finalize_args->region;
-      region->finalize();
-      if (region->remove_reference())
-        delete region;
     }
 
     //--------------------------------------------------------------------------
@@ -8689,8 +8679,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RtEvent ConcretePool::escape_task_local_instance(PhysicalInstance instance,
-          size_t num_results, PhysicalInstance *results, LgEvent *unique_events,
-          const Realm::InstanceLayoutGeneric **layouts, UniqueID creator_uid)
+          RtEvent safe_effects, size_t num_results, PhysicalInstance *results,
+          LgEvent *unique_events, const Realm::InstanceLayoutGeneric **layouts,
+          UniqueID creator_uid)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -8720,7 +8711,7 @@ namespace Legion {
       // Remove the allocated instance
       allocated.erase(finder);
       // Destroy the external instance that we created
-      instance.destroy();
+      instance.destroy(safe_effects);
       return result;
     }
 
@@ -9462,8 +9453,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RtEvent UnboundPool::escape_task_local_instance(PhysicalInstance instance,
-          size_t num_results, PhysicalInstance *result, LgEvent *unique_events,
-          const Realm::InstanceLayoutGeneric **layouts, UniqueID creator_uid)
+          RtEvent safe_effects, size_t num_results, PhysicalInstance *result,
+          LgEvent *unique_events, const Realm::InstanceLayoutGeneric **layouts,
+          UniqueID creator_uid)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -34094,11 +34086,6 @@ namespace Legion {
             CopyAcrossExecutor::handle_deferred_copy_across(args);
             break;
           }
-        case LG_FINALIZE_OUTPUT_ID:
-          {
-            OutputRegionImpl::handle_finalize_output(args);
-            break;
-          } 
 #ifdef LEGION_MALLOC_INSTANCES
         // LG_MALLOC_INSTANCE_TASK_ID should always run app processor
         case LG_FREE_INSTANCE_TASK_ID:
