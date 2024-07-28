@@ -9446,6 +9446,9 @@ namespace Legion {
        *              In general these are tiny and not worth profiling,
        *              but you might still want to see them. They are not
        *              recorded by default.
+       * -lg:prof_no_critical_paths Disable logging for performing critial
+       *              path analysis as it is can greatly increase the size
+       *              of the Legion Prof log files
        *
        * @param argc the number of input arguments
        * @param argv pointer to an array of string arguments of size argc

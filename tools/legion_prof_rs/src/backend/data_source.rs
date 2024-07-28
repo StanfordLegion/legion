@@ -24,8 +24,8 @@ use crate::backend::common::{
 use crate::conditional_assert;
 use crate::state::{
     BacktraceID, ChanEntry, ChanID, Color, Config, Container, ContainerEntry, Copy, CopyInstInfo,
-    DeviceKind, Fill, FillInstInfo, Inst, InstUID, MemID, MemKind, NodeID, OpID, ProcEntryKind,
-    ProcID, ProcKind, ProfUID, State, TimeRange, Timestamp,
+    DeviceKind, EventEntry, EventEntryKind, EventID, Fill, FillInstInfo, Inst, InstUID, MemID,
+    MemKind, NodeID, OpID, ProcEntryKind, ProcID, ProcKind, ProfUID, State, TimeRange, Timestamp,
 };
 
 impl Into<ts::Timestamp> for Timestamp {
@@ -105,6 +105,7 @@ pub struct Fields {
     mapper: FieldID,
     mapper_proc: FieldID,
     backtrace: FieldID,
+    critical: FieldID,
 }
 
 #[derive(Debug)]
@@ -152,6 +153,7 @@ impl StateDataSource {
             mapper: field_schema.insert("Mapper".to_owned(), true),
             mapper_proc: field_schema.insert("Mapper Processor".to_owned(), true),
             backtrace: field_schema.insert("Backtrace".to_owned(), false),
+            critical: field_schema.insert("Critical Path".to_owned(), false),
         };
 
         let mut entry_map = BTreeMap::<EntryID, EntryKind>::new();
@@ -921,7 +923,8 @@ impl StateDataSource {
                      opacity: f32,
                      status: Option<FieldID>,
                      wait_callee: Option<ProfUID>,
-                     wait_backtrace: Option<BacktraceID>| {
+                     wait_backtrace: Option<BacktraceID>,
+                     wait_event: Option<EventID>| {
                         if !interval.overlaps(tile_id.0) {
                             return;
                         }
@@ -954,6 +957,13 @@ impl StateDataSource {
                                     ),
                                 ));
                             }
+                            if let Some(event) = wait_event {
+                                if let Some(event_entry) = self.state.find_critical_entry(event) {
+                                    item_meta.fields.push((
+                                        self.fields.critical,
+                                        self.generate_critical_link(event, event_entry)));
+                                }
+                            }
                             item_metas.push(item_meta);
                         }
                     };
@@ -970,6 +980,7 @@ impl StateDataSource {
                             Some(self.fields.status_running),
                             None,
                             None,
+                            None,
                         );
                         add_item(
                             waiting_interval,
@@ -977,11 +988,13 @@ impl StateDataSource {
                             Some(self.fields.status_waiting),
                             wait.callee,
                             wait.backtrace,
+                            wait.event,
                         );
                         add_item(
                             ready_interval,
                             0.45,
                             Some(self.fields.status_ready),
+                            None,
                             None,
                             None,
                         );
@@ -996,10 +1009,11 @@ impl StateDataSource {
                             Some(self.fields.status_running),
                             None,
                             None,
+                            None,
                         );
                     }
                 } else {
-                    add_item(view_interval, 1.0, None, None, None);
+                    add_item(view_interval, 1.0, None, None, None, None);
                 }
             }
         }
@@ -1092,6 +1106,151 @@ impl StateDataSource {
         }
     }
 
+    fn generate_critical_link(&self, event: EventID, event_entry: &EventEntry) -> Field {
+        let node = event.node_id();
+        match event_entry.kind {
+            EventEntryKind::UnknownEvent => {
+                Field::String(format!(
+                        "Unknown critical path event from node {}. Please load the logfile from that node to see it.", 
+                        node.0
+                ))
+            }
+            EventEntryKind::TaskEvent => {
+                let prof_uid = event_entry.creator.unwrap();
+                if let Some(proc_id) = self.state.prof_uid_proc.get(&prof_uid) {
+                    let proc = self.state.procs.get(&proc_id).unwrap();
+                    let entry = proc.find_entry(prof_uid).unwrap();
+                    let op_name = entry.name(&self.state);
+                    Field::ItemLink(ItemLink {
+                        item_uid: entry.base().prof_uid.into(),
+                        title: format!("Completion of {}", &op_name),
+                        interval: entry.time_range.into(),
+                        entry_id: self.proc_entries.get(proc_id).unwrap().clone(),
+                    })
+                } else {
+                    Field::String(format!(
+                            "Critical path from a (meta-) task on node {}. Please load the logfile from that node to see it.",
+                            node.0
+                    ))
+                }
+            }
+            EventEntryKind::FillEvent => {
+                Field::String(format!("Fill"))
+            }
+            EventEntryKind::CopyEvent => {
+                Field::String(format!("Copy"))
+            }
+            EventEntryKind::DeppartEvent => {
+                Field::String(format!("Deppart"))
+            }
+            // The rest of these only happen when the critical path is not along a chain
+            // of events but when the (meta-) task producing 
+            EventEntryKind::MergeEvent => {
+                let prof_uid = event_entry.creator.unwrap();
+                if let Some(proc_id) = self.state.prof_uid_proc.get(&prof_uid) {
+                    let trigger_time = event_entry.trigger_time.unwrap();
+                    let proc = self.state.procs.get(&proc_id).unwrap();
+                    let entry = proc.find_entry(prof_uid).unwrap();
+                    let op_name = entry.name(&self.state);
+                    Field::ItemLink(ItemLink {
+                        item_uid: entry.base().prof_uid.into(),
+                        title: format!("Event Merger by {}", &op_name),
+                        interval: ts::Interval::new(entry.time_range.start.unwrap().into(), trigger_time.into()),
+                        entry_id: self.proc_entries.get(proc_id).unwrap().clone(),
+                    })
+                } else {
+                    Field::String(format!(
+                            "Critical path from an event merger on node {}. Please load the logfile from that node to see it.",
+                            node.0
+                    ))
+                }
+            }
+            EventEntryKind::TriggerEvent => {
+                let prof_uid = event_entry.creator.unwrap();
+                if let Some(proc_id) = self.state.prof_uid_proc.get(&prof_uid) {
+                    let trigger_time = event_entry.trigger_time.unwrap();
+                    let proc = self.state.procs.get(&proc_id).unwrap();
+                    let entry = proc.find_entry(prof_uid).unwrap();
+                    let op_name = entry.name(&self.state);
+                    Field::ItemLink(ItemLink {
+                        item_uid: entry.base().prof_uid.into(),
+                        title: format!("User Event Trigger by {}", &op_name),
+                        interval: ts::Interval::new(entry.time_range.start.unwrap().into(), trigger_time.into()),
+                        entry_id: self.proc_entries.get(proc_id).unwrap().clone(),
+                    })
+                } else {
+                    Field::String(format!(
+                            "Critical path from a user event trigger on node {}. Please load the logfile from that node to see it.",
+                            node.0
+                    ))
+                }
+            }
+            EventEntryKind::PoisonEvent => {
+                let prof_uid = event_entry.creator.unwrap();
+                if let Some(proc_id) = self.state.prof_uid_proc.get(&prof_uid) {
+                    let trigger_time = event_entry.trigger_time.unwrap();
+                    let proc = self.state.procs.get(&proc_id).unwrap();
+                    let entry = proc.find_entry(prof_uid).unwrap();
+                    let op_name = entry.name(&self.state);
+                    Field::ItemLink(ItemLink {
+                        item_uid: entry.base().prof_uid.into(),
+                        title: format!("Event Poisoned by {}", &op_name),
+                        interval: ts::Interval::new(entry.time_range.start.unwrap().into(), trigger_time.into()),
+                        entry_id: self.proc_entries.get(proc_id).unwrap().clone(),
+                    })
+                } else {
+                    Field::String(format!(
+                            "Critical path from a user event poison on node {}. Please load the logfile from that node to see it.",
+                            node.0
+                    ))
+                }
+            }
+            EventEntryKind::ArriveBarrier => {
+                let prof_uid = event_entry.creator.unwrap();
+                if let Some(proc_id) = self.state.prof_uid_proc.get(&prof_uid) {
+                    let trigger_time = event_entry.trigger_time.unwrap();
+                    let proc = self.state.procs.get(&proc_id).unwrap();
+                    let entry = proc.find_entry(prof_uid).unwrap();
+                    let op_name = entry.name(&self.state);
+                    Field::ItemLink(ItemLink {
+                        item_uid: entry.base().prof_uid.into(),
+                        title: format!("Barrier Arrival by {}", &op_name),
+                        interval: ts::Interval::new(entry.time_range.start.unwrap().into(), trigger_time.into()),
+                        entry_id: self.proc_entries.get(proc_id).unwrap().clone(),
+                    })
+                } else {
+                    Field::String(format!(
+                            "Critical path from a barrier arrival on node {}. Please load the logfile from that node to see it.",
+                            node.0
+                    ))
+                }
+            }
+            EventEntryKind::ReservationAcquire => {
+                let prof_uid = event_entry.creator.unwrap();
+                if let Some(proc_id) = self.state.prof_uid_proc.get(&prof_uid) {
+                    let trigger_time = event_entry.trigger_time.unwrap();
+                    let proc = self.state.procs.get(&proc_id).unwrap();
+                    let entry = proc.find_entry(prof_uid).unwrap();
+                    let op_name = entry.name(&self.state);
+                    Field::ItemLink(ItemLink {
+                        item_uid: entry.base().prof_uid.into(),
+                        title: format!("Reservation Acquire by {}", &op_name),
+                        interval: ts::Interval::new(entry.time_range.start.unwrap().into(), trigger_time.into()),
+                        entry_id: self.proc_entries.get(proc_id).unwrap().clone(),
+                    })
+                } else {
+                    Field::String(format!(
+                            "Critical path from a reservation acquire on node {}. Please load the logfile from that node to see it.",
+                            node.0
+                    ))
+                }
+            }
+            EventEntryKind::LocalLockAcquire => {
+                Field::String(format!("Local Lock Acquire (cannot say which other task is holding the lock yet...)"))
+            }
+        }
+    }
+
     fn generate_proc_slot_meta_tile(
         &self,
         entry_id: &EntryID,
@@ -1162,6 +1321,13 @@ impl StateDataSource {
                     _ => {
                         // Everything else can use the create time to find the creator
                         fields.push((self.fields.creator, self.generate_creator_link(creator)));
+                        // Check to see if we have a critical path event
+                        if let Some(critical) = entry.critical {
+                            if let Some(event_entry) = self.state.find_critical_entry(critical) { 
+                                fields.push((self.fields.critical, 
+                                             self.generate_critical_link(critical, event_entry)))
+                            }
+                        }
                     }
                 }
             }
@@ -1515,6 +1681,12 @@ impl StateDataSource {
             }
             if let Some(creator) = entry.creator() {
                 fields.push((self.fields.creator, self.generate_creator_link(creator)));
+            }
+            if let Some(critical) = entry.critical() {
+                if let Some(event_entry) = self.state.find_critical_entry(critical) {
+                    fields.push((self.fields.critical, 
+                                 self.generate_critical_link(critical, event_entry)));
+                }
             }
             let time_range = entry.time_range();
             if let Some(ready) = time_range.ready {

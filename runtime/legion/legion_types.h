@@ -2895,6 +2895,15 @@ namespace Legion {
       void end_context_wait(Context ctx, bool from_application) const;
       void record_event_wait(LegionProfInstance *profiler, 
                              Realm::Backtrace &bt) const;
+    public:
+      void record_event_merger(const LgEvent *preconditions,
+                               size_t count) const;
+      void record_event_trigger(LgEvent precondition) const;
+      void record_event_poison(void) const;
+      void record_barrier_arrival(LgEvent precondition) const;
+      void record_reservation_acquire(Reservation r,
+                                      LgEvent precondition) const;
+      void record_local_lock_acquire(void) const;
     };
 
     class PredEvent : public LgEvent {
@@ -3094,6 +3103,8 @@ namespace Legion {
           RtEvent ready = local_lock.wrlock();
           while (ready.exists())
           {
+            if (implicit_profiler != NULL)
+              ready.record_local_lock_acquire();
             ready.wait();
             ready = local_lock.wrlock();
           }
@@ -3103,6 +3114,8 @@ namespace Legion {
           RtEvent ready = local_lock.rdlock();
           while (ready.exists())
           {
+            if (implicit_profiler != NULL)
+              ready.record_local_lock_acquire();
             ready.wait();
             ready = local_lock.rdlock();
           }
@@ -3165,6 +3178,8 @@ namespace Legion {
           RtEvent ready = local_lock.wrlock();
           while (ready.exists())
           {
+            if (implicit_profiler != NULL)
+              ready.record_local_lock_acquire();
             ready.wait();
             ready = local_lock.wrlock();
           }
@@ -3174,6 +3189,8 @@ namespace Legion {
           RtEvent ready = local_lock.rdlock();
           while (ready.exists())
           {
+            if (implicit_profiler != NULL)
+              ready.record_local_lock_acquire();
             ready.wait();
             ready = local_lock.rdlock();
           }

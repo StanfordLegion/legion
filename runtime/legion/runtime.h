@@ -2548,7 +2548,8 @@ namespace Legion {
             prof_footprint_threshold(128 << 20),
             prof_target_latency(100),
             prof_call_threshold(0),
-            prof_self_profile(false) { }
+            prof_self_profile(false),
+            prof_no_critical_paths(false) { }
       public:
         int delay_start;
         int legion_collective_radix;
@@ -2607,6 +2608,7 @@ namespace Legion {
         size_t prof_target_latency;
         size_t prof_call_threshold;
         bool prof_self_profile;
+        bool prof_no_critical_paths;
       public:
         bool parse_alloc_percentage_override_argument(const std::string& s);
       };
@@ -5091,7 +5093,8 @@ namespace Legion {
       if (profiler != NULL)
       {
         Realm::ProfilingRequestSet requests;
-        profiler->add_meta_request(requests, T::TASK_ID, args.provenance);
+        profiler->add_meta_request(requests, T::TASK_ID, 
+            args.provenance, precondition);
 #ifdef LEGION_SEPARATE_META_TASKS
         return RtEvent(target.spawn(LG_TASK_ID + T::TASK_ID, &args, sizeof(T),
                                     requests, precondition, priority));
@@ -5135,7 +5138,8 @@ namespace Legion {
       if (profiler != NULL)
       {
         Realm::ProfilingRequestSet requests;
-        profiler->add_meta_request(requests, T::TASK_ID, args.provenance);
+        profiler->add_meta_request(requests, T::TASK_ID,
+            args.provenance, precondition);
 #ifdef LEGION_SEPARATE_META_TASKS
         return RtEvent(target.spawn(LG_APP_PROC_TASK_ID + T::TASK_ID, &args,
                               sizeof(T), requests, precondition, priority));
@@ -5179,6 +5183,11 @@ namespace Legion {
 #endif
       if ((info != NULL) && info->recording)
         info->record_merge_events(result, e1, e2);
+      if ((implicit_profiler != NULL) && result.exists())
+      {
+        const LgEvent preconditions[2] = { e1, e2 };
+        result.record_event_merger(preconditions, 2);
+      }
       return result;
     }
 
@@ -5210,6 +5219,11 @@ namespace Legion {
 #endif
       if ((info != NULL) && info->recording)
         info->record_merge_events(result, e1, e2, e3);
+      if ((implicit_profiler != NULL) && result.exists())
+      {
+        const LgEvent preconditions[3] = { e1, e2, e3 };
+        result.record_event_merger(preconditions, 3);
+      }
       return result;
     }
 
@@ -5268,6 +5282,15 @@ namespace Legion {
 #endif
       if ((info != NULL) && info->recording)
         info->record_merge_events(result, events);
+      if ((implicit_profiler != NULL) && result.exists())
+      {
+        std::vector<LgEvent> preconditions;
+        preconditions.reserve(events.size());
+        for (std::set<ApEvent>::const_iterator it =
+              events.begin(); it != events.end(); it++)
+          preconditions.push_back(*it);
+        result.record_event_merger(&preconditions.front(),preconditions.size());
+      }
       return result;
     }
 
@@ -5336,6 +5359,8 @@ namespace Legion {
 #endif
       if ((info != NULL) && info->recording)
         info->record_merge_events(result, events);
+      if ((implicit_profiler != NULL) && result.exists())
+        result.record_event_merger(&events.front(), events.size());
       return result;
     }
 
@@ -5344,7 +5369,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // No logging for runtime operations currently
-      return RtEvent(Realm::Event::merge_events(e1, e2)); 
+      RtEvent result(Realm::Event::merge_events(e1, e2)); 
+      if ((implicit_profiler != NULL) && result.exists())
+      {
+        const LgEvent preconditions[2] = { e1 , e2 };
+        result.record_event_merger(preconditions, 2);
+      }
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -5353,7 +5384,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // No logging for runtime operations currently
-      return RtEvent(Realm::Event::merge_events(e1, e2, e3)); 
+      const RtEvent result(Realm::Event::merge_events(e1, e2, e3)); 
+      if ((implicit_profiler != NULL) && result.exists())
+      {
+        const LgEvent preconditions[3] = { e1, e2, e3 };
+        result.record_event_merger(preconditions, 3);
+      }
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -5373,7 +5410,17 @@ namespace Legion {
       static_assert(sizeof(legion_events) == sizeof(realm_events));
       memcpy(&realm_events, &legion_events, sizeof(legion_events));
       // No logging for runtime operations currently
-      return RtEvent(Realm::Event::merge_events(*realm_events));
+      const RtEvent result(Realm::Event::merge_events(*realm_events));
+      if ((implicit_profiler != NULL) && result.exists())
+      {
+        std::vector<RtEvent> preconditions;
+        preconditions.reserve(events.size());
+        for (std::set<RtEvent>::const_iterator it =
+              events.begin(); it != events.end(); it++)
+          preconditions.push_back(*it);
+        result.record_event_merger(&preconditions.front(),preconditions.size());
+      }
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -5393,7 +5440,10 @@ namespace Legion {
       static_assert(sizeof(legion_events) == sizeof(realm_events));
       memcpy(&realm_events, &legion_events, sizeof(legion_events));
       // No logging for runtime operations currently
-      return RtEvent(Realm::Event::merge_events(*realm_events));
+      const RtEvent result(Realm::Event::merge_events(*realm_events));
+      if ((implicit_profiler != NULL) && result.exists())
+        result.record_event_merger(&events.front(), events.size());
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -5428,6 +5478,8 @@ namespace Legion {
 #endif
       if ((info != NULL) && info->recording)
         info->record_trigger_event(to_trigger, precondition);
+      if (implicit_profiler != NULL)
+        to_trigger.record_event_trigger(precondition);
     }
 
     //--------------------------------------------------------------------------
@@ -5440,6 +5492,8 @@ namespace Legion {
       // This counts as triggering
       LegionSpy::log_ap_user_event_trigger(to_poison);
 #endif
+      if (implicit_profiler != NULL)
+        to_poison.record_event_poison();
     }
 
     //--------------------------------------------------------------------------
@@ -5465,6 +5519,8 @@ namespace Legion {
 #ifdef LEGION_SPY
       LegionSpy::log_rt_user_event_trigger(to_trigger);
 #endif
+      if (implicit_profiler != NULL)
+        to_trigger.record_event_trigger(to_trigger);
     }
 
     //--------------------------------------------------------------------------
@@ -5477,6 +5533,8 @@ namespace Legion {
       // This counts as triggering
       LegionSpy::log_rt_user_event_trigger(to_poison);
 #endif
+      if (implicit_profiler != NULL)
+        to_poison.record_event_poison();
     }
 
     //--------------------------------------------------------------------------
@@ -5501,6 +5559,8 @@ namespace Legion {
 #ifdef LEGION_SPY
       LegionSpy::log_pred_event_trigger(to_trigger);
 #endif
+      if (implicit_profiler != NULL)
+        to_trigger.record_event_trigger(LgEvent::NO_LG_EVENT);
     }
 
     //--------------------------------------------------------------------------
@@ -5513,6 +5573,8 @@ namespace Legion {
       // This counts as triggering
       LegionSpy::log_pred_event_trigger(to_poison);
 #endif
+      if (implicit_profiler != NULL)
+        to_poison.record_event_poison();
     }
 
     //--------------------------------------------------------------------------
@@ -5544,6 +5606,11 @@ namespace Legion {
 #endif
       if ((info != NULL) && info->recording)
         info->record_merge_events(result, e1, e2);
+      if ((implicit_profiler != NULL) && result.exists())
+      {
+        const LgEvent preconditions[2] = { e1, e2 };
+        result.record_event_merger(preconditions, 2);
+      }
       return result;
     }
 
@@ -5563,6 +5630,8 @@ namespace Legion {
       LegionSpy::log_event_dependence(ApEvent(e), result);
 #endif
 #endif
+      if ((implicit_profiler != NULL) && result.exists())
+        result.record_event_trigger(e);
       return result;
     }
 
@@ -5571,7 +5640,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (to_protect.exists())
-        return RtEvent(Realm::Event::ignorefaults(to_protect));
+      {
+        const RtEvent result(Realm::Event::ignorefaults(to_protect));
+        if ((implicit_profiler != NULL) && result.exists())
+          result.record_event_trigger(to_protect);
+        return result;
+      }
       else
         return RtEvent::NO_RT_EVENT;
     }
@@ -5585,7 +5659,17 @@ namespace Legion {
       const std::set<Realm::Event> *realm_events = NULL;
       static_assert(sizeof(realm_events) == sizeof(ptr));
       memcpy(&realm_events, &ptr, sizeof(realm_events));
-      return RtEvent(Realm::Event::merge_events_ignorefaults(*realm_events));
+      RtEvent result(Realm::Event::merge_events_ignorefaults(*realm_events));
+      if ((implicit_profiler != NULL) && result.exists())
+      {
+        std::vector<LgEvent> preconditions;
+        preconditions.reserve(events.size());
+        for (std::set<ApEvent>::const_iterator it =
+              events.begin(); it != events.end(); it++)
+          preconditions.push_back(*it);
+        result.record_event_merger(&preconditions.front(),preconditions.size());
+      }
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -5600,6 +5684,8 @@ namespace Legion {
       if (precondition.exists())
         LegionSpy::log_event_dependence(precondition, bar.phase_barrier);
 #endif
+      if (implicit_profiler != NULL)
+        bar.phase_barrier.record_barrier_arrival(precondition);
     }
 
     //--------------------------------------------------------------------------
@@ -5649,6 +5735,8 @@ namespace Legion {
       if (precondition.exists())
         LegionSpy::log_event_dependence(precondition, bar);
 #endif
+      if (implicit_profiler != NULL)
+        bar.record_barrier_arrival(precondition);
     }
 
     //--------------------------------------------------------------------------
@@ -5683,6 +5771,8 @@ namespace Legion {
     {
       Realm::Barrier copy = bar;
       copy.arrive(count, precondition, value, size); 
+      if (implicit_profiler != NULL)
+        bar.record_barrier_arrival(precondition);
     }
 
     //--------------------------------------------------------------------------
@@ -5727,6 +5817,8 @@ namespace Legion {
 #ifdef LEGION_SPY
       LegionSpy::log_reservation_acquire(r, precondition, result);
 #endif
+      if ((implicit_profiler != NULL) && result.exists())
+        result.record_reservation_acquire(r, precondition);
       return result;
     }
 
@@ -5735,7 +5827,10 @@ namespace Legion {
                                            bool exclusive, RtEvent precondition)
     //--------------------------------------------------------------------------
     {
-      return RtEvent(r.acquire(exclusive ? 0 : 1, exclusive, precondition)); 
+      RtEvent result(r.acquire(exclusive ? 0 : 1, exclusive, precondition)); 
+      if ((implicit_profiler != NULL) && result.exists())
+        result.record_reservation_acquire(r, precondition);
+      return result;
     }
 
     //--------------------------------------------------------------------------

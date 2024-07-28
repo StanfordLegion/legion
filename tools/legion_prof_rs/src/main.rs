@@ -347,6 +347,8 @@ fn main() -> io::Result<()> {
     state.sort_time_range();
     state.check_message_latencies(message_threshold, message_percentage);
     state.filter_output();
+    println!("Calculating critical paths");
+    state.compute_critical_paths();
 
     match cli.command {
         Commands::Archive {

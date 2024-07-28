@@ -461,6 +461,137 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void LegionProfInstance::record_event_merger(LgEvent result,
+        const LgEvent *preconditions, size_t count)
+    //--------------------------------------------------------------------------
+    {
+      if (owner->no_critical_paths)
+        return;
+      // Realm can return one of the preconditions as the result of
+      // an event merger as an optimization, to handle that we check
+      // if the result is the same as any of the preconditions, if it
+      // is then there is nothing needed for us to record
+      for (unsigned idx = 0; idx < count; idx++)
+        if (preconditions[idx] == result)
+          return;
+      EventMergerInfo &info = event_merger_infos.emplace_back(
+          EventMergerInfo());
+      // Take the timing measurement of when this happened first
+      info.performed = Realm::Clock::current_time_in_nanoseconds();
+      info.result = result;
+      info.preconditions.resize(count);
+      for (unsigned idx = 0; idx < count; idx++)
+        info.preconditions[idx] = preconditions[idx];
+      const Processor current = Processor::get_executing_processor();
+      if (current.exists())
+        info.fevent = LgEvent(Processor::get_current_finish_event());
+      else if ((implicit_context != NULL) && 
+          (implicit_context->owner_task != NULL))
+        info.fevent = implicit_context->owner_task->get_completion_event();
+      owner->update_footprint(sizeof(info) + count * sizeof(LgEvent), this);
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfInstance::record_event_trigger(LgEvent result, LgEvent pre)
+    //--------------------------------------------------------------------------
+    {
+      if (owner->no_critical_paths)
+        return;
+      EventTriggerInfo &info = event_trigger_infos.emplace_back(
+          EventTriggerInfo());
+      info.performed = Realm::Clock::current_time_in_nanoseconds();
+      info.result = result;
+      info.precondition = pre;
+      const Processor current = Processor::get_executing_processor();
+      if (current.exists())
+        info.fevent = LgEvent(Processor::get_current_finish_event());
+      else if ((implicit_context != NULL) && 
+          (implicit_context->owner_task != NULL))
+        info.fevent = implicit_context->owner_task->get_completion_event();
+      owner->update_footprint(sizeof(info), this);
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfInstance::record_event_poison(LgEvent result)
+    //--------------------------------------------------------------------------
+    {
+      if (owner->no_critical_paths)
+        return;
+      EventPoisonInfo &info = event_poison_infos.emplace_back(
+          EventPoisonInfo());
+      info.performed = Realm::Clock::current_time_in_nanoseconds();
+      info.result = result;
+      const Processor current = Processor::get_executing_processor();
+      if (current.exists())
+        info.fevent = LgEvent(Processor::get_current_finish_event());
+      else if ((implicit_context != NULL) && 
+          (implicit_context->owner_task != NULL))
+        info.fevent = implicit_context->owner_task->get_completion_event();
+      owner->update_footprint(sizeof(info), this);
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfInstance::record_barrier_arrival(LgEvent result, LgEvent pre)
+    //--------------------------------------------------------------------------
+    {
+      if (owner->no_critical_paths)
+        return;
+      BarrierArrivalInfo &info = barrier_arrival_infos.emplace_back(
+          BarrierArrivalInfo());
+      info.performed = Realm::Clock::current_time_in_nanoseconds();
+      info.result = result;
+      info.precondition = pre;
+      const Processor current = Processor::get_executing_processor();
+      if (current.exists())
+        info.fevent = LgEvent(Processor::get_current_finish_event());
+      else if ((implicit_context != NULL) && 
+          (implicit_context->owner_task != NULL))
+        info.fevent = implicit_context->owner_task->get_completion_event();
+      owner->update_footprint(sizeof(info), this);
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfInstance::record_reservation_acquire(Reservation r,
+        LgEvent result, LgEvent precondition)
+    //--------------------------------------------------------------------------
+    {
+      if (owner->no_critical_paths)
+        return;
+      ReservationAcquireInfo &info = reservation_acquire_infos.emplace_back(
+          ReservationAcquireInfo());
+      info.performed = Realm::Clock::current_time_in_nanoseconds();
+      info.result = result;
+      info.precondition = precondition;
+      info.reservation = r;
+      const Processor current = Processor::get_executing_processor();
+      if (current.exists())
+        info.fevent = LgEvent(Processor::get_current_finish_event());
+      else if ((implicit_context != NULL) && 
+          (implicit_context->owner_task != NULL))
+        info.fevent = implicit_context->owner_task->get_completion_event();
+      owner->update_footprint(sizeof(info), this);
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfInstance::record_local_lock_acquire(LgEvent result)
+    //--------------------------------------------------------------------------
+    {
+      if (owner->no_critical_paths)
+        return;
+      LocalLockAcquireInfo &info = local_lock_acquire_infos.emplace_back(
+          LocalLockAcquireInfo());
+      info.performed = Realm::Clock::current_time_in_nanoseconds();
+      info.result = result;
+      const Processor current = Processor::get_executing_processor();
+      if (current.exists())
+        info.fevent = LgEvent(Processor::get_current_finish_event());
+      else if ((implicit_context != NULL) && 
+          (implicit_context->owner_task != NULL))
+        info.fevent = implicit_context->owner_task->get_completion_event();
+      owner->update_footprint(sizeof(info), this);
+    }
+
+    //--------------------------------------------------------------------------
     void LegionProfInstance::process_task(const ProfilingInfo *prof_info,
              const Realm::ProfilingResponse &response,
              const Realm::ProfilingMeasurements::OperationProcessorUsage &usage)
@@ -515,6 +646,7 @@ namespace Legion {
           }
         }
         info.creator = prof_info->creator;
+        info.critical = prof_info->critical;
         Realm::ProfilingMeasurements::OperationFinishEvent finish;
         if (response.get_measurement(finish))
           info.finish_event = LgEvent(finish.finish_event);
@@ -549,6 +681,7 @@ namespace Legion {
           }
         }
         info.creator = prof_info->creator;
+        info.critical = prof_info->critical;
         Realm::ProfilingMeasurements::OperationFinishEvent finish;
         if (response.get_measurement(finish))
           info.finish_event = LgEvent(finish.finish_event);
@@ -600,6 +733,7 @@ namespace Legion {
         }
       }
       info.creator = prof_info->creator;
+      info.critical = prof_info->critical;
       Realm::ProfilingMeasurements::OperationFinishEvent finish;
       if (response.get_measurement(finish))
         info.finish_event = LgEvent(finish.finish_event);
@@ -651,6 +785,7 @@ namespace Legion {
         }
       }
       info.creator = prof_info->creator;
+      info.critical = prof_info->critical;
       Realm::ProfilingMeasurements::OperationFinishEvent finish;
       if (response.get_measurement(finish))
         info.finish_event = LgEvent(finish.finish_event);
@@ -813,6 +948,7 @@ namespace Legion {
         }
       }
       info.creator = prof_info->creator;
+      info.critical = prof_info->critical;
       owner->update_footprint(sizeof(CopyInfo) +
           info.inst_infos.size() * sizeof(CopyInstInfo), this);
       if (closure->remove_reference())
@@ -878,6 +1014,7 @@ namespace Legion {
         }
       }
       info.creator = prof_info->creator;
+      info.critical = prof_info->critical;
       owner->update_footprint(sizeof(FillInfo) + 
           info.inst_infos.size() * sizeof(FillInstInfo), this);
       if (closure->remove_reference())
@@ -915,6 +1052,12 @@ namespace Legion {
       assert(response.has_measurement<
           Realm::ProfilingMeasurements::OperationTimeline>());
 #endif
+      // Check to see if this dependent partition operation has a finish event
+      // If it doesn't that means that it was executed inline and we don't
+      // need to bother recording
+      Realm::ProfilingMeasurements::OperationFinishEvent fevent;
+      if (!response.get_measurement(fevent) || !fevent.finish_event.exists())
+        return;
       Realm::ProfilingMeasurements::OperationTimeline timeline;
       response.get_measurement<
             Realm::ProfilingMeasurements::OperationTimeline>(timeline);
@@ -928,6 +1071,8 @@ namespace Legion {
       // use complete_time instead of end_time to include async work
       info.stop = timeline.complete_time;
       info.creator = prof_info->creator;
+      info.critical = prof_info->critical;
+      info.fevent = LgEvent(fevent.finish_event);
       owner->update_footprint(sizeof(PartitionInfo), this);
     }
 
@@ -1318,6 +1463,27 @@ namespace Legion {
       {
         serializer->serialize(*it);
       }
+      for (std::deque<EventMergerInfo>::const_iterator it =
+            event_merger_infos.begin(); it != event_merger_infos.end(); it++)
+        serializer->serialize(*it);
+      for (std::deque<EventTriggerInfo>::const_iterator it =
+            event_trigger_infos.begin(); it != event_trigger_infos.end(); it++)
+        serializer->serialize(*it);
+      for (std::deque<EventPoisonInfo>::const_iterator it =
+            event_poison_infos.begin(); it != event_poison_infos.end(); it++)
+        serializer->serialize(*it);
+      for (std::deque<BarrierArrivalInfo>::const_iterator it =
+            barrier_arrival_infos.begin(); it !=
+            barrier_arrival_infos.end(); it++)
+        serializer->serialize(*it);
+      for (std::deque<ReservationAcquireInfo>::const_iterator it =
+            reservation_acquire_infos.begin(); it !=
+            reservation_acquire_infos.end(); it++)
+        serializer->serialize(*it);
+      for (std::deque<LocalLockAcquireInfo>::const_iterator it =
+            local_lock_acquire_infos.begin(); it !=
+            local_lock_acquire_infos.end(); it++)
+        serializer->serialize(*it);
       for (std::deque<ProfTaskInfo>::const_iterator it = 
             prof_task_infos.begin(); it != prof_task_infos.end(); it++)
       {
@@ -1349,6 +1515,12 @@ namespace Legion {
       partition_infos.clear();
       mapper_call_infos.clear();
       event_wait_infos.clear();
+      event_merger_infos.clear();
+      event_trigger_infos.clear();
+      event_poison_infos.clear();
+      barrier_arrival_infos.clear();
+      reservation_acquire_infos.clear();
+      local_lock_acquire_infos.clear();
     }
 
     //--------------------------------------------------------------------------
@@ -1664,7 +1836,66 @@ namespace Legion {
         if (t_curr >= t_stop)
           return diff;
       }
-
+      while (!event_merger_infos.empty())
+      {
+        EventMergerInfo &info = event_merger_infos.front();
+        serializer->serialize(info);
+        diff += (sizeof(info) + (info.preconditions.size() * sizeof(LgEvent)));
+        event_merger_infos.pop_front();
+        const long long t_curr = Realm::Clock::current_time_in_microseconds();
+        if (t_curr >= t_stop)
+          return diff;
+      }
+      while (!event_trigger_infos.empty())
+      {
+        EventTriggerInfo &info = event_trigger_infos.front();
+        serializer->serialize(info);
+        diff += sizeof(info);
+        event_trigger_infos.pop_front();
+        const long long t_curr = Realm::Clock::current_time_in_microseconds();
+        if (t_curr >= t_stop)
+          return diff;
+      }
+      while (!event_poison_infos.empty())
+      {
+        EventPoisonInfo &info = event_poison_infos.front();
+        serializer->serialize(info);
+        diff += sizeof(info);
+        event_poison_infos.pop_front();
+        const long long t_curr = Realm::Clock::current_time_in_microseconds();
+        if (t_curr >= t_stop)
+          return diff;
+      }
+      while (!barrier_arrival_infos.empty())
+      {
+        BarrierArrivalInfo &info = barrier_arrival_infos.front();
+        serializer->serialize(info);
+        diff += sizeof(info);
+        barrier_arrival_infos.pop_front();
+        const long long t_curr = Realm::Clock::current_time_in_microseconds();
+        if (t_curr >= t_stop)
+          return diff;
+      }
+      while (!reservation_acquire_infos.empty())
+      {
+        ReservationAcquireInfo &info = reservation_acquire_infos.front();
+        serializer->serialize(info);
+        diff += sizeof(info);
+        reservation_acquire_infos.pop_front();
+        const long long t_curr = Realm::Clock::current_time_in_microseconds();
+        if (t_curr >= t_stop)
+          return diff;
+      }
+      while (!local_lock_acquire_infos.empty())
+      {
+        LocalLockAcquireInfo &info = local_lock_acquire_infos.front();
+        serializer->serialize(info);
+        diff += sizeof(info);
+        local_lock_acquire_infos.pop_front();
+        const long long t_curr = Realm::Clock::current_time_in_microseconds();
+        if (t_curr >= t_stop)
+          return diff;
+      }
       while (!prof_task_infos.empty())
       {
         ProfTaskInfo &front = prof_task_infos.front();
@@ -1695,12 +1926,14 @@ namespace Legion {
                                    const size_t target_latency,
                                    const size_t call_threshold,
                                    const bool slow_config_ok,
-                                   const bool self_prof)
+                                   const bool self_prof,
+                                   const bool no_critical)
       : runtime(rt), done_event(Runtime::create_rt_user_event()), 
         minimum_call_threshold(call_threshold * 1000 /*convert us to ns*/),
         output_footprint_threshold(footprint_threshold), 
         output_target_latency(target_latency),
-        target_proc(target), self_profile(self_prof),
+        target_proc(target), self_profile(self_prof), 
+        no_critical_paths(no_critical),
         next_backtrace_id((runtime->address_space == 0) ?
             runtime->total_address_spaces : runtime->address_space),
 #ifndef DEBUG_LEGION
@@ -2019,7 +2252,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LegionProfiler::add_task_request(Realm::ProfilingRequestSet &requests,
-                      TaskID tid, VariantID vid, UniqueID task_uid, Processor p)
+    TaskID tid, VariantID vid, UniqueID task_uid, Processor p, LgEvent critical)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2031,6 +2264,7 @@ namespace Legion {
       info.id = tid;
       info.extra.id2 = vid;
       info.op_id = task_uid;
+      info.critical = critical;
       Realm::ProfilingRequest &req = requests.add_request(target_proc,
                 LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_MIN_PRIORITY);
       req.add_measurement<
@@ -2048,7 +2282,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LegionProfiler::add_meta_request(Realm::ProfilingRequestSet &requests,
-                                          LgTaskID tid, Operation *op)
+                                  LgTaskID tid, Operation *op, LgEvent critical)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2059,6 +2293,7 @@ namespace Legion {
       ProfilingInfo info(this, LEGION_PROF_META); 
       info.id = tid;
       info.op_id = (op != NULL) ? op->get_unique_op_id() : 0;
+      info.critical = critical;
       Realm::ProfilingRequest &req = requests.add_request(target_proc,
                 LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_MIN_PRIORITY);
       req.add_measurement<
@@ -2073,7 +2308,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void LegionProfiler::add_message_request(
-     Realm::ProfilingRequestSet &requests,MessageKind k,Processor remote_target)
+        Realm::ProfilingRequestSet &requests, MessageKind k,
+        Processor remote_target, LgEvent critical)
     //--------------------------------------------------------------------------
     {
       // Don't increment here, we'll increment on the remote side since we
@@ -2081,6 +2317,7 @@ namespace Legion {
       ProfilingInfo info(NULL, LEGION_PROF_MESSAGE);
       info.id = LG_MESSAGE_ID + (int)k;
       info.op_id = implicit_provenance;
+      info.critical = critical;
       // Record the spawn time which is different than the create_time in
       // the Realm profiling response because the create time is not recorded
       // until the active message makes it to the remote node and we want to
@@ -2102,7 +2339,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void LegionProfiler::add_copy_request(Realm::ProfilingRequestSet &requests,
                                           InstanceNameClosure *closure,
-                                          Operation *op, unsigned count,
+                                          Operation *op, LgEvent critical,
+                                          unsigned count,
                                           CollectiveKind collective)
     //--------------------------------------------------------------------------
     {
@@ -2115,6 +2353,7 @@ namespace Legion {
       info.op_id = (op != NULL) ? op->get_unique_op_id() : 0;
       // Use ID to encode the collective copy kind
       info.id = collective;
+      info.critical = critical;
       closure->add_reference(count);
       info.extra.closure = closure;
       Realm::ProfilingRequest &req = requests.add_request(target_proc,
@@ -2132,7 +2371,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void LegionProfiler::add_fill_request(Realm::ProfilingRequestSet &requests,
                                           InstanceNameClosure *closure,
-                                          Operation *op, 
+                                          Operation *op, LgEvent critical, 
                                           CollectiveKind collective)
     //--------------------------------------------------------------------------
     {
@@ -2145,6 +2384,7 @@ namespace Legion {
       info.op_id = (op != NULL) ? op->get_unique_op_id() : 0;
       // Use ID to encode the collective copy kind
       info.id = collective;
+      info.critical = critical;
       closure->add_reference();
       info.extra.closure = closure;
       Realm::ProfilingRequest &req = requests.add_request(target_proc,
@@ -2197,7 +2437,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void LegionProfiler::add_partition_request(
                                            Realm::ProfilingRequestSet &requests,
-                                           Operation *op, DepPartOpKind part_op)
+                                           Operation *op, DepPartOpKind part_op,
+                                           LgEvent critical)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2209,16 +2450,19 @@ namespace Legion {
       // Pass the part_op as the ID
       info.id = part_op;
       info.op_id = (op != NULL) ? op->get_unique_op_id() : 0;
+      info.critical = critical;
       Realm::ProfilingRequest &req = requests.add_request((target_proc.exists())
                         ? target_proc : Processor::get_executing_processor(),
                         LG_LEGION_PROFILING_ID, &info, sizeof(info));
       req.add_measurement<
                   Realm::ProfilingMeasurements::OperationTimeline>();
+      req.add_measurement<
+        Realm::ProfilingMeasurements::OperationFinishEvent>();
     }
 
     //--------------------------------------------------------------------------
     void LegionProfiler::add_task_request(Realm::ProfilingRequestSet &requests,
-                                        TaskID tid, VariantID vid, UniqueID uid)
+                      TaskID tid, VariantID vid, UniqueID uid, LgEvent critical)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2230,6 +2474,7 @@ namespace Legion {
       info.id = tid;
       info.extra.id2 = vid;
       info.op_id = uid;
+      info.critical = critical;
       Realm::ProfilingRequest &req = requests.add_request(target_proc,
                 LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_MIN_PRIORITY);
       req.add_measurement<
@@ -2244,7 +2489,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LegionProfiler::add_meta_request(Realm::ProfilingRequestSet &requests,
-                                          LgTaskID tid, UniqueID uid)
+                                   LgTaskID tid, UniqueID uid, LgEvent critical)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2255,6 +2500,7 @@ namespace Legion {
       ProfilingInfo info(this, LEGION_PROF_META); 
       info.id = tid;
       info.op_id = uid;
+      info.critical = critical;
       Realm::ProfilingRequest &req = requests.add_request(target_proc,
                 LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_MIN_PRIORITY);
       req.add_measurement<
@@ -2270,7 +2516,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void LegionProfiler::add_copy_request(Realm::ProfilingRequestSet &requests,
                                           InstanceNameClosure *closure,
-                                          UniqueID uid, unsigned count,
+                                          UniqueID uid, LgEvent critical,
+                                          unsigned count,
                                           CollectiveKind collective)
     //--------------------------------------------------------------------------
     {
@@ -2283,6 +2530,7 @@ namespace Legion {
       info.op_id = uid;
       // Use ID to encode the collective copy kind
       info.id = collective;
+      info.critical = critical;
       closure->add_reference(count);
       info.extra.closure = closure;
       Realm::ProfilingRequest &req = requests.add_request(target_proc,
@@ -2300,7 +2548,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void LegionProfiler::add_fill_request(Realm::ProfilingRequestSet &requests,
                                           InstanceNameClosure *closure,
-                                          UniqueID uid,
+                                          UniqueID uid, LgEvent critical,
                                           CollectiveKind collective)
     //--------------------------------------------------------------------------
     {
@@ -2313,6 +2561,7 @@ namespace Legion {
       info.op_id = uid;
       // Use ID to encode the collective copy kind
       info.id = collective;
+      info.critical = critical;
       closure->add_reference();
       info.extra.closure = closure;
       Realm::ProfilingRequest &req = requests.add_request(target_proc,
@@ -2354,7 +2603,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void LegionProfiler::add_partition_request(
                                            Realm::ProfilingRequestSet &requests,
-                                           UniqueID uid, DepPartOpKind part_op)
+                                           UniqueID uid, DepPartOpKind part_op,
+                                           LgEvent critical)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2366,10 +2616,13 @@ namespace Legion {
       // Pass the partition op kind as the ID
       info.id = part_op;
       info.op_id = uid;
+      info.critical = critical;
       Realm::ProfilingRequest &req = requests.add_request(target_proc,
                   LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_MIN_PRIORITY);
       req.add_measurement<
                   Realm::ProfilingMeasurements::OperationTimeline>();
+      req.add_measurement<
+        Realm::ProfilingMeasurements::OperationFinishEvent>();
     }
 
     //--------------------------------------------------------------------------

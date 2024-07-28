@@ -37,6 +37,7 @@ slice-group-by = "0.3" # because &[]::group_by is unstable
 log = "0.4"
 env_logger = "0.10"
 nonmax = { version = "0.5.5", features = ["serde"] }
+petgraph = "0.6.5"
 
 [profile.dev]
 opt-level = 2
