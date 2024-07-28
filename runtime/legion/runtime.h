@@ -5520,7 +5520,7 @@ namespace Legion {
       LegionSpy::log_rt_user_event_trigger(to_trigger);
 #endif
       if (implicit_profiler != NULL)
-        to_trigger.record_event_trigger(to_trigger);
+        to_trigger.record_event_trigger(precondition);
     }
 
     //--------------------------------------------------------------------------
