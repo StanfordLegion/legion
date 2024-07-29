@@ -2250,9 +2250,8 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
         }
 
         for(std::set<Processor::Kind>::const_iterator it = local_cpu_kinds.begin();
-	    it != local_cpu_kinds.end();
-	    it++) {
-	  Processor::Kind k = *it;
+            it != local_cpu_kinds.end(); it++) {
+          Processor::Kind k = *it;
 
 	  add_proc_mem_affinities(machine,
 				  procs_by_kind[k],
@@ -2260,8 +2259,7 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
 				  40,  // "large" bandwidth
 				  3   // "small" latency
 				  );
-	}
-
+        }
       }
 
       // retrieve process info
