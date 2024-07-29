@@ -4530,11 +4530,16 @@ namespace Realm {
             }
             info->pci_bandwidth = (rates[gen - 1] * buswidth);
 
-#if !defined(_WIN32) && NVML_API_VERSION >= 11
-            memset(info->numa_node_affinity, 0, sizeof(info->numa_node_affinity));
-            CHECK_NVML(NVML_FNPTR(nvmlDeviceGetMemoryAffinity)(
-                info->nvml_dev, info->MAX_NUMA_NODE_LEN, info->numa_node_affinity,
-                NVML_AFFINITY_SCOPE_NODE));
+#if NVML_API_VERSION >= 11
+            {
+              memset(info->numa_node_affinity, 0, sizeof(info->numa_node_affinity));
+              nvmlReturn_t ret = NVML_FNPTR(nvmlDeviceGetMemoryAffinity)(
+                  info->nvml_dev, info->MAX_NUMA_NODE_LEN, info->numa_node_affinity,
+                  NVML_AFFINITY_SCOPE_NODE);
+              if(ret != NVML_SUCCESS) {
+                memset(info->numa_node_affinity, -1, sizeof(info->numa_node_affinity));
+              }
+            }
 #endif
 #if NVML_API_VERSION >= 12
             {
