@@ -374,7 +374,7 @@ namespace Realm {
   inline IndexSpace<N,T>::IndexSpace(const Rect<N,T>& _bounds, SparsityMap<N,T> _sparsity)
     : bounds(_bounds), sparsity(_sparsity)
   {
-    _sparsity.add_references();
+    sparsity.add_references();
   }
 
   // construct an index space from a list of points or rects
