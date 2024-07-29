@@ -106,6 +106,7 @@ pub struct Fields {
     mapper_proc: FieldID,
     backtrace: FieldID,
     critical: FieldID,
+    trigger_time: FieldID,
 }
 
 #[derive(Debug)]
@@ -153,7 +154,8 @@ impl StateDataSource {
             mapper: field_schema.insert("Mapper".to_owned(), true),
             mapper_proc: field_schema.insert("Mapper Processor".to_owned(), true),
             backtrace: field_schema.insert("Backtrace".to_owned(), false),
-            critical: field_schema.insert("Critical Path".to_owned(), false),
+            critical: field_schema.insert("Critical Path".to_owned(), true),
+            trigger_time: field_schema.insert("Triggering".to_owned(), false),
         };
 
         let mut entry_map = BTreeMap::<EntryID, EntryKind>::new();
@@ -962,6 +964,12 @@ impl StateDataSource {
                                     item_meta.fields.push((
                                         self.fields.critical,
                                         self.generate_critical_link(event, event_entry)));
+                                    // Record the time it took for Realm to propagate the event trigger
+                                    if event_entry.kind != EventEntryKind::UnknownEvent {
+                                        item_meta.fields.push((
+                                            self.fields.trigger_time,
+                                            Field::Interval(ts::Interval::new(event_entry.trigger_time.unwrap().into(), interval.stop))));
+                                    }
                                 }
                             }
                             item_metas.push(item_meta);
@@ -1106,6 +1114,32 @@ impl StateDataSource {
         }
     }
 
+    fn generate_critical_creator_link(&self, prof_uid: ProfUID, creation_time: Timestamp) -> Field {
+        // Not all ProfUIDs will have a processor since some of them
+        // might be referering to fevents that we never found
+        if let Some(proc_id) = self.state.prof_uid_proc.get(&prof_uid) {
+            let proc = self.state.procs.get(&proc_id).unwrap();
+            let entry = proc.find_entry(prof_uid).unwrap();
+            let op_name = entry.name(&self.state);
+            let trigger_time : ts::Timestamp = creation_time.into();
+            Field::ItemLink(ItemLink {
+                item_uid: entry.base().prof_uid.into(),
+                title: format!("Created by {} at {}", &op_name, trigger_time),
+                interval: entry.time_range().into(),
+                entry_id: self.proc_entries.get(proc_id).unwrap().clone(),
+            })
+        } else {
+            // Convert the ProfUID back into an fevent so we can figure
+            // out which node it is on and tell the user that they need
+            // to load the logfile from that node if they want to see it
+            let node = self.state.find_fevent(prof_uid).node_id();
+            Field::String(format!(
+                "Unknown creator on node {}. Please load the logfile from that node to see it.",
+                node.0
+            ))
+        }
+    }
+
     fn generate_critical_link(&self, event: EventID, event_entry: &EventEntry) -> Field {
         let node = event.node_id();
         match event_entry.kind {
@@ -1118,12 +1152,13 @@ impl StateDataSource {
             EventEntryKind::TaskEvent => {
                 let prof_uid = event_entry.creator.unwrap();
                 if let Some(proc_id) = self.state.prof_uid_proc.get(&prof_uid) {
+                    let trigger_time: ts::Timestamp = event_entry.trigger_time.unwrap().into();
                     let proc = self.state.procs.get(&proc_id).unwrap();
                     let entry = proc.find_entry(prof_uid).unwrap();
                     let op_name = entry.name(&self.state);
                     Field::ItemLink(ItemLink {
                         item_uid: entry.base().prof_uid.into(),
-                        title: format!("Completion of {}", &op_name),
+                        title: format!("Completion of {} at {}", &op_name, trigger_time),
                         interval: entry.time_range.into(),
                         entry_id: self.proc_entries.get(proc_id).unwrap().clone(),
                     })
@@ -1144,18 +1179,19 @@ impl StateDataSource {
                 Field::String(format!("Deppart"))
             }
             // The rest of these only happen when the critical path is not along a chain
-            // of events but when the (meta-) task producing 
+            // of events but when the (meta-) task producing the event is the last thing
+            // to actually run to enable the execution
             EventEntryKind::MergeEvent => {
                 let prof_uid = event_entry.creator.unwrap();
                 if let Some(proc_id) = self.state.prof_uid_proc.get(&prof_uid) {
-                    let trigger_time = event_entry.trigger_time.unwrap();
+                    let trigger_time: ts::Timestamp = event_entry.trigger_time.unwrap().into();
                     let proc = self.state.procs.get(&proc_id).unwrap();
                     let entry = proc.find_entry(prof_uid).unwrap();
                     let op_name = entry.name(&self.state);
                     Field::ItemLink(ItemLink {
                         item_uid: entry.base().prof_uid.into(),
-                        title: format!("Event Merger by {}", &op_name),
-                        interval: ts::Interval::new(entry.time_range.start.unwrap().into(), trigger_time.into()),
+                        title: format!("Event Merger by {} at {}", &op_name, trigger_time),
+                        interval: ts::Interval::new(entry.time_range.start.unwrap().into(), trigger_time),
                         entry_id: self.proc_entries.get(proc_id).unwrap().clone(),
                     })
                 } else {
@@ -1168,14 +1204,14 @@ impl StateDataSource {
             EventEntryKind::TriggerEvent => {
                 let prof_uid = event_entry.creator.unwrap();
                 if let Some(proc_id) = self.state.prof_uid_proc.get(&prof_uid) {
-                    let trigger_time = event_entry.trigger_time.unwrap();
+                    let trigger_time: ts::Timestamp = event_entry.trigger_time.unwrap().into();
                     let proc = self.state.procs.get(&proc_id).unwrap();
                     let entry = proc.find_entry(prof_uid).unwrap();
                     let op_name = entry.name(&self.state);
                     Field::ItemLink(ItemLink {
                         item_uid: entry.base().prof_uid.into(),
-                        title: format!("User Event Trigger by {}", &op_name),
-                        interval: ts::Interval::new(entry.time_range.start.unwrap().into(), trigger_time.into()),
+                        title: format!("User Event Trigger by {} at {}", &op_name, trigger_time),
+                        interval: ts::Interval::new(entry.time_range.start.unwrap().into(), trigger_time),
                         entry_id: self.proc_entries.get(proc_id).unwrap().clone(),
                     })
                 } else {
@@ -1188,14 +1224,14 @@ impl StateDataSource {
             EventEntryKind::PoisonEvent => {
                 let prof_uid = event_entry.creator.unwrap();
                 if let Some(proc_id) = self.state.prof_uid_proc.get(&prof_uid) {
-                    let trigger_time = event_entry.trigger_time.unwrap();
+                    let trigger_time: ts::Timestamp = event_entry.trigger_time.unwrap().into();
                     let proc = self.state.procs.get(&proc_id).unwrap();
                     let entry = proc.find_entry(prof_uid).unwrap();
                     let op_name = entry.name(&self.state);
                     Field::ItemLink(ItemLink {
                         item_uid: entry.base().prof_uid.into(),
-                        title: format!("Event Poisoned by {}", &op_name),
-                        interval: ts::Interval::new(entry.time_range.start.unwrap().into(), trigger_time.into()),
+                        title: format!("Event Poisoned by {} at {}", &op_name, trigger_time),
+                        interval: ts::Interval::new(entry.time_range.start.unwrap().into(), trigger_time),
                         entry_id: self.proc_entries.get(proc_id).unwrap().clone(),
                     })
                 } else {
@@ -1208,14 +1244,14 @@ impl StateDataSource {
             EventEntryKind::ArriveBarrier => {
                 let prof_uid = event_entry.creator.unwrap();
                 if let Some(proc_id) = self.state.prof_uid_proc.get(&prof_uid) {
-                    let trigger_time = event_entry.trigger_time.unwrap();
+                    let trigger_time: ts::Timestamp = event_entry.trigger_time.unwrap().into();
                     let proc = self.state.procs.get(&proc_id).unwrap();
                     let entry = proc.find_entry(prof_uid).unwrap();
                     let op_name = entry.name(&self.state);
                     Field::ItemLink(ItemLink {
                         item_uid: entry.base().prof_uid.into(),
-                        title: format!("Barrier Arrival by {}", &op_name),
-                        interval: ts::Interval::new(entry.time_range.start.unwrap().into(), trigger_time.into()),
+                        title: format!("Barrier Arrival by {} at {}", &op_name, trigger_time),
+                        interval: ts::Interval::new(entry.time_range.start.unwrap().into(), trigger_time),
                         entry_id: self.proc_entries.get(proc_id).unwrap().clone(),
                     })
                 } else {
@@ -1228,14 +1264,14 @@ impl StateDataSource {
             EventEntryKind::ReservationAcquire => {
                 let prof_uid = event_entry.creator.unwrap();
                 if let Some(proc_id) = self.state.prof_uid_proc.get(&prof_uid) {
-                    let trigger_time = event_entry.trigger_time.unwrap();
+                    let trigger_time: ts::Timestamp = event_entry.trigger_time.unwrap().into();
                     let proc = self.state.procs.get(&proc_id).unwrap();
                     let entry = proc.find_entry(prof_uid).unwrap();
                     let op_name = entry.name(&self.state);
                     Field::ItemLink(ItemLink {
                         item_uid: entry.base().prof_uid.into(),
-                        title: format!("Reservation Acquire by {}", &op_name),
-                        interval: ts::Interval::new(entry.time_range.start.unwrap().into(), trigger_time.into()),
+                        title: format!("Reservation Acquire by {} at {}", &op_name, trigger_time),
+                        interval: ts::Interval::new(entry.time_range.start.unwrap().into(), trigger_time),
                         entry_id: self.proc_entries.get(proc_id).unwrap().clone(),
                     })
                 } else {
@@ -1320,14 +1356,47 @@ impl StateDataSource {
                     }
                     _ => {
                         // Everything else can use the create time to find the creator
-                        fields.push((self.fields.creator, self.generate_creator_link(creator)));
                         // Check to see if we have a critical path event
-                        if let Some(critical) = entry.critical {
-                            if let Some(event_entry) = self.state.find_critical_entry(critical) { 
-                                fields.push((self.fields.critical, 
-                                             self.generate_critical_link(critical, event_entry)))
+                        if let Some(critical) = entry.critical() {
+                            if let Some(event_entry) = self.state.find_critical_entry(critical) {
+                                // Check to see if the critical entry happened before or after
+                                // the creation of this processor entry
+                                if event_entry.kind != EventEntryKind::UnknownEvent &&
+                                    event_entry.trigger_time.unwrap() < entry.creation_time() {
+                                    // Created after critical event triggered
+                                    fields.push((self.fields.critical,
+                                                 self.generate_critical_creator_link(creator, 
+                                                                                     entry.creation_time())));
+                                } else {
+                                    // Created before critical event triggered so list both
+                                    // fields separately since they wil be different
+                                    fields.push((self.fields.creator, self.generate_creator_link(creator)));
+                                    fields.push((self.fields.critical, 
+                                                 self.generate_critical_link(critical, event_entry)));
+                                    if event_entry.kind != EventEntryKind::UnknownEvent {
+                                        // Record the time it took Realm to propagate the event trigger
+                                        fields.push((self.fields.trigger_time, Field::Interval(ts::Interval::new(event_entry.trigger_time.unwrap().into(), entry.time_range.ready.unwrap().into()))));
+                                    }
+                                }
+                            } else {
+                                // No critical entry so assume creation was the critical path
+                                fields.push((self.fields.critical, self.generate_critical_creator_link(creator,
+                                                                                                       entry.creation_time())));
                             }
+                        } else {
+                            // No critical event so the creation was definitely the critical path 
+                            fields.push((self.fields.critical, self.generate_critical_creator_link(creator, entry.creation_time())));
                         }
+                    }
+                }
+            } else if let Some(critical) = entry.critical() {
+                // No creator so if we have critical entry that is the critical path
+                if let Some(event_entry) = self.state.find_critical_entry(critical) {
+                    fields.push((self.fields.critical,
+                                 self.generate_critical_link(critical, event_entry)));
+                    if event_entry.kind != EventEntryKind::UnknownEvent {
+                        // Record the time it took Realm to propagate the event trigger
+                        fields.push((self.fields.trigger_time, Field::Interval(ts::Interval::new(event_entry.trigger_time.unwrap().into(), entry.time_range.ready.unwrap().into()))));
                     }
                 }
             }
@@ -1679,16 +1748,46 @@ impl StateDataSource {
                     Field::String(provenance.to_string()),
                 ));
             }
+            let time_range = entry.time_range();
             if let Some(creator) = entry.creator() {
-                fields.push((self.fields.creator, self.generate_creator_link(creator)));
-            }
-            if let Some(critical) = entry.critical() {
+                if let Some(critical) = entry.critical() {
+                    if let Some(event_entry) = self.state.find_critical_entry(critical) {
+                        // Check to see if the critical entry happened before or after
+                        // the creation of this processor entry
+                        if event_entry.kind != EventEntryKind::UnknownEvent &&
+                            event_entry.trigger_time.unwrap() < entry.creation_time() {
+                            // Created after critical event triggered
+                            fields.push((self.fields.critical,
+                                         self.generate_critical_creator_link(creator, entry.creation_time())));
+                        } else {
+                            // Created before critical event triggered so list both
+                            // fields separately since they will be different
+                            fields.push((self.fields.creator, self.generate_creator_link(creator)));
+                            fields.push((self.fields.critical, self.generate_critical_link(critical, event_entry)));
+                            if event_entry.kind != EventEntryKind::UnknownEvent {
+                                // Record the time it took Realm to propagate the event trigger
+                                fields.push((self.fields.trigger_time, Field::Interval(ts::Interval::new(event_entry.trigger_time.unwrap().into(), time_range.ready.unwrap().into()))));
+                            }
+                        }
+                    } else {
+                        // No critical entry so assume creation was the critical path
+                        fields.push((self.fields.critical, self.generate_critical_creator_link(creator, entry.creation_time())));
+                    }
+                } else {
+                    // No critical event so the creation was definitely the critical path
+                    fields.push((self.fields.critical, self.generate_critical_creator_link(creator, entry.creation_time())));
+                }
+            } else if let Some(critical) = entry.critical() {
+                // No creator so if we have critical entry that is the critical path
                 if let Some(event_entry) = self.state.find_critical_entry(critical) {
-                    fields.push((self.fields.critical, 
+                    fields.push((self.fields.critical,
                                  self.generate_critical_link(critical, event_entry)));
+                    if event_entry.kind != EventEntryKind::UnknownEvent {
+                        // Record the time it took Realm to propagate the event trigger
+                        fields.push((self.fields.trigger_time, Field::Interval(ts::Interval::new(event_entry.trigger_time.unwrap().into(), time_range.ready.unwrap().into()))));
+                    }
                 }
             }
-            let time_range = entry.time_range();
             if let Some(ready) = time_range.ready {
                 if let Some(create) = time_range.create {
                     fields.push((

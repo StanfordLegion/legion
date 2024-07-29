@@ -376,6 +376,7 @@ pub trait ContainerEntry {
     fn initiation(&self) -> Option<OpID>;
     fn creator(&self) -> Option<ProfUID>;
     fn critical(&self) -> Option<EventID>;
+    fn creation_time(&self) -> Timestamp;
 
     // Methods that require State access
     fn name(&self, state: &State) -> String;
@@ -463,6 +464,14 @@ impl ContainerEntry for ProcEntry {
 
     fn critical(&self) -> Option<EventID> {
         self.critical
+    }
+
+    fn creation_time(&self) -> Timestamp {
+        if let Some(spawn) = self.time_range.spawn {
+            spawn
+        } else {
+            self.time_range.create.unwrap()
+        }
     }
 
     fn name(&self, state: &State) -> String {
@@ -1354,6 +1363,14 @@ impl ContainerEntry for ChanEntry {
         }
     }
 
+    fn creation_time(&self) -> Timestamp {
+        match self {
+            ChanEntry::Copy(copy) => copy.time_range.create.unwrap(),
+            ChanEntry::Fill(fill) => fill.time_range.create.unwrap(),
+            ChanEntry::DepPart(deppart) => deppart.time_range.create.unwrap(),
+        }
+    }
+
     fn name(&self, state: &State) -> String {
         match self {
             ChanEntry::Copy(copy) => {
@@ -2015,6 +2032,10 @@ impl ContainerEntry for Inst {
         // No criticality for instances yet because we can't
         // see what Realm is doing to satisfy them
         None 
+    }
+
+    fn creation_time(&self) -> Timestamp {
+        self.time_range.create.unwrap()
     }
 
     fn name(&self, state: &State) -> String {
