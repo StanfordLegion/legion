@@ -198,6 +198,7 @@ namespace Realm {
       sparsity.id = 0;
       return sparsity;
     }
+
     // construct and fill in a sparsity map
     SparsityMapImplWrapper *wrap = get_runtime()->get_available_sparsity_impl(Network::my_node_id);
     SparsityMap<N,T> sparsity = wrap->me.convert<SparsityMap<N,T> >();

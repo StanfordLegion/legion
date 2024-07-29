@@ -27,10 +27,26 @@ void node_task_0(const void *args, size_t arglen, const void *userdata, size_t u
   task_args.sparsity_map.impl();
   task_args.sparsity_map.remove_references(1);
 
-  SparsityMap<1> local_sparsity =
-      SparsityMap<1>::construct({Rect<1>(Point<1>(0), Point<1>(50000))}, true, true);
-  local_sparsity.add_references();
-  local_sparsity.destroy(task_args.wait_on);
+  {
+    Rect<1> bounds{Rect<1>(Point<1>(0), Point<1>(50000))};
+    SparsityMap<1> local_sparsity = SparsityMap<1>::construct({bounds}, true, true);
+    IndexSpace<1> is(bounds, local_sparsity);
+    is.destroy();
+  }
+
+  {
+    std::vector<Rect<1>> bounds{Rect<1>(Point<1>(0), Point<1>(20000)),
+                                Rect<1>(Point<1>(30000), Point<1>(50000))};
+    IndexSpace<1> is(bounds);
+    is.destroy(task_args.wait_on);
+  }
+
+  {
+    std::vector<Point<1>> points{Point<1>(0), Point<1>(20000),
+                                Point<1>(30000)};
+    IndexSpace<1> is(points);
+    is.destroy();
+  }
 }
 
 void main_task(const void *args, size_t arglen, const void *userdata, size_t userlen,
