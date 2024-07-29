@@ -2932,8 +2932,6 @@ namespace Realm {
       const Node &n = nodes_info[src_node];
       for(std::vector<Channel *>::const_iterator it = n.dma_channels.begin();
           it != n.dma_channels.end(); ++it) {
-        assert(channel_copy_info.src_mem != Memory::NO_MEMORY);
-        assert(channel_copy_info.dst_mem != Memory::NO_MEMORY);
         XferDesKind kind = XFER_NONE;
         uint64_t cost =
             (*it)->supports_path(channel_copy_info, src_serdez_id, dst_serdez_id,
