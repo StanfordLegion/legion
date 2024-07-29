@@ -29,7 +29,8 @@ void node_task_0(const void *args, size_t arglen, const void *userdata, size_t u
 
   {
     Rect<1> bounds{Rect<1>(Point<1>(0), Point<1>(50000))};
-    SparsityMap<1> local_sparsity = SparsityMap<1>::construct({bounds}, true, true);
+    SparsityMap<1> local_sparsity =
+        SparsityMap<1>::construct({bounds}, /*always_create=*/true, /*disjoint=*/false);
     IndexSpace<1> is(bounds, local_sparsity);
     is.destroy();
   }
@@ -42,8 +43,7 @@ void node_task_0(const void *args, size_t arglen, const void *userdata, size_t u
   }
 
   {
-    std::vector<Point<1>> points{Point<1>(0), Point<1>(20000),
-                                Point<1>(30000)};
+    std::vector<Point<1>> points{Point<1>(0), Point<1>(20000), Point<1>(30000)};
     IndexSpace<1> is(points);
     is.destroy();
   }
@@ -75,7 +75,8 @@ void main_task(const void *args, size_t arglen, const void *userdata, size_t use
     UserEvent done = UserEvent::create_user_event();
     std::vector<Event> events;
 
-    sparsity_maps.push_back(SparsityMap<1>::construct(rects, true, true));
+    sparsity_maps.push_back(
+        SparsityMap<1>::construct(rects, /*always_create=*/true, /*disjoint=*/true));
     sparsity_maps.back().impl();
 
     for(std::map<NodeID, Memory>::const_iterator it = memories.begin();
