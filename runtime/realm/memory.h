@@ -61,7 +61,19 @@ namespace Realm {
     };
 
     inline std::ostream& operator<<(std::ostream& os, Memory m) { return os << std::hex << m.id << std::dec; }
-	
+
+    inline std::ostream &operator<<(std::ostream &os, Memory::Kind kind)
+    {
+#define STRING_KIND_CASE(kind, desc)                                                     \
+  case Memory::Kind::kind:                                                               \
+    return os << #kind;
+      switch(kind) {
+        REALM_MEMORY_KINDS(STRING_KIND_CASE)
+      }
+#undef STRING_KIND_CASE
+      return os << "UNKNOWN_KIND";
+    }
+
 }; // namespace Realm
 
 //include "memory.inl"
