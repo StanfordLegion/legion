@@ -180,14 +180,12 @@ namespace Realm {
       // 1) empty lhs
       if(l.empty()) {
 	results[i] = r;
-        results[i].sparsity.add_references();
 	continue;
       }
 
       // 2) empty rhs
       if(rhss[li].empty()) {
 	results[i] = l;
-        results[i].sparsity.add_references();
 	continue;
       }
 
@@ -207,7 +205,6 @@ namespace Realm {
       if((l.sparsity == r.sparsity) && union_is_rect(l.bounds, r.bounds)) {
 	results[i] = IndexSpace<N,T>(l.bounds.union_bbox(r.bounds),
 				      l.sparsity);
-        results[i].sparsity.add_references();
         continue;
       }
 
@@ -222,6 +219,9 @@ namespace Realm {
     }
 
     for(size_t i = 0; i < n; i++) {
+      if(results[i].sparsity.exists()) {
+        results[i].sparsity.add_references();
+      }
       size_t li = (lhss.size() == 1) ? 0 : i;
       size_t ri = (rhss.size() == 1) ? 0 : i;
       log_dpops.info() << "union: " << lhss[li] << " " << rhss[ri] << " -> " << results[i] << " (" << e << ")";
@@ -272,7 +272,6 @@ namespace Realm {
       if(r.dense() || (r.sparsity == l.sparsity)) {
 	results[i] = IndexSpace<N,T>(l.bounds.intersection(r.bounds),
 				      l.sparsity);
-        results[i].sparsity.add_references(1);
 	continue;
       }
 
@@ -295,6 +294,9 @@ namespace Realm {
     }
 
     for(size_t i = 0; i < n; i++) {
+      if (results[i].sparsity.exists()) {
+        results[i].sparsity.add_references();
+      }
       size_t li = (lhss.size() == 1) ? 0 : i;
       size_t ri = (rhss.size() == 1) ? 0 : i;
       log_dpops.info() << "isect: " << lhss[li] << " " << rhss[ri] << " -> " << results[i] << " (" << e << ")";
@@ -344,7 +346,6 @@ namespace Realm {
       // 2) empty rhs
       if(r.empty()) {
 	results[i] = l;
-        results[i].sparsity.add_references();
 	continue;
       }
 
@@ -365,7 +366,6 @@ namespace Realm {
 	Rect<N,T> sdiff;
 	if(attempt_simple_diff(l.bounds, r.bounds, sdiff)) {
           results[i] = IndexSpace<N, T>(sdiff, l.sparsity);
-          results[i].sparsity.add_references(1);
           continue;
 	}
       }
@@ -382,6 +382,9 @@ namespace Realm {
     }
 
     for(size_t i = 0; i < n; i++) {
+      if(results[i].sparsity.exists()) {
+        results[i].sparsity.add_references();
+      }
       size_t li = (lhss.size() == 1) ? 0 : i;
       size_t ri = (rhss.size() == 1) ? 0 : i;
       log_dpops.info() << "diff: " << lhss[li] << " " << rhss[ri] << " -> " << results[i] << " (" << e << ")";
@@ -444,6 +447,10 @@ namespace Realm {
 	was_inline = false;
 	break;
       }
+    }
+
+    if(result.sparsity.exists()) {
+      result.sparsity.add_references();
     }
 
     {
@@ -512,7 +519,6 @@ namespace Realm {
 	if(result.dense()) {
 	  result.bounds = result.bounds.intersection(subspaces[i].bounds);
 	  result.sparsity = subspaces[i].sparsity;
-          result.sparsity.add_references();
 	  continue;	  
 	}
 
@@ -528,6 +534,10 @@ namespace Realm {
 	was_inline = false;
 	break;
       }
+    }
+
+    if(result.sparsity.exists()) {
+      result.sparsity.add_references();
     }
 
     {
@@ -1552,7 +1562,6 @@ namespace Realm {
     }
     SparsityMap<N,T> sparsity = get_runtime()->get_available_sparsity_impl(target_node)->me.convert<SparsityMap<N,T> >();
     output.sparsity = sparsity;
-    output.sparsity.add_references();
 
     std::vector<IndexSpace<N,T> > ops(2);
     ops[0] = lhs;
@@ -1592,7 +1601,6 @@ namespace Realm {
       }
     SparsityMap<N,T> sparsity = get_runtime()->get_available_sparsity_impl(target_node)->me.convert<SparsityMap<N,T> >();
     output.sparsity = sparsity;
-    output.sparsity.add_references();
 
     inputs.push_back(ops);
     outputs.push_back(sparsity);
@@ -1677,7 +1685,6 @@ namespace Realm {
     }
     SparsityMap<N,T> sparsity = get_runtime()->get_available_sparsity_impl(target_node)->me.convert<SparsityMap<N,T> >();
     output.sparsity = sparsity;
-    output.sparsity.add_references();
 
     std::vector<IndexSpace<N,T> > ops(2);
     ops[0] = lhs;
@@ -1720,7 +1727,6 @@ namespace Realm {
       }
     SparsityMap<N,T> sparsity = get_runtime()->get_available_sparsity_impl(target_node)->me.convert<SparsityMap<N,T> >();
     output.sparsity = sparsity;
-    output.sparsity.add_references();
 
     inputs.push_back(ops);
     outputs.push_back(sparsity);
@@ -1805,7 +1811,6 @@ namespace Realm {
     }
     SparsityMap<N,T> sparsity = get_runtime()->get_available_sparsity_impl(target_node)->me.convert<SparsityMap<N,T> >();
     output.sparsity = sparsity;
-    output.sparsity.add_references();
 
     lhss.push_back(lhs);
     rhss.push_back(rhs);
