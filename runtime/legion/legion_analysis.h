@@ -1458,6 +1458,28 @@ namespace Legion {
         ProjectionSummary *proj_summary;
         bool has_interfering_sibling = false;
       };
+
+    struct PointWisePreviousIndexTaskInfo : public LegionHeapify<PointWisePreviousIndexTaskInfo> {
+      public:
+        PointWisePreviousIndexTaskInfo(IndexSpaceNode *domain, ProjectionFunction *projection,
+            ShardingFunction *sharding, IndexSpaceNode *sharding_domain, Domain &index_domain,
+            Operation *previous_index_task,
+            GenerationID previous_index_task_generation, size_t ctx_index)
+          : domain(domain), projection(projection), sharding(sharding), sharding_domain(sharding_domain),
+          previous_index_task(previous_index_task), index_domain(index_domain),
+          previous_index_task_generation(previous_index_task_generation),
+          ctx_index(ctx_index)
+      {}
+      public:
+        IndexSpaceNode *domain;
+        ProjectionFunction *projection;
+        ShardingFunction *sharding;
+        IndexSpaceNode *sharding_domain;
+        Domain index_domain;
+        Operation *previous_index_task;
+        GenerationID previous_index_task_generation;
+        size_t ctx_index;
+    };
 #endif
 
     /**

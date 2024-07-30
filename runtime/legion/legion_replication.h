@@ -2031,6 +2031,13 @@ namespace Legion {
       virtual void record_intra_space_dependence(const DomainPoint &point,
                                                  const DomainPoint &next,
                                                  RtEvent point_mapped);
+#ifdef POINT_WISE_LOGICAL_ANALYSIS
+    public:
+    void record_point_wise_dependence(LogicalRegion lr,
+        unsigned region_idx, RtEvent point_mapped);
+    RtEvent find_point_wise_dependence(LogicalRegion lr,
+        unsigned region_idx, GenerationID gen);
+#endif
     public:
       // Output regions
       virtual void record_output_registered(RtEvent registered);
@@ -3429,6 +3436,11 @@ namespace Legion {
     public:
       void send_intra_space_dependence(ShardID target, Serializer &rez);
       void handle_intra_space_dependence(Deserializer &derez);
+#ifdef POINT_WISE_LOGICAL_ANALYSIS
+    public:
+      void send_point_wise_dependence(ShardID target, Serializer &rez);
+      void handle_point_wise_dependence(Deserializer &derez);
+#endif
     public:
       void broadcast_resource_update(ShardTask *source, Serializer &rez,
                                      std::set<RtEvent> &applied_events);
@@ -3497,6 +3509,10 @@ namespace Legion {
                                                       Runtime *rt);
       static void handle_intra_space_dependence(Deserializer &derez, 
                                                 Runtime *rt);
+#ifdef POINT_WISE_LOGICAL_ANALYSIS
+      static void handle_point_wise_dependence(Deserializer &derez,
+                                                Runtime *rt);
+#endif
       static void handle_broadcast_update(Deserializer &derez, Runtime *rt);
       static void handle_created_regions(Deserializer &derez, Runtime *rt);
       static void handle_trace_event_request(Deserializer &derez, Runtime *rt,

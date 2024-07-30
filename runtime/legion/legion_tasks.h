@@ -684,6 +684,14 @@ namespace Legion {
         virtual void record_intra_space_dependence(const DomainPoint &point,
                                                    const DomainPoint &next,
                                                    RtEvent point_mapped) = 0;
+#ifdef POINT_WISE_LOGICAL_ANALYSIS
+      public:
+        virtual void record_point_wise_dependence(LogicalRegion lr,
+            unsigned region_idx,
+            RtEvent point_mapped) = 0;
+        virtual RtEvent find_point_wise_dependence(LogicalRegion lr,
+            unsigned region_idx, GenerationID gen) = 0;
+#endif
       public:
         void pack_multi_task(Serializer &rez, AddressSpaceID target);
         void unpack_multi_task(Deserializer &derez,
@@ -749,6 +757,21 @@ namespace Legion {
         size_t predicate_false_size;
       protected:
         std::map<DomainPoint,RtEvent> intra_space_dependences;
+#ifdef POINT_WISE_LOGICAL_ANALYSIS
+      protected:
+        std::map<LogicalRegion,RtEvent> point_wise_dependences;
+        // Flag to indicate if we have a previous task for which
+        // we can map point-task-wise instead of whole index-task-wise.
+        bool connect_to_prev_point = false;
+        // Flag to indicate if we have a next task for which
+        // we can map point-task-wise instead of whole index-task-wise.
+        bool connect_to_next_point = false;
+      public:
+        void set_connect_to_prev_point (void) { connect_to_prev_point = true; }
+        void set_connect_to_next_point (void) { connect_to_next_point = true; }
+        bool should_connect_to_prev_point (void) { return connect_to_prev_point; }
+        bool should_connect_to_next_point (void) { return connect_to_next_point; }
+#endif
       protected:
         // This barrier is only here to help with a bug that currently
         // exists in the CUDA driver between collective kernel launches
@@ -962,9 +985,8 @@ namespace Legion {
         virtual const Mappable* as_mappable(void) const { return this; }
 #ifdef POINT_WISE_LOGICAL_ANALYSIS
       public:
-        void record_point_wise_dependence_for_next_point(LogicalRegion lr,
+        void record_point_wise_dependence(LogicalRegion lr,
             unsigned region_idx);
-        void record_point_wise_dependence_for_prev_point(LogicalRegion lr);
 #endif
       public:
         void initialize_point(SliceTask *owner, const DomainPoint &point,
@@ -1132,6 +1154,9 @@ namespace Legion {
         void handle_output_equivalence_set(Deserializer &derez);
         void handle_refine_equivalence_sets(Deserializer &derez);
         void handle_intra_space_dependence(Deserializer &derez);
+#ifdef POINT_WISE_LOGICAL_ANALYSIS
+        void handle_point_wise_dependence(Deserializer &derez);
+#endif
         void handle_resource_update(Deserializer &derez,
                                     std::set<RtEvent> &applied);
         void handle_created_region_contexts(Deserializer &derez,
@@ -1296,11 +1321,6 @@ namespace Legion {
       virtual void concurrent_allreduce(SliceTask *slice,
           AddressSpaceID slice_space, size_t points, uint64_t lamport_clock,
           VariantID vid, bool poisoned);
-#ifdef POINT_WISE_LOGICAL_ANALYSIS
-    public:
-      void recond_point_wise_dependence(LogicalRegion lr, RtEvent point_mapped);
-      RtEvent find_point_wise_dependence(LogicalRegion lr, GenerationID gen);
-#endif
     public:
       // Methods for supporting intra-index-space mapping dependences
       virtual RtEvent find_intra_space_dependence(const DomainPoint &point);
@@ -1383,25 +1403,24 @@ namespace Legion {
     protected:
       std::vector<std::pair<SliceTask*,AddressSpace> > concurrent_slices;
 #ifdef POINT_WISE_LOGICAL_ANALYSIS
+    public:
+      virtual void record_point_wise_dependence(LogicalRegion lr,
+          unsigned region_idx,
+          RtEvent point_mapped);
+      virtual RtEvent find_point_wise_dependence(LogicalRegion lr,
+           unsigned region_idx, GenerationID gen);
+      static void process_slice_find_point_wise_dependence(Deserializer &derez);
+      static void process_slice_record_point_wise_dependence(Deserializer &derez);
     protected:
       std::map<LogicalRegion,RtUserEvent> pending_point_wise_dependences;
     public:
-      // This map will be storing the events for each disjoint
-      // logical_region representing each point in the previous
-      // index task.
-      std::map<LogicalRegion,RtEvent> point_wise_dependences;
       // Map of previous index task for a region id. This will
       // be maintained in the next task to lookup the event
       // this task needs to wait on. The event will be stored
       // in the point_wise_dependnece data structure of the
       // previous task.
-      std::map<unsigned,std::pair<Operation*, GenerationID>> prev_index_tasks;
-      // Flag to indicate if we have a previous task for which
-      // we can map point-task-wise instead of whole index-task-wise.
-      bool prev_point_wise_mapping = false;
-      // Flag to indicate if we have a next task for which
-      // we can map point-task-wise instead of whole index-task-wise.
-      bool next_point_wise_mapping = false;
+      std::map<unsigned,PointWisePreviousIndexTaskInfo> prev_index_tasks;
+      std::map<unsigned,PointWisePreviousIndexTaskInfo> next_index_tasks;
 #endif
     };
 
@@ -1523,6 +1542,15 @@ namespace Legion {
       virtual void record_intra_space_dependence(const DomainPoint &point,
                                                  const DomainPoint &next,
                                                  RtEvent point_mapped);
+#ifdef POINT_WISE_LOGICAL_ANALYSIS
+    public:
+      virtual void record_point_wise_dependence(LogicalRegion lr,
+          unsigned region_idx,
+          RtEvent point_mapped);
+      virtual RtEvent find_point_wise_dependence(LogicalRegion lr,
+           unsigned region_idx, GenerationID gen = 0);
+      bool need_forward_progress(void);
+#endif
     public:
       virtual size_t get_collective_points(void) const;
       virtual bool find_shard_participants(std::vector<ShardID> &shards);
@@ -1561,8 +1589,6 @@ namespace Legion {
       static void handle_concurrent_allreduce_response(Deserializer &derez);
       static void handle_remote_output_extents(Deserializer &derez);
       static void handle_remote_output_registration(Deserializer &derez);
-    public:
-      bool need_forward_progress(void);
     protected:
       friend class IndexTask;
       friend class PointTask;

@@ -16559,7 +16559,9 @@ namespace Legion {
             continue;
           }
           const FieldMask overlap = check_mask & it->second;
+#ifdef POINT_WISE_LOGICAL_ANALYSIS
           bool skip_registering_region_dependece = false;
+#endif
           if (!!overlap)
           {
             if (TRACK_DOM)
@@ -16579,7 +16581,6 @@ namespace Legion {
               case LEGION_SIMULTANEOUS_DEPENDENCE:
               case LEGION_TRUE_DEPENDENCE:
                 {
-
 #ifdef POINT_WISE_LOGICAL_ANALYSIS
                   if (prev.shard_proj != NULL && user.shard_proj != NULL)
                   {
@@ -16592,7 +16593,10 @@ namespace Legion {
                       if(!prev.shard_proj->is_disjoint() || !prev.shard_proj->can_perform_name_based_self_analysis()) {
                         logical_analysis.bail_point_wise_analysis = true;
                       }
-                      else if ((user.shard_proj->projection->projection_id != prev.shard_proj->projection->projection_id) || !user.shard_proj->projection->is_functional)
+                      else if ((user.shard_proj->projection->projection_id !=
+                            prev.shard_proj->projection->projection_id) ||
+                          !user.shard_proj->projection->is_functional) //||
+                          //!user.shard_proj->projection->is_invertible)
                       {
                         logical_analysis.bail_point_wise_analysis = true;
                       }
@@ -16604,9 +16608,29 @@ namespace Legion {
                           printf("FOUND PROPER ANCESTOR\n");
                           skip_registering_region_dependece = true;
                           logical_analysis.point_wise_analyses.back().ancestor = &prev;
-                          static_cast<IndexTask*>(user.op)->prev_index_tasks[user.idx] = std::pair<Operation*, unsigned>(prev.op, prev.gen);
-                          static_cast<IndexTask*>(user.op)->prev_point_wise_mapping = true;
-                          static_cast<IndexTask*>(prev.op)->next_point_wise_mapping = true;
+                          //static_cast<IndexTask*>(user.op)->prev_index_tasks[user.idx] = std::pair<Operation*, unsigned>(prev.op, prev.gen);
+                          static_cast<IndexTask*>(user.op)->prev_index_tasks.insert(
+                              {
+                              user.idx,
+                              PointWisePreviousIndexTaskInfo(prev.shard_proj->domain,
+                              prev.shard_proj->projection, prev.shard_proj->sharding,
+                              prev.shard_proj->sharding_domain,
+                              static_cast<IndexTask*>(prev.op)->index_domain,
+                              prev.op, prev.gen, prev.ctx_index)
+                              }
+                            );
+                          static_cast<IndexTask*>(user.op)->next_index_tasks.insert(
+                              {
+                              prev.idx,
+                              PointWisePreviousIndexTaskInfo(user.shard_proj->domain,
+                              user.shard_proj->projection, user.shard_proj->sharding,
+                              user.shard_proj->sharding_domain,
+                              static_cast<IndexTask*>(user.op)->index_domain,
+                              user.op, user.gen, user.ctx_index)
+                              }
+                            );
+                          static_cast<IndexTask*>(user.op)->set_connect_to_prev_point();
+                          static_cast<IndexTask*>(prev.op)->set_connect_to_next_point();
                         }
                       }
                     }

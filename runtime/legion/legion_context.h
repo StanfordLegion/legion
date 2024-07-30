@@ -2943,6 +2943,12 @@ namespace Legion {
           const DomainPoint &point, RtEvent point_mapped, ShardID next_shard);
       void handle_intra_space_dependence(Deserializer &derez);
     public:
+#ifdef POINT_WISE_LOGICAL_ANALYSIS
+      void record_point_wise_dependence(uint64_t context_index,
+          LogicalRegion lr, RtEvent point_mapped, ShardID next_shard);
+      void handle_point_wise_dependence(Deserializer &derez);
+#endif
+    public:
       void increase_pending_index_spaces(unsigned count, bool double_buffer);
       void increase_pending_partitions(unsigned count, bool double_buffer);
       void increase_pending_field_spaces(unsigned count, bool double_buffer);
@@ -3182,6 +3188,9 @@ namespace Legion {
       unsigned                   next_collective_map_bar_index;
     protected:
       std::map<std::pair<uint64_t,DomainPoint>,IntraSpaceDeps> intra_space_deps;
+    protected:
+      std::map<std::pair<uint64_t,LogicalRegion>,IntraSpaceDeps> point_wise_deps;
+    protected:
     protected:
       // Store the global owner shard and local owner shard for allocation
       std::map<FieldSpace,

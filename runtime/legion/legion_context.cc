@@ -20809,6 +20809,75 @@ namespace Legion {
       }
     }
 
+#ifdef POINT_WISE_LOGICAL_ANALYSIS
+    //--------------------------------------------------------------------------
+    void ReplicateContext::record_point_wise_dependence(uint64_t context_index,
+        LogicalRegion lr, RtEvent point_mapped, ShardID next_shard)
+    //--------------------------------------------------------------------------
+    {
+      const std::pair<uint64_t,LogicalRegion> key(context_index,lr);
+      AutoLock r_lock(replication_lock);
+      IntraSpaceDeps &deps = point_wise_deps[key];
+      // Check to see if someone has already registered this
+      std::map<ShardID,RtUserEvent>::iterator finder = 
+        deps.pending_deps.find(next_shard);
+      if (finder != deps.pending_deps.end())
+      {
+        Runtime::trigger_event(finder->second, point_mapped);
+        deps.pending_deps.erase(finder);
+        if (deps.pending_deps.empty() && deps.ready_deps.empty())
+          point_wise_deps.erase(key);
+      }
+      else
+      {
+        // Not seen yet so just record our entry for this shard
+#ifdef DEBUG_LEGION
+        assert(deps.ready_deps.find(next_shard) == deps.ready_deps.end());
+#endif
+        deps.ready_deps[next_shard] = point_mapped;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::handle_point_wise_dependence(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      std::pair<uint64_t,LogicalRegion> key;
+      derez.deserialize(key.first);
+      derez.deserialize(key.second);
+      RtUserEvent pending_event;
+      derez.deserialize(pending_event);
+      unsigned region_idx;
+      derez.deserialize(region_idx);
+      GenerationID gen;
+      derez.deserialize(gen);
+      ShardID requesting_shard;
+      derez.deserialize(requesting_shard);
+
+      AutoLock r_lock(replication_lock);
+      IntraSpaceDeps &deps = point_wise_deps[key];
+      // Check to see if someone has already registered this shard
+      std::map<ShardID,RtEvent>::iterator finder = 
+        deps.ready_deps.find(requesting_shard);
+      if (finder != deps.ready_deps.end())
+      {
+        Runtime::trigger_event(pending_event, finder->second);
+        deps.ready_deps.erase(finder);
+        if (deps.ready_deps.empty() && deps.pending_deps.empty())
+          point_wise_deps.erase(key);
+      }
+      else
+      {
+        // Not seen yet so just record our entry for this shard
+#ifdef DEBUG_LEGION
+        assert(deps.pending_deps.find(requesting_shard) == 
+                deps.pending_deps.end());
+#endif
+        deps.pending_deps[requesting_shard] = pending_event;
+      }
+    }
+#endif
+
     //--------------------------------------------------------------------------
     void ReplicateContext::receive_resources(uint64_t return_index,
               std::map<LogicalRegion,unsigned> &created_regs,

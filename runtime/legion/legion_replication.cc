@@ -1507,7 +1507,7 @@ namespace Legion {
         if (all_reduce_collective == NULL)
         {
           reduction_collective->async_reduce(reduction_instance, 
-                                             reduction_instance_precondition);
+              reduction_instance_precondition);
           reduction_instance_precondition = broadcast_collective->finished;
           if (broadcast_collective->is_origin())
             collective_done = reduction_collective->get_done_event();
@@ -1931,6 +1931,156 @@ namespace Legion {
       else // The next shard is ourself, so we can do the normal thing
         IndexTask::record_intra_space_dependence(point, next, point_mapped);
     }
+
+#ifdef POINT_WISE_LOGICAL_ANALYSIS
+    //--------------------------------------------------------------------------
+    void ReplIndexTask::record_point_wise_dependence(LogicalRegion lr,
+                                                 unsigned region_idx,
+                                                 RtEvent point_mapped)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(sharding_function != NULL);
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+
+      std::map<unsigned, PointWisePreviousIndexTaskInfo>::iterator finder =
+        next_index_tasks.find(region_idx);
+      assert(finder != next_index_tasks.end());
+      IndexTask *next_index_task = static_cast<IndexTask*>(finder->second.previous_index_task);
+      GenerationID next_task_gen = finder->second.previous_index_task_generation;
+
+      // find the point of the previous index_task
+      const RegionRequirement &req = logical_regions[region_idx];
+      std::vector<DomainPoint> next_index_task_points;
+      if (req.handle_type == LEGION_PARTITION_PROJECTION)
+      {
+        finder->second.projection->functor->invert(lr,
+            req.partition, finder->second.index_domain,
+            next_index_task_points);
+      }
+      else
+      {
+        finder->second.projection->functor->invert(lr,
+            req.region, finder->second.index_domain,
+            next_index_task_points);
+      }
+
+      if (next_index_task_points.size() > 1)
+      {
+        // throw _error
+      }
+      // find shard of the point
+      const ShardID next_shard =
+         finder->second.sharding->find_owner(next_index_task_points[0],
+            finder->second.index_domain);
+
+      if (next_shard != repl_ctx->owner_shard->shard_id)
+      {
+        repl_ctx->record_point_wise_dependence(context_index, lr,
+                                                point_mapped, next_shard);
+      }
+      else
+        IndexTask::record_point_wise_dependence(lr, region_idx, point_mapped);
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent ReplIndexTask::find_point_wise_dependence(LogicalRegion lr,
+        unsigned region_idx, GenerationID gen)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock o_lock(op_lock);
+      if (gen < get_generation()) return RtUserEvent::NO_RT_USER_EVENT;
+
+#ifdef DEBUG_LEGION
+      assert(sharding_function != NULL);
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+
+      if (should_connect_to_prev_point())
+      {
+        // Find prev index task
+        std::map<unsigned, PointWisePreviousIndexTaskInfo>::iterator finder =
+          prev_index_tasks.find(region_idx);
+        assert(finder != prev_index_tasks.end());
+        IndexTask *prev_index_task = static_cast<IndexTask*>(finder->second.previous_index_task);
+        GenerationID prev_task_gen = finder->second.previous_index_task_generation;
+
+        // find the point of the previous index_task
+        const RegionRequirement &req = logical_regions[region_idx];
+        std::vector<DomainPoint> previous_index_task_points;
+        if (req.handle_type == LEGION_PARTITION_PROJECTION)
+        {
+          finder->second.projection->functor->invert(lr,
+              req.partition, finder->second.index_domain,
+              previous_index_task_points);
+        }
+        else
+        {
+          finder->second.projection->functor->invert(lr,
+              req.region, finder->second.index_domain,
+              previous_index_task_points);
+        }
+
+        if (previous_index_task_points.size() > 1)
+        {
+          // throw _error
+        }
+        // find shard of the point
+        const ShardID point_shard =
+           finder->second.sharding->find_owner(previous_index_task_points[0],
+              finder->second.index_domain);
+
+        if (point_shard != repl_ctx->owner_shard->shard_id)
+        {
+          // send to the shard where the point is
+          const RtUserEvent pending_event = Runtime::create_rt_user_event();
+
+          // A different shard owns it so send a message to that shard 
+          // requesting it to fill in the dependence
+          Serializer rez;
+          rez.serialize(repl_ctx->shard_manager->did);
+          rez.serialize(point_shard);
+          rez.serialize(finder->second.ctx_index);
+          rez.serialize(lr);
+          rez.serialize(pending_event);
+          rez.serialize(region_idx);
+          rez.serialize(gen);
+          rez.serialize(repl_ctx->owner_shard->shard_id);
+          repl_ctx->shard_manager->send_point_wise_dependence(point_shard, rez);
+          return pending_event;
+        }
+
+        if (prev_task_gen < prev_index_task->get_generation())
+          return RtEvent::NO_RT_EVENT;
+
+        return prev_index_task->find_point_wise_dependence(lr, region_idx,
+                                                           prev_task_gen);
+      }
+
+      if (should_connect_to_next_point())
+      {
+        std::map<LogicalRegion,RtEvent>::iterator finder =
+          point_wise_dependences.find(lr);
+        if (finder != point_wise_dependences.end())
+          return finder->second;
+        // Otherwise make a temporary one and record it for now
+        const RtUserEvent pending_event = Runtime::create_rt_user_event();
+        point_wise_dependences[lr] = pending_event;
+        pending_point_wise_dependences[lr] = pending_event;
+        return pending_event;
+      }
+
+      assert(1);
+      return RtUserEvent::NO_RT_USER_EVENT;
+    }
+#endif
 
     //--------------------------------------------------------------------------
     void ReplIndexTask::record_output_registered(RtEvent registered)
@@ -11072,6 +11222,51 @@ namespace Legion {
       assert(false);
     }
 
+#ifdef POINT_WISE_LOGICAL_ANALYSIS
+    //--------------------------------------------------------------------------
+    void ShardManager::send_point_wise_dependence(ShardID target,
+                                                   Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(target < address_spaces->size());
+#endif
+      AddressSpaceID target_space = (*address_spaces)[target];
+      // Check to see if this is a local shard
+      if (target_space == runtime->address_space)
+      {
+        Deserializer derez(rez.get_buffer(), rez.get_used_bytes());
+        // Have to unpack the preample we already know
+        DistributedID local_repl;
+        derez.deserialize(local_repl);
+        handle_point_wise_dependence(derez);
+      }
+      else
+        runtime->send_control_replicate_point_wise_dependence(target_space,
+                                                               rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardManager::handle_point_wise_dependence(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      // Figure out which shard we are going to
+      ShardID target;
+      derez.deserialize(target);
+      for (std::vector<ShardTask*>::const_iterator it =
+            local_shards.begin(); it != local_shards.end(); it++)
+      {
+        if ((*it)->shard_id == target)
+        {
+          (*it)->handle_point_wise_dependence(derez);
+          return;
+        }
+      }
+      // Should never get here
+      assert(false);
+    }
+#endif
+
     //--------------------------------------------------------------------------
     void ShardManager::broadcast_resource_update(ShardTask *source, 
                              Serializer &rez, std::set<RtEvent> &applied_events)
@@ -12176,6 +12371,19 @@ namespace Legion {
       ShardManager *manager = runtime->find_shard_manager(repl_id);
       manager->handle_intra_space_dependence(derez);
     }
+
+#ifdef POINT_WISE_LOGICAL_ANALYSIS
+    //--------------------------------------------------------------------------
+    /*static*/ void ShardManager::handle_point_wise_dependence(
+                                          Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DistributedID repl_id;
+      derez.deserialize(repl_id);
+      ShardManager *manager = runtime->find_shard_manager(repl_id);
+      manager->handle_point_wise_dependence(derez);
+    }
+#endif
 
     //--------------------------------------------------------------------------
     /*static*/ void ShardManager::handle_broadcast_update(Deserializer &derez,

@@ -12577,6 +12577,18 @@ namespace Legion {
               runtime->handle_slice_record_intra_dependence(derez);
               break;
             }
+#ifdef POINT_WISE_LOGICAL_ANALYSIS
+          case SLICE_FIND_POINT_WISE_DEP:
+            {
+              runtime->handle_slice_find_point_wise_dependence(derez);
+              break;
+            }
+          case SLICE_RECORD_POINT_WISE_DEP:
+            {
+              runtime->handle_slice_record_point_wise_dependence(derez);
+              break;
+            }
+#endif
           case SLICE_REMOTE_COLLECTIVE_RENDEZVOUS:
             {
               runtime->handle_slice_remote_collective_rendezvous(derez,
@@ -13010,6 +13022,13 @@ namespace Legion {
               runtime->handle_control_replicate_intra_space_dependence(derez);
               break;
             }
+#ifdef POINT_WISE_LOGICAL_ANALYSIS
+          case SEND_REPL_POINT_WISE_DEP:
+            {
+              runtime->handle_control_replicate_point_wise_dependence(derez);
+              break;
+            }
+#endif
           case SEND_REPL_BROADCAST_UPDATE:
             {
               runtime->handle_control_replicate_broadcast_update(derez);
@@ -15737,7 +15756,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // This should never get called
-      assert(false);
+      //assert(false);
+      // TODO : Add
+      // Get color of the partition
+      // ordered_points should have exactly one point that corresponds to the color we find above
+      ordered_points[0] = runtime->get_logical_region_color_point(region);
+      assert(launch_domain.contains(ordered_points[0]));
     }
 
     //--------------------------------------------------------------------------
@@ -15920,8 +15944,7 @@ namespace Legion {
             (*it)->set_projection_result(idx, result);
 
 #ifdef POINT_WISE_LOGICAL_ANALYSIS
-            (*it)->record_point_wise_dependence_for_next_point(result, idx);
-            (*it)->record_point_wise_dependence_for_prev_point(result);
+            (*it)->record_point_wise_dependence(result, idx);
 #endif
 
             if (find_dependences)
@@ -22218,8 +22241,28 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(SLICE_RECORD_INTRA_DEP, rez,
+                                                      true/*flush*/);
+    }
+
+#ifdef POINT_WISE_LOGICAL_ANALYSIS
+    //--------------------------------------------------------------------------
+    void Runtime::send_slice_find_point_wise_dependence(Processor target,
+                                                         Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(SLICE_FIND_POINT_WISE_DEP, rez,
+                                                      true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_slice_record_point_wise_dependence(Processor target,
+                                                           Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(SLICE_RECORD_POINT_WISE_DEP, rez,
                                                          true/*flush*/);
     }
+#endif
 
     //--------------------------------------------------------------------------
     void Runtime::send_slice_remote_rendezvous(Processor target,Serializer &rez)
@@ -22937,6 +22980,17 @@ namespace Legion {
       find_messenger(target)->send_message(SEND_REPL_INTRA_SPACE_DEP,
                                                     rez, true/*flush*/);
     }
+
+#ifdef POINT_WISE_LOGICAL_ANALYSIS 
+    //--------------------------------------------------------------------------
+    void Runtime::send_control_replicate_point_wise_dependence(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(SEND_REPL_POINT_WISE_DEP,
+                                                    rez, true/*flush*/);
+    }
+#endif
 
     //--------------------------------------------------------------------------
     void Runtime::send_control_replicate_broadcast_update(AddressSpaceID target,
@@ -24800,6 +24854,22 @@ namespace Legion {
       IndexTask::process_slice_record_intra_dependence(derez);
     }
 
+#ifdef POINT_WISE_LOGICAL_ANALYSIS
+    //--------------------------------------------------------------------------
+    void Runtime::handle_slice_find_point_wise_dependence(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      IndexTask::process_slice_find_point_wise_dependence(derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_slice_record_point_wise_dependence(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      IndexTask::process_slice_record_point_wise_dependence(derez);
+    }
+#endif
+
     //--------------------------------------------------------------------------
     void Runtime::handle_slice_remote_collective_rendezvous(
                                      Deserializer &derez, AddressSpaceID source)
@@ -25369,6 +25439,16 @@ namespace Legion {
     {
       ShardManager::handle_intra_space_dependence(derez, this);
     }
+
+#ifdef POINT_WISE_LOGICAL_ANALYSIS
+    //--------------------------------------------------------------------------
+    void Runtime::handle_control_replicate_point_wise_dependence(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      ShardManager::handle_point_wise_dependence(derez, this);
+    }
+#endif
 
     //--------------------------------------------------------------------------
     void Runtime::handle_control_replicate_broadcast_update(Deserializer &derez)
