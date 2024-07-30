@@ -349,6 +349,11 @@ pub trait Container {
     fn util_time_points(&self, device: Option<DeviceKind>) -> &Vec<TimePoint<Self::E, Self::S>>;
     fn entry(&self, entry: Self::E) -> &Self::Entry;
     fn entry_mut(&mut self, entry: Self::E) -> &mut Self::Entry;
+    fn find_previous_executing_entry(
+        &self,
+        ready: Timestamp,
+        start: Timestamp,
+    ) -> Option<(ProfUID, Timestamp, Timestamp)>;
 
     // For internal use only
     fn stack(
@@ -1082,6 +1087,96 @@ impl Container for Proc {
     fn entry_mut(&mut self, prof_uid: ProfUID) -> &mut ProcEntry {
         self.entries.get_mut(&prof_uid).unwrap()
     }
+
+    fn find_previous_executing_entry(
+        &self,
+        ready: Timestamp,
+        start: Timestamp,
+    ) -> Option<(ProfUID, Timestamp, Timestamp)> {
+        // If this is an I/O processor then there is no concept of a "previous"
+        // as there might be multiple ranges executing at the same time
+        let mut result = None;
+        if self.kind.unwrap() != ProcKind::IO {
+            // Iterate all the levels of the stack
+            for level in self.time_points_stacked.iter() {
+                // Should be at least two points in every level for the
+                // starting and ending of the range
+                if level.is_empty() {
+                    // I don't know whey this happens but we'll ignore it
+                    continue;
+                }
+                // Find the lower bound for the start time to get the
+                // last task to start before the start time
+                let mut lower = 0;
+                let mut upper = level.len();
+                while lower < upper {
+                    let mid = (lower + upper) / 2;
+                    if level[mid].time < start {
+                        lower = mid + 1;
+                    } else {
+                        upper = mid;
+                    }
+                }
+                // lower is now the "upper" bound
+                upper = lower;
+                if upper == 0 {
+                    // Found nothing that started before start
+                    continue;
+                }
+                // This makes lower the first point less than than the timestamp
+                lower = upper - 1;
+                let prof_uid = level[lower].entry;
+                let entry = self.entries.get(&prof_uid).unwrap();
+                // Find the last running range that happens before the start time
+                let mut running_start = entry.time_range.start.unwrap();
+                assert!(running_start < start);
+                for wait in entry.waiters.wait_intervals.iter() {
+                    // Should need to wait before the start happens
+                    assert!(wait.start <= start);
+                    // We're only interested in ranges that happen after the ready time
+                    if ready <= wait.start {
+                        // Running after the task becomes ready, see if this is
+                        // the latest running interval before the start
+                        let diff = start - wait.start;
+                        // See if this is the closest running range to the start
+                        if let Some((_, _, prev_stop)) = result {
+                            let prev_diff = start - prev_stop;
+                            if diff < prev_diff {
+                                result = Some((prof_uid, running_start, wait.start));
+                            }
+                        } else {
+                            // First one so go ahead and record it
+                            result = Some((prof_uid, running_start, wait.start));
+                        }
+                    }
+                    running_start = wait.end;
+                    // If the next running range starts after start we don't need to consider it
+                    if start <= running_start {
+                        break;
+                    }
+                }
+                // Make sure the running ranges starts before the start
+                if running_start <= start {
+                    let running_stop = entry.time_range.stop.unwrap();
+                    // We're only interested in ranges that end after the ready time
+                    if ready <= running_stop {
+                        let diff = start - running_stop;
+                        // See if this is the closest running range to the start
+                        if let Some((_, _, prev_stop)) = result {
+                            let prev_diff = start - prev_stop;
+                            if diff < prev_diff {
+                                result = Some((prof_uid, running_start, running_stop));
+                            }
+                        } else {
+                            // First one so go ahead and record it
+                            result = Some((prof_uid, running_start, running_stop));
+                        }
+                    }
+                }
+            }
+        }
+        result
+    }
 }
 
 pub type MemEntry = Inst;
@@ -1253,6 +1348,15 @@ impl Container for Mem {
 
     fn entry_mut(&mut self, inst_uid: InstUID) -> &mut Inst {
         self.insts.get_mut(&inst_uid).unwrap()
+    }
+
+    fn find_previous_executing_entry(
+        &self,
+        _: Timestamp,
+        _: Timestamp,
+    ) -> Option<(ProfUID, Timestamp, Timestamp)> {
+        // No support for this
+        None
     }
 }
 
@@ -1585,6 +1689,15 @@ impl Container for Chan {
 
     fn entry_mut(&mut self, prof_uid: ProfUID) -> &mut ChanEntry {
         self.entries.get_mut(&prof_uid).unwrap()
+    }
+
+    fn find_previous_executing_entry(
+        &self,
+        _: Timestamp,
+        _: Timestamp,
+    ) -> Option<(ProfUID, Timestamp, Timestamp)> {
+        // No support for this
+        None
     }
 }
 
@@ -2031,7 +2144,7 @@ impl ContainerEntry for Inst {
     fn critical(&self) -> Option<EventID> {
         // No criticality for instances yet because we can't
         // see what Realm is doing to satisfy them
-        None 
+        None
     }
 
     fn creation_time(&self) -> Timestamp {
