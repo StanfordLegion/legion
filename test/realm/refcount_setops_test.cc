@@ -178,7 +178,46 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
   {
     std::vector<IndexSpace<1>> results;
     assert(!task_args.lhs[0].dense());
+    Event e2 = IndexSpace<1>::compute_unions(
+        std::vector<IndexSpace<1>>{std::begin(task_args.lhs), std::end(task_args.lhs)},
+        std::vector<IndexSpace<1>>{std::begin(task_args.lhs), std::end(task_args.lhs)},
+        results, ProfilingRequestSet());
+    e2.wait();
+    for(size_t i = 0; i < results.size(); i++) {
+      results[i].sparsity.remove_references();
+    }
+  }
+
+  {
+    std::vector<IndexSpace<1>> results;
+    assert(!task_args.lhs[0].dense());
     Event e2 = IndexSpace<1>::compute_intersections(
+        std::vector<IndexSpace<1>>{std::begin(task_args.lhs), std::end(task_args.lhs)},
+        std::vector<IndexSpace<1>>{std::begin(task_args.rhs), std::end(task_args.rhs)},
+        results, ProfilingRequestSet());
+    e2.wait();
+    for(size_t i = 0; i < results.size(); i++) {
+      results[i].sparsity.remove_references();
+    }
+  }
+
+  {
+    std::vector<IndexSpace<1>> results;
+    assert(!task_args.lhs[0].dense());
+    Event e2 = IndexSpace<1>::compute_intersections(
+        std::vector<IndexSpace<1>>{std::begin(task_args.lhs), std::end(task_args.lhs)},
+        std::vector<IndexSpace<1>>{std::begin(task_args.lhs), std::end(task_args.lhs)},
+        results, ProfilingRequestSet());
+    e2.wait();
+    for(size_t i = 0; i < results.size(); i++) {
+      results[i].sparsity.remove_references();
+    }
+  }
+
+  {
+    std::vector<IndexSpace<1>> results;
+    assert(!task_args.lhs[0].dense());
+    Event e2 = IndexSpace<1>::compute_differences(
         std::vector<IndexSpace<1>>{std::begin(task_args.lhs), std::end(task_args.lhs)},
         std::vector<IndexSpace<1>>{std::begin(task_args.rhs), std::end(task_args.rhs)},
         results, ProfilingRequestSet());
@@ -193,7 +232,7 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
     assert(!task_args.lhs[0].dense());
     Event e2 = IndexSpace<1>::compute_differences(
         std::vector<IndexSpace<1>>{std::begin(task_args.lhs), std::end(task_args.lhs)},
-        std::vector<IndexSpace<1>>{std::begin(task_args.rhs), std::end(task_args.rhs)},
+        std::vector<IndexSpace<1>>{std::begin(task_args.lhs), std::end(task_args.lhs)},
         results, ProfilingRequestSet());
     e2.wait();
     for(size_t i = 0; i < results.size(); i++) {
