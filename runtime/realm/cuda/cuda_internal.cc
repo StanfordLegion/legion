@@ -784,10 +784,10 @@ namespace Realm {
                                    copy_info.extents[2]
                             << " srcPitch=" << cuda_copy.srcPitch
                             << " srcHeight=" << cuda_copy.srcHeight
-                            << " srcDevice=" << cuda_copy.srcDevice
-                            << " dstPitch=" << cuda_copy.dstPitch
+                            << " srcDevice=" << std::hex << cuda_copy.srcDevice
+                            << std::dec << " dstPitch=" << cuda_copy.dstPitch
                             << " dstHeight=" << cuda_copy.dstHeight
-                            << " dstDevice=" << cuda_copy.dstDevice;
+                            << " dstDevice=" << std::hex << cuda_copy.dstDevice;
 
           CHECK_CU(CUDA_DRIVER_FNPTR(cuMemcpy3DAsync)(&cuda_copy, stream->get_stream()));
 
