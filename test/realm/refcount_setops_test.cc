@@ -162,6 +162,22 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
     assert(result.dense());
   }
 
+  // empty lhs
+  {
+    std::vector<IndexSpace<1>> results;
+    std::vector<IndexSpace<1>> lhs(1);
+    Event e2 = IndexSpace<1>::compute_unions(
+        lhs,
+        std::vector<IndexSpace<1>>{std::begin(task_args.rhs), std::end(task_args.rhs)},
+        results, ProfilingRequestSet());
+    e2.wait();
+    for(size_t i = 0; i < results.size(); i++) {
+      results[i].sparsity.remove_references();
+    }
+  }
+
+  // TODO: test empty rhs
+
   {
     std::vector<IndexSpace<1>> results;
     assert(!task_args.lhs[0].dense());
@@ -181,6 +197,19 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
     Event e2 = IndexSpace<1>::compute_unions(
         std::vector<IndexSpace<1>>{std::begin(task_args.lhs), std::end(task_args.lhs)},
         std::vector<IndexSpace<1>>{std::begin(task_args.lhs), std::end(task_args.lhs)},
+        results, ProfilingRequestSet());
+    e2.wait();
+    for(size_t i = 0; i < results.size(); i++) {
+      results[i].sparsity.remove_references();
+    }
+  }
+
+  {
+    std::vector<IndexSpace<1>> results;
+    std::vector<IndexSpace<1>> rhs(1);
+    assert(!task_args.lhs[0].dense());
+    Event e2 = IndexSpace<1>::compute_differences(
+        std::vector<IndexSpace<1>>{std::begin(task_args.lhs), std::end(task_args.lhs)}, rhs,
         results, ProfilingRequestSet());
     e2.wait();
     for(size_t i = 0; i < results.size(); i++) {
@@ -239,7 +268,7 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
       results[i].sparsity.remove_references();
     }
   }
-}
+  }
 
 void main_task(const void *args, size_t arglen, const void *userdata, size_t userlen,
                Processor p)

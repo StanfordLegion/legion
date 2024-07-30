@@ -180,12 +180,14 @@ namespace Realm {
       // 1) empty lhs
       if(l.empty()) {
 	results[i] = r;
+        results[i].sparsity.add_references();
 	continue;
       }
 
       // 2) empty rhs
       if(rhss[li].empty()) {
 	results[i] = l;
+        results[i].sparsity.add_references();
 	continue;
       }
 
@@ -342,6 +344,7 @@ namespace Realm {
       // 2) empty rhs
       if(r.empty()) {
 	results[i] = l;
+        results[i].sparsity.add_references();
 	continue;
       }
 
