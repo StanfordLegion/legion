@@ -5187,13 +5187,15 @@ namespace Realm {
   {
     switch(io.iotype) {
     case TransferGraph::XDTemplate::IO_INST:
-      os << "inst(" << io.inst.inst << ":" << io.inst.inst.get_location().kind() << ","
-         << io.inst.fld_start << "+" << io.inst.fld_count << ")";
+      os << "inst(" << io.inst.inst << ":(" << io.inst.inst.get_location() << ":"
+         << io.inst.inst.get_location().kind() << ")," << io.inst.fld_start << "+"
+         << io.inst.fld_count << ")";
       break;
     case TransferGraph::XDTemplate::IO_INDIRECT_INST:
       os << "ind(" << io.indirect.ind_idx << "," << io.indirect.port << ","
-         << io.indirect.inst << ":" << io.indirect.inst.get_location().kind() << ","
-         << io.indirect.fld_start << "+" << io.indirect.fld_count << ")";
+         << io.indirect.inst << ":(" << io.indirect.inst.get_location() << ":"
+         << io.indirect.inst.get_location().kind() << ")," << io.indirect.fld_start << "+"
+         << io.indirect.fld_count << ")";
       break;
     case TransferGraph::XDTemplate::IO_EDGE:
       os << "edge(" << io.edge << ")";
@@ -5290,8 +5292,10 @@ namespace Realm {
 	  ib_pre_ids[xdn.outputs[j].edge] = std::make_pair(new_xdid, j);
     }
 
-    log_new_dma.info() << "xds created: " << std::hex << PrettyVector<XferDesID>(xd_ids) << std::dec;
-    
+    log_new_dma.info() << "plan=" << std::hex << &desc << std::dec
+                       << ", xds created: " << std::hex << PrettyVector<XferDesID>(xd_ids)
+                       << std::dec;
+
     // now actually create xfer descriptors for each template node in our DAG
     xd_trackers.resize(tg.xd_nodes.size(), 0);
     for(size_t i = 0; i < tg.xd_nodes.size(); i++) {

@@ -15,12 +15,6 @@ variables:
 
   THREADS: 32 # for parallel build
 
-.rocm543: &rocm543
-  ROCM_VERSION: "5.4.3"
-
-.rocm560: &rocm560
-  ROCM_VERSION: "5.6.0"
-
 .rocm571: &rocm571
   ROCM_VERSION: "5.7.1"
   WARN_AS_ERROR: "0"
@@ -75,24 +69,6 @@ prep:
     - shell
     - frontier
 
-legion_rocm543:
-  <<: [*tests]
-  stage: test
-  tags:
-    - slurm
-    - frontier
-  variables:
-    <<: [*legion, *rocm543, *nodes1]
-
-legion_rocm560:
-  <<: [*tests]
-  stage: test
-  tags:
-    - slurm
-    - frontier
-  variables:
-    <<: [*legion, *rocm560, *nodes1]
-
 legion_rocm571:
   <<: [*tests]
   stage: test
@@ -110,24 +86,6 @@ legion_rocm600:
     - frontier
   variables:
     <<: [*legion, *rocm600, *nodes2]
-
-legion_cmake_rocm543:
-  <<: [*tests]
-  stage: test
-  tags:
-    - slurm
-    - frontier
-  variables:
-    <<: [*legion, *cmake, *ctest, *rocm543, *nodes1]
-
-legion_cmake_rocm560:
-  <<: [*tests]
-  stage: test
-  tags:
-    - slurm
-    - frontier
-  variables:
-    <<: [*legion, *cmake, *ctest, *rocm560, *nodes1]
 
 legion_cmake_rocm571:
   <<: [*tests]
