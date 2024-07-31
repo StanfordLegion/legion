@@ -1155,9 +1155,10 @@ impl Container for Proc {
                         break;
                     }
                 }
-                // Make sure the running ranges starts before the start
-                if running_start <= start {
+                // Make sure the running range starts before the start
+                if running_start < start {
                     let running_stop = entry.time_range.stop.unwrap();
+                    assert!(running_stop <= start);
                     // We're only interested in ranges that end after the ready time
                     if ready <= running_stop {
                         let diff = start - running_stop;
