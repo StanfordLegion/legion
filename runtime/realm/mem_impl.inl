@@ -243,10 +243,10 @@ namespace Realm {
         // tie this off because we use it to detect allocated-ness
         new_range.prev_free = new_range.next_free = new_idx;
         allocated[new_tags[i]] = new_idx;
+
         // Detect the case where the old range is empty
         if (r->first == r->last) {
-          free_range(range_idx);
-          allocated.erase(it);
+          deallocate(it->first);
           return (i+1);
         }
       } else { // Zero-sized instances are easy
@@ -334,7 +334,8 @@ namespace Realm {
                 << " last:" << ranges[i].last << " size:" << size
                 << " gap:" << (ranges[i].first - prev_used_last)
                 << " prev_free:" << ranges[i].prev_free
-                << " next_free:" << ranges[i].next_free << std::endl;
+                << " next_free:" << ranges[i].next_free << " prev:" << ranges[i].prev
+                << " next:" << ranges[i].next << std::endl;
     }
 
     size_t largest_used_blocksize = 0;
@@ -351,7 +352,8 @@ namespace Realm {
       std::cerr << "allocated_range_idx:" << i << " first:" << ranges[i].first
                 << " last:" << ranges[i].last << " prev:" << ranges[i].prev
                 << " next:" << ranges[i].next << " prev_free:" << ranges[i].prev_free
-                << " next_free:" << ranges[i].next_free << " size:" << size << std::endl;
+                << " next_free:" << ranges[i].next_free << " range_size:" << size
+                << " total:" << total_used_size << std::endl;
     }
 
     // size_t num_adjacent_free_blocks = 0;

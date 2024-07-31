@@ -313,6 +313,7 @@ protected:
     }
     return total_free_size;
   }
+
   BasicRangeAllocator<size_t, int> range_alloc;
 };
 
@@ -333,17 +334,17 @@ TEST_P(RangeAllocatorSplitParamTest, Base)
 
   for(TestCase::SplitOp op : test_case.split_ops) {
     std::vector<size_t> offsets(op.new_tags.size());
-    // range_alloc.dump_allocator_status();
     EXPECT_EQ(
         range_alloc.split_range(op.old_tag, op.new_tags, op.sizes, op.aligns, offsets),
         op.good_allocs);
-    // range_alloc.dump_allocator_status();
     for(size_t j = 0; j < offsets.size(); j++) {
       EXPECT_EQ(offsets[j], op.exp_offsets[j]);
     }
   }
 
-  EXPECT_EQ(test_case.free_size, get_total_free_size());
+  size_t free_size = get_total_free_size();
+
+  EXPECT_EQ(test_case.free_size, free_size);
 
   if(!test_case.exp_ranges.empty()) {
     // EXPECT_EQ(range_alloc.ranges.size(), test_case.exp_ranges.size());
@@ -428,8 +429,11 @@ INSTANTIATE_TEST_SUITE_P(
                              .aligns{8},
                              .exp_offsets{0}}},
 
-                 .exp_ranges{Range{/*first=*/0, /*last=*/0},
-                             Range{/*first=*/0, /*last=*/512}}},
+                 .exp_ranges{
+                     Range{/*first=*/0, /*last=*/0},
+                     Range{/*first=*/0, /*last=*/512},
+                     Range{/*first=*/512, /*last=*/512},
+                 }},
 
         // Case 4: split/reuse zero range
         TestCase{
@@ -570,13 +574,27 @@ INSTANTIATE_TEST_SUITE_P(
                         .sizes{32, 32, 32, 32},
                         .aligns{16, 16, 16, 16},
                         .exp_offsets{0, 32, 64, 96}},
+
                        {.old_tag = 2,
                         .good_allocs = 4,
                         .new_tags{45, 46, 47, 48},
                         .sizes{32, 32, 32, 32},
                         .aligns{16, 16, 16, 16},
                         .exp_offsets{128, 160, 192, 224}}},
-            // TODO(apryakhin@): Check ranges
+
+            .exp_ranges{
+                Range{/*first=*/0, /*last=*/0},
+                Range{/*first=*/0, /*last=*/32},
+                Range{/*first=*/32, /*last=*/64},
+                Range{/*first=*/64, /*last=*/96},
+                Range{/*first=*/96, /*last=*/128},
+                Range{/*first=*/128, /*last=*/128},
+                Range{/*first=*/128, /*last=*/160},
+                Range{/*first=*/160, /*last=*/192},
+                Range{/*first=*/192, /*last=*/224},
+                Range{/*first=*/224, /*last=*/256},
+                Range{/*first=*/256, /*last=*/256},
+            },
             .free_size = 0,
         },
 
