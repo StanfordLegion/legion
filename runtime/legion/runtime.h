@@ -5181,13 +5181,14 @@ namespace Legion {
       LegionSpy::log_event_dependence(e1, result);
       LegionSpy::log_event_dependence(e2, result);
 #endif
-      if ((info != NULL) && info->recording)
-        info->record_merge_events(result, e1, e2);
       if ((implicit_profiler != NULL) && result.exists())
       {
         const LgEvent preconditions[2] = { e1, e2 };
         result.record_event_merger(preconditions, 2);
       }
+      // Always do tracing after profiling
+      if ((info != NULL) && info->recording)
+        info->record_merge_events(result, e1, e2);
       return result;
     }
 
@@ -5217,13 +5218,14 @@ namespace Legion {
       LegionSpy::log_event_dependence(e2, result);
       LegionSpy::log_event_dependence(e3, result);
 #endif
-      if ((info != NULL) && info->recording)
-        info->record_merge_events(result, e1, e2, e3);
       if ((implicit_profiler != NULL) && result.exists())
       {
         const LgEvent preconditions[3] = { e1, e2, e3 };
         result.record_event_merger(preconditions, 3);
       }
+      // Always do tracing after profiling
+      if ((info != NULL) && info->recording)
+        info->record_merge_events(result, e1, e2, e3);
       return result;
     }
 
@@ -5280,13 +5282,14 @@ namespace Legion {
             it != events.end(); it++)
         LegionSpy::log_event_dependence(*it, result);
 #endif
-      if ((info != NULL) && info->recording)
-        info->record_merge_events(result, events);
       if ((implicit_profiler != NULL) && result.exists())
       {
         const std::vector<ApEvent> preconditions(events.begin(), events.end());
         result.record_event_merger(&preconditions.front(),preconditions.size());
       }
+      // Always do tracing after profiling
+      if ((info != NULL) && info->recording)
+        info->record_merge_events(result, events);
       return result;
     }
 
@@ -5353,10 +5356,11 @@ namespace Legion {
             it != events.end(); it++)
         LegionSpy::log_event_dependence(*it, result);
 #endif
-      if ((info != NULL) && info->recording)
-        info->record_merge_events(result, events);
       if ((implicit_profiler != NULL) && result.exists())
         result.record_event_merger(&events.front(), events.size());
+      // Always do tracing after profiling
+      if ((info != NULL) && info->recording)
+        info->record_merge_events(result, events);
       return result;
     }
 
@@ -5461,6 +5465,10 @@ namespace Legion {
                                    ApUserEvent to_trigger, ApEvent precondition)
     //--------------------------------------------------------------------------
     {
+      // Record trigger event timing first since it might be expensive
+      // to actually propagate the triggered event
+      if (implicit_profiler != NULL)
+        to_trigger.record_event_trigger(precondition);
       Realm::UserEvent copy = to_trigger;
       copy.trigger(precondition);
 #ifdef LEGION_SPY
@@ -5470,22 +5478,22 @@ namespace Legion {
 #endif
       if ((info != NULL) && info->recording)
         info->record_trigger_event(to_trigger, precondition);
-      if (implicit_profiler != NULL)
-        to_trigger.record_event_trigger(precondition);
     }
 
     //--------------------------------------------------------------------------
     /*static*/ inline void Runtime::poison_event(ApUserEvent to_poison)
     //--------------------------------------------------------------------------
     {
+      // Record poison event timing first since it might be expensive
+      // to actually propagate the poison
+      if (implicit_profiler != NULL)
+        to_poison.record_event_poison();
       Realm::UserEvent copy = to_poison;
       copy.cancel();
 #ifdef LEGION_SPY
       // This counts as triggering
       LegionSpy::log_ap_user_event_trigger(to_poison);
 #endif
-      if (implicit_profiler != NULL)
-        to_poison.record_event_poison();
     }
 
     //--------------------------------------------------------------------------
@@ -5506,27 +5514,31 @@ namespace Legion {
                                                   RtEvent precondition) 
     //--------------------------------------------------------------------------
     {
+      // Record trigger event timing first since it might be expensive
+      // to actually propagate the triggered event
+      if (implicit_profiler != NULL)
+        to_trigger.record_event_trigger(precondition);
       Realm::UserEvent copy = to_trigger;
       copy.trigger(precondition);
 #ifdef LEGION_SPY
       LegionSpy::log_rt_user_event_trigger(to_trigger);
 #endif
-      if (implicit_profiler != NULL)
-        to_trigger.record_event_trigger(precondition);
     }
 
     //--------------------------------------------------------------------------
     /*static*/ inline void Runtime::poison_event(RtUserEvent to_poison)
     //--------------------------------------------------------------------------
     {
+      // Record poison event timing first since it might be expensive
+      // to actually propagate the poison
+      if (implicit_profiler != NULL)
+        to_poison.record_event_poison();
       Realm::UserEvent copy = to_poison;
       copy.cancel();
 #ifdef LEGION_SPY
       // This counts as triggering
       LegionSpy::log_rt_user_event_trigger(to_poison);
 #endif
-      if (implicit_profiler != NULL)
-        to_poison.record_event_poison();
     }
 
     //--------------------------------------------------------------------------
@@ -5546,27 +5558,31 @@ namespace Legion {
     /*static*/ inline void Runtime::trigger_event(PredUserEvent to_trigger)
     //--------------------------------------------------------------------------
     {
+      // Record trigger event timing first since it might be expensive
+      // to actually propagate the triggered event
+      if (implicit_profiler != NULL)
+        to_trigger.record_event_trigger(LgEvent::NO_LG_EVENT);
       Realm::UserEvent copy = to_trigger;
       copy.trigger();
 #ifdef LEGION_SPY
       LegionSpy::log_pred_event_trigger(to_trigger);
 #endif
-      if (implicit_profiler != NULL)
-        to_trigger.record_event_trigger(LgEvent::NO_LG_EVENT);
     }
 
     //--------------------------------------------------------------------------
     /*static*/ inline void Runtime::poison_event(PredUserEvent to_poison)
     //--------------------------------------------------------------------------
     {
+      // Record poison event timing first since it might be expensive
+      // to actually propagate the poison
+      if (implicit_profiler != NULL)
+        to_poison.record_event_poison();
       Realm::UserEvent copy = to_poison;
       copy.cancel();
 #ifdef LEGION_SPY
       // This counts as triggering
       LegionSpy::log_pred_event_trigger(to_poison);
 #endif
-      if (implicit_profiler != NULL)
-        to_poison.record_event_poison();
     }
 
     //--------------------------------------------------------------------------
@@ -5596,13 +5612,14 @@ namespace Legion {
       LegionSpy::log_event_dependence(e1, result);
       LegionSpy::log_event_dependence(e2, result);
 #endif
-      if ((info != NULL) && info->recording)
-        info->record_merge_events(result, e1, e2);
       if ((implicit_profiler != NULL) && result.exists())
       {
         const LgEvent preconditions[2] = { e1, e2 };
         result.record_event_merger(preconditions, 2);
       }
+      // Always do tracing after profiling
+      if ((info != NULL) && info->recording)
+        info->record_merge_events(result, e1, e2);
       return result;
     }
 
@@ -5667,14 +5684,16 @@ namespace Legion {
                   const void *reduce_value, size_t reduce_value_size)
     //--------------------------------------------------------------------------
     {
+      // Record barrier arrivals before we actually do them since it
+      // might be expensive to propagate the effects
+      if (implicit_profiler != NULL)
+        bar.phase_barrier.record_barrier_arrival(precondition);
       Realm::Barrier copy = bar.phase_barrier;
       copy.arrive(count, precondition, reduce_value, reduce_value_size);
 #ifdef LEGION_SPY
       if (precondition.exists())
         LegionSpy::log_event_dependence(precondition, bar.phase_barrier);
 #endif
-      if (implicit_profiler != NULL)
-        bar.phase_barrier.record_barrier_arrival(precondition);
     }
 
     //--------------------------------------------------------------------------
@@ -5718,14 +5737,16 @@ namespace Legion {
                   const void *reduce_value, size_t reduce_value_size)
     //--------------------------------------------------------------------------
     {
+      // Record barrier arrivals before we actually do them since it
+      // might be expensive to propagate the effects
+      if (implicit_profiler != NULL)
+        bar.record_barrier_arrival(precondition);
       Realm::Barrier copy = bar;
       copy.arrive(count, precondition, reduce_value, reduce_value_size);
 #ifdef LEGION_SPY
       if (precondition.exists())
         LegionSpy::log_event_dependence(precondition, bar);
 #endif
-      if (implicit_profiler != NULL)
-        bar.record_barrier_arrival(precondition);
     }
 
     //--------------------------------------------------------------------------
@@ -5758,10 +5779,12 @@ namespace Legion {
            unsigned count, RtEvent precondition, const void *value, size_t size)
     //--------------------------------------------------------------------------
     {
-      Realm::Barrier copy = bar;
-      copy.arrive(count, precondition, value, size); 
+      // Record barrier arrivals before we actually do them since it
+      // might be expensive to propagate the effects
       if (implicit_profiler != NULL)
         bar.record_barrier_arrival(precondition);
+      Realm::Barrier copy = bar;
+      copy.arrive(count, precondition, value, size); 
     }
 
     //--------------------------------------------------------------------------
