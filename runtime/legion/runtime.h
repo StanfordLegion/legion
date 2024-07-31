@@ -5284,11 +5284,7 @@ namespace Legion {
         info->record_merge_events(result, events);
       if ((implicit_profiler != NULL) && result.exists())
       {
-        std::vector<LgEvent> preconditions;
-        preconditions.reserve(events.size());
-        for (std::set<ApEvent>::const_iterator it =
-              events.begin(); it != events.end(); it++)
-          preconditions.push_back(*it);
+        const std::vector<LgEvent> preconditions(events.begin(), events.end());
         result.record_event_merger(&preconditions.front(),preconditions.size());
       }
       return result;
@@ -5413,11 +5409,7 @@ namespace Legion {
       const RtEvent result(Realm::Event::merge_events(*realm_events));
       if ((implicit_profiler != NULL) && result.exists())
       {
-        std::vector<RtEvent> preconditions;
-        preconditions.reserve(events.size());
-        for (std::set<RtEvent>::const_iterator it =
-              events.begin(); it != events.end(); it++)
-          preconditions.push_back(*it);
+        const std::vector<RtEvent> preconditions(events.begin(), events.end());
         result.record_event_merger(&preconditions.front(),preconditions.size());
       }
       return result;
@@ -5630,7 +5622,7 @@ namespace Legion {
       LegionSpy::log_event_dependence(ApEvent(e), result);
 #endif
 #endif
-      if ((implicit_profiler != NULL) && result.exists())
+      if ((implicit_profiler != NULL) && result.exists() && (result != e))
         result.record_event_trigger(e);
       return result;
     }
@@ -5642,7 +5634,8 @@ namespace Legion {
       if (to_protect.exists())
       {
         const RtEvent result(Realm::Event::ignorefaults(to_protect));
-        if ((implicit_profiler != NULL) && result.exists())
+        if ((implicit_profiler != NULL) && result.exists() &&
+            (result.id != to_protect.id))
           result.record_event_trigger(to_protect);
         return result;
       }
@@ -5662,11 +5655,7 @@ namespace Legion {
       RtEvent result(Realm::Event::merge_events_ignorefaults(*realm_events));
       if ((implicit_profiler != NULL) && result.exists())
       {
-        std::vector<LgEvent> preconditions;
-        preconditions.reserve(events.size());
-        for (std::set<ApEvent>::const_iterator it =
-              events.begin(); it != events.end(); it++)
-          preconditions.push_back(*it);
+        const std::vector<ApEvent> preconditions(events.begin(), events.end());
         result.record_event_merger(&preconditions.front(),preconditions.size());
       }
       return result;
