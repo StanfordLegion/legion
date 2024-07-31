@@ -177,6 +177,7 @@ namespace Realm {
       const IndexSpace<N,T> &l = lhss[li];
       const IndexSpace<N,T> &r = rhss[ri];
 
+
       // 1) empty lhs
       if(l.empty()) {
 	results[i] = r;
@@ -294,12 +295,13 @@ namespace Realm {
     }
 
     for(size_t i = 0; i < n; i++) {
-      if (results[i].sparsity.exists()) {
+      if(results[i].sparsity.exists()) {
         results[i].sparsity.add_references();
       }
       size_t li = (lhss.size() == 1) ? 0 : i;
       size_t ri = (rhss.size() == 1) ? 0 : i;
-      log_dpops.info() << "isect: " << lhss[li] << " " << rhss[ri] << " -> " << results[i] << " (" << e << ")";
+      log_dpops.info() << "isect: " << lhss[li] << " " << rhss[ri] << " -> " << results[i]
+                       << " (" << e << ")";
     }
 
     if(op)
@@ -387,7 +389,8 @@ namespace Realm {
       }
       size_t li = (lhss.size() == 1) ? 0 : i;
       size_t ri = (rhss.size() == 1) ? 0 : i;
-      log_dpops.info() << "diff: " << lhss[li] << " " << rhss[ri] << " -> " << results[i] << " (" << e << ")";
+      log_dpops.info() << "diff: " << lhss[li] << " " << rhss[ri] << " -> " << results[i]
+                       << " (" << e << ")";
     }
 
     if(op)
