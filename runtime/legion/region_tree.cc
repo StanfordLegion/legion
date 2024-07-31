@@ -16608,29 +16608,10 @@ namespace Legion {
                           printf("FOUND PROPER ANCESTOR\n");
                           skip_registering_region_dependece = true;
                           logical_analysis.point_wise_analyses.back().ancestor = &prev;
-                          //static_cast<IndexTask*>(user.op)->prev_index_tasks[user.idx] = std::pair<Operation*, unsigned>(prev.op, prev.gen);
-                          static_cast<IndexTask*>(user.op)->prev_index_tasks.insert(
-                              {
-                              user.idx,
-                              PointWisePreviousIndexTaskInfo(prev.shard_proj->domain,
-                              prev.shard_proj->projection, prev.shard_proj->sharding,
-                              prev.shard_proj->sharding_domain,
-                              static_cast<IndexTask*>(prev.op)->index_domain,
-                              prev.op, prev.gen, prev.ctx_index)
-                              }
-                            );
-                          static_cast<IndexTask*>(user.op)->next_index_tasks.insert(
-                              {
-                              prev.idx,
-                              PointWisePreviousIndexTaskInfo(user.shard_proj->domain,
-                              user.shard_proj->projection, user.shard_proj->sharding,
-                              user.shard_proj->sharding_domain,
-                              static_cast<IndexTask*>(user.op)->index_domain,
-                              user.op, user.gen, user.ctx_index)
-                              }
-                            );
-                          static_cast<IndexTask*>(user.op)->set_connect_to_prev_point();
-                          static_cast<IndexTask*>(prev.op)->set_connect_to_next_point();
+                          static_cast<IndexTask*>(user.op)->set_prev_point_wise_user(
+                              &user, &prev);
+                          static_cast<IndexTask*>(user.op)->set_next_point_wise_user(
+                              &prev, &user);
                         }
                       }
                     }

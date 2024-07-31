@@ -10340,6 +10340,40 @@ namespace Legion {
     }
 
 #ifdef POINT_WISE_LOGICAL_ANALYSIS
+    void IndexTask::set_prev_point_wise_user(const LogicalUser *user,
+        const LogicalUser *prev)
+    {
+      AutoLock o_lock(op_lock);
+      prev_index_tasks.insert({
+                              user->idx,
+                              PointWisePreviousIndexTaskInfo(
+                                  prev->shard_proj->domain,
+                                  prev->shard_proj->projection,
+                                  prev->shard_proj->sharding,
+                                  prev->shard_proj->sharding_domain,
+                                  static_cast<IndexTask*>(prev->op)->index_domain,
+                                  prev->op, prev->gen, prev->ctx_index)
+                              });
+      set_connect_to_prev_point();
+    }
+
+    void IndexTask::set_next_point_wise_user(const LogicalUser *user,
+        const LogicalUser *next)
+    {
+      AutoLock o_lock(op_lock);
+      next_index_tasks.insert({
+                              user->idx,
+                              PointWisePreviousIndexTaskInfo(
+                                  next->shard_proj->domain,
+                                  next->shard_proj->projection,
+                                  next->shard_proj->sharding,
+                                  next->shard_proj->sharding_domain,
+                                  static_cast<IndexTask*>(next->op)->index_domain,
+                                  next->op, next->gen, next->ctx_index)
+                              });
+      set_connect_to_next_point();
+    }
+
     //--------------------------------------------------------------------------
     void IndexTask::record_point_wise_dependence(LogicalRegion lr,
                                                  unsigned region_idx,

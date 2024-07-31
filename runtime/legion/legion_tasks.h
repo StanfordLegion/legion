@@ -1411,6 +1411,10 @@ namespace Legion {
            unsigned region_idx, GenerationID gen);
       static void process_slice_find_point_wise_dependence(Deserializer &derez);
       static void process_slice_record_point_wise_dependence(Deserializer &derez);
+      void set_prev_point_wise_user(const LogicalUser *user,
+          const LogicalUser *prev);
+      void set_next_point_wise_user(const LogicalUser *user,
+          const LogicalUser *next);
     protected:
       std::map<LogicalRegion,RtUserEvent> pending_point_wise_dependences;
     public:

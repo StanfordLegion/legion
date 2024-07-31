@@ -28,6 +28,8 @@ using namespace Legion::Mapping;
 
 enum {
   POINT_WISE_LOGICAL_ANALYSIS_MAPPER_ID = 1,
+	EVEN_SHARDING_FN,
+	ODD_SHARDING_FN,
 };
 
 enum TaskIDs {
@@ -38,6 +40,94 @@ enum TaskIDs {
 enum FieldIDs {
   FID_DATA,
 };
+
+//--------------------------------------------------------------------------
+template<int DIM>
+size_t linearize_point(
+			const Realm::IndexSpace<DIM,coord_t> &is,
+			const Realm::Point<DIM,coord_t> &point)
+//--------------------------------------------------------------------------
+{
+	if (is.dense())
+	{
+		Realm::AffineLinearizedIndexSpace<DIM,coord_t> linearizer(is);
+		return linearizer.linearize(point);
+	}
+	else
+	{
+		size_t offset = 0;
+		for (Realm::IndexSpaceIterator<DIM,coord_t> it(is); it.valid; it.step())
+		{
+			if (it.rect.contains(point))
+			{
+				Realm::AffineLinearizedIndexSpace<DIM,coord_t> 
+					linearizer(Realm::IndexSpace<DIM,coord_t>(it.rect));
+				return offset + linearizer.linearize(point);
+			}
+			else
+				offset += it.rect.volume();
+		}
+		return offset;
+	}
+}
+
+
+class EvenShardingFunctor: public ShardingFunctor
+{
+public:
+  virtual ShardID shard(const DomainPoint &point,
+                        const Domain &full_space,
+                        const size_t total_shards)
+  {
+#ifdef DEBUG_LEGION
+		assert(point.get_dim() == full_space.get_dim());
+#endif
+		switch (point.get_dim())
+		{
+#define DIMFUNC(DIM) \
+			case DIM: \
+				{ \
+					const DomainT<DIM,coord_t> is = full_space; \
+					const Point<DIM,coord_t> p1 = point; \
+					return (linearize_point<DIM>(is, p1) % total_shards); \
+				}
+			LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
+			default:
+				assert(false);
+		}
+		return 0;
+  }
+};
+
+class OddShardingFunctor: public ShardingFunctor
+{
+public:
+  virtual ShardID shard(const DomainPoint &point,
+                        const Domain &full_space,
+                        const size_t total_shards)
+  {
+#ifdef DEBUG_LEGION
+		assert(point.get_dim() == full_space.get_dim());
+#endif
+		switch (point.get_dim())
+		{
+#define DIMFUNC(DIM) \
+			case DIM: \
+				{ \
+					const DomainT<DIM,coord_t> is = full_space; \
+					const Point<DIM,coord_t> p1 = point; \
+					return ((linearize_point<DIM>(is, p1) + 1) % total_shards); \
+				}
+			LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
+			default:
+				assert(false);
+		}
+		return 0;
+  }
+};
+
 
 // Select Task to map
 class PointWiseLogicalAnalysisMapper: public DefaultMapper {
@@ -67,10 +157,24 @@ class PointWiseLogicalAnalysisMapper: public DefaultMapper {
       total_point = num_iterations;
     }
   public:
+		/*void select_sharding_functor(const Mapping::MapperContext       ctx,
+																 const Task&                        task,
+																 const SelectShardingFunctorInput&  input,
+																			 SelectShardingFunctorOutput& output)
+		{
+      if (task.task_id % 2 == 0)
+        output.chosen_functor = EVEN_SHARDING_FN;
+      else
+        output.chosen_functor = EVEN_SHARDING_FN;
+      // TODO: CHANGE TO ODD
+		}*/
+
     void select_tasks_to_map(const MapperContext          ctx,
                              const SelectMappingInput&    input,
                                    SelectMappingOutput&   output)
     {
+      //DefaultMapper::select_tasks_to_map(ctx, input, output);
+      //return;
       unsigned count = 0;
       for (std::list<const Task*>::const_iterator it =
             input.ready_tasks.begin(); (count < max_schedule_count) &&
@@ -216,6 +320,11 @@ int main(int argc, char **argv)
     registrar.set_leaf();
     Runtime::preregister_task_variant<intra_is_ordering_task>(registrar, "intra_is_ordering_task");
   }
+
+	Runtime::preregister_sharding_functor(EVEN_SHARDING_FN,
+                                        new EvenShardingFunctor());
+	Runtime::preregister_sharding_functor(ODD_SHARDING_FN,
+                                        new OddShardingFunctor());
 
 	Runtime::add_registration_callback(PointWiseLogicalAnalysisMapper::register_my_mapper);
 
