@@ -5284,7 +5284,7 @@ namespace Legion {
         info->record_merge_events(result, events);
       if ((implicit_profiler != NULL) && result.exists())
       {
-        const std::vector<LgEvent> preconditions(events.begin(), events.end());
+        const std::vector<ApEvent> preconditions(events.begin(), events.end());
         result.record_event_merger(&preconditions.front(),preconditions.size());
       }
       return result;
