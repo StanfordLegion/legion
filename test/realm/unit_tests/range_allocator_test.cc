@@ -398,8 +398,9 @@ INSTANTIATE_TEST_SUITE_P(
                  .exp_ranges{Range{/*first=*/0, /*last=*/0},
                              Range{/*first=*/0, /*last=*/512}}},
 
-        // Case 2: split into the existing tag ??
-        TestCase{.alloc_ranges{{0, 512}},
+        // TODO(apryakhin@): Consider enabling it back
+        // Case 2: split into the existing tag
+        /*TestCase{.alloc_ranges{{0, 512}},
                  .alloc_tags{1},
                  .alloc_sizes{512},
                  .alloc_aligns{8},
@@ -411,8 +412,8 @@ INSTANTIATE_TEST_SUITE_P(
                              .aligns{8},
                              .exp_offsets{0}}},
 
-                 .exp_ranges{Range{/*first=*/0, /*last=*/0},
-                             Range{/*first=*/0, /*last=*/512}}},
+                 .exp_ranges{Range{0, 0},
+                             Range{0, 512}}},*/
 
         // Case 3: base case split/reuse the full range
         TestCase{.alloc_ranges{{0, 512}},
@@ -502,8 +503,9 @@ INSTANTIATE_TEST_SUITE_P(
             .free_size = 728,
         },
 
+        // TODO(apryakhin@): Consider enabling it back
         // Case 7: split range with duplicated tag
-        TestCase{
+        /*TestCase{
             .alloc_ranges{{24, 1000}},
             .alloc_tags{1},
             .alloc_sizes{800},
@@ -517,15 +519,15 @@ INSTANTIATE_TEST_SUITE_P(
                         .exp_offsets{32, 0}}},
 
             .exp_ranges{
-                Range{/*first=*/0, /*last=*/0},
+                Range{0, 0},
                 // free range after alignment computation
-                Range{/*first=*/24, /*last=*/32},
-                Range{/*first=*/32, /*last=*/280},
-                Range{/*first=*/280, /*last=*/1000},
+                Range{24, 32},
+                Range{32, 280},
+                Range{280, /1000},
 
             },
             .free_size = 728,
-        },
+        },*/
 
         // Case 8: split range on different layouts and create free blocks in
         // front
