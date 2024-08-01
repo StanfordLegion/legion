@@ -533,6 +533,7 @@ namespace Legion {
                                       Realm::InstanceLayoutGeneric *layout) = 0;
       virtual void destroy_task_local_instance(PhysicalInstance instance) = 0;
       virtual size_t query_available_memory(Memory target) = 0;
+      virtual void release_memory_pool(Memory target) = 0;
     public:
       const std::vector<PhysicalRegion>& begin_task(Processor proc);
       virtual void end_task(const void *res, size_t res_size, bool owned,
@@ -1692,6 +1693,7 @@ namespace Legion {
                                         Realm::InstanceLayoutGeneric *layout);
       virtual void destroy_task_local_instance(PhysicalInstance instance);
       virtual size_t query_available_memory(Memory target);
+      virtual void release_memory_pool(Memory target);
     public:
       virtual void end_task(const void *res, size_t res_size, bool owned,
                       PhysicalInstance inst, FutureFunctor *callback_functor,
@@ -3901,6 +3903,7 @@ namespace Legion {
                                         Realm::InstanceLayoutGeneric *layout);
       virtual void destroy_task_local_instance(PhysicalInstance instance);
       virtual size_t query_available_memory(Memory target);
+      virtual void release_memory_pool(Memory target);
     public:
       virtual void end_task(const void *res, size_t res_size, bool owned,
                       PhysicalInstance inst, FutureFunctor *callback_functor,

@@ -8457,8 +8457,22 @@ namespace Legion {
        * that you can create an instance of this size as the memory 
        * may be fragmented and the largest hole might be much smaller
        * than the size returned by this function.
+       * @param ctx enclosing task context
+       * @param target the memory being queried
+       * @return the instantaneous remaining size in the target memory
        */
       size_t query_available_memory(Context ctx, Memory target);
+
+      /**
+       * Inform the runtime that a task is done performing memory
+       * allocations in a given memory ahead of the completion of
+       * the task. This will allow the runtime to free up the memory
+       * pool for additional allocations earlier than waiting for
+       * the completion of the task. 
+       * @param ctx enclosing task context
+       * @param memory the memory in which allocations are finished
+       */
+      void release_memory_pool(Context ctx, Memory target);
 
       /**
        * Indicate that data in a particular physical region

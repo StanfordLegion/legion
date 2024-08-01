@@ -6544,6 +6544,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::release_memory_pool(Context ctx, Memory target)
+    //--------------------------------------------------------------------------
+    {
+      ctx->release_memory_pool(target);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::raise_region_exception(Context ctx, 
                                          PhysicalRegion region, bool nuclear)
     //--------------------------------------------------------------------------

@@ -1463,7 +1463,9 @@ namespace Legion {
           LgEvent *unique_events,
           const Realm::InstanceLayoutGeneric **layouts, UniqueID creator) = 0;
       virtual void free_instance(PhysicalInstance instance) = 0;
-      virtual void release_pool(RtEvent done) = 0;
+      virtual bool is_released(void) const = 0;
+      virtual void release_pool(UniqueID creator) = 0;
+      virtual void finalize_pool(RtEvent done) = 0;
     public:
       virtual void serialize(Serializer &rez) = 0;
       static MemoryPool* deserialize(Deserializer &derez, Runtime *runtime);
@@ -1503,7 +1505,9 @@ namespace Legion {
           LgEvent *unique_events,
           const Realm::InstanceLayoutGeneric **layouts, UniqueID uid) override;
       virtual void free_instance(PhysicalInstance instance) override;
-      virtual void release_pool(RtEvent done) override;
+      virtual bool is_released(void) const override;
+      virtual void release_pool(UniqueID creator) override;
+      virtual void finalize_pool(RtEvent done) override;
       virtual void serialize(Serializer &rez) override;
     private:
       unsigned allocate(size_t size, size_t alignment, uintptr_t &start);
@@ -1541,6 +1545,8 @@ namespace Legion {
       std::vector<unsigned> size_based_free_lists;
       // Linked list of ranges not currently be used
       unsigned first_unused_range;
+      // Whether this pool has been released
+      bool released;
     };
 
     /**
@@ -1569,11 +1575,14 @@ namespace Legion {
           LgEvent *unique_events,
           const Realm::InstanceLayoutGeneric **layouts, UniqueID uid) override;
       virtual void free_instance(PhysicalInstance instance) override;
-      virtual void release_pool(RtEvent done) override;
+      virtual bool is_released(void) const override;
+      virtual void release_pool(UniqueID creator) override;
+      virtual void finalize_pool(RtEvent done) override;
       virtual void serialize(Serializer &rez) override;
     private:
       TaskTreeCoordinates coordinates;
       MemoryManager *manager;
+      bool released;
     };
 
     /**

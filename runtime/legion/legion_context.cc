@@ -11923,6 +11923,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void InnerContext::release_memory_pool(Memory target)
+    //--------------------------------------------------------------------------
+    {
+      // Nothing to do for inner tasks since they do not have memory pools
+    }
+
+    //--------------------------------------------------------------------------
     void InnerContext::end_task(const void *res, size_t res_size, bool owned,
                                 PhysicalInstance deferred_result_instance, 
                                 FutureFunctor *callback_functor,
@@ -25212,6 +25219,16 @@ namespace Legion {
             "execution of the task.", size, get_task_name(),
             get_unique_id(), manager->get_name())
       }
+      else if (finder->second->is_released())
+      {
+        MemoryManager *manager = runtime->find_memory_manager(memory);
+        REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
+            "Failed to allocate future in leaf task %s (UID %lld) in %s memory "
+            "because the pool associated with this memory was already released "
+            "by the task. It is illegal to attempt to perform dynamic "
+            "allocations in a memory pool after you released it.",
+            get_task_name(), get_unique_id(), manager->get_name())
+      }
       FutureInstance *instance = 
         finder->second->allocate_future(get_unique_id(), size);
       if (instance == NULL)
@@ -25345,6 +25362,17 @@ namespace Legion {
             "the execution of the task.", footprint, get_task_name(),
             get_unique_id(), manager->get_name())
       }
+      else if (finder->second->is_released())
+      {
+        MemoryManager *manager = runtime->find_memory_manager(memory);
+        REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
+            "Failed to allocate DeferredBuffer/Value/Reduction in leaf "
+            "task %s (UID %lld) in %s memory because the pool associated "
+            "with this memory was already released by the task. It is "
+            "illegal to attempt to perform dynamic allocations in a memory "
+            "pool after it has been released it.",
+            get_task_name(), get_unique_id(), manager->get_name())
+      }
       if (finder->second->max_alignment < layout->alignment_reqd)
       {
         MemoryManager *manager = runtime->find_memory_manager(memory);
@@ -25452,6 +25480,15 @@ namespace Legion {
         return 0;
       else
         return finder->second->query_available_memory();
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::release_memory_pool(Memory target)
+    //--------------------------------------------------------------------------
+    {
+      std::map<Memory,MemoryPool*>::iterator finder = memory_pools.find(target);
+      if (finder != memory_pools.end())
+        finder->second->release_pool(get_unique_id());
     }
 
     //--------------------------------------------------------------------------
@@ -25567,7 +25604,7 @@ namespace Legion {
       for (std::map<Memory,MemoryPool*>::const_iterator it =
             memory_pools.begin(); it != memory_pools.end(); it++)
       {
-        it->second->release_pool(safe_effects);
+        it->second->finalize_pool(safe_effects);
         delete it->second;
       }
 #ifdef DEBUG_LEGION

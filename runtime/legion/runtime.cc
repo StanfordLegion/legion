@@ -8520,7 +8520,7 @@ namespace Legion {
     ConcretePool::ConcretePool(PhysicalInstance inst, size_t remain,
         size_t alignment, RtEvent use, MemoryManager *man)
       : MemoryPool(alignment), manager(man), limit(remain),
-        remaining_bytes(remain), first_unused_range(SENTINEL)
+        remaining_bytes(remain), first_unused_range(SENTINEL), released(false)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -8569,6 +8569,9 @@ namespace Legion {
                                                   size_t size)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(!released);
+#endif
       if (remaining_bytes < size)
         return NULL;
       // Align futures on the largest power of 2 that divides the size of 
@@ -8613,6 +8616,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
+      assert(!released);
       // Should have been checked earlier
       assert(layout->alignment_reqd <= max_alignment);
 #endif
@@ -8727,8 +8731,31 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(finder != allocated.end());
 #endif
-      if (finder->second != SENTINEL)
-        deallocate(finder->second);
+      if (released)
+      {
+        // If we're released then we can free the backing instance
+        // immediately as we know that it is only for this instance
+        const Range &range = ranges[finder->second];
+        // Free up the back instance since we know that we're not
+        // going to bother recycling this memory since we're released
+        std::map<PhysicalInstance,RtEvent>::iterator backing_finder =
+          backing_instances.find(range.instance);
+#ifdef DEBUG_LEGION
+        assert(backing_finder != backing_instances.end());
+#endif
+        backing_finder->first.destroy(backing_finder->second);
+        backing_instances.erase(backing_finder);
+      }
+      else
+      {
+        std::map<PhysicalInstance,unsigned>::iterator finder = 
+          allocated.find(instance);
+#ifdef DEBUG_LEGION
+        assert(finder != allocated.end());
+#endif
+        if (finder->second != SENTINEL)
+          deallocate(finder->second);
+      }
       allocated.erase(finder);
       // Finally destroy the external Realm instance that we made
       instance.destroy();
@@ -8932,68 +8959,73 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       Range *range = &ranges[index];
-      // First update the ranges 
-      // If there is any padding needed for alignment before the first
-      // instance then we'll add that range to the free list
-      unsigned prev_index = SENTINEL;
-      unsigned next_index = SENTINEL;
-      uintptr_t offset = range->first;
-      if (layouts[0]->alignment_reqd > 0)
+      // We only need to update the ranges if we're not released because
+      // releasing means we're never going to need to allocated again
+      if (!released)
       {
-        size_t remainder = offset % layouts[0]->alignment_reqd;
-        if (remainder > 0)
+        // First update the ranges 
+        // If there is any padding needed for alignment before the first
+        // instance then we'll add that range to the free list
+        unsigned prev_index = SENTINEL;
+        unsigned next_index = SENTINEL;
+        uintptr_t offset = range->first;
+        if (layouts[0]->alignment_reqd > 0)
         {
-          offset += (layouts[0]->alignment_reqd - remainder);
-          prev_index = alloc_range(range->first, offset, range->instance);
+          size_t remainder = offset % layouts[0]->alignment_reqd;
+          if (remainder > 0)
+          {
+            offset += (layouts[0]->alignment_reqd - remainder);
+            prev_index = alloc_range(range->first, offset, range->instance);
+            // Update the original range to start later
+            range = &ranges[index]; // vector might have resized
+            range->first = offset;
+            // Add the new previous range into the linked list
+            Range &prev_range = ranges[prev_index];
+            prev_range.prev = range->prev;
+            prev_range.next = index;
+            range->prev = prev_index; 
+            if (prev_range.prev != SENTINEL)
+              ranges[prev_range.prev].next = prev_index;
+            // Deallocate the previous range
+            deallocate(prev_index);
+          }
+        }
+        offset += layouts[0]->bytes_used;
+        // Note this throws away padding bytes between instances, but those
+        // were unlikely to matter to anyone anyway since it's unlikely they'll
+        // be able to be used for anything
+        for (unsigned idx = 1; idx < num_results; idx++)
+        {
+          if (layouts[idx]->alignment_reqd > 0)
+          {
+            size_t remainder = offset % layouts[idx]->alignment_reqd;
+            if (remainder > 0)
+              offset += (layouts[idx]->alignment_reqd - remainder);
+          }
+          offset += layouts[idx]->bytes_used;
+        }
+        // Do the same thing with any leftover bytes at the end of the range
+        // after considering how the new instances will be laid out
+        if (offset < range->last)
+        {
+          next_index = alloc_range(offset, range->last, range->instance);
           // Update the original range to start later
           range = &ranges[index]; // vector might have resized
-          range->first = offset;
-          // Add the new previous range into the linked list
-          Range &prev_range = ranges[prev_index];
-          prev_range.prev = range->prev;
-          prev_range.next = index;
-          range->prev = prev_index; 
-          if (prev_range.prev != SENTINEL)
-            ranges[prev_range.prev].next = prev_index;
-          // Deallocate the previous range
-          deallocate(prev_index);
+          range->last = offset;
+          // Add the new next range into the linked list
+          Range &next_range = ranges[next_index];
+          next_range.prev = index;
+          next_range.next = range->next;
+          range->next = next_index;
+          if (next_range.next != SENTINEL)
+            ranges[next_range.next].prev = next_index;
+          // Deallocate the next range
+          deallocate(next_index);
         }
-      }
-      offset += layouts[0]->bytes_used;
-      // Note this throws away padding bytes between instances, but those
-      // were unlikely to matter to anyone anyway since it's unlikely they'll
-      // be able to be used for anything
-      for (unsigned idx = 1; idx < num_results; idx++)
-      {
-        if (layouts[idx]->alignment_reqd > 0)
-        {
-          size_t remainder = offset % layouts[idx]->alignment_reqd;
-          if (remainder > 0)
-            offset += (layouts[idx]->alignment_reqd - remainder);
-        }
-        offset += layouts[idx]->bytes_used;
-      }
-      // Do the same thing with any leftover bytes at the end of the range
-      // after considering how the new instances will be laid out
-      if (offset < range->last)
-      {
-        next_index = alloc_range(offset, range->last, range->instance);
-        // Update the original range to start later
-        range = &ranges[index]; // vector might have resized
-        range->last = offset;
-        // Add the new next range into the linked list
-        Range &next_range = ranges[next_index];
-        next_range.prev = index;
-        next_range.next = range->next;
-        range->next = next_index;
-        if (next_range.next != SENTINEL)
-          ranges[next_range.next].prev = next_index;
-        // Deallocate the next range
-        deallocate(next_index);
       }
       // Find the first and last range with the same backing instance
       unsigned current = range->prev;
-      prev_index = index;
+      unsigned prev_index = index;
       while (current != SENTINEL)
       {
         const Range &current_range = ranges[current];
@@ -9003,7 +9035,7 @@ namespace Legion {
         current = current_range.prev;
       }
       current = range->next;
-      next_index = index;
+      unsigned next_index = index;
       while (current != SENTINEL)
       {
         const Range &current_range = ranges[current];
@@ -9027,6 +9059,11 @@ namespace Legion {
 #endif
       if ((prev_index != index) || (index != next_index))
       {
+#ifdef DEBUG_LEGION
+        // Shouldn't be here if we're released because each allocated range 
+        // should have exactly one backing instance
+        assert(!released);
+#endif
         std::vector<LgEvent> extra_unique_events;
         std::vector<const Realm::InstanceLayoutGeneric*> extra_layouts;
         if (prev_index != index)
@@ -9184,7 +9221,45 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ConcretePool::release_pool(RtEvent done)
+    bool ConcretePool::is_released(void) const
+    //--------------------------------------------------------------------------
+    {
+      return released;
+    }
+
+    //--------------------------------------------------------------------------
+    void ConcretePool::release_pool(UniqueID creator)
+    //--------------------------------------------------------------------------
+    {
+      if (!released)
+      {
+        // Iterate over all the existing allocations and escape their ranges
+        // and replace their backing stores with the escaped instances
+        std::map<PhysicalInstance,RtEvent> new_backing_instances;
+        for (std::map<PhysicalInstance,unsigned>::const_iterator it =
+              allocated.begin(); it != allocated.end(); it++)
+        {
+          LgEvent unique_event;
+          PhysicalInstance backing_instance;
+          const Realm::InstanceLayoutGeneric *layout = it->first.get_layout();
+          const RtEvent ready = escape_range(it->second, 1/*num results*/,
+              &backing_instance, &unique_event, &layout, creator);
+          new_backing_instances[backing_instance] = ready;
+          Range &range = ranges[it->second];
+          range.instance = backing_instance;  
+        }
+        // Then go through and delete the remaining backing stores
+        for (std::map<PhysicalInstance,RtEvent>::const_iterator it =
+              backing_instances.begin(); it != backing_instances.end(); it++)
+          it->first.destroy(it->second);
+        // Now the only remaining backing instances are the ones we made
+        backing_instances.swap(new_backing_instances);
+        released = true;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ConcretePool::finalize_pool(RtEvent done)
     //--------------------------------------------------------------------------
     {
       // Iterate over all the remaining backing stores delete them
@@ -9386,7 +9461,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     UnboundPool::UnboundPool(MemoryManager *man, TaskTreeCoordinates &coords)
-      : MemoryPool(std::numeric_limits<size_t>::max()), manager(man)
+      : MemoryPool(std::numeric_limits<size_t>::max()), manager(man), 
+        released(false)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -9425,6 +9501,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
+      assert(!released);
       assert(manager != NULL);
 #endif
       return manager->create_future_instance(creator_uid, coordinates, size);
@@ -9437,6 +9514,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
+      assert(!released);
       assert(manager != NULL);
 #endif
       return manager->create_task_local_instance(creator_uid, coordinates,
@@ -9474,13 +9552,35 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void UnboundPool::release_pool(RtEvent done)
+    bool UnboundPool::is_released(void) const
+    //--------------------------------------------------------------------------
+    {
+      return released;
+    }
+
+    //--------------------------------------------------------------------------
+    void UnboundPool::release_pool(UniqueID creator)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(manager != NULL);
 #endif
-      manager->release_unbound_pool();
+      if (!released)
+      {
+        manager->release_unbound_pool();
+        released = true;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void UnboundPool::finalize_pool(RtEvent done)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(manager != NULL);
+#endif
+      if (!released)
+        manager->release_unbound_pool();
     }
 
     //--------------------------------------------------------------------------
