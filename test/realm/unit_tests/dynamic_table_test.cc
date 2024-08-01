@@ -50,7 +50,7 @@ TEST(DynamicTableTest, LookupMultipleEntries)
   std::vector<int> ids { 0, 15, 16, 33 };
 
   std::vector<Dummy *> entries(ids.size());
-  for(int i = 0; i < ids.size(); i++) {
+  for(size_t i = 0; i < ids.size(); i++) {
     entries[i] = dtable.lookup_entry(ids[i], 0);
   }
 
