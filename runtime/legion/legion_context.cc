@@ -25486,7 +25486,8 @@ namespace Legion {
     void LeafContext::release_memory_pool(Memory target)
     //--------------------------------------------------------------------------
     {
-      std::map<Memory,MemoryPool*>::iterator finder = memory_pools.find(target);
+      std::map<Memory,MemoryPool*>::const_iterator finder =
+        memory_pools.find(target);
       if (finder != memory_pools.end())
         finder->second->release_pool(get_unique_id());
     }
