@@ -173,8 +173,8 @@ class PointWiseLogicalAnalysisMapper: public DefaultMapper {
                              const SelectMappingInput&    input,
                                    SelectMappingOutput&   output)
     {
-      //DefaultMapper::select_tasks_to_map(ctx, input, output);
-      //return;
+      DefaultMapper::select_tasks_to_map(ctx, input, output);
+      return;
       unsigned count = 0;
       for (std::list<const Task*>::const_iterator it =
             input.ready_tasks.begin(); (count < max_schedule_count) &&
@@ -214,13 +214,16 @@ class PointWiseLogicalAnalysisMapper: public DefaultMapper {
     {
       output.slices.resize(input.domain.get_volume());
       unsigned idx = 0;
-      Rect<1> rect = input.domain;
-      for (PointInRectIterator<1> pir(rect); pir(); pir++, idx++)
+      //Rect<1> rect = input.domain;
+      for (RectInDomainIterator<1> itr(input.domain); itr(); itr++)
       {
-        Rect<1> slice(*pir, *pir);
-        output.slices[idx] = TaskSlice(slice,
-            task.target_proc,
-            false/*recurse*/, true/*stealable*/);
+        for (PointInRectIterator<1> pir(*itr); pir(); pir++, idx++)
+        {
+          Rect<1> slice(*pir, *pir);
+          output.slices[idx] = TaskSlice(slice,
+              task.target_proc,
+              false/*recurse*/, true/*stealable*/);
+        }
       }
     }
 
