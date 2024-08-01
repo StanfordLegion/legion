@@ -1029,30 +1029,6 @@ namespace Realm {
         }
       }
 
-#if 0
-      static inline off_t calc_mem_loc_ib(off_t alloc_offset,
-                                          off_t field_start,
-                                          int field_size,
-                                          size_t elmt_size,
-                                          size_t block_size,
-                                          size_t buf_size,
-                                          size_t domain_size,
-                                          off_t index)
-      {
-        off_t idx2 = domain_size / block_size * block_size;
-        off_t offset;
-        if (index < idx2) {
-          offset = Realm::calc_mem_loc(alloc_offset, field_start, field_size, elmt_size, block_size, index);
-        } else {
-          offset = (alloc_offset + field_start * domain_size + (elmt_size - field_start) * idx2 + (index - idx2) * field_size);
-        }
-	// the final step is to wrap the offset around within the buf_size
-	//  (i.e. offset %= buf_size), but that is done by the caller after
-	//  checking flow control limits
-        return offset;
-      }
-#endif
-
 #define MAX_GEN_REQS 3
 
       bool support_2d_xfers(XferDesKind kind)
@@ -1608,10 +1584,9 @@ namespace Realm {
 	    // TODO: figure out how to eliminate false positives from these
 	    //  checks with indirection and/or multiple remote inputs
 #if 0
-	    assert((out_port->peer_guid != XFERDES_NO_GUID) ||
-		   out_port->iter->done());
+           assert((out_port->peer_guid != XFERDES_NO_GUID) ||
+                  out_port->iter->done());
 #endif
-
 	    begin_completion();
 	    break;
 	  }
@@ -2151,16 +2126,6 @@ namespace Realm {
 	       ((output_control.remaining_count == 0) && output_control.eos_received)) {
 	      log_xd.info() << "iteration completed via control port: xd=" << std::hex << guid << std::dec;
 	      begin_completion();
-
-#if 0
-	      // non-ib iterators should end at the same time?
-	      for(size_t i = 0; i < input_ports.size(); i++)
-		assert((input_ports[i].peer_guid != XFERDES_NO_GUID) ||
-		       input_ports[i].iter->done());
-	      for(size_t i = 0; i < output_ports.size(); i++)
-		assert((output_ports[i].peer_guid != XFERDES_NO_GUID) ||
-		       output_ports[i].iter->done());
-#endif
 	    }
 	  } else {
 	    // otherwise, we go by our iterators
@@ -2223,147 +2188,6 @@ namespace Realm {
 	  }
 	  reqs[idx++] = new_req;
 	}
-#if 0
-        coord_t src_idx, dst_idx, todo, src_str, dst_str;
-        size_t nitems, nlines;
-        while (idx + MAX_GEN_REQS <= nr && offset_idx < oas_vec.size()
-        && MAX_GEN_REQS <= available_reqs.size()) {
-          if (DIM == 0) {
-            todo = std::min((coord_t)(max_req_size / oas_vec[offset_idx].size),
-                       me->continuous_steps(src_idx, dst_idx));
-            nitems = src_str = dst_str = todo;
-            nlines = 1;
-          }
-          else
-            todo = std::min((coord_t)(max_req_size / oas_vec[offset_idx].size),
-                       li->continuous_steps(src_idx, dst_idx,
-                                            src_str, dst_str,
-                                            nitems, nlines));
-          coord_t src_in_block = src_buf.block_size
-                               - src_idx % src_buf.block_size;
-          coord_t dst_in_block = dst_buf.block_size
-                               - dst_idx % dst_buf.block_size;
-          todo = std::min(todo, std::min(src_in_block, dst_in_block));
-          if (todo == 0)
-            break;
-          coord_t src_start, dst_start;
-          if (src_buf.is_ib) {
-            src_start = calc_mem_loc_ib(0,
-                                        oas_vec[offset_idx].src_offset,
-                                        oas_vec[offset_idx].size,
-                                        src_buf.elmt_size,
-                                        src_buf.block_size,
-                                        src_buf.buf_size,
-                                        domain.get_volume(), src_idx);
-            todo = std::min(todo, std::max((coord_t)0,
-					   (coord_t)(pre_bytes_write - src_start))
-                                    / oas_vec[offset_idx].size);
-	    // wrap src_start around within src_buf if needed
-	    src_start %= src_buf.buf_size;
-          } else {
-            src_start = Realm::calc_mem_loc(0,
-                                     oas_vec[offset_idx].src_offset,
-                                     oas_vec[offset_idx].size,
-                                     src_buf.elmt_size,
-                                     src_buf.block_size, src_idx);
-          }
-          if (dst_buf.is_ib) {
-            dst_start = calc_mem_loc_ib(0,
-                                        oas_vec[offset_idx].dst_offset,
-                                        oas_vec[offset_idx].size,
-                                        dst_buf.elmt_size,
-                                        dst_buf.block_size,
-                                        dst_buf.buf_size,
-                                        domain.get_volume(), dst_idx);
-            todo = std::min(todo, std::max((coord_t)0,
-					   (coord_t)(next_bytes_read + dst_buf.buf_size - dst_start))
-                                    / oas_vec[offset_idx].size);
-	    // wrap dst_start around within dst_buf if needed
-	    dst_start %= dst_buf.buf_size;
-          } else {
-            dst_start = Realm::calc_mem_loc(0,
-                                     oas_vec[offset_idx].dst_offset,
-                                     oas_vec[offset_idx].size,
-                                     dst_buf.elmt_size,
-                                     dst_buf.block_size, dst_idx);
-          }
-          if (todo == 0)
-            break;
-          bool cross_src_ib = false, cross_dst_ib = false;
-          if (src_buf.is_ib)
-            cross_src_ib = cross_ib(src_start,
-                                    todo * oas_vec[offset_idx].size,
-                                    src_buf.buf_size);
-          if (dst_buf.is_ib)
-            cross_dst_ib = cross_ib(dst_start,
-                                    todo * oas_vec[offset_idx].size,
-                                    dst_buf.buf_size);
-          // We are crossing ib, fallback to 1d case
-          // We don't support 2D, fallback to 1d case
-          if (cross_src_ib || cross_dst_ib || !support_2d_xfers(kind))
-            todo = std::min(todo, (coord_t)nitems);
-          if ((size_t)todo <= nitems) {
-            // fallback to 1d case
-            nitems = (size_t)todo;
-            nlines = 1;
-          } else {
-            nlines = todo / nitems;
-            todo = nlines * nitems;
-          }
-          if (nlines == 1) {
-            // 1D case
-            size_t nbytes = todo * oas_vec[offset_idx].size;
-            while (nbytes > 0) {
-              size_t req_size = nbytes;
-              Request* new_req = dequeue_request();
-              new_req->dim = Request::DIM_1D;
-              if (src_buf.is_ib) {
-                src_start = src_start % src_buf.buf_size;
-                req_size = std::min(req_size, (size_t)(src_buf.buf_size - src_start));
-              }
-              if (dst_buf.is_ib) {
-                dst_start = dst_start % dst_buf.buf_size;
-                req_size = std::min(req_size, (size_t)(dst_buf.buf_size - dst_start));
-              }
-              new_req->src_off = src_start;
-              new_req->dst_off = dst_start;
-              new_req->nbytes = req_size;
-              new_req->nlines = 1;
-              log_request.info("[1D] guid(%llx) src_off(%lld) dst_off(%lld)"
-                               " nbytes(%zu) offset_idx(%u)",
-                               guid, src_start, dst_start, req_size, offset_idx);
-              reqs[idx++] = new_req;
-              nbytes -= req_size;
-              src_start += req_size;
-              dst_start += req_size;
-            }
-          } else {
-            // 2D case
-            Request* new_req = dequeue_request();
-            new_req->dim = Request::DIM_2D;
-            new_req->src_off = src_start;
-            new_req->dst_off = dst_start;
-            new_req->src_str = src_str * oas_vec[offset_idx].size;
-            new_req->dst_str = dst_str * oas_vec[offset_idx].size;
-            new_req->nbytes = nitems * oas_vec[offset_idx].size;
-            new_req->nlines = nlines;
-            reqs[idx++] = new_req;
-          }
-          if (DIM == 0) {
-            me->move(todo);
-            if (!me->any_left()) {
-              me->reset();
-              offset_idx ++;
-            }
-          } else {
-            li->move(todo);
-            if (!li->any_left()) {
-              li->reset();
-              offset_idx ++;
-            }
-          }
-        } // while
-#endif
         return idx;
       }
 
@@ -2427,39 +2251,6 @@ namespace Realm {
 	}
       }
 
-#if 0
-      inline void XferDes::simple_update_bytes_read(int64_t offset, uint64_t size)
-        //printf("update_read[%lx]: offset = %ld, size = %lu, pre = %lx, next = %lx\n", guid, offset, size, pre_xd_guid, next_xd_guid);
-        if (pre_xd_guid != XFERDES_NO_GUID) {
-          bool update = false;
-          if ((int64_t)(bytes_read % src_buf.buf_size) == offset) {
-            bytes_read += size;
-            update = true;
-          }
-          else {
-            //printf("[%lx] insert: key = %ld, value = %lu\n", guid, offset, size);
-            segments_read[offset] = size;
-          }
-          std::map<int64_t, uint64_t>::iterator it;
-          while (true) {
-            it = segments_read.find(bytes_read % src_buf.buf_size);
-            if (it == segments_read.end())
-              break;
-            bytes_read += it->second;
-            update = true;
-            //printf("[%lx] erase: key = %ld, value = %lu\n", guid, it->first, it->second);
-            segments_read.erase(it);
-          }
-          if (update) {
-            xferDes_queue->update_next_bytes_read(pre_xd_guid, bytes_read);
-          }
-        }
-        else {
-          bytes_read += size;
-        }
-      }
-#endif
-
       void XferDes::update_bytes_write(int port_idx, size_t offset, size_t size)
       {
 	XferPort *out_port = &output_ports[port_idx];
@@ -2508,42 +2299,6 @@ namespace Realm {
           }
         }
       }
-
-#if 0
-      inline void XferDes::simple_update_bytes_write(int64_t offset, uint64_t size)
-      {
-        log_request.info(
-            "update_write: guid(%llx) off(%zd) size(%zu) pre(%llx) next(%llx)",
-            guid, (ssize_t)offset, (size_t)size, pre_xd_guid, next_xd_guid);
-
-	
-        if (next_xd_guid != XFERDES_NO_GUID) {
-          bool update = false;
-          if ((int64_t)(bytes_write % dst_buf.buf_size) == offset) {
-            bytes_write += size;
-            update = true;
-          } else {
-            segments_write[offset] = size;
-          }
-          std::map<int64_t, uint64_t>::iterator it;
-          while (true) {
-            it = segments_write.find(bytes_write % dst_buf.buf_size);
-            if (it == segments_write.end())
-              break;
-            bytes_write += it->second;
-            update = true;
-            segments_write.erase(it);
-          }
-          if (update) {
-            xferDes_queue->update_pre_bytes_write(next_xd_guid, bytes_write);
-          }
-        }
-        else {
-          bytes_write += size;
-        }
-        //printf("[%d] offset(%ld), size(%lu), bytes_writes(%lx): %ld\n", Network::my_node_id, offset, size, guid, bytes_write);
-      }
-#endif
 
       void XferDes::update_pre_bytes_write(int port_idx, size_t offset, size_t size)
       {
@@ -2607,12 +2362,6 @@ namespace Realm {
         req->is_read_done = true;
 	update_bytes_read(req->src_port_idx,
 			  req->read_seq_pos, req->read_seq_count);
-#if 0
-        if (req->dim == Request::DIM_1D)
-          simple_update_bytes_read(req->src_off, req->nbytes);
-        else
-          simple_update_bytes_read(req->src_off, req->nbytes * req->nlines);
-#endif
       }
 
       void XferDes::default_notify_request_write_done(Request* req)
@@ -2625,12 +2374,6 @@ namespace Realm {
 	size_t write_seq_pos = req->write_seq_pos;
 	size_t write_seq_count = req->write_seq_count;
 	update_bytes_write(dst_port_idx, write_seq_pos, write_seq_count);
-#if 0
-        if (req->dim == Request::DIM_1D)
-          simple_update_bytes_write(req->dst_off, req->nbytes);
-        else
-          simple_update_bytes_write(req->dst_off, req->nbytes * req->nlines);
-#endif
         enqueue_request(req);
       }
 
@@ -3507,14 +3250,6 @@ namespace Realm {
       {
 	kind = XFER_REMOTE_WRITE;
 	requests = 0;
-#if 0
-        requests = (RemoteWriteRequest*) calloc(max_nr, sizeof(RemoteWriteRequest));
-        for (int i = 0; i < max_nr; i++) {
-          requests[i].xd = this;
-          //requests[i].dst_node = dst_node;
-          available_reqs.push(&requests[i]);
-        }
-#endif
       }
 
       long RemoteWriteXferDes::get_requests(Request** requests, long nr)
@@ -3579,20 +3314,6 @@ namespace Realm {
       bool RemoteWriteXferDes::progress_xd(RemoteWriteChannel *channel,
 					   TimeLimit work_until)
       {
-#if 0
-	Request *rq;
-	bool did_work = false;
-	do {
-	  long count = get_requests(&rq, 1);
-	  if(count > 0) {
-	    channel->submit(&rq, count);
-	    did_work = true;
-	  } else
-	    break;
-	} while(!work_until.is_expired());
-
-	return did_work;
-#else
 	bool did_work = false;
 	// immediate acks for reads happen when we assemble or skip input,
 	//  while immediate acks for writes happen only if we skip output
@@ -5883,115 +5604,8 @@ namespace Realm {
       {
         // should not be reached
         assert(0);
-#if 0 // TODO: DELETE
-        for (long i = 0; i < nr; i ++) {
-          RemoteWriteRequest* req = (RemoteWriteRequest*) requests[i];
-	  XferDes::XferPort *in_port = &req->xd->input_ports[req->src_port_idx];
-	  XferDes::XferPort *out_port = &req->xd->output_ports[req->dst_port_idx];
-	  // no serdez support
-	  assert((in_port->serdez_op == 0) && (out_port->serdez_op == 0));
-	  NodeID dst_node = ID(out_port->mem->me).memory_owner_node();
-	  size_t write_bytes_total = (size_t)-1;
-	  if(out_port->needs_pbt_update.load() &&
-	     req->xd->iteration_completed.load_acquire()) {
-	    // this can result in sending the pbt twice, but this code path
-	    //  is "mostly dead" and should be nuked soon
-	    out_port->needs_pbt_update.store(false);
-	    write_bytes_total = out_port->local_bytes_total;
-	  }
-	  RemoteAddress dst_buf;
-	  bool ok = out_port->mem->get_remote_addr(req->dst_off, dst_buf);
-	  assert(ok);
-	  // send a request if there's data or if there's a next XD to update
-	  if((req->nbytes > 0) ||
-	     (out_port->peer_guid != XferDes::XFERDES_NO_GUID)) {
-	    if (req->dim == Request::DIM_1D) {
-	      XferDesRemoteWriteMessage::send_request(
-                dst_node, dst_buf, req->src_base, req->nbytes, req,
-		out_port->peer_guid, out_port->peer_port_idx,
-		req->write_seq_pos, req->write_seq_count, 
-		write_bytes_total);
-	    } else {
-	      assert(req->dim == Request::DIM_2D);
-	      // dest MUST be continuous
-	      assert(req->nlines <= 1 || ((size_t)req->dst_str) == req->nbytes);
-	      XferDesRemoteWriteMessage::send_request(
-                dst_node, dst_buf, req->src_base, req->nbytes,
-                req->src_str, req->nlines, req,
-		out_port->peer_guid, out_port->peer_port_idx,
-		req->write_seq_pos, req->write_seq_count, 
-		write_bytes_total);
-	    }
-	  }
-	  // for an empty transfer, we do the local completion ourselves
-	  //   instead of waiting for an ack from the other node
-	  if(req->nbytes == 0) {
-	    req->xd->notify_request_read_done(req);
-	    req->xd->notify_request_write_done(req);
-	  }
-        /*RemoteWriteRequest* req = (RemoteWriteRequest*) requests[i];
-          req->complete_event = GenEventImpl::create_genevent()->current_event();
-          Realm::RemoteWriteMessage::RequestArgs args;
-          args.mem = req->dst_mem;
-          args.offset = req->dst_offset;
-          args.event = req->complete_event;
-          args.sender = Network::my_node_id;
-          args.sequence_id = 0;
-
-          Realm::RemoteWriteMessage::Message::request(ID(args.mem).node(), args,
-                                                      req->src_buf, req->nbytes,
-                                                      PAYLOAD_KEEPREG,
-                                                      req->dst_buf);*/
-        }
-#endif
         return nr;
       }
-
-#if 0 // TODO: DELETE
-      /*static*/
-      void XferDesRemoteWriteMessage::handle_message(NodeID sender,
-						     const XferDesRemoteWriteMessage &args,
-						     const void *data,
-						     size_t datalen)
-      {
-        // assert data copy is in right position
-        //assert(data == args.dst_buf);
-
-	log_xd.info() << "remote write recieved: next="
-		      << std::hex << args.next_xd_guid << std::dec
-		      << " start=" << args.span_start
-		      << " size=" << args.span_size
-		      << " pbt=" << args.pre_bytes_total;
-
-	// if requested, notify (probably-local) next XD
-	if(args.next_xd_guid != XferDes::XFERDES_NO_GUID) {
-	  XferDesQueue *xdq = XferDesQueue::get_singleton();
-	  if(args.pre_bytes_total != size_t(-1))
-	    xdq->update_pre_bytes_total(args.next_xd_guid,
-					args.next_port_idx,
-					args.pre_bytes_total);
-	  xdq->update_pre_bytes_write(args.next_xd_guid,
-				      args.next_port_idx,
-				      args.span_start,
-				      args.span_size);
-	}
-
-	// don't ack empty requests
-	if(datalen > 0)
-	  XferDesRemoteWriteAckMessage::send_request(sender, args.req);
-      }
-
-      /*static*/
-      void XferDesRemoteWriteAckMessage::handle_message(NodeID sender,
-							const XferDesRemoteWriteAckMessage &args,
-							const void *data,
-							size_t datalen)
-      {
-        RemoteWriteRequest* req = args.req;
-        req->xd->notify_request_read_done(req);
-        req->xd->notify_request_write_done(req);
-      }
-#endif
 
       /*static*/ void XferDesDestroyMessage::handle_message(NodeID sender,
 							    const XferDesDestroyMessage &args,
@@ -6460,10 +6074,6 @@ namespace Realm {
 
 ActiveMessageHandlerReg<SimpleXferDesCreateMessage> simple_xfer_des_create_message_handler;
 ActiveMessageHandlerReg<NotifyXferDesCompleteMessage> notify_xfer_des_complete_handler;
-#if 0 // TODO: DELETE
-ActiveMessageHandlerReg<XferDesRemoteWriteMessage> xfer_des_remote_write_handler;
-ActiveMessageHandlerReg<XferDesRemoteWriteAckMessage> xfer_des_remote_write_ack_handler;
-#endif
 ActiveMessageHandlerReg<XferDesDestroyMessage> xfer_des_destroy_message_handler;
 ActiveMessageHandlerReg<UpdateBytesTotalMessage> update_bytes_total_message_handler;
 ActiveMessageHandlerReg<UpdateBytesWriteMessage> update_bytes_write_message_handler;
