@@ -2337,8 +2337,6 @@ namespace Realm {
 				 const void *fill_data, size_t fill_size,
                                  size_t fill_total);
 
-    virtual Channel *get_channel() const { return channel; }
-
     static ActiveMessageHandlerReg<AddressSplitXferDesCreateMessage<N,T> > areg;
 
   protected:
@@ -3214,14 +3212,12 @@ namespace Realm {
     return (best_cost != 0);
   }
 
-  IndirectionInfoBase::IndirectionInfoBase(bool _structured,
-                                           FieldID _field_id,
-                                           RegionInstance _inst,
-                                           bool _is_ranges,
-                                           bool _oor_possible,
-                                           bool _aliasing_possible,
+  IndirectionInfoBase::IndirectionInfoBase(bool _structured, FieldID _field_id,
+                                           RegionInstance _inst, bool _is_ranges,
+                                           bool _oor_possible, bool _aliasing_possible,
                                            size_t _subfield_offset,
-                                           const std::vector<RegionInstance> _insts)
+                                           const std::vector<RegionInstance> _insts,
+                                           Channel *_addrsplit_channel)
     : structured(_structured)
     , field_id(_field_id)
     , inst(_inst)
@@ -3230,6 +3226,7 @@ namespace Realm {
     , aliasing_possible(_aliasing_possible)
     , subfield_offset(_subfield_offset)
     , insts(_insts)
+    , addrsplit_channel(_addrsplit_channel)
   {}
 
   static TransferGraph::XDTemplate::IO
@@ -3465,9 +3462,10 @@ namespace Realm {
       // HACK!
       MemPathInfo addr_path;
 
+      assert(addrsplit_channel != nullptr);
+      Memory addr_ib_mem = addrsplit_channel->suggest_ib_memories_for_node(addr_node);
+
       XferDesFactory *addr_split_factory = create_addrsplit_factory(bytes_per_element);
-      Memory addr_ib_mem =
-          addr_split_factory->get_channel()->suggest_ib_memories_for_node(addr_node);
 
       bool ok = find_shortest_path(nodes_info, inst.get_location(), addr_ib_mem,
                                    0 /*no serdez*/, 0 /*redop_id*/, addr_path,
@@ -3930,10 +3928,9 @@ namespace Realm {
       Channel *_addr_split_channel)
     : IndirectionInfoBase(false /*!structured*/, ind.field_id, ind.inst, ind.is_ranges,
                           ind.oor_possible, ind.aliasing_possible, ind.subfield_offset,
-                          ind.insts)
+                          ind.insts, _addr_split_channel)
     , domain(is)
     , spaces(ind.spaces)
-    , addr_split_channel(_addr_split_channel)
   {}
 
   template <int N, typename T, int N2, typename T2>
@@ -3986,10 +3983,11 @@ namespace Realm {
   }
 
   template <int N, typename T, int N2, typename T2>
-  XferDesFactory *IndirectionInfoTyped<N,T,N2,T2>::create_addrsplit_factory(size_t bytes_per_element) const
+  XferDesFactory *IndirectionInfoTyped<N, T, N2, T2>::create_addrsplit_factory(
+      size_t bytes_per_element) const
   {
     return new AddressSplitXferDesFactory<N2, T2>(bytes_per_element, spaces,
-                                                  addr_split_channel);
+                                                  this->addr_split_channel);
   }
 
   template <int N, typename T, int N2, typename T2>

@@ -644,7 +644,6 @@ namespace Realm {
 
     public:
       virtual void release() = 0;
-      virtual Channel *get_channel() const = 0;
 
       virtual void create_xfer_des(uintptr_t dma_op,
 				   NodeID launch_node,
@@ -680,7 +679,6 @@ namespace Realm {
       SimpleXferDesFactory(uintptr_t _channel);
 
       virtual void release();
-      virtual Channel *get_channel() const;
 
       virtual void create_xfer_des(uintptr_t dma_op,
 				   NodeID launch_node,

@@ -348,8 +348,8 @@ namespace Realm {
   public:
     IndirectionInfoBase(bool _structured, FieldID _field_id, RegionInstance _inst,
                         bool _is_ranges, bool _oor_possible, bool _aliasing_possible,
-                        size_t _subfield_offset,
-                        const std::vector<RegionInstance> _insts);
+                        size_t _subfield_offset, const std::vector<RegionInstance> _insts,
+                        Channel *_addrsplit_channel);
 
   protected:
     // most of the logic to generate unstructured gather/scatter paths is
@@ -389,6 +389,7 @@ namespace Realm {
     bool aliasing_possible;
     size_t subfield_offset;
     std::vector<RegionInstance> insts;
+    Channel* addrsplit_channel;
   };
 
   ////////////////////////////////////////////////////////////////////////
