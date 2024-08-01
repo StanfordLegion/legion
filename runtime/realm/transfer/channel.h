@@ -328,6 +328,10 @@ namespace Realm {
 
       atomic<unsigned> reference_count;
 
+      unsigned nb_update_pre_bytes_total_calls_expected;
+
+      atomic<unsigned> nb_update_pre_bytes_total_calls_received;
+
       // intrusive list for queued XDs in a channel
       IntrusivePriorityListLink<XferDes> xd_link;
       REALM_PMTA_DEFN(XferDes,IntrusivePriorityListLink<XferDes>,xd_link);
@@ -351,6 +355,8 @@ namespace Realm {
       //  deleted
       void add_reference(void);
       void remove_reference(void);
+
+      void add_update_pre_bytes_total_received(void);
 
     protected:
       virtual ~XferDes();
@@ -692,6 +698,7 @@ namespace Realm {
     class RemoteChannelInfo;
     class RemoteChannel;
 
+    // TODO(apryakhin): Deprecate ChannelCopyInfo
     struct ChannelCopyInfo {
       ChannelCopyInfo(Memory _src_mem, Memory _dst_mem,
                       Memory _ind_mem = Memory::NO_MEMORY, size_t _num_spaces = 1,
@@ -718,6 +725,9 @@ namespace Realm {
       bool oor_possible;
       size_t addr_size;
     };
+
+    std::ostream &operator<<(std::ostream &os, const ChannelCopyInfo &info);
+    bool operator==(const ChannelCopyInfo &lhs, const ChannelCopyInfo &rhs);
 
     class Channel {
     public:
@@ -1395,10 +1405,15 @@ namespace Realm {
 
       void set_real_xd(XferDes *_xd);
 
+      void add_update_pre_bytes_total_received(void);
+
+      unsigned get_update_pre_bytes_total_received(void);
+
     protected:
       static const int INLINE_PORTS = 4;
       atomic<unsigned> refcount;
       XferDes *xd;
+      atomic<unsigned> nb_update_pre_bytes_total_calls_received;
       size_t inline_bytes_total[INLINE_PORTS];
       SequenceAssembler inline_pre_write[INLINE_PORTS];
       Mutex extra_mutex;
@@ -1420,6 +1435,7 @@ namespace Realm {
       }
 
       ~XferDesQueue() {
+        assert(guid_to_xd.empty());
       }
 
       static XferDesQueue* get_singleton();

@@ -71,7 +71,9 @@ gasnet-ld:
 gasnet-ldflags:
 	@echo $(GASNET_LDFLAGS)
 gasnet-libs:
-	@echo $(GASNET_LIBS)"
+	@echo $(GASNET_LIBS)
+gasnet-ld-requires-mpi:
+	@echo $(GASNET_LD_REQUIRES_MPI)"
   )
   find_program(GASNet_MAKE_PROGRAM NAMES gmake make smake)
   mark_as_advanced(GASNet_MAKE_PROGRAM)
@@ -104,6 +106,12 @@ gasnet-libs:
       COMMAND ${GASNet_MAKE_PROGRAM} -s -f ${_TEMP_MAKEFILE} gasnet-libs
       OUTPUT_VARIABLE _GASNet_LIBS
       ERROR_VARIABLE _GASNet_LIBS_ERROR
+      OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    execute_process(
+      COMMAND ${GASNet_MAKE_PROGRAM} -s -f ${_TEMP_MAKEFILE} gasnet-ld-requires-mpi
+      OUTPUT_VARIABLE _GASNet_LD_REQUIRES_MPI
+      ERROR_VARIABLE _GASNet_LD_REQUIRES_MPI_ERROR
       OUTPUT_STRIP_TRAILING_WHITESPACE
     )
     file(REMOVE ${_TEMP_MAKEFILE})
@@ -156,6 +164,9 @@ function(_GASNet_create_component_target _GASNet_MAKEFILE COMPONENT_NAME)
   endforeach()
   if(_GASNet_LD MATCHES "^(/.*/)?mpi[^/]*" AND NOT (_GASNet_LD STREQUAL CMAKE_C_COMPILER))
     set(MPI_C_COMPILER ${_GASNet_LD})
+    find_package(MPI REQUIRED COMPONENTS C)
+    list(APPEND COMPONENT_DEPS ${MPI_C_LIBRARIES})
+  elseif(_GASNet_LD_REQUIRES_MPI)
     find_package(MPI REQUIRED COMPONENTS C)
     list(APPEND COMPONENT_DEPS ${MPI_C_LIBRARIES})
   endif()

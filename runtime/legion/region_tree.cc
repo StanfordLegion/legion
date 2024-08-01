@@ -1207,8 +1207,6 @@ namespace Legion {
                                       bool sharded_non_owner)
     //--------------------------------------------------------------------------
     {
-      if (!has_node(handle))
-        return;
       FieldSpaceNode *node = get_node(handle);
       node->free_field(fid, runtime->address_space, applied, sharded_non_owner);
     }
@@ -1256,8 +1254,6 @@ namespace Legion {
                                        bool sharded_non_owner)
     //--------------------------------------------------------------------------
     {
-      if (!has_node(handle))
-        return;
       FieldSpaceNode *node = get_node(handle);
       node->free_fields(to_free, runtime->address_space, applied, 
                         sharded_non_owner);
@@ -3407,8 +3403,8 @@ namespace Legion {
         // still be getting notifications to compute the complete
         if (complete < 0)
           result->initialize_disjoint_complete_notifications();
-        else if ((runtime->profiler != NULL) && result->is_owner())
-          runtime->profiler->record_index_partition(parent->handle.id,
+        else if ((implicit_profiler != NULL) && result->is_owner())
+          implicit_profiler->register_index_partition(parent->handle.id,
               p.id, disjoint, result->color);
         result->register_with_runtime();
       }
@@ -4343,12 +4339,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RegionNode* RegionTreeForest::get_tree(RegionTreeID tid,bool first/*=true*/)
+    RegionNode* RegionTreeForest::get_tree(RegionTreeID tid, bool can_fail,
+                                           bool first/*=true*/)
     //--------------------------------------------------------------------------
     {
       if (tid == 0)
+      {
+        if (can_fail)
+          return NULL;
         REPORT_LEGION_ERROR(ERROR_INVALID_REQUEST_TREE_ID,
           "Invalid request for tree ID 0 which is never a tree ID")
+      }
       RtEvent wait_on;
       RegionNode *result = NULL;
       {
@@ -4392,8 +4393,10 @@ namespace Legion {
         if (pending_wait.exists())
         {
           pending_wait.wait();
-          return get_tree(tid, false/*first*/); 
+          return get_tree(tid, can_fail, false/*first*/); 
         }
+        else if (can_fail)
+          return NULL;
         else
           REPORT_LEGION_ERROR(ERROR_UNABLE_FIND_ENTRY,
             "Unable to find entry for region tree ID %d", tid)
@@ -4428,12 +4431,16 @@ namespace Legion {
       std::map<RegionTreeID,RegionNode*>::const_iterator finder = 
           tree_nodes.find(tid);
       if (finder == tree_nodes.end())
+      {
+        if (can_fail)
+          return NULL;
         REPORT_LEGION_ERROR(ERROR_UNABLE_FIND_TOPLEVEL_TREE,
           "Unable to find top-level tree entry for "
                          "region tree %d.  This is either a runtime "
                          "bug or requires Legion fences if names are "
                          "being returned out of the context in which"
                          "they are being created.", tid)
+      }
       return finder->second;
     }
 
@@ -4476,56 +4483,6 @@ namespace Legion {
       }
       else
         return wait_finder->second;
-    }
-
-    //--------------------------------------------------------------------------
-    bool RegionTreeForest::has_node(IndexSpace space)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
-      return (index_nodes.find(space) != index_nodes.end());
-    }
-    
-    //--------------------------------------------------------------------------
-    bool RegionTreeForest::has_node(IndexPartition part)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
-      return (index_parts.find(part) != index_parts.end());
-    }
-
-    //--------------------------------------------------------------------------
-    bool RegionTreeForest::has_node(FieldSpace space)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
-      return (field_nodes.find(space) != field_nodes.end());
-    }
-
-    //--------------------------------------------------------------------------
-    bool RegionTreeForest::has_node(LogicalRegion handle)
-    //--------------------------------------------------------------------------
-    {
-      // Reflect that we can build these nodes whenever this is true
-      return (has_node(handle.index_space) && has_node(handle.field_space) &&
-              has_tree(handle.tree_id));
-    }
-
-    //--------------------------------------------------------------------------
-    bool RegionTreeForest::has_node(LogicalPartition handle)
-    //--------------------------------------------------------------------------
-    {
-      // Reflect that we can build these nodes whenever this is true
-      return (has_node(handle.index_partition) && has_node(handle.field_space)
-              && has_tree(handle.tree_id));
-    }
-
-    //--------------------------------------------------------------------------
-    bool RegionTreeForest::has_tree(RegionTreeID tid)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
-      return (tree_nodes.find(tid) != tree_nodes.end());
     }
 
     //--------------------------------------------------------------------------
@@ -5136,12 +5093,12 @@ namespace Legion {
         memcpy(&ptr, &buffer, sizeof(ptr));
         LegionSpy::log_index_space_name(handle.id, ptr);
       }
-      if (runtime->profiler && (LEGION_NAME_SEMANTIC_TAG == tag))
+      if ((implicit_profiler != NULL) && (LEGION_NAME_SEMANTIC_TAG == tag))
       {
         const char *ptr = NULL;
         static_assert(sizeof(buffer) == sizeof(ptr));
         memcpy(&ptr, &buffer, sizeof(ptr));
-	runtime->profiler->record_index_space(handle.id, ptr);
+	implicit_profiler->register_index_space(handle.id, ptr);
       }
     }
 
@@ -5164,12 +5121,12 @@ namespace Legion {
         memcpy(&ptr, &buffer, sizeof(ptr));
         LegionSpy::log_index_partition_name(handle.id, ptr);
       }
-      if (runtime->profiler && (LEGION_NAME_SEMANTIC_TAG == tag))
+      if ((implicit_profiler != NULL) && (LEGION_NAME_SEMANTIC_TAG == tag))
       {
         const char *ptr = NULL;
         static_assert(sizeof(buffer) == sizeof(ptr));
         memcpy(&ptr, &buffer, sizeof(ptr));
-	runtime->profiler->record_index_part(handle.id, ptr);
+	implicit_profiler->register_index_part(handle.id, ptr);
       }
     }
 
@@ -5192,12 +5149,12 @@ namespace Legion {
         memcpy(&ptr, &buffer, sizeof(ptr));
         LegionSpy::log_field_space_name(handle.id, ptr);
       }
-      if (runtime->profiler && (LEGION_NAME_SEMANTIC_TAG == tag))
+      if ((implicit_profiler != NULL) && (LEGION_NAME_SEMANTIC_TAG == tag))
       {
         const char *ptr = NULL;
         static_assert(sizeof(buffer) == sizeof(ptr));
         memcpy(&ptr, &buffer, sizeof(ptr));
-	runtime->profiler->record_field_space(handle.id, ptr);
+	implicit_profiler->register_field_space(handle.id, ptr);
       }
     }
 
@@ -5221,12 +5178,12 @@ namespace Legion {
         memcpy(&ptr, &buf, sizeof(ptr));
         LegionSpy::log_field_name(handle.id, fid, ptr);
       }
-      if (runtime->profiler && (LEGION_NAME_SEMANTIC_TAG == tag))
+      if ((implicit_profiler != NULL) && (LEGION_NAME_SEMANTIC_TAG == tag))
       {
         const char *ptr = NULL;
         static_assert(sizeof(buf) == sizeof(ptr));
         memcpy(&ptr, &buf, sizeof(ptr));
-	runtime->profiler->record_field(handle.id, fid, size, ptr); 
+	implicit_profiler->register_field(handle.id, fid, size, ptr); 
       }
     }
 
@@ -5250,12 +5207,12 @@ namespace Legion {
         LegionSpy::log_logical_region_name(handle.index_space.id,
             handle.field_space.id, handle.tree_id, ptr);
       }
-      if (runtime->profiler && (LEGION_NAME_SEMANTIC_TAG == tag))
+      if ((implicit_profiler != NULL) && (LEGION_NAME_SEMANTIC_TAG == tag))
       {
         const char *ptr = NULL;
         static_assert(sizeof(buffer) == sizeof(ptr));
         memcpy(&ptr, &buffer, sizeof(ptr));
-	runtime->profiler->record_logical_region(handle.index_space.id,
+	implicit_profiler->register_logical_region(handle.index_space.id,
             handle.field_space.id, handle.tree_id, ptr);
       }
     }
@@ -9597,8 +9554,8 @@ namespace Legion {
           if (runtime->legion_spy_enabled)
             LegionSpy::log_index_subspace(handle.id, is.id, 
                 runtime->address_space, result->get_domain_point_color());
-          if (runtime->profiler != NULL)
-            runtime->profiler->record_index_subspace(handle.id, is.id,
+          if (implicit_profiler != NULL)
+            implicit_profiler->register_index_subspace(handle.id, is.id,
                 result->get_domain_point_color());
           return result;
         }
@@ -10200,8 +10157,8 @@ namespace Legion {
             complete.store((parent_volume == total_children_volume));
           }
         }
-        if (context->runtime->profiler != NULL)
-          context->runtime->profiler->record_index_partition(parent->handle.id,
+        if (implicit_profiler != NULL)
+          implicit_profiler->register_index_partition(parent->handle.id,
               handle.id, disjoint.load(), color);
       }
       has_disjoint.store(true);
@@ -17445,7 +17402,7 @@ namespace Legion {
     {
       RegionTreeID tid;
       derez.deserialize(tid);
-      RegionNode *node = forest->get_tree(tid);
+      RegionNode *node = forest->get_tree(tid, true/*can fail*/);
       RtUserEvent done_event;
       derez.deserialize(done_event);
       AddressSpaceID source;

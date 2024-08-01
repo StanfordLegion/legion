@@ -28,6 +28,8 @@ TYPE_IS_SERIALIZABLE(Realm::Channel::SupportedPath);
 
 namespace Realm {
 
+  extern Logger log_xd_ref;
+
   ////////////////////////////////////////////////////////////////////////
   //
   // class XferDes
@@ -43,8 +45,15 @@ namespace Realm {
   inline void XferDes::remove_reference(void)
   {
     unsigned prev = reference_count.fetch_sub_acqrel(1);
-    if(prev == 1)
+    if(prev == 1) {
+      log_xd_ref.info("[Delete xd]: XD guid=%llx, ptr=%p", guid, static_cast<void*>(this));
       delete this;
+    }
+  }
+
+  inline void XferDes::add_update_pre_bytes_total_received(void)
+  {
+    nb_update_pre_bytes_total_calls_received.fetch_add_acqrel(1);
   }
 
   inline unsigned XferDes::current_progress(void)
@@ -171,7 +180,7 @@ namespace Realm {
 	  }
 	}
 
-	if(xd->transfer_completed.load_acquire()) {
+	if(xd->transfer_completed.load_acquire() && xd->nb_update_pre_bytes_total_calls_received.load_acquire() == xd->nb_update_pre_bytes_total_calls_expected) {
 	  xd->flush();
 	  log_new_dma.info("Finish XferDes : id(" IDFMT ")", xd->guid);
 	  xd->mark_completed();

@@ -228,7 +228,7 @@ public:
     graph.clear();
     Realm::Point<MAX_DIM> start_pnt(0);
     Realm::Point<MAX_DIM> end_pnt(0);
-    end_pnt.x = size - 1;
+    end_pnt[0] = size - 1;
     CopyIndexSpace is(Realm::Rect<MAX_DIM>(start_pnt, end_pnt));
     std::vector<size_t> fields(1, sizeof(size_t));
 
@@ -276,7 +276,7 @@ public:
     graph.clear();
     Realm::Point<MAX_DIM> start_pnt(0);
     Realm::Point<MAX_DIM> end_pnt(0);
-    end_pnt.x = size - 1;
+    end_pnt[0] = size - 1;
     CopyIndexSpace is(Realm::Rect<MAX_DIM>(start_pnt, end_pnt));
     std::vector<size_t> fields(1, sizeof(size_t));
 
@@ -323,8 +323,8 @@ static void display_node_data(std::vector<CopyOperation> &graph)
       src = dst;
     }
     std::vector<Realm::Machine::MemoryMemoryAffinity> affinity;
-    if (Realm::Machine::get_machine().get_mem_mem_affinity(affinity, src,
-                                                           dst) == 0) {
+    if(Realm::Machine::get_machine().get_mem_mem_affinity(affinity, src, dst, false) ==
+       0) {
       Realm::Machine::MemoryMemoryAffinity fake_aff;
       fake_aff.m1 = src;
       fake_aff.m2 = dst;

@@ -35,6 +35,51 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
 {
   TaskArgs &task_args = *(TaskArgs *)args;
 
+  // TODO: test empty rhs
+
+  {
+    std::vector<IndexSpace<1>> results;
+    assert(!task_args.lhs[0].dense());
+    Event e2 = IndexSpace<1>::compute_unions(
+        std::vector<IndexSpace<1>>{std::begin(task_args.lhs), std::end(task_args.lhs)},
+        std::vector<IndexSpace<1>>{std::begin(task_args.rhs), std::end(task_args.rhs)},
+        results, ProfilingRequestSet());
+    e2.wait();
+    for(size_t i = 0; i < results.size(); i++) {
+      if(results[i].sparsity.exists()) {
+        results[i].sparsity.remove_references();
+      }
+    }
+  }
+
+  {
+    // case 4
+    IndexSpace<1> result;
+
+    std::vector<Rect<1>> rects0;
+    rects0.push_back(Rect<1>(Point<1>(0), Point<1>(5)));
+    rects0.push_back(Rect<1>(Point<1>(10), Point<1>(15)));
+
+    std::vector<Rect<1>> rects1;
+    rects1.push_back(Rect<1>(Point<1>(2), Point<1>(8)));
+    rects1.push_back(Rect<1>(Point<1>(12), Point<1>(14)));
+
+    IndexSpace<1> is0(rects0);
+    is0.sparsity.add_references();
+    IndexSpace<1> is1(rects1);
+    is1.sparsity.add_references();
+
+    Event e2 = IndexSpace<1>::compute_intersection(std::vector<IndexSpace<1>>{is0, is1},
+                                                   result, ProfilingRequestSet());
+    e2.wait();
+    assert(result.sparsity != is0.sparsity);
+    assert(result.sparsity != is1.sparsity);
+    assert(result.sparsity.exists());
+    result.sparsity.destroy();
+    is0.sparsity.destroy();
+    is1.sparsity.destroy();
+  }
+
   // empty lhs
   {
     std::vector<IndexSpace<1>> results;
@@ -117,33 +162,6 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
 
     std::vector<Rect<1>> rects0;
     rects0.push_back(Rect<1>(Point<1>(0), Point<1>(5)));
-    rects0.push_back(Rect<1>(Point<1>(10), Point<1>(15)));
-
-    std::vector<Rect<1>> rects1;
-    rects1.push_back(Rect<1>(Point<1>(2), Point<1>(8)));
-    rects1.push_back(Rect<1>(Point<1>(12), Point<1>(14)));
-
-    IndexSpace<1> is0(rects0);
-    is0.sparsity.add_references();
-    IndexSpace<1> is1(rects1);
-    is1.sparsity.add_references();
-
-    Event e2 = IndexSpace<1>::compute_intersection(std::vector<IndexSpace<1>>{is0, is1},
-                                                   result, ProfilingRequestSet());
-    e2.wait();
-    assert(result.sparsity != is0.sparsity);
-    assert(result.sparsity != is1.sparsity);
-    result.sparsity.destroy();
-    is0.sparsity.destroy();
-    is1.sparsity.destroy();
-  }
-
-  {
-    // case 4
-    IndexSpace<1> result;
-
-    std::vector<Rect<1>> rects0;
-    rects0.push_back(Rect<1>(Point<1>(0), Point<1>(5)));
 
     std::vector<Rect<1>> rects1;
     rects1.push_back(Rect<1>(Point<1>(2), Point<1>(8)));
@@ -174,21 +192,6 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
         ProfilingRequestSet());
     e2.wait();
     assert(result.dense());
-  }
-
-  // TODO: test empty rhs
-
-  {
-    std::vector<IndexSpace<1>> results;
-    assert(!task_args.lhs[0].dense());
-    Event e2 = IndexSpace<1>::compute_unions(
-        std::vector<IndexSpace<1>>{std::begin(task_args.lhs), std::end(task_args.lhs)},
-        std::vector<IndexSpace<1>>{std::begin(task_args.rhs), std::end(task_args.rhs)},
-        results, ProfilingRequestSet());
-    e2.wait();
-    for(size_t i = 0; i < results.size(); i++) {
-      results[i].sparsity.remove_references();
-    }
   }
 
   {
@@ -311,6 +314,7 @@ void main_task(const void *args, size_t arglen, const void *userdata, size_t use
 
     roots.push_back(IndexSpace<1>(rects1));
     roots.back().sparsity.add_references();
+
     std::vector<IndexSpace<1>> rhs_diff;
     roots.back()
         .create_equal_subspaces(NUM_INSTS, 1, rhs_diff, Realm::ProfilingRequestSet())
@@ -335,6 +339,7 @@ void main_task(const void *args, size_t arglen, const void *userdata, size_t use
 
   Event::merge_events(events).wait();
   for(size_t i = 0; i < roots.size(); i++) {
+    assert(roots[i].sparsity.exists());
     roots[i].sparsity.destroy();
   }
   usleep(100000);

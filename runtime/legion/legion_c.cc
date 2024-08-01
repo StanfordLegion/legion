@@ -3558,7 +3558,7 @@ legion_deferred_buffer_char_##DIM##d_create( \
   Memory::Kind kind = CObjectWrapper::unwrap(kind_); \
  \
   return CObjectWrapper::wrap( \
-      new DeferredBufferChar##DIM##D(bounds, kind, initial_value)); \
+      new DeferredBufferChar##DIM##D(bounds, kind, initial_value, 16)); \
 }
 LEGION_FOREACH_N(CREATE_BUFFER)
 #undef CREATE_BUFFER
@@ -8323,6 +8323,115 @@ legion_runtime_generate_library_task_ids(
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
 
   return runtime->generate_library_task_ids(library_name, count);
+}
+
+legion_task_variant_registrar_t
+legion_task_variant_registrar_create(
+    legion_task_id_t id,
+    bool global,
+    const char *variant_name)
+{
+  TaskVariantRegistrar *registrar =
+    new TaskVariantRegistrar(id, global, variant_name);
+  return CObjectWrapper::wrap(registrar);
+}
+
+void
+legion_task_variant_registrar_destroy(
+    legion_task_variant_registrar_t registrar_)
+{
+  TaskVariantRegistrar *registrar = CObjectWrapper::unwrap(registrar_);
+
+  delete registrar;
+}
+
+void
+legion_task_variant_registrar_set_execution_constraints(
+      legion_task_variant_registrar_t registrar_,
+      legion_execution_constraint_set_t constraints_)
+{
+  TaskVariantRegistrar *registrar = CObjectWrapper::unwrap(registrar_);
+  ExecutionConstraintSet *constraints = CObjectWrapper::unwrap(constraints_);
+
+  registrar->execution_constraints = *constraints;
+}
+
+void
+legion_task_variant_registrar_set_layout_constraints(
+      legion_task_variant_registrar_t registrar_,
+      legion_task_layout_constraint_set_t constraints_)
+{
+  TaskVariantRegistrar *registrar = CObjectWrapper::unwrap(registrar_);
+  TaskLayoutConstraintSet *constraints = CObjectWrapper::unwrap(constraints_);
+
+  registrar->layout_constraints = *constraints;
+}
+
+void
+legion_task_variant_registrar_set_options(
+      legion_task_variant_registrar_t registrar_,
+      legion_task_config_options_t options)
+{
+  TaskVariantRegistrar *registrar = CObjectWrapper::unwrap(registrar_);
+  registrar->set_leaf(options.leaf);
+  registrar->set_inner(options.inner);
+  registrar->set_idempotent(options.idempotent);
+  registrar->set_replicable(options.replicable);
+}
+
+void
+legion_task_variant_registrar_set_leaf_memory_pool_bounds(
+      legion_task_variant_registrar_t registrar_,
+      legion_memory_kind_t kind_,
+      size_t size,
+      unsigned alignment)
+{
+  TaskVariantRegistrar *registrar = CObjectWrapper::unwrap(registrar_);
+  Memory::Kind kind = CObjectWrapper::unwrap(kind_);
+
+  registrar->leaf_pool_bounds.emplace(
+      std::make_pair(kind, PoolBounds(size, alignment)));
+}
+
+legion_variant_id_t
+legion_runtime_register_task_variant_fnptr_with_registrar(
+      legion_runtime_t runtime_,
+      legion_task_variant_registrar_t registrar_,
+      legion_task_pointer_wrapped_t wrapped_task_pointer,
+      legion_variant_id_t variant_id,
+      const void *userdata,
+      size_t userlen,
+      size_t return_type_size,
+      bool has_return_type_size)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  TaskVariantRegistrar *registrar = CObjectWrapper::unwrap(registrar_);
+
+  CodeDescriptor code_desc(Realm::Type::from_cpp_type<Processor::TaskFuncPtr>());
+  code_desc.add_implementation(new Realm::FunctionPointerImplementation((void(*)())wrapped_task_pointer));
+  
+  return runtime->register_task_variant(*registrar, code_desc, userdata, userlen,
+      return_type_size, variant_id, has_return_type_size);
+}
+
+legion_variant_id_t
+legion_runtime_preregister_task_variant_fnptr_with_registrar(
+      legion_task_variant_registrar_t registrar_,
+      legion_task_pointer_wrapped_t wrapped_task_pointer,
+      legion_variant_id_t variant_id,
+      const char *task_name,
+      const void *userdata,
+      size_t userlen,
+      size_t return_type_size,
+      bool has_return_type_size)
+{
+  TaskVariantRegistrar *registrar = CObjectWrapper::unwrap(registrar_);
+
+  CodeDescriptor code_desc(Realm::Type::from_cpp_type<Processor::TaskFuncPtr>());
+  code_desc.add_implementation(new Realm::FunctionPointerImplementation((void(*)())wrapped_task_pointer));
+
+  return Runtime::preregister_task_variant(*registrar, code_desc, userdata, userlen,
+      task_name, variant_id, return_type_size, has_return_type_size);
 }
 
 legion_task_id_t

@@ -83,7 +83,7 @@ class LegionDeserializer(ABC):
         """
         self.state = state
         self.callbacks: Dict[Any, Callable] = callbacks # type: ignore # Any is str or int
-        self.always_parsed_logs = ["ProcDesc", "MemDesc", "ProcMDesc", "TaskInfo", "GPUTaskInfo", "MetaInfo", "CopyInfo", "CopyInstInfo", "FillInfo", "FillInstInfo", "InstTimelineInfo", "PartitionInfo"]
+        self.always_parsed_logs = ["ProcDesc", "MemDesc", "ProcMDesc", "TaskInfo", "GPUTaskInfo", "MetaInfo", "MessageInfo", "CopyInfo", "CopyInstInfo", "FillInfo", "FillInstInfo", "InstTimelineInfo", "PartitionInfo"]
         self.visible_nodes: Optional[List[int]] = None
 
     def deserialize(self, filename: str) -> None:
@@ -98,7 +98,7 @@ class LegionDeserializer(ABC):
         if node_id not in self.visible_nodes:
             if log in ["ProcDesc", "MemDesc", "ProcMDesc", "CopyInfo", "FillInfo", "PartitionInfo"]:
                 return True
-            elif log in ["TaskInfo", "GPUTaskInfo", "MetaInfo"]:
+            elif log in ["TaskInfo", "GPUTaskInfo", "MetaInfo", "MessageInfo"]:
                 return is_on_visible_nodes(self.visible_nodes, (kwargs["proc_id"],))
             elif log == "CopyInstInfo":
                 return is_on_visible_nodes(self.visible_nodes, (kwargs["src"], kwargs["dst"]))
@@ -186,11 +186,12 @@ class LegionProfASCIIDeserializer(LegionDeserializer):
         "OperationInstance": re.compile(prefix + r'Prof Operation (?P<op_id>[0-9]+) (?P<parent_id>[0-9]+) (?P<kind>[0-9]+) (?P<provenance>[0-9]+)'),
         "MultiTask": re.compile(prefix + r'Prof Multi (?P<op_id>[0-9]+) (?P<task_id>[0-9]+)'),
         "SliceOwner": re.compile(prefix + r'Prof Slice Owner (?P<parent_id>[0-9]+) (?P<op_id>[0-9]+)'),
-        "TaskWaitInfo": re.compile(prefix + r'Prof Task Wait Info (?P<op_id>[0-9]+) (?P<task_id>[0-9]+) (?P<variant_id>[0-9]+) (?P<wait_start>[0-9]+) (?P<wait_ready>[0-9]+) (?P<wait_end>[0-9]+)'),
-        "MetaWaitInfo": re.compile(prefix + r'Prof Meta Wait Info (?P<op_id>[0-9]+) (?P<lg_id>[0-9]+) (?P<wait_start>[0-9]+) (?P<wait_ready>[0-9]+) (?P<wait_end>[0-9]+)'),
+        "TaskWaitInfo": re.compile(prefix + r'Prof Task Wait Info (?P<op_id>[0-9]+) (?P<task_id>[0-9]+) (?P<variant_id>[0-9]+) (?P<wait_start>[0-9]+) (?P<wait_ready>[0-9]+) (?P<wait_end>[0-9]+) (?P<wait_event>[0-9a-f]+)'),
+        "MetaWaitInfo": re.compile(prefix + r'Prof Meta Wait Info (?P<op_id>[0-9]+) (?P<lg_id>[0-9]+) (?P<wait_start>[0-9]+) (?P<wait_ready>[0-9]+) (?P<wait_end>[0-9]+) (?P<wait_event>[0-9a-f]+)'),
         "TaskInfo": re.compile(prefix + r'Prof Task Info (?P<op_id>[0-9]+) (?P<task_id>[0-9]+) (?P<variant_id>[0-9]+) (?P<proc_id>[a-f0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+) (?P<creator>[0-9a-f]+) (?P<fevent>[0-9a-f]+)'),
         "GPUTaskInfo": re.compile(prefix + r'Prof GPU Task Info (?P<op_id>[0-9]+) (?P<task_id>[0-9]+) (?P<variant_id>[0-9]+) (?P<proc_id>[a-f0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+) (?P<gpu_start>[0-9]+) (?P<gpu_stop>[0-9]+) (?P<creator>[0-9a-f]+) (?P<fevent>[0-9a-f]+)'),
         "MetaInfo": re.compile(prefix + r'Prof Meta Info (?P<op_id>[0-9]+) (?P<lg_id>[0-9]+) (?P<proc_id>[a-f0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+) (?P<creator>[0-9a-f]+) (?P<fevent>[0-9a-f]+)'),
+        "MessageInfo": re.compile(prefix + r'Prof Message Info (?P<op_id>[0-9]+) (?P<lg_id>[0-9]+) (?P<proc_id>[a-f0-9]+) (?P<spawn>[0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+) (?P<creator>[0-9a-f]+) (?P<fevent>[0-9a-f]+)'),
         "CopyInfo": re.compile(prefix + r'Prof Copy Info (?P<op_id>[0-9]+) (?P<size>[0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+) (?P<creator>[0-9a-f]+) (?P<fevent>[a-f0-9]+) (?P<collective>[0-9]+)'),
         "CopyInstInfo": re.compile(prefix + r'Prof Copy Inst Info (?P<src>[a-f0-9]+) (?P<dst>[a-f0-9]+) (?P<src_fid>[a-f0-9]+) (?P<dst_fid>[a-f0-9]+) (?P<src_inst>[a-f0-9]+) (?P<dst_inst>[a-f0-9]+) (?P<fevent>[a-f0-9]+) (?P<num_hops>[0-9]+) (?P<indirect>[0-1])'),
         "FillInfo": re.compile(prefix + r'Prof Fill Info (?P<op_id>[0-9]+) (?P<size>[0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+) (?P<creator>[0-9a-f]+) (?P<fevent>[a-f0-9]+)'),
@@ -202,6 +203,8 @@ class LegionProfASCIIDeserializer(LegionDeserializer):
         "ApplicationCallInfo": re.compile(prefix + r'Prof Application Call Info (?P<provenance>[0-9]+) (?P<proc_id>[0-9a-f]+) (?P<start>[0-9]+) (?P<stop>[0-9]+) (?P<fevent>[0-9a-f]+)'),
         "ProfTaskInfo": re.compile(prefix + r'Prof ProfTask Info (?P<proc_id>[a-f0-9]+) (?P<op_id>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+) (?P<creator>[0-9a-f]+) (?P<fevent>[0-9a-f]+)'),
         "CalibrationErr": re.compile(prefix + r'Calibration Err (?P<calibration_err>[0-9]+)'),
+        "BacktraceDesc": re.compile(prefix + r'Prof Backtrace Desc (?P<backtrace_id>[0-9]+) (?P<backtrace>.+)'),
+        "EventWaitInfo": re.compile(prefix + r'Prof Event Wait Info (?P<proc_id>[0-9a-f]+) (?P<fevent>[0-9a-f]+) (?P<wait_event>[0-9a-f]+) (?P<backtrace_id>[0-9]+)'),
         # "UserInfo": re.compile(prefix + r'Prof User Info (?P<proc_id>[a-f0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+) (?P<name>[$()a-zA-Z0-9_]+)')
     }
     parse_callbacks = {
@@ -211,6 +214,7 @@ class LegionProfASCIIDeserializer(LegionDeserializer):
         "capacity": int,
         "variant_id": int,
         "lg_id": int,
+        "backtrace_id": int,
         "uid": int,
         "overwrite": int,
         "task_id": int,
@@ -248,7 +252,9 @@ class LegionProfASCIIDeserializer(LegionDeserializer):
         "inst_uid": lambda x: int(x, 16),
         "creator": lambda x: int(x, 16),
         "fevent": lambda x: int(x, 16),
+        "wait_event": lambda x: int(x, 16),
         "indirect": int,
+        "spawn": int,
         "create": int,
         "destroy": int,
         "start": int,
@@ -278,6 +284,7 @@ class LegionProfASCIIDeserializer(LegionDeserializer):
         "zero_time": int,
         "version": int,
         "hostname": str,
+        "backtrace": str,
         "host_id": int,
         "process_id": int,
         "calibration_err": int,

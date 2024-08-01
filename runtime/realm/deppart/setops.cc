@@ -630,13 +630,13 @@ namespace Realm {
       its[i].reset(spaces[i]);
       if(its[i].valid) {
 	order[n] = i;
-	T lo = its[i].rect.lo.x;
-	for(int j = n; j > 0; j--)
-	  if(its[order[j-1]].rect.lo.x > lo)
-	    std::swap(order[j-1], order[j]);
-	  else
-	    break;
-	n++;
+        T lo = its[i].rect.lo[0];
+        for(int j = n; j > 0; j--)
+          if(its[order[j - 1]].rect.lo[0] > lo)
+            std::swap(order[j - 1], order[j]);
+          else
+            break;
+        n++;
       }
     }
   }
@@ -670,14 +670,16 @@ namespace Realm {
   template <int N, typename T>
   void NWayMerge<N,T>::update(int idx)
   {
+    // TODO(cperry): Fix this to support N>1?
+    assert(N == 1);
     if(its[order[idx]].valid) {
       // can only move upwards
-      T lo = its[order[idx]].rect.lo;
+      T lo = its[order[idx]].rect.lo[0];
       for(int j = idx + 1; j < n; j++)
-	if(its[order[j]].rect.lo < lo)
-	  std::swap(order[j], order[j-1]);
-	else
-	  break;
+        if(its[order[j]].rect.lo[0] < lo)
+          std::swap(order[j], order[j - 1]);
+        else
+          break;
     } else {
       // just delete it
       order.erase(order.begin() + idx);
@@ -719,49 +721,49 @@ namespace Realm {
        
 	while(it_lhs.valid && it_rhs.valid) {
 	  // if either side comes completely before the other, emit it and continue
-	  if(it_lhs.rect.hi.x < (it_rhs.rect.lo.x - 1)) {
-	    bitmask.add_rect(it_lhs.rect);
-	    it_lhs.step();
-	    continue;
-	  }
+          if(it_lhs.rect.hi[0] < (it_rhs.rect.lo[0] - 1)) {
+            bitmask.add_rect(it_lhs.rect);
+            it_lhs.step();
+            continue;
+          }
 
-	  if(it_rhs.rect.hi.x < (it_lhs.rect.lo.x - 1)) {
-	    bitmask.add_rect(it_rhs.rect);
-	    it_rhs.step();
-	    continue;
-	  }
+          if(it_rhs.rect.hi[0] < (it_lhs.rect.lo[0] - 1)) {
+            bitmask.add_rect(it_rhs.rect);
+            it_rhs.step();
+            continue;
+          }
 
-	  // new rectangle will be at least the union of these two
-	  Rect<N,T> u = it_lhs.rect.union_bbox(it_rhs.rect);
-	  it_lhs.step();
-	  it_rhs.step();
-	  // try to consume even more
-	  while(true) {
-	    if(it_lhs.valid && (it_lhs.rect.lo.x <= (u.hi.x + 1))) {
-	      u.hi.x = std::max(u.hi.x, it_lhs.rect.hi.x);
-	      it_lhs.step();
-	      continue;
-	    }
-	    if(it_rhs.valid && (it_rhs.rect.lo.x <= (u.hi.x + 1))) {
-	      u.hi.x = std::max(u.hi.x, it_rhs.rect.hi.x);
-	      it_rhs.step();
-	      continue;
-	    }
-	    // if both fail, we're done
-	    break;
-	  }
-	  bitmask.add_rect(u);
-	}
+          // new rectangle will be at least the union of these two
+          Rect<N, T> u = it_lhs.rect.union_bbox(it_rhs.rect);
+          it_lhs.step();
+          it_rhs.step();
+          // try to consume even more
+          while(true) {
+            if(it_lhs.valid && (it_lhs.rect.lo[0] <= (u.hi[0] + 1))) {
+              u.hi[0] = std::max(u.hi[0], it_lhs.rect.hi[0]);
+              it_lhs.step();
+              continue;
+            }
+            if(it_rhs.valid && (it_rhs.rect.lo[0] <= (u.hi[0] + 1))) {
+              u.hi[0] = std::max(u.hi[0], it_rhs.rect.hi[0]);
+              it_rhs.step();
+              continue;
+            }
+            // if both fail, we're done
+            break;
+          }
+          bitmask.add_rect(u);
+        }
 
-	// leftover rects from one side or the other just get added
-	while(it_lhs.valid) {
-	  bitmask.add_rect(it_lhs.rect);
-	  it_lhs.step();
-	}
-	while(it_rhs.valid) {
-	  bitmask.add_rect(it_rhs.rect);
-	  it_rhs.step();
-	}
+        // leftover rects from one side or the other just get added
+        while(it_lhs.valid) {
+          bitmask.add_rect(it_lhs.rect);
+          it_lhs.step();
+        }
+        while(it_rhs.valid) {
+          bitmask.add_rect(it_rhs.rect);
+          it_rhs.step();
+        }
       } else {
 	// N-way merge
 	NWayMerge<N,T> nwm(inputs);
@@ -770,32 +772,34 @@ namespace Realm {
 	  //nwm.print();
 
 	  // consume rectangles off the first one until there's overlap with the next guy
-	  T lo1 = nwm[1].lo.x;
-	  if(nwm[0].hi.x < (lo1 - 1)) {
-	    while(nwm[0].hi.x < (lo1 - 1)) {
-	      bitmask.add_rect(nwm[0]);
-	      if(!nwm.step(0)) break;
-	    }
-	    nwm.update(0);
-	    continue;
-	  }
+          T lo1 = nwm[1].lo[0];
+          if(nwm[0].hi[0] < (lo1 - 1)) {
+            while(nwm[0].hi[0] < (lo1 - 1)) {
+              bitmask.add_rect(nwm[0]);
+              if(!nwm.step(0))
+                break;
+            }
+            nwm.update(0);
+            continue;
+          }
 
-	  // at least a little overlap, so start accumulating a value
-	  Rect<N,T> u = nwm[0];
-	  nwm.step(0); nwm.update(0);
-	  while((nwm.size() > 0) && (nwm[0].lo.x <= (u.hi.x + 1))) {
-	    u.hi.x = std::max(u.hi.x, nwm[0].hi.x);
-	    nwm.step(0);
-	    nwm.update(0);
-	  }
-	  bitmask.add_rect(u);
-	}
+          // at least a little overlap, so start accumulating a value
+          Rect<N, T> u = nwm[0];
+          nwm.step(0);
+          nwm.update(0);
+          while((nwm.size() > 0) && (nwm[0].lo[0] <= (u.hi[0] + 1))) {
+            u.hi[0] = std::max(u.hi[0], nwm[0].hi[0]);
+            nwm.step(0);
+            nwm.update(0);
+          }
+          bitmask.add_rect(u);
+        }
 
-	// any stragglers?
-	if(nwm.size() > 0)
-	  do {
-	    bitmask.add_rect(nwm[0]);
-	  } while(nwm.step(0));
+        // any stragglers?
+        if(nwm.size() > 0)
+          do {
+            bitmask.add_rect(nwm[0]);
+          } while(nwm.step(0));
 #if 0
 	std::vector<IndexSpaceIterator<N,T> > its(inputs.size());
 	std::vector<int> order(inputs.size());
@@ -804,9 +808,9 @@ namespace Realm {
 	  its[i].reset(inputs[i]);
 	  if(its[i].valid) {
 	    order[n] = i;
-	    T lo = its[i].rect.lo.x;
+	    T lo = its[i].rect.lo[0];
 	    for(size_t j = n; j > 0; j--)
-	      if(its[order[j-1]].rect.lo.x > lo)
+	      if(its[order[j-1]].rect.lo[0] > lo)
 		std::swap(order[j-1], order[j]);
 	      else
 		break;
@@ -821,14 +825,14 @@ namespace Realm {
 	  for(size_t i = 0; i < n; i++) std::cout << " " << i << "=" << order[i] << "=" << its[order[i]].rect;
 	  std::cout << "]]\n";
 	  // consume rectangles off the first one until there's overlap with the next guy
-	  if(its[order[0]].rect.hi.x < (its[order[1]].rect.lo.x - 1)) {
-	    while(its[order[0]].rect.hi.x < (its[order[1]].rect.lo.x - 1)) {
+	  if(its[order[0]].rect.hi[0] < (its[order[1]].rect.lo[0] - 1)) {
+	    while(its[order[0]].rect.hi[0] < (its[order[1]].rect.lo[0] - 1)) {
 	      bitmask.add_rect(its[order[0]].rect);
 	      if(!its[order[0]].step()) break;
 	    }
 	    if(its[order[0]].valid) {
 	      for(size_t j = 0; j < n - 1; j++)
-		if(its[order[j]].rect.lo.x > its[order[j+1]].rect.lo.x)
+		if(its[order[j]].rect.lo[0] > its[order[j+1]].rect.lo[0])
 		  std::swap(order[j], order[j+1]);
 		else
 		  break;
@@ -873,13 +877,13 @@ namespace Realm {
        
 	while(it_lhs.valid && it_rhs.valid) {
 	  // if either side comes completely before the other, emit it and continue
-	  if(it_lhs.rect.hi.x < (it_rhs.rect.lo.x - 1)) {
+	  if(it_lhs.rect.hi[0] < (it_rhs.rect.lo[0] - 1)) {
 	    bitmask.add_rect(it_lhs.rect);
 	    it_lhs.step();
 	    continue;
 	  }
 
-	  if(it_rhs.rect.hi.x < (it_lhs.rect.lo.x - 1)) {
+	  if(it_rhs.rect.hi[0] < (it_lhs.rect.lo[0] - 1)) {
 	    bitmask.add_rect(it_rhs.rect);
 	    it_rhs.step();
 	    continue;
@@ -891,13 +895,13 @@ namespace Realm {
 	  it_rhs.step();
 	  // try to consume even more
 	  while(true) {
-	    if(it_lhs.valid && (it_lhs.rect.lo.x <= (u.hi.x + 1))) {
-	      u.hi.x = std::max(u.hi.x, it_lhs.rect.hi.x);
+	    if(it_lhs.valid && (it_lhs.rect.lo[0] <= (u.hi[0] + 1))) {
+	      u.hi[0] = std::max(u.hi[0], it_lhs.rect.hi[0]);
 	      it_lhs.step();
 	      continue;
 	    }
-	    if(it_rhs.valid && (it_rhs.rect.lo.x <= (u.hi.x + 1))) {
-	      u.hi.x = std::max(u.hi.x, it_rhs.rect.hi.x);
+	    if(it_rhs.valid && (it_rhs.rect.lo[0] <= (u.hi[0] + 1))) {
+	      u.hi[0] = std::max(u.hi[0], it_rhs.rect.hi[0]);
 	      it_rhs.step();
 	      continue;
 	    }
@@ -924,9 +928,9 @@ namespace Realm {
 	  //nwm.print();
 
 	  // consume rectangles off the first one until there's overlap with the next guy
-	  T lo1 = nwm[1].lo.x;
-	  if(nwm[0].hi.x < (lo1 - 1)) {
-	    while(nwm[0].hi.x < (lo1 - 1)) {
+	  T lo1 = nwm[1].lo[0];
+	  if(nwm[0].hi[0] < (lo1 - 1)) {
+	    while(nwm[0].hi[0] < (lo1 - 1)) {
 	      bitmask.add_rect(nwm[0]);
 	      if(!nwm.step(0)) break;
 	    }
@@ -937,8 +941,8 @@ namespace Realm {
 	  // at least a little overlap, so start accumulating a value
 	  Rect<N,T> u = nwm[0];
 	  nwm.step(0); nwm.update(0);
-	  while((nwm.size() > 0) && (nwm[0].lo.x <= (u.hi.x + 1))) {
-	    u.hi.x = std::max(u.hi.x, nwm[0].hi.x);
+	  while((nwm.size() > 0) && (nwm[0].lo[0] <= (u.hi[0] + 1))) {
+	    u.hi[0] = std::max(u.hi[0], nwm[0].hi[0]);
 	    nwm.step(0);
 	    nwm.update(0);
 	  }
@@ -958,9 +962,9 @@ namespace Realm {
 	  its[i].reset(inputs[i]);
 	  if(its[i].valid) {
 	    order[n] = i;
-	    T lo = its[i].rect.lo.x;
+	    T lo = its[i].rect.lo[0];
 	    for(size_t j = n; j > 0; j--)
-	      if(its[order[j-1]].rect.lo.x > lo)
+	      if(its[order[j-1]].rect.lo[0] > lo)
 		std::swap(order[j-1], order[j]);
 	      else
 		break;
@@ -975,14 +979,14 @@ namespace Realm {
 	  for(size_t i = 0; i < n; i++) std::cout << " " << i << "=" << order[i] << "=" << its[order[i]].rect;
 	  std::cout << "]]\n";
 	  // consume rectangles off the first one until there's overlap with the next guy
-	  if(its[order[0]].rect.hi.x < (its[order[1]].rect.lo.x - 1)) {
-	    while(its[order[0]].rect.hi.x < (its[order[1]].rect.lo.x - 1)) {
+	  if(its[order[0]].rect.hi[0] < (its[order[1]].rect.lo[0] - 1)) {
+	    while(its[order[0]].rect.hi[0] < (its[order[1]].rect.lo[0] - 1)) {
 	      bitmask.add_rect(its[order[0]].rect);
 	      if(!its[order[0]].step()) break;
 	    }
 	    if(its[order[0]].valid) {
 	      for(size_t j = 0; j < n - 1; j++)
-		if(its[order[j]].rect.lo.x > its[order[j+1]].rect.lo.x)
+		if(its[order[j]].rect.lo[0] > its[order[j+1]].rect.lo[0])
 		  std::swap(order[j], order[j+1]);
 		else
 		  break;
@@ -1151,28 +1155,29 @@ namespace Realm {
 	// can only generate data while both sides have rectangles left
 	while(it_lhs.valid && it_rhs.valid) {
 	  // skip rectangles if they completely preceed the one on the other side
-	  if(it_lhs.rect.hi.x < it_rhs.rect.lo.x) {
-	    it_lhs.step();
-	    continue;
-	  }
+          if(it_lhs.rect.hi[0] < it_rhs.rect.lo[0]) {
+            it_lhs.step();
+            continue;
+          }
 
-	  if(it_rhs.rect.hi.x < it_lhs.rect.lo.x) {
-	    it_rhs.step();
-	    continue;
-	  }
+          if(it_rhs.rect.hi[0] < it_lhs.rect.lo[0]) {
+            it_rhs.step();
+            continue;
+          }
 
-	  // we have at least partial overlap - add the intersection and then consume whichever
-	  //  rectangle ended first (or both if equal)
-	  bitmask.add_rect(it_lhs.rect.intersection(it_rhs.rect));
-	  if(it_lhs.rect.hi.x < it_rhs.rect.hi.x) {
-	    it_lhs.step();
-	  } else if(it_lhs.rect.hi.x > it_rhs.rect.hi.x) {
-	    it_rhs.step();
-	  } else {
-	    it_lhs.step();
-	    it_rhs.step();
-	  }
-	}
+          // we have at least partial overlap - add the intersection and then consume
+          // whichever
+          //  rectangle ended first (or both if equal)
+          bitmask.add_rect(it_lhs.rect.intersection(it_rhs.rect));
+          if(it_lhs.rect.hi[0] < it_rhs.rect.hi[0]) {
+            it_lhs.step();
+          } else if(it_lhs.rect.hi[0] > it_rhs.rect.hi[0]) {
+            it_rhs.step();
+          } else {
+            it_lhs.step();
+            it_rhs.step();
+          }
+        }
       } else {
 	assert(0);
       }
@@ -1334,51 +1339,51 @@ namespace Realm {
 
       while(it_lhs.valid) {
 	// throw away any rhs rectangles that come before this one
-	while(it_rhs.valid && (it_rhs.rect.hi.x < it_lhs.rect.lo.x))
-	  it_rhs.step();
+        while(it_rhs.valid && (it_rhs.rect.hi[0] < it_lhs.rect.lo[0]))
+          it_rhs.step();
 
-	// out of rhs rectangles? just copy over all the rest on the lhs and we're done
-	if(!it_rhs.valid) {
-	  while(it_lhs.valid) {
-	    bitmask.add_rect(it_lhs.rect);
-	    it_lhs.step();
-	  }
-	  break;
-	}
+        // out of rhs rectangles? just copy over all the rest on the lhs and we're done
+        if(!it_rhs.valid) {
+          while(it_lhs.valid) {
+            bitmask.add_rect(it_lhs.rect);
+            it_lhs.step();
+          }
+          break;
+        }
 
-	// an lhs rectangle that is entirely below the first rhs is taken as is
-	if(it_lhs.rect.hi.x < it_rhs.rect.lo.x) {
-	  bitmask.add_rect(it_lhs.rect);
-	  it_lhs.step();
-	  continue;
-	}
+        // an lhs rectangle that is entirely below the first rhs is taken as is
+        if(it_lhs.rect.hi[0] < it_rhs.rect.lo[0]) {
+          bitmask.add_rect(it_lhs.rect);
+          it_lhs.step();
+          continue;
+        }
 
-	// last case - partial overlap - subtract out rhs rect(s)
-	if(it_lhs.valid) {
-	  Point<N,T> p = it_lhs.rect.lo;
-	  while(it_rhs.valid) {
-	    if(p.x < it_rhs.rect.lo.x) {
-	      // add a partial rect below the rhs
-	      Point<N,T> p2 = it_rhs.rect.lo;
-	      p2.x -= 1;
-	      bitmask.add_rect(Rect<N,T>(p, p2));
-	    }
+        // last case - partial overlap - subtract out rhs rect(s)
+        if(it_lhs.valid) {
+          Point<N, T> p = it_lhs.rect.lo;
+          while(it_rhs.valid) {
+            if(p[0] < it_rhs.rect.lo[0]) {
+              // add a partial rect below the rhs
+              Point<N, T> p2 = it_rhs.rect.lo;
+              p2[0] -= 1;
+              bitmask.add_rect(Rect<N, T>(p, p2));
+            }
 
-	    // if the rhs ends after the lhs, we're done
-	    if(it_rhs.rect.hi.x >= it_lhs.rect.hi.x)
-	      break;
+            // if the rhs ends after the lhs, we're done
+            if(it_rhs.rect.hi[0] >= it_lhs.rect.hi[0])
+              break;
 
-	    // otherwise consume the rhs and update p
-	    p = it_rhs.rect.hi;
-	    p.x += 1;
-	    if(!it_rhs.step() || (it_lhs.rect.hi.x < it_rhs.rect.lo.x)) {
-	      // no rhs left in this lhs piece - emit the rest and break out
-	      bitmask.add_rect(Rect<N,T>(p, it_lhs.rect.hi));
-	      break;
-	    }
-	  }
-	  it_lhs.step();
-	}
+            // otherwise consume the rhs and update p
+            p = it_rhs.rect.hi;
+            p[0] += 1;
+            if(!it_rhs.step() || (it_lhs.rect.hi[0] < it_rhs.rect.lo[0])) {
+              // no rhs left in this lhs piece - emit the rest and break out
+              bitmask.add_rect(Rect<N, T>(p, it_lhs.rect.hi));
+              break;
+            }
+          }
+          it_lhs.step();
+        }
       }
       return;
     }
