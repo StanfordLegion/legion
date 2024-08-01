@@ -644,14 +644,13 @@ namespace Realm {
       NodeID src_node = ID(src_mem).memory_owner_node();
       NodeID dst_node = ID(dst_mem).memory_owner_node();
       const Node &n = nodes_info[src_node];
-      for(std::vector<Channel *>::const_iterator it = n.dma_channels.begin();
-          it != n.dma_channels.end(); ++it) {
+      for(Channel *ch : n.dma_channels) {
         unsigned bw = 0;
         unsigned latency = 0;
-        if((*it)->supports_path(ChannelCopyInfo{src_mem, dst_mem}, src_serdez_id,
-                                dst_serdez_id, redop_id, 0, 0, 0, // FIXME
-                                &kind, &bw, &latency)) {
-          channel = *it;
+        if(ch->supports_path(ChannelCopyInfo{src_mem, dst_mem}, src_serdez_id,
+                             dst_serdez_id, redop_id, 0, 0, 0, // FIXME
+                             &kind, &bw, &latency)) {
+          channel = ch;
           break;
         }
       }
@@ -659,14 +658,13 @@ namespace Realm {
       // if that didn't work, try the destination node (if different)
       if((kind == XFER_NONE) && (dst_node != src_node)) {
         const Node &n = nodes_info[dst_node];
-        for(std::vector<Channel *>::const_iterator it = n.dma_channels.begin();
-            it != n.dma_channels.end(); ++it) {
+        for(Channel *ch : n.dma_channels) {
           unsigned bw = 0;
           unsigned latency = 0;
-          if((*it)->supports_path(ChannelCopyInfo{src_mem, dst_mem}, src_serdez_id,
-                                  dst_serdez_id, redop_id, 0, 0, 0, // FIXME
-                                  &kind, &bw, &latency)) {
-            channel = *it;
+          if(ch->supports_path(ChannelCopyInfo{src_mem, dst_mem}, src_serdez_id,
+                               dst_serdez_id, redop_id, 0, 0, 0, // FIXME
+                               &kind, &bw, &latency)) {
+            channel = ch;
             break;
           }
         }
@@ -704,15 +702,13 @@ namespace Realm {
         std::list<Memory> mems_left;
         std::queue<Memory> active_nodes;
         const Node &node = nodes_info[ID(src_mem).memory_owner_node()];
-        for(std::vector<IBMemory *>::const_iterator it = node.ib_memories.begin();
-            it != node.ib_memories.end(); it++) {
-          mems_left.push_back((*it)->me);
+        for(const IBMemory *ib_mem : node.ib_memories) {
+          mems_left.push_back(ib_mem->me);
         }
         if(ID(dst_mem).memory_owner_node() != ID(src_mem).memory_owner_node()) {
           const Node &node = nodes_info[ID(dst_mem).memory_owner_node()];
-          for(std::vector<IBMemory *>::const_iterator it = node.ib_memories.begin();
-              it != node.ib_memories.end(); it++) {
-            mems_left.push_back((*it)->me);
+          for(const IBMemory *ib_mem : node.ib_memories) {
+            mems_left.push_back(ib_mem->me);
           }
         }
         for(std::list<Memory>::iterator it = mems_left.begin(); it != mems_left.end();) {
