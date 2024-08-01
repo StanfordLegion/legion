@@ -474,6 +474,7 @@ namespace Legion {
       for (unsigned idx = 0; idx < count; idx++)
         if (preconditions[idx] == result)
           return;
+      assert(recorded_events.insert(result).second);
       EventMergerInfo &info = event_merger_infos.emplace_back(
           EventMergerInfo());
       // Take the timing measurement of when this happened first
@@ -497,6 +498,7 @@ namespace Legion {
     {
       if (owner->no_critical_paths)
         return;
+      assert(recorded_events.insert(result).second);
       EventTriggerInfo &info = event_trigger_infos.emplace_back(
           EventTriggerInfo());
       info.performed = Realm::Clock::current_time_in_nanoseconds();
@@ -517,6 +519,7 @@ namespace Legion {
     {
       if (owner->no_critical_paths)
         return;
+      assert(recorded_events.insert(result).second);
       EventPoisonInfo &info = event_poison_infos.emplace_back(
           EventPoisonInfo());
       info.performed = Realm::Clock::current_time_in_nanoseconds();
@@ -557,6 +560,7 @@ namespace Legion {
     {
       if (owner->no_critical_paths)
         return;
+      assert(recorded_events.insert(result).second);
       ReservationAcquireInfo &info = reservation_acquire_infos.emplace_back(
           ReservationAcquireInfo());
       info.performed = Realm::Clock::current_time_in_nanoseconds();
@@ -578,6 +582,7 @@ namespace Legion {
     {
       if (owner->no_critical_paths)
         return;
+      assert(recorded_events.insert(result).second);
       LocalLockAcquireInfo &info = local_lock_acquire_infos.emplace_back(
           LocalLockAcquireInfo());
       info.performed = Realm::Clock::current_time_in_nanoseconds();
