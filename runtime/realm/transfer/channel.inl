@@ -293,7 +293,7 @@ namespace Realm {
     : LocalChannel(_kind)
     , xdq(this, _name, CHANNEL::is_ordered)
   {
-    if (bgwork) { // TODO(apryakhin)
+    if (bgwork != nullptr) {
       xdq.add_to_manager(bgwork, _numa_domain);
     }
   }

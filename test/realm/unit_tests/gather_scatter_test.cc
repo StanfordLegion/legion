@@ -41,11 +41,15 @@ public:
     PathMap::iterator it =
         paths.find(std::make_pair(channel_copy_info.src_mem, channel_copy_info.dst_mem));
     *kind_ret = this->kind;
-
     return it != paths.end() ? it->second : 0;
   }
 
   Memory suggest_ib_memories(Memory memory) const { return make_mem(node, kIBMemIdx); }
+
+  Memory suggest_ib_memories_for_node(NodeID node) const
+  {
+    return make_mem(node, kIBMemIdx);
+  }
 
   XferDesFactory *get_factory() { return nullptr; }
 
@@ -56,40 +60,6 @@ public:
   MOCK_METHOD(void, enqueue_ready_xd, (XferDes * xd), ());
 };
 
-/*class MockAddressSplitChannel : public Channel {
-public:
-  typedef std::map<std::pair<Memory, Memory>, size_t> PathMap;
-  PathMap paths;
-  MockAddressSplitChannel(XferDesKind _kind, int node)
-    : Channel(_kind)
-  {
-    this->node = node;
-  }
-
-  uint64_t supports_path(ChannelCopyInfo channel_copy_info, CustomSerdezID src_serdez_id,
-                         CustomSerdezID dst_serdez_id, ReductionOpID redop_id,
-                         size_t total_bytes, const std::vector<size_t> *src_frags,
-                         const std::vector<size_t> *dst_frags, XferDesKind *kind_ret,
-                         unsigned *bw_ret, unsigned *lat_ret)
-  {
-    PathMap::iterator it =
-        paths.find(std::make_pair(channel_copy_info.src_mem, channel_copy_info.dst_mem));
-    *kind_ret = this->kind;
-    return it != paths.end() ? it->second : 0;
-  }
-
-  Memory suggest_ib_memories(Memory memory) const { return Memory::NO_MEMORY; }
-
-  // MOCK_METHOD(Memory, suggest_ib_memories, (Memory mem), (const));
-  /// MOCK_METHOD(Memory, suggest_ib_memories_for_node, (NodeID node_id), (const));
-  MOCK_METHOD(long, available, (), ());
-  MOCK_METHOD(long, submit, (Request * *requests, long nr), ());
-  MOCK_METHOD(void, pull, (), ());
-  MOCK_METHOD(void, wakeup_xd, (XferDes * xd), ());
-  MOCK_METHOD(void, enqueue_ready_xd, (XferDes * xd), ());
-  MOCK_METHOD(XferDesFactory *, get_factory, (), ());
-};*/
-
 struct GatherTestCase {
   std::vector<MockGatherChannel *> channels;
   std::vector<IBMemory *> ib_mems;
@@ -99,7 +69,9 @@ struct GatherTestCase {
   std::vector<TransferGraph::XDTemplate> xd_nodes;
 };
 
-class GatherScatterTest : public ::testing::TestWithParam<GatherTestCase> {};
+class GatherScatterTest : public ::testing::TestWithParam<GatherTestCase> {
+  void TearDown() { GatherTestCase test_case = GetParam(); }
+};
 
 TEST_P(GatherScatterTest, Base)
 {
@@ -143,9 +115,14 @@ TEST_P(GatherScatterTest, Base)
       /*serdez_id=*/0, xd_nodes, ib_edges, src_fields);
 
   for(size_t i = 0; i < test_case.xd_nodes.size(); i++) {
+    EXPECT_EQ(xd_nodes[i].inputs.size(), test_case.xd_nodes[i].inputs.size())
+        << " xd_node:" << i;
+
     // TODO: compare all fields
     for(size_t j = 0; j < test_case.xd_nodes[i].inputs.size(); j++) {
-      EXPECT_EQ(xd_nodes[i].inputs[j].iotype, test_case.xd_nodes[i].inputs[j].iotype);
+
+      EXPECT_EQ(xd_nodes[i].inputs[j].iotype, test_case.xd_nodes[i].inputs[j].iotype)
+          << "xd_node:" << i << " index:" << j;
 
       if(test_case.xd_nodes[i].inputs[j].iotype ==
          TransferGraph::XDTemplate::IO_INDIRECT_INST) {
@@ -170,12 +147,17 @@ TEST_P(GatherScatterTest, Base)
 
     EXPECT_EQ(xd_nodes.size(), test_case.xd_nodes.size());
 
+    EXPECT_EQ(xd_nodes[i].outputs.size(), test_case.xd_nodes[i].outputs.size())
+        << " xd_node:" << i;
+
     for(size_t j = 0; j < test_case.xd_nodes[i].outputs.size(); j++) {
-      EXPECT_EQ(xd_nodes[i].outputs[j].iotype, test_case.xd_nodes[i].outputs[j].iotype);
+      EXPECT_EQ(xd_nodes[i].outputs[j].iotype, test_case.xd_nodes[i].outputs[j].iotype)
+          << "xd_node:" << i << " index:" << j;
 
       if(test_case.xd_nodes[i].outputs[j].iotype == TransferGraph::XDTemplate::IO_INST) {
         EXPECT_EQ(xd_nodes[i].outputs[j].inst.inst,
-                  test_case.xd_nodes[i].outputs[j].inst.inst);
+                  test_case.xd_nodes[i].outputs[j].inst.inst)
+            << "xd_node:" << i << " index:" << j;
       } else if(test_case.xd_nodes[i].outputs[j].iotype ==
                 TransferGraph::XDTemplate::IO_EDGE) {
         EXPECT_EQ(xd_nodes[i].outputs[j].edge, test_case.xd_nodes[i].outputs[j].edge);
@@ -189,34 +171,69 @@ static inline RegionInstance make_inst(int owner, int creator, int mem_idx, int 
   return ID::make_instance(owner, creator, mem_idx, inst_idx).convert<RegionInstance>();
 }
 
+static TransferGraph::XDTemplate::IO inline mk_indirect(RegionInstance inst,
+                                                        unsigned ind_idx = 2,
+                                                        unsigned port = 1,
+                                                        unsigned fld_start = 0,
+                                                        unsigned fld_count = 0)
+{
+  return TransferGraph::XDTemplate::mk_indirect(ind_idx, port, inst, fld_start,
+                                                fld_count);
+}
+
+static TransferGraph::XDTemplate::IO inline mk_inst(RegionInstance inst,
+                                                    unsigned fld_start = 0,
+                                                    unsigned fld_count = 0)
+{
+  return TransferGraph::XDTemplate::mk_inst(inst, fld_start, fld_count);
+}
+
+static inline TransferGraph::XDTemplate::IO mk_edge(unsigned edge)
+{
+  return TransferGraph::XDTemplate::mk_edge(edge);
+}
+
+struct TestInstances {
+  RegionInstance src;
+  RegionInstance dst;
+  RegionInstance ind;
+};
+
+// 0: src, dst, ind (same node)
+// 1: src, dst, ind (different nodes)
+const static TestInstances kInst[] = {{.src = make_inst(0, 0, 0, 0),
+                                       .dst = make_inst(0, 0, 1, 1),
+                                       .ind = make_inst(0, 0, 2, 2)},
+                                      {.src = make_inst(0, 0, 0, 0),
+                                       .dst = make_inst(1, 1, 1, 1),
+                                       .ind = make_inst(0, 0, 2, 2)}};
+
+const static Memory kIBMem[] = {make_mem(0, 3), make_mem(0, 4), make_mem(1, 4)};
+
 const static GatherTestCase kTestCases[] = {
     // Case 0: Same node gather
     // dst(0) <-- src(0)[ind(0)]
     GatherTestCase{
-        .channels{new MockGatherChannel(XferDesKind::XFER_MEM_CPY, /*node=*/0,
-                                        {// src --> dst
-                                         {{make_mem(0, 0), make_mem(0, 1)},
-                                          /*cost=*/2},
-                                         // ind_mem -> ind_ib_mem
-                                         {{make_mem(0, 2), make_mem(0, 3)},
-                                          /*cost=*/2}})},
+        .channels{new MockGatherChannel(
+            XferDesKind::XFER_MEM_CPY, /*node=*/0,
+            {// src --> dst
+             {{kInst[0].src.get_location(), kInst[0].dst.get_location()},
+              /*cost=*/2},
+             // ind_mem -> ind_ib_mem
+             {{kInst[0].ind.get_location(), kIBMem[0]},
+              /*cost=*/2}})},
 
-        .ib_mems{make_ib_mem(make_mem(0, 3))},
+        .ib_mems{make_ib_mem(kIBMem[0])},
 
         .indirection = new IndirectionInfoTyped<1, int, 1, int>(
             Rect<1, int>(0, 1),
             typename CopyIndirection<1, int>::template Unstructured<1, int>(
-                make_inst(0, 0, 2, 2), {Rect<1, int>(0, 1)}, {make_inst(0, 0, 0, 0)}, 0),
+                kInst[0].ind, {Rect<1, int>(0, 1)}, {kInst[0].src}, 0),
             nullptr),
+        .dst_inst = kInst[0].dst,
 
-        .dst_inst = make_inst(0, 0, 1, 1),
-
-        .xd_nodes = {{.inputs = {TransferGraph::XDTemplate::mk_indirect(
-                                     2, 1, make_inst(0, 0, 0, 0), 0, 0),
-                                 TransferGraph::XDTemplate::mk_inst(make_inst(0, 0, 2, 2),
-                                                                    0, 0)},
-                      .outputs = {TransferGraph::XDTemplate::mk_inst(
-                          make_inst(0, 0, 1, 1), 0, 0)}}}},
+        .xd_nodes = {{.inputs = {mk_indirect(kInst[0].src), mk_inst(kInst[0].ind)},
+                      .outputs = {mk_inst(kInst[0].dst)}}}},
 
     // Case 1: Different nodes gather
     // dst(1) <-- ib(1) <-- ib(0) <-- src(0)[ind(0)]
@@ -224,40 +241,78 @@ const static GatherTestCase kTestCases[] = {
     GatherTestCase{
         .channels{
             new MockGatherChannel(XferDesKind::XFER_MEM_CPY, /*node=*/0,
-                                  {// src -> src_ib
-                                   {{make_mem(0, 0), make_mem(1, 1)},
-                                    /*cost=*/2},
-                                   // ind_mem -> ind_ib_mem
-                                   {{make_mem(0, 2), make_mem(0, 3)},
-                                    /*cost=*/2}}),
+                                  {
+                                      // src -> src_ib
+                                      {{kInst[1].src.get_location(), kIBMem[1]},
+                                       /*cost=*/2},
+                                      // ind_mem -> ind_ib_mem
+                                      {{kInst[1].ind.get_location(), kIBMem[0]},
+                                       /*cost=*/2},
+                                      // src_ib -> dst_ib
+                                      {{kIBMem[1], kIBMem[2]},
+                                       /*cost=*/4},
+                                  }),
 
             new MockGatherChannel(XferDesKind::XFER_MEM_CPY, /*node=*/1,
-                                  {// src -> dst
-                                   {{make_mem(0, 0), make_mem(1, 1)},
-                                    /*cost=*/0},
+                                  {// dst_ib -> dst
+                                   {{kIBMem[2], kInst[1].dst.get_location()},
+                                    /*cost=*/2},
                                    // ind_mem -> ind_ib_mem
-                                   {{make_mem(0, 2), make_mem(0, 3)},
+                                   {{kInst[1].ind.get_location(), kIBMem[0]},
                                     /*cost=*/0}}),
         },
 
-        .ib_mems{make_ib_mem(make_mem(0, 3)), make_ib_mem(make_mem(0, 4)),
-                 make_ib_mem(make_mem(1, 4))},
+        .ib_mems{make_ib_mem(kIBMem[0]), make_ib_mem(kIBMem[1]), make_ib_mem(kIBMem[2])},
 
         .indirection = new IndirectionInfoTyped<1, int, 1, int>(
             Rect<1, int>(0, 1),
             typename CopyIndirection<1, int>::template Unstructured<1, int>(
-                make_inst(0, 0, 2, 2), {Rect<1, int>(0, 1)}, {make_inst(0, 0, 0, 0)}, 0),
+                kInst[1].ind, {Rect<1, int>(0, 1)}, {kInst[1].src}, 0),
             nullptr),
 
-        .dst_inst = make_inst(1, 1, 1, 1),
+        .dst_inst = kInst[1].dst,
 
-        .xd_nodes = {{.inputs = {TransferGraph::XDTemplate::mk_indirect(
-                                     2, 1, make_inst(0, 0, 0, 0), 0, 0),
-                                 TransferGraph::XDTemplate::mk_inst(make_inst(0, 0, 2, 2),
-                                                                    0, 0)},
-                      .outputs = {TransferGraph::XDTemplate::mk_inst(
-                          make_inst(1, 1, 1, 1), 0, 0)}}},
+        .xd_nodes =
+            {
+                {.inputs = {mk_indirect(kInst[1].src), mk_inst(kInst[1].ind)},
+                 .outputs = {mk_edge(0)}},
+                {.inputs = {mk_edge(0)}, .outputs = {mk_edge(1)}},
+                {.inputs = {mk_edge(1)}, .outputs = {mk_inst(kInst[1].dst)}},
+            },
 
-    }};
+    },
+
+    // Case 2: Same node gather with oorflag
+    // dst(0) <-- src(0)[ind(0)]
+    GatherTestCase{.channels{new MockGatherChannel(
+                       XferDesKind::XFER_MEM_CPY, /*node=*/0,
+                       {// src --> dst
+                        {{kInst[0].src.get_location(), kInst[0].dst.get_location()},
+                         /*cost=*/2},
+                        // ind_mem -> ind_ib_mem
+                        {{kInst[0].ind.get_location(), kIBMem[0]},
+                         /*cost=*/2}})},
+
+                   .ib_mems{make_ib_mem(kIBMem[0])},
+
+                   .indirection = new IndirectionInfoTyped<1, int, 1, int>(
+                       Rect<1, int>(0, 1),
+                       typename CopyIndirection<1, int>::template Unstructured<1, int>(
+                           kInst[0].ind, {Rect<1, int>(0, 1)}, {kInst[0].src},
+                           /*field_id=*/0, /*subfield_offset=*/0,
+                           /*is_ranges=*/0, /*oor=*/1),
+                       new MockGatherChannel(XferDesKind::XFER_ADDR_SPLIT, 0, {})),
+                   // TODO: Don't leak address split channel
+
+                   .dst_inst = kInst[0].dst,
+
+                   .xd_nodes = {{
+                                    .inputs = {mk_inst(kInst[0].ind)},
+                                    .outputs = {mk_edge(0), mk_edge(1)},
+                                },
+
+                                {.inputs = {mk_indirect(kInst[0].src, 2, 2), mk_edge(1),
+                                            mk_edge(0)},
+                                 .outputs = {mk_inst(kInst[0].dst)}}}}};
 
 INSTANTIATE_TEST_SUITE_P(Foo, GatherScatterTest, testing::ValuesIn(kTestCases));
