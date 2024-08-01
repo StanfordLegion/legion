@@ -210,6 +210,19 @@ const static TestInstances kInst[] = {{.src = make_inst(0, 0, 0, 0),
 
 const static Memory kIBMem[] = {make_mem(0, 3), make_mem(0, 4), make_mem(1, 4)};
 
+
+// TODO(apryakhin): The following test cases need be added:
+//
+// 1. gather from multiple sources (plus combination of flags oor +
+// is_ranges + is_structured)
+//
+// 2. gather when indirection isn't accessible by source node (plus
+// combination of multiple sources + flags)
+//
+// 3. gather with various errors on the path (e.g. no path found etc)
+//
+// 4. mirror all the test cases for scatter
+
 const static GatherTestCase kTestCases[] = {
     // Case 0: Same node gather
     // dst(0) <-- src(0)[ind(0)]
