@@ -21,14 +21,15 @@ use nom::{
 use serde::Serialize;
 
 use crate::state::{
-    EventID, FSpaceID, FieldID, IPartID, ISpaceID, InstID, InstUID, MapperCallKindID, MapperID,
-    MemID, NodeID, OpID, ProcID, ProvenanceID, RuntimeCallKindID, State, TaskID, Timestamp, TreeID,
-    VariantID,
+    BacktraceID, EventID, FSpaceID, FieldID, IPartID, ISpaceID, InstID, InstUID, MapperCallKindID,
+    MapperID, MemID, NodeID, OpID, ProcID, ProvenanceID, RuntimeCallKindID, State, TaskID,
+    Timestamp, TreeID, VariantID,
 };
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum ValueFormat {
     Array,
+    BacktraceID,
     Bool,
     DepPartOpKind,
     IDType,
@@ -124,8 +125,8 @@ pub enum Record {
     OperationInstance { op_id: OpID, parent_id: Option<OpID>, kind: u32, provenance: Option<ProvenanceID> },
     MultiTask { op_id: OpID, task_id: TaskID },
     SliceOwner { parent_id: UniqueID, op_id: OpID },
-    TaskWaitInfo { op_id: OpID, task_id: TaskID, variant_id: VariantID, wait_start: Timestamp, wait_ready: Timestamp, wait_end: Timestamp },
-    MetaWaitInfo { op_id: OpID, lg_id: VariantID, wait_start: Timestamp, wait_ready: Timestamp, wait_end: Timestamp },
+    TaskWaitInfo { op_id: OpID, task_id: TaskID, variant_id: VariantID, wait_start: Timestamp, wait_ready: Timestamp, wait_end: Timestamp, wait_event: EventID },
+    MetaWaitInfo { op_id: OpID, lg_id: VariantID, wait_start: Timestamp, wait_ready: Timestamp, wait_end: Timestamp, wait_event: EventID },
     TaskInfo { op_id: OpID, task_id: TaskID, variant_id: VariantID, proc_id: ProcID, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp, creator: EventID, fevent: EventID  },
     GPUTaskInfo { op_id: OpID, task_id: TaskID, variant_id: VariantID, proc_id: ProcID, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp, gpu_start: Timestamp, gpu_stop: Timestamp, creator: EventID, fevent: EventID },
     MetaInfo { op_id: OpID, lg_id: VariantID, proc_id: ProcID, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp, creator: EventID, fevent: EventID },
@@ -141,11 +142,14 @@ pub enum Record {
     ApplicationCallInfo { provenance: ProvenanceID, start: Timestamp, stop: Timestamp, proc_id: ProcID, fevent: EventID },
     ProfTaskInfo { proc_id: ProcID, op_id: OpID, start: Timestamp, stop: Timestamp, creator: EventID, fevent: EventID  },
     CalibrationErr { calibration_err: i64 },
+    BacktraceDesc { backtrace_id: BacktraceID , backtrace: String },
+    EventWaitInfo { proc_id: ProcID, fevent: EventID, event: EventID, backtrace_id: BacktraceID },
 }
 
 fn convert_value_format(name: String) -> Option<ValueFormat> {
     match name.as_str() {
         "array" => Some(ValueFormat::Array),
+        "BacktraceID" => Some(ValueFormat::BacktraceID),
         "bool" => Some(ValueFormat::Bool),
         "DepPartOpKind" => Some(ValueFormat::DepPartOpKind),
         "IDType" => Some(ValueFormat::IDType),
@@ -361,6 +365,9 @@ fn parse_timestamp(input: &[u8]) -> IResult<&[u8], Timestamp> {
 }
 fn parse_variant_id(input: &[u8]) -> IResult<&[u8], VariantID> {
     map(le_u32, VariantID)(input)
+}
+fn parse_backtrace_id(input: &[u8]) -> IResult<&[u8], BacktraceID> {
+    map(le_u64, BacktraceID)(input)
 }
 
 ///
@@ -738,6 +745,7 @@ fn parse_task_wait_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, wait_start) = parse_timestamp(input)?;
     let (input, wait_ready) = parse_timestamp(input)?;
     let (input, wait_end) = parse_timestamp(input)?;
+    let (input, wait_event) = parse_event_id(input)?;
     Ok((
         input,
         Record::TaskWaitInfo {
@@ -747,6 +755,7 @@ fn parse_task_wait_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
             wait_start,
             wait_ready,
             wait_end,
+            wait_event,
         },
     ))
 }
@@ -756,6 +765,7 @@ fn parse_meta_wait_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, wait_start) = parse_timestamp(input)?;
     let (input, wait_ready) = parse_timestamp(input)?;
     let (input, wait_end) = parse_timestamp(input)?;
+    let (input, wait_event) = parse_event_id(input)?;
     Ok((
         input,
         Record::MetaWaitInfo {
@@ -764,6 +774,7 @@ fn parse_meta_wait_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
             wait_start,
             wait_ready,
             wait_end,
+            wait_event,
         },
     ))
 }
@@ -1100,6 +1111,32 @@ fn parse_proftask_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
         },
     ))
 }
+fn parse_backtrace_desc(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
+    let (input, backtrace_id) = parse_backtrace_id(input)?;
+    let (input, backtrace) = parse_string(input)?;
+    Ok((
+        input,
+        Record::BacktraceDesc {
+            backtrace_id,
+            backtrace,
+        },
+    ))
+}
+fn parse_event_wait_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
+    let (input, proc_id) = parse_proc_id(input)?;
+    let (input, fevent) = parse_event_id(input)?;
+    let (input, event) = parse_event_id(input)?;
+    let (input, backtrace_id) = parse_backtrace_id(input)?;
+    Ok((
+        input,
+        Record::EventWaitInfo {
+            proc_id,
+            fevent,
+            event,
+            backtrace_id,
+        },
+    ))
+}
 
 fn filter_record<'a>(
     record: &'a Record,
@@ -1248,6 +1285,8 @@ fn parse<'a>(
     parsers.insert(ids["RuntimeCallInfo"], parse_runtime_call_info);
     parsers.insert(ids["ApplicationCallInfo"], parse_application_call_info);
     parsers.insert(ids["ProfTaskInfo"], parse_proftask_info);
+    parsers.insert(ids["BacktraceDesc"], parse_backtrace_desc);
+    parsers.insert(ids["EventWaitInfo"], parse_event_wait_info);
 
     let mut input = input;
     let mut max_dim = -1;

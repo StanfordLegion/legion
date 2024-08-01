@@ -1452,8 +1452,8 @@ namespace Legion {
                                               inst_event);
           }
         }
-        if ((runtime->profiler != NULL) && !manager->is_virtual_manager())
-          runtime->profiler->record_physical_instance_use(inst_event,
+        if ((implicit_profiler != NULL) && !manager->is_virtual_manager())
+          implicit_profiler->register_physical_instance_use(inst_event,
                                       unique_op_id, index, valid_fields);
       }
     }
@@ -1504,8 +1504,8 @@ namespace Legion {
           LegionSpy::log_operation_provenance(unique_op_id,
                                               prov->human_str());
       }
-      if (runtime->profiler != NULL)
-        runtime->profiler->register_operation(this);
+      if (implicit_profiler != NULL)
+        implicit_profiler->register_operation(this);
     }
 
     //--------------------------------------------------------------------------
@@ -20023,11 +20023,11 @@ namespace Legion {
       ready_event = ApEvent(PhysicalInstance::create_external_instance(
             result, external_resource->suggested_memory(), ilg, 
             *external_resource, requests));
-      if (runtime->profiler != NULL)
+      if (implicit_profiler != NULL)
       {
-        runtime->profiler->record_physical_instance_region(unique_event,
+        implicit_profiler->register_physical_instance_region(unique_event,
                                                            requirement.region);
-        runtime->profiler->record_physical_instance_layout(unique_event,
+        implicit_profiler->register_physical_instance_layout(unique_event,
             requirement.region.field_space, layout_constraint_set);
       }
       // Check to see if this instance is local or whether we need

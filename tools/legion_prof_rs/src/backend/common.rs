@@ -105,13 +105,13 @@ impl StatePostprocess for State {
             // Do NOT filter empty procs here because they count towards
             // utilization totals
             let nodes = [None, Some(proc.proc_id.node_id())];
-            let devices: &'static [_] = match proc.kind {
+            let devices: &'static [_] = match proc.kind.unwrap() {
                 ProcKind::GPU => &[Some(DeviceKind::Device), Some(DeviceKind::Host)],
                 _ => &[None],
             };
             for node in nodes {
                 for device in devices {
-                    let group = ProcGroup(node, proc.kind, *device);
+                    let group = ProcGroup(node, proc.kind.unwrap(), *device);
                     groups
                         .entry(group)
                         .or_insert_with(Vec::new)
@@ -262,13 +262,13 @@ impl StatePostprocess for State {
                 continue;
             }
             let nodes = [None, Some(proc.proc_id.node_id())];
-            let devices: &'static [_] = match proc.kind {
+            let devices: &'static [_] = match proc.kind.unwrap() {
                 ProcKind::GPU => &[Some(DeviceKind::Device), Some(DeviceKind::Host)],
                 _ => &[None],
             };
             for node in nodes {
                 for device in devices {
-                    let group = ProcGroup(node, proc.kind, *device);
+                    let group = ProcGroup(node, proc.kind.unwrap(), *device);
                     proc_count.entry(group).and_modify(|i| *i += 1).or_insert(1);
                     if !proc.is_empty() {
                         timepoint

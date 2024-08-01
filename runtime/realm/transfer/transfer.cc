@@ -2727,72 +2727,11 @@ namespace Realm {
 
     return did_work;
   }
-  
-  
+
   ////////////////////////////////////////////////////////////////////////
   //
   // transfer path search logic
   //
-
-  static bool best_channel_for_mem_pair(ChannelCopyInfo channel_copy_info,
-                                        CustomSerdezID src_serdez_id,
-                                        CustomSerdezID dst_serdez_id,
-                                        ReductionOpID redop_id,
-                                        size_t total_bytes,
-                                        const std::vector<size_t> *src_frags,
-                                        const std::vector<size_t> *dst_frags,
-                                        uint64_t& best_cost,
-                                        Channel *& best_channel,
-                                        XferDesKind& best_kind)
-  {
-    // consider dma channels available on either source or dest node
-    NodeID src_node = ID(channel_copy_info.src_mem).memory_owner_node();
-    NodeID dst_node = ID(channel_copy_info.dst_mem).memory_owner_node();
-
-    best_cost = 0;
-    best_channel = 0;
-    best_kind = XFER_NONE;
-
-    {
-      const Node& n = get_runtime()->nodes[src_node];
-      for(std::vector<Channel *>::const_iterator it = n.dma_channels.begin();
-	  it != n.dma_channels.end();
-	  ++it) {
-        XferDesKind kind = XFER_NONE;
-        uint64_t cost = (*it)->supports_path(channel_copy_info,
-                                             src_serdez_id, dst_serdez_id,
-                                             redop_id,
-                                             total_bytes, src_frags, dst_frags,
-                                             &kind);
-        if((cost > 0) && ((best_cost == 0) || (cost < best_cost))) {
-          best_cost = cost;
-          best_channel = *it;
-          best_kind = kind;
-        }
-      }
-    }
-
-    if(dst_node != src_node) {
-      const Node& n = get_runtime()->nodes[dst_node];
-      for(std::vector<Channel *>::const_iterator it = n.dma_channels.begin();
-	  it != n.dma_channels.end();
-	  ++it) {
-        XferDesKind kind = XFER_NONE;
-        uint64_t cost = (*it)->supports_path(channel_copy_info,
-                                             src_serdez_id, dst_serdez_id,
-                                             redop_id,
-                                             total_bytes, src_frags, dst_frags,
-                                             &kind);
-        if((cost > 0) && ((best_cost == 0) || (cost < best_cost))) {
-          best_cost = cost;
-          best_channel = *it;
-          best_kind = kind;
-        }
-      }
-    }
-
-    return (best_cost != 0);
-  }
 
 // #define PATH_CACHE_EARLY_INIT
 
@@ -2972,22 +2911,70 @@ namespace Realm {
     return item_list.end();
   }
 
-  static bool find_fastest_path(ChannelCopyInfo channel_copy_info,
-                                CustomSerdezID serdez_id,
-                                ReductionOpID redop_id,
-                                size_t total_bytes,
-                                const std::vector<size_t> *src_frags,
-                                const std::vector<size_t> *dst_frags,
-                                MemPathInfo& info,
-                                bool skip_final_memcpy = false)
+  bool find_best_channel_for_memories(
+      const Node *nodes_info, ChannelCopyInfo channel_copy_info,
+      CustomSerdezID src_serdez_id, CustomSerdezID dst_serdez_id, ReductionOpID redop_id,
+      size_t total_bytes, const std::vector<size_t> *src_frags,
+      const std::vector<size_t> *dst_frags, uint64_t &best_cost, Channel *&best_channel,
+      XferDesKind &best_kind)
+  {
+    // consider dma channels available on either source or dest node
+    NodeID src_node = ID(channel_copy_info.src_mem).memory_owner_node();
+    NodeID dst_node = ID(channel_copy_info.dst_mem).memory_owner_node();
+
+    best_cost = 0;
+    best_channel = 0;
+    best_kind = XFER_NONE;
+
+    {
+      const Node &n = nodes_info[src_node];
+      for(std::vector<Channel *>::const_iterator it = n.dma_channels.begin();
+          it != n.dma_channels.end(); ++it) {
+        XferDesKind kind = XFER_NONE;
+        uint64_t cost =
+            (*it)->supports_path(channel_copy_info, src_serdez_id, dst_serdez_id,
+                                 redop_id, total_bytes, src_frags, dst_frags, &kind);
+        if((cost > 0) && ((best_cost == 0) || (cost < best_cost))) {
+          best_cost = cost;
+          best_channel = *it;
+          best_kind = kind;
+        }
+      }
+    }
+
+    if(dst_node != src_node) {
+      const Node &n = nodes_info[dst_node];
+      for(std::vector<Channel *>::const_iterator it = n.dma_channels.begin();
+          it != n.dma_channels.end(); ++it) {
+        XferDesKind kind = XFER_NONE;
+        uint64_t cost =
+            (*it)->supports_path(channel_copy_info, src_serdez_id, dst_serdez_id,
+                                 redop_id, total_bytes, src_frags, dst_frags, &kind);
+        if((cost > 0) && ((best_cost == 0) || (cost < best_cost))) {
+          best_cost = cost;
+          best_channel = *it;
+          best_kind = kind;
+        }
+      }
+    }
+
+    return (best_cost != 0);
+  }
+
+  bool find_fastest_path(const Node *nodes_info, PathCache &path_cache,
+                         ChannelCopyInfo channel_copy_info, CustomSerdezID serdez_id,
+                         ReductionOpID redop_id, size_t total_bytes,
+                         const std::vector<size_t> *src_frags,
+                         const std::vector<size_t> *dst_frags, MemPathInfo &info,
+                         bool skip_final_memcpy)
   {
     Memory src_mem = channel_copy_info.src_mem;
     Memory dst_mem = channel_copy_info.dst_mem;
     NodeID src_node = ID(src_mem).memory_owner_node();
     NodeID dst_node = ID(dst_mem).memory_owner_node();
     std::vector<size_t> empty_vec;
-    log_xpath.info() << "FFP: " << src_mem << '(' << src_mem.kind() << ')' << "->"
-                     << dst_mem << '(' << dst_mem.kind() << ')' << " serdez=" << serdez_id
+
+    log_xpath.info() << "FFP: " << src_mem << "->" << dst_mem << " serdez=" << serdez_id
                      << " redop=" << redop_id << " bytes=" << total_bytes << " frags="
                      << PrettyVector<size_t>(*(src_frags ? src_frags : &empty_vec)) << "/"
                      << PrettyVector<size_t>(*(dst_frags ? dst_frags : &empty_vec));
@@ -3039,12 +3026,11 @@ namespace Realm {
     {
       Channel *channel;
       XferDesKind kind;
-      if(best_channel_for_mem_pair(channel_copy_info, serdez_id, serdez_id,
-                                   redop_id, total_bytes, src_frags, dst_frags,
-                                   best_cost, channel, kind)) {
-        log_xpath.info() << "direct: " << src_mem << "(" << src_mem.kind()
-                         << ",n:" << src_node << ")->" << dst_mem << " ("
-                         << dst_mem.kind() << ",n:" << dst_node << ") cost=" << best_cost
+      if(find_best_channel_for_memories(nodes_info, channel_copy_info, serdez_id,
+                                        serdez_id, redop_id, total_bytes, src_frags,
+                                        dst_frags, best_cost, channel, kind)) {
+        log_xpath.info() << "direct: " << src_mem << "(n:" << src_node << ")->" << dst_mem
+                         << " (n:" << dst_node << ") cost=" << best_cost
                          << " channel=" << channel->kind;
         info.path.assign(1, src_mem);
         if(!skip_final_memcpy || (kind != XFER_MEM_CPY)) {
@@ -3066,7 +3052,7 @@ namespace Realm {
     std::vector<PartialPath> partials;
     size_t num_src_ibs, total_ibs;
     {
-      const Node& n = get_runtime()->nodes[src_node];
+      const Node &n = nodes_info[src_node];
       num_src_ibs = n.ib_memories.size();
       partials.resize(num_src_ibs);
       for(size_t i = 0; i < n.ib_memories.size(); i++) {
@@ -3075,7 +3061,7 @@ namespace Realm {
       }
     }
     if(dst_node != src_node) {
-      const Node& n = get_runtime()->nodes[dst_node];
+      const Node &n = nodes_info[dst_node];
       total_ibs = num_src_ibs + n.ib_memories.size();
       partials.resize(total_ibs);
       for(size_t i = 0; i < n.ib_memories.size(); i++) {
@@ -3097,16 +3083,14 @@ namespace Realm {
       if(channel_copy_info.is_scatter) {
         copy_info.ind_mem = Memory::NO_MEMORY;
       }
-      if(best_channel_for_mem_pair(copy_info,
-                                   serdez_id, 0 /*no dst serdez*/,
-                                   0 /*no redop on not-last hops*/,
-                                   total_bytes, src_frags, 0 /*no dst_frags*/,
-                                   cost, channel, kind)) {
+      if(find_best_channel_for_memories(
+             nodes_info, copy_info, serdez_id, 0 /*no dst serdez*/,
+             0 /*no redop on not-last hops*/, total_bytes, src_frags, 0 /*no dst_frags*/,
+             cost, channel, kind)) {
         NodeID dst_node = ID(partials[i].ib_mem).memory_owner_node();
-        log_xpath.info() << "first: " << src_mem << "(" << src_mem.kind()
-                         << ",n:" << src_node << ")->" << partials[i].ib_mem << "("
-                         << partials[i].ib_mem.kind() << ",n:" << dst_node
-                         << ") cost=" << cost << " channel=" << channel->kind;
+        log_xpath.info() << "first: " << src_mem << "(n:" << src_node << ")->"
+                         << partials[i].ib_mem << "(n:" << dst_node << ") cost=" << cost
+                         << " channel=" << channel->kind;
         // ignore anything that's already worse than the direct path
         if((best_cost == 0) || (cost < best_cost)) {
           active_ibs.insert(i);
@@ -3138,20 +3122,18 @@ namespace Realm {
         copy_info.dst_mem = partials[dst_idx].ib_mem;
         copy_info.ind_mem = Memory::NO_MEMORY;
         copy_info.is_direct = false;
-        if(best_channel_for_mem_pair(copy_info,
-                                     0, 0, 0, // no serdez or redop on interhops
-                                     total_bytes, 0, 0, // no fragmentation also
-                                     cost, channel, kind)) {
+        if(find_best_channel_for_memories(nodes_info, copy_info, 0, 0,
+                                          0, // no serdez or redop on interhops
+                                          total_bytes, 0, 0, // no fragmentation also
+                                          cost, channel, kind)) {
 
           NodeID src_node = ID(partials[src_idx].ib_mem).memory_owner_node();
           NodeID dst_node = ID(partials[dst_idx].ib_mem).memory_owner_node();
           size_t total_cost = partials[src_idx].cost + cost;
           log_xpath.info() << "inter: src_idx:" << src_idx << " "
-                           << partials[src_idx].ib_mem << "("
-                           << partials[src_idx].ib_mem.kind() << ",n:" << src_node
+                           << partials[src_idx].ib_mem << "(n:" << src_node
                            << ")-> dst_idx:" << dst_idx << " " << partials[dst_idx].ib_mem
-                           << "(" << partials[dst_idx].ib_mem.kind() << ",n:" << dst_node
-                           << ")"
+                           << "(n:" << dst_node << ")"
                            << " channel=" << channel->kind
                            << " cost=" << partials[src_idx].cost << "+" << cost << " = "
                            << total_cost << " <? " << partials[dst_idx].cost;
@@ -3185,15 +3167,13 @@ namespace Realm {
         copy_info.ind_mem = Memory::NO_MEMORY;
       }
       copy_info.is_direct = false;
-      if(best_channel_for_mem_pair(copy_info,
-                                   0 /*no src serdez*/, serdez_id, redop_id,
-                                   total_bytes, 0 /*no src_frags*/, dst_frags,
-                                   cost, channel, kind)) {
+      if(find_best_channel_for_memories(
+             nodes_info, copy_info, 0 /*no src serdez*/, serdez_id, redop_id, total_bytes,
+             0 /*no src_frags*/, dst_frags, cost, channel, kind)) {
         NodeID src_node = ID(partials[i].ib_mem).memory_owner_node();
         size_t total_cost = partials[i].cost + cost;
-        log_xpath.info() << "last: " << partials[i].ib_mem << "("
-                         << partials[i].ib_mem.kind() << ",n:" << src_node << ")->"
-                         << dst_mem << "(" << dst_mem.kind() << ",n:" << dst_node << ")"
+        log_xpath.info() << "last: " << partials[i].ib_mem << "(n:" << src_node << ")->"
+                         << dst_mem << "(n:" << dst_node << ")"
                          << " channel=" << channel->kind << " cost=" << partials[i].cost
                          << "+" << cost << " = " << total_cost << " <? " << best_cost;
         if((best_cost == 0) || (total_cost < best_cost)) {
@@ -3407,15 +3387,15 @@ namespace Realm {
                                   spaces_size,
                                   /*is_scatter=*/false};
         populate_copy_info(copy_info);
-        bool ok =
-            find_fastest_path(copy_info, serdez_id, 0, domain_size() * bytes_per_element,
-                              &src_frags, &dst_frags, path_infos[idx]);
+        bool ok = find_fastest_path(get_runtime()->nodes, path_cache, copy_info,
+                                    serdez_id, 0, domain_size() * bytes_per_element,
+                                    &src_frags, &dst_frags, path_infos[idx]);
         if(!ok) {
           // Couldn't find a path with the given indirect memory, so use a path without it
           // and we'll move the indirection buffer somewhere that channel can access it
           copy_info.ind_mem = Memory::NO_MEMORY;
-          ok = find_fastest_path(copy_info, serdez_id, 0,
-                                 domain_size() * bytes_per_element, &src_frags,
+          ok = find_fastest_path(get_runtime()->nodes, path_cache, copy_info, serdez_id,
+                                 0, domain_size() * bytes_per_element, &src_frags,
                                  &dst_frags, path_infos[idx]);
         }
         assert(ok);
@@ -3712,15 +3692,15 @@ namespace Realm {
                                   spaces_size,
                                   /*is_scatter=*/true};
         populate_copy_info(copy_info);
-        bool ok =
-            find_fastest_path(copy_info, serdez_id, 0, domain_size() * bytes_per_element,
-                              &src_frags, &dst_frags, path_infos[idx]);
+        bool ok = find_fastest_path(get_runtime()->nodes, path_cache, copy_info,
+                                    serdez_id, 0, domain_size() * bytes_per_element,
+                                    &src_frags, &dst_frags, path_infos[idx]);
         if(!ok) {
           // Couldn't find a path with the given indirect memory, so use a path without it
           // and we'll move the indirection buffer somewhere that channel can access it
           copy_info.ind_mem = Memory::NO_MEMORY;
-          ok = find_fastest_path(copy_info, serdez_id, 0,
-                                 domain_size() * bytes_per_element, &src_frags,
+          ok = find_fastest_path(get_runtime()->nodes, path_cache, copy_info, serdez_id,
+                                 0, domain_size() * bytes_per_element, &src_frags,
                                  &dst_frags, path_infos[idx]);
         }
         assert(ok);
@@ -4427,13 +4407,13 @@ namespace Realm {
                                 dst_frags);
 
         MemPathInfo path_info;
-        bool ok = find_fastest_path(ChannelCopyInfo{src_mem, dst_mem}, serdez_id,
-                                    dsts[i].redop_id,
-                                    domain_size * combined_field_size,
-                                    &src_frags, &dst_frags,
-                                    path_info);
+        bool ok = find_fastest_path(get_runtime()->nodes, path_cache,
+                                    ChannelCopyInfo{src_mem, dst_mem}, serdez_id,
+                                    dsts[i].redop_id, domain_size * combined_field_size,
+                                    &src_frags, &dst_frags, path_info);
         if(!ok) {
-          log_new_dma.fatal() << "FATAL: no path found from " << src_mem << " to " << dst_mem << " (redop=" << dsts[i].redop_id << ")";
+          log_new_dma.fatal() << "FATAL: no path found from " << src_mem << " to "
+                              << dst_mem << " (redop=" << dsts[i].redop_id << ")";
           assert(0);
         }
         size_t pathlen = path_info.xd_channels.size();
@@ -4512,16 +4492,18 @@ namespace Realm {
 
 	Memory dst_mem = dsts[i].inst.get_location();
 	MemPathInfo path_info;
-	bool ok = find_shortest_path(Memory::NO_MEMORY, dst_mem, serdez_id,
-                                     0 /*redop_id*/,
-				     path_info);
-	if(!ok) {
-	  log_new_dma.fatal() << "FATAL: no fill path found for " << dst_mem << " (serdez=" << serdez_id << ")";
-	  assert(0);
-	}
+        ChannelCopyInfo copy_info(Memory::NO_MEMORY, dst_mem);
+        bool ok = find_fastest_path(get_runtime()->nodes, path_cache,
+                                    copy_info, serdez_id, 0, domain_size, nullptr,
+                                    nullptr, path_info);
+        if(!ok) {
+          log_new_dma.fatal() << "FATAL: no fill path found for " << dst_mem
+                              << " (serdez=" << serdez_id << ")";
+          assert(0);
+        }
 
-	size_t pathlen = path_info.xd_channels.size();
-	size_t xd_idx = graph.xd_nodes.size();
+        size_t pathlen = path_info.xd_channels.size();
+        size_t xd_idx = graph.xd_nodes.size();
         size_t ib_idx = graph.ib_edges.size();
         size_t ib_alloc_size = 0;
         graph.xd_nodes.resize(xd_idx + pathlen);
@@ -4651,29 +4633,28 @@ namespace Realm {
             //                    << " src_inst=" << srcs[i].inst << " frags=" << PrettyVector<size_t>(src_frags)
             //                    << " dst_inst=" << dsts[i].inst << " frags=" << PrettyVector<size_t>(dst_frags);
 
-	    MemPathInfo path_info;
-            bool ok = find_fastest_path(ChannelCopyInfo{src_mem, dst_mem}, serdez_id,
-                                        0 /*redop_id*/,
-                                        domain_size * combined_field_size,
-                                        &src_frags, &dst_frags,
-                                        path_info);
-	    if(!ok) {
-	      log_new_dma.fatal() << "FATAL: no path found from " << src_mem << " to " << dst_mem << " (serdez=" << serdez_id << ")";
-	      assert(0);
-	    }
-	    size_t pathlen = path_info.xd_channels.size();
-	    size_t xd_idx = graph.xd_nodes.size();
-	    size_t ib_idx = graph.ib_edges.size();
-	    size_t ib_alloc_size = 0;
-	    graph.xd_nodes.resize(xd_idx + pathlen);
-	    if(pathlen > 1) {
-	      graph.ib_edges.resize(ib_idx + pathlen - 1);
-	      ib_alloc_size = compute_ib_size(combined_field_size,
-					      domain_size,
-					      serdez_id);
-	    }
-	    for(size_t j = 0; j < pathlen; j++) {
-	      TransferGraph::XDTemplate& xdn = graph.xd_nodes[xd_idx++];
+            MemPathInfo path_info;
+            bool ok = find_fastest_path(get_runtime()->nodes, path_cache,
+                                        ChannelCopyInfo{src_mem, dst_mem}, serdez_id,
+                                        0 /*redop_id*/, domain_size * combined_field_size,
+                                        &src_frags, &dst_frags, path_info);
+            if(!ok) {
+              log_new_dma.fatal() << "FATAL: no path found from " << src_mem << " to "
+                                  << dst_mem << " (serdez=" << serdez_id << ")";
+              assert(0);
+            }
+            size_t pathlen = path_info.xd_channels.size();
+            size_t xd_idx = graph.xd_nodes.size();
+            size_t ib_idx = graph.ib_edges.size();
+            size_t ib_alloc_size = 0;
+            graph.xd_nodes.resize(xd_idx + pathlen);
+            if(pathlen > 1) {
+              graph.ib_edges.resize(ib_idx + pathlen - 1);
+              ib_alloc_size =
+                  compute_ib_size(combined_field_size, domain_size, serdez_id);
+            }
+            for(size_t j = 0; j < pathlen; j++) {
+              TransferGraph::XDTemplate &xdn = graph.xd_nodes[xd_idx++];
 
               // xdn.kind = path_info.xd_kinds[j];
               xdn.factory = path_info.xd_channels[j]->get_factory();

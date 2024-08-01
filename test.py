@@ -898,6 +898,16 @@ def build_cmake(root_dir, tmp_dir, env, thread_count,
 
 def build_legion_prof_rs(root_dir, tmp_dir, env):
     legion_prof_dir = os.path.join(root_dir, 'tools', 'legion_prof_rs')
+
+    # Check the build with various settings to make sure we're not breaking anything
+    allow_unused_variables_env = dict(list(env.items()) + [
+        ('RUSTFLAGS', '-Aunused_variables'), # When not all features are enabled, some variables may be unused
+    ])
+    cmd(['cargo', 'check', '--no-default-features'],
+        env=allow_unused_variables_env, cwd=legion_prof_dir)
+    cmd(['cargo', 'check', '--release'],
+        env=env, cwd=legion_prof_dir)
+
     cmd(['cargo', 'install',
          '--all-features',
          '--locked',

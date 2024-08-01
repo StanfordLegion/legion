@@ -3558,7 +3558,7 @@ legion_deferred_buffer_char_##DIM##d_create( \
   Memory::Kind kind = CObjectWrapper::unwrap(kind_); \
  \
   return CObjectWrapper::wrap( \
-      new DeferredBufferChar##DIM##D(bounds, kind, initial_value)); \
+      new DeferredBufferChar##DIM##D(bounds, kind, initial_value, 16)); \
 }
 LEGION_FOREACH_N(CREATE_BUFFER)
 #undef CREATE_BUFFER
@@ -8389,8 +8389,8 @@ legion_task_variant_registrar_set_leaf_memory_pool_bounds(
   TaskVariantRegistrar *registrar = CObjectWrapper::unwrap(registrar_);
   Memory::Kind kind = CObjectWrapper::unwrap(kind_);
 
-  registrar->leaf_pool_bounds.emplace(std::make_pair(kind,
-        std::optional<PoolBounds>(PoolBounds(size, alignment))));
+  registrar->leaf_pool_bounds.emplace(
+      std::make_pair(kind, PoolBounds(size, alignment)));
 }
 
 legion_variant_id_t
