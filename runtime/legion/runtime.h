@@ -5264,6 +5264,7 @@ namespace Legion {
       const std::set<ApEvent> *legion_events = &events;
       const std::set<Realm::Event> *realm_events;
       static_assert(sizeof(legion_events) == sizeof(realm_events));
+      static_assert(sizeof(ApEvent) == sizeof(Realm::Event));
       memcpy(&realm_events, &legion_events, sizeof(legion_events));
       ApEvent result(Realm::Event::merge_events(*realm_events));
 #ifdef LEGION_DISABLE_EVENT_PRUNING
@@ -5284,6 +5285,7 @@ namespace Legion {
 #endif
       if ((implicit_profiler != NULL) && result.exists())
       {
+        static_assert(sizeof(ApEvent) == sizeof(LgEvent));
         const std::vector<ApEvent> preconditions(events.begin(), events.end());
         result.record_event_merger(&preconditions.front(),preconditions.size());
       }
@@ -5328,6 +5330,7 @@ namespace Legion {
       const std::vector<ApEvent> *legion_events = &events;
       const std::vector<Realm::Event> *realm_events;
       static_assert(sizeof(legion_events) == sizeof(realm_events));
+      static_assert(sizeof(ApEvent) == sizeof(Realm::Event));
       memcpy(&realm_events, &legion_events, sizeof(legion_events));
       ApEvent result(Realm::Event::merge_events(*realm_events));
 #ifdef LEGION_DISABLE_EVENT_PRUNING 
@@ -5357,7 +5360,10 @@ namespace Legion {
         LegionSpy::log_event_dependence(*it, result);
 #endif
       if ((implicit_profiler != NULL) && result.exists())
+      {
+        static_assert(sizeof(ApEvent) == sizeof(LgEvent));
         result.record_event_merger(&events.front(), events.size());
+      }
       // Always do tracing after profiling
       if ((info != NULL) && info->recording)
         info->record_merge_events(result, events);
@@ -5408,11 +5414,13 @@ namespace Legion {
       const std::set<RtEvent> *legion_events = &events;
       const std::set<Realm::Event> *realm_events;
       static_assert(sizeof(legion_events) == sizeof(realm_events));
+      static_assert(sizeof(RtEvent) == sizeof(Realm::Event));
       memcpy(&realm_events, &legion_events, sizeof(legion_events));
       // No logging for runtime operations currently
       const RtEvent result(Realm::Event::merge_events(*realm_events));
       if ((implicit_profiler != NULL) && result.exists())
       {
+        static_assert(sizeof(RtEvent) == sizeof(LgEvent));
         const std::vector<RtEvent> preconditions(events.begin(), events.end());
         result.record_event_merger(&preconditions.front(),preconditions.size());
       }
@@ -5434,11 +5442,15 @@ namespace Legion {
       const std::vector<RtEvent> *legion_events = &events;
       const std::vector<Realm::Event> *realm_events;
       static_assert(sizeof(legion_events) == sizeof(realm_events));
+      static_assert(sizeof(RtEvent) == sizeof(Realm::Event));
       memcpy(&realm_events, &legion_events, sizeof(legion_events));
       // No logging for runtime operations currently
       const RtEvent result(Realm::Event::merge_events(*realm_events));
       if ((implicit_profiler != NULL) && result.exists())
+      {
+        static_assert(sizeof(RtEvent) == sizeof(LgEvent));
         result.record_event_merger(&events.front(), events.size());
+      }
       return result;
     }
 
@@ -5672,6 +5684,7 @@ namespace Legion {
       RtEvent result(Realm::Event::merge_events_ignorefaults(*realm_events));
       if ((implicit_profiler != NULL) && result.exists())
       {
+        static_assert(sizeof(ApEvent) == sizeof(LgEvent));
         const std::vector<ApEvent> preconditions(events.begin(), events.end());
         result.record_event_merger(&preconditions.front(),preconditions.size());
       }
