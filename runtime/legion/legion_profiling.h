@@ -669,7 +669,6 @@ namespace Legion {
       std::vector<ProcID> proc_ids;
     private:
       std::deque<ProfTaskInfo> prof_task_infos;
-      std::set<LgEvent> recorded_events;
     };
 
     class LegionProfiler : public ProfilingResponseHandler {
