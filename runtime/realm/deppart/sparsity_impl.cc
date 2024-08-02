@@ -282,6 +282,10 @@ namespace Realm {
                       << " has_impl:" << (impl != nullptr)
                       << " refs:" << references.load();
 
+    if(Network::my_node_id == NodeID(ID(me).sparsity_creator_node())) {
+      assert(impl != nullptr);
+    }
+
     if(impl != nullptr) {
       assert(map_deleter);
       (*map_deleter)(impl);
@@ -299,8 +303,11 @@ namespace Realm {
   void SparsityMapImplWrapper::add_references(unsigned count)
   {
     if(need_refcount) {
+      void *impl = map_impl.load();
       log_dpops.print() << "AddRef me:" << me << " N:" << Network::my_node_id
-                        << " refs:" << references.load() << " count:" << count;
+                        << " refs:" << references.load() << " count:" << count
+                        << " owner:" << NodeID(me.sparsity_creator_node())
+                        << " has_impl:" << (impl != nullptr);
       references.fetch_add_acqrel(count);
     }
   }
