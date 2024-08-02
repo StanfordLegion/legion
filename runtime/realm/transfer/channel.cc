@@ -4477,7 +4477,7 @@ namespace Realm {
         return Memory::NO_MEMORY;
       }
 
-      Memory Channel::suggest_ib_memories(Memory memory) const
+      Memory Channel::suggest_ib_memories() const
       {
         return find_sysmem_ib_memory(node);
       }

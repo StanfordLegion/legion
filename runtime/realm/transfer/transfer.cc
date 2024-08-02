@@ -3351,22 +3351,27 @@ namespace Realm {
       auto channel = path_infos[0].xd_channels[0];
       log_xpath.info() << "Gather channel kind=" << channel->kind
                        << " node=" << channel->node << " path len=" << pathlen;
-      Memory ind_ib_mem = channel->suggest_ib_memories(inst.get_location());
-      if(ind_ib_mem != Memory::NO_MEMORY) {
-        log_xpath.info() << "Copy indirectiom from src_node="
-                         << NodeID(ID(inst.get_location()).memory_owner_node())
-                         << " to dst_node=" << NodeID(ID(ind_ib_mem).memory_owner_node())
-                         << " ind_mem=" << ind_ib_mem;
-        MemPathInfo addr_path;
-        bool ok = find_shortest_path(nodes_info, inst.get_location(), ind_ib_mem,
-                                     0 /*no serdez*/, 0 /*redop_id*/, addr_path,
-                                     true /*skip_final_memcpy*/);
-        assert(ok);
-        size_t aligned_ib_size =
-            Config::ib_size_bytes +
-            (address_size() - (Config::ib_size_bytes % address_size())) % address_size();
-        addr_edge =
-            add_copy_path(xd_nodes, ib_edges, addr_edge, addr_path, aligned_ib_size);
+
+      if(!channel->supports_indirection_memory(inst.get_location())) {
+        Memory ind_ib_mem = channel->suggest_ib_memories();
+        if(ind_ib_mem != Memory::NO_MEMORY) {
+          log_xpath.info() << "Copy indirectiom from src_node="
+                           << NodeID(ID(inst.get_location()).memory_owner_node())
+                           << " to dst_node="
+                           << NodeID(ID(ind_ib_mem).memory_owner_node())
+                           << " ind_mem=" << ind_ib_mem;
+          MemPathInfo addr_path;
+          bool ok = find_shortest_path(nodes_info, inst.get_location(), ind_ib_mem,
+                                       0 /*no serdez*/, 0 /*redop_id*/, addr_path,
+                                       true /*skip_final_memcpy*/);
+          assert(ok);
+          size_t aligned_ib_size =
+              Config::ib_size_bytes +
+              (address_size() - (Config::ib_size_bytes % address_size())) %
+                  address_size();
+          addr_edge =
+              add_copy_path(xd_nodes, ib_edges, addr_edge, addr_path, aligned_ib_size);
+        }
       }
 
       size_t xd_idx = xd_nodes.size();
@@ -3414,7 +3419,7 @@ namespace Realm {
           path_infos[0].xd_channels[path_infos[0].xd_channels.size() - 1];
       bool same_last_channel = true;
       if(last_channel->node == dst_node) {
-        dst_ib_mem = last_channel->suggest_ib_memories(dst_mem);
+        dst_ib_mem = last_channel->suggest_ib_memories();
         for(size_t i = 1; i < path_infos.size(); i++) {
           if(path_infos[i].xd_channels[path_infos[i].xd_channels.size() - 1] !=
              last_channel) {
@@ -3504,8 +3509,7 @@ namespace Realm {
       //  data instances live
       for(size_t i = 0; i < spaces_size; i++) {
         // HACK!
-        Memory src_ib_mem = path_infos[path_idx[i]].xd_channels[0]->suggest_ib_memories(
-            insts[i].get_location());
+        Memory src_ib_mem = path_infos[path_idx[i]].xd_channels[0]->suggest_ib_memories();
         if(src_ib_mem != addr_ib_mem) {
           MemPathInfo path;
           bool ok = find_shortest_path(nodes_info, addr_ib_mem, src_ib_mem,
@@ -3664,7 +3668,7 @@ namespace Realm {
       auto channel = path_infos[0].xd_channels[pathlen - 1];
       log_xpath.info() << "Scatter channel kind=" << channel->kind
                        << " node=" << channel->node << " path len=" << pathlen;
-      Memory ind_ib_mem = channel->suggest_ib_memories(inst.get_location());
+      Memory ind_ib_mem = channel->suggest_ib_memories();
 
       if(ind_ib_mem != Memory::NO_MEMORY) {
         log_xpath.info() << "Copy indirectiom from src_node="

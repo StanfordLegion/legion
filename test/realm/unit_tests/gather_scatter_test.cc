@@ -44,7 +44,9 @@ public:
     return it != paths.end() ? it->second : 0;
   }
 
-  Memory suggest_ib_memories(Memory memory) const { return make_mem(node, kIBMemIdx); }
+  Memory suggest_ib_memories() const { return make_mem(node, kIBMemIdx); }
+
+  bool supports_indirection_memory(Memory memory) const { return false; }
 
   Memory suggest_ib_memories_for_node(NodeID node) const
   {
@@ -222,6 +224,8 @@ const static Memory kIBMem[] = {make_mem(0, 3), make_mem(0, 4), make_mem(1, 4)};
 // 3. gather with various errors on the path (e.g. no path found etc)
 //
 // 4. mirror all the test cases for scatter
+//
+// 5. test with supports_indirection_memory
 
 const static GatherTestCase kTestCases[] = {
     // Case 0: Same node gather

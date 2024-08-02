@@ -1125,7 +1125,7 @@ namespace Realm {
       static const bool is_ordered = true;
 
       virtual bool needs_wrapping_iterator() const;
-      virtual Memory suggest_ib_memories(Memory memory) const;
+      virtual Memory suggest_ib_memories() const;
 
       virtual RemoteChannelInfo *construct_remote_info() const;
 
@@ -1181,7 +1181,7 @@ namespace Realm {
     public:
       GPUIndirectRemoteChannel(uintptr_t _remote_ptr,
                                const std::vector<Memory> &_indirect_memories);
-      virtual Memory suggest_ib_memories(Memory memory) const;
+      virtual Memory suggest_ib_memories() const;
       virtual bool needs_wrapping_iterator() const;
       virtual uint64_t
       supports_path(ChannelCopyInfo channel_copy_info, CustomSerdezID src_serdez_id,
