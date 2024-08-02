@@ -5842,7 +5842,9 @@ namespace Legion {
 #ifdef LEGION_SPY
       LegionSpy::log_reservation_acquire(r, precondition, result);
 #endif
-      if ((implicit_profiler != NULL) && result.exists())
+      // Result can be the same as precondition if precondition is poisoned
+      if ((implicit_profiler != NULL) && result.exists() && 
+          (result != precondition))
         result.record_reservation_acquire(r, precondition);
       return result;
     }
@@ -5853,7 +5855,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       RtEvent result(r.acquire(exclusive ? 0 : 1, exclusive, precondition)); 
-      if ((implicit_profiler != NULL) && result.exists())
+      // Result can be the same as precondition if precondition is poisoned
+      if ((implicit_profiler != NULL) && result.exists() && 
+          (result != precondition))
         result.record_reservation_acquire(r, precondition);
       return result;
     }
