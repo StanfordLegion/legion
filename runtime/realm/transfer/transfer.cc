@@ -2317,8 +2317,7 @@ namespace Realm {
   class AddressSplitXferDesFactory : public XferDesFactory {
   public:
     AddressSplitXferDesFactory(size_t _bytes_per_element,
-                               const std::vector<IndexSpace<N, T>> &_spaces,
-                               Channel *_channel);
+                               const std::vector<IndexSpace<N, T>> &_spaces);
 
   protected:
     virtual ~AddressSplitXferDesFactory();
@@ -2342,7 +2341,6 @@ namespace Realm {
   protected:
     size_t bytes_per_element;
     std::vector<IndexSpace<N,T> > spaces;
-    Channel *channel;
   };
 
   template <int N, typename T>
@@ -2384,11 +2382,9 @@ namespace Realm {
 
   template <int N, typename T>
   AddressSplitXferDesFactory<N, T>::AddressSplitXferDesFactory(
-      size_t _bytes_per_element, const std::vector<IndexSpace<N, T>> &_spaces,
-      Channel *_channel)
+      size_t _bytes_per_element, const std::vector<IndexSpace<N, T>> &_spaces)
     : bytes_per_element(_bytes_per_element)
     , spaces(_spaces)
-    , channel(_channel)
   {}
 
   template <int N, typename T>
@@ -2419,12 +2415,13 @@ namespace Realm {
     if(target_node == Network::my_node_id) {
       // local creation
       //assert(!inst.exists());
-      assert(channel);
-      XferDes *xd = new AddressSplitXferDes<N, T>(dma_op, channel, launch_node, guid,
+      assert(local_addrsplit_channel != 0);
+
+      XferDes *xd = new AddressSplitXferDes<N, T>(dma_op, local_addrsplit_channel, launch_node, guid,
                                                   inputs_info, outputs_info, priority,
                                                   bytes_per_element, spaces);
 
-      channel->enqueue_ready_xd(xd);
+      local_addrsplit_channel->enqueue_ready_xd(xd);
     } else {
       // remote creation
       Serialization::ByteCountSerializer bcs;
@@ -3986,8 +3983,7 @@ namespace Realm {
   XferDesFactory *IndirectionInfoTyped<N, T, N2, T2>::create_addrsplit_factory(
       size_t bytes_per_element) const
   {
-    return new AddressSplitXferDesFactory<N2, T2>(bytes_per_element, spaces,
-                                                  this->addr_split_channel);
+    return new AddressSplitXferDesFactory<N2, T2>(bytes_per_element, spaces);
   }
 
   template <int N, typename T, int N2, typename T2>
