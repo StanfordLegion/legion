@@ -195,6 +195,11 @@ namespace Realm {
     void add_references(unsigned count);
     void remove_references(unsigned count);
 
+    static ID make_id(const SparsityMapImplWrapper &dummy, int owner, ID::IDType index)
+    {
+      return ID::make_sparsity(owner, 0, index);
+    }
+
     ID me;
     unsigned owner;
     SparsityMapImplWrapper *next_free;
