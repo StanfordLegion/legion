@@ -2903,7 +2903,6 @@ namespace Legion {
       void record_barrier_arrival(LgEvent precondition) const;
       void record_reservation_acquire(Reservation r,
                                       LgEvent precondition) const;
-      void record_local_lock_acquire(void) const;
     };
 
     class PredEvent : public LgEvent {
@@ -3103,8 +3102,6 @@ namespace Legion {
           RtEvent ready = local_lock.wrlock();
           while (ready.exists())
           {
-            if (implicit_profiler != NULL)
-              ready.record_local_lock_acquire();
             ready.wait();
             ready = local_lock.wrlock();
           }
@@ -3114,8 +3111,6 @@ namespace Legion {
           RtEvent ready = local_lock.rdlock();
           while (ready.exists())
           {
-            if (implicit_profiler != NULL)
-              ready.record_local_lock_acquire();
             ready.wait();
             ready = local_lock.rdlock();
           }
@@ -3178,8 +3173,6 @@ namespace Legion {
           RtEvent ready = local_lock.wrlock();
           while (ready.exists())
           {
-            if (implicit_profiler != NULL)
-              ready.record_local_lock_acquire();
             ready.wait();
             ready = local_lock.wrlock();
           }
@@ -3189,8 +3182,6 @@ namespace Legion {
           RtEvent ready = local_lock.rdlock();
           while (ready.exists())
           {
-            if (implicit_profiler != NULL)
-              ready.record_local_lock_acquire();
             ready.wait();
             ready = local_lock.rdlock();
           }

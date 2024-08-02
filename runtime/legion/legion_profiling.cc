@@ -573,25 +573,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LegionProfInstance::record_local_lock_acquire(LgEvent result)
-    //--------------------------------------------------------------------------
-    {
-      if (owner->no_critical_paths)
-        return;
-      LocalLockAcquireInfo &info = local_lock_acquire_infos.emplace_back(
-          LocalLockAcquireInfo());
-      info.performed = Realm::Clock::current_time_in_nanoseconds();
-      info.result = result;
-      const Processor current = Processor::get_executing_processor();
-      if (current.exists())
-        info.fevent = LgEvent(Processor::get_current_finish_event());
-      else if ((implicit_context != NULL) && 
-          (implicit_context->owner_task != NULL))
-        info.fevent = implicit_context->owner_task->get_completion_event();
-      owner->update_footprint(sizeof(info), this);
-    }
-
-    //--------------------------------------------------------------------------
     void LegionProfInstance::process_task(const ProfilingInfo *prof_info,
              const Realm::ProfilingResponse &response,
              const Realm::ProfilingMeasurements::OperationProcessorUsage &usage)
@@ -1480,10 +1461,6 @@ namespace Legion {
             reservation_acquire_infos.begin(); it !=
             reservation_acquire_infos.end(); it++)
         serializer->serialize(*it);
-      for (std::deque<LocalLockAcquireInfo>::const_iterator it =
-            local_lock_acquire_infos.begin(); it !=
-            local_lock_acquire_infos.end(); it++)
-        serializer->serialize(*it);
       for (std::deque<ProfTaskInfo>::const_iterator it = 
             prof_task_infos.begin(); it != prof_task_infos.end(); it++)
       {
@@ -1520,7 +1497,6 @@ namespace Legion {
       event_poison_infos.clear();
       barrier_arrival_infos.clear();
       reservation_acquire_infos.clear();
-      local_lock_acquire_infos.clear();
     }
 
     //--------------------------------------------------------------------------
@@ -1882,16 +1858,6 @@ namespace Legion {
         serializer->serialize(info);
         diff += sizeof(info);
         reservation_acquire_infos.pop_front();
-        const long long t_curr = Realm::Clock::current_time_in_microseconds();
-        if (t_curr >= t_stop)
-          return diff;
-      }
-      while (!local_lock_acquire_infos.empty())
-      {
-        LocalLockAcquireInfo &info = local_lock_acquire_infos.front();
-        serializer->serialize(info);
-        diff += sizeof(info);
-        local_lock_acquire_infos.pop_front();
         const long long t_curr = Realm::Clock::current_time_in_microseconds();
         if (t_curr >= t_stop)
           return diff;

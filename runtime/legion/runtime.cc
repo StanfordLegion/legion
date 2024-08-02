@@ -182,17 +182,6 @@ namespace Legion {
       implicit_profiler->record_reservation_acquire(r, *this, precondition);
     }
 
-    //--------------------------------------------------------------------------
-    void LgEvent::record_local_lock_acquire(void) const
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(exists());
-      assert(implicit_profiler != NULL);
-#endif
-      implicit_profiler->record_local_lock_acquire(*this);
-    }
-
     /////////////////////////////////////////////////////////////
     // Argument Map Impl
     /////////////////////////////////////////////////////////////

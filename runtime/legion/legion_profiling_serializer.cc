@@ -536,13 +536,6 @@ namespace Legion {
          << "reservation:unsigned long long:" << sizeof(Reservation)
          << "}" << std::endl;
 
-      ss << "LocalLockAcquireInfo {"
-         << "id:" << LOCAL_LOCK_ACQUIRE_INFO_ID             << delim
-         << "result:unsigned long long:" << sizeof(LgEvent) << delim
-         << "fevent:unsigned long long:" << sizeof(LgEvent) << delim
-         << "performed:timestamp_t:" << sizeof(timestamp_t)
-         << "}" << std::endl;
-
       ss << "ProfTaskInfo {"
          << "id:" << PROFTASK_INFO_ID                        << delim
          << "proc_id:ProcID:"         << sizeof(ProcID)      << delim
@@ -1479,18 +1472,6 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LegionProfBinarySerializer::serialize(
-                           const LegionProfInstance::LocalLockAcquireInfo &info)
-    //--------------------------------------------------------------------------
-    {
-      int ID = LOCAL_LOCK_ACQUIRE_INFO_ID;
-      lp_fwrite(f, (char*)&ID, sizeof(ID));
-      lp_fwrite(f, (char*)&info.result.id, sizeof(info.result.id));
-      lp_fwrite(f, (char*)&info.fevent.id, sizeof(info.fevent.id));
-      lp_fwrite(f, (char*)&info.performed, sizeof(info.performed));
-    }
-
-    //--------------------------------------------------------------------------
-    void LegionProfBinarySerializer::serialize(
                           const LegionProfInstance::ProfTaskInfo& proftask_info)
     //--------------------------------------------------------------------------
     {
@@ -2382,15 +2363,6 @@ namespace Legion {
       log_prof.print("Prof Reservation Acquire Info " IDFMT " " IDFMT " " IDFMT
           " %lld " IDFMT, info.result.id, info.fevent.id, info.precondition.id,
           info.performed, info.reservation.id);
-    }
-
-    //--------------------------------------------------------------------------
-    void LegionProfASCIISerializer::serialize(
-                           const LegionProfInstance::LocalLockAcquireInfo &info)
-    //--------------------------------------------------------------------------
-    {
-      log_prof.print("Prof Local Lock Acquire Info " IDFMT " " IDFMT " %lld",
-          info.result.id, info.fevent.id, info.performed);
     }
 
     //--------------------------------------------------------------------------

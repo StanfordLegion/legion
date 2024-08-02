@@ -498,12 +498,6 @@ namespace Legion {
         timestamp_t performed;
         Reservation reservation;
       };
-      struct LocalLockAcquireInfo {
-      public:
-        LgEvent result;
-        LgEvent fevent;
-        timestamp_t performed;
-      };
       struct ProfilingInfo : public ProfilingResponseBase {
       public:
         ProfilingInfo(ProfilingResponseHandler *h);
@@ -581,7 +575,6 @@ namespace Legion {
       void record_barrier_arrival(LgEvent result, LgEvent precondition);
       void record_reservation_acquire(Reservation r, LgEvent result,
           LgEvent precondition);
-      void record_local_lock_acquire(LgEvent result);
     public:
       void process_task(const ProfilingInfo *info,
             const Realm::ProfilingResponse &response,
@@ -663,7 +656,6 @@ namespace Legion {
       std::deque<EventPoisonInfo> event_poison_infos;
       std::deque<BarrierArrivalInfo> barrier_arrival_infos;
       std::deque<ReservationAcquireInfo> reservation_acquire_infos;
-      std::deque<LocalLockAcquireInfo> local_lock_acquire_infos;
       // keep track of MemIDs/ProcIDs to avoid duplicate entries
       std::vector<MemID> mem_ids;
       std::vector<ProcID> proc_ids;
