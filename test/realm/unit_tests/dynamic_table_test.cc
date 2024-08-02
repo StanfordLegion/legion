@@ -47,7 +47,7 @@ TEST(DynamicTableTest, LookupMultipleEntries)
 {
   const int leaf_bits = 4;
   DynamicTable<DynamicTableAllocator<Dummy, 1, leaf_bits>> dtable;
-  std::vector<int> ids { 0, 15, 16, 33 };
+  std::vector<int> ids{0, 15, 16, 33};
 
   std::vector<Dummy *> entries(ids.size());
   for(size_t i = 0; i < ids.size(); i++) {

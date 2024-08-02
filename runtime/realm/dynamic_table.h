@@ -140,7 +140,7 @@ namespace Realm {
                                       ET **free_list_head, ET **free_list_tail);
     };
 
-  }; // namespace Realm
+}; // namespace Realm
 
 #include "realm/dynamic_table.inl"
 
