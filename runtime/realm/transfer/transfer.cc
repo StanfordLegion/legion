@@ -2398,60 +2398,48 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  void AddressSplitXferDesFactory<N,T>::create_xfer_des(uintptr_t dma_op,
-							NodeID launch_node,
-							NodeID target_node,
-							XferDesID guid,
-							const std::vector<XferDesPortInfo>& inputs_info,
-							const std::vector<XferDesPortInfo>& outputs_info,
-							int priority,
-							XferDesRedopInfo redop_info,
-							const void *fill_data,
-                                                        size_t fill_size,
-                                                        size_t fill_total)
+  void AddressSplitXferDesFactory<N, T>::create_xfer_des(
+      uintptr_t dma_op, NodeID launch_node, NodeID target_node, XferDesID guid,
+      const std::vector<XferDesPortInfo> &inputs_info,
+      const std::vector<XferDesPortInfo> &outputs_info, int priority,
+      XferDesRedopInfo redop_info, const void *fill_data, size_t fill_size,
+      size_t fill_total)
   {
     assert(redop_info.id == 0);
     assert(fill_size == 0);
     if(target_node == Network::my_node_id) {
       // local creation
-      //assert(!inst.exists());
+      // assert(!inst.exists());
       assert(local_addrsplit_channel != 0);
 
-      XferDes *xd = new AddressSplitXferDes<N, T>(dma_op, local_addrsplit_channel, launch_node, guid,
-                                                  inputs_info, outputs_info, priority,
-                                                  bytes_per_element, spaces);
+      XferDes *xd = new AddressSplitXferDes<N, T>(
+          dma_op, local_addrsplit_channel, launch_node, guid, inputs_info, outputs_info,
+          priority, bytes_per_element, spaces);
 
       local_addrsplit_channel->enqueue_ready_xd(xd);
     } else {
       // remote creation
       Serialization::ByteCountSerializer bcs;
       {
-	bool ok = ((bcs << inputs_info) &&
-		   (bcs << outputs_info) &&
-		   (bcs << priority) &&
-		   (bcs << bytes_per_element) &&
-		   (bcs << spaces));
-	assert(ok);
+        bool ok = ((bcs << inputs_info) && (bcs << outputs_info) && (bcs << priority) &&
+                   (bcs << bytes_per_element) && (bcs << spaces));
+        assert(ok);
       }
       size_t req_size = bcs.bytes_used();
-      ActiveMessage<AddressSplitXferDesCreateMessage<N,T> > amsg(target_node, req_size);
-      //amsg->inst = inst;
+      ActiveMessage<AddressSplitXferDesCreateMessage<N, T>> amsg(target_node, req_size);
+      // amsg->inst = inst;
       amsg->launch_node = launch_node;
       amsg->guid = guid;
       amsg->dma_op = dma_op;
       {
-	bool ok = ((amsg << inputs_info) &&
-		   (amsg << outputs_info) &&
-		   (amsg << priority) &&
-		   (amsg << bytes_per_element) &&
-		   (amsg << spaces));
-	assert(ok);
+        bool ok = ((amsg << inputs_info) && (amsg << outputs_info) &&
+                   (amsg << priority) && (amsg << bytes_per_element) && (amsg << spaces));
+        assert(ok);
       }
       amsg.commit();
     }
   }
 
-  
   ////////////////////////////////////////////////////////////////////////
   //
   // class AddressSplitXferDes<N,T>

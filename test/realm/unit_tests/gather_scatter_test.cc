@@ -212,7 +212,6 @@ const static TestInstances kInst[] = {{.src = make_inst(0, 0, 0, 0),
 
 const static Memory kIBMem[] = {make_mem(0, 3), make_mem(0, 4), make_mem(1, 4)};
 
-
 // TODO(apryakhin): The following test cases need be added:
 //
 // 1. gather from multiple sources (plus combination of flags oor +
