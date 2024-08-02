@@ -3353,11 +3353,10 @@ namespace Realm {
                        << " node=" << channel->node << " path len=" << pathlen;
       Memory ind_ib_mem = channel->suggest_ib_memories(inst.get_location());
       if(ind_ib_mem != Memory::NO_MEMORY) {
-        /*log_xpath.info() << "Copy indirectiom from src_node="
+        log_xpath.info() << "Copy indirectiom from src_node="
                          << NodeID(ID(inst.get_location()).memory_owner_node())
                          << " to dst_node=" << NodeID(ID(ind_ib_mem).memory_owner_node())
-                         << " ind_mem=" << ind_ib_mem
-                         << " ind_mem_kind=" << ind_ib_mem.kind();*/
+                         << " ind_mem=" << ind_ib_mem;
         MemPathInfo addr_path;
         bool ok = find_shortest_path(nodes_info, inst.get_location(), ind_ib_mem,
                                      0 /*no serdez*/, 0 /*redop_id*/, addr_path,
