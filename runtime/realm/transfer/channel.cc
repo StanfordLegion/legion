@@ -3648,7 +3648,6 @@ namespace Realm {
 	wseqcache.flush();
 
 	return did_work;
-#endif
       }
 
       void RemoteWriteXferDes::notify_request_read_done(Request* req)
