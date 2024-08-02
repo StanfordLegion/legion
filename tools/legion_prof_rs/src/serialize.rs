@@ -149,7 +149,6 @@ pub enum Record {
     EventPoisonInfo { result: EventID, fevent: EventID, performed: Timestamp },
     BarrierArrivalInfo { result: EventID, fevent: EventID, precondition: EventID, performed: Timestamp },
     ReservationAcquireInfo { result: EventID, fevent: EventID, precondition: EventID, performed: Timestamp, reservation: u64 },
-    LocalLockAcquireInfo { result: EventID, fevent: EventID, performed: Timestamp },
 }
 
 fn convert_value_format(name: String) -> Option<ValueFormat> {
@@ -1240,19 +1239,6 @@ fn parse_reservation_acquire_info(input: &[u8], _max_dim: i32) -> IResult<&[u8],
         },
     ))
 }
-fn parse_local_lock_acquire_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
-    let (input, result) = parse_event_id(input)?;
-    let (input, fevent) = parse_event_id(input)?;
-    let (input, performed) = parse_timestamp(input)?;
-    Ok((
-        input,
-        Record::LocalLockAcquireInfo {
-            result,
-            fevent,
-            performed,
-        },
-    ))
-}
 
 fn filter_record<'a>(
     record: &'a Record,
@@ -1411,7 +1397,6 @@ fn parse<'a>(
         ids["ReservationAcquireInfo"],
         parse_reservation_acquire_info,
     );
-    parsers.insert(ids["LocalLockAcquireInfo"], parse_local_lock_acquire_info);
 
     let mut input = input;
     let mut max_dim = -1;

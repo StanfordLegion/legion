@@ -3126,7 +3126,6 @@ pub enum EventEntryKind {
     PoisonEvent,
     ArriveBarrier,
     ReservationAcquire,
-    LocalLockAcquire,
 }
 
 #[derive(Debug)]
@@ -5366,21 +5365,6 @@ fn process_record(
                 let src = state.find_event_node(*precondition);
                 state.event_graph.add_edge(src, dst, ());
             }
-        }
-        Record::LocalLockAcquireInfo {
-            result,
-            fevent,
-            performed,
-        } => {
-            assert!(result.exists());
-            assert!(fevent.exists());
-            let creator_uid = state.create_fevent_reference(*fevent).unwrap();
-            state.record_event_node(
-                *result,
-                EventEntryKind::LocalLockAcquire,
-                creator_uid,
-                *performed,
-            );
         }
     }
 }

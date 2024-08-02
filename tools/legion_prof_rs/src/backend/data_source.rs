@@ -1330,9 +1330,6 @@ impl StateDataSource {
                     ))
                 }
             }
-            EventEntryKind::LocalLockAcquire => {
-                Field::String(format!("Local Lock Acquire (cannot say which other task is holding the lock yet...)"))
-            }
         }
     }
 
