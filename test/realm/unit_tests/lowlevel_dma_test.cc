@@ -30,7 +30,7 @@ public:
     return it != paths.end() ? it->second : 0;
   }
 
-  MOCK_METHOD(Memory, suggest_ib_memories, (Memory mem), (const));
+  MOCK_METHOD(Memory, suggest_ib_memories, (), (const));
   MOCK_METHOD(long, available, (), ());
   MOCK_METHOD(long, submit, (Request * *requests, long nr), ());
   MOCK_METHOD(void, pull, (), ());
