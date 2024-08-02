@@ -276,14 +276,17 @@ namespace Realm {
     assert(subscribers.empty());
 
     void *impl = map_impl.load();
-    if(impl != nullptr) {
+    assert(impl != nullptr);
+    //if(impl != nullptr) {
       assert(map_deleter);
       (*map_deleter)(impl);
       map_impl.store(0);
       type_tag.store(0);
-    }
+    //}
 
     if(Network::my_node_id == NodeID(ID(me).sparsity_creator_node())) {
+      log_dpops.print() << "FREE me:" << me << " N:" << Network::my_node_id
+                        << " refs:" << references.load();
       get_runtime()->free_sparsity_impl(this);
     }
   }
@@ -293,6 +296,8 @@ namespace Realm {
   void SparsityMapImplWrapper::add_references(unsigned count)
   {
     if(need_refcount) {
+      log_dpops.print() << "AddRef me:" << me << " N:" << Network::my_node_id
+                        << " refs:" << references.load() << " count:" << count;
       references.fetch_add_acqrel(count);
     }
   }
@@ -315,6 +320,8 @@ namespace Realm {
   {
     if(need_refcount) {
       assert(references.load() >= count);
+      log_dpops.print() << "Pre RemRef me:" << me << " N:" << Network::my_node_id
+                        << " refs:" << references.load() << " count:" << count;
       if(references.fetch_sub_acqrel(count) == count) {
         assert(Network::my_node_id == NodeID(me.sparsity_creator_node()) ||
                subscribers.empty());
