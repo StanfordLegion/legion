@@ -389,7 +389,7 @@ namespace Realm {
     bool aliasing_possible;
     size_t subfield_offset;
     std::vector<RegionInstance> insts;
-    Channel* addrsplit_channel;
+    Channel *addrsplit_channel;
   };
 
   ////////////////////////////////////////////////////////////////////////
