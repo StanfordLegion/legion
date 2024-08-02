@@ -3304,6 +3304,14 @@ namespace Legion {
           end_context_wait(local_ctx, false/*from application*/);
         // When we wake up, notify that we are done and exited the wait
         local_lock_list_copy->advise_sleep_exit();
+        // If we're profiling we need to record that we triggered this
+        // event as it will help us hook up the critical path for
+        // local lock acquires
+        if (implicit_profiler != NULL)
+        {
+          const LgEvent to_trigger(done);
+          to_trigger.record_event_trigger(LgEvent::NO_LG_EVENT);
+        }
         // Trigger the user-event
         done.trigger();
         // Restore our local lock list
@@ -3388,6 +3396,14 @@ namespace Legion {
           end_context_wait(local_ctx, from_app);
         // When we wake up, notify that we are done and exited the wait
         local_lock_list_copy->advise_sleep_exit();
+        // If we're profiling we need to record that we triggered this
+        // event as it will help us hook up the critical path for
+        // local lock acquires
+        if (implicit_profiler != NULL)
+        {
+          const LgEvent to_trigger(done);
+          to_trigger.record_event_trigger(LgEvent::NO_LG_EVENT);
+        }
         // Trigger the user-event
         done.trigger();
         // Restore our local lock list
