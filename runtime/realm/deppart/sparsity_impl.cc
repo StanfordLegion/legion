@@ -276,17 +276,20 @@ namespace Realm {
     assert(subscribers.empty());
 
     void *impl = map_impl.load();
-    assert(impl != nullptr);
-    //if(impl != nullptr) {
+
+    log_dpops.print() << "Recycle me:" << me << " N:" << Network::my_node_id
+                      << " owner:" << NodeID(ID(me).sparsity_creator_node())
+                      << " has_impl:" << (impl != nullptr)
+                      << " refs:" << references.load();
+
+    if(impl != nullptr) {
       assert(map_deleter);
       (*map_deleter)(impl);
       map_impl.store(0);
       type_tag.store(0);
-    //}
+    }
 
     if(Network::my_node_id == NodeID(ID(me).sparsity_creator_node())) {
-      log_dpops.print() << "FREE me:" << me << " N:" << Network::my_node_id
-                        << " refs:" << references.load();
       get_runtime()->free_sparsity_impl(this);
     }
   }
