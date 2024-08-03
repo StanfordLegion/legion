@@ -1323,24 +1323,27 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool PhysicalManager::register_deletion_subscriber(
-                                         InstanceDeletionSubscriber *subscriber)
+                  InstanceDeletionSubscriber *subscriber, bool allow_duplicates)
     //--------------------------------------------------------------------------
     {
+      bool result = false;
       subscriber->add_subscriber_reference(this);
       {
         AutoLock inst(inst_lock);
         if (gc_state != COLLECTED_GC_STATE)
         {
+          if (subscribers.insert(subscriber).second)
+            return true;
 #ifdef DEBUG_LEGION
-          assert(subscribers.find(subscriber) == subscribers.end());
+          assert(allow_duplicates);
 #endif
-          subscribers.insert(subscriber);
-          return true;
+          result = true;
+          // Fall through to remove the duplicate reference on the subscriber
         }
       }
       if (subscriber->remove_subscriber_reference(this))
         delete subscriber;
-      return false;
+      return result;
     }
 
     //--------------------------------------------------------------------------

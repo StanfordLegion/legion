@@ -421,8 +421,10 @@ namespace Legion {
       IndividualView* construct_top_view(AddressSpaceID logical_owner,
                                          DistributedID did, InnerContext *ctx,
                                          CollectiveMapping *mapping);
-      bool register_deletion_subscriber(InstanceDeletionSubscriber *subscriber);
-      void unregister_deletion_subscriber(InstanceDeletionSubscriber *subscrib);
+      bool register_deletion_subscriber(InstanceDeletionSubscriber *subscriber,
+                                        bool allow_duplicates = false);
+      void unregister_deletion_subscriber(
+                                        InstanceDeletionSubscriber *subscriber);
       void unregister_active_context(InnerContext *context); 
     public:
       PieceIteratorImpl* create_piece_iterator(IndexSpaceNode *privilege_node);

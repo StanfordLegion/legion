@@ -252,12 +252,11 @@ namespace Realm {
     bool can_allocate(TT tag, RT size, RT alignment);
     bool allocate(TT tag, RT size, RT alignment, RT& first);
     void deallocate(TT tag, bool missing_ok = false);
+
     bool lookup(TT tag, RT& first, RT& size);
     size_t split_range(TT old_tag, const std::vector<TT> &new_tags,
                        const std::vector<RT> &sizes, const std::vector<RT> &alignment,
                        std::vector<RT> &allocs_first);
-
-    unsigned insert_free_block(unsigned prev_idx, RT alloc_first, RT alloc_last);
 
     // TODO(apryakhin@): consider ifdefing for debug builds only
     void dump_allocator_status();
@@ -267,6 +266,7 @@ namespace Realm {
   protected:
     unsigned first_free_range;
     unsigned alloc_range(RT first, RT last);
+    void deallocate(unsigned del_idx);
     void free_range(unsigned index);
   };
 

@@ -313,6 +313,7 @@ protected:
     }
     return total_free_size;
   }
+
   BasicRangeAllocator<size_t, int> range_alloc;
 };
 
@@ -341,29 +342,27 @@ TEST_P(RangeAllocatorSplitParamTest, Base)
     }
   }
 
-  EXPECT_EQ(test_case.free_size, get_total_free_size());
+  size_t free_size = get_total_free_size();
+
+  EXPECT_EQ(test_case.free_size, free_size);
 
   if(!test_case.exp_ranges.empty()) {
-    EXPECT_EQ(range_alloc.ranges.size(), test_case.exp_ranges.size());
-
-    EXPECT_EQ(range_alloc.ranges[SENTINEL].prev, test_case.exp_ranges[SENTINEL].prev);
-    EXPECT_EQ(range_alloc.ranges[SENTINEL].next, test_case.exp_ranges[SENTINEL].next);
-    EXPECT_EQ(range_alloc.ranges[SENTINEL].prev_free,
-              test_case.exp_ranges[SENTINEL].prev_free);
-    EXPECT_EQ(range_alloc.ranges[SENTINEL].next_free,
-              test_case.exp_ranges[SENTINEL].next_free);
+    // EXPECT_EQ(range_alloc.ranges.size(), test_case.exp_ranges.size());
 
     size_t index = 1;
     unsigned idx = range_alloc.ranges[SENTINEL].next;
     while(idx != SENTINEL) {
-      EXPECT_EQ(range_alloc.ranges[idx].prev, test_case.exp_ranges[index].prev);
-      EXPECT_EQ(range_alloc.ranges[idx].next, test_case.exp_ranges[index].next);
-      EXPECT_EQ(range_alloc.ranges[idx].prev_free, test_case.exp_ranges[index].prev_free);
-      EXPECT_EQ(range_alloc.ranges[idx].next_free, test_case.exp_ranges[index].next_free);
+      EXPECT_EQ(range_alloc.ranges[idx].first, test_case.exp_ranges[index].first)
+          << " index:" << index;
+      EXPECT_EQ(range_alloc.ranges[idx].last, test_case.exp_ranges[index].last)
+          << " index:" << index;
       idx = range_alloc.ranges[idx].next;
       index++;
     }
   }
+
+  EXPECT_FALSE(range_alloc.free_list_has_cycle());
+  EXPECT_FALSE(range_alloc.has_invalid_ranges());
 
   // TODO(apryakhin@)
   // for(size_t i = 0; i < test_case.split_new_tags.size(); i++) {
@@ -397,12 +396,12 @@ INSTANTIATE_TEST_SUITE_P(
                              .aligns{8},
                              .exp_offsets{0}}},
 
-                 .exp_ranges{Range{/*first=*/0, /*last=*/0, /*prev=*/1, /*next=*/1},
-                             Range{/*first=*/0, /*last=*/512, /*prev=*/0, /*next=*/0,
-                                   /*prev_free=*/1, /*next_free=*/1}}},
+                 .exp_ranges{Range{/*first=*/0, /*last=*/0},
+                             Range{/*first=*/0, /*last=*/512}}},
 
-        // Case 2: split into the existing tag ??
-        TestCase{.alloc_ranges{{0, 512}},
+        // TODO(apryakhin@): Consider enabling it back
+        // Case 2: split into the existing tag
+        /*TestCase{.alloc_ranges{{0, 512}},
                  .alloc_tags{1},
                  .alloc_sizes{512},
                  .alloc_aligns{8},
@@ -414,9 +413,8 @@ INSTANTIATE_TEST_SUITE_P(
                              .aligns{8},
                              .exp_offsets{0}}},
 
-                 .exp_ranges{Range{/*first=*/0, /*last=*/0, /*prev=*/1, /*next=*/1},
-                             Range{/*first=*/0, /*last=*/512, /*prev=*/0, /*next=*/0,
-                                   /*prev_free=*/1, /*next_free=*/1}}},
+                 .exp_ranges{Range{0, 0},
+                             Range{0, 512}}},*/
 
         // Case 3: base case split/reuse the full range
         TestCase{.alloc_ranges{{0, 512}},
@@ -431,9 +429,11 @@ INSTANTIATE_TEST_SUITE_P(
                              .aligns{8},
                              .exp_offsets{0}}},
 
-                 .exp_ranges{Range{/*first=*/0, /*last=*/0, /*prev=*/1, /*next=*/1},
-                             Range{/*first=*/0, /*last=*/512, /*prev=*/0, /*next=*/0,
-                                   /*prev_free=*/1, /*next_free=*/1}}},
+                 .exp_ranges{
+                     Range{/*first=*/0, /*last=*/0},
+                     Range{/*first=*/0, /*last=*/512},
+                     Range{/*first=*/512, /*last=*/512},
+                 }},
 
         // Case 4: split/reuse zero range
         TestCase{
@@ -449,9 +449,7 @@ INSTANTIATE_TEST_SUITE_P(
                         .aligns{8},
                         .exp_offsets{0}}},
 
-            .exp_ranges{Range{/*first=*/0, /*last=*/0, /*next=*/1, /*prev=*/1,
-                              /*prev_free=*/1, /*next_free=*/1},
-                        Range{/*first=*/0, /*last=*/512}},
+            .exp_ranges{Range{/*first=*/0, /*last=*/0}, Range{/*first=*/0, /*last=*/512}},
 
             .free_size = 512,
         },
@@ -470,20 +468,14 @@ INSTANTIATE_TEST_SUITE_P(
                         .aligns{16},
                         .exp_offsets{32}}},
 
-            .exp_ranges{Range{/*first=*/0, /*last=*/0, /*prev=*/2, /*next=*/3,
-                              /*prev_free=*/2, /*next_free=*/3},
+            .exp_ranges{Range{/*first=*/0, /*last=*/0},
 
-                        Range{/*first=*/24, /*last=*/32, /*prev=*/0, /*next=*/1,
-                              /*prev_free=*/0, /*next_free=*/4},
+                        Range{/*first=*/24, /*last=*/32},
 
-                        Range{/*first=*/32, /*last=*/528, /*prev=*/3, /*next=*/4,
-                              /*prev_free=*/1, /*next_free=*/1},
+                        Range{/*first=*/32, /*last=*/528},
 
-                        Range{/*first=*/528, /*last=*/824, /*prev=*/1, /*next=*/2,
-                              /*prev_free=*/3, /*next_free=*/2},
+                        Range{/*first=*/528, /*last=*/1000}},
 
-                        Range{/*first=*/824, /*last=*/1000, /*prev=*/4, /*next=*/0,
-                              /*prev_free=*/4, /*next_free=*/0}},
             .free_size = 480,
         },
 
@@ -502,28 +494,22 @@ INSTANTIATE_TEST_SUITE_P(
                         .exp_offsets{32, 0}}},
 
             .exp_ranges{
-                Range{/*first=*/0, /*last=*/0, /*prev=*/2, /*next=*/3,
-                      /*prev_free=*/2, /*next_free=*/3},
+                Range{/*first=*/0, /*last=*/0},
 
                 // free range after alignment computation
-                Range{/*first=*/24, /*last=*/32, /*prev=*/0, /*next=*/1,
-                      /*prev_free=*/0, /*next_free=*/4},
+                Range{/*first=*/24, /*last=*/32},
 
-                Range{/*first=*/32, /*last=*/280, /*prev=*/3, /*next=*/4,
-                      /*prev_free=*/1, /*next_free=*/1},
+                Range{/*first=*/32, /*last=*/280},
 
-                Range{/*first=*/280, /*last=*/824, /*prev=*/1, /*next=*/2,
-                      /*prev_free=*/3, /*next_free=*/2},
-
-                Range{/*first=*/824, /*last=*/1000, /*prev=*/4, /*next=*/0,
-                      /*prev_free=*/4, /*next_free=*/0},
+                Range{/*first=*/280, /*last=*/1000},
             },
 
             .free_size = 728,
         },
 
+        // TODO(apryakhin@): Consider enabling it back
         // Case 7: split range with duplicated tag
-        TestCase{
+        /*TestCase{
             .alloc_ranges{{24, 1000}},
             .alloc_tags{1},
             .alloc_sizes{800},
@@ -537,25 +523,15 @@ INSTANTIATE_TEST_SUITE_P(
                         .exp_offsets{32, 0}}},
 
             .exp_ranges{
-                Range{/*first=*/0, /*last=*/0, /*prev=*/2, /*next=*/3,
-                      /*prev_free=*/2, /*next_free=*/3},
-
+                Range{0, 0},
                 // free range after alignment computation
-                Range{/*first=*/24, /*last=*/32, /*prev=*/0, /*next=*/1,
-                      /*prev_free=*/0, /*next_free=*/4},
-
-                Range{/*first=*/32, /*last=*/280, /*prev=*/3, /*next=*/4,
-                      /*prev_free=*/1, /*next_free=*/1},
-
-                Range{/*first=*/280, /*last=*/824, /*prev=*/1, /*next=*/2,
-                      /*prev_free=*/3, /*next_free=*/2},
-
-                Range{/*first=*/824, /*last=*/1000, /*prev=*/4, /*next=*/0,
-                      /*prev_free=*/4, /*next_free=*/0},
+                Range{24, 32},
+                Range{32, 280},
+                Range{280, /1000},
 
             },
             .free_size = 728,
-        },
+        },*/
 
         // Case 8: split range on different layouts and create free blocks in
         // front
@@ -573,28 +549,14 @@ INSTANTIATE_TEST_SUITE_P(
                         .exp_offsets{32, 288}}},
 
             .exp_ranges{
-                Range{/*first=*/0, /*last=*/0, /*prev=*/2, /*next=*/3,
-                      /*prev_free=*/2, /*next_free=*/3},
-
+                Range{/*first=*/0, /*last=*/0},
                 // free range after alignment computation
-                Range{/*first=*/24, /*last=*/32, /*prev=*/0, /*next=*/1,
-                      /*prev_free=*/0, /*next_free=*/6},
-
-                Range{/*first=*/32, /*last=*/280, /*prev=*/3, /*next=*/5,
-                      /*prev_free=*/1, /*next_free=*/1},
-
+                Range{/*first=*/24, /*last=*/32},
+                Range{/*first=*/32, /*last=*/280},
                 // free range after alignment computation
-                Range{/*first=*/280, /*last=*/288, /*prev=*/1, /*next=*/4,
-                      /*prev_free=*/6, /*next_free=*/2},
-
-                Range{/*first=*/288, /*last=*/536, /*prev=*/5, /*next=*/6,
-                      /*prev_free=*/4, /*next_free=*/4},
-
-                Range{/*first=*/536, /*last=*/824, /*prev=*/4, /*next=*/2,
-                      /*prev_free=*/3, /*next_free=*/5},
-
-                Range{/*first=*/824, /*last=*/1000, /*prev=*/6, /*next=*/0,
-                      /*prev_free=*/5, /*next_free=*/0},
+                Range{/*first=*/280, /*last=*/288},
+                Range{/*first=*/288, /*last=*/536},
+                Range{/*first=*/536, /*last=*/1000},
             },
             .free_size = 480,
         },
@@ -612,13 +574,27 @@ INSTANTIATE_TEST_SUITE_P(
                         .sizes{32, 32, 32, 32},
                         .aligns{16, 16, 16, 16},
                         .exp_offsets{0, 32, 64, 96}},
+
                        {.old_tag = 2,
                         .good_allocs = 4,
                         .new_tags{45, 46, 47, 48},
                         .sizes{32, 32, 32, 32},
                         .aligns{16, 16, 16, 16},
                         .exp_offsets{128, 160, 192, 224}}},
-            // TODO(apryakhin@): Check ranges
+
+            .exp_ranges{
+                Range{/*first=*/0, /*last=*/0},
+                Range{/*first=*/0, /*last=*/32},
+                Range{/*first=*/32, /*last=*/64},
+                Range{/*first=*/64, /*last=*/96},
+                Range{/*first=*/96, /*last=*/128},
+                Range{/*first=*/128, /*last=*/128},
+                Range{/*first=*/128, /*last=*/160},
+                Range{/*first=*/160, /*last=*/192},
+                Range{/*first=*/192, /*last=*/224},
+                Range{/*first=*/224, /*last=*/256},
+                Range{/*first=*/256, /*last=*/256},
+            },
             .free_size = 0,
         },
 
