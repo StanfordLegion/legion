@@ -19,6 +19,8 @@
 #define REALM_DYNAMIC_TABLE_H
 
 #include "realm/atomics.h"
+#include "realm/id.h"
+#include "realm/mutex.h"
 
 namespace Realm {
 
@@ -111,7 +113,33 @@ namespace Realm {
       atomic<ET *> first_free;
       IT next_alloc;
     };
-	
+
+    template <typename _ET, size_t _INNER_BITS, size_t _LEAF_BITS>
+    class DynamicTableAllocator {
+    public:
+      typedef _ET ET;
+      static const size_t INNER_BITS = _INNER_BITS;
+      static const size_t LEAF_BITS = _LEAF_BITS;
+
+      typedef Mutex LT;
+      typedef ID::IDType IT;
+      typedef DynamicTableNode<atomic<DynamicTableNodeBase<LT, IT> *>, 1 << INNER_BITS,
+                               LT, IT>
+          INNER_TYPE;
+      typedef DynamicTableNode<ET, 1 << LEAF_BITS, LT, IT> LEAF_TYPE;
+      typedef DynamicTableFreeList<DynamicTableAllocator<ET, _INNER_BITS, _LEAF_BITS>>
+          FreeList;
+
+      static std::vector<FreeList *> &get_registered_freelists(Mutex *&lock);
+
+      static void register_freelist(FreeList *free_list);
+
+      static ET *steal_freelist_element(FreeList *requestor = nullptr);
+
+      static LEAF_TYPE *new_leaf_node(IT first_index, IT last_index, int owner,
+                                      ET **free_list_head, ET **free_list_tail);
+    };
+
 }; // namespace Realm
 
 #include "realm/dynamic_table.inl"

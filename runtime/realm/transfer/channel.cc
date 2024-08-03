@@ -1324,6 +1324,8 @@ namespace Realm {
                                            size_t total_write_bytes)
   {
     bool in_done = false;
+    assert(input_control.remaining_count >= total_read_bytes);
+    assert(output_control.remaining_count >= total_write_bytes);
     if(input_control.current_io_port >= 0) {
       XferPort *in_port = &input_ports[input_control.current_io_port];
 
@@ -4078,6 +4080,34 @@ namespace Realm {
       }
   }
 
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class ChannelCopyInfo
+  //
+
+  std::ostream &operator<<(std::ostream &os, const ChannelCopyInfo &info)
+  {
+    os << "ChannelCopyInfo { "
+       << "src_mem: " << info.src_mem << ", "
+       << "dst_mem: " << info.dst_mem << ", "
+       << "ind_mem: " << info.ind_mem << ", "
+       << "num_spaces: " << info.num_spaces << ", "
+       << "is_scatter: " << info.is_scatter << ", "
+       << "is_ranges: " << info.is_ranges << ", "
+       << "is_direct: " << info.is_direct << ", "
+       << "oor_possible: " << info.oor_possible << ", "
+       << "addr_size: " << info.addr_size << " }";
+    return os;
+  }
+
+  bool operator==(const ChannelCopyInfo &lhs, const ChannelCopyInfo &rhs)
+  {
+    return lhs.src_mem == rhs.src_mem && lhs.dst_mem == rhs.dst_mem &&
+           lhs.ind_mem == rhs.ind_mem && lhs.num_spaces == rhs.num_spaces &&
+           lhs.is_scatter == rhs.is_scatter && lhs.is_ranges == rhs.is_ranges &&
+           lhs.is_direct == rhs.is_direct && lhs.oor_possible == rhs.oor_possible &&
+           lhs.addr_size == rhs.addr_size;
+  }
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -5591,8 +5621,8 @@ namespace Realm {
 						      XFER_MEM_FILL,
 						      "memfill channel")
   {
-    unsigned bw = 10000; // HACK - estimate at 10 GB/s
-    unsigned latency = 100; // HACK - estimate at 100ns
+    unsigned bw = 128000;         // HACK - estimate at 128 GB/s
+    unsigned latency = 100;       // HACK - estimate at 100ns
     unsigned frag_overhead = 100; // HACK - estimate at 100ns
 
     // all local cpu memories are valid dests

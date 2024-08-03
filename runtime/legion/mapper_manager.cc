@@ -1750,7 +1750,8 @@ namespace Legion {
         return false;
       pause_mapper_call(ctx);
       PhysicalManager *manager = instance.impl->as_physical_manager();
-      const bool result = manager->register_deletion_subscriber(this);
+      const bool result =
+        manager->register_deletion_subscriber(this, true/*allow duplicates*/);
       resume_mapper_call(ctx, MAPPER_SUBSCRIBE_INSTANCE_CALL);
       return result;
     }
