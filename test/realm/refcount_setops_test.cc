@@ -36,7 +36,7 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
 {
   //TaskArgs &task_args = *(TaskArgs *)args;
 
-  /*{
+  {
     IndexSpace<1> result;
 
     std::vector<Rect<1>> rects0;
@@ -106,7 +106,7 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
     assert(!result.dense());
     result.sparsity.destroy();
     is0.sparsity.destroy();
-  }*/
+  }
 
   {
     IndexSpace<1> result;
