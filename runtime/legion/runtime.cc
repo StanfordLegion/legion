@@ -11622,7 +11622,7 @@ namespace Legion {
     VirtualChannel::VirtualChannel(VirtualChannelKind kind, 
         AddressSpaceID local_address_space, size_t max_message_size, 
         bool profile_outgoing)
-      : sending_buffer((char*)malloc(max_message_size)), 
+      : sending_buffer((uint8_t*)malloc(max_message_size)), 
         sending_buffer_size(max_message_size), 
         ordered_channel((kind != DEFAULT_VIRTUAL_CHANNEL) &&
                         (kind != THROUGHPUT_VIRTUAL_CHANNEL)), 
@@ -11638,7 +11638,7 @@ namespace Legion {
     //
     {
       receiving_buffer_size = max_message_size;
-      receiving_buffer = (char*)legion_malloc(MESSAGE_BUFFER_ALLOC,
+      receiving_buffer = (uint8_t*)legion_malloc(MESSAGE_BUFFER_ALLOC,
                                               receiving_buffer_size);
 #ifdef DEBUG_LEGION
       assert(sending_buffer != NULL);
@@ -11649,21 +11649,22 @@ namespace Legion {
       // expects this before the task ID. We'll actually have individual
       // implicit provenances that will override this when handling the
       // messages so we can just set this to zero.
-      *((UniqueID*)sending_buffer) = 0;
+      memset(sending_buffer, 0, sizeof(UniqueID));
       sending_index = sizeof(UniqueID);
 #ifdef DEBUG_LEGION_CALLERS
-      *((LgTaskID*)(((char*)sending_buffer)+sending_index)) = LG_SCHEDULER_ID;
-      sending_index += sizeof(LgTaskID);
+      const LgTaskID scheduler = LG_SCHEDULER_ID;
+      memcpy(sending_buffer+sending_index, &sched, sizeof(scheduler));
+      sending_index += sizeof(scheduler);
 #endif
       // Set up the buffer for sending the first batch of messages
       // Only need to write the processor once
-      *((LgTaskID*)(((char*)sending_buffer)+sending_index))= LG_MESSAGE_ID;
-      sending_index += sizeof(LgTaskID);
-      *((AddressSpaceID*)
-          (((char*)sending_buffer)+sending_index)) = local_address_space;
+      const LgTaskID message = LG_MESSAGE_ID;
+      memcpy(sending_buffer+sending_index, &message, sizeof(message));
+      sending_index += sizeof(message);
+      memcpy(sending_buffer+sending_index, &local_address_space,
+          sizeof(local_address_space));
       sending_index += sizeof(local_address_space);
-      *((VirtualChannelKind*)
-          (((char*)sending_buffer)+sending_index)) = kind;
+      memcpy(sending_buffer+sending_index, &kind, sizeof(kind));
       sending_index += sizeof(kind);
       header = FULL_MESSAGE;
       sending_index += sizeof(header);
@@ -11715,7 +11716,7 @@ namespace Legion {
       // First check to see if the message fits in the current buffer    
       // including the overhead for the message: kind and size
       size_t buffer_size = rez.get_used_bytes();
-      const char *buffer = (const char*)rez.get_buffer();
+      const uint8_t *buffer = (const uint8_t*)rez.get_buffer();
       const size_t header_size = 
 #ifdef DEBUG_LEGION_CALLERS
         sizeof(LgTaskID) +
@@ -11732,15 +11733,17 @@ namespace Legion {
                        response, flush_precondition);
         // Now can package up the meta data
         packaged_messages++;
-        *((MessageKind*)(sending_buffer+sending_index)) = k;
+        memcpy(sending_buffer+sending_index, &k, sizeof(k));
         sending_index += sizeof(k);
-        *((UniqueID*)(sending_buffer+sending_index)) = implicit_provenance;
+        memcpy(sending_buffer+sending_index, &implicit_provenance,
+            sizeof(implicit_provenance));
         sending_index += sizeof(implicit_provenance);
 #ifdef DEBUG_LEGION_CALLERS
-        *((LgTaskID*)(sending_buffer+sending_index)) = implicit_task_kind;
+        memcpy(sending_buffer+sending_index, &implicit_task_kind,
+            sizeof(implicit_task_kind));
         sending_index += sizeof(implicit_task_kind);
 #endif
-        *((size_t*)(sending_buffer+sending_index)) = buffer_size;
+        memcpy(sending_buffer+sending_index, &buffer_size, sizeof(buffer_size));
         sending_index += sizeof(buffer_size);
         while (buffer_size > 0)
         {
@@ -11765,15 +11768,17 @@ namespace Legion {
       {
         packaged_messages++;
         // Package up the kind and the size first
-        *((MessageKind*)(sending_buffer+sending_index)) = k;
+        memcpy(sending_buffer+sending_index, &k, sizeof(k));
         sending_index += sizeof(k);
-        *((UniqueID*)(sending_buffer+sending_index)) = implicit_provenance;
+        memcpy(sending_buffer+sending_index, &implicit_provenance, 
+            sizeof(implicit_provenance));
         sending_index += sizeof(implicit_provenance);
 #ifdef DEBUG_LEGION_CALLERS
-        *((LgTaskID*)(sending_buffer+sending_index)) = implicit_task_kind;
+        memcpy(sending_buffer+sending_index, &implicit_task_kind,
+            sizeof(implicit_task_kind));
         sending_index += sizeof(implicit_task_kind);
 #endif
-        *((size_t*)(sending_buffer+sending_index)) = buffer_size;
+        memcpy(sending_buffer+sending_index, &buffer_size, sizeof(buffer_size));
         sending_index += sizeof(buffer_size);
         // Then copy over the buffer
         memcpy(sending_buffer+sending_index,buffer,buffer_size); 
@@ -11825,9 +11830,9 @@ namespace Legion {
         sizeof(LgTaskID) +
 #endif
         sizeof(AddressSpaceID) + sizeof(VirtualChannelKind);
-      *((MessageHeader*)(sending_buffer + base_size)) = header;
-      *((unsigned*)(sending_buffer + base_size + sizeof(header))) = 
-                                                            packaged_messages;
+      memcpy(sending_buffer + base_size, &header, sizeof(header));
+      memcpy(sending_buffer + base_size + sizeof(header), &packaged_messages,
+            sizeof(packaged_messages));
       // Send the message directly there, don't go through the
       // runtime interface to avoid being counted, still include
       // a profiling request though if necessary in order to 
@@ -12031,11 +12036,13 @@ namespace Legion {
 #endif
       // Strip off our header and the number of messages, the 
       // processor part was already stipped off by the Legion runtime
-      const char *buffer = (const char*)args;
-      MessageHeader head = *((const MessageHeader*)buffer);
+      const uint8_t *buffer = (const uint8_t*)args;
+      MessageHeader head; 
+      memcpy(&head, buffer, sizeof(head));
       buffer += sizeof(head);
       arglen -= sizeof(head);
-      unsigned num_messages = *((const unsigned*)buffer);
+      unsigned num_messages;
+      memcpy(&num_messages, buffer, sizeof(num_messages));
       buffer += sizeof(num_messages);
       arglen -= sizeof(num_messages);
       unsigned incoming_message_id = 0;
@@ -12070,7 +12077,7 @@ namespace Legion {
                 // Same as max message size
                 message.size = sending_buffer_size;
                 message.buffer = 
-                  (char*)legion_malloc(MESSAGE_BUFFER_ALLOC, message.size);
+                  (uint8_t*)legion_malloc(MESSAGE_BUFFER_ALLOC, message.size);
               }
               buffer_messages(num_messages, buffer, arglen,
                               message.buffer, message.size,
@@ -12087,7 +12094,7 @@ namespace Legion {
           {
             // Save the remaining messages onto the receiving
             // buffer, then handle them and reset the state.
-            char *final_buffer = NULL;
+            uint8_t *final_buffer = NULL;
             size_t final_index = 0;
             unsigned final_messages = 0;
             bool free_buffer = false;
@@ -12140,7 +12147,8 @@ namespace Legion {
     void VirtualChannel::handle_messages(unsigned num_messages,
                                          Runtime *runtime,
                                          AddressSpaceID remote_address_space,
-                                         const char *args, size_t arglen) const
+                                         const uint8_t *args,
+                                         size_t arglen) const
     //--------------------------------------------------------------------------
     {
       for (unsigned idx = 0; idx < num_messages; idx++)
@@ -12149,23 +12157,25 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(arglen >= (sizeof(MessageKind)+sizeof(size_t)));
 #endif
-        MessageKind kind = *((const MessageKind*)args);
+        MessageKind kind;
+        memcpy(&kind, args, sizeof(kind));
         // Any message that is not a shutdown message needs to be recorded
         if (!observed_recent && (kind != SEND_SHUTDOWN_NOTIFICATION) &&
             (kind != SEND_SHUTDOWN_RESPONSE))
           observed_recent = true;
         args += sizeof(kind);
         arglen -= sizeof(kind);
-        implicit_provenance = *((const UniqueID*)args);
+        memcpy(&implicit_provenance, args, sizeof(implicit_provenance));
         args += sizeof(implicit_provenance);
         arglen -= sizeof(implicit_provenance);
 #ifdef DEBUG_LEGION_CALLERS
         implicit_task_kind = (LgTaskID)(LG_MESSAGE_ID + kind);
-        implicit_task_caller = *((const LgTaskID*)args);
+        memcpy(&implicit_task_caller, args, sizeof(implicit_task_caller));
         args += sizeof(implicit_task_caller);
         arglen -= sizeof(implicit_task_caller);
 #endif
-        size_t message_size = *((const size_t*)args);
+        size_t message_size;
+        memcpy(&message_size, args, sizeof(message_size));
         args += sizeof(message_size);
         arglen -= sizeof(message_size);
 #ifdef DEBUG_LEGION
@@ -13730,7 +13740,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     /*static*/ void VirtualChannel::buffer_messages(unsigned num_messages,
                                          const void *args, size_t arglen,
-                                         char *&receiving_buffer,
+                                         uint8_t *&receiving_buffer,
                                          size_t &receiving_buffer_size,
                                          size_t &receiving_index,
                                          unsigned &received_messages,
@@ -13757,7 +13767,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(new_ptr != NULL);
 #endif
-        receiving_buffer = (char*)new_ptr;
+        receiving_buffer = (uint8_t*)new_ptr;
       }
       // Copy the data in
       memcpy(receiving_buffer+receiving_index,args,arglen);

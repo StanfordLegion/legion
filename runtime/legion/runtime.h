@@ -1823,7 +1823,7 @@ namespace Legion {
         PartialMessage(void)
           : buffer(NULL), size(0), index(0), messages(0), total(0) { }
       public:
-        char *buffer;
+        uint8_t *buffer;
         size_t size;
         size_t index;
         unsigned messages;
@@ -1850,10 +1850,10 @@ namespace Legion {
                         RtEvent send_precondition);
       void handle_messages(unsigned num_messages, Runtime *runtime, 
                            AddressSpaceID remote_address_space,
-                           const char *args, size_t arglen) const;
+                           const uint8_t *args, size_t arglen) const;
       static void buffer_messages(unsigned num_messages,
                                   const void *args, size_t arglen,
-                                  char *&receiving_buffer,
+                                  uint8_t *&receiving_buffer,
                                   size_t &receiving_buffer_size,
                                   size_t &receiving_index,
                                   unsigned &received_messages,
@@ -1861,7 +1861,7 @@ namespace Legion {
       void filter_unordered_events(void);
     private:
       mutable LocalLock channel_lock;
-      char *const sending_buffer;
+      uint8_t *const sending_buffer;
       unsigned sending_index;
       const size_t sending_buffer_size;
       RtEvent last_message_event;
@@ -1884,7 +1884,7 @@ namespace Legion {
       // that they are ordered for ordered virtual
       // channels, for un-ordered virtual channels then
       // we know that we do need the lock
-      char *receiving_buffer;
+      uint8_t *receiving_buffer;
       size_t receiving_buffer_size;
       size_t receiving_index;
       unsigned received_messages;
