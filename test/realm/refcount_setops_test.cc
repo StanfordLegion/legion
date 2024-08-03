@@ -34,7 +34,7 @@ namespace TestConfig {
 void node_task(const void *args, size_t arglen, const void *userdata, size_t userlen,
                Processor p)
 {
-  TaskArgs &task_args = *(TaskArgs *)args;
+  //TaskArgs &task_args = *(TaskArgs *)args;
 
   /*{
     IndexSpace<1> result;
@@ -331,7 +331,7 @@ void main_task(const void *args, size_t arglen, const void *userdata, size_t use
 
       break; // TODO
 
-      roots.push_back(IndexSpace<1>(rects));
+      /*roots.push_back(IndexSpace<1>(rects));
       roots.back().sparsity.add_references();
 
       std::vector<IndexSpace<1>> lhs;
@@ -350,7 +350,7 @@ void main_task(const void *args, size_t arglen, const void *userdata, size_t use
       for(int i = 0; i < NUM_INSTS; i++) {
         args.lhs[id][i] = lhs[i];
         args.rhs[id][i] = rhs_diff[i];
-      }
+      }*/
     }
 
     /*if((TestConfig::remote_create) &&

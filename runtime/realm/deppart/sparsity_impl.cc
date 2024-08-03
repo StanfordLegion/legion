@@ -282,10 +282,6 @@ namespace Realm {
                       << " has_impl:" << (impl != nullptr)
                       << " refs:" << references.load();
 
-    if(Network::my_node_id == NodeID(ID(me).sparsity_creator_node())) {
-      assert(impl != nullptr);
-    }
-
     if(impl != nullptr) {
       assert(map_deleter);
       (*map_deleter)(impl);
