@@ -1225,7 +1225,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool FutureImpl::request_application_instance(Memory target,
-                 SingleTask *task, bool can_fail, size_t known_upper_bound_size)
+                 SingleTask *task, bool &safe_for_unbounded_pools,
+                 bool can_fail, size_t known_upper_bound_size)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1251,6 +1252,10 @@ namespace Legion {
           rez.serialize(known_upper_bound_size);
           rez.serialize(task_uid);
           coordinates.serialize(rez);
+          if (!safe_for_unbounded_pools)
+            rez.serialize(&safe_for_unbounded_pools);
+          else
+            rez.serialize<bool*>(NULL);
           rez.serialize(wait_on);
           rez.serialize(&result);
         }
@@ -1260,9 +1265,10 @@ namespace Legion {
           return true;
       }
       else if (find_or_create_application_instance(target, 
-                known_upper_bound_size, task_uid, coordinates))
+            known_upper_bound_size, task_uid, coordinates,
+            safe_for_unbounded_pools))
         return true;
-      if (!can_fail)
+      if (!can_fail && safe_for_unbounded_pools)
       {
         const char *mem_names[] = {
 #define MEM_NAMES(name, desc) #name,
@@ -1282,8 +1288,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool FutureImpl::find_or_create_application_instance(Memory target,
-          size_t known_upper_bound_size, UniqueID task_uid,
-          const TaskTreeCoordinates &coordinates)
+         size_t known_upper_bound_size, UniqueID task_uid,
+         const TaskTreeCoordinates &coordinates, bool &safe_for_unbounded_pools)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1341,8 +1347,8 @@ namespace Legion {
 #endif
       // Create the future instance of the given size
       MemoryManager *manager = runtime->find_memory_manager(target);
-      FutureInstance *instance = manager->create_future_instance(
-          task_uid, coordinates, known_upper_bound_size);
+      FutureInstance *instance = manager->create_future_instance(task_uid,
+          coordinates, known_upper_bound_size, safe_for_unbounded_pools);
       if (instance == NULL)
         return false;
       // Retake the lock and register the instance in the right place
@@ -1450,8 +1456,11 @@ namespace Legion {
       op->compute_task_tree_coordinates(coordinates);
       MemoryManager *manager = 
         runtime->find_memory_manager(runtime->runtime_system_memory);
+      // Safe to block here indefinitely waiting for unbounded pools
+      bool safe_for_unbounded_pools = true;
       FutureInstance *instance = manager->create_future_instance(
-          op->get_unique_op_id(), coordinates, known_upper_bound_size);
+          op->get_unique_op_id(), coordinates, known_upper_bound_size,
+          safe_for_unbounded_pools);
       if (instance == NULL)
         REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
           "Failed to allocate future for %s (UID %lld) in parent task %s "
@@ -1847,7 +1856,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FutureImpl::set_result(Operation *op, FutureImpl *previous)
+    void FutureImpl::set_result(Operation *op, FutureImpl *previous,
+                                bool &safe_for_unbounded_pools)
     //--------------------------------------------------------------------------
     {
       const RtEvent subscribed = previous->subscribe();
@@ -1859,7 +1869,8 @@ namespace Legion {
       FutureInstance *instance = NULL;
       if (size > 0)
       {
-        instance = create_instance(op, runtime->runtime_system_memory, size);
+        instance = create_instance(op, runtime->runtime_system_memory,
+            size, safe_for_unbounded_pools);
         ready = previous->copy_to(instance, op, ApEvent::NO_AP_EVENT);
       }
       AutoLock f_lock(future_lock);
@@ -2146,8 +2157,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FutureInstance* FutureImpl::create_instance(Operation *op, 
-                                                Memory memory, size_t size)
+    FutureInstance* FutureImpl::create_instance(Operation *op, Memory memory,
+        size_t size, bool &safe_for_unbounded_pools)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2159,7 +2170,7 @@ namespace Legion {
       TaskTreeCoordinates coordinates;
       op->compute_task_tree_coordinates(coordinates);
       FutureInstance *instance = manager->create_future_instance(
-          op->get_unique_op_id(), coordinates, size);
+          op->get_unique_op_id(), coordinates, size, safe_for_unbounded_pools);
       if (instance == NULL)
         REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
           "Failed to allocate future of %zd bytes for %s (UID %lld) "
@@ -2814,8 +2825,10 @@ namespace Legion {
             // stage of the pipeline for some operation, but it's a "small"
             // future and it's going to the host memory so it will hit the
             // path that just calls malloc and not perform an allocation
-            FutureInstance *instance = create_instance(
-              context->owner_task, runtime->runtime_system_memory, future_size);
+            bool safe_for_unbounded_pools = true;
+            FutureInstance *instance = create_instance(context->owner_task,
+                runtime->runtime_system_memory, future_size,
+                safe_for_unbounded_pools);
             inst_ready = record_instance(instance, context->get_unique_id());
 #ifdef DEBUG_LEGION
             assert(local_visible_memory.exists());
@@ -2926,9 +2939,10 @@ namespace Legion {
               // stage of the pipeline for some operation, but it's a "small"
               // future and it's going to the host memory so it will hit the
               // path that just calls malloc and not perform an allocation
+              bool safe_for_unbounded_pools = true;
               FutureInstance *instance = create_instance(
                   context->owner_task, runtime->runtime_system_memory,
-                  future_size);
+                  future_size, safe_for_unbounded_pools);
               local_visible_ready = 
                 record_instance(instance, context->get_unique_id());
 #ifdef DEBUG_LEGION
@@ -3181,17 +3195,24 @@ namespace Legion {
       derez.deserialize(creator_uid);
       TaskTreeCoordinates coordinates;
       coordinates.deserialize(derez);
+      bool *remote_safe_for_unbounded_pools;
+      derez.deserialize(remote_safe_for_unbounded_pools);
       RtUserEvent done_event;
       derez.deserialize(done_event);
       bool *result;
       derez.deserialize(result);
+
+      bool safe_for_unbounded_pools = (remote_safe_for_unbounded_pools == NULL);
       if (!f.impl->find_or_create_application_instance(target,
-            known_upper_bound_size, creator_uid, coordinates))
+            known_upper_bound_size, creator_uid, coordinates,
+            safe_for_unbounded_pools))
       {
         Serializer rez;
         {
           RezCheck z(rez);
           rez.serialize(result);
+          rez.serialize(remote_safe_for_unbounded_pools);
+          rez.serialize<bool>(safe_for_unbounded_pools);
           rez.serialize(done_event);
         }
         runtime->send_future_create_instance_response(source, rez);
@@ -3209,6 +3230,9 @@ namespace Legion {
       bool *result;
       derez.deserialize(result);
       *result = false;
+      bool *safe_for_unbounded_pools;
+      derez.deserialize(safe_for_unbounded_pools);
+      derez.deserialize<bool>(*safe_for_unbounded_pools);
       RtUserEvent done_event;
       derez.deserialize(done_event);
       Runtime::trigger_event(done_event);
@@ -3885,6 +3909,13 @@ namespace Legion {
         // Not packed by value
         return false;
       }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void FutureInstance::pack_null(Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize<size_t>(0);
     }
 
     //--------------------------------------------------------------------------
@@ -9504,7 +9535,10 @@ namespace Legion {
       assert(!released);
       assert(manager != NULL);
 #endif
-      return manager->create_future_instance(creator_uid, coordinates, size);
+      // This is safe for unbounded pools because we are the unbounded pool :)
+      bool safe_for_unbounded_pools = true;
+      return manager->create_future_instance(creator_uid, coordinates, size,
+          safe_for_unbounded_pools);
     }
 
     //--------------------------------------------------------------------------
@@ -9517,8 +9551,10 @@ namespace Legion {
       assert(!released);
       assert(manager != NULL);
 #endif
+      // We are the unbound pool so it is always safe for us
+      bool safe_for_unbound_pools = true;
       return manager->create_task_local_instance(creator_uid, coordinates,
-          unique_event, layout, use_event);
+          unique_event, layout, use_event, safe_for_unbound_pools);
     }
 
     //--------------------------------------------------------------------------
@@ -9857,6 +9893,7 @@ namespace Legion {
                                 GCPriority priority, bool tight_bounds,
                                 LayoutConstraintKind *unsat_kind,
                                 unsigned *unsat_index, size_t *footprint, 
+                                bool &safe_for_unbounded_pools,
                                 UniqueID creator_id, bool remote)
     //--------------------------------------------------------------------------
     {
@@ -9883,6 +9920,10 @@ namespace Legion {
           rez.serialize(unsat_kind);
           rez.serialize(unsat_index);
           rez.serialize(footprint);
+          if (!safe_for_unbounded_pools)
+            rez.serialize(&safe_for_unbounded_pools);
+          else
+            rez.serialize<bool*>(NULL);
           rez.serialize(creator_id);
           rez.serialize(&remote_manager);
           rez.serialize(&success);
@@ -9908,7 +9949,10 @@ namespace Legion {
         InstanceBuilder builder(regions, constraints, runtime, this,creator_id);
         builder.initialize(runtime->forest);
         // Acquire allocation privilege before doing anything
-        const RtEvent wait_on = acquire_allocation_privilege(coordinates);
+        const RtEvent wait_on = 
+          acquire_allocation_privilege(coordinates, safe_for_unbounded_pools);
+        if (!safe_for_unbounded_pools)
+          return false;
         if (wait_on.exists())
           wait_on.wait();
         // Try to make the result
@@ -9939,6 +9983,7 @@ namespace Legion {
                                      GCPriority priority, bool tight_bounds,
                                      LayoutConstraintKind *unsat_kind,
                                      unsigned *unsat_index, size_t *footprint, 
+                                     bool &safe_for_unbounded_pools,
                                      UniqueID creator_id, bool remote)
     //--------------------------------------------------------------------------
     {
@@ -9965,6 +10010,10 @@ namespace Legion {
           rez.serialize(unsat_kind);
           rez.serialize(unsat_index);
           rez.serialize(footprint);
+          if (!safe_for_unbounded_pools)
+            rez.serialize(&safe_for_unbounded_pools);
+          else
+            rez.serialize<bool*>(NULL);
           rez.serialize(creator_id);
           rez.serialize(&remote_manager);
           rez.serialize(&success);
@@ -9990,7 +10039,10 @@ namespace Legion {
         InstanceBuilder builder(regions,*constraints, runtime, this,creator_id);
         builder.initialize(runtime->forest);
         // Acquire allocation privilege before doing anything
-        const RtEvent wait_on = acquire_allocation_privilege(coordinates);
+        const RtEvent wait_on =
+          acquire_allocation_privilege(coordinates, safe_for_unbounded_pools);
+        if (!safe_for_unbounded_pools)
+          return false;
         if (wait_on.exists())
           wait_on.wait();
         // Try to make the instance
@@ -10023,6 +10075,7 @@ namespace Legion {
                                   bool tight_region_bounds, 
                                   LayoutConstraintKind *unsat_kind,
                                   unsigned *unsat_index, size_t *footprint, 
+                                  bool &safe_for_unbounded_pools,
                                   UniqueID creator_id, bool remote)
     //--------------------------------------------------------------------------
     {
@@ -10055,6 +10108,10 @@ namespace Legion {
           rez.serialize(unsat_kind);
           rez.serialize(unsat_index);
           rez.serialize(footprint);
+          if (!safe_for_unbounded_pools)
+            rez.serialize(&safe_for_unbounded_pools);
+          else
+            rez.serialize<bool*>(NULL);
           rez.serialize(creator_id);
           rez.serialize(&remote_manager);
           rez.serialize(&remote_created);
@@ -10083,7 +10140,8 @@ namespace Legion {
         builder.initialize(runtime->forest); 
         // First get our allocation privileges so we're the only
         // one trying to do any allocations
-        const RtEvent wait_on = acquire_allocation_privilege(coordinates);
+        const RtEvent wait_on =
+          acquire_allocation_privilege(coordinates, safe_for_unbounded_pools);
         if (wait_on.exists())
           wait_on.wait();
         // Since this is find or acquire, first see if we can find
@@ -10127,6 +10185,7 @@ namespace Legion {
                                 bool tight_region_bounds, 
                                 LayoutConstraintKind *unsat_kind,
                                 unsigned *unsat_index, size_t *footprint, 
+                                bool &safe_for_unbounded_pools,
                                 UniqueID creator_id, bool remote)
     //--------------------------------------------------------------------------
     {
@@ -10159,6 +10218,10 @@ namespace Legion {
           rez.serialize(unsat_kind);
           rez.serialize(unsat_index);
           rez.serialize(footprint);
+          if (!safe_for_unbounded_pools)
+            rez.serialize(&safe_for_unbounded_pools);
+          else
+            rez.serialize<bool*>(NULL);
           rez.serialize(creator_id);
           rez.serialize(&remote_manager);
           rez.serialize(&remote_created);
@@ -10187,7 +10250,8 @@ namespace Legion {
         builder.initialize(runtime->forest);
         // First get our allocation privileges so we're the only
         // one trying to do any allocations
-        const RtEvent wait_on = acquire_allocation_privilege(coordinates);
+        const RtEvent wait_on =
+          acquire_allocation_privilege(coordinates, safe_for_unbounded_pools);
         if (wait_on.exists())
           wait_on.wait();
         // Since this is find or acquire, first see if we can find
@@ -10539,6 +10603,8 @@ namespace Legion {
             derez.deserialize(remote_index);
             size_t *remote_footprint; // warning: remote pointer
             derez.deserialize(remote_footprint);
+            bool *remote_safe_for_unbounded_pools;
+            derez.deserialize(remote_safe_for_unbounded_pools);
             UniqueID creator_id;
             derez.deserialize(creator_id);
             std::atomic<PhysicalManager*> *remote_target;
@@ -10549,13 +10615,17 @@ namespace Legion {
             size_t local_footprint;
             LayoutConstraintKind local_kind;
             unsigned local_index;
+            bool safe_for_unbounded_pools = 
+              (remote_safe_for_unbounded_pools == NULL);
             bool success = create_physical_instance(constraints, regions, 
                                  coordinates, result,processor,false/*acquire*/,
                                  priority, tight_region_bounds,
                                  &local_kind, &local_index, &local_footprint,
+                                 safe_for_unbounded_pools,
                                  creator_id, true/*remote*/);
             if (success || (remote_footprint != NULL) || 
-                (remote_kind != NULL) || (remote_index != NULL))
+                (remote_kind != NULL) || (remote_index != NULL) ||
+                (remote_safe_for_unbounded_pools != NULL))
             {
               // Send back the response starting with the instance
               Serializer rez;
@@ -10579,6 +10649,8 @@ namespace Legion {
                 rez.serialize(local_index);
                 rez.serialize(remote_footprint);
                 rez.serialize(local_footprint);
+                rez.serialize(remote_safe_for_unbounded_pools);
+                rez.serialize(safe_for_unbounded_pools);
               }
               runtime->send_instance_response(source, rez);
             }
@@ -10604,6 +10676,8 @@ namespace Legion {
             derez.deserialize(remote_index);
             size_t *remote_footprint; // warning: remote pointer
             derez.deserialize(remote_footprint);
+            bool *remote_safe_for_unbounded_pools;
+            derez.deserialize(remote_safe_for_unbounded_pools);
             UniqueID creator_id;
             derez.deserialize(creator_id);
             std::atomic<PhysicalManager*> *remote_target;
@@ -10616,13 +10690,17 @@ namespace Legion {
             size_t local_footprint;
             LayoutConstraintKind local_kind;
             unsigned local_index;
+            bool safe_for_unbounded_pools =
+              (remote_safe_for_unbounded_pools == NULL);
             bool success = create_physical_instance(constraints, regions, 
                                  coordinates, result,processor,false/*acquire*/,
                                  priority, tight_region_bounds,
                                  &local_kind, &local_index, &local_footprint,
+                                 safe_for_unbounded_pools,
                                  creator_id, true/*remote*/);
             if (success || (remote_footprint != NULL) ||
-                (remote_kind != NULL) || (remote_index != NULL))
+                (remote_kind != NULL) || (remote_index != NULL) ||
+                (remote_safe_for_unbounded_pools != NULL))
             {
               Serializer rez;
               {
@@ -10645,6 +10723,8 @@ namespace Legion {
                 rez.serialize(local_index);
                 rez.serialize(remote_footprint);
                 rez.serialize(local_footprint);
+                rez.serialize(remote_safe_for_unbounded_pools);
+                rez.serialize(safe_for_unbounded_pools);
               }
               runtime->send_instance_response(source, rez);
             }
@@ -10670,6 +10750,8 @@ namespace Legion {
             derez.deserialize(remote_index);
             size_t *remote_footprint; // warning: remote pointer
             derez.deserialize(remote_footprint);
+            bool *remote_safe_for_unbounded_pools;
+            derez.deserialize(remote_safe_for_unbounded_pools);
             UniqueID creator_id;
             derez.deserialize(creator_id);
             std::atomic<PhysicalManager*> *remote_target;
@@ -10681,13 +10763,17 @@ namespace Legion {
             LayoutConstraintKind local_kind;
             unsigned local_index;
             bool created;
+            bool safe_for_unbounded_pools = 
+              (remote_safe_for_unbounded_pools == NULL);
             bool success = find_or_create_physical_instance(constraints, 
                                 regions, coordinates, result, created,processor,
                                 false/*acquire*/, priority, tight_bounds,
                                 &local_kind, &local_index,
-                                &local_footprint, creator_id, true/*remote*/);
+                                &local_footprint, safe_for_unbounded_pools,
+                                creator_id, true/*remote*/);
             if (success || (remote_footprint != NULL) ||
-                (remote_kind != NULL) || (remote_index != NULL))
+                (remote_kind != NULL) || (remote_index != NULL) ||
+                (remote_safe_for_unbounded_pools != NULL))
             {
               Serializer rez;
               {
@@ -10711,6 +10797,8 @@ namespace Legion {
                 rez.serialize(local_index);
                 rez.serialize(remote_footprint);
                 rez.serialize(local_footprint);
+                rez.serialize(remote_safe_for_unbounded_pools);
+                rez.serialize(safe_for_unbounded_pools);
               }
               runtime->send_instance_response(source, rez);
             }
@@ -10736,6 +10824,8 @@ namespace Legion {
             derez.deserialize(remote_index);
             size_t *remote_footprint; // warning: remote pointer
             derez.deserialize(remote_footprint);
+            bool *remote_safe_for_unbounded_pools;
+            derez.deserialize(remote_safe_for_unbounded_pools);
             UniqueID creator_id;
             derez.deserialize(creator_id);
             std::atomic<PhysicalManager*> *remote_target;
@@ -10749,13 +10839,17 @@ namespace Legion {
             LayoutConstraintKind local_kind;
             unsigned local_index;
             bool created;
+            bool safe_for_unbounded_pools = 
+              (remote_safe_for_unbounded_pools == NULL);
             bool success = find_or_create_physical_instance(constraints, 
                                  regions, coordinates, result,created,processor,
                                  false/*acquire*/, priority, tight_bounds,
                                  &local_kind, &local_index,
-                                 &local_footprint, creator_id, true/*remote*/);
+                                 &local_footprint, safe_for_unbounded_pools,
+                                 creator_id, true/*remote*/);
             if (success || (remote_footprint != NULL) ||
-                (remote_kind != NULL) || (remote_index != NULL))
+                (remote_kind != NULL) || (remote_index != NULL) ||
+                (remote_safe_for_unbounded_pools != NULL))
             {
               Serializer rez;
               {
@@ -10779,6 +10873,8 @@ namespace Legion {
                 rez.serialize(local_index);
                 rez.serialize(remote_footprint);
                 rez.serialize(local_footprint);
+                rez.serialize(remote_safe_for_unbounded_pools);
+                rez.serialize(safe_for_unbounded_pools);
               }
               runtime->send_instance_response(source, rez);
             }
@@ -10817,6 +10913,8 @@ namespace Legion {
                 rez.serialize<unsigned>(0);
                 rez.serialize<size_t*>(NULL);
                 rez.serialize<size_t>(0);
+                rez.serialize<bool*>(NULL);
+                rez.serialize<bool>(true);
               }
               runtime->send_instance_response(source, rez);
             }
@@ -10857,6 +10955,8 @@ namespace Legion {
                 rez.serialize<unsigned>(0);
                 rez.serialize<size_t*>(NULL);
                 rez.serialize<size_t>(0);
+                rez.serialize<bool*>(NULL);
+                rez.serialize<bool>(true);
               }
               runtime->send_instance_response(source, rez);
             }
@@ -10899,6 +10999,8 @@ namespace Legion {
                 rez.serialize<unsigned>(0);
                 rez.serialize<size_t*>(NULL);
                 rez.serialize<size_t>(0);
+                rez.serialize<bool*>(NULL);
+                rez.serialize<bool>(true);
               }
               runtime->send_instance_response(source, rez);
             }
@@ -10943,6 +11045,8 @@ namespace Legion {
                 rez.serialize<unsigned>(0);
                 rez.serialize<size_t*>(NULL);
                 rez.serialize<size_t>(0);
+                rez.serialize<bool*>(NULL);
+                rez.serialize<bool>(true);
               }
               runtime->send_instance_response(source, rez);
             }
@@ -11050,6 +11154,12 @@ namespace Legion {
       derez.deserialize(footprint);
       if (local_footprint != NULL)
         *local_footprint = footprint;
+      bool *local_safe_for_unbounded_pools;
+      derez.deserialize(local_safe_for_unbounded_pools);
+      bool safe_for_unbounded_pools;
+      derez.deserialize(safe_for_unbounded_pools);
+      if (local_safe_for_unbounded_pools != NULL)
+        *local_safe_for_unbounded_pools = safe_for_unbounded_pools; 
       // Trigger that we are done
       if (!preconditions.empty())
         Runtime::trigger_event(to_trigger,Runtime::merge_events(preconditions));
@@ -11447,7 +11557,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RtEvent MemoryManager::acquire_allocation_privilege(
-                                         const TaskTreeCoordinates &coordinates)
+         const TaskTreeCoordinates &coordinates, bool &safe_for_unbounded_pools)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -11462,6 +11572,8 @@ namespace Legion {
         if ((unbounded_pool_scope == LEGION_STRICT_UNBOUNDED_POOL) &&
             (unbounded_coordinates == coordinates))
         {
+          // This will be safe for unbounded pools
+          safe_for_unbounded_pools = true;
           // See if the front allocation has the same coordinates, if it
           // does then we insert ourselves after it, if not then we insert
           // ourselves in front of it
@@ -11489,6 +11601,8 @@ namespace Legion {
         else if ((unbounded_pool_scope == LEGION_INDEX_TASK_UNBOUNDED_POOL) &&
             unbounded_coordinates.same_index_space(coordinates))
         {
+          // This will be safe for unbounded pools
+          safe_for_unbounded_pools = true;
           // See if the front allocation has the same index space task 
           // coordinates, if it does then we insert ourselves after it,
           // if not then we insert ourselves in front of it
@@ -11515,6 +11629,16 @@ namespace Legion {
         }
         else
         {
+          // Check to see if this is safe for unbounded pools
+          if (!safe_for_unbounded_pools)
+          {
+            // If there is an unbounded pool that we're going to block
+            // on that is potentially unsafe
+            if ((unbounded_pool_scope == LEGION_STRICT_UNBOUNDED_POOL) ||
+                (unbounded_pool_scope == LEGION_INDEX_TASK_UNBOUNDED_POOL))
+              return RtEvent::NO_RT_EVENT;
+            safe_for_unbounded_pools = true;
+          }
           // Appending like normal to a list of pending allocations
           const RtUserEvent wait_on = Runtime::create_rt_user_event();
           pending_allocation_attempts.emplace_back(
@@ -11529,6 +11653,8 @@ namespace Legion {
         if ((unbounded_pool_scope == LEGION_STRICT_UNBOUNDED_POOL) &&
             (unbounded_coordinates != coordinates))
         {
+          if (!safe_for_unbounded_pools)
+            return RtEvent::NO_RT_EVENT;
           // Cannot bypass with different coordinates
           const RtUserEvent wait_on = Runtime::create_rt_user_event();
           pending_allocation_attempts.emplace_back(
@@ -11538,6 +11664,8 @@ namespace Legion {
         else if ((unbounded_pool_scope == LEGION_INDEX_TASK_UNBOUNDED_POOL) &&
             !unbounded_coordinates.same_index_space(coordinates))
         {
+          if (!safe_for_unbounded_pools)
+            return RtEvent::NO_RT_EVENT;
           // Cannot bypass without being in the same index space task
           const RtUserEvent wait_on = Runtime::create_rt_user_event();
           pending_allocation_attempts.emplace_back(
@@ -11546,6 +11674,7 @@ namespace Legion {
         }
         else
         {
+          safe_for_unbounded_pools = true;
           // No unbounded pool or a permissive one so we can do our
           // allocation immediately, put in our guard allocation
           pending_allocation_attempts.emplace_back(std::make_pair(
@@ -12087,7 +12216,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     MemoryPool* MemoryManager::create_memory_pool(UniqueID creator_uid,
-                     TaskTreeCoordinates &coordinates, const PoolBounds &bounds)
+                     TaskTreeCoordinates &coordinates, const PoolBounds &bounds,
+                     bool &safe_for_unbounded_pools)
     //--------------------------------------------------------------------------
     {
       if (!is_owner)
@@ -12102,6 +12232,10 @@ namespace Legion {
           coordinates.serialize(rez);
           rez.serialize(bounds);
           rez.serialize(&result);
+          if (!safe_for_unbounded_pools)
+            rez.serialize(&safe_for_unbounded_pools);
+          else
+            rez.serialize<bool*>(NULL);
           rez.serialize(ready);
         }
         runtime->send_create_memory_pool_request(owner_space, rez);
@@ -12127,7 +12261,8 @@ namespace Legion {
         }
         RtEvent use_event;
         PhysicalInstance instance = create_task_local_instance(creator_uid,
-            coordinates, unique_event, layout, use_event);
+            coordinates, unique_event, layout, use_event, 
+            safe_for_unbounded_pools);
         if (!instance.exists())
           return NULL;
         return new ConcretePool(instance, bounds.size, bounds.alignment,
@@ -12152,6 +12287,8 @@ namespace Legion {
                 {
                   if (coordinates != unbounded_coordinates)
                   {
+                    if (!safe_for_unbounded_pools)
+                      return NULL;
                     if (!unbounded_transition_event.exists())
                       unbounded_transition_event =
                         Runtime::create_rt_user_event();
@@ -12166,6 +12303,8 @@ namespace Legion {
                   if (!coordinates.same_index_space(unbounded_coordinates) ||
                       (bounds.scope == LEGION_STRICT_UNBOUNDED_POOL))
                   {
+                    if (!safe_for_unbounded_pools)
+                      return NULL;
                     if (!unbounded_transition_event.exists())
                       unbounded_transition_event =
                         Runtime::create_rt_user_event();
@@ -12179,6 +12318,8 @@ namespace Legion {
                 {
                   if (bounds.scope != LEGION_PERMISSIVE_UNBOUNDED_POOL)
                   {
+                    if (!safe_for_unbounded_pools)
+                      return NULL;
                     if (!unbounded_transition_event.exists())
                       unbounded_transition_event =
                         Runtime::create_rt_user_event();
@@ -12210,6 +12351,8 @@ namespace Legion {
             unbounded_coordinates = coordinates;
           }
         } while (wait_on.exists());
+        // We were safe for unbounded pools in this case
+        safe_for_unbounded_pools = true;
         return new UnboundPool(this, coordinates);
       }
     }
@@ -12284,19 +12427,27 @@ namespace Legion {
       derez.deserialize(bounds);
       MemoryPool **result;
       derez.deserialize(result);
+      bool *remote_safe_for_unbounded_pools;
+      derez.deserialize(remote_safe_for_unbounded_pools);
       RtUserEvent ready;
       derez.deserialize(ready);
 
       MemoryManager *manager = runtime->find_memory_manager(memory);
-      MemoryPool *pool =
-        manager->create_memory_pool(creator_uid, coordinates, bounds);
-      if (pool != NULL)
+      bool safe_for_unbounded_pools = (remote_safe_for_unbounded_pools == NULL);
+      MemoryPool *pool = manager->create_memory_pool(creator_uid, coordinates,
+          bounds, safe_for_unbounded_pools);
+      if ((pool != NULL) || ((remote_safe_for_unbounded_pools != NULL) && 
+            safe_for_unbounded_pools))
       {
         Serializer rez;
         {
           RezCheck z(rez);
           rez.serialize(result);
-          pool->serialize(rez);
+          if (pool != NULL)
+            pool->serialize(rez);
+          else
+            FutureInstance::pack_null(rez);
+          rez.serialize(remote_safe_for_unbounded_pools);
           rez.serialize(ready);
         }
         runtime->send_create_memory_pool_response(source, rez);
@@ -12315,6 +12466,9 @@ namespace Legion {
       MemoryPool **result;
       derez.deserialize(result);
       *result = MemoryPool::deserialize(derez, runtime);
+      bool *safe_for_unbounded_pools;
+      derez.deserialize(safe_for_unbounded_pools);
+      *safe_for_unbounded_pools = true;
       RtUserEvent ready;
       derez.deserialize(ready);
       Runtime::trigger_event(ready);
@@ -12324,7 +12478,7 @@ namespace Legion {
     PhysicalInstance MemoryManager::create_task_local_instance(
         UniqueID creator_uid, const TaskTreeCoordinates &coordinates,
         LgEvent unique_event, Realm::InstanceLayoutGeneric *layout, 
-        RtEvent &use_event)
+        RtEvent &use_event, bool &safe_for_unbounded_pools)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -12350,6 +12504,8 @@ namespace Legion {
             {
               if (coordinates != unbounded_coordinates)
               {
+                if (!safe_for_unbounded_pools)
+                  return PhysicalInstance::NO_INST;
                 if (!unbounded_transition_event.exists())
                   unbounded_transition_event = Runtime::create_rt_user_event();
                 wait_on = unbounded_transition_event;
@@ -12360,6 +12516,8 @@ namespace Legion {
             {
               if (!unbounded_coordinates.same_index_space(coordinates))
               {
+                if (!safe_for_unbounded_pools)
+                  return PhysicalInstance::NO_INST;
                 if (!unbounded_transition_event.exists())
                   unbounded_transition_event = Runtime::create_rt_user_event();
                 wait_on = unbounded_transition_event;
@@ -12370,6 +12528,7 @@ namespace Legion {
             assert(false);
         }
       }
+      safe_for_unbounded_pools = true;
       if (wait_on.exists())
         wait_on.wait();
       do {
@@ -12472,7 +12631,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FutureInstance* MemoryManager::create_future_instance(UniqueID creator_uid,
-                            const TaskTreeCoordinates &coordinates, size_t size)
+                            const TaskTreeCoordinates &coordinates, size_t size,
+                            bool &safe_for_unbounded_pools)
     //--------------------------------------------------------------------------
     {
       if (!is_owner)
@@ -12489,6 +12649,10 @@ namespace Legion {
           rez.serialize(creator_uid);
           coordinates.serialize(rez);
           rez.serialize(size);
+          if (!safe_for_unbounded_pools)
+            rez.serialize(&safe_for_unbounded_pools);
+          else
+            rez.serialize<bool*>(NULL);
         }
         runtime->send_create_future_instance_request(owner_space, rez);
         wait_on.wait();
@@ -12498,6 +12662,7 @@ namespace Legion {
       if ((size <= LEGION_MAX_RETURN_SIZE) &&
           (memory == runtime->runtime_system_memory))
       {
+        safe_for_unbounded_pools = true;
 #ifdef __GNUC__
 #if __GNUC__ >= 11
           // GCC is dumb and thinks we need to initialize the malloc buffer
@@ -12540,7 +12705,7 @@ namespace Legion {
       }
       RtEvent use_event;
       PhysicalInstance instance = create_task_local_instance(creator_uid,
-          coordinates, unique_event, ilg, use_event);
+          coordinates, unique_event, ilg, use_event, safe_for_unbounded_pools);
       if (!instance.exists())
         return NULL;
       return new FutureInstance(NULL/*data*/, size,
@@ -15588,18 +15753,26 @@ namespace Legion {
       coordinates.deserialize(derez);
       size_t size;
       derez.deserialize(size);
+      bool *remote_safe_for_unbounded_pools;
+      derez.deserialize(remote_safe_for_unbounded_pools);
 
       MemoryManager *manager = find_memory_manager(memory);
-      FutureInstance *result =
-        manager->create_future_instance(uid, coordinates, size);
-      if (result != NULL)
+      bool safe_for_unbounded_pools = (remote_safe_for_unbounded_pools == NULL);
+      FutureInstance *result = manager->create_future_instance(uid,
+          coordinates, size, safe_for_unbounded_pools);
+      if ((result != NULL) || ((remote_safe_for_unbounded_pools != NULL) &&
+            safe_for_unbounded_pools))
       {
         Serializer rez;
         {
           RezCheck z(rez);
           rez.serialize(target);
-          result->pack_instance(rez, ApEvent::NO_AP_EVENT,
-              true/*pack ownership*/, false/*allow by value*/);
+          if (result != NULL)
+            result->pack_instance(rez, ApEvent::NO_AP_EVENT,
+                true/*pack ownership*/, false/*allow by value*/);
+          else
+            FutureInstance::pack_null(rez);
+          rez.serialize(remote_safe_for_unbounded_pools);
           rez.serialize(done);
         }
         send_create_future_instance_response(source, rez);
@@ -15617,6 +15790,9 @@ namespace Legion {
       std::atomic<FutureInstance*> *target;
       derez.deserialize(target);
       target->store(FutureInstance::unpack_instance(derez));
+      bool *safe_for_unbounded_pools;
+      derez.deserialize(safe_for_unbounded_pools);
+      *safe_for_unbounded_pools = true;
       RtUserEvent done;
       derez.deserialize(done);
       Runtime::trigger_event(done);
@@ -28187,7 +28363,8 @@ namespace Legion {
                                      bool acquire, GCPriority priority,
                                      bool tight_bounds, 
                                      const LayoutConstraint **unsat,
-                                     size_t *footprint, UniqueID creator_id)
+                                     size_t *footprint, UniqueID creator_id,
+                                     bool &safe_for_unbounded_pools)
     //--------------------------------------------------------------------------
     {
       MemoryManager *manager = find_memory_manager(target_memory);
@@ -28197,7 +28374,8 @@ namespace Legion {
         unsigned unsat_index = 0;
         if (!manager->create_physical_instance(constraints, regions, 
               coordinates, result, processor, acquire, priority, tight_bounds,
-              &unsat_kind, &unsat_index, footprint, creator_id))
+              &unsat_kind, &unsat_index, footprint, 
+              safe_for_unbounded_pools, creator_id))
         {
           *unsat = constraints.convert_unsatisfied(unsat_kind, unsat_index);
           return false;
@@ -28208,7 +28386,7 @@ namespace Legion {
       else
         return manager->create_physical_instance(constraints, regions, 
             coordinates, result, processor, acquire, priority, tight_bounds,
-            NULL, NULL, footprint, creator_id);
+            NULL, NULL, footprint, safe_for_unbounded_pools, creator_id);
     }
 
     //--------------------------------------------------------------------------
@@ -28221,7 +28399,8 @@ namespace Legion {
                                      bool acquire, GCPriority priority,
                                      bool tight_bounds, 
                                      const LayoutConstraint **unsat,
-                                     size_t *footprint, UniqueID creator_id)
+                                     size_t *footprint, UniqueID creator_id,
+                                     bool &safe_for_unbounded_pools)
     //--------------------------------------------------------------------------
     { 
       MemoryManager *manager = find_memory_manager(target_memory);
@@ -28231,7 +28410,8 @@ namespace Legion {
         unsigned unsat_index = 0;
         if (!manager->create_physical_instance(constraints, regions, 
               coordinates, result, processor, acquire, priority,
-              tight_bounds, &unsat_kind, &unsat_index, footprint, creator_id))
+              tight_bounds, &unsat_kind, &unsat_index, footprint,
+              safe_for_unbounded_pools, creator_id))
         {
           *unsat = constraints->convert_unsatisfied(unsat_kind, unsat_index);
           return false;
@@ -28242,7 +28422,7 @@ namespace Legion {
       else
         return manager->create_physical_instance(constraints, regions, 
             coordinates, result, processor, acquire, priority, tight_bounds,
-            NULL, NULL, footprint, creator_id);
+            NULL, NULL, footprint, safe_for_unbounded_pools, creator_id);
     }
 
     //--------------------------------------------------------------------------
@@ -28255,7 +28435,8 @@ namespace Legion {
                                      bool acquire, GCPriority priority,
                                      bool tight_bounds, 
                                      const LayoutConstraint **unsat,
-                                     size_t *footprint, UniqueID creator_id)
+                                     size_t *footprint, UniqueID creator_id,
+                                     bool &safe_for_unbounded_pools)
     //--------------------------------------------------------------------------
     {
       MemoryManager *manager = find_memory_manager(target_memory);
@@ -28265,7 +28446,8 @@ namespace Legion {
         unsigned unsat_index = 0;
         if (!manager->find_or_create_physical_instance(constraints, regions,
               coordinates, result, created, processor, acquire, priority,
-              tight_bounds, &unsat_kind, &unsat_index, footprint, creator_id))
+              tight_bounds, &unsat_kind, &unsat_index, footprint,
+              safe_for_unbounded_pools, creator_id))
         {
           *unsat = constraints.convert_unsatisfied(unsat_kind, unsat_index);
           return false;
@@ -28276,7 +28458,8 @@ namespace Legion {
       else
         return manager->find_or_create_physical_instance(constraints, regions, 
             coordinates, result, created, processor, acquire, priority,
-            tight_bounds, NULL, NULL, footprint, creator_id);
+            tight_bounds, NULL, NULL, footprint, safe_for_unbounded_pools,
+            creator_id);
     }
 
     //--------------------------------------------------------------------------
@@ -28289,7 +28472,8 @@ namespace Legion {
                                     bool acquire, GCPriority priority,
                                     bool tight_bounds, 
                                     const LayoutConstraint **unsat,
-                                    size_t *footprint, UniqueID creator_id)
+                                    size_t *footprint, UniqueID creator_id,
+                                    bool &safe_for_unbounded_pools)
     //--------------------------------------------------------------------------
     { 
       MemoryManager *manager = find_memory_manager(target_memory);
@@ -28299,7 +28483,8 @@ namespace Legion {
         unsigned unsat_index = 0;
         if (!manager->find_or_create_physical_instance(constraints, regions,
               coordinates, result, created, processor, acquire, priority,
-              tight_bounds, &unsat_kind, &unsat_index, footprint, creator_id))
+              tight_bounds, &unsat_kind, &unsat_index, footprint,
+              safe_for_unbounded_pools, creator_id))
         {
           *unsat = constraints->convert_unsatisfied(unsat_kind, unsat_index);
           return false;
@@ -28310,7 +28495,8 @@ namespace Legion {
       else
         return manager->find_or_create_physical_instance(constraints, regions,
             coordinates, result, created, processor, acquire, priority,
-            tight_bounds, NULL, NULL, footprint, creator_id);
+            tight_bounds, NULL, NULL, footprint, safe_for_unbounded_pools,
+            creator_id);
     }
 
     //--------------------------------------------------------------------------

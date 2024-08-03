@@ -247,6 +247,10 @@ namespace Legion {
       virtual void resume_mapper_call(MappingCallInfo *info,
                                       RuntimeCallKind kind) = 0;
       virtual void finish_mapper_call(MappingCallInfo *info) = 0;
+    protected:
+      virtual bool is_safe_for_unbounded_pools(void) = 0;
+      virtual void report_unsafe_allocation_in_unbounded_pool(
+          const MappingCallInfo *info, Memory memory, RuntimeCallKind kind) = 0;
     public:
       void update_mappable_tag(MappingCallInfo *info,
                                const Mappable &mappable, MappingTagID tag);
@@ -616,6 +620,10 @@ namespace Legion {
                                       RuntimeCallKind kind);
       virtual void finish_mapper_call(MappingCallInfo *info);
     protected:
+      virtual bool is_safe_for_unbounded_pools(void);
+      virtual void report_unsafe_allocation_in_unbounded_pool(
+          const MappingCallInfo *info, Memory memory, RuntimeCallKind kind);
+    protected:
       // Must be called while holding the mapper reservation
       RtUserEvent complete_pending_pause_mapper_call(void);
       RtUserEvent complete_pending_finish_mapper_call(void);
@@ -674,6 +682,10 @@ namespace Legion {
       virtual void resume_mapper_call(MappingCallInfo *info,
                                       RuntimeCallKind kind);
       virtual void finish_mapper_call(MappingCallInfo *info);
+    protected:
+      virtual bool is_safe_for_unbounded_pools(void);
+      virtual void report_unsafe_allocation_in_unbounded_pool(
+          const MappingCallInfo *info, Memory memory, RuntimeCallKind kind);
     protected:
       // Must be called while holding the lock
       void release_lock(std::vector<RtUserEvent> &to_trigger); 

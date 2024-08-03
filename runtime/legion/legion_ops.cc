@@ -22150,8 +22150,10 @@ namespace Legion {
           runtime->find_memory_manager(runtime->runtime_system_memory);
         TaskTreeCoordinates coordinates;
         compute_task_tree_coordinates(coordinates);
+        // Safe to block here indefinitely waiting for unbounded pools
+        bool safe_for_unbounded_pools = true;
         instance = manager->create_future_instance(unique_op_id,
-            coordinates, return_type_size);
+            coordinates, return_type_size, safe_for_unbounded_pools);
         complete_mapping(futures_mapped);
       }
       // Also make sure we wait for any execution fences that we have
@@ -22627,8 +22629,10 @@ namespace Legion {
             FutureInstance::check_meta_visible(*it))
           runtime_visible = targets.size();
         MemoryManager *manager = runtime->find_memory_manager(*it);
+        // Safe to block here indefinitely waiting for unbounded pools
+        bool safe_for_unbounded_pools = true;
         FutureInstance *instance = manager->create_future_instance(
-            unique_op_id, coordinates, result_size);
+            unique_op_id, coordinates, result_size, safe_for_unbounded_pools);
         targets.push_back(instance);
       }
       // This is an important optimization: if we're doing a small

@@ -11817,8 +11817,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       MemoryManager *manager = runtime->find_memory_manager(memory);
+      // Safe to block indefinitely waiting on unbounded pools
+      bool safe_for_unbounded_pools = true;
       FutureInstance *instance = manager->create_future_instance(
-          get_unique_id(), context_coordinates, size);
+          get_unique_id(), context_coordinates, size, safe_for_unbounded_pools);
       if (instance == NULL)
       {
         const size_t remaining = manager->query_available_memory();
@@ -11860,8 +11862,10 @@ namespace Legion {
       }
       MemoryManager *manager = runtime->find_memory_manager(memory);
       RtEvent use_event;
+      bool safe_for_unbounded_pools = true;
       PhysicalInstance instance = manager->create_task_local_instance(
-         get_unique_id(), context_coordinates, unique_event, layout, use_event);
+          get_unique_id(), context_coordinates, unique_event, layout,
+          use_event, safe_for_unbounded_pools);
       if (!instance.exists())
       {
         const size_t remaining = manager->query_available_memory();
@@ -25171,13 +25175,16 @@ namespace Legion {
         TaskTreeCoordinates coordinates;
         compute_task_tree_coordinates(coordinates); 
         MemoryManager *manager = runtime->find_memory_manager(memory);
+        // This is not safe to block indefinitely on unbounded pools because
+        // the unbounded pool might be for a task that depends on us running
+        bool safe_for_unbounded_pools = false;
         // A tiny bit of backwards compatibility here for system level
         // futures in which case we know this will go to the fast path of
         // just calling malloc without relying on Realm's allocator
         if ((memory == runtime->runtime_system_memory) &&
             (size <= LEGION_MAX_RETURN_SIZE))
           return manager->create_future_instance(
-              get_unique_id(), coordinates, size);
+              get_unique_id(), coordinates, size, safe_for_unbounded_pools);
         // WE'RE ABOUT TO DO SOMETHING DANGEROUS!
         // The user didn't bother to pre-allocate a pool so we're going
         // to try to make an immediate instance that has no event precondition
@@ -25185,7 +25192,7 @@ namespace Legion {
         // given an instance with a precondition we cannot wait for it under
         // any circumstances without risking a deadlock
         FutureInstance *instance = manager->create_future_instance(
-            get_unique_id(), coordinates, size);
+            get_unique_id(), coordinates, size, safe_for_unbounded_pools);
         if (instance != NULL)
         {
           if (instance->is_immediate())
@@ -25209,15 +25216,30 @@ namespace Legion {
           else
             delete instance; // Not immediately available so we can't use it
         }
-        REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
-            "Failed to allocate %zd bytes for a future needed by leaf task %s "
-            "(UID %lld) in %s memory because there was no space reserved at "
-            "the point of mapping the task for dynamic allocations. If you "
-            "designate a task as a leaf task variant then it is your "
-            "responsibility to tell Legion how much memory needs to be "
-            "reserved for satisfying dynamic allocations during the "
-            "execution of the task.", size, get_task_name(),
-            get_unique_id(), manager->get_name())
+        else if (!safe_for_unbounded_pools)
+          REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
+              "Failed to allocate %zd bytes for a future needed by leaf task %s"
+              " (UID %lld) in %s memory because there was no space reserved at "
+              "the point of mapping the task for dynamic allocations. If you "
+              "designate a task as a leaf task variant then it is your "
+              "responsibility to tell Legion how much memory needs to be "
+              "reserved for satisfying dynamic allocations during the "
+              "execution of the task. Legion did try to allocate an eager "
+              "instance this case but discovered an unbounded pool in the "
+              "memory which prevented us from attempted the eager allocation "
+              "(because it cannot be done safely), so you might not actually "
+              "be out of memory.", size, get_task_name(),
+              get_unique_id(), manager->get_name())
+        else
+          REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
+              "Failed to allocate %zd bytes for a future needed by leaf task %s"
+              " (UID %lld) in %s memory because there was no space reserved at "
+              "the point of mapping the task for dynamic allocations. If you "
+              "designate a task as a leaf task variant then it is your "
+              "responsibility to tell Legion how much memory needs to be "
+              "reserved for satisfying dynamic allocations during the "
+              "execution of the task.", size, get_task_name(),
+              get_unique_id(), manager->get_name())
       }
       else if (finder->second->is_released())
       {
@@ -25318,8 +25340,13 @@ namespace Legion {
         // any circumstances without risking a deadlock
         TaskTreeCoordinates coordinates;
         compute_task_tree_coordinates(coordinates);
+        // It is NOT safe to block for unbounded pools when doing this
+        // because those unbounded pools might be from tasks that are behind
+        // us in program order and depend on us to finish running
+        bool safe_for_unbounded_pools = false;
         const PhysicalInstance instance = manager->create_task_local_instance(
-            get_unique_id(), coordinates, unique_event, layout, use_event);
+            get_unique_id(), coordinates, unique_event, layout, use_event,
+            safe_for_unbounded_pools);
         if (footprint == 0)
         {
 #ifdef DEBUG_LEGION
@@ -25352,15 +25379,30 @@ namespace Legion {
           else
             instance.destroy(use_event); // Can't use so destroy immediately
         }
-        REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
-            "Failed to allocate DeferredBuffer/Value/Reduction of %zd bytes "
-            "for leaf task %s (UID %lld) in %s memory because there was no "
-            "space reserved at the point of mapping the task for dynamic "
-            "allocations. If you designate a task as a leaf task variant "
-            "then it is your responsibility to tell Legion how much memory "
-            "needs to be allocated for satisfying dynamic allocations during "
-            "the execution of the task.", footprint, get_task_name(),
-            get_unique_id(), manager->get_name())
+        else if (!safe_for_unbounded_pools)
+          REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
+              "Failed to allocate DeferredBuffer/Value/Reduction of %zd bytes "
+              "for leaf task %s (UID %lld) in %s memory because there was no "
+              "space reserved at the point of mapping the task for dynamic "
+              "allocations. If you designate a task as a leaf task variant "
+              "then it is your responsibility to tell Legion how much memory "
+              "needs to be allocated for satisfying dynamic allocations during "
+              "the execution of the task. Legion did try to allocate an "
+              "eager instance in this case but discovered an unbounded pool "
+              "in the memory which prevented us from attempting the eager "
+              "allocation (because it cannot be done safely), so you might "
+              "not actually be out of memory.", footprint, get_task_name(),
+              get_unique_id(), manager->get_name())
+        else
+          REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
+              "Failed to allocate DeferredBuffer/Value/Reduction of %zd bytes "
+              "for leaf task %s (UID %lld) in %s memory because there was no "
+              "space reserved at the point of mapping the task for dynamic "
+              "allocations. If you designate a task as a leaf task variant "
+              "then it is your responsibility to tell Legion how much memory "
+              "needs to be allocated for satisfying dynamic allocations during "
+              "the execution of the task.", footprint, get_task_name(),
+              get_unique_id(), manager->get_name())
       }
       else if (finder->second->is_released())
       {
