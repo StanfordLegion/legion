@@ -4813,9 +4813,6 @@ namespace Legion {
                 get_unique_id());
         if (it->second.is_bounded())
         {
-          // Skip creation of pools of size zero
-          if (it->second.size == 0)
-            continue;
           // Check to see if acquired a memory pool for this already
           std::map<Memory,MemoryPool*>::iterator finder =
             acquired_pools.find(it->first);

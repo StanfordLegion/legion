@@ -8527,10 +8527,12 @@ namespace Legion {
       Memory memory;
       derez.deserialize(memory);
       MemoryManager *manager = runtime->find_memory_manager(memory);
-      size_t size;
-      derez.deserialize(size);
-      if (size > 0)
+      bool bounded;
+      derez.deserialize<bool>(bounded);
+      if (bounded)
       {
+        size_t size;
+        derez.deserialize(size);
         size_t alignment;
         derez.deserialize(alignment);
         PhysicalInstance instance;
@@ -8556,22 +8558,26 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(manager != NULL);
-      assert(inst.exists());
+      assert(inst.exists() == (remain > 0));
 #endif
-      backing_instances.emplace(std::make_pair(inst, use));
-      // If we're on the local node for the instance then set up the ranges
-      const void *base = inst.pointer_untyped(0, 0);
-      if (base != NULL)
+      // Might not have an instance if this is a zero-sized pool
+      if (inst.exists())
       {
-        // Initialize the first range with the full allocated space
-        Range &r = ranges.emplace_back(Range());
-        r.first = reinterpret_cast<uintptr_t>(base);
-        r.last = r.first + limit;
-        r.prev = r.next = r.prev_free = r.next_free = SENTINEL;
-        r.instance = inst;
-        const unsigned log2_size = floor_log2(limit);
-        size_based_free_lists.resize(log2_size+1, SENTINEL);
-        size_based_free_lists[log2_size] = 0;
+        backing_instances.emplace(std::make_pair(inst, use));
+        // If we're on the local node for the instance then set up the ranges
+        const void *base = inst.pointer_untyped(0, 0);
+        if (base != NULL)
+        {
+          // Initialize the first range with the full allocated space
+          Range &r = ranges.emplace_back(Range());
+          r.first = reinterpret_cast<uintptr_t>(base);
+          r.last = r.first + limit;
+          r.prev = r.next = r.prev_free = r.next_free = SENTINEL;
+          r.instance = inst;
+          const unsigned log2_size = floor_log2(limit);
+          size_based_free_lists.resize(log2_size+1, SENTINEL);
+          size_based_free_lists[log2_size] = 0;
+        }
       }
     }
 
@@ -8601,6 +8607,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
+      assert(size > 0);
       assert(!released);
 #endif
       if (remaining_bytes < size)
@@ -8727,7 +8734,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(finder != allocated.end());
 #endif
-      RtEvent result;
+      const Realm::InstanceLayoutGeneric *layout = instance.get_layout();
       if (layouts == NULL)
       {
         // Handle the case where we are escaping a deferred buffer/value
@@ -8735,12 +8742,56 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(num_results == 1);
 #endif
-        const Realm::InstanceLayoutGeneric *layout = instance.get_layout();
         layouts = &layout;
-        result = escape_range(finder->second, num_results, results,
-            unique_events, layouts, creator_uid);
       }
-      else
+      RtEvent result;
+      if (finder->second == SENTINEL)
+      {
+        // This is a zero-sized range, so we can just redistrict it directly
+        // into the N instances that we need
+        std::vector<Realm::ProfilingRequestSet> requests(num_results);
+#ifdef DEBUG_LEGION
+        std::vector<MemoryManager::TaskLocalInstanceAllocator>
+          allocators(num_results);
+        std::vector<ProfilingResponseBase> bases;
+        bases.reserve(num_results);
+#endif
+        for (unsigned idx = 0; idx < num_results; idx++)
+        {
+          if (manager->runtime->profiler != NULL)
+          {
+            if (!unique_events[idx].exists())
+            {
+              const RtUserEvent unique = Runtime::create_rt_user_event();
+              Runtime::trigger_event(unique);
+              unique_events[idx] = unique;
+            }
+            manager->runtime->profiler->add_inst_request(requests[idx],
+                                      creator_uid, unique_events[idx]);
+          }
+#ifdef DEBUG_LEGION
+          bases.emplace_back(ProfilingResponseBase(&allocators[idx]));
+          Realm::ProfilingRequest &req = requests[idx].add_request(
+              manager->runtime->find_utility_group(), LG_LEGION_PROFILING_ID,
+              &bases[idx], sizeof(bases[idx]), LG_RESOURCE_PRIORITY);
+          req.add_measurement<
+            Realm::ProfilingMeasurements::InstanceAllocResult>();
+#endif
+        }
+        result = RtEvent(instance.redistrict(results, layouts,
+              num_results, &requests.front()));
+#ifdef DEBUG_LEGION
+        for (unsigned idx = 0; idx < allocators.size(); idx++)
+        {
+#ifndef NDEBUG
+          const bool success =
+#endif
+            allocators[idx].succeeded();
+          assert(success);
+        }
+#endif
+      }
+      else // Non-zero-sized instance so can escape like normal
         result = escape_range(finder->second, num_results, results,
             unique_events, layouts, creator_uid);
       // Remove the allocated instance
@@ -8989,6 +9040,9 @@ namespace Legion {
         const Realm::InstanceLayoutGeneric **layouts, UniqueID creator_uid)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(index < ranges.size());
+#endif
       Range *range = &ranges[index];
       // We only need to update the ranges if we're not released because
       // releasing means we're never going to need to allocated again
@@ -9270,6 +9324,10 @@ namespace Legion {
         for (std::map<PhysicalInstance,unsigned>::const_iterator it =
               allocated.begin(); it != allocated.end(); it++)
         {
+          // If this is a zero-sized instance we can skip it as it is not
+          // backed by any memory so there is nothing to escape
+          if (it->second == SENTINEL)
+            continue;
           LgEvent unique_event;
           PhysicalInstance backing_instance;
           const Realm::InstanceLayoutGeneric *layout = it->first.get_layout();
@@ -9454,17 +9512,25 @@ namespace Legion {
     void ConcretePool::serialize(Serializer &rez)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(remaining_bytes > 0);
-      assert(backing_instances.size() == 1);
-#endif
       rez.serialize(manager->memory);
+      rez.serialize<bool>(true); // bounded;
       rez.serialize(remaining_bytes);
       rez.serialize(max_alignment);
-      std::map<PhysicalInstance,RtEvent>::const_iterator finder = 
-        backing_instances.begin();
-      rez.serialize(finder->first);
-      rez.serialize(finder->second);
+      if (!backing_instances.empty())
+      {
+#ifdef DEBUG_LEGION
+        assert(backing_instances.size() == 1);
+#endif
+        std::map<PhysicalInstance,RtEvent>::const_iterator finder =
+          backing_instances.begin();
+        rez.serialize(finder->first);
+        rez.serialize(finder->second);
+      }
+      else
+      {
+        rez.serialize(PhysicalInstance::NO_INST);
+        rez.serialize(RtEvent::NO_RT_EVENT); 
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -9627,7 +9693,7 @@ namespace Legion {
       assert(manager != NULL);
 #endif
       rez.serialize(manager->memory);
-      rez.serialize<size_t>(0);
+      rez.serialize<bool>(false); // bounded;
       coordinates.serialize(rez);
 #ifdef DEBUG_LEGION
       // Clear the manager since we packed it
@@ -12244,10 +12310,10 @@ namespace Legion {
       }
       if (bounds.is_bounded())
       {
-#ifdef DEBUG_LEGION
-        // Caller should have filtered size 0 pools before this
-        assert(bounds.size > 0);
-#endif
+        // Zero-sized pools are easy to make
+        if (bounds.size == 0)
+          return new ConcretePool(PhysicalInstance::NO_INST,
+              bounds.size, bounds.alignment, RtEvent::NO_RT_EVENT, this);
         // Creating a normal memory pool so create a task local instance
         // for the requested number of bytes and and then make a pool for it  
         Realm::InstanceLayoutGeneric *layout =
