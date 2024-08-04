@@ -543,8 +543,8 @@ namespace Realm {
           request->xd->notify_request_write_done(request);
         }
         // </NEW_DMA>
-	delete op;
-	launched_operations.pop_front();
+        launched_operations.pop_front();
+        delete op;
       }
 
       // finally, if there are any pending ops, and room for them, launch them
@@ -588,8 +588,18 @@ namespace Realm {
 
 	// now actually mark events completed in oldest-first order
 	while(!work_until.is_expired()) {
-	  AIOOperation *op = launched_operations.front();
-	  if(!op->check_completion()) break;
+          if(launched_operations.empty()) {
+            if(pending_operations.empty()) {
+              // finished work - we can return without requeuing ourselves
+              return false;
+            } else {
+              // launch some pending work below
+              break;
+            }
+          }
+          AIOOperation *op = launched_operations.front();
+          if(!op->check_completion())
+            break;
           log_aio.debug("aio op completed: op=%p", static_cast<void *>(op));
           // <NEW_DMA>
 	  if (op->req != NULL) {
@@ -597,30 +607,20 @@ namespace Realm {
 	    request->xd->notify_request_read_done(request);
 	    request->xd->notify_request_write_done(request);
 	  }
-	  // </NEW_DMA>
-	  delete op;
-	  launched_operations.pop_front();
-	  if(launched_operations.empty()) {
-	    if(pending_operations.empty()) {
-	      // finished work - we can return without requeuing ourselves
-	      return false;
-	    } else {
-	      // launch some pending work below
-	      break;
-	    }
-	  }
-	}
+          // </NEW_DMA>
+          launched_operations.pop_front();
+          delete op;
+        }
 
-	// finally, if there are any pending ops, and room for them, and
-	//   time left, launch them
-	while((launched_operations.size() < (size_t)max_depth) &&
-	      !pending_operations.empty() &&
-	      !work_until.is_expired()) {
-	  AIOOperation *op = pending_operations.front();
-	  pending_operations.pop_front();
-	  op->launch();
-	  launched_operations.push_back(op);
-	}
+        // finally, if there are any pending ops, and room for them, and
+        //   time left, launch them
+        while((launched_operations.size() < (size_t)max_depth) &&
+              !pending_operations.empty() && !work_until.is_expired()) {
+          AIOOperation *op = pending_operations.front();
+          pending_operations.pop_front();
+          op->launch();
+          launched_operations.push_back(op);
+        }
       }
 
       // if we fall through to here, there's still polling for either old
