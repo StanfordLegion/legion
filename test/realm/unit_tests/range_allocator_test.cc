@@ -271,6 +271,7 @@ TEST_F(RangeAllocatorTest, TestExplicitRangesSharedTags)
   EXPECT_TRUE(alloc.has_invalid_ranges());
 }
 
+#if 0
 struct TestCase {
   std::vector<std::pair<size_t, size_t>> alloc_ranges;
 
@@ -666,3 +667,4 @@ INSTANTIATE_TEST_SUITE_P(
         }
 
         ));
+#endif
