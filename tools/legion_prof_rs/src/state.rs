@@ -1596,6 +1596,10 @@ impl Chan {
             .or_insert(ChanEntry::DepPart(deppart));
     }
 
+    pub fn find_entry(&self, prof_uid: ProfUID) -> Option<&ChanEntry> {
+        self.entries.get(&prof_uid)
+    }
+
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
@@ -2749,7 +2753,13 @@ impl Copy {
         self.copy_inst_infos.push(copy_inst_info);
     }
 
-    fn split_by_channel(mut self, allocator: &mut ProfUIDAllocator) -> Vec<Self> {
+    fn split_by_channel(
+        mut self,
+        allocator: &mut ProfUIDAllocator,
+        event_lookup: &BTreeMap<EventID, NodeIndex<usize>>,
+        event_graph: &mut Graph<EventEntry, (), Directed, usize>,
+        fevent: EventID,
+    ) -> Vec<Self> {
         assert!(self.chan_id.is_none());
         assert!(self.copy_kind.is_none());
 
@@ -2775,6 +2785,11 @@ impl Copy {
         // Figure out which side we're indirect on, if any.
         let indirect_src = indirect.map_or(false, |i| i.src.is_some());
         let indirect_dst = indirect.map_or(false, |i| i.dst.is_some());
+
+        // Find the event node for this copy so we can update with the right prof uid
+        let node_index = event_lookup.get(&fevent).unwrap();
+        let node_weight = event_graph.node_weight_mut(*node_index).unwrap();
+        assert!(node_weight.kind == EventEntryKind::CopyEvent);
 
         let mut result = Vec::new();
 
@@ -2803,8 +2818,15 @@ impl Copy {
             // first, which matches the current Legion implementation, but is
             // not guaranteed.
             indirect.map(|i| group.insert(0, i));
+            // Hack: update the critical path data structure to point to this
+            // copy, note this means that only the last copy that we make here
+            // will be pointed to as the critical path copy, which may or not
+            // be the actual copy here that is on the critical path since this
+            // is an arbitrary decision, but it's probably good enough for now
+            let base = Base::new(allocator);
+            node_weight.creator = Some(base.prof_uid);
             result.push(Copy {
-                base: Base::new(allocator),
+                base,
                 copy_kind: Some(copy_kind),
                 chan_id: Some(chan_id),
                 copy_inst_infos: group,
@@ -3120,7 +3142,7 @@ pub enum EventEntryKind {
     TaskEvent,
     FillEvent,
     CopyEvent,
-    DeppartEvent,
+    DepPartEvent,
     MergeEvent,
     TriggerEvent,
     PoisonEvent,
@@ -3171,6 +3193,7 @@ pub struct State {
     pub operations: BTreeMap<OpID, Operation>,
     op_prof_uid: BTreeMap<OpID, ProfUID>,
     pub prof_uid_proc: BTreeMap<ProfUID, ProcID>,
+    pub prof_uid_chan: BTreeMap<ProfUID, ChanID>,
     pub tasks: BTreeMap<OpID, ProcID>,
     pub multi_tasks: BTreeMap<OpID, MultiTask>,
     pub last_time: Timestamp,
@@ -3610,11 +3633,16 @@ impl State {
         let creator_uid = alloc.create_reference(creator);
         self.record_event_node(
             fevent,
-            EventEntryKind::DeppartEvent,
+            EventEntryKind::DepPartEvent,
             base.prof_uid,
             time_range.stop.unwrap(),
         );
-        let chan = self.find_deppart_chan_mut(node_id);
+        let chan_id = ChanID::new_deppart(node_id);
+        self.prof_uid_chan.insert(base.prof_uid, chan_id);
+        let chan = self
+            .chans
+            .entry(chan_id)
+            .or_insert_with(|| Chan::new(chan_id));
         chan.add_deppart(DepPart::new(
             base,
             part_op,
@@ -3626,13 +3654,6 @@ impl State {
     }
 
     fn find_chan_mut(&mut self, chan_id: ChanID) -> &mut Chan {
-        self.chans
-            .entry(chan_id)
-            .or_insert_with(|| Chan::new(chan_id))
-    }
-
-    fn find_deppart_chan_mut(&mut self, node_id: NodeID) -> &mut Chan {
-        let chan_id = ChanID::new_deppart(node_id);
         self.chans
             .entry(chan_id)
             .or_insert_with(|| Chan::new(chan_id))
@@ -3712,6 +3733,7 @@ impl State {
             if !fill.fill_inst_infos.is_empty() {
                 fill.add_channel();
                 if let Some(chan_id) = fill.chan_id {
+                    self.prof_uid_chan.insert(fill.base.prof_uid, chan_id);
                     let chan = self.find_chan_mut(chan_id);
                     chan.add_fill(fill);
                 } else {
@@ -3720,11 +3742,17 @@ impl State {
             }
         }
         // put copies into channels
-        for copy in copies.into_values() {
+        for (fevent, copy) in copies.into_iter() {
             if !copy.copy_inst_infos.is_empty() {
-                let split = copy.split_by_channel(&mut self.prof_uid_allocator);
+                let split = copy.split_by_channel(
+                    &mut self.prof_uid_allocator,
+                    &self.event_lookup,
+                    &mut self.event_graph,
+                    fevent,
+                );
                 for elt in split {
                     if let Some(chan_id) = elt.chan_id {
+                        self.prof_uid_chan.insert(elt.base.prof_uid, chan_id);
                         let chan = self.find_chan_mut(chan_id);
                         chan.add_copy(elt);
                     } else {

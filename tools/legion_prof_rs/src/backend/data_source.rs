@@ -120,6 +120,7 @@ pub struct StateDataSource {
     proc_groups: BTreeMap<ProcGroup, Vec<ProcID>>,
     mem_entries: BTreeMap<MemID, EntryID>,
     mem_groups: BTreeMap<MemGroup, Vec<MemID>>,
+    chan_entries: BTreeMap<ChanID, EntryID>,
     chan_groups: BTreeMap<Option<NodeID>, Vec<ChanID>>,
     deppart_groups: BTreeMap<Option<NodeID>, Vec<ChanID>>,
     step_utilization_cache: Mutex<BTreeMap<EntryID, Arc<Vec<(Timestamp, f64)>>>>,
@@ -160,6 +161,7 @@ impl StateDataSource {
 
         let mut entry_map = BTreeMap::<EntryID, EntryKind>::new();
         let mut proc_entries = BTreeMap::new();
+        let mut chan_entries = BTreeMap::new();
         let mut mem_entries = BTreeMap::new();
 
         let mut proc_groups = state.group_procs();
@@ -389,7 +391,8 @@ impl StateDataSource {
                 if node.is_some() {
                     for (chan_index, chan) in chans.iter().enumerate() {
                         let chan_id = kind_id.child(chan_index as u64);
-                        entry_map.insert(chan_id, EntryKind::Chan(*chan));
+                        entry_map.insert(chan_id.clone(), EntryKind::Chan(*chan));
+                        chan_entries.insert(*chan, chan_id);
 
                         let (src_name, src_short) = match chan {
                             ChanID::Copy { src, .. } | ChanID::Scatter { src } => {
@@ -499,7 +502,8 @@ impl StateDataSource {
                 if node.is_some() {
                     for (chan_index, chan) in chans.iter().enumerate() {
                         let chan_id = kind_id.child(chan_index as u64);
-                        entry_map.insert(chan_id, EntryKind::DepPart(*chan));
+                        entry_map.insert(chan_id.clone(), EntryKind::DepPart(*chan));
+                        chan_entries.insert(*chan, chan_id);
 
                         let short_name = match chan {
                             ChanID::DepPart { node_id } => format!("dp{}", node_id.0),
@@ -559,6 +563,7 @@ impl StateDataSource {
             proc_groups,
             mem_entries,
             mem_groups,
+            chan_entries,
             chan_groups,
             deppart_groups,
             step_utilization_cache: Mutex::new(BTreeMap::new()),
@@ -976,6 +981,10 @@ impl StateDataSource {
                                             )),
                                         ));
                                     }
+                                } else {
+                                    item_meta.fields.push((
+                                            self.fields.critical,
+                                            Field::String(format!("Waiting on unknown critical path event from node {}. Please load the logfile from that node to see it.", event.node_id().0))));
                                 }
                             }
                             if find_previous_executing {
@@ -993,6 +1002,10 @@ impl StateDataSource {
                                             previous, prev_start, prev_stop,
                                         ),
                                     ));
+                                } else {
+                                    item_meta.fields.push((
+                                        self.fields.critical,
+                                        Field::String(format!("This is how long it took Realm to wake up the task once it became ready as nothing else is preventing it from running."))));
                                 }
                             }
                             item_metas.push(item_meta);
@@ -1219,13 +1232,64 @@ impl StateDataSource {
                 }
             }
             EventEntryKind::FillEvent => {
-                Field::String(format!("Fill"))
+                let prof_uid = event_entry.creator.unwrap();
+                if let Some(chan_id) = self.state.prof_uid_chan.get(&prof_uid) {
+                    let trigger_time: ts::Timestamp = event_entry.trigger_time.unwrap().into();
+                    let chan = self.state.chans.get(&chan_id).unwrap();
+                    let entry = chan.find_entry(prof_uid).unwrap();
+                    let fill_name = entry.name(&self.state);
+                    Field::ItemLink(ItemLink {
+                        item_uid: entry.base().prof_uid.into(),
+                        title: format!("Completion of {} at {}", &fill_name, trigger_time),
+                        interval: entry.time_range().into(),
+                        entry_id: self.chan_entries.get(chan_id).unwrap().clone(),
+                    })
+                } else {
+                    Field::String(format!(
+                            "Critical path from a fill on node {}. Please load the logfile from that node to see it.",
+                            node.0
+                    ))
+                }
             }
             EventEntryKind::CopyEvent => {
-                Field::String(format!("Copy"))
+                let prof_uid = event_entry.creator.unwrap();
+                if let Some(chan_id) = self.state.prof_uid_chan.get(&prof_uid) {
+                    let trigger_time: ts::Timestamp = event_entry.trigger_time.unwrap().into();
+                    let chan = self.state.chans.get(&chan_id).unwrap();
+                    let entry = chan.find_entry(prof_uid).unwrap();
+                    let copy_name = entry.name(&self.state);
+                    Field::ItemLink(ItemLink {
+                        item_uid: entry.base().prof_uid.into(),
+                        title: format!("Completion of {} at {}", &copy_name, trigger_time),
+                        interval: entry.time_range().into(),
+                        entry_id: self.chan_entries.get(chan_id).unwrap().clone(),
+                    })
+                } else {
+                    Field::String(format!(
+                            "Critical path from a copy on node {}. Please load the logfile from that node to see it.",
+                            node.0
+                    ))
+                }
             }
-            EventEntryKind::DeppartEvent => {
-                Field::String(format!("Deppart"))
+            EventEntryKind::DepPartEvent => {
+                let prof_uid = event_entry.creator.unwrap();
+                if let Some(chan_id) = self.state.prof_uid_chan.get(&prof_uid) {
+                    let trigger_time: ts::Timestamp = event_entry.trigger_time.unwrap().into();
+                    let chan = self.state.chans.get(&chan_id).unwrap();
+                    let entry = chan.find_entry(prof_uid).unwrap();
+                    let copy_name = entry.name(&self.state);
+                    Field::ItemLink(ItemLink {
+                        item_uid: entry.base().prof_uid.into(),
+                        title: format!("Completion of {} at {}", &copy_name, trigger_time),
+                        interval: entry.time_range().into(),
+                        entry_id: self.chan_entries.get(chan_id).unwrap().clone(),
+                    })
+                } else {
+                    Field::String(format!(
+                            "Critical path from a dependent partition operation on node {}. Please load the logfile from that node to see it.",
+                            node.0
+                    ))
+                }
             }
             // The rest of these only happen when the critical path is not along a chain
             // of events but when the (meta-) task producing the event is the last thing
