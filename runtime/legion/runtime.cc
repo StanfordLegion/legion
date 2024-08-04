@@ -10152,7 +10152,10 @@ namespace Legion {
         // See if we can find a locally valid instance first
         if (find_valid_instance(constraints, regions, result, acquire,
                                 tight_region_bounds, remote))
+        {
+          safe_for_unbounded_pools = true;
           return true;
+        }
         // Not the owner, send a message to the owner to request creation
         Serializer rez;
         std::atomic<bool> remote_created(created);
@@ -10208,6 +10211,8 @@ namespace Legion {
         // one trying to do any allocations
         const RtEvent wait_on =
           acquire_allocation_privilege(coordinates, safe_for_unbounded_pools);
+        if (!safe_for_unbounded_pools)
+          return false;
         if (wait_on.exists())
           wait_on.wait();
         // Since this is find or acquire, first see if we can find
@@ -10262,7 +10267,10 @@ namespace Legion {
         // See if we can find it locally
         if (find_valid_instance(*constraints, regions, result, acquire,
                                 tight_region_bounds, remote))
+        {
+          safe_for_unbounded_pools = true;
           return true;
+        }
         // Not the owner, send a message to the owner to request creation
         Serializer rez;
         std::atomic<bool> remote_created(created);
@@ -10318,6 +10326,8 @@ namespace Legion {
         // one trying to do any allocations
         const RtEvent wait_on =
           acquire_allocation_privilege(coordinates, safe_for_unbounded_pools);
+        if (!safe_for_unbounded_pools)
+          return false;
         if (wait_on.exists())
           wait_on.wait();
         // Since this is find or acquire, first see if we can find
