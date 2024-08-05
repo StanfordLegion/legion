@@ -38,6 +38,9 @@ RUN pip3 install --upgrade 'pip>=22,<23' && \
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --default-toolchain 1.74.1 -y
 
 # install a bunch of flavors of CUDA
+RUN wget -nv https://developer.download.nvidia.com/compute/cuda/12.5.1/local_installers/cuda_12.5.1_555.42.06_linux.run && \
+    bash ./cuda_12.5.1_555.42.06_linux.run --toolkit --silent --override && \
+    rm ./cuda_12.5.1_555.42.06_linux.run
 RUN wget -nv https://developer.download.nvidia.com/compute/cuda/12.4.1/local_installers/cuda_12.4.1_550.54.15_linux.run && \
     bash ./cuda_12.4.1_550.54.15_linux.run --toolkit --silent --override && \
     rm ./cuda_12.4.1_550.54.15_linux.run

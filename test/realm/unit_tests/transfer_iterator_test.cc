@@ -6,119 +6,143 @@
 
 using namespace Realm;
 
-// TODO(apryakhin@): Consider parameterizing even more..
-class TransferIteratorIndexSpaceTest
-  : public ::testing::TestWithParam<std::tuple<unsigned, Rect<3, int>>> {
-protected:
-  void SetUp()
-  {
-    const unsigned bytes_per_element = std::get<0>(GetParam());
-    IndexSpace<3, int> is(std::get<1>(GetParam()));
-
-    InstanceLayoutGeneric::FieldLayout field_layout;
-    field_layout.list_idx = 0;
-    field_layout.rel_offset = 0;
-    field_layout.size_in_bytes = bytes_per_element;
-
-    AffineLayoutPiece<3, int> *affine_piece = new AffineLayoutPiece<3, int>();
-    affine_piece->offset = 0;
-    affine_piece->strides[0] = bytes_per_element;
-    affine_piece->strides[1] =
-        bytes_per_element * (is.bounds.hi[0] - is.bounds.lo[0] + 1);
-    affine_piece->strides[2] = bytes_per_element *
-                               (is.bounds.hi[0] - is.bounds.lo[0] + 1) *
-                               (is.bounds.hi[1] - is.bounds.lo[1] + 1);
-    affine_piece->bounds = is.bounds;
-
-    inst_layout = new InstanceLayout<3, int>();
-    inst_layout->space = is.bounds;
-    inst_layout->fields[0] = field_layout;
-    inst_layout->piece_lists.resize(1);
-    inst_layout->piece_lists[0].pieces.push_back(affine_piece);
-  }
-
-  void TearDown() { delete inst_layout; }
-
-  InstanceLayout<3, int> *inst_layout = nullptr;
+struct IteratorTestCase {
+  TransferIterator *it;
+  std::vector<TransferIterator::AddressInfo> infos;
+  std::vector<size_t> max_bytes;
+  std::vector<size_t> exp_bytes;
+  int num_steps;
 };
 
-TEST_P(TransferIteratorIndexSpaceTest, Step3DEmpty)
+class TransferIteratorParamTest : public ::testing::TestWithParam<IteratorTestCase> {};
+
+TEST_P(TransferIteratorParamTest, Base)
 {
-  const unsigned bytes_per_element = std::get<0>(GetParam());
-  IndexSpace<3, int> is(std::get<1>(GetParam()));
-  const std::vector<FieldID> fields{0};
-  const std::vector<size_t> fld_offsets{0};
-  const std::vector<size_t> fld_sizes{bytes_per_element};
-  TransferIteratorIndexSpace<3, int> it(is, inst_layout, 0, 0, fields, fld_offsets,
-                                        fld_sizes, 0);
+  IteratorTestCase test_case = GetParam();
 
-  size_t max_bytes = 0;
-  TransferIterator::AddressInfo info{0, 0, 0, 0, 0};
-  size_t bytes = it.step(max_bytes, info, 0, 0);
+  for(int i = 0; i < test_case.num_steps; i++) {
+    TransferIterator::AddressInfo info;
+    size_t bytes = test_case.it->step(test_case.max_bytes[i], info, 0, 0);
 
-  EXPECT_EQ(bytes, max_bytes);
-  EXPECT_EQ(info.base_offset, 0);
-  EXPECT_EQ(info.bytes_per_chunk, 0);
-  EXPECT_EQ(info.num_lines, 0);
-  EXPECT_EQ(info.line_stride, 0);
-  EXPECT_EQ(info.num_planes, 0);
-  EXPECT_FALSE(it.done());
+    EXPECT_EQ(bytes, test_case.exp_bytes[i]);
+
+    if(!test_case.infos.empty()) {
+      EXPECT_EQ(info.base_offset, test_case.infos[i].base_offset);
+      EXPECT_EQ(info.bytes_per_chunk, test_case.infos[i].bytes_per_chunk);
+      EXPECT_EQ(info.num_lines, test_case.infos[i].num_lines);
+      EXPECT_EQ(info.line_stride, test_case.infos[i].line_stride);
+      EXPECT_EQ(info.num_planes, test_case.infos[i].num_planes);
+      // EXPECT_FALSE(it.done());
+    }
+  }
 }
 
-TEST_P(TransferIteratorIndexSpaceTest, Step3D)
+template <int N, typename T>
+static InstanceLayout<N, T> *create_layout(Rect<N, T> bounds,
+                                           size_t bytes_per_element = 8)
 {
-  const unsigned bytes_per_element = std::get<0>(GetParam());
-  IndexSpace<3, int> is(std::get<1>(GetParam()));
-  const std::vector<FieldID> fields{0};
-  const std::vector<size_t> fld_offsets{0};
-  const std::vector<size_t> fld_sizes{bytes_per_element};
-  TransferIteratorIndexSpace<3, int> it(is, inst_layout, 0, 0, fields, fld_offsets,
-                                        fld_sizes, 0);
+  InstanceLayout<N, T> *inst_layout = new InstanceLayout<N, T>();
 
-  size_t offset = 0;
-  size_t max_bytes = is.bounds.volume() * bytes_per_element;
-  for(int i = 0; i < (is.bounds.volume() * bytes_per_element) / max_bytes; i++) {
-    TransferIterator::AddressInfo info{0, 0, 0, 0, 0};
-    size_t bytes = it.step(max_bytes, info, 0, 0);
-    EXPECT_EQ(bytes, max_bytes);
-    EXPECT_EQ(info.base_offset, offset);
-    EXPECT_EQ(info.bytes_per_chunk, max_bytes);
-    EXPECT_EQ(info.num_lines, 1);
-    EXPECT_EQ(info.line_stride, 0);
-    EXPECT_EQ(info.num_planes, 1);
-    offset += max_bytes;
+  InstanceLayoutGeneric::FieldLayout field_layout;
+  field_layout.list_idx = 0;
+  field_layout.rel_offset = 0;
+  field_layout.size_in_bytes = bytes_per_element;
+
+  AffineLayoutPiece<N, T> *affine_piece = new AffineLayoutPiece<N, T>();
+  affine_piece->bounds = bounds;
+  affine_piece->offset = 0;
+
+  affine_piece->strides[0] = bytes_per_element;
+  size_t mult = affine_piece->strides[0];
+  for(int i = 1; i < N; i++) {
+    affine_piece->strides[i] = (bounds.hi[i - 1] - bounds.lo[i - 1] + 1) * mult;
+    mult *= (bounds.hi[i - 1] - bounds.lo[i - 1] + 1);
   }
 
-  EXPECT_TRUE(it.done());
+  inst_layout->space = bounds;
+  inst_layout->fields[0] = field_layout;
+  inst_layout->piece_lists.resize(1);
+  inst_layout->piece_lists[0].pieces.push_back(affine_piece);
+
+  return inst_layout;
 }
 
-TEST_P(TransferIteratorIndexSpaceTest, GetAddressesIsCoversEntirePiece)
-{
-  const unsigned bytes_per_element = std::get<0>(GetParam());
-  // TODO(apryakhin@): Add more tests in releation
-  IndexSpace<3, int> is(std::get<1>(GetParam()));
-  const std::vector<FieldID> fields{0};
-  const std::vector<size_t> fld_offsets{0};
-  const std::vector<size_t> fld_sizes{bytes_per_element};
-  TransferIteratorIndexSpace<3, int> it(is, inst_layout, 0, 0, fields, fld_offsets,
-                                        fld_sizes, 0);
+const static size_t kByteSize = sizeof(int);
 
-  AddressList addrlist;
-  const InstanceLayoutPieceBase *nonaffine;
-  bool done = it.get_addresses(addrlist, nonaffine);
+const static IteratorTestCase kIteratorTestCases[] = {
+    // Case 0: step through 1D layout with 2 elements
+    IteratorTestCase{
+        .it = new TransferIteratorIndexSpace<1, int>(
+            Rect<1, int>(0, 1), create_layout<1, int>(Rect<1, int>(0, 1), kByteSize), 0,
+            0, {0}, {0}, /*field_sizes=*/{kByteSize}, 0),
+        .infos = {TransferIterator::AddressInfo{/*offset=*/0, /*bytes_per_el=*/kByteSize,
+                                                /*num_lines=*/1,
+                                                /*line_stride=*/0,
+                                                /*num_planes=*/1,
+                                                /*plane_stride=*/0},
+                  TransferIterator::AddressInfo{/*offset=*/kByteSize,
+                                                /*bytes_per_el=*/kByteSize,
+                                                /*num_lines=*/1,
+                                                /*line_stride=*/0,
+                                                /*num_planes=*/1,
+                                                /*plane_stride=*/0}},
+        .max_bytes = {kByteSize, kByteSize},
+        .exp_bytes = {kByteSize, kByteSize},
+        .num_steps = 2,
+    },
 
-  EXPECT_EQ(done, true);
-  EXPECT_EQ(addrlist.bytes_pending(), is.bounds.volume() * bytes_per_element);
-  AddressListCursor cursor;
-  cursor.set_addrlist(&addrlist);
-  // EXPECT_EQ(cursor.get_dim(), 1);
-  EXPECT_EQ(cursor.get_offset(), 0);
-  EXPECT_EQ(cursor.remaining(0), is.bounds.volume() * bytes_per_element);
-}
+    // Case 1: step through 2D layout with 4 elements
+    IteratorTestCase{
+        .it = new TransferIteratorIndexSpace<2, int>(
+            Rect<2, int>(Point<2, int>(0), Point<2, int>(1)),
+            create_layout<2, int>(Rect<2, int>(Point<2, int>(0), Point<2, int>(1)),
+                                  kByteSize),
+            0, 0, {0}, {0}, /*field_sizes=*/{kByteSize}, 0),
+        .infos = {TransferIterator::AddressInfo{/*offset=*/0,
+                                                /*bytes_per_el=*/kByteSize * 2,
+                                                /*num_lines=*/1,
+                                                /*line_stride=*/0,
+                                                /*num_planes=*/1,
+                                                /*plane_stride=*/0},
+                  TransferIterator::AddressInfo{/*offset=*/kByteSize * 2,
+                                                /*bytes_per_el=*/kByteSize * 2,
+                                                /*num_lines=*/1,
+                                                /*line_stride=*/0,
+                                                /*num_planes=*/1,
+                                                /*plane_stride=*/0}},
+        .max_bytes = {kByteSize * 2, kByteSize * 2},
+        .exp_bytes = {kByteSize * 2, kByteSize * 2},
+        .num_steps = 2,
+    },
 
-INSTANTIATE_TEST_SUITE_P(
-    IteratorTest, TransferIteratorIndexSpaceTest,
-    testing::Values(std::make_tuple(8, Rect<3, int>({0, 0, 0}, {3, 0, 0})),
-                    std::make_tuple(8, Rect<3, int>({0, 0, 0}, {3, 3, 0})),
-                    std::make_tuple(8, Rect<3, int>({0, 0, 0}, {3, 3, 3})),
-                    std::make_tuple(16, Rect<3, int>({0, 0, 0}, {3, 3, 3}))));
+    // Case 2: step through 2D layout at once
+    IteratorTestCase{
+        .it = new TransferIteratorIndexSpace<2, int>(
+            Rect<2, int>(Point<2, int>(0), Point<2, int>(1)),
+            create_layout<2, int>(Rect<2, int>(Point<2, int>(0), Point<2, int>(1)),
+                                  kByteSize),
+            0, 0, {0}, {0}, /*field_sizes=*/{kByteSize}, 0),
+        .infos = {TransferIterator::AddressInfo{/*offset=*/0,
+                                                /*bytes_per_el=*/kByteSize * 4,
+                                                /*num_lines=*/1,
+                                                /*line_stride=*/0,
+                                                /*num_planes=*/1,
+                                                /*plane_stride=*/0}},
+        .max_bytes = {kByteSize * 4},
+        .exp_bytes = {kByteSize * 4},
+        .num_steps = 1,
+    },
+
+    // Case 3: step with empty rect
+    IteratorTestCase{.it = new TransferIteratorIndexSpace<1, int>(
+                         Rect<1, int>::make_empty(),
+                         create_layout<1, int>(Rect<1, int>(0, 1), kByteSize), 0, 0, {0},
+                         {0},
+                         /*field_sizes=*/{kByteSize}, 0),
+                     .max_bytes = {0},
+                     .exp_bytes = {0},
+                     .num_steps = 1},
+};
+
+INSTANTIATE_TEST_SUITE_P(Foo, TransferIteratorParamTest,
+                         testing::ValuesIn(kIteratorTestCases));

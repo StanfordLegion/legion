@@ -552,7 +552,7 @@ class HasNoDependencies(Dependencies):
         pass
 
 class TimeRange(ABC):
-    _abstract_slots = ['create', 'ready', 'start', 'stop', 'trimmed', 'was_removed']
+    _abstract_slots = ['spawn', 'create', 'ready', 'start', 'stop', 'trimmed', 'was_removed']
 
     @typecheck
     def __init__(self, 
@@ -564,6 +564,7 @@ class TimeRange(ABC):
         assert create is None or (create is not None and ready is not None and create <= ready)
         assert ready is None or (ready is not None and start is not None and ready <= start)
         assert start is None or (start is not None and stop is not None and start <= stop)
+        self.spawn: Optional[int] = None
         self.create: Optional[int] = create
         self.ready: Optional[int] = ready
         self.start: Optional[int] = start
@@ -3587,9 +3588,10 @@ class LFSR(object):
         self.max_value = pow(2,needed_bits)
         # We'll use a deterministic seed here so that
         # our results are repeatable
-        seed_configuration = '1010010011110011'
+        seed_configuration = '101001001111001110100011'
         for i in range(needed_bits):
             self.register += seed_configuration[i]
+        # Polynomials from https://en.wikipedia.org/wiki/Linear-feedback_shift_register#Example_polynomials_for_maximal_LFSRs
         polynomials = {
           2 : (2,1),
           3 : (3,2),
@@ -3605,9 +3607,17 @@ class LFSR(object):
           13 : (13,12,11,8),
           14 : (14,13,12,2),
           15 : (15,14),
-          16 : (16,14,13,11),
+          16 : (16,15,13,4),
+          17 : (17,14),
+          18 : (18,11),
+          19 : (19,18,17,14),
+          20 : (20,17),
+          21 : (21,19),
+          22 : (22,21),
+          23 : (23,18),
+          24 : (24,23,22,17),
         }
-        # If we need more than 16 bits that is a lot tasks
+        # If we need more than 24 bits that is a lot tasks
         assert needed_bits in polynomials
         self.taps = polynomials[needed_bits]
 
@@ -3695,6 +3705,7 @@ class State(object):
             "TaskInfo": self.log_task_info,
             "GPUTaskInfo": self.log_gpu_task_info,
             "MetaInfo": self.log_meta_info,
+            "MessageInfo": self.log_message_info,
             "CopyInfo": self.log_copy_info,
             "CopyInstInfo": self.log_copy_inst_info,
             "FillInfo": self.log_fill_info,
@@ -3721,7 +3732,9 @@ class State(object):
             "PhysicalInstDimOrderDesc": self.log_physical_inst_layout_dim_desc,
             "PhysicalInstanceUsage": self.log_physical_inst_usage,
             "IndexSpaceSizeDesc": self.log_index_space_size_desc,
-            "CalibrationErr": self.log_calibration_err
+            "CalibrationErr": self.log_calibration_err,
+            "BacktraceDesc": self.log_backtrace_desc,
+            "EventWaitInfo": self.log_event_wait
             #"UserInfo": self.log_user_info
         }
         self.current_node_id: Optional[int] = None
@@ -3861,6 +3874,16 @@ class State(object):
     def log_calibration_err(self, calibration_err: int) -> None:
         self.calibration_err = calibration_err
 
+    # BacktraceDesc
+    @typecheck
+    def log_backtrace_desc(self, backtrace_id: int, backtrace:str) -> None:
+        pass
+
+    # EventWaitInfo
+    @typecheck
+    def log_event_wait(self, proc_id: int, fevent: int, wait_event: int, backtrace_id: int) -> None:
+        pass
+
     # PhysicalInstRegionDesc
     @typecheck
     def log_physical_inst_region_desc(self, inst_uid: int, 
@@ -3967,6 +3990,24 @@ class State(object):
         proc = self.find_or_create_processor(proc_id)
         proc.add_task(meta)
 
+    # MessageInfo
+    @typecheck
+    def log_message_info(self, op_id: int, lg_id: int, 
+                         proc_id: int, spawn: int, 
+                         create: int, ready: int, 
+                         start: int, stop: int,
+                         creator: int, fevent: int
+    ) -> None:
+        op = self.find_or_create_op(op_id)
+        variant = self.find_or_create_meta_variant(lg_id)
+        meta = self.create_meta(variant, op, create, ready, start, stop)
+        meta.fevent = fevent
+        meta.spawn = spawn
+        if stop > self.last_time:
+            self.last_time = stop
+        proc = self.find_or_create_processor(proc_id)
+        proc.add_task(meta)
+
     @typecheck
     def add_copy_map(self, fevent: int, copy: Copy) -> None:
         key = fevent
@@ -4067,7 +4108,7 @@ class State(object):
     # TaskWaitInfo
     @typecheck
     def log_task_wait_info(self, op_id: int, task_id: int, variant_id: int, 
-                           wait_start: int, wait_ready: int, wait_end: int
+                           wait_start: int, wait_ready: int, wait_end: int, wait_event: int
     ) -> None:
         variant = self.find_or_create_variant(task_id, variant_id)
         task = self.find_or_create_task(op_id, variant)
@@ -4079,7 +4120,7 @@ class State(object):
     # MetaWaitInfo
     @typecheck
     def log_meta_wait_info(self, op_id: int, lg_id: int, 
-                           wait_start: int, wait_ready: int, wait_end: int
+                           wait_start: int, wait_ready: int, wait_end: int, wait_event: int
     ) -> None:
         op = self.find_or_create_op(op_id)
         variant = self.find_or_create_meta_variant(lg_id)
@@ -4724,13 +4765,15 @@ class State(object):
         for variant in self.meta_variants.values():
             if not variant.message:
                 continue
-            if variant.ordered_vc:
-                continue
             # Iterate over the lists of meta-tasks for each op_id
             for ops in variant.ops.values():
                 total_messages += len(ops)
                 for op in ops:
-                    latency = op.ready - op.create
+                    # Check for skew, we'll ignore skew for now
+                    # See Legion Prof Rust for skew analysis
+                    if op.create < op.spawn:
+                        continue
+                    latency = op.create - op.spawn
                     if threshold <= latency:
                         bad_messages += 1
                     if longest_latency < latency:

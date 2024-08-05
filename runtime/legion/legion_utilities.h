@@ -1296,7 +1296,7 @@ namespace Legion {
       decltype(context_bytes) sent_context = 0;
       memcpy(&sent_context, buffer+index, sizeof(sent_context));
 #endif
-      index += sizeof(sent_context);
+      index += sizeof(context_bytes);
       // Check to make sure that they match
       assert(sent_context == context_bytes);
       context_bytes = 0;
@@ -1313,7 +1313,7 @@ namespace Legion {
       decltype(context_bytes) sent_context = 0;
       memcpy(&sent_context, buffer+index, sizeof(sent_context));
 #endif
-      index += sizeof(sent_context);
+      index += sizeof(context_bytes);
       // Check to make sure that they match
       assert(sent_context == context_bytes);
       context_bytes = 0;
