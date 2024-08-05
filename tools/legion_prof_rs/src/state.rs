@@ -4140,10 +4140,12 @@ impl State {
             self.event_lookup.clear();
         } else {
             // Compute a topological sorting of the graph
+            // Complexity of this is O(V + E) so should be scalable
             match toposort(&self.event_graph, None) {
                 Ok(topological_order) => {
                     // Iterate over the nodes in topological order and propagate the
                     // ProfUID of and timestamp determining the critical path for each event
+                    // Complexity of this loop is also O(V + E) so should be scalable
                     for node_id in topological_order {
                         // Iterate over all the incoming edges and determine the latest
                         // precondition event to trigger leading into this node
@@ -4161,10 +4163,10 @@ impl State {
                             let trigger_time = src.trigger_time.unwrap();
                             if let Some((_, latest_time)) = latest {
                                 if latest_time < trigger_time {
-                                    latest = Some((edge.source(), trigger_time));
+                                    latest = Some((src.critical.unwrap(), trigger_time));
                                 }
                             } else {
-                                latest = Some((edge.source(), trigger_time));
+                                latest = Some((src.critical.unwrap(), trigger_time));
                             }
                         }
                         let node = self.event_graph.node_weight_mut(node_id).unwrap();
