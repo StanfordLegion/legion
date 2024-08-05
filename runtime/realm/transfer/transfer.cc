@@ -79,10 +79,11 @@ namespace Realm {
 
   template <int N, typename T>
   TransferIteratorBase<N, T>::TransferIteratorBase(
-      const InstanceLayout<N, T> *_inst_layout, size_t _inst_offset,
+      RegionInstance _inst, const InstanceLayout<N, T> *_inst_layout, size_t _inst_offset,
       const int _dim_order[N])
     : have_rect(false)
     , is_done(false)
+    , inst(_inst)
     , inst_layout(_inst_layout)
     , inst_offset(_inst_offset)
     , tentative_valid(false)
@@ -101,7 +102,7 @@ namespace Realm {
   TransferIteratorBase<N, T>::TransferIteratorBase(void)
     : have_rect(false)
     , is_done(false)
-    , inst_impl(0)
+    , inst(RegionInstance::NO_INST)
     , inst_layout(0)
     , inst_offset(0)
     , tentative_valid(false)
@@ -382,6 +383,8 @@ namespace Realm {
       target_hi[i] = target_subrect.hi[i] - layout_piece->bounds.lo[i];
     }
 
+    RegionInstanceImpl *inst_impl = get_runtime()->get_instance_impl(inst);
+
     // offer the rectangle - it can be reduced by pruning dimensions
     int ndims = info.set_rect(inst_impl, layout_piece,
                               cur_field_size, cur_field_offset,
@@ -632,11 +635,12 @@ namespace Realm {
 
   template <int N, typename T>
   TransferIteratorIndexSpace<N, T>::TransferIteratorIndexSpace(
-      const IndexSpace<N, T> &_is, const InstanceLayout<N, T> *inst_layout,
-      size_t inst_offset, const int _dim_order[N], const std::vector<FieldID> &_fields,
+      const IndexSpace<N, T> &_is, RegionInstance inst,
+      const InstanceLayout<N, T> *inst_layout, size_t inst_offset,
+      const int _dim_order[N], const std::vector<FieldID> &_fields,
       const std::vector<size_t> &_fld_offsets, const std::vector<size_t> &_fld_sizes,
       size_t _extra_elems)
-    : TransferIteratorBase<N, T>(inst_layout, inst_offset, _dim_order)
+    : TransferIteratorBase<N, T>(inst, inst_layout, inst_offset, _dim_order)
     , is(_is)
     , field_idx(0)
     , extra_elems(_extra_elems)
@@ -658,7 +662,7 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  TransferIteratorIndexSpace<N,T>::TransferIteratorIndexSpace(void)
+  TransferIteratorIndexSpace<N, T>::TransferIteratorIndexSpace(void)
     : iter_init_deferred(false)
     , field_idx(0)
   {}
@@ -675,7 +679,6 @@ namespace Realm {
     size_t extra_elems;
     int dim_order[N];
     size_t inst_offset;
-    InstanceLayout<N, T> *inst_layout = nullptr;
 
     if(!((deserializer >> is) && (deserializer >> inst) && (deserializer >> fields) &&
          (deserializer >> fld_offsets) && (deserializer >> fld_sizes) &&
@@ -694,7 +697,7 @@ namespace Realm {
     assert((checked_cast<const InstanceLayout<N, T> *>(impl->metadata.layout) != 0));
 
     TransferIteratorIndexSpace<N, T> *tiis = new TransferIteratorIndexSpace<N, T>(
-        is, checked_cast<const InstanceLayout<N, T> *>(impl->metadata.layout),
+        is, inst, checked_cast<const InstanceLayout<N, T> *>(impl->metadata.layout),
         impl->metadata.inst_offset, dim_order, fields, fld_offsets, fld_sizes,
         extra_elems);
     return tiis;
@@ -765,15 +768,11 @@ namespace Realm {
 
   template <int N, typename T>
   template <typename S>
-  bool TransferIteratorIndexSpace<N,T>::serialize(S& serializer) const
+  bool TransferIteratorIndexSpace<N, T>::serialize(S &serializer) const
   {
-    if(!((serializer << iter.space) &&
-	 (serializer << (this->inst_impl ? this->inst_impl->me :
-			 RegionInstance::NO_INST)) &&
-	 (serializer << fields) &&
-	 (serializer << fld_offsets) &&
-	 (serializer << fld_sizes) &&
-	 (serializer << extra_elems)))
+    if(!((serializer << iter.space) && (serializer << this->inst) &&
+         (serializer << fields) && (serializer << fld_offsets) &&
+         (serializer << fld_sizes) && (serializer << extra_elems)))
       return false;
 
     for(int i = 0; i < N; i++)
@@ -852,6 +851,7 @@ namespace Realm {
       RegionInstance inst, const std::vector<FieldID> &_fields,
       const std::vector<size_t> &_fld_offsets, const std::vector<size_t> &_fld_sizes)
     : TransferIteratorBase<N, T>(
+          inst,
           checked_cast<const InstanceLayout<N, T> *>(
               get_runtime()->get_instance_impl(inst)->metadata.layout),
           get_runtime()->get_instance_impl(inst)->metadata.inst_offset, 0)
@@ -870,7 +870,7 @@ namespace Realm {
   template <typename S>
   bool WrappingTransferIteratorIndirect<N, T>::serialize(S &serializer) const
   {
-    return ((serializer << this->inst_impl->me) && (serializer << fields) &&
+    return ((serializer << this->inst) && (serializer << fields) &&
             (serializer << fld_offsets) && (serializer << fld_sizes));
   }
 
@@ -1138,6 +1138,7 @@ namespace Realm {
       const std::vector<FieldID> &_fields, const std::vector<size_t> &_fld_offsets,
       const std::vector<size_t> &_fld_sizes)
     : TransferIteratorBase<N, T>(
+          inst,
           checked_cast<const InstanceLayout<N, T> *>(
               get_runtime()->get_instance_impl(inst)->metadata.layout),
           get_runtime()->get_instance_impl(inst)->metadata.inst_offset, 0)
@@ -1153,7 +1154,7 @@ namespace Realm {
     , indirect_xd(0)
     , indirect_port_idx(-1)
   {}
-    
+
   template <int N, typename T>
   /*static*/ Serialization::PolymorphicSerdezSubclass<TransferIterator, TransferIteratorIndirect<N,T> > TransferIteratorIndirect<N,T>::serdez_subclass;
 
@@ -1161,11 +1162,9 @@ namespace Realm {
   template <typename S>
   bool TransferIteratorIndirect<N,T>::serialize(S& serializer) const
   {
-    return ((serializer << addrs_mem) &&
-	    (serializer << this->inst_impl->me) &&
-	    (serializer << fields) &&
-	    (serializer << fld_offsets) &&
-	    (serializer << fld_sizes));
+    return ((serializer << addrs_mem) && (serializer << this->inst) &&
+            (serializer << fields) && (serializer << fld_offsets) &&
+            (serializer << fld_sizes));
   }
 
   template <int N, typename T>
@@ -1423,6 +1422,7 @@ namespace Realm {
       const std::vector<FieldID> &_fields, const std::vector<size_t> &_fld_offsets,
       const std::vector<size_t> &_fld_sizes)
     : TransferIteratorBase<N, T>(
+          inst,
           checked_cast<const InstanceLayout<N, T> *>(
               get_runtime()->get_instance_impl(inst)->metadata.layout),
           get_runtime()->get_instance_impl(inst)->metadata.inst_offset, 0)
@@ -1439,19 +1439,19 @@ namespace Realm {
     , indirect_xd(0)
     , indirect_port_idx(-1)
   {}
-    
+
   template <int N, typename T>
-  /*static*/ Serialization::PolymorphicSerdezSubclass<TransferIterator, TransferIteratorIndirectRange<N,T> > TransferIteratorIndirectRange<N,T>::serdez_subclass;
+  /*static*/ Serialization::PolymorphicSerdezSubclass<TransferIterator,
+                                                      TransferIteratorIndirectRange<N, T>>
+      TransferIteratorIndirectRange<N, T>::serdez_subclass;
 
   template <int N, typename T>
   template <typename S>
   bool TransferIteratorIndirectRange<N,T>::serialize(S& serializer) const
   {
-    return ((serializer << addrs_mem) &&
-	    (serializer << this->inst_impl->me) &&
-	    (serializer << fields) &&
-	    (serializer << fld_offsets) &&
-	    (serializer << fld_sizes));
+    return ((serializer << addrs_mem) && (serializer << this->inst) &&
+            (serializer << fields) && (serializer << fld_offsets) &&
+            (serializer << fld_sizes));
   }
 
   template <int N, typename T>
@@ -2045,7 +2045,7 @@ namespace Realm {
     assert(impl->metadata.is_valid());
     assert((checked_cast<const InstanceLayout<N, T> *>(impl->metadata.layout) != 0));
     return new TransferIteratorIndexSpace<N, T>(
-        is, checked_cast<const InstanceLayout<N, T> *>(impl->metadata.layout),
+        is, inst, checked_cast<const InstanceLayout<N, T> *>(impl->metadata.layout),
         impl->metadata.inst_offset, dim_order.data(), fields, fld_offsets, fld_sizes,
         extra_elems);
   }

@@ -66,14 +66,22 @@ static InstanceLayout<N, T> *create_layout(Rect<N, T> bounds,
   return inst_layout;
 }
 
+// TODO(apryakhin@): Move to utils
+static inline RegionInstance make_inst(int owner = 0, int creator = 0, int mem_idx = 0,
+                                       int inst_idx = 0)
+{
+  return ID::make_instance(owner, creator, mem_idx, inst_idx).convert<RegionInstance>();
+}
+
 const static size_t kByteSize = sizeof(int);
 
 const static IteratorTestCase kIteratorTestCases[] = {
     // Case 0: step through 1D layout with 2 elements
     IteratorTestCase{
         .it = new TransferIteratorIndexSpace<1, int>(
-            Rect<1, int>(0, 1), create_layout<1, int>(Rect<1, int>(0, 1), kByteSize), 0,
-            0, {0}, {0}, /*field_sizes=*/{kByteSize}, 0),
+            Rect<1, int>(0, 1), make_inst(),
+            create_layout<1, int>(Rect<1, int>(0, 1), kByteSize), 0, 0, {0}, {0},
+            /*field_sizes=*/{kByteSize}, 0),
         .infos = {TransferIterator::AddressInfo{/*offset=*/0, /*bytes_per_el=*/kByteSize,
                                                 /*num_lines=*/1,
                                                 /*line_stride=*/0,
@@ -93,7 +101,7 @@ const static IteratorTestCase kIteratorTestCases[] = {
     // Case 1: step through 2D layout with 4 elements
     IteratorTestCase{
         .it = new TransferIteratorIndexSpace<2, int>(
-            Rect<2, int>(Point<2, int>(0), Point<2, int>(1)),
+            Rect<2, int>(Point<2, int>(0), Point<2, int>(1)), make_inst(),
             create_layout<2, int>(Rect<2, int>(Point<2, int>(0), Point<2, int>(1)),
                                   kByteSize),
             0, 0, {0}, {0}, /*field_sizes=*/{kByteSize}, 0),
@@ -117,7 +125,7 @@ const static IteratorTestCase kIteratorTestCases[] = {
     // Case 2: step through 2D layout at once
     IteratorTestCase{
         .it = new TransferIteratorIndexSpace<2, int>(
-            Rect<2, int>(Point<2, int>(0), Point<2, int>(1)),
+            Rect<2, int>(Point<2, int>(0), Point<2, int>(1)), make_inst(),
             create_layout<2, int>(Rect<2, int>(Point<2, int>(0), Point<2, int>(1)),
                                   kByteSize),
             0, 0, {0}, {0}, /*field_sizes=*/{kByteSize}, 0),
@@ -135,7 +143,7 @@ const static IteratorTestCase kIteratorTestCases[] = {
     // Case 3: step through 2D layout at once requesting more bytes
     IteratorTestCase{
         .it = new TransferIteratorIndexSpace<2, int>(
-            Rect<2, int>(Point<2, int>(0), Point<2, int>(1)),
+            Rect<2, int>(Point<2, int>(0), Point<2, int>(1)), make_inst(),
             create_layout<2, int>(Rect<2, int>(Point<2, int>(0), Point<2, int>(1)),
                                   kByteSize),
             0, 0, {0}, {0}, /*field_sizes=*/{kByteSize}, 0),
@@ -153,7 +161,7 @@ const static IteratorTestCase kIteratorTestCases[] = {
     // Case 3: Partial steps through 2D layout
     IteratorTestCase{
         .it = new TransferIteratorIndexSpace<2, int>(
-            Rect<2, int>(Point<2, int>(0), Point<2, int>(1)),
+            Rect<2, int>(Point<2, int>(0), Point<2, int>(1)), make_inst(),
             create_layout<2, int>(Rect<2, int>(Point<2, int>(0), Point<2, int>(3)),
                                   kByteSize),
             0, 0, {0}, {0}, /*field_sizes=*/{kByteSize}, 0),
@@ -179,7 +187,7 @@ const static IteratorTestCase kIteratorTestCases[] = {
     // Case 5: step through 3D layout at once
     IteratorTestCase{
         .it = new TransferIteratorIndexSpace<3, int>(
-            Rect<3, int>(Point<3, int>(0), Point<3, int>(1)),
+            Rect<3, int>(Point<3, int>(0), Point<3, int>(1)), make_inst(),
             create_layout<3, int>(Rect<3, int>(Point<3, int>(0), Point<3, int>(1)),
                                   kByteSize),
             0, 0, {0}, {0}, /*field_sizes=*/{kByteSize}, 0),
@@ -196,7 +204,7 @@ const static IteratorTestCase kIteratorTestCases[] = {
 
     // Case 6: step with empty rect
     IteratorTestCase{.it = new TransferIteratorIndexSpace<1, int>(
-                         Rect<1, int>::make_empty(),
+                         Rect<1, int>::make_empty(), make_inst(),
                          create_layout<1, int>(Rect<1, int>(0, 1), kByteSize), 0, 0, {0},
                          {0},
                          /*field_sizes=*/{kByteSize}, 0),

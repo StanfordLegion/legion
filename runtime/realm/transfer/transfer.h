@@ -126,9 +126,8 @@ namespace Realm {
   protected:
     TransferIteratorBase(void); // used by deserializer
   public:
-    TransferIteratorBase(const InstanceLayout<N, T> *_inst_layout, size_t _inst_offset,
-                         // RegionInstance inst,
-                         const int _dim_order[N]);
+    TransferIteratorBase(RegionInstance _inst, const InstanceLayout<N, T> *_inst_layout,
+                         size_t _inst_offset, const int _dim_order[N]);
 
     virtual Event request_metadata(void);
 
@@ -158,11 +157,9 @@ namespace Realm {
     Point<N, T> cur_point, next_point;
     bool carry;
 
-    RegionInstanceImpl *inst_impl; // TODO(apryakhin@): DELETE
+    RegionInstance inst;
     const InstanceLayout<N, T> *inst_layout;
     size_t inst_offset;
-    //RegionInstanceImpl::Metadata metadata; // TODO(apryakhin@):
-    //DELETE
     bool tentative_valid;
     int dim_order[N];
   };
@@ -177,11 +174,9 @@ namespace Realm {
   protected:
     TransferIteratorIndexSpace(void); // used by deserializer
   public:
-    TransferIteratorIndexSpace(const IndexSpace<N, T> &_is,
+    TransferIteratorIndexSpace(const IndexSpace<N, T> &_is, RegionInstance _inst,
                                const InstanceLayout<N, T> *_inst_layout,
-                               size_t inst_offset,
-                               // RegionInstance inst,
-                               const int _dim_order[N],
+                               size_t inst_offset, const int _dim_order[N],
                                const std::vector<FieldID> &_fields,
                                const std::vector<size_t> &_fld_offsets,
                                const std::vector<size_t> &_fld_sizes,
