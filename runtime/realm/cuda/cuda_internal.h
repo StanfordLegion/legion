@@ -1445,6 +1445,7 @@ namespace Realm {
   __op__(cuStreamQuery, CUDA_VERSION);                                                   \
   __op__(cuMemGetAddressRange, CUDA_VERSION);                                            \
   __op__(cuPointerGetAttributes, CUDA_VERSION);                                          \
+  __op__(cuDriverGetVersion, CUDA_VERSION);                                              \
   __op__(cuLaunchHostFunc, CUDA_VERSION);
 
 // We specify the exact version for this api so we can pass it to cuGetProcAddress later.
