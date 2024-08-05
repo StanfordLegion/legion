@@ -181,12 +181,18 @@ namespace Realm {
       // 1) empty lhs
       if(l.empty()) {
 	results[i] = r;
-	continue;
+        if(results[i].sparsity.exists()) {
+          //results[i].sparsity.add_references();
+        }
+        continue;
       }
 
       // 2) empty rhs
       if(rhss[li].empty()) {
 	results[i] = l;
+        if(results[i].sparsity.exists()) {
+          //results[i].sparsity.add_references();
+        }
 	continue;
       }
 
@@ -206,6 +212,9 @@ namespace Realm {
       if((l.sparsity == r.sparsity) && union_is_rect(l.bounds, r.bounds)) {
 	results[i] = IndexSpace<N,T>(l.bounds.union_bbox(r.bounds),
 				      l.sparsity);
+        if(results[i].sparsity.exists()) {
+          //results[i].sparsity.add_references();
+        }
         continue;
       }
 
@@ -217,6 +226,9 @@ namespace Realm {
 				     finish_event, ID(e).event_generation());
       }
       results[i] = op->add_union(l, r);
+      if(results[i].sparsity.exists()) {
+        //results[i].sparsity.add_references();
+      }
     }
 
     for(size_t i = 0; i < n; i++) {
@@ -347,14 +359,20 @@ namespace Realm {
 
       // 2) empty rhs
       if(r.empty()) {
-	results[i] = l;
-	continue;
+        results[i] = l;
+        if(results[i].sparsity.exists()) {
+          //results[i].sparsity.add_references();
+        }
+        continue;
       }
 
       // 3) no overlap between lhs and rhs
       if(!l.bounds.overlaps(r.bounds)) {
-	results[i] = l;
-	continue;
+        results[i] = l;
+        if(results[i].sparsity.exists()) {
+          //results[i].sparsity.add_references();
+        }
+        continue;
       }
 
       // 4) dense rhs containing lhs' bounds -> empty
@@ -368,6 +386,9 @@ namespace Realm {
 	Rect<N,T> sdiff;
 	if(attempt_simple_diff(l.bounds, r.bounds, sdiff)) {
           results[i] = IndexSpace<N, T>(sdiff, l.sparsity);
+          if(results[i].sparsity.exists()) {
+            //results[i].sparsity.add_references();
+          }
           continue;
 	}
       }
@@ -381,6 +402,9 @@ namespace Realm {
 					  ID(e).event_generation());
       }
       results[i] = op->add_difference(lhss[li], rhss[ri]);
+      if(results[i].sparsity.exists()) {
+        //results[i].sparsity.add_references();
+      }
     }
 
     for(size_t i = 0; i < n; i++) {
@@ -427,7 +451,10 @@ namespace Realm {
         // lhs dense or subspace match, and containment - skip
 	if((result.dense() || (result.sparsity == subspaces[i].sparsity)) &&
 	   result.bounds.contains(subspaces[i].bounds)) {
-	  continue;
+          if(result.sparsity.exists()) {
+            //result.sparsity.add_references();
+          }
+          continue;
         }
 
 	// TODO: subspace match ought to be sufficient here - also handle
@@ -446,6 +473,9 @@ namespace Realm {
 							  ID(e).event_generation());
 
 	result = op->add_union(subspaces);
+        if(result.sparsity.exists()) {
+          //result.sparsity.add_references();
+        }
         op->launch(wait_on);
 	was_inline = false;
 	break;
