@@ -3516,9 +3516,10 @@ namespace Legion {
 #ifdef LEGION_SPY
       LegionSpy::log_replay_operation(unique_op_id);
 #endif
+      std::map<Memory,PoolBounds> pool_bounds;
       tpl->get_mapper_output(this, selected_variant, task_priority,
           perform_postmap, target_processors, future_memories,
-          physical_instances);
+          pool_bounds, physical_instances);
       // Then request any future mappings in advance
       if (!futures.empty())
       {
@@ -3530,6 +3531,30 @@ namespace Legion {
           futures[idx].impl->request_application_instance(memory, this,
               safe_for_unbounded_pools);
         }
+      }
+      // Make any memory pools required to replay this task
+      for (std::map<Memory,PoolBounds>::const_iterator it =
+            pool_bounds.begin(); it != pool_bounds.end(); it++)
+      {
+        MemoryManager *manager = runtime->find_memory_manager(it->first);
+        // Recompute these each time as they might be consumed each time
+        TaskTreeCoordinates coordinates;
+        compute_task_tree_coordinates(coordinates);
+        // Safe to block here indefinitely for unbounded pools since any
+        // unbounded pools have to come from before the trace
+        bool safe_for_unbounded_pools = true;
+        MemoryPool *pool = manager->create_memory_pool(get_unique_id(),
+            coordinates, it->second, safe_for_unbounded_pools);
+        if (pool == NULL)
+          REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
+              "Failed to reserve a dynamic memory pool of %zd bytes for "
+              "leaf task %s (UID %lld) in %s memory during trace replay. "
+              "You are actually out of memory here so you'll need to "
+              "either allocate more memory for this kind of memory when "
+              "you configure Realm which may necessitate finding a bigger "
+              "machine.", it->second.size, get_task_name(), get_unique_id(),
+              manager->get_name())
+        leaf_memory_pools.emplace(std::make_pair(it->first, pool));
       }
       // Make sure to propagate any future sizes that we know about here
       if (!elide_future_return)
@@ -3740,6 +3765,30 @@ namespace Legion {
         // here if we're going to record it
         if (!futures.empty())
           output.future_locations = future_memories;
+        // Make sure we save all the future pool bounds sizes including
+        // the ones that come statically from the task variant
+        for (std::map<Memory,MemoryPool*>::const_iterator it =
+              leaf_memory_pools.begin(); it != leaf_memory_pools.end(); it++)
+        {
+          std::map<Memory,PoolBounds>::const_iterator finder =
+            output.leaf_pool_bounds.find(it->first);
+          if (finder == output.leaf_pool_bounds.end())
+            finder = output.leaf_pool_bounds.insert(
+                std::make_pair(it->first, it->second->get_bounds())).first;
+          // Issue a warning to the user if the pool is unbounded that
+          // this is going to invalidate the trace capture
+          if (!finder->second.is_bounded())
+          {
+            MemoryManager *manager = runtime->find_memory_manager(it->first);
+            REPORT_LEGION_WARNING(LEGION_WARNING_TRACING_UNBOUND_MEMORY_POOL,
+                "Detected unbounded pool in trace. Mapper %s requested to "
+                "trace task %s (UID %lld) with an unbounded memory pool in "
+                "%s memory. Unbounded pools are not permitted in traces and "
+                "will prevent this recording of the trace from being replayed.",
+                mapper->get_mapper_name(), get_task_name(), get_unique_id(),
+                manager->get_name())
+          }
+        }
         const TraceLocalID tlid = get_trace_local_id();
         if (remote_trace_recorder != NULL)
           remote_trace_recorder->record_mapper_output(tlid, output,

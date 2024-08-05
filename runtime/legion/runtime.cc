@@ -8543,9 +8543,11 @@ namespace Legion {
       }
       else
       {
+        UnboundPoolScope scope;
+        derez.deserialize(scope);
         TaskTreeCoordinates coordinates;
         coordinates.deserialize(derez);
-        return new UnboundPool(manager, coordinates);
+        return new UnboundPool(manager, scope, coordinates);
       }
     }
 
@@ -8598,7 +8600,17 @@ namespace Legion {
     size_t ConcretePool::query_available_memory(void)
     //--------------------------------------------------------------------------
     {
-      return remaining_bytes;
+      if (released)
+        return 0;
+      else
+        return remaining_bytes;
+    }
+
+    //--------------------------------------------------------------------------
+    PoolBounds ConcretePool::get_bounds(void) const
+    //--------------------------------------------------------------------------
+    {
+      return PoolBounds(limit, max_alignment);
     }
 
     //--------------------------------------------------------------------------
@@ -9557,9 +9569,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    UnboundPool::UnboundPool(MemoryManager *man, TaskTreeCoordinates &coords)
+    UnboundPool::UnboundPool(MemoryManager *man, UnboundPoolScope s,
+                             TaskTreeCoordinates &coords)
       : MemoryPool(std::numeric_limits<size_t>::max()), manager(man), 
-        released(false)
+        scope(s), released(false)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -9579,17 +9592,24 @@ namespace Legion {
     size_t UnboundPool::query_memory_limit(void)
     //--------------------------------------------------------------------------
     {
-      return 0;
+      return manager->capacity;
     }
 
     //--------------------------------------------------------------------------
     size_t UnboundPool::query_available_memory(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(manager != NULL);
-#endif
-      return manager->query_available_memory();
+      if (released)
+        return 0;
+      else
+        return manager->query_available_memory();
+    }
+
+    //--------------------------------------------------------------------------
+    PoolBounds UnboundPool::get_bounds(void) const
+    //--------------------------------------------------------------------------
+    {
+      return PoolBounds(scope);
     }
 
     //--------------------------------------------------------------------------
@@ -9599,7 +9619,6 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(!released);
-      assert(manager != NULL);
 #endif
       // This is safe for unbounded pools because we are the unbounded pool :)
       bool safe_for_unbounded_pools = true;
@@ -9615,7 +9634,6 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(!released);
-      assert(manager != NULL);
 #endif
       // We are the unbound pool so it is always safe for us
       bool safe_for_unbound_pools = true;
@@ -9647,9 +9665,6 @@ namespace Legion {
     void UnboundPool::free_instance(PhysicalInstance instance)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(manager != NULL);
-#endif
       manager->free_task_local_instance(instance);   
     }
 
@@ -9664,9 +9679,6 @@ namespace Legion {
     void UnboundPool::release_pool(UniqueID creator)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(manager != NULL);
-#endif
       if (!released)
       {
         manager->release_unbound_pool();
@@ -9678,9 +9690,6 @@ namespace Legion {
     void UnboundPool::finalize_pool(RtEvent done)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(manager != NULL);
-#endif
       if (!released)
         manager->release_unbound_pool();
     }
@@ -9694,11 +9703,8 @@ namespace Legion {
 #endif
       rez.serialize(manager->memory);
       rez.serialize<bool>(false); // bounded;
+      rez.serialize(scope);
       coordinates.serialize(rez);
-#ifdef DEBUG_LEGION
-      // Clear the manager since we packed it
-      manager = NULL;
-#endif
     }
 
     /////////////////////////////////////////////////////////////
@@ -12429,7 +12435,7 @@ namespace Legion {
         } while (wait_on.exists());
         // We were safe for unbounded pools in this case
         safe_for_unbounded_pools = true;
-        return new UnboundPool(this, coordinates);
+        return new UnboundPool(this, bounds.scope, coordinates);
       }
     }
 

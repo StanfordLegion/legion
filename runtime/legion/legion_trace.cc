@@ -7036,6 +7036,18 @@ namespace Legion {
       mapping.postmap_task = output.postmap_task;
       mapping.future_locations = output.future_locations;
       mapping.physical_instances = physical_instances;
+      for (std::map<Memory,PoolBounds>::const_iterator it =
+            output.leaf_pool_bounds.begin(); it !=
+            output.leaf_pool_bounds.end(); it++)
+      {
+        // Check to see if it is is bounded, if it is we can safe it, if not
+        // then we already issued a warning in the task that this is going
+        // to invalidate the trace replay so do that now
+        if (it->second.is_bounded())
+          mapping.pool_bounds.insert(*it);
+        else
+          record_no_consensus();
+      }
       for (std::deque<InstanceSet>::iterator it =
            mapping.physical_instances.begin(); it !=
            mapping.physical_instances.end(); ++it)
@@ -7056,6 +7068,7 @@ namespace Legion {
                                              bool &postmap_task,
                               std::vector<Processor> &target_procs,
                               std::vector<Memory> &future_locations,
+                              std::map<Memory,PoolBounds> &pool_bounds,
                               std::deque<InstanceSet> &physical_instances) const
     //--------------------------------------------------------------------------
     {
@@ -7073,6 +7086,7 @@ namespace Legion {
       postmap_task = finder->second.postmap_task;
       target_procs = finder->second.target_procs;
       future_locations = finder->second.future_locations;
+      pool_bounds = finder->second.pool_bounds;
       physical_instances = finder->second.physical_instances;
     }
 

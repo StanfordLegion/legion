@@ -1457,6 +1457,7 @@ namespace Legion {
       virtual ~MemoryPool(void) { }
       virtual size_t query_memory_limit(void) = 0;
       virtual size_t query_available_memory(void) = 0;
+      virtual PoolBounds get_bounds(void) const = 0;
       virtual FutureInstance* allocate_future(UniqueID creator_uid,
                                               size_t size) = 0;
       virtual PhysicalInstance allocate_instance(UniqueID creator_uid,
@@ -1499,6 +1500,7 @@ namespace Legion {
       virtual ~ConcretePool(void) override;
       virtual size_t query_memory_limit(void) override;
       virtual size_t query_available_memory(void) override;
+      virtual PoolBounds get_bounds(void) const override;
       virtual FutureInstance* allocate_future(UniqueID creator_uid,
                                               size_t size) override;
       virtual PhysicalInstance allocate_instance(UniqueID creator_uid,
@@ -1565,10 +1567,12 @@ namespace Legion {
      */
     class UnboundPool : public MemoryPool {
     public:
-      UnboundPool(MemoryManager *manager, TaskTreeCoordinates &coordinates);
+      UnboundPool(MemoryManager *manager, UnboundPoolScope scope,
+                  TaskTreeCoordinates &coordinates);
       virtual ~UnboundPool(void) override;
       virtual size_t query_memory_limit(void) override;
       virtual size_t query_available_memory(void) override;
+      virtual PoolBounds get_bounds(void) const override;
       virtual FutureInstance* allocate_future(UniqueID creator_uid,
                                               size_t size) override;
       virtual PhysicalInstance allocate_instance(UniqueID creator_uid,
@@ -1586,7 +1590,8 @@ namespace Legion {
       virtual void serialize(Serializer &rez) override;
     private:
       TaskTreeCoordinates coordinates;
-      MemoryManager *manager;
+      MemoryManager *const manager;
+      const UnboundPoolScope scope;
       bool released;
     };
 

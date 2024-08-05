@@ -1069,6 +1069,14 @@ namespace Legion {
           rez.serialize<size_t>(output.future_locations.size());
           for (unsigned idx = 0; idx < output.future_locations.size(); idx++)
             rez.serialize(output.future_locations[idx]);
+          rez.serialize<size_t>(output.leaf_pool_bounds.size());
+          for (std::map<Memory,PoolBounds>::const_iterator it =
+                output.leaf_pool_bounds.begin(); it !=
+                output.leaf_pool_bounds.end(); it++)
+          {
+            rez.serialize(it->first);
+            rez.serialize(it->second);
+          }
           rez.serialize(output.chosen_variant);
           rez.serialize(output.task_priority);
           rez.serialize<bool>(output.postmap_task);
@@ -1627,6 +1635,14 @@ namespace Legion {
               output.future_locations.resize(num_future_locations);
               for (unsigned idx = 0; idx < num_future_locations; idx++)
                 derez.deserialize(output.future_locations[idx]);
+            }
+            size_t num_pool_bounds;
+            derez.deserialize(num_pool_bounds);
+            for (unsigned idx = 0; idx < num_pool_bounds; idx++)
+            {
+              Memory memory;
+              derez.deserialize(memory);
+              derez.deserialize(output.leaf_pool_bounds[memory]);
             }
             derez.deserialize(output.chosen_variant);
             derez.deserialize(output.task_priority);
