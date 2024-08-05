@@ -678,7 +678,6 @@ namespace Realm {
     std::vector<size_t> fld_offsets, fld_sizes;
     size_t extra_elems;
     int dim_order[N];
-    size_t inst_offset;
 
     if(!((deserializer >> is) && (deserializer >> inst) && (deserializer >> fields) &&
          (deserializer >> fld_offsets) && (deserializer >> fld_sizes) &&
