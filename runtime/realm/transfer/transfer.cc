@@ -665,40 +665,39 @@ namespace Realm {
 
   template <int N, typename T>
   template <typename S>
-  /*static*/ TransferIterator *TransferIteratorIndexSpace<N,T>::deserialize_new(S& deserializer)
+  /*static*/ TransferIterator *
+  TransferIteratorIndexSpace<N, T>::deserialize_new(S &deserializer)
   {
-    // TODO(apryakhin@): Fix serdez
-    /*IndexSpace<N,T> is;
+    IndexSpace<N, T> is;
     RegionInstance inst;
     std::vector<FieldID> fields;
     std::vector<size_t> fld_offsets, fld_sizes;
     size_t extra_elems;
     int dim_order[N];
     size_t inst_offset;
-    RegionInstanceImpl::Metadata metadata;
+    InstanceLayout<N, T> *inst_layout = nullptr;
 
-    if(!((deserializer >> is) &&
-         (deserializer >> inst) &&
-         (deserializer >> fields) &&
-         (deserializer >> fld_offsets) &&
-         (deserializer >> fld_sizes) &&
-         (deserializer >> extra_elems)))
+    if(!((deserializer >> is) && (deserializer >> inst) && (deserializer >> fields) &&
+         (deserializer >> fld_offsets) && (deserializer >> fld_sizes) &&
+         (deserializer >> extra_elems))) {
       return 0;
+    }
 
-    for(int i = 0; i < N; i++)
-      if(!(deserializer >> dim_order[i]))
+    for(int i = 0; i < N; i++) {
+      if(!(deserializer >> dim_order[i])) {
         return 0;
+      }
+    }
 
-    TransferIteratorIndexSpace<N,T> *tiis = new TransferIteratorIndexSpace<N,T>(is,
-                                                                                metadata,
-                                                                                dim_order,
-                                                                                fields,
-                                                                                fld_offsets,
-                                                                                fld_sizes,
-                                                                                extra_elems);
+    RegionInstanceImpl *impl = get_runtime()->get_instance_impl(inst);
+    assert(impl->metadata.is_valid());
+    assert((checked_cast<const InstanceLayout<N, T> *>(impl->metadata.layout) != 0));
+
+    TransferIteratorIndexSpace<N, T> *tiis = new TransferIteratorIndexSpace<N, T>(
+        is, checked_cast<const InstanceLayout<N, T> *>(impl->metadata.layout),
+        impl->metadata.inst_offset, dim_order, fields, fld_offsets, fld_sizes,
+        extra_elems);
     return tiis;
-    */
-    return 0;
   }
 
   template <int N, typename T>
