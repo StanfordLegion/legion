@@ -185,6 +185,11 @@ namespace Realm {
       static GenEventImpl *create_genevent(void);
       static void free_genevent(GenEventImpl *);
 
+      static ID make_id(const GenEventImpl &dummy, int owner, ID::IDType index)
+      {
+        return ID::make_event(owner, index, 0);
+      }
+
       // get the Event (id+generation) for the current (i.e. untriggered) generation
       Event current_event(void) const;
 
@@ -308,6 +313,11 @@ namespace Realm {
 
       void init(ID _me, unsigned _init_owner);
 
+      static ID make_id(const BarrierImpl &dummy, int owner, ID::IDType index)
+      {
+        return ID::make_barrier(owner, index, 0);
+      }
+
       // get the Barrier (id+generation) for the current (i.e. untriggered) generation
       Barrier current_barrier(Barrier::timestamp_t timestamp = 0) const;
 
@@ -398,6 +408,12 @@ namespace Realm {
       ~CompQueueImpl(void);
 
       void init(CompletionQueue _me, int _owner);
+
+      static CompletionQueue make_id(const CompQueueImpl &dummy, int owner,
+                                     ID::IDType index)
+      {
+        return ID::make_compqueue(owner, index).convert<CompletionQueue>();
+      }
 
       void set_capacity(size_t _max_size, bool _resizable);
 

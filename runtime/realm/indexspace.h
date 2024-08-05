@@ -271,23 +271,38 @@ namespace Realm {
     };
 
     template <int N2, typename T2 = int>
-    class Unstructured : public CopyIndirection<N,T>::Base {
+    class Unstructured : public CopyIndirection<N, T>::Base {
     public:
+      Unstructured() {}
+      Unstructured(RegionInstance _ind_inst,
+                   const std::vector<IndexSpace<N2, T2>> &_spaces,
+                   const std::vector<RegionInstance> &_insts, FieldID _field_id,
+                   size_t _subfield_offset = 0, bool _is_ranges = false,
+                   bool _oor_possible = false, bool _aliasing_possible = false)
+        : inst(_ind_inst)
+        , spaces(_spaces)
+        , insts(_insts)
+        , field_id(_field_id)
+        , subfield_offset(_subfield_offset)
+        , is_ranges(_is_ranges)
+        , oor_possible(_oor_possible)
+        , aliasing_possible(_aliasing_possible)
+      {}
       virtual ~Unstructured(void) {}
 
-      typename CopyIndirection<N2, T2>::Base* next_indirection;
+      typename CopyIndirection<N2, T2>::Base *next_indirection;
 
-      FieldID field_id;
       RegionInstance inst;
-      bool is_ranges;
-      bool oor_possible;  // can any pointers fall outside all the target spaces?
-      bool aliasing_possible;  // can multiple pointers go to the same element?
-      size_t subfield_offset;
-      std::vector<IndexSpace<N2,T2> > spaces;
+      std::vector<IndexSpace<N2, T2>> spaces;
       std::vector<RegionInstance> insts;
+      FieldID field_id;
+      size_t subfield_offset;
+      bool is_ranges;
+      bool oor_possible;      // can any pointers fall outside all the target spaces?
+      bool aliasing_possible; // can multiple pointers go to the same element?
 
       REALM_INTERNAL_API_EXTERNAL_LINKAGE
-      virtual IndirectionInfo *create_info(const IndexSpace<N,T>& is) const;
+      virtual IndirectionInfo *create_info(const IndexSpace<N, T> &is) const;
     };
   };
 

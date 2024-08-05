@@ -1206,16 +1206,13 @@ namespace Realm {
 
     GPUIndirectChannel::~GPUIndirectChannel() {}
 
-    Memory GPUIndirectChannel::suggest_ib_memories(Memory memory) const
+    Memory GPUIndirectChannel::suggest_ib_memories() const
     {
-      if(memory.kind() != Memory::GPU_FB_MEM ||
-         node != NodeID(ID(memory).memory_owner_node())) {
-        Node &n = get_runtime()->nodes[node];
-        for(std::vector<IBMemory *>::const_iterator it = n.ib_memories.begin();
-            it != n.ib_memories.end(); ++it) {
-          if((*it)->lowlevel_kind == Memory::GPU_FB_MEM) {
-            return (*it)->me;
-          }
+      Node &n = get_runtime()->nodes[node];
+      for(std::vector<IBMemory *>::const_iterator it = n.ib_memories.begin();
+          it != n.ib_memories.end(); ++it) {
+        if((*it)->lowlevel_kind == Memory::GPU_FB_MEM) {
+          return (*it)->me;
         }
       }
       return Memory::NO_MEMORY;
@@ -1347,16 +1344,13 @@ namespace Realm {
       : RemoteChannel(_remote_ptr, indirect_memories)
     {}
 
-    Memory GPUIndirectRemoteChannel::suggest_ib_memories(Memory memory) const
+    Memory GPUIndirectRemoteChannel::suggest_ib_memories() const
     {
-      if(memory.kind() != Memory::GPU_FB_MEM ||
-         node != NodeID(ID(memory).memory_owner_node())) {
-        Node &n = get_runtime()->nodes[node];
-        for(std::vector<IBMemory *>::const_iterator it = n.ib_memories.begin();
-            it != n.ib_memories.end(); ++it) {
-          if((*it)->lowlevel_kind == Memory::GPU_FB_MEM) {
-            return (*it)->me;
-          }
+      Node &n = get_runtime()->nodes[node];
+      for(std::vector<IBMemory *>::const_iterator it = n.ib_memories.begin();
+          it != n.ib_memories.end(); ++it) {
+        if((*it)->lowlevel_kind == Memory::GPU_FB_MEM) {
+          return (*it)->me;
         }
       }
       return Memory::NO_MEMORY;
