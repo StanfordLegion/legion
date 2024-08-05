@@ -51,7 +51,6 @@ static InstanceLayout<N, T> *create_layout(Rect<N, T> bounds,
   AffineLayoutPiece<N, T> *affine_piece = new AffineLayoutPiece<N, T>();
   affine_piece->bounds = bounds;
   affine_piece->offset = 0;
-
   affine_piece->strides[0] = bytes_per_element;
   size_t mult = affine_piece->strides[0];
   for(int i = 1; i < N; i++) {
@@ -97,7 +96,7 @@ const static IteratorTestCase kIteratorTestCases[] = {
             Rect<2, int>(Point<2, int>(0), Point<2, int>(1)),
             create_layout<2, int>(Rect<2, int>(Point<2, int>(0), Point<2, int>(1)),
                                   kByteSize),
-            0, 0, {0}, {0}, /*field_sizes=*/{kByteSize}, 0),
+            0, 0, {0, 1}, {0}, /*field_sizes=*/{kByteSize}, 0),
         .infos = {TransferIterator::AddressInfo{/*offset=*/0,
                                                 /*bytes_per_el=*/kByteSize * 2,
                                                 /*num_lines=*/1,
@@ -121,7 +120,7 @@ const static IteratorTestCase kIteratorTestCases[] = {
             Rect<2, int>(Point<2, int>(0), Point<2, int>(1)),
             create_layout<2, int>(Rect<2, int>(Point<2, int>(0), Point<2, int>(1)),
                                   kByteSize),
-            0, 0, {0}, {0}, /*field_sizes=*/{kByteSize}, 0),
+            0, 0, {0, 1}, {0}, /*field_sizes=*/{kByteSize}, 0),
         .infos = {TransferIterator::AddressInfo{/*offset=*/0,
                                                 /*bytes_per_el=*/kByteSize * 4,
                                                 /*num_lines=*/1,
@@ -130,6 +129,24 @@ const static IteratorTestCase kIteratorTestCases[] = {
                                                 /*plane_stride=*/0}},
         .max_bytes = {kByteSize * 4},
         .exp_bytes = {kByteSize * 4},
+        .num_steps = 1,
+    },
+
+    // Case 2: step through 3D layout at once
+    IteratorTestCase{
+        .it = new TransferIteratorIndexSpace<3, int>(
+            Rect<3, int>(Point<3, int>(0), Point<3, int>(1)),
+            create_layout<3, int>(Rect<3, int>(Point<3, int>(0), Point<3, int>(1)),
+                                  kByteSize),
+            0, 0, {0, 1, 2}, {0}, /*field_sizes=*/{kByteSize}, 0),
+        .infos = {TransferIterator::AddressInfo{/*offset=*/0,
+                                                /*bytes_per_el=*/kByteSize * 8,
+                                                /*num_lines=*/1,
+                                                /*line_stride=*/0,
+                                                /*num_planes=*/1,
+                                                /*plane_stride=*/0}},
+        .max_bytes = {kByteSize * 8},
+        .exp_bytes = {kByteSize * 8},
         .num_steps = 1,
     },
 
