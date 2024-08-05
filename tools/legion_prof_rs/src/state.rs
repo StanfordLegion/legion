@@ -1030,6 +1030,35 @@ impl Proc {
     pub fn is_visible(&self) -> bool {
         self.visible
     }
+
+    pub fn find_executing_entry(
+        &self,
+        prof_uid: ProfUID,
+        creation_time: Timestamp,
+    ) -> Option<&ProcEntry> {
+        let mut result = self.entries.get(&prof_uid);
+        while let Some(entry) = result {
+            assert!(entry.time_range.start.unwrap() <= creation_time);
+            assert!(creation_time <= entry.time_range.stop.unwrap());
+            let mut next = None;
+            // Iterate over all the "waiters" which includes both event waits and subcalls
+            for wait in entry.waiters.wait_intervals.iter() {
+                // We're only interested if there is a callee
+                if let Some(callee) = wait.callee {
+                    if wait.start <= creation_time && creation_time <= wait.end {
+                        next = self.entries.get(&callee);
+                        break;
+                    }
+                }
+            }
+            if next.is_none() {
+                break;
+            } else {
+                result = next;
+            }
+        }
+        result
+    }
 }
 
 impl Container for Proc {
