@@ -182,7 +182,7 @@ namespace Realm {
       if(l.empty()) {
 	results[i] = r;
         if(results[i].sparsity.exists()) {
-          //results[i].sparsity.add_references();
+          results[i].sparsity.add_references();
         }
         continue;
       }
@@ -191,7 +191,7 @@ namespace Realm {
       if(rhss[li].empty()) {
 	results[i] = l;
         if(results[i].sparsity.exists()) {
-          //results[i].sparsity.add_references();
+          results[i].sparsity.add_references();
         }
 	continue;
       }
@@ -213,7 +213,7 @@ namespace Realm {
 	results[i] = IndexSpace<N,T>(l.bounds.union_bbox(r.bounds),
 				      l.sparsity);
         if(results[i].sparsity.exists()) {
-          //results[i].sparsity.add_references();
+          results[i].sparsity.add_references();
         }
         continue;
       }
@@ -227,13 +227,13 @@ namespace Realm {
       }
       results[i] = op->add_union(l, r);
       if(results[i].sparsity.exists()) {
-        //results[i].sparsity.add_references();
+        results[i].sparsity.add_references();
       }
     }
 
     for(size_t i = 0; i < n; i++) {
       if(results[i].sparsity.exists()) {
-        results[i].sparsity.add_references();
+        //results[i].sparsity.add_references();
       }
       size_t li = (lhss.size() == 1) ? 0 : i;
       size_t ri = (rhss.size() == 1) ? 0 : i;
@@ -361,7 +361,7 @@ namespace Realm {
       if(r.empty()) {
         results[i] = l;
         if(results[i].sparsity.exists()) {
-          //results[i].sparsity.add_references();
+          results[i].sparsity.add_references();
         }
         continue;
       }
@@ -370,7 +370,7 @@ namespace Realm {
       if(!l.bounds.overlaps(r.bounds)) {
         results[i] = l;
         if(results[i].sparsity.exists()) {
-          //results[i].sparsity.add_references();
+          results[i].sparsity.add_references();
         }
         continue;
       }
@@ -387,7 +387,7 @@ namespace Realm {
 	if(attempt_simple_diff(l.bounds, r.bounds, sdiff)) {
           results[i] = IndexSpace<N, T>(sdiff, l.sparsity);
           if(results[i].sparsity.exists()) {
-            //results[i].sparsity.add_references();
+            results[i].sparsity.add_references();
           }
           continue;
 	}
@@ -403,13 +403,13 @@ namespace Realm {
       }
       results[i] = op->add_difference(lhss[li], rhss[ri]);
       if(results[i].sparsity.exists()) {
-        //results[i].sparsity.add_references();
+        results[i].sparsity.add_references();
       }
     }
 
     for(size_t i = 0; i < n; i++) {
       if(results[i].sparsity.exists()) {
-        results[i].sparsity.add_references();
+        //results[i].sparsity.add_references();
       }
       size_t li = (lhss.size() == 1) ? 0 : i;
       size_t ri = (rhss.size() == 1) ? 0 : i;
@@ -442,6 +442,7 @@ namespace Realm {
       result = IndexSpace<N,T>::make_empty();
     } else {
       result = subspaces[0];
+      // TODO: add ref here
 
       for(size_t i = 1; i < subspaces.size(); i++) {
         // empty rhs - skip
@@ -452,7 +453,7 @@ namespace Realm {
 	if((result.dense() || (result.sparsity == subspaces[i].sparsity)) &&
 	   result.bounds.contains(subspaces[i].bounds)) {
           if(result.sparsity.exists()) {
-            //result.sparsity.add_references();
+            result.sparsity.add_references();
           }
           continue;
         }
@@ -474,7 +475,7 @@ namespace Realm {
 
 	result = op->add_union(subspaces);
         if(result.sparsity.exists()) {
-          //result.sparsity.add_references();
+          result.sparsity.add_references();
         }
         op->launch(wait_on);
 	was_inline = false;
@@ -483,7 +484,7 @@ namespace Realm {
     }
 
     if(result.sparsity.exists()) {
-      result.sparsity.add_references();
+      //result.sparsity.add_references();
     }
 
     {
@@ -522,6 +523,7 @@ namespace Realm {
       result = IndexSpace<N,T>::make_empty();
     } else {
       result = subspaces[0];
+      // TODO: add ref here
 
       for(size_t i = 1; i < subspaces.size(); i++) {
 	// no point in continuing if our result is empty
@@ -548,14 +550,17 @@ namespace Realm {
 	  continue;
 	}
 
-	// lhs dense and rhs sparse - intersect and adopt rhs' sparsity map
-	if(result.dense()) {
-	  result.bounds = result.bounds.intersection(subspaces[i].bounds);
-	  result.sparsity = subspaces[i].sparsity;
-	  continue;	  
-	}
+        // lhs dense and rhs sparse - intersect and adopt rhs' sparsity map
+        if(result.dense()) {
+          result.bounds = result.bounds.intersection(subspaces[i].bounds);
+          result.sparsity = subspaces[i].sparsity;
+          if(result.sparsity.exists()) {
+            result.sparsity.add_references();
+          }
+          continue;
+        }
 
-	// general case - do full computation
+        // general case - do full computation
 	GenEventImpl *finish_event = GenEventImpl::create_genevent();
 	e = finish_event->current_event();
 	IntersectionOperation<N,T> *op = new IntersectionOperation<N,T>(reqs,
@@ -563,14 +568,17 @@ namespace Realm {
 									ID(e).event_generation());
 
 	result = op->add_intersection(subspaces);
-	op->launch(wait_on);
+        if(result.sparsity.exists()) {
+          result.sparsity.add_references();
+        }
+        op->launch(wait_on);
 	was_inline = false;
 	break;
       }
     }
 
     if(result.sparsity.exists()) {
-      result.sparsity.add_references();
+      //result.sparsity.add_references();
     }
 
     {
