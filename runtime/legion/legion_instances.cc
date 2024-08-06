@@ -3758,7 +3758,7 @@ namespace Legion {
       Realm::ProfilingRequestSet requests;
       // Add a profiling request to see if the instance is actually allocated
       // Make it very high priority so we get the response quickly
-      ProfilingResponseBase base(this);
+      ProfilingResponseBase base(this, creator_id);
 #ifndef LEGION_MALLOC_INSTANCES
       Realm::ProfilingRequest &req = requests.add_request(
           runtime->find_utility_group(), LG_LEGION_PROFILING_ID,
@@ -3907,8 +3907,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InstanceBuilder::handle_profiling_response(
-                                       const ProfilingResponseBase *base,
+    bool InstanceBuilder::handle_profiling_response(
                                        const Realm::ProfilingResponse &response,
                                        const void *orig, size_t orig_length)
     //--------------------------------------------------------------------------
@@ -3940,6 +3939,8 @@ namespace Legion {
       }
       // No matter what trigger the event
       Runtime::trigger_event(profiling_ready);
+      // Always record these as part of profiling
+      return true;
     }
 
     //--------------------------------------------------------------------------

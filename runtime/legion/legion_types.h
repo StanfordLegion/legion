@@ -2052,23 +2052,7 @@ namespace Legion {
     class LayoutConstraints;
     class ProjectionFunction;
     class ShardingFunction;
-    class Runtime;
-    // A small interface class for handling profiling responses
-    struct ProfilingResponseBase;
-    class ProfilingResponseHandler {
-    public:
-      virtual void handle_profiling_response(
-                const ProfilingResponseBase *base,
-                const Realm::ProfilingResponse &response,
-                const void *orig, size_t orig_length) = 0;
-    };
-    struct ProfilingResponseBase {
-    public:
-      ProfilingResponseBase(ProfilingResponseHandler *h)
-        : handler(h) { }
-    public:
-      ProfilingResponseHandler *const handler;
-    };
+    class Runtime; 
 
     // legion_ops.h
     class Provenance;

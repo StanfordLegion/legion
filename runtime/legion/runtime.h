@@ -1495,10 +1495,9 @@ namespace Legion {
       public:
         FutureInstanceAllocator(void);
       public:
-        virtual void handle_profiling_response(
-                const ProfilingResponseBase *base,
-                const Realm::ProfilingResponse &response,
-                const void *orig, size_t orig_length);
+        virtual bool handle_profiling_response(
+            const Realm::ProfilingResponse &response,
+            const void *orig, size_t orig_length);
         inline bool succeeded(void) const
         {
           if (!ready.has_triggered())

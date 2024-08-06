@@ -30,6 +30,20 @@ namespace Legion {
     extern Realm::Logger log_prof;
 
     //--------------------------------------------------------------------------
+    ProfilingResponseBase::ProfilingResponseBase(ProfilingResponseHandler *h,
+                                                 UniqueID op) 
+      : handler(h), op_id(op),
+        creator(Processor::get_executing_processor().exists() ?
+            LgEvent(Processor::get_current_finish_event()) :
+            ((implicit_context != NULL) && 
+             (implicit_context->owner_task != NULL)) ?
+              implicit_context->owner_task->get_completion_event() :
+              LgEvent::NO_LG_EVENT)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
     template<size_t ENTRIES>
     SmallNameClosure<ENTRIES>::SmallNameClosure(void)
     //--------------------------------------------------------------------------
@@ -110,14 +124,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     LegionProfInstance::ProfilingInfo::ProfilingInfo(
-                                                    ProfilingResponseHandler *h)
-      : ProfilingResponseBase(h),
-        creator(Processor::get_executing_processor().exists() ?
-            LgEvent(Processor::get_current_finish_event()) :
-            ((implicit_context != NULL) && 
-             (implicit_context->owner_task != NULL)) ?
-              implicit_context->owner_task->get_completion_event() :
-              LgEvent::NO_LG_EVENT)
+                                      ProfilingResponseHandler *h, UniqueID uid)
+      : ProfilingResponseBase(h, uid)
     //--------------------------------------------------------------------------
     {
     }
@@ -2046,6 +2054,15 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
+    LegionProfiler::ProfilingInfo::ProfilingInfo(LegionProfiler *p,
+                                                 ProfilingKind k, Operation *op)
+      : LegionProfInstance::ProfilingInfo(p, 
+          (op == NULL) ? 0 : op->get_unique_op_id()), kind(k)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
     void LegionProfiler::register_task_kind(TaskID task_id,
                                             const char *name,bool overwrite)
     //--------------------------------------------------------------------------
@@ -2226,10 +2243,9 @@ namespace Legion {
 #else
       increment_total_outstanding_requests();
 #endif
-      ProfilingInfo info(this, LEGION_PROF_TASK); 
+      ProfilingInfo info(this, LEGION_PROF_TASK, task_uid); 
       info.id = tid;
       info.extra.id2 = vid;
-      info.op_id = task_uid;
       info.critical = critical;
       Realm::ProfilingRequest &req = requests.add_request(target_proc,
                 LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_MIN_PRIORITY);
@@ -2256,9 +2272,8 @@ namespace Legion {
 #else
       increment_total_outstanding_requests();
 #endif
-      ProfilingInfo info(this, LEGION_PROF_META); 
+      ProfilingInfo info(this, LEGION_PROF_META, op); 
       info.id = tid;
-      info.op_id = (op != NULL) ? op->get_unique_op_id() : 0;
       info.critical = critical;
       Realm::ProfilingRequest &req = requests.add_request(target_proc,
                 LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_MIN_PRIORITY);
@@ -2280,9 +2295,8 @@ namespace Legion {
     {
       // Don't increment here, we'll increment on the remote side since we
       // that is where we know the profiler is going to handle the results
-      ProfilingInfo info(NULL, LEGION_PROF_MESSAGE);
+      ProfilingInfo info(NULL, LEGION_PROF_MESSAGE, implicit_provenance);
       info.id = LG_MESSAGE_ID + (int)k;
-      info.op_id = implicit_provenance;
       info.critical = critical;
       // Record the spawn time which is different than the create_time in
       // the Realm profiling response because the create time is not recorded
@@ -2315,8 +2329,7 @@ namespace Legion {
 #else
       increment_total_outstanding_requests(count);
 #endif
-      ProfilingInfo info(this, LEGION_PROF_COPY); 
-      info.op_id = (op != NULL) ? op->get_unique_op_id() : 0;
+      ProfilingInfo info(this, LEGION_PROF_COPY, op); 
       // Use ID to encode the collective copy kind
       info.id = collective;
       info.critical = critical;
@@ -2346,8 +2359,7 @@ namespace Legion {
 #else
       increment_total_outstanding_requests();
 #endif
-      ProfilingInfo info(this, LEGION_PROF_FILL);
-      info.op_id = (op != NULL) ? op->get_unique_op_id() : 0;
+      ProfilingInfo info(this, LEGION_PROF_FILL, op);
       // Use ID to encode the collective copy kind
       info.id = collective;
       info.critical = critical;
@@ -2375,9 +2387,8 @@ namespace Legion {
 #else
       increment_total_outstanding_requests();
 #endif
-      ProfilingInfo info(this, LEGION_PROF_INST); 
+      ProfilingInfo info(this, LEGION_PROF_INST, op); 
       // No ID here
-      info.op_id = (op != NULL) ? op->get_unique_op_id() : 0;
       info.id = unique_event.id;
       // Instances use two profiling requests so that we can get MemoryUsage
       // right away - the Timeline doesn't come until we delete the instance
@@ -2412,10 +2423,9 @@ namespace Legion {
 #else
       increment_total_outstanding_requests();
 #endif
-      ProfilingInfo info(this, LEGION_PROF_PARTITION);
+      ProfilingInfo info(this, LEGION_PROF_PARTITION, op);
       // Pass the part_op as the ID
       info.id = part_op;
-      info.op_id = (op != NULL) ? op->get_unique_op_id() : 0;
       info.critical = critical;
       Realm::ProfilingRequest &req = requests.add_request((target_proc.exists())
                         ? target_proc : Processor::get_executing_processor(),
@@ -2436,10 +2446,9 @@ namespace Legion {
 #else
       increment_total_outstanding_requests();
 #endif
-      ProfilingInfo info(this, LEGION_PROF_TASK); 
+      ProfilingInfo info(this, LEGION_PROF_TASK, uid); 
       info.id = tid;
       info.extra.id2 = vid;
-      info.op_id = uid;
       info.critical = critical;
       Realm::ProfilingRequest &req = requests.add_request(target_proc,
                 LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_MIN_PRIORITY);
@@ -2463,9 +2472,8 @@ namespace Legion {
 #else
       increment_total_outstanding_requests();
 #endif
-      ProfilingInfo info(this, LEGION_PROF_META); 
+      ProfilingInfo info(this, LEGION_PROF_META, uid); 
       info.id = tid;
-      info.op_id = uid;
       info.critical = critical;
       Realm::ProfilingRequest &req = requests.add_request(target_proc,
                 LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_MIN_PRIORITY);
@@ -2492,8 +2500,7 @@ namespace Legion {
 #else
       increment_total_outstanding_requests(count);
 #endif
-      ProfilingInfo info(this, LEGION_PROF_COPY); 
-      info.op_id = uid;
+      ProfilingInfo info(this, LEGION_PROF_COPY, uid); 
       // Use ID to encode the collective copy kind
       info.id = collective;
       info.critical = critical;
@@ -2523,8 +2530,7 @@ namespace Legion {
 #else
       increment_total_outstanding_requests();
 #endif
-      ProfilingInfo info(this, LEGION_PROF_FILL);
-      info.op_id = uid;
+      ProfilingInfo info(this, LEGION_PROF_FILL, uid);
       // Use ID to encode the collective copy kind
       info.id = collective;
       info.critical = critical;
@@ -2552,9 +2558,8 @@ namespace Legion {
 #else
       increment_total_outstanding_requests();
 #endif
-      ProfilingInfo info(this, LEGION_PROF_INST); 
+      ProfilingInfo info(this, LEGION_PROF_INST, uid); 
       // No ID here
-      info.op_id = uid;
       info.id = unique_event.id;
       // Instances use two profiling requests so that we can get MemoryUsage
       // right away - the Timeline doesn't come until we delete the instance
@@ -2578,10 +2583,9 @@ namespace Legion {
 #else
       increment_total_outstanding_requests();
 #endif
-      ProfilingInfo info(this, LEGION_PROF_PARTITION);
+      ProfilingInfo info(this, LEGION_PROF_PARTITION, uid);
       // Pass the partition op kind as the ID
       info.id = part_op;
-      info.op_id = uid;
       info.critical = critical;
       Realm::ProfilingRequest &req = requests.add_request(target_proc,
                   LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_MIN_PRIORITY);
@@ -2592,22 +2596,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LegionProfiler::handle_profiling_response(
-                                       const ProfilingResponseBase *base,
+    bool LegionProfiler::handle_profiling_response(
                                        const Realm::ProfilingResponse &response,
                                        const void *orig, size_t orig_length)
     //--------------------------------------------------------------------------
     {
-      long long t_start = 0;
-      if (self_profile)
-        t_start = Realm::Clock::current_time_in_nanoseconds();
 #ifdef DEBUG_LEGION
       assert(response.user_data_size() == sizeof(ProfilingInfo));
 #endif
-      const ProfilingInfo *info = (const ProfilingInfo*)response.user_data();
-      // Need to look this up in case we're not doing local profiling
-      LegionProfInstance *profiler_instance =
-        find_or_create_profiling_instance();
+      const ProfilingInfo *info =
+        static_cast<const ProfilingInfo*>(response.user_data());
       switch (info->kind)
       {
         case LEGION_PROF_TASK:
@@ -2616,8 +2614,8 @@ namespace Legion {
             // Check for predication and speculation
             if (response.get_measurement<
                 Realm::ProfilingMeasurements::OperationProcessorUsage>(usage)) {
-              profiler_instance->process_proc_desc(usage.proc);
-              profiler_instance->process_task(info, response, usage);
+              implicit_profiler->process_proc_desc(usage.proc);
+              implicit_profiler->process_task(info, response, usage);
             }
             break;
           }
@@ -2627,8 +2625,8 @@ namespace Legion {
             // Check for predication and speculation
             if (response.get_measurement<
                 Realm::ProfilingMeasurements::OperationProcessorUsage>(usage)) {
-              profiler_instance->process_proc_desc(usage.proc);
-              profiler_instance->process_meta(info, response, usage); 
+              implicit_profiler->process_proc_desc(usage.proc);
+              implicit_profiler->process_meta(info, response, usage); 
             }
             break;
           }
@@ -2638,8 +2636,8 @@ namespace Legion {
             // Check for predication and speculation
             if (response.get_measurement<
                 Realm::ProfilingMeasurements::OperationProcessorUsage>(usage)) {
-              profiler_instance->process_proc_desc(usage.proc);
-              profiler_instance->process_message(info, response, usage);
+              implicit_profiler->process_proc_desc(usage.proc);
+              implicit_profiler->process_message(info, response, usage);
             }
             break;
           }
@@ -2649,9 +2647,9 @@ namespace Legion {
             // Check for predication and speculation
             if (response.get_measurement<
                 Realm::ProfilingMeasurements::OperationMemoryUsage>(usage)) {
-              profiler_instance->process_mem_desc(usage.source);
-              profiler_instance->process_mem_desc(usage.target);
-              profiler_instance->process_copy(info, response, usage);
+              implicit_profiler->process_mem_desc(usage.source);
+              implicit_profiler->process_mem_desc(usage.target);
+              implicit_profiler->process_copy(info, response, usage);
             }
             break;
           }
@@ -2661,8 +2659,8 @@ namespace Legion {
             // Check for predication and speculation
             if (response.get_measurement<
                 Realm::ProfilingMeasurements::OperationMemoryUsage>(usage)) {
-              profiler_instance->process_mem_desc(usage.target);
-              profiler_instance->process_fill(info, response, usage);
+              implicit_profiler->process_mem_desc(usage.target);
+              implicit_profiler->process_fill(info, response, usage);
             }
             break;
           }
@@ -2676,34 +2674,27 @@ namespace Legion {
                 response.get_measurement<
                     Realm::ProfilingMeasurements::InstanceMemoryUsage>(usage))
             {
-              profiler_instance->process_mem_desc(usage.memory);
-	      profiler_instance->process_inst_timeline(info,
+              implicit_profiler->process_mem_desc(usage.memory);
+	      implicit_profiler->process_inst_timeline(info,
                                                       response, usage, timeline);
             }
             break;
           }
         case LEGION_PROF_PARTITION:
           {
-            profiler_instance->process_partition(info, response);
+            implicit_profiler->process_partition(info, response);
             break;
           }
         default:
           assert(false);
-      }
-      if (self_profile)
-      {
-        long long t_stop = Realm::Clock::current_time_in_nanoseconds();
-        const Processor p = Realm::Processor::get_executing_processor();
-        const LgEvent finish_event(Processor::get_current_finish_event());
-        profiler_instance->process_proc_desc(p);
-        profiler_instance->record_proftask(p, info->op_id,
-            t_start, t_stop, info->creator, finish_event);
       }
 #ifdef DEBUG_LEGION
       decrement_total_outstanding_requests(info->kind);
 #else
       decrement_total_outstanding_requests();
 #endif
+      // Only record this if we are self-profiling the profiler
+      return self_profile;
     }
 
     //--------------------------------------------------------------------------

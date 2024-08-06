@@ -1909,13 +1909,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Operation::handle_profiling_response(const ProfilingResponseBase *base,
+    bool Operation::handle_profiling_response(
                                        const Realm::ProfilingResponse &response,
                                        const void *orig, size_t orig_length)
     //--------------------------------------------------------------------------
     {
       // Should only be called for inherited types
       assert(false);
+      return false;
     }
 
     //--------------------------------------------------------------------------
@@ -4640,12 +4641,6 @@ namespace Legion {
       atomic_locks.clear();
       map_applied_conditions.clear();
       profiling_requests.clear();
-      if (!profiling_info.empty())
-      {
-        for (unsigned idx = 0; idx < profiling_info.size(); idx++)
-          free(profiling_info[idx].buffer);
-        profiling_info.clear();
-      }
       if (mapper_data != NULL)
       {
         free(mapper_data);
@@ -4845,48 +4840,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Check to see if we need to do a profiling response
-      if (profiling_reported.exists())
+      if (profiling_reported.exists() && (outstanding_profiling_requests == 0))
       {
-        if (outstanding_profiling_requests.load() > 0)
-        {
-#ifdef DEBUG_LEGION
-          assert(mapped_event.has_triggered());
-#endif
-          std::vector<MapProfilingInfo> to_perform;
-          {
-            AutoLock o_lock(op_lock);
-            to_perform.swap(profiling_info);
-          }
-          if (!to_perform.empty())
-          {
-            for (unsigned idx = 0; idx < to_perform.size(); idx++)
-            {
-              MapProfilingInfo &info = to_perform[idx];
-              const Realm::ProfilingResponse resp(info.buffer,info.buffer_size);
-              info.total_reports = outstanding_profiling_requests.load();
-              info.profiling_responses.attach_realm_profiling_response(resp);
-              mapper->invoke_inline_report_profiling(this, info);
-              free(info.buffer);
-            }
-            const int count = to_perform.size() + 
-              outstanding_profiling_reported.fetch_add(to_perform.size());
-#ifdef DEBUG_LEGION
-            assert(count <= outstanding_profiling_requests.load());
-#endif
-            if (count == outstanding_profiling_requests.load())
-              Runtime::trigger_event(profiling_reported);
-          }
-        }
-        else
-        {
-          // We're not expecting any profiling callbacks so we need to
-          // do one ourself to inform the mapper that there won't be any
-          Mapping::Mapper::InlineProfilingInfo info;
-          info.total_reports = 0;
-          info.fill_response = false; // make valgrind happy
-          mapper->invoke_inline_report_profiling(this, info);    
-          Runtime::trigger_event(profiling_reported);
-        }
+        // We're not expecting any profiling callbacks so we need to
+        // do one ourself to inform the mapper that there won't be any
+        Mapping::Mapper::InlineProfilingInfo info;
+        info.total_reports = 0;
+        info.fill_response = false; // make valgrind happy
+        mapper->invoke_inline_report_profiling(this, info);    
+        Runtime::trigger_event(profiling_reported);
       }
       // Don't commit this operation until we've reported our profiling
       commit_operation(true/*deactivate*/, profiling_reported); 
@@ -5473,7 +5435,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MapOp::handle_profiling_response(const ProfilingResponseBase *base,
+    bool MapOp::handle_profiling_response(
                                        const Realm::ProfilingResponse &response,
                                        const void *orig, size_t orig_length)
     //--------------------------------------------------------------------------
@@ -5482,36 +5444,26 @@ namespace Legion {
       assert(mapper != NULL);
 #endif
       const OpProfilingResponse *op_info = 
-        static_cast<const OpProfilingResponse*>(base);
+        static_cast<const OpProfilingResponse*>(response.user_data());
       // Check to see if we are done mapping, if not then we need to defer
       // this until we are done mapping so we know how many reports to expect
-      {
-        AutoLock o_lock(op_lock);
-        if (!mapped_event.has_triggered())
-        {
-          // Save this profiling response for later until we know the
-          // full count of profiling responses
-          profiling_info.resize(profiling_info.size() + 1);
-          MapProfilingInfo &info = profiling_info.back();
-          info.fill_response = op_info->fill;
-          info.buffer_size = orig_length;
-          info.buffer = malloc(orig_length);
-          memcpy(info.buffer, orig, orig_length);
-          return;
-        }
-      }
+      const RtEvent mapped = get_mapped_event();
+      if (!mapped.has_triggered())
+        mapped.wait();
       // If we get here then we can handle the response now
       Mapping::Mapper::InlineProfilingInfo info; 
       info.profiling_responses.attach_realm_profiling_response(response);
-      info.total_reports = outstanding_profiling_requests.load();
+      info.total_reports = outstanding_profiling_requests;
       info.fill_response = op_info->fill;
       mapper->invoke_inline_report_profiling(this, info);
       const int count = outstanding_profiling_reported.fetch_add(1) + 1;
 #ifdef DEBUG_LEGION
-      assert(count <= outstanding_profiling_requests.load());
+      assert(count <= outstanding_profiling_requests);
 #endif
-      if (count == outstanding_profiling_requests.load())
+      if (count == outstanding_profiling_requests)
         Runtime::trigger_event(profiling_reported);
+      // Always record these as part of profiling
+      return true;
     }
 
     //--------------------------------------------------------------------------
@@ -5520,7 +5472,6 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(count > 0);
-      assert(!mapped_event.has_triggered());
 #endif
       outstanding_profiling_requests.fetch_add(count);
     }
@@ -6413,12 +6364,6 @@ namespace Legion {
         release_acquired_instances(acquired_instances);
       map_applied_conditions.clear();
       profiling_requests.clear();
-      if (!profiling_info.empty())
-      {
-        for (unsigned idx = 0; idx < profiling_info.size(); idx++)
-          free(profiling_info[idx].buffer);
-        profiling_info.clear();
-      }
       if (mapper_data != NULL)
       {
         free(mapper_data);
@@ -7342,37 +7287,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(profiling_reported.exists());
 #endif
-      if (outstanding_profiling_requests.load() > 0)
-      {
-#ifdef DEBUG_LEGION
-        assert(mapped_event.has_triggered());
-#endif
-        std::vector<CopyProfilingInfo> to_perform;
-        {
-          AutoLock o_lock(op_lock);
-          to_perform.swap(profiling_info);
-        }
-        if (!to_perform.empty())
-        {
-          for (unsigned idx = 0; idx < to_perform.size(); idx++)
-          {
-            CopyProfilingInfo &info = to_perform[idx];
-            const Realm::ProfilingResponse resp(info.buffer, info.buffer_size);
-            info.total_reports = outstanding_profiling_requests.load();
-            info.profiling_responses.attach_realm_profiling_response(resp);
-            mapper->invoke_copy_report_profiling(this, info);
-            free(info.buffer);
-          }
-          const int count = to_perform.size() +
-              outstanding_profiling_reported.fetch_add(to_perform.size());
-#ifdef DEBUG_LEGION
-          assert(count <= outstanding_profiling_requests.load());
-#endif
-          if (count == outstanding_profiling_requests.load())
-            Runtime::trigger_event(profiling_reported);
-        }
-      }
-      else
+      if (outstanding_profiling_requests.load() == 0)
       {
         // We're not expecting any profiling callbacks so we need to
         // do one ourself to inform the mapper that there won't be any
@@ -8091,7 +8006,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CopyOp::handle_profiling_response(const ProfilingResponseBase *base,
+    bool CopyOp::handle_profiling_response(
                                        const Realm::ProfilingResponse &response,
                                        const void *orig, size_t orig_length)
     //--------------------------------------------------------------------------
@@ -8100,40 +8015,28 @@ namespace Legion {
       assert(mapper != NULL);
 #endif
       const OpProfilingResponse *op_info = 
-        static_cast<const OpProfilingResponse*>(base);
+        static_cast<const OpProfilingResponse*>(response.user_data());
       // Check to see if we are done mapping, if not then we need to defer
-      // this until we are done mapping so we know how many
-      {
-        AutoLock o_lock(op_lock);
-        if (!mapped_event.has_triggered())
-        {
-          // Save this profiling response for later until we know the
-          // full count of profiling responses
-          profiling_info.resize(profiling_info.size() + 1);
-          CopyProfilingInfo &info = profiling_info.back();
-          info.src_index = op_info->src;
-          info.dst_index = op_info->dst;
-          info.fill_response = op_info->fill;
-          info.buffer_size = orig_length;
-          info.buffer = malloc(orig_length);
-          memcpy(info.buffer, orig, orig_length);
-          return;
-        }
-      }
+      // this until we are done mapping so we know how many reports to expect
+      const RtEvent mapped = get_mapped_event();
+      if (!mapped.has_triggered())
+        mapped.wait();
       // If we get here then we can handle the response now
       Mapping::Mapper::CopyProfilingInfo info; 
       info.profiling_responses.attach_realm_profiling_response(response);
       info.src_index = op_info->src;
       info.dst_index = op_info->dst;
-      info.total_reports = outstanding_profiling_requests.load();
+      info.total_reports = outstanding_profiling_requests;
       info.fill_response = op_info->fill;
       mapper->invoke_copy_report_profiling(this, info);
       const int count = outstanding_profiling_reported.fetch_add(1) + 1;
 #ifdef DEBUG_LEGION
-      assert(count <= outstanding_profiling_requests.load());
+      assert(count <= outstanding_profiling_requests);
 #endif
-      if (count == outstanding_profiling_requests.load())
+      if (count == outstanding_profiling_requests)
         Runtime::trigger_event(profiling_reported);
+      // Always record these as part of profiling
+      return true;
     }
 
     //--------------------------------------------------------------------------
@@ -11247,12 +11150,6 @@ namespace Legion {
         release_acquired_instances(acquired_instances);
       map_applied_conditions.clear();
       profiling_requests.clear();
-      if (!profiling_info.empty())
-      {
-        for (unsigned idx = 0; idx < profiling_info.size(); idx++)
-          free(profiling_info[idx].buffer);
-        profiling_info.clear();
-      }
       target_instances.clear();
       if (freeop)
         runtime->free_post_close_op(this);
@@ -11342,48 +11239,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Check to see if we need to do a profiling response
-      if (profiling_reported.exists())
+      if (profiling_reported.exists() && (outstanding_profiling_requests == 0))
       {
-        if (outstanding_profiling_requests.load() > 0)
-        {
-#ifdef DEBUG_LEGION
-          assert(mapped_event.has_triggered());
-#endif
-          std::vector<CloseProfilingInfo> to_perform;
-          {
-            AutoLock o_lock(op_lock);
-            to_perform.swap(profiling_info);
-          }
-          if (!to_perform.empty())
-          {
-            for (unsigned idx = 0; idx < to_perform.size(); idx++)
-            {
-              CloseProfilingInfo &info = to_perform[idx];
-              const Realm::ProfilingResponse resp(info.buffer,info.buffer_size);
-              info.total_reports = outstanding_profiling_requests.load();
-              info.profiling_responses.attach_realm_profiling_response(resp);
-              mapper->invoke_close_report_profiling(this, info);
-              free(info.buffer);
-            }
-            const int count = to_perform.size() +
-                outstanding_profiling_reported.fetch_add(to_perform.size());
-#ifdef DEBUG_LEGION
-            assert(count <= outstanding_profiling_requests.load());
-#endif
-            if (count == outstanding_profiling_requests.load())
-              Runtime::trigger_event(profiling_reported);
-          }
-        }
-        else
-        {
-          // We're not expecting any profiling callbacks so we need to
-          // do one ourself to inform the mapper that there won't be any
-          Mapping::Mapper::CloseProfilingInfo info;
-          info.total_reports = 0;
-          info.fill_response = false; // make valgrind happy
-          mapper->invoke_close_report_profiling(this, info);    
-          Runtime::trigger_event(profiling_reported);
-        }
+        // We're not expecting any profiling callbacks so we need to
+        // do one ourself to inform the mapper that there won't be any
+        Mapping::Mapper::CloseProfilingInfo info;
+        info.total_reports = 0;
+        info.fill_response = false; // make valgrind happy
+        mapper->invoke_close_report_profiling(this, info);    
+        Runtime::trigger_event(profiling_reported);
       }
       // Only commit this operation if we are done profiling
       commit_operation(true/*deactivate*/, profiling_reported);
@@ -11452,8 +11316,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PostCloseOp::handle_profiling_response(
-                                       const ProfilingResponseBase *base,
+    bool PostCloseOp::handle_profiling_response(
                                        const Realm::ProfilingResponse &response,
                                        const void *orig, size_t orig_length)
     //--------------------------------------------------------------------------
@@ -11462,36 +11325,26 @@ namespace Legion {
       assert(mapper != NULL);
 #endif
       const OpProfilingResponse *op_info = 
-        static_cast<const OpProfilingResponse*>(base);
+        static_cast<const OpProfilingResponse*>(response.user_data());
       // Check to see if we are done mapping, if not then we need to defer
-      // this until we are done mapping so we know how many
-      {
-        AutoLock o_lock(op_lock);
-        if (!mapped_event.has_triggered())
-        {
-          // Save this profiling response for later until we know the
-          // full count of profiling responses
-          profiling_info.resize(profiling_info.size() + 1);
-          CloseProfilingInfo &info = profiling_info.back();
-          info.fill_response = op_info->fill;
-          info.buffer_size = orig_length;
-          info.buffer = malloc(orig_length);
-          memcpy(info.buffer, orig, orig_length);
-          return;
-        }
-      }
+      // this until we are done mapping so we know how many reports to expect
+      const RtEvent mapped = get_mapped_event();
+      if (!mapped.has_triggered())
+        mapped.wait();
       // If we get here then we can handle the response now
       Mapping::Mapper::CloseProfilingInfo info; 
       info.profiling_responses.attach_realm_profiling_response(response);
-      info.total_reports = outstanding_profiling_requests.load();
+      info.total_reports = outstanding_profiling_requests;
       info.fill_response = op_info->fill;
       mapper->invoke_close_report_profiling(this, info);
       const int count = outstanding_profiling_reported.fetch_add(1) + 1;
 #ifdef DEBUG_LEGION
-      assert(count <= outstanding_profiling_requests.load());
+      assert(count <= outstanding_profiling_requests);
 #endif
-      if (count == outstanding_profiling_requests.load())
+      if (count == outstanding_profiling_requests)
         Runtime::trigger_event(profiling_reported);
+      // Always record these as part of profiling
+      return true;
     }
 
     //--------------------------------------------------------------------------
@@ -12077,12 +11930,6 @@ namespace Legion {
         release_acquired_instances(acquired_instances);
       map_applied_conditions.clear();
       profiling_requests.clear();
-      if (!profiling_info.empty())
-      {
-        for (unsigned idx = 0; idx < profiling_info.size(); idx++)
-          free(profiling_info[idx].buffer);
-        profiling_info.clear();
-      }
       if (mapper_data != NULL)
       {
         free(mapper_data);
@@ -12269,48 +12116,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Check to see if we need to do a profiling response
-      if (profiling_reported.exists())
+      if (profiling_reported.exists() && (outstanding_profiling_requests == 0))
       {
-        if (outstanding_profiling_requests.load() > 0)
-        {
-#ifdef DEBUG_LEGION
-          assert(mapped_event.has_triggered());
-#endif
-          std::vector<AcquireProfilingInfo> to_perform;
-          {
-            AutoLock o_lock(op_lock);
-            to_perform.swap(profiling_info);
-          }
-          if (!to_perform.empty())
-          {
-            for (unsigned idx = 0; idx < to_perform.size(); idx++)
-            {
-              AcquireProfilingInfo &info = to_perform[idx];
-              const Realm::ProfilingResponse resp(info.buffer,info.buffer_size);
-              info.total_reports = outstanding_profiling_requests.load();
-              info.profiling_responses.attach_realm_profiling_response(resp);
-              mapper->invoke_acquire_report_profiling(this, info);
-              free(info.buffer);
-            }
-            const int count = to_perform.size() +
-                outstanding_profiling_reported.fetch_add(to_perform.size());
-#ifdef DEBUG_LEGION
-            assert(count <= outstanding_profiling_requests.load());
-#endif
-            if (count == outstanding_profiling_requests.load())
-              Runtime::trigger_event(profiling_reported);
-          }
-        }
-        else
-        {
-          // We're not expecting any profiling callbacks so we need to
-          // do one ourself to inform the mapper that there won't be any
-          Mapping::Mapper::AcquireProfilingInfo info;
-          info.total_reports = 0;
-          info.fill_response = false; // make valgrind happy
-          mapper->invoke_acquire_report_profiling(this, info);    
-          Runtime::trigger_event(profiling_reported);
-        }
+        // We're not expecting any profiling callbacks so we need to
+        // do one ourself to inform the mapper that there won't be any
+        Mapping::Mapper::AcquireProfilingInfo info;
+        info.total_reports = 0;
+        info.fill_response = false; // make valgrind happy
+        mapper->invoke_acquire_report_profiling(this, info);    
+        Runtime::trigger_event(profiling_reported);
       }
       // Don't commit thisoperation until we've reported profiling information
       commit_operation(true/*deactivate*/, profiling_reported);
@@ -12617,7 +12431,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void AcquireOp::handle_profiling_response(const ProfilingResponseBase *base,
+    bool AcquireOp::handle_profiling_response(
                                        const Realm::ProfilingResponse &response,
                                        const void *orig, size_t orig_length)
     //--------------------------------------------------------------------------
@@ -12626,36 +12440,26 @@ namespace Legion {
       assert(mapper != NULL);
 #endif
       const OpProfilingResponse *op_info = 
-        static_cast<const OpProfilingResponse*>(base);
+        static_cast<const OpProfilingResponse*>(response.user_data());
       // Check to see if we are done mapping, if not then we need to defer
       // this until we are done mapping so we know how many reports to expect
-      {
-        AutoLock o_lock(op_lock);
-        if (!mapped_event.has_triggered())
-        {
-          // Save this profiling response for later until we know the
-          // full count of profiling responses
-          profiling_info.resize(profiling_info.size() + 1);
-          AcquireProfilingInfo &info = profiling_info.back();
-          info.fill_response = op_info->fill;
-          info.buffer_size = orig_length;
-          info.buffer = malloc(orig_length);
-          memcpy(info.buffer, orig, orig_length);
-          return;
-        }
-      }
+      const RtEvent mapped = get_mapped_event();
+      if (!mapped.has_triggered())
+        mapped.wait();
       // If we get here then we can handle the response now
       Mapping::Mapper::AcquireProfilingInfo info; 
       info.profiling_responses.attach_realm_profiling_response(response);
-      info.total_reports = outstanding_profiling_requests.load();
+      info.total_reports = outstanding_profiling_requests;
       info.fill_response = op_info->fill;
       mapper->invoke_acquire_report_profiling(this, info);
       const int count = outstanding_profiling_reported.fetch_add(1) + 1;
 #ifdef DEBUG_LEGION
-      assert(count <= outstanding_profiling_requests.load());
+      assert(count <= outstanding_profiling_requests);
 #endif
-      if (count == outstanding_profiling_requests.load())
+      if (count == outstanding_profiling_requests)
         Runtime::trigger_event(profiling_reported);
+      // Always record these as part of profiling
+      return true;
     }
 
     //--------------------------------------------------------------------------
@@ -12897,12 +12701,6 @@ namespace Legion {
         release_acquired_instances(acquired_instances);
       map_applied_conditions.clear();
       profiling_requests.clear();
-      if (!profiling_info.empty())
-      {
-        for (unsigned idx = 0; idx < profiling_info.size(); idx++)
-          free(profiling_info[idx].buffer);
-        profiling_info.clear();
-      }
       if (mapper_data != NULL)
       {
         free(mapper_data);
@@ -13094,48 +12892,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Check to see if we need to do a profiling response
-      if (profiling_reported.exists())
+      if (profiling_reported.exists() && (outstanding_profiling_requests == 0))
       {
-        if (outstanding_profiling_requests.load() > 0)
-        {
-#ifdef DEBUG_LEGION
-          assert(mapped_event.has_triggered());
-#endif
-          std::vector<ReleaseProfilingInfo> to_perform;
-          {
-            AutoLock o_lock(op_lock);
-            to_perform.swap(profiling_info);
-          }
-          if (!to_perform.empty())
-          {
-            for (unsigned idx = 0; idx < to_perform.size(); idx++)
-            {
-              ReleaseProfilingInfo &info = to_perform[idx];
-              const Realm::ProfilingResponse resp(info.buffer,info.buffer_size);
-              info.total_reports = outstanding_profiling_requests.load();
-              info.profiling_responses.attach_realm_profiling_response(resp);
-              mapper->invoke_release_report_profiling(this, info);
-              free(info.buffer);
-            }
-            const int count = to_perform.size() +
-                outstanding_profiling_reported.fetch_add(to_perform.size());
-#ifdef DEBUG_LEGION
-            assert(count <= outstanding_profiling_requests.load());
-#endif
-            if (count == outstanding_profiling_requests.load())
-              Runtime::trigger_event(profiling_reported);
-          }
-        }
-        else
-        {
-          // We're not expecting any profiling callbacks so we need to
-          // do one ourself to inform the mapper that there won't be any
-          Mapping::Mapper::ReleaseProfilingInfo info;
-          info.total_reports = 0;
-          info.fill_response = false; // make valgrind happy
-          mapper->invoke_release_report_profiling(this, info);    
-          Runtime::trigger_event(profiling_reported);
-        }
+        // We're not expecting any profiling callbacks so we need to
+        // do one ourself to inform the mapper that there won't be any
+        Mapping::Mapper::ReleaseProfilingInfo info;
+        info.total_reports = 0;
+        info.fill_response = false; // make valgrind happy
+        mapper->invoke_release_report_profiling(this, info);    
+        Runtime::trigger_event(profiling_reported);
       }
       // Don't commit this operation until the profiling is done
       commit_operation(true/*deactivate*/, profiling_reported);
@@ -13473,7 +13238,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReleaseOp::handle_profiling_response(const ProfilingResponseBase *base,
+    bool ReleaseOp::handle_profiling_response(
                                        const Realm::ProfilingResponse &response,
                                        const void *orig, size_t orig_length)
     //--------------------------------------------------------------------------
@@ -13482,36 +13247,26 @@ namespace Legion {
       assert(mapper != NULL);
 #endif
       const OpProfilingResponse *op_info = 
-        static_cast<const OpProfilingResponse*>(base);
+        static_cast<const OpProfilingResponse*>(response.user_data());
       // Check to see if we are done mapping, if not then we need to defer
       // this until we are done mapping so we know how many reports to expect
-      {
-        AutoLock o_lock(op_lock);
-        if (!mapped_event.has_triggered())
-        {
-          // Save this profiling response for later until we know the
-          // full count of profiling responses
-          profiling_info.resize(profiling_info.size() + 1);
-          ReleaseProfilingInfo &info = profiling_info.back();
-          info.fill_response = op_info->fill;
-          info.buffer_size = orig_length;
-          info.buffer = malloc(orig_length);
-          memcpy(info.buffer, orig, orig_length);
-          return;
-        }
-      }
+      const RtEvent mapped = get_mapped_event();
+      if (!mapped.has_triggered())
+        mapped.wait();
       // If we get here then we can handle the response now
       Mapping::Mapper::ReleaseProfilingInfo info; 
       info.profiling_responses.attach_realm_profiling_response(response);
-      info.total_reports = outstanding_profiling_requests.load();
+      info.total_reports = outstanding_profiling_requests;
       info.fill_response = op_info->fill;
       mapper->invoke_release_report_profiling(this, info);
       const int count = outstanding_profiling_reported.fetch_add(1) + 1;
 #ifdef DEBUG_LEGION
-      assert(count <= outstanding_profiling_requests.load());
+      assert(count <= outstanding_profiling_requests);
 #endif
-      if (count == outstanding_profiling_requests.load())
+      if (count == outstanding_profiling_requests)
         Runtime::trigger_event(profiling_reported);
+      // Always record these as part of profiling
+      return true;
     }
 
     //--------------------------------------------------------------------------
@@ -17139,37 +16894,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(profiling_reported.exists());
 #endif
-      if (outstanding_profiling_requests.load() > 0)
-      {
-#ifdef DEBUG_LEGION
-        assert(mapped_event.has_triggered());
-#endif
-        std::vector<PartitionProfilingInfo> to_perform;
-        {
-          AutoLock o_lock(op_lock);
-          to_perform.swap(profiling_info);
-        }
-        if (!to_perform.empty())
-        {
-          for (unsigned idx = 0; idx < to_perform.size(); idx++)
-          {
-            PartitionProfilingInfo &info = to_perform[idx];
-            const Realm::ProfilingResponse resp(info.buffer, info.buffer_size);
-            info.total_reports = outstanding_profiling_requests.load();
-            info.profiling_responses.attach_realm_profiling_response(resp);
-            mapper->invoke_partition_report_profiling(this, info);
-            free(info.buffer);
-          }
-          const int count = to_perform.size() +
-              outstanding_profiling_reported.fetch_add(to_perform.size());
-#ifdef DEBUG_LEGION
-          assert(count <= outstanding_profiling_requests.load());
-#endif
-          if (count == outstanding_profiling_requests.load())
-            Runtime::trigger_event(profiling_reported);
-        }
-      }
-      else
+      if (outstanding_profiling_requests == 0)
       {
         // We're not expecting any profiling callbacks so we need to
         // do one ourself to inform the mapper that there won't be any
@@ -17414,12 +17139,6 @@ namespace Legion {
       index_preconditions.clear();
       commit_preconditions.clear();
       profiling_requests.clear();
-      if (!profiling_info.empty())
-      {
-        for (unsigned idx = 0; idx < profiling_info.size(); idx++)
-          free(profiling_info[idx].buffer);
-        profiling_info.clear();
-      }
       if (mapper_data != NULL)
       {
         free(mapper_data);
@@ -17508,8 +17227,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DependentPartitionOp::handle_profiling_response(
-                                       const ProfilingResponseBase *base,
+    bool DependentPartitionOp::handle_profiling_response(
                                        const Realm::ProfilingResponse &response,
                                        const void *orig, size_t orig_length)
     //--------------------------------------------------------------------------
@@ -17518,36 +17236,26 @@ namespace Legion {
       assert(mapper != NULL);
 #endif
       const OpProfilingResponse *op_info = 
-        static_cast<const OpProfilingResponse*>(base);
+        static_cast<const OpProfilingResponse*>(response.user_data());
       // Check to see if we are done mapping, if not then we need to defer
       // this until we are done mapping so we know how many reports to expect
-      {
-        AutoLock o_lock(op_lock);
-        if (!mapped_event.has_triggered())
-        {
-          // Save this profiling response for later until we know the
-          // full count of profiling responses
-          profiling_info.resize(profiling_info.size() + 1);
-          PartitionProfilingInfo &info = profiling_info.back();
-          info.fill_response = op_info->fill;
-          info.buffer_size = orig_length;
-          info.buffer = malloc(orig_length);
-          memcpy(info.buffer, orig, orig_length);
-          return;
-        }
-      }
+      const RtEvent mapped = get_mapped_event();
+      if (!mapped.has_triggered())
+        mapped.wait();
       // If we get here then we can handle the response now
       Mapping::Mapper::PartitionProfilingInfo info; 
       info.profiling_responses.attach_realm_profiling_response(response);
-      info.total_reports = outstanding_profiling_requests.load();
+      info.total_reports = outstanding_profiling_requests;
       info.fill_response = op_info->fill;
       mapper->invoke_partition_report_profiling(this, info);
       const int count = outstanding_profiling_reported.fetch_add(1) + 1;
 #ifdef DEBUG_LEGION
-      assert(count <= outstanding_profiling_requests.load());
+      assert(count <= outstanding_profiling_requests);
 #endif
-      if (count == outstanding_profiling_requests.load())
+      if (count == outstanding_profiling_requests)
         Runtime::trigger_event(profiling_reported);
+      // Always record these as part of profiling
+      return true;
     }
 
     //--------------------------------------------------------------------------

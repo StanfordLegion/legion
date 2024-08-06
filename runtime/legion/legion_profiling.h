@@ -58,6 +58,23 @@ namespace Legion {
     typedef ::realm_id_t IDType;
 
     class LegionProfSerializer; // forward declaration
+    // A small interface class for handling profiling responses
+    class ProfilingResponseHandler {
+    public:
+      // Return true if we should profile this profiling response
+      virtual bool handle_profiling_response(
+          const Realm::ProfilingResponse &response,
+          const void *orig, size_t orig_length) = 0;
+    };
+
+    struct ProfilingResponseBase {
+    public:
+      ProfilingResponseBase(ProfilingResponseHandler *h, UniqueID op);
+    public:
+      ProfilingResponseHandler *const handler;
+      const UniqueID op_id;
+      const LgEvent creator;
+    };
 
     /*
      * This class provides an interface for mapping physical instance names
@@ -500,7 +517,7 @@ namespace Legion {
       };
       struct ProfilingInfo : public ProfilingResponseBase {
       public:
-        ProfilingInfo(ProfilingResponseHandler *h);
+        ProfilingInfo(ProfilingResponseHandler *h, UniqueID uid);
       public:
         size_t id; 
         union {
@@ -508,7 +525,6 @@ namespace Legion {
           InstanceNameClosure *closure;
           long long spawn_time;
         } extra;
-        UniqueID op_id;
         LgEvent creator;
         LgEvent critical;
       };
@@ -677,8 +693,9 @@ namespace Legion {
       };
       struct ProfilingInfo : public LegionProfInstance::ProfilingInfo {
       public:
-        ProfilingInfo(LegionProfiler *p, ProfilingKind k)
-          : LegionProfInstance::ProfilingInfo(p), kind(k) { }
+        ProfilingInfo(LegionProfiler *p, ProfilingKind k, UniqueID uid)
+          : LegionProfInstance::ProfilingInfo(p, uid), kind(k) { }
+        ProfilingInfo(LegionProfiler *p, ProfilingKind k, Operation *op);
       public:
         ProfilingKind kind;
       };
@@ -764,9 +781,9 @@ namespace Legion {
                                  LgEvent critical);
     public:
       // Process low-level runtime profiling results
-      virtual void handle_profiling_response(const ProfilingResponseBase *base,
-                                      const Realm::ProfilingResponse &response,
-                                      const void *orig, size_t orig_length);
+      virtual bool handle_profiling_response(
+          const Realm::ProfilingResponse &response,
+          const void *orig, size_t orig_length);
     public:
       // Dump all the results
       void finalize(void);

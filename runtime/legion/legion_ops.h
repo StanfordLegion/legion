@@ -356,9 +356,11 @@ namespace Legion {
     public:
       struct OpProfilingResponse : public ProfilingResponseBase {
       public:
-        OpProfilingResponse(ProfilingResponseHandler *h, 
-                            unsigned s, unsigned d, bool f, bool t = false)
-          : ProfilingResponseBase(h), src(s), dst(d), fill(f), task(t) { }
+        template<typename OP>
+        OpProfilingResponse(OP *op, unsigned s, unsigned d,
+                            bool f, bool t = false)
+          : ProfilingResponseBase(op, op->get_unique_op_id()), 
+            src(s), dst(d), fill(f), task(t) { }
       public:
         unsigned src, dst;
         bool fill;
@@ -539,9 +541,9 @@ namespace Legion {
                                Realm::ProfilingRequestSet &requests, 
                                bool fill, unsigned count = 1);
       // Report a profiling result for this operation
-      virtual void handle_profiling_response(const ProfilingResponseBase *base,
-                                        const Realm::ProfilingResponse &result,
-                                        const void *orig, size_t orig_length);
+      virtual bool handle_profiling_response(
+          const Realm::ProfilingResponse &response,
+          const void *orig, size_t orig_length);
       virtual void handle_profiling_update(int count);
       // To notify  
       ApEvent get_completion_event(void);
@@ -1278,9 +1280,9 @@ namespace Legion {
       virtual int add_copy_profiling_request(const PhysicalTraceInfo &info,
                                Realm::ProfilingRequestSet &requests,
                                bool fill, unsigned count = 1);
-      virtual void handle_profiling_response(const ProfilingResponseBase *base,
-                                      const Realm::ProfilingResponse &response,
-                                      const void *orig, size_t orig_length);
+      virtual bool handle_profiling_response(
+          const Realm::ProfilingResponse &response,
+          const void *orig, size_t orig_length);
       virtual void handle_profiling_update(int count);
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const;
@@ -1298,13 +1300,7 @@ namespace Legion {
     protected:
       MapperManager *mapper;
     protected:
-      struct MapProfilingInfo : public Mapping::Mapper::InlineProfilingInfo {
-      public:
-        void *buffer;
-        size_t buffer_size;
-      };
       std::vector<ProfilingMeasurementID>           profiling_requests;
-      std::vector<MapProfilingInfo>                     profiling_info;
       RtUserEvent                                   profiling_reported;
       int                                           profiling_priority;
       int                                           copy_fill_priority;
@@ -1506,9 +1502,9 @@ namespace Legion {
       virtual int add_copy_profiling_request(const PhysicalTraceInfo &info,
                                Realm::ProfilingRequestSet &requests,
                                bool fill, unsigned count = 1);
-      virtual void handle_profiling_response(const ProfilingResponseBase *base,
-                                      const Realm::ProfilingResponse &response,
-                                      const void *orig, size_t orig_length);
+      virtual bool handle_profiling_response(
+          const Realm::ProfilingResponse &response,
+          const void *orig, size_t orig_length);
       virtual void handle_profiling_update(int count);
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const;
@@ -1593,13 +1589,7 @@ namespace Legion {
       std::map<PhysicalManager*,unsigned> acquired_instances;
       std::set<RtEvent> map_applied_conditions;
     protected:
-      struct CopyProfilingInfo : public Mapping::Mapper::CopyProfilingInfo {
-      public:
-        void *buffer;
-        size_t buffer_size;
-      };
       std::vector<ProfilingMeasurementID>         profiling_requests;
-      std::vector<CopyProfilingInfo>                  profiling_info;
       RtUserEvent                                 profiling_reported;
       int                                         profiling_priority;
       int                                         copy_fill_priority;
@@ -2175,9 +2165,9 @@ namespace Legion {
       virtual int add_copy_profiling_request(const PhysicalTraceInfo &info,
                                Realm::ProfilingRequestSet &requests,
                                bool fill, unsigned count = 1);
-      virtual void handle_profiling_response(const ProfilingResponseBase *base,
-                                      const Realm::ProfilingResponse &response,
-                                      const void *orig, size_t orig_length);
+      virtual bool handle_profiling_response(
+          const Realm::ProfilingResponse &response,
+          const void *orig, size_t orig_length);
       virtual void handle_profiling_update(int count);
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const;
@@ -2189,13 +2179,7 @@ namespace Legion {
     protected:
       MapperManager *mapper;
     protected:
-      struct CloseProfilingInfo : public Mapping::Mapper::CloseProfilingInfo {
-      public:
-        void *buffer;
-        size_t buffer_size;
-      };
       std::vector<ProfilingMeasurementID>          profiling_requests;
-      std::vector<CloseProfilingInfo>                  profiling_info;
       RtUserEvent                                  profiling_reported;
       int                                          profiling_priority;
       std::atomic<int>                 outstanding_profiling_requests;
@@ -2367,9 +2351,9 @@ namespace Legion {
       virtual int add_copy_profiling_request(const PhysicalTraceInfo &info,
                                Realm::ProfilingRequestSet &requests,
                                bool fill, unsigned count = 1);
-      virtual void handle_profiling_response(const ProfilingResponseBase *base,
-                                      const Realm::ProfilingResponse &response,
-                                      const void *orig, size_t orig_length);
+      virtual bool handle_profiling_response(
+          const Realm::ProfilingResponse &response,
+          const void *orig, size_t orig_length);
       virtual void handle_profiling_update(int count);
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const;
@@ -2383,14 +2367,7 @@ namespace Legion {
     protected:
       MapperManager*    mapper;
     protected:
-      struct AcquireProfilingInfo : 
-        public Mapping::Mapper::AcquireProfilingInfo {
-      public:
-        void *buffer;
-        size_t buffer_size;
-      };
       std::vector<ProfilingMeasurementID>            profiling_requests;
-      std::vector<AcquireProfilingInfo>                  profiling_info;
       RtUserEvent                                    profiling_reported;
       int                                            profiling_priority;
       int                                            copy_fill_priority;
@@ -2483,9 +2460,9 @@ namespace Legion {
       virtual int add_copy_profiling_request(const PhysicalTraceInfo &info,
                                Realm::ProfilingRequestSet &requests,
                                bool fill, unsigned count = 1);
-      virtual void handle_profiling_response(const ProfilingResponseBase *base,
-                                      const Realm::ProfilingResponse &response,
-                                      const void *orig, size_t orig_length);
+      virtual bool handle_profiling_response(
+          const Realm::ProfilingResponse &response,
+          const void *orig, size_t orig_length);
       virtual void handle_profiling_update(int count);
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const;
@@ -3516,9 +3493,9 @@ namespace Legion {
                                Realm::ProfilingRequestSet &requests,
                                bool fill, unsigned count = 1);
       // Report a profiling result for this operation
-      virtual void handle_profiling_response(const ProfilingResponseBase *base,
-                                        const Realm::ProfilingResponse &result,
-                                        const void *orig, size_t orig_length);
+      virtual bool handle_profiling_response(
+          const Realm::ProfilingResponse &response,
+          const void *orig, size_t orig_length);
       virtual void handle_profiling_update(int count);
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const;
@@ -3555,14 +3532,7 @@ namespace Legion {
       std::set<RtEvent>                 commit_preconditions;
       ApUserEvent                       intermediate_index_event;
     protected:
-      struct PartitionProfilingInfo :
-        public Mapping::Mapper::PartitionProfilingInfo {
-      public:
-        void *buffer;
-        size_t buffer_size;
-      };
       std::vector<ProfilingMeasurementID>              profiling_requests;
-      std::vector<PartitionProfilingInfo>                  profiling_info;
       RtUserEvent                                      profiling_reported;
       int                                              profiling_priority;
       int                                              copy_fill_priority;

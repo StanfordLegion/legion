@@ -10902,7 +10902,7 @@ namespace Legion {
 #endif
 #ifndef LEGION_MALLOC_INSTANCES
           FutureInstanceAllocator allocator;
-          ProfilingResponseBase base(&allocator);
+          ProfilingResponseBase base(&allocator, creator_uid);
           Realm::ProfilingRequest &req = requests.add_request(
               runtime->find_utility_group(), LG_LEGION_PROFILING_ID,
               &base, sizeof(base), LG_RESOURCE_PRIORITY);
@@ -11021,8 +11021,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MemoryManager::FutureInstanceAllocator::handle_profiling_response(
-                                       const ProfilingResponseBase *base,
+    bool MemoryManager::FutureInstanceAllocator::handle_profiling_response(
                                        const Realm::ProfilingResponse &response,
                                        const void *orig, size_t orig_length)
     //--------------------------------------------------------------------------
@@ -11045,6 +11044,8 @@ namespace Legion {
 #endif
       success.store(result.success);
       Runtime::trigger_event(ready);
+      // Always record these as part of profiling
+      return true;
     }
 
     //--------------------------------------------------------------------------
@@ -32940,23 +32941,27 @@ namespace Legion {
         implicit_runtime = runtime;
       if (implicit_context != NULL)
         implicit_context = NULL;
-      // Only profile this if we're doing self profiling
-      if ((runtime->profiler == NULL) || !runtime->profiler->self_profile)
-        implicit_profiler = NULL;
-      else if (implicit_profiler == NULL)
+      if ((runtime->profiler != NULL) && (implicit_profiler == NULL))
         implicit_profiler = 
           runtime->profiler->find_or_create_profiling_instance();
       Realm::ProfilingResponse response(args, arglen);
       const ProfilingResponseBase *base = 
-        (const ProfilingResponseBase*)response.user_data();
-      if (base->handler == NULL)
+        static_cast<const ProfilingResponseBase*>(response.user_data());
+      if (runtime->profiler != NULL)
       {
-        // If we got a NULL let's assume they meant the profiler
-        // this mainly happens with messages that cross nodes
-        runtime->profiler->handle_profiling_response(base,response,args,arglen);
+        const long long t_start = Realm::Clock::current_time_in_nanoseconds();
+        // Check to see if should report this profiling
+        if (base->handler->handle_profiling_response(response, args, arglen))
+        {
+          const long long t_stop = Realm::Clock::current_time_in_nanoseconds();
+          const LgEvent finish_event(Processor::get_current_finish_event());
+          implicit_profiler->process_proc_desc(p);
+          implicit_profiler->record_proftask(p, base->op_id, t_start,
+              t_stop, base->creator, finish_event);
+        }
       }
       else
-        base->handler->handle_profiling_response(base, response, args, arglen);
+        base->handler->handle_profiling_response(response, args, arglen);
     }
 
     //--------------------------------------------------------------------------
