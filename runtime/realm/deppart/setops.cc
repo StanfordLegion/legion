@@ -174,13 +174,12 @@ namespace Realm {
       size_t ri = (rhss.size() == 1) ? 0 : i;
 
       // handle a bunch of special cases
-      const IndexSpace<N,T> &l = lhss[li];
-      const IndexSpace<N,T> &r = rhss[ri];
-
+      const IndexSpace<N, T> &l = lhss[li];
+      const IndexSpace<N, T> &r = rhss[ri];
 
       // 1) empty lhs
       if(l.empty()) {
-	results[i] = r;
+        results[i] = r;
         if(results[i].sparsity.exists()) {
           results[i].sparsity.add_references();
         }
@@ -189,29 +188,28 @@ namespace Realm {
 
       // 2) empty rhs
       if(rhss[li].empty()) {
-	results[i] = l;
+        results[i] = l;
         if(results[i].sparsity.exists()) {
           results[i].sparsity.add_references();
         }
-	continue;
+        continue;
       }
 
       // 3) dense lhs containing rhs' bounds -> lhs
       if(l.dense() && l.bounds.contains(r.bounds)) {
-	results[i] = l;
-	continue;
+        results[i] = l;
+        continue;
       }
 
       // 4) dense rhs containing lhs' bounds -> rhs
       if(r.dense() && r.bounds.contains(l.bounds)) {
-	results[i] = r;
-	continue;
+        results[i] = r;
+        continue;
       }
 
       // 5) same sparsity map (or none) and simple union for bbox
       if((l.sparsity == r.sparsity) && union_is_rect(l.bounds, r.bounds)) {
-	results[i] = IndexSpace<N,T>(l.bounds.union_bbox(r.bounds),
-				      l.sparsity);
+        results[i] = IndexSpace<N, T>(l.bounds.union_bbox(r.bounds), l.sparsity);
         if(results[i].sparsity.exists()) {
           results[i].sparsity.add_references();
         }
@@ -220,10 +218,9 @@ namespace Realm {
 
       // general case - create op if needed
       if(!op) {
-	GenEventImpl *finish_event = GenEventImpl::create_genevent();
-	e = finish_event->current_event();
-	op = new UnionOperation<N,T>(reqs,
-				     finish_event, ID(e).event_generation());
+        GenEventImpl *finish_event = GenEventImpl::create_genevent();
+        e = finish_event->current_event();
+        op = new UnionOperation<N, T>(reqs, finish_event, ID(e).event_generation());
       }
       results[i] = op->add_union(l, r);
       if(results[i].sparsity.exists()) {
@@ -232,12 +229,10 @@ namespace Realm {
     }
 
     for(size_t i = 0; i < n; i++) {
-      if(results[i].sparsity.exists()) {
-        //results[i].sparsity.add_references();
-      }
       size_t li = (lhss.size() == 1) ? 0 : i;
       size_t ri = (rhss.size() == 1) ? 0 : i;
-      log_dpops.info() << "union: " << lhss[li] << " " << rhss[ri] << " -> " << results[i] << " (" << e << ")";
+      log_dpops.info() << "union: " << lhss[li] << " " << rhss[ri] << " -> " << results[i]
+                       << " (" << e << ")";
     }
 
     if(op)
@@ -353,8 +348,8 @@ namespace Realm {
 
       // 1) empty lhs
       if(l.empty()) {
-	results[i] = IndexSpace<N,T>::make_empty();
-	continue;
+        results[i] = IndexSpace<N, T>::make_empty();
+        continue;
       }
 
       // 2) empty rhs
@@ -377,29 +372,27 @@ namespace Realm {
 
       // 4) dense rhs containing lhs' bounds -> empty
       if(r.dense() && r.bounds.contains(l.bounds)) {
-	results[i] = IndexSpace<N,T>::make_empty();
-	continue;
+        results[i] = IndexSpace<N, T>::make_empty();
+        continue;
       }
 
       // 5) same sparsity map (or none) and simple difference
       if(r.dense() || (l.sparsity == r.sparsity)) {
-	Rect<N,T> sdiff;
-	if(attempt_simple_diff(l.bounds, r.bounds, sdiff)) {
+        Rect<N, T> sdiff;
+        if(attempt_simple_diff(l.bounds, r.bounds, sdiff)) {
           results[i] = IndexSpace<N, T>(sdiff, l.sparsity);
           if(results[i].sparsity.exists()) {
             results[i].sparsity.add_references();
           }
           continue;
-	}
+        }
       }
 
       // general case - create op if needed
       if(!op) {
-	GenEventImpl *finish_event = GenEventImpl::create_genevent();
-	e = finish_event->current_event();
-	op = new DifferenceOperation<N,T>(reqs,
-					  finish_event,
-					  ID(e).event_generation());
+        GenEventImpl *finish_event = GenEventImpl::create_genevent();
+        e = finish_event->current_event();
+        op = new DifferenceOperation<N, T>(reqs, finish_event, ID(e).event_generation());
       }
       results[i] = op->add_difference(lhss[li], rhss[ri]);
       if(results[i].sparsity.exists()) {
@@ -408,9 +401,6 @@ namespace Realm {
     }
 
     for(size_t i = 0; i < n; i++) {
-      if(results[i].sparsity.exists()) {
-        //results[i].sparsity.add_references();
-      }
       size_t li = (lhss.size() == 1) ? 0 : i;
       size_t ri = (rhss.size() == 1) ? 0 : i;
       log_dpops.info() << "diff: " << lhss[li] << " " << rhss[ri] << " -> " << results[i]
@@ -446,8 +436,8 @@ namespace Realm {
 
       for(size_t i = 1; i < subspaces.size(); i++) {
         // empty rhs - skip
-	if(subspaces[i].empty())
-	  continue;
+        if(subspaces[i].empty())
+          continue;
 
         // lhs dense or subspace match, and containment - skip
         if((result.dense() || (result.sparsity == subspaces[i].sparsity)) &&
@@ -459,32 +449,27 @@ namespace Realm {
         }
 
         // TODO: subspace match ought to be sufficient here - also handle
-	//  merge-into-rectangle case?
-	// rhs dense and contains lhs - take rhs
-	if(subspaces[i].dense() && subspaces[i].bounds.contains(result.bounds)) {
-	  result = subspaces[i];
-	  continue;
-	}
+        //  merge-into-rectangle case?
+        // rhs dense and contains lhs - take rhs
+        if(subspaces[i].dense() && subspaces[i].bounds.contains(result.bounds)) {
+          result = subspaces[i];
+          continue;
+        }
 
-	// general case - do full computation
-	GenEventImpl *finish_event = GenEventImpl::create_genevent();
-	e = finish_event->current_event();
-	UnionOperation<N,T> *op = new UnionOperation<N,T>(reqs,
-							  finish_event,
-							  ID(e).event_generation());
+        // general case - do full computation
+        GenEventImpl *finish_event = GenEventImpl::create_genevent();
+        e = finish_event->current_event();
+        UnionOperation<N, T> *op =
+            new UnionOperation<N, T>(reqs, finish_event, ID(e).event_generation());
 
-	result = op->add_union(subspaces);
+        result = op->add_union(subspaces);
         if(result.sparsity.exists()) {
           result.sparsity.add_references();
         }
         op->launch(wait_on);
-	was_inline = false;
-	break;
+        was_inline = false;
+        break;
       }
-    }
-
-    if(result.sparsity.exists()) {
-      //result.sparsity.add_references();
     }
 
     {
@@ -564,24 +549,19 @@ namespace Realm {
         }
 
         // general case - do full computation
-	GenEventImpl *finish_event = GenEventImpl::create_genevent();
-	e = finish_event->current_event();
-	IntersectionOperation<N,T> *op = new IntersectionOperation<N,T>(reqs,
-									finish_event,
-									ID(e).event_generation());
+        GenEventImpl *finish_event = GenEventImpl::create_genevent();
+        e = finish_event->current_event();
+        IntersectionOperation<N, T> *op =
+            new IntersectionOperation<N, T>(reqs, finish_event, ID(e).event_generation());
 
-	result = op->add_intersection(subspaces);
+        result = op->add_intersection(subspaces);
         if(result.sparsity.exists()) {
           result.sparsity.add_references();
         }
         op->launch(wait_on);
-	was_inline = false;
-	break;
+        was_inline = false;
+        break;
       }
-    }
-
-    if(result.sparsity.exists()) {
-      //result.sparsity.add_references();
     }
 
     {
