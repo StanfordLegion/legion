@@ -219,7 +219,6 @@ namespace Realm {
       }
       results[i] = op->add_union(l, r);
       results[i].sparsity.add_references();
-
     }
 
     for(size_t i = 0; i < n; i++) {
