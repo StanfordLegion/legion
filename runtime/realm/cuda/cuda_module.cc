@@ -3345,6 +3345,8 @@ namespace Realm {
         return nullptr;
       }
 
+      CHECK_CU(CUDA_DRIVER_FNPTR(cuDriverGetVersion)(&m->cuda_api_version));
+
       // check if nvml can be initialized
       // we will continue create cuda module even if nvml can not be initialized
       if(!nvml_initialized && resolve_nvml_api_fnptrs()) {
@@ -3843,8 +3845,12 @@ namespace Realm {
         IBMemory *ib_mem = nullptr;
 
         if(config->cfg_zc_mem_size > 0) {
+          // In order to work around a bug in 12.3 and 12.4 drivers with shareable host
+          // allocations, disable the shareable path if the driver we're running on does
+          // not support at least 12.5
           GPUAllocation *alloc = GPUAllocation::allocate_host(
-              gpus[0], config->cfg_zc_mem_size, /*peer_enabled=*/true, /*shareable=*/true,
+              gpus[0], config->cfg_zc_mem_size, /*peer_enabled=*/true,
+              /*shareable=*/cuda_api_version >= 12050,
               /*same_va=*/true);
           if(alloc == nullptr) {
             log_gpu.fatal() << "Insufficient zero-copy device-mappable host memory: "
@@ -3859,8 +3865,12 @@ namespace Realm {
         }
 
         if(config->cfg_zc_ib_size > 0) {
+          // In order to work around a bug in 12.3 and 12.4 drivers with shareable host
+          // allocations, disable the shareable path if the driver we're running on does
+          // not support at least 12.5
           GPUAllocation *alloc = GPUAllocation::allocate_host(
-              gpus[0], config->cfg_zc_ib_size, /*peer_enabled=*/true, /*shareable=*/true,
+              gpus[0], config->cfg_zc_ib_size, /*peer_enabled=*/true,
+              /*shareable=*/cuda_api_version >= 12050,
               /*same_va=*/false);
           if(alloc == nullptr) {
             log_gpu.fatal() << "Insufficient ib device-mappable host memory: "
@@ -4724,8 +4734,7 @@ namespace Realm {
       ret = alloc.map_allocation(gpu, alloc.mmap_handle, size, vaddr, 0, peer_enabled,
                                  map_host);
       if(ret != CUDA_SUCCESS) {
-        REPORT_CU_ERROR(Logger::LEVEL_INFO, "cuMemCreate", ret);
-        CHECK_CU(CUDA_DRIVER_FNPTR(cuMemRelease)(alloc.mmap_handle));
+        REPORT_CU_ERROR(Logger::LEVEL_INFO, "cuMemMap", ret);
         return nullptr;
       }
 

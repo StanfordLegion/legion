@@ -24,7 +24,7 @@ use crate::backend::common::{
 use crate::conditional_assert;
 use crate::state::{
     BacktraceID, ChanEntry, ChanID, Color, Config, Container, ContainerEntry, Copy, CopyInstInfo,
-    DeviceKind, EventEntry, EventEntryKind, EventID, Fill, FillInstInfo, Inst, InstUID, MemID,
+    DeviceKind, EventEntry, EventEntryKind, EventID, Fill, FillInstInfo, Inst, MemID,
     MemKind, NodeID, OpID, ProcEntryKind, ProcID, ProcKind, ProfUID, State, TimeRange, Timestamp,
 };
 
@@ -1116,7 +1116,7 @@ impl StateDataSource {
         Field::U64(op_id.0.get())
     }
 
-    fn generate_inst_link(&self, inst_uid: InstUID, prefix: &str) -> Option<Field> {
+    fn generate_inst_link(&self, inst_uid: ProfUID, prefix: &str) -> Option<Field> {
         let mem_id = self.state.insts.get(&inst_uid)?;
         let mem = self.state.mems.get(mem_id)?;
         let inst = mem.insts.get(&inst_uid)?;
@@ -1861,8 +1861,16 @@ impl StateDataSource {
                 ..
             } = group[0];
 
-            let src_inst = self.state.find_inst(src_inst_uid);
-            let dst_inst = self.state.find_inst(dst_inst_uid);
+            let src_inst = if let Some(src_uid) = src_inst_uid {
+                self.state.find_inst(src_uid)
+            } else {
+                None
+            };
+            let dst_inst = if let Some(dst_uid) = dst_inst_uid {
+                self.state.find_inst(dst_uid)
+            } else {
+                None
+            };
 
             let src_fids = group.iter().map(|x| x.src_fid).collect();
             let src_fields = format!(
@@ -1876,29 +1884,29 @@ impl StateDataSource {
                 ChanEntryFieldsPretty(dst_inst, &dst_fids, &self.state)
             );
 
-            match (src_inst_uid.0, dst_inst_uid.0) {
-                (0, 0) => unreachable!(),
-                (0, _) => {
+            match (src_inst_uid, dst_inst_uid) {
+                (None, None) => unreachable!(),
+                (None, Some(dst_uid)) => {
                     let prefix = "Scatter: destination indirect instance ";
-                    if let Some(dst) = self.generate_inst_link(dst_inst_uid, prefix) {
+                    if let Some(dst) = self.generate_inst_link(dst_uid, prefix) {
                         result_reqs.push(dst);
                     } else {
                         result_reqs.push(Field::String(format!("{}<unknown instance>", prefix)));
                     }
                     result_reqs.push(Field::String(dst_fields));
                 }
-                (_, 0) => {
+                (Some(src_uid), None) => {
                     let prefix = "Gather: source indirect instance ";
-                    if let Some(src) = self.generate_inst_link(src_inst_uid, prefix) {
+                    if let Some(src) = self.generate_inst_link(src_uid, prefix) {
                         result_reqs.push(src);
                     } else {
                         result_reqs.push(Field::String(format!("{}<unknown instance>", prefix)));
                     }
                     result_reqs.push(Field::String(src_fields));
                 }
-                (_, _) => {
+                (Some(src_uid), Some(dst_uid)) => {
                     let prefix = "Source: ";
-                    if let Some(src) = self.generate_inst_link(src_inst_uid, prefix) {
+                    if let Some(src) = self.generate_inst_link(src_uid, prefix) {
                         result_reqs.push(src);
                     } else {
                         result_reqs.push(Field::String(format!("{}<unknown instance>", prefix)));
@@ -1906,7 +1914,7 @@ impl StateDataSource {
                     result_reqs.push(Field::String(src_fields));
 
                     let prefix = "Destination: ";
-                    if let Some(dst) = self.generate_inst_link(dst_inst_uid, prefix) {
+                    if let Some(dst) = self.generate_inst_link(dst_uid, prefix) {
                         result_reqs.push(dst);
                     } else {
                         result_reqs.push(Field::String(format!("{}<unknown instance>", prefix)));

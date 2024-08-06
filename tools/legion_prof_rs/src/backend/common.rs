@@ -4,8 +4,8 @@ use std::fmt;
 
 use crate::state::{
     Align, Bounds, ChanEntry, ChanID, ChanPoint, Config, Container, CopyInstInfo, DeviceKind,
-    DimKind, FSpace, FieldID, FillInstInfo, ISpaceID, Inst, InstUID, MemID, MemKind, MemPoint,
-    NodeID, ProcID, ProcKind, ProcPoint, State, TimePoint, Timestamp,
+    DimKind, FSpace, FieldID, FillInstInfo, ISpaceID, Inst, MemID, MemKind, MemPoint, NodeID,
+    ProcID, ProcKind, ProcPoint, ProfUID, State, TimePoint, Timestamp,
 };
 
 use crate::conditional_assert;
@@ -896,8 +896,8 @@ impl fmt::Display for ChanEntryFieldsPretty<'_> {
 pub struct CopyInstInfoDisplay<'a>(
     pub Option<&'a Inst>, // src_inst
     pub Option<&'a Inst>, // src_dst
-    pub InstUID,          // src_inst_uid
-    pub InstUID,          // dst_inst_uid
+    pub Option<ProfUID>,  // src_inst_uid
+    pub Option<ProfUID>,  // dst_inst_uid
     pub FieldID,          // src_fid
     pub FieldID,          // dst_fid
     pub u32,              // num_hops
@@ -913,16 +913,16 @@ impl fmt::Display for CopyInstInfoDisplay<'_> {
         if let Some(dst_inst) = self.1 {
             dst_inst_id = dst_inst.inst_id.unwrap().0;
         }
-        match (self.2 .0, self.3 .0) {
-            (0, 0) => unreachable!(),
-            (0, _) => {
+        match (self.2, self.3) {
+            (None, None) => unreachable!(),
+            (None, _) => {
                 write!(
                     f,
                     "Scatter: dst_indirect_inst=0x{:x}, fid={}",
                     dst_inst_id, self.5 .0
                 )
             }
-            (_, 0) => {
+            (_, None) => {
                 write!(
                     f,
                     "Gather: src_indirect_inst=0x{:x}, fid={}",
@@ -946,8 +946,16 @@ pub struct CopyInstInfoVec<'a>(pub &'a Vec<CopyInstInfo>, pub &'a State);
 impl fmt::Display for CopyInstInfoVec<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for (i, elt) in self.0.iter().enumerate() {
-            let src_inst = self.1.find_inst(elt.src_inst_uid);
-            let dst_inst = self.1.find_inst(elt.dst_inst_uid);
+            let src_inst = if let Some(src_inst_uid) = elt.src_inst_uid {
+                self.1.find_inst(src_inst_uid)
+            } else {
+                None
+            };
+            let dst_inst = if let Some(dst_inst_uid) = elt.dst_inst_uid {
+                self.1.find_inst(dst_inst_uid)
+            } else {
+                None
+            };
             write!(
                 f,
                 "$req[{}]: {}",
@@ -975,29 +983,29 @@ impl fmt::Display for CopyInstInfoDumpInstVec<'_> {
         // remove duplications
         let mut insts_set = BTreeSet::new();
         for elt in self.0.iter() {
-            // src_inst_uid = 0 means scatter (indirection inst)
-            if elt.src_inst_uid != InstUID(0) {
-                if let Some(src_inst) = self.1.find_inst(elt.src_inst_uid) {
+            // src_inst_uid = None means scatter (indirection inst)
+            if let Some(src_inst_uid) = elt.src_inst_uid {
+                if let Some(src_inst) = self.1.find_inst(src_inst_uid) {
                     insts_set.insert(src_inst);
                 } else {
                     conditional_assert!(
                         false,
                         Config::all_logs(),
                         "Copy can not find src_inst:0x{:x}",
-                        elt.src_inst_uid.0
+                        src_inst_uid.0
                     );
                 }
             }
-            // dst_inst_uid = 0 means gather (indirection inst)
-            if elt.dst_inst_uid != InstUID(0) {
-                if let Some(dst_inst) = self.1.find_inst(elt.dst_inst_uid) {
+            // dst_inst_uid = None means gather (indirection inst)
+            if let Some(dst_inst_uid) = elt.dst_inst_uid {
+                if let Some(dst_inst) = self.1.find_inst(dst_inst_uid) {
                     insts_set.insert(dst_inst);
                 } else {
                     conditional_assert!(
                         false,
                         Config::all_logs(),
                         "Copy can not find dst_inst:0x{:x}",
-                        elt.dst_inst_uid.0
+                        dst_inst_uid.0
                     );
                 }
             }
