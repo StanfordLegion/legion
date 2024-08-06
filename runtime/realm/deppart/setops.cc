@@ -450,15 +450,15 @@ namespace Realm {
 	  continue;
 
         // lhs dense or subspace match, and containment - skip
-	if((result.dense() || (result.sparsity == subspaces[i].sparsity)) &&
-	   result.bounds.contains(subspaces[i].bounds)) {
+        if((result.dense() || (result.sparsity == subspaces[i].sparsity)) &&
+           result.bounds.contains(subspaces[i].bounds)) {
           if(result.sparsity.exists()) {
             result.sparsity.add_references();
           }
           continue;
         }
 
-	// TODO: subspace match ought to be sufficient here - also handle
+        // TODO: subspace match ought to be sufficient here - also handle
 	//  merge-into-rectangle case?
 	// rhs dense and contains lhs - take rhs
 	if(subspaces[i].dense() && subspaces[i].bounds.contains(result.bounds)) {
@@ -544,11 +544,14 @@ namespace Realm {
 	  break;
 	}
 
-	// rhs dense or has same sparsity map
-	if(subspaces[i].dense() || (subspaces[i].sparsity == result.sparsity)) {
-	  result.bounds = result.bounds.intersection(subspaces[i].bounds);
-	  continue;
-	}
+        // rhs dense or has same sparsity map
+        if(subspaces[i].dense() || (subspaces[i].sparsity == result.sparsity)) {
+          result.bounds = result.bounds.intersection(subspaces[i].bounds);
+          if(result.sparsity.exists()) {
+            result.sparsity.add_references();
+          }
+          continue;
+        }
 
         // lhs dense and rhs sparse - intersect and adopt rhs' sparsity map
         if(result.dense()) {
