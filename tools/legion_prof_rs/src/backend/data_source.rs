@@ -24,8 +24,8 @@ use crate::backend::common::{
 use crate::conditional_assert;
 use crate::state::{
     BacktraceID, ChanEntry, ChanID, Color, Config, Container, ContainerEntry, Copy, CopyInstInfo,
-    DeviceKind, Fill, FillInstInfo, Inst, InstUID, MemID, MemKind, NodeID, OpID, ProcEntryKind,
-    ProcID, ProcKind, ProfUID, State, TimeRange, Timestamp,
+    DeviceKind, Fill, FillInstInfo, Inst, MemID, MemKind, NodeID, OpID, ProcEntryKind, ProcID,
+    ProcKind, ProfUID, State, TimeRange, Timestamp,
 };
 
 impl Into<ts::Timestamp> for Timestamp {
@@ -1054,7 +1054,7 @@ impl StateDataSource {
         Field::U64(op_id.0.get())
     }
 
-    fn generate_inst_link(&self, inst_uid: InstUID, prefix: &str) -> Option<Field> {
+    fn generate_inst_link(&self, inst_uid: ProfUID, prefix: &str) -> Option<Field> {
         let mem_id = self.state.insts.get(&inst_uid)?;
         let mem = self.state.mems.get(mem_id)?;
         let inst = mem.insts.get(&inst_uid)?;

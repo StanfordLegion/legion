@@ -4,8 +4,8 @@ use std::fmt;
 
 use crate::state::{
     Align, Bounds, ChanEntry, ChanID, ChanPoint, Config, Container, CopyInstInfo, DeviceKind,
-    DimKind, FSpace, FieldID, FillInstInfo, ISpaceID, Inst, InstUID, MemID, MemKind, MemPoint,
-    NodeID, ProcID, ProcKind, ProcPoint, State, TimePoint, Timestamp,
+    DimKind, FSpace, FieldID, FillInstInfo, ISpaceID, Inst, MemID, MemKind, MemPoint, NodeID,
+    ProcID, ProcKind, ProcPoint, ProfUID, State, TimePoint, Timestamp,
 };
 
 use crate::conditional_assert;
@@ -896,8 +896,8 @@ impl fmt::Display for ChanEntryFieldsPretty<'_> {
 pub struct CopyInstInfoDisplay<'a>(
     pub Option<&'a Inst>, // src_inst
     pub Option<&'a Inst>, // src_dst
-    pub InstUID,          // src_inst_uid
-    pub InstUID,          // dst_inst_uid
+    pub ProfUID,          // src_inst_uid
+    pub ProfUID,          // dst_inst_uid
     pub FieldID,          // src_fid
     pub FieldID,          // dst_fid
     pub u32,              // num_hops
@@ -976,7 +976,7 @@ impl fmt::Display for CopyInstInfoDumpInstVec<'_> {
         let mut insts_set = BTreeSet::new();
         for elt in self.0.iter() {
             // src_inst_uid = 0 means scatter (indirection inst)
-            if elt.src_inst_uid != InstUID(0) {
+            if elt.src_inst_uid != ProfUID(0) {
                 if let Some(src_inst) = self.1.find_inst(elt.src_inst_uid) {
                     insts_set.insert(src_inst);
                 } else {
@@ -989,7 +989,7 @@ impl fmt::Display for CopyInstInfoDumpInstVec<'_> {
                 }
             }
             // dst_inst_uid = 0 means gather (indirection inst)
-            if elt.dst_inst_uid != InstUID(0) {
+            if elt.dst_inst_uid != ProfUID(0) {
                 if let Some(dst_inst) = self.1.find_inst(elt.dst_inst_uid) {
                     insts_set.insert(dst_inst);
                 } else {
