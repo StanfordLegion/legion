@@ -2509,8 +2509,8 @@ pub struct CopyInstInfo {
     dst: Option<MemID>,
     pub src_fid: FieldID,
     pub dst_fid: FieldID,
-    pub src_inst_uid: ProfUID,
-    pub dst_inst_uid: ProfUID,
+    pub src_inst_uid: Option<ProfUID>,
+    pub dst_inst_uid: Option<ProfUID>,
     pub num_hops: u32,
     pub indirect: bool,
 }
@@ -2521,8 +2521,8 @@ impl CopyInstInfo {
         dst: Option<MemID>,
         src_fid: FieldID,
         dst_fid: FieldID,
-        src_inst_uid: ProfUID,
-        dst_inst_uid: ProfUID,
+        src_inst_uid: Option<ProfUID>,
+        dst_inst_uid: Option<ProfUID>,
         num_hops: u32,
         indirect: bool,
     ) -> Self {
@@ -4342,6 +4342,7 @@ fn process_record(
             fspace_id,
             tree_id,
         } => {
+            assert!(fevent.exists());
             let fspace_id = FSpaceID(*fspace_id as u64);
             state.find_field_space_mut(fspace_id);
             state
@@ -4358,6 +4359,7 @@ fn process_record(
             eqk,
             align_desc,
         } => {
+            assert!(fevent.exists());
             let fspace_id = FSpaceID(*fspace_id as u64);
             state.find_field_space_mut(fspace_id);
             state
@@ -4375,6 +4377,7 @@ fn process_record(
                 Ok(x) => x,
                 Err(_) => unreachable!("bad dim kind"),
             };
+            assert!(fevent.exists());
             state
                 .create_inst(*fevent, insts)
                 .add_dim_order(dim, dim_kind);
@@ -4385,8 +4388,9 @@ fn process_record(
             index_id,
             field_id,
         } => {
+            assert!(fevent.exists());
             state.create_op(*op_id);
-            let inst_uid = state.create_inst(*fevent, insts).base.prof_uid;
+            let inst_uid = state.create_fevent_reference(*fevent).unwrap();
             let operation_inst_info = OperationInstInfo::new(inst_uid, *index_id, *field_id);
             state
                 .find_op_mut(*op_id)
@@ -4622,8 +4626,8 @@ fn process_record(
             if *dst != MemID(0) {
                 dst_mem = Some(*dst);
             }
-            let src_uid = state.create_fevent_reference(*src_inst).unwrap();
-            let dst_uid = state.create_fevent_reference(*dst_inst).unwrap();
+            let src_uid = state.create_fevent_reference(*src_inst);
+            let dst_uid = state.create_fevent_reference(*dst_inst);
             let copy_inst_info = CopyInstInfo::new(
                 src_mem, dst_mem, *src_fid, *dst_fid, src_uid, dst_uid, *num_hops, *indirect,
             );
@@ -4666,6 +4670,7 @@ fn process_record(
             destroy,
             creator,
         } => {
+            assert!(fevent.exists());
             state.create_op(*op_id);
             let creator_uid = state.create_fevent_reference(*creator);
             let inst_uid = state.create_fevent_reference(*fevent).unwrap();
