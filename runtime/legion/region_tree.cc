@@ -16610,7 +16610,7 @@ namespace Legion {
                           logical_analysis.point_wise_analyses.back().ancestor = &prev;
                           static_cast<IndexTask*>(user.op)->set_prev_point_wise_user(
                               &user, &prev);
-                          static_cast<IndexTask*>(user.op)->set_next_point_wise_user(
+                          static_cast<IndexTask*>(prev.op)->set_next_point_wise_user(
                               &prev, &user);
                         }
                       }

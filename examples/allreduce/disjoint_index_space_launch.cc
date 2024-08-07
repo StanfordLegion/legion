@@ -20,6 +20,7 @@
 #include <unistd.h>
 #include "legion.h"
 #include "mappers/default_mapper.h"
+#include "legion/legion_replication.h"
 
 using namespace Legion;
 using namespace Legion::Mapping;
@@ -157,17 +158,23 @@ class PointWiseLogicalAnalysisMapper: public DefaultMapper {
       total_point = num_iterations;
     }
   public:
-		/*void select_sharding_functor(const Mapping::MapperContext       ctx,
+		void select_sharding_functor(const Mapping::MapperContext       ctx,
 																 const Task&                        task,
 																 const SelectShardingFunctorInput&  input,
 																			 SelectShardingFunctorOutput& output)
 		{
-      if (task.task_id % 2 == 0)
+      if (task.get_context_index() % 2 == 0)
+      {
         output.chosen_functor = EVEN_SHARDING_FN;
+        printf("Even shard %d\n", node_id);
+      }
       else
-        output.chosen_functor = EVEN_SHARDING_FN;
+      {
+        output.chosen_functor = ODD_SHARDING_FN;
+        printf("Odd shard %d\n", node_id);
+      }
       // TODO: CHANGE TO ODD
-		}*/
+		}
 
     void select_tasks_to_map(const MapperContext          ctx,
                              const SelectMappingInput&    input,
@@ -303,7 +310,7 @@ void intra_is_ordering_task(const Task *task,
 
   const Point<1> point = task->index_point;
   if(point.x() == 0) usleep(1000);
-  printf("Executing task %lld\n", point.x());
+  printf("Executing task %lld %d\n", point.x(), ctx->runtime->address_space);
 }
 
 int main(int argc, char **argv)

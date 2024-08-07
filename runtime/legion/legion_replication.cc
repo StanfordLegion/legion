@@ -1939,7 +1939,7 @@ namespace Legion {
                                                  RtEvent point_mapped)
     //--------------------------------------------------------------------------
     {
-      printf("INSIDE REPLINDEXSPACE SHARD: %d\n", get_shard_id());
+      printf("INSIDE REPLINDEXSPACE ctx_id: %ld SHARD: %d\n", get_context_index(), parent_ctx->get_task()->get_shard_id());
 #ifdef DEBUG_LEGION
       assert(sharding_function != NULL);
       ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);

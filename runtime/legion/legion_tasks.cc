@@ -12953,8 +12953,6 @@ namespace Legion {
         if (finder != point_wise_dependences.end())
           return finder->second;
         // If we're remote, make up an event and send a message to index_owner.
-        // Index_owner will then forward this event to th index_owner
-        // in case they are not local to each other.
         if (is_remote())
         {
           const RtUserEvent temp_event = Runtime::create_rt_user_event();
