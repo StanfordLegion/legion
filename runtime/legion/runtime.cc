@@ -9004,7 +9004,8 @@ namespace Legion {
 
           // adjust both normal list and free list
           r_before.next = r_after.next;
-          ranges[r_after.next].prev = pf_idx;
+          if (r_after.next != SENTINEL)
+            ranges[r_after.next].prev = pf_idx;
 
           free_range(index);
           free_range(nf_idx);
