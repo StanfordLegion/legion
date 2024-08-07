@@ -166,6 +166,8 @@ void top_level_task(const void *args, size_t arglen, const void *userdata, size_
   UserEvent destroy_event = UserEvent::create_user_event();
   inst1.destroy(destroy_event);
 
+  std::vector<Event> user_events;
+
   ProfilingRequestSet prs;
 
   UserEvent inst_status_event = UserEvent::create_user_event();
@@ -177,6 +179,8 @@ void top_level_task(const void *args, size_t arglen, const void *userdata, size_
     prs.add_request(p, INST_STATUS_PROF_TASK, &result, sizeof(ProfAllocResult))
         .add_measurement<ProfilingMeasurements::InstanceStatus>();
   }
+
+  user_events.push_back(inst_status_event);
 
   UserEvent alloc_event = UserEvent::create_user_event();
   int alloc_result = 0;
@@ -190,6 +194,8 @@ void top_level_task(const void *args, size_t arglen, const void *userdata, size_
         .add_measurement<ProfilingMeasurements::InstanceAllocResult>();
   }
 
+  user_events.push_back(alloc_event);
+
   UserEvent timel_event = UserEvent::create_user_event();
   int timel_result = 0;
   {
@@ -200,6 +206,8 @@ void top_level_task(const void *args, size_t arglen, const void *userdata, size_
         .add_measurement<ProfilingMeasurements::InstanceTimeline>();
   }
 
+  user_events.push_back(timel_event);
+
   UserEvent musage_event = UserEvent::create_user_event();
   int musage_result = 0;
   {
@@ -209,6 +217,8 @@ void top_level_task(const void *args, size_t arglen, const void *userdata, size_
     prs.add_request(p, MUSAGE_PROF_TASK, &result, sizeof(ProfMusageResult))
         .add_measurement<ProfilingMeasurements::InstanceMemoryUsage>();
   }
+
+  user_events.push_back(musage_event);
 
   RegionInstance inst2;
   RegionInstance::create_instance(inst2, memories[0], bounds, field_sizes, 0, prs).wait();
@@ -236,10 +246,7 @@ void top_level_task(const void *args, size_t arglen, const void *userdata, size_
   Event e2 = reader_cpus[0].spawn(WORKER_TASK, &worker_args, sizeof(WorkerArgs),
                                   ProfilingRequestSet(), e1);
   e2.wait();
-  alloc_event.wait();
-  timel_event.wait();
-  musage_event.wait();
-  inst_status_event.wait();
+  Event::merge_events(user_events).wait();
   assert(alloc_result == true);
   assert(timel_result == true);
   assert(musage_result == 1048576);
