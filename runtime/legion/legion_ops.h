@@ -542,8 +542,8 @@ namespace Legion {
                                bool fill, unsigned count = 1);
       // Report a profiling result for this operation
       virtual bool handle_profiling_response(
-          const Realm::ProfilingResponse &response,
-          const void *orig, size_t orig_length);
+          const Realm::ProfilingResponse &response, const void *orig,
+          size_t orig_length, LgEvent &fevent);
       virtual void handle_profiling_update(int count);
       // To notify  
       ApEvent get_completion_event(void);
@@ -1281,8 +1281,8 @@ namespace Legion {
                                Realm::ProfilingRequestSet &requests,
                                bool fill, unsigned count = 1);
       virtual bool handle_profiling_response(
-          const Realm::ProfilingResponse &response,
-          const void *orig, size_t orig_length);
+          const Realm::ProfilingResponse &response, const void *orig,
+          size_t orig_length, LgEvent &fevent);
       virtual void handle_profiling_update(int count);
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const;
@@ -1503,8 +1503,8 @@ namespace Legion {
                                Realm::ProfilingRequestSet &requests,
                                bool fill, unsigned count = 1);
       virtual bool handle_profiling_response(
-          const Realm::ProfilingResponse &response,
-          const void *orig, size_t orig_length);
+          const Realm::ProfilingResponse &response, const void *orig,
+          size_t orig_length, LgEvent &fevent);
       virtual void handle_profiling_update(int count);
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const;
@@ -2166,8 +2166,8 @@ namespace Legion {
                                Realm::ProfilingRequestSet &requests,
                                bool fill, unsigned count = 1);
       virtual bool handle_profiling_response(
-          const Realm::ProfilingResponse &response,
-          const void *orig, size_t orig_length);
+          const Realm::ProfilingResponse &response, const void *orig,
+          size_t orig_length, LgEvent &fevent);
       virtual void handle_profiling_update(int count);
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const;
@@ -2352,8 +2352,8 @@ namespace Legion {
                                Realm::ProfilingRequestSet &requests,
                                bool fill, unsigned count = 1);
       virtual bool handle_profiling_response(
-          const Realm::ProfilingResponse &response,
-          const void *orig, size_t orig_length);
+          const Realm::ProfilingResponse &response, const void *orig,
+          size_t orig_length, LgEvent &fevent);
       virtual void handle_profiling_update(int count);
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const;
@@ -2461,8 +2461,8 @@ namespace Legion {
                                Realm::ProfilingRequestSet &requests,
                                bool fill, unsigned count = 1);
       virtual bool handle_profiling_response(
-          const Realm::ProfilingResponse &response,
-          const void *orig, size_t orig_length);
+          const Realm::ProfilingResponse &response, const void *orig,
+          size_t orig_length, LgEvent &fevent);
       virtual void handle_profiling_update(int count);
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const;
@@ -3494,8 +3494,8 @@ namespace Legion {
                                bool fill, unsigned count = 1);
       // Report a profiling result for this operation
       virtual bool handle_profiling_response(
-          const Realm::ProfilingResponse &response,
-          const void *orig, size_t orig_length);
+          const Realm::ProfilingResponse &response, const void *orig,
+          size_t orig_length, LgEvent &fevent);
       virtual void handle_profiling_update(int count);
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const;

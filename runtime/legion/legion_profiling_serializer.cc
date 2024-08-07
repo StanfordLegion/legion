@@ -543,7 +543,8 @@ namespace Legion {
          << "start:timestamp_t:"      << sizeof(timestamp_t) << delim
          << "stop:timestamp_t:"       << sizeof(timestamp_t) << delim
          << "creator:unsigned long long:" << sizeof(LgEvent) << delim
-         << "fevent:unsigned long long:" << sizeof(LgEvent)
+         << "fevent:unsigned long long:" << sizeof(LgEvent)  << delim
+         << "completion:bool:" << sizeof(bool)
          << "}" << std::endl;
 
       // An empty line indicates the end of the preamble.
@@ -1486,6 +1487,8 @@ namespace Legion {
                 sizeof(proftask_info.creator));
       lp_fwrite(f, (char*)&(proftask_info.finish_event),
                                             sizeof(proftask_info.finish_event));
+      lp_fwrite(f, (char*)&(proftask_info.completion),
+                                            sizeof(proftask_info.completion));
     }
 
     //--------------------------------------------------------------------------
@@ -2370,11 +2373,12 @@ namespace Legion {
                           const LegionProfInstance::ProfTaskInfo& proftask_info)
     //--------------------------------------------------------------------------
     {
-      log_prof.print("Prof ProfTask Info " IDFMT " %llu %llu %llu " IDFMT 
-                     " " IDFMT, proftask_info.proc_id, proftask_info.op_id, 
-                     proftask_info.start, proftask_info.stop,
-                     proftask_info.creator.id,
-                     proftask_info.finish_event.id);
+      log_prof.print("Prof ProfTask Info " IDFMT " %llu %llu %llu " 
+                     IDFMT " " IDFMT " %d", proftask_info.proc_id, 
+                     proftask_info.op_id, proftask_info.start,
+                     proftask_info.stop, proftask_info.creator.id,
+                     proftask_info.finish_event.id,
+                     proftask_info.completion ? 1 : 0);
     }
 
     //--------------------------------------------------------------------------

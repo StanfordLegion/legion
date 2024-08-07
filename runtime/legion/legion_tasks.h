@@ -466,8 +466,8 @@ namespace Legion {
                                Realm::ProfilingRequestSet &requests,
                                bool fill, unsigned count = 1);
       virtual bool handle_profiling_response(
-          const Realm::ProfilingResponse &response,
-          const void *orig, size_t orig_length);
+          const Realm::ProfilingResponse &response, const void *orig,
+          size_t orig_length, LgEvent &fevent);
       virtual void handle_profiling_update(int count);
       void finalize_single_task_profiling(void);
     public:
@@ -1254,8 +1254,8 @@ namespace Legion {
                                Realm::ProfilingRequestSet &requests,
                                bool fill, unsigned count = 1);
       virtual bool handle_profiling_response(
-          const Realm::ProfilingResponse &response,
-          const void *orig, size_t orig_length);
+          const Realm::ProfilingResponse &response, const void *orig,
+          size_t orig_length, LgEvent &fevent);
       virtual void handle_profiling_update(int count);
     public:
       virtual void register_must_epoch(void);

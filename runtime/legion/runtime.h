@@ -1493,11 +1493,11 @@ namespace Legion {
       };
       class FutureInstanceAllocator : public ProfilingResponseHandler {
       public:
-        FutureInstanceAllocator(void);
+        FutureInstanceAllocator(LgEvent unique);
       public:
         virtual bool handle_profiling_response(
-            const Realm::ProfilingResponse &response,
-            const void *orig, size_t orig_length);
+            const Realm::ProfilingResponse &response, const void *orig,
+            size_t orig_length, LgEvent &fevent);
         inline bool succeeded(void) const
         {
           if (!ready.has_triggered())
@@ -1506,6 +1506,7 @@ namespace Legion {
         }
       private:
         const RtUserEvent ready;
+        const LgEvent unique_event;
         std::atomic<bool> success;
       };
 #ifdef LEGION_MALLOC_INSTANCES

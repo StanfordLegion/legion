@@ -30,20 +30,6 @@ namespace Legion {
     extern Realm::Logger log_prof;
 
     //--------------------------------------------------------------------------
-    ProfilingResponseBase::ProfilingResponseBase(ProfilingResponseHandler *h,
-                                                 UniqueID op) 
-      : handler(h), op_id(op),
-        creator(Processor::get_executing_processor().exists() ?
-            LgEvent(Processor::get_current_finish_event()) :
-            ((implicit_context != NULL) && 
-             (implicit_context->owner_task != NULL)) ?
-              implicit_context->owner_task->get_completion_event() :
-              LgEvent::NO_LG_EVENT)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
     template<size_t ENTRIES>
     SmallNameClosure<ENTRIES>::SmallNameClosure(void)
     //--------------------------------------------------------------------------
@@ -1254,7 +1240,7 @@ namespace Legion {
     void LegionProfInstance::record_proftask(Processor proc, UniqueID op_id,
 					     long long start, long long stop,
                                              LgEvent creator,
-                                             LgEvent finish_event)
+                                             LgEvent finish_event,bool complete)
     //--------------------------------------------------------------------------
     {
       prof_task_infos.emplace_back(ProfTaskInfo());
@@ -1265,6 +1251,7 @@ namespace Legion {
       info.stop = stop;
       info.creator = creator;
       info.finish_event = finish_event;
+      info.completion = complete;
       owner->update_footprint(sizeof(ProfTaskInfo), this);
     }
 
@@ -2597,10 +2584,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool LegionProfiler::handle_profiling_response(
-                                       const Realm::ProfilingResponse &response,
-                                       const void *orig, size_t orig_length)
+        const Realm::ProfilingResponse &response, const void *orig,
+        size_t orig_length, LgEvent &fevent)
     //--------------------------------------------------------------------------
     {
+      long long start = 0;
+      if (self_profile)
+        start = Realm::Clock::current_time_in_nanoseconds();
 #ifdef DEBUG_LEGION
       assert(response.user_data_size() == sizeof(ProfilingInfo));
 #endif
@@ -2688,13 +2678,39 @@ namespace Legion {
         default:
           assert(false);
       }
+      // Have to do self-profiling here before the decrement to avoid races
+      // with the shutdown code
+      if (self_profile)
+      {
+        const Processor proc = Processor::get_executing_processor();
+        implicit_profiler->process_proc_desc(proc);
+        const LgEvent prof_finish(Processor::get_current_finish_event());
+        if (info->kind == LEGION_PROF_INST)
+        {
+          fevent.id = info->id;
+          const long long stop = Realm::Clock::current_time_in_nanoseconds();
+          implicit_profiler->record_proftask(proc, info->op_id,
+              start, stop, fevent, prof_finish, true/*completion*/);
+        }
+        else
+        {
+          Realm::ProfilingMeasurements::OperationFinishEvent finish;
+          if (response.get_measurement(finish))
+          {
+            const long long stop = Realm::Clock::current_time_in_nanoseconds();
+            implicit_profiler->record_proftask(proc, info->op_id,
+                start, stop, LgEvent(finish.finish_event), 
+                prof_finish, true/*completion*/);
+          }
+        }
+      }
 #ifdef DEBUG_LEGION
       decrement_total_outstanding_requests(info->kind);
 #else
       decrement_total_outstanding_requests();
 #endif
-      // Only record this if we are self-profiling the profiler
-      return self_profile;
+      // Already recorded the prof task profiling in this case
+      return false;
     }
 
     //--------------------------------------------------------------------------

@@ -24,8 +24,8 @@ use crate::backend::common::{
 use crate::conditional_assert;
 use crate::state::{
     BacktraceID, ChanEntry, ChanID, Color, Config, Container, ContainerEntry, Copy, CopyInstInfo,
-    DeviceKind, EventEntry, EventEntryKind, EventID, Fill, FillInstInfo, Inst, MemID,
-    MemKind, NodeID, OpID, ProcEntryKind, ProcID, ProcKind, ProfUID, State, TimeRange, Timestamp,
+    DeviceKind, EventEntry, EventEntryKind, EventID, Fill, FillInstInfo, Inst, MemID, MemKind,
+    NodeID, OpID, ProcEntryKind, ProcID, ProcKind, ProfUID, State, TimeRange, Timestamp,
 };
 
 impl Into<ts::Timestamp> for Timestamp {
@@ -1161,6 +1161,26 @@ impl StateDataSource {
                 interval: entry.time_range().into(),
                 entry_id: self.proc_entries.get(proc_id).unwrap().clone(),
             })
+        } else if let Some(chan_id) = self.state.prof_uid_chan.get(&prof_uid) {
+            let chan = self.state.chans.get(&chan_id).unwrap();
+            let entry = chan.find_entry(prof_uid).unwrap();
+            let op_name = entry.name(&self.state);
+            Field::ItemLink(ItemLink {
+                item_uid: entry.base().prof_uid.into(),
+                title: op_name,
+                interval: entry.time_range().into(),
+                entry_id: self.chan_entries.get(chan_id).unwrap().clone(),
+            })
+        } else if let Some(mem_id) = self.state.insts.get(&prof_uid) {
+            let mem = self.state.mems.get(&mem_id).unwrap();
+            let inst = mem.entry(prof_uid);
+            let inst_name = inst.name(&self.state);
+            Field::ItemLink(ItemLink {
+                item_uid: inst.base().prof_uid.into(),
+                title: inst_name,
+                interval: inst.time_range().into(),
+                entry_id: self.mem_entries.get(mem_id).unwrap().clone(),
+            })
         } else {
             // Convert the ProfUID back into an fevent so we can figure
             // out which node it is on and tell the user that they need
@@ -1177,18 +1197,38 @@ impl StateDataSource {
     fn generate_critical_creator_link(&self, prof_uid: ProfUID, creation_time: Timestamp) -> Field {
         // Not all ProfUIDs will have a processor since some of them
         // might be referering to fevents that we never found
+        let creation_ts: ts::Timestamp = creation_time.into();
         if let Some(proc_id) = self.state.prof_uid_proc.get(&prof_uid) {
             let proc = self.state.procs.get(&proc_id).unwrap();
             // The prof_uid here is the fevent creator, find the entry that was actually
             // executing during this task at the point of creation
             let entry = proc.find_executing_entry(prof_uid, creation_time).unwrap();
             let op_name = entry.name(&self.state);
-            let creation_ts: ts::Timestamp = creation_time.into();
             Field::ItemLink(ItemLink {
                 item_uid: entry.base().prof_uid.into(),
                 title: format!("Created by {} at {}", &op_name, creation_ts),
                 interval: entry.time_range().into(),
                 entry_id: self.proc_entries.get(proc_id).unwrap().clone(),
+            })
+        } else if let Some(chan_id) = self.state.prof_uid_chan.get(&prof_uid) {
+            let chan = self.state.chans.get(&chan_id).unwrap();
+            let entry = chan.find_entry(prof_uid).unwrap();
+            let op_name = entry.name(&self.state);
+            Field::ItemLink(ItemLink {
+                item_uid: entry.base().prof_uid.into(),
+                title: format!("Created by {} at {}", &op_name, creation_ts),
+                interval: entry.time_range().into(),
+                entry_id: self.chan_entries.get(chan_id).unwrap().clone(),
+            })
+        } else if let Some(mem_id) = self.state.insts.get(&prof_uid) {
+            let mem = self.state.mems.get(&mem_id).unwrap();
+            let inst = mem.entry(prof_uid);
+            let inst_name = inst.name(&self.state);
+            Field::ItemLink(ItemLink {
+                item_uid: inst.base().prof_uid.into(),
+                title: format!("Created by {} at {}", &inst_name, creation_ts),
+                interval: inst.time_range().into(),
+                entry_id: self.mem_entries.get(mem_id).unwrap().clone(),
             })
         } else {
             // Convert the ProfUID back into an fevent so we can figure
@@ -1564,11 +1604,12 @@ impl StateDataSource {
                             // Check if it is the creator or the previous execution on the
                             // processor that is on the critical path
                             let created = entry.creation_time();
+                            let ready = entry.time_range.ready.unwrap();
                             let started = entry.time_range.start.unwrap();
                             if let Some((previous, start_time, stop_time)) =
-                                proc.find_previous_executing_entry(created, started)
+                                proc.find_previous_executing_entry(ready, started)
                             {
-                                if created < stop_time {
+                                if ready < stop_time {
                                     // Critical path is previous executing entry
                                     // Need to record both the creator and the critical path
                                     fields.push((
@@ -1588,10 +1629,7 @@ impl StateDataSource {
                                 // Critical path is creation of the task
                                 fields.push((
                                     self.fields.critical,
-                                    self.generate_critical_creator_link(
-                                        creator,
-                                        entry.creation_time(),
-                                    ),
+                                    self.generate_critical_creator_link(creator, created),
                                 ));
                                 need_critical = false;
                             }
@@ -1645,12 +1683,12 @@ impl StateDataSource {
                             }
                         }
                         if need_critical {
-                            let created = entry.creation_time();
+                            let ready = entry.time_range.ready.unwrap();
                             let started = entry.time_range.start.unwrap();
                             if let Some((previous, start_time, stop_time)) =
-                                proc.find_previous_executing_entry(created, started)
+                                proc.find_previous_executing_entry(ready, started)
                             {
-                                if created < stop_time {
+                                if ready < stop_time {
                                     // Critical path is previous executing entry
                                     fields.push((
                                         self.fields.critical,

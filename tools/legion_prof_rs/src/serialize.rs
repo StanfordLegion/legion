@@ -140,7 +140,7 @@ pub enum Record {
     MapperCallInfo { mapper_id: MapperID, mapper_proc: ProcID, kind: MapperCallKindID, op_id: OpID, start: Timestamp, stop: Timestamp, proc_id: ProcID, fevent: EventID },
     RuntimeCallInfo { kind: RuntimeCallKindID, start: Timestamp, stop: Timestamp, proc_id: ProcID, fevent: EventID },
     ApplicationCallInfo { provenance: ProvenanceID, start: Timestamp, stop: Timestamp, proc_id: ProcID, fevent: EventID },
-    ProfTaskInfo { proc_id: ProcID, op_id: OpID, start: Timestamp, stop: Timestamp, creator: EventID, fevent: EventID  },
+    ProfTaskInfo { proc_id: ProcID, op_id: OpID, start: Timestamp, stop: Timestamp, creator: EventID, fevent: EventID, completion: bool },
     CalibrationErr { calibration_err: i64 },
     BacktraceDesc { backtrace_id: BacktraceID , backtrace: String },
     EventWaitInfo { proc_id: ProcID, fevent: EventID, event: EventID, backtrace_id: BacktraceID },
@@ -1117,6 +1117,7 @@ fn parse_proftask_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, stop) = parse_timestamp(input)?;
     let (input, creator) = parse_event_id(input)?;
     let (input, fevent) = parse_event_id(input)?;
+    let (input, completion) = parse_bool(input)?;
     Ok((
         input,
         Record::ProfTaskInfo {
@@ -1126,6 +1127,7 @@ fn parse_proftask_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
             stop,
             creator,
             fevent,
+            completion,
         },
     ))
 }

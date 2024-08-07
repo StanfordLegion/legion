@@ -63,17 +63,21 @@ namespace Legion {
     public:
       // Return true if we should profile this profiling response
       virtual bool handle_profiling_response(
-          const Realm::ProfilingResponse &response,
-          const void *orig, size_t orig_length) = 0;
+          const Realm::ProfilingResponse &response, const void *orig,
+          size_t orig_length, LgEvent &fevent) = 0;
     };
 
     struct ProfilingResponseBase {
     public:
-      ProfilingResponseBase(ProfilingResponseHandler *h, UniqueID op);
+      ProfilingResponseBase(ProfilingResponseHandler *h, UniqueID op,
+                            bool complete = true)
+        : handler(h), op_id(op), completion(complete) { }
     public:
       ProfilingResponseHandler *const handler;
       const UniqueID op_id;
-      const LgEvent creator;
+      // Whether this profiling response happens at the completion
+      // of the operation or at the initiation
+      const bool completion;
     };
 
     /*
@@ -479,6 +483,7 @@ namespace Legion {
         timestamp_t start, stop;
         LgEvent creator;
         LgEvent finish_event;
+        bool completion;
       };
       struct EventMergerInfo {
       public:
@@ -630,7 +635,8 @@ namespace Legion {
       void record_event_wait(LgEvent event, Realm::Backtrace &bt);
     public:
       void record_proftask(Processor p, UniqueID op_id, timestamp_t start,
-          timestamp_t stop, LgEvent creator, LgEvent finish_event);
+          timestamp_t stop, LgEvent creator, LgEvent finish_event, 
+          bool creator_complete);
     public:
       void dump_state(LegionProfSerializer *serializer);
       size_t dump_inter(LegionProfSerializer *serializer, const double over);
@@ -782,8 +788,8 @@ namespace Legion {
     public:
       // Process low-level runtime profiling results
       virtual bool handle_profiling_response(
-          const Realm::ProfilingResponse &response,
-          const void *orig, size_t orig_length);
+          const Realm::ProfilingResponse &response, const void *orig,
+          size_t orig_length, LgEvent &fevent);
     public:
       // Dump all the results
       void finalize(void);

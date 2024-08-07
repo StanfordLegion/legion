@@ -4791,6 +4791,10 @@ namespace Legion {
         }
         if (!realm_measurements.empty())
         {
+          // If we're doing profiling we need the fevent to know how to
+          // profile the profiling response
+          if (runtime->profiler != NULL)
+            realm_measurements.insert(Realm::PMID_OP_FINISH_EVENT);
           OpProfilingResponse response(this, 0, 0, false/*fill*/, true/*task*/);
           Realm::ProfilingRequest &request = profiling_requests.add_request(
               runtime->find_utility_group(), LG_LEGION_PROFILING_ID, 
@@ -4944,18 +4948,29 @@ namespace Legion {
       Realm::ProfilingRequest &request = requests.add_request(
         runtime->find_utility_group(), LG_LEGION_PROFILING_ID, 
         &response, sizeof(response));
+      bool has_finish = false;
       for (std::vector<ProfilingMeasurementID>::const_iterator it = 
-            copy_profiling_requests.begin(); it != 
+            copy_profiling_requests.begin(); it !=
             copy_profiling_requests.end(); it++)
-        request.add_measurement((Realm::ProfilingMeasurementID)(*it));
+      {
+        const Realm::ProfilingMeasurementID measurement = 
+          (Realm::ProfilingMeasurementID)*it;
+        request.add_measurement(measurement);
+        if (measurement == Realm::PMID_OP_FINISH_EVENT)
+          has_finish = true;
+      }
+      // Need thetimeline for the operation to know how to profile this
+      // profiling response
+      if (!has_finish && (runtime->profiler != NULL))
+        request.add_measurement(Realm::PMID_OP_FINISH_EVENT);
       handle_profiling_update(count);
       return copy_fill_priority;
     }
 
     //--------------------------------------------------------------------------
     bool SingleTask::handle_profiling_response(
-                                       const Realm::ProfilingResponse &response,
-                                       const void *orig, size_t orig_length)
+        const Realm::ProfilingResponse &response, const void *orig,
+        size_t orig_length, LgEvent &fevent)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -4965,6 +4980,9 @@ namespace Legion {
         mapper = runtime->find_mapper(current_proc, map_id); 
       const OpProfilingResponse *task_prof = 
             static_cast<const OpProfilingResponse*>(response.user_data());
+      Realm::ProfilingMeasurements::OperationFinishEvent finish_event;
+      if (response.get_measurement(finish_event))
+        fevent = LgEvent(finish_event.finish_event);
       // First see if this is a task response for an origin-mapped task
       // on a remote node that needs to be sent back to the origin node
       if (task_prof->task && is_origin_mapped() && is_remote())
@@ -9989,22 +10007,36 @@ namespace Legion {
       Realm::ProfilingRequest &request = requests.add_request(
         runtime->find_utility_group(), LG_LEGION_PROFILING_ID, 
         &response, sizeof(response));
+      bool has_finish = false;
       for (std::vector<ProfilingMeasurementID>::const_iterator it = 
-            copy_profiling_requests.begin(); it != 
+            copy_profiling_requests.begin(); it !=
             copy_profiling_requests.end(); it++)
-        request.add_measurement((Realm::ProfilingMeasurementID)(*it));
+      {
+        const Realm::ProfilingMeasurementID measurement = 
+          (Realm::ProfilingMeasurementID)*it;
+        request.add_measurement(measurement);
+        if (measurement == Realm::PMID_OP_FINISH_EVENT)
+          has_finish = true;
+      }
+      // Need thetimeline for the operation to know how to profile this
+      // profiling response
+      if (!has_finish && (runtime->profiler != NULL))
+        request.add_measurement(Realm::PMID_OP_FINISH_EVENT);
       handle_profiling_update(count);
       return copy_fill_priority;
     }
 
     //--------------------------------------------------------------------------
     bool IndexTask::handle_profiling_response(
-                                       const Realm::ProfilingResponse &response,
-                                       const void *orig, size_t orig_length)
+        const Realm::ProfilingResponse &response, const void *orig,
+        size_t orig_length, LgEvent &fevent)
     //--------------------------------------------------------------------------
     {
       const OpProfilingResponse *task_prof =
         static_cast<const OpProfilingResponse*>(response.user_data());
+      Realm::ProfilingMeasurements::OperationFinishEvent finish_event;
+      if (response.get_measurement(finish_event))
+        fevent = LgEvent(finish_event.finish_event);
       // Check to see if we are done mapping, if not then we need to defer
       // this until we are done mapping so we know how many reports to expect
       const RtEvent mapped = get_mapped_event();

@@ -725,6 +725,13 @@ impl Proc {
         self.entries.retain(|_, t| !t.trim_time_range(start, stop));
     }
 
+    fn update_prof_task_times(&mut self, prof_uid: ProfUID, create: Timestamp, ready: Timestamp) {
+        let entry = self.entries.get_mut(&prof_uid).unwrap();
+        assert!(entry.kind == ProcEntryKind::ProfTask);
+        entry.time_range.create = Some(create);
+        entry.time_range.ready = Some(ready);
+    }
+
     fn sort_calls_and_waits(&mut self) {
         // Before we sort things, we need to rearrange the waiters from
         // any tasks into the appropriate runtime/mapper calls and make the
@@ -1122,14 +1129,12 @@ impl Container for Proc {
         ready: Timestamp,
         start: Timestamp,
     ) -> Option<(ProfUID, Timestamp, Timestamp)> {
+        let mut result = None;
         // If this is an I/O processor then there is no concept of a "previous"
         // as there might be multiple ranges executing at the same time
-        let mut result = None;
         if self.kind.unwrap() != ProcKind::IO {
             // Iterate all the levels of the stack
             for level in self.time_points_stacked.iter() {
-                // Should be at least two points in every level for the
-                // starting and ending of the range
                 if level.is_empty() {
                     // I don't know whey this happens but we'll ignore it
                     continue;
@@ -3569,7 +3574,7 @@ impl State {
             ProcEntryKind::ProfTask,
             time_range,
             creator_uid,
-            creator.existing(),
+            None,
             &mut self.op_prof_uid,
             &mut self.prof_uid_proc,
         )
@@ -3731,6 +3736,7 @@ impl State {
         let mut insts = BTreeMap::new();
         let mut copies = BTreeMap::new();
         let mut fills = BTreeMap::new();
+        let mut profs = BTreeMap::new();
         for record in records {
             process_record(
                 record,
@@ -3739,6 +3745,7 @@ impl State {
                 &mut insts,
                 &mut copies,
                 &mut fills,
+                &mut profs,
                 call_threshold,
             );
         }
@@ -3785,7 +3792,58 @@ impl State {
                 }
             }
         }
+        // for each prof task find it's creator and fill in the appropriate
+        // creation and ready times
+        for (prof_uid, (creator_uid, completion)) in profs.into_iter() {
+            let (create, ready) = self.find_prof_task_times(creator_uid, completion);
+            let proc_id = self.prof_uid_proc.get(&prof_uid).unwrap();
+            let proc = self.procs.get_mut(&proc_id).unwrap();
+            proc.update_prof_task_times(prof_uid, create, ready);
+        }
         self.has_prof_data = true;
+    }
+
+    fn find_prof_task_times(
+        &self,
+        creator_uid: ProfUID,
+        completion: bool,
+    ) -> (Timestamp, Timestamp) {
+        // See what kind of creator we have for this prof task
+        if let Some(proc_id) = self.prof_uid_proc.get(&creator_uid) {
+            assert!(completion);
+            let proc = self.procs.get(&proc_id).unwrap();
+            let entry = proc.find_entry(creator_uid).unwrap();
+            // Profiling responses are created at the same time task is created
+            let create = entry.time_range().create.unwrap();
+            // Profiling responses are ready when the task is done executing
+            let ready = entry.time_range().stop.unwrap();
+            (create, ready)
+        } else if let Some(chan_id) = self.prof_uid_chan.get(&creator_uid) {
+            assert!(completion);
+            let chan = self.chans.get(&chan_id).unwrap();
+            let entry = chan.find_entry(creator_uid).unwrap();
+            // Profiling responses are created at the same time the op is created
+            let create = entry.time_range().create.unwrap();
+            // Profiling response sare ready when the op is done executing
+            let ready = entry.time_range().stop.unwrap();
+            (create, ready)
+        } else if let Some(mem_id) = self.insts.get(&creator_uid) {
+            let mem = self.mems.get(&mem_id).unwrap();
+            let inst = mem.entry(creator_uid);
+            // Profiling responses are create at the same time as the instance
+            let create = inst.time_range().create.unwrap();
+            if completion {
+                // Profiling responses are ready at the same time as the instance is deleted
+                let ready = inst.time_range().stop.unwrap();
+                (create, ready)
+            } else {
+                // Profiling response are ready at the same time as the instance is ready
+                let ready = inst.time_range().ready.unwrap();
+                (create, ready)
+            }
+        } else {
+            unreachable!();
+        }
     }
 
     pub fn complete_parse(&mut self) -> bool {
@@ -4597,6 +4655,7 @@ fn process_record(
     insts: &mut BTreeMap<ProfUID, Inst>,
     copies: &mut BTreeMap<EventID, Copy>,
     fills: &mut BTreeMap<EventID, Fill>,
+    profs: &mut BTreeMap<ProfUID, (ProfUID, bool)>,
     call_threshold: Timestamp,
 ) {
     match record {
@@ -5253,9 +5312,13 @@ fn process_record(
             stop,
             creator,
             fevent,
+            completion,
         } => {
+            assert!(fevent.exists());
+            assert!(creator.exists());
             let time_range = TimeRange::new_call(*start, *stop);
-            state.create_prof_task(*proc_id, *op_id, time_range, *creator, *fevent);
+            let entry = state.create_prof_task(*proc_id, *op_id, time_range, *creator, *fevent);
+            profs.insert(entry.base.prof_uid, (entry.creator.unwrap(), *completion));
             state.update_last_time(*stop);
         }
         Record::BacktraceDesc {

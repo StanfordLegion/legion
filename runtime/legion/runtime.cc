@@ -10901,8 +10901,9 @@ namespace Legion {
           assert(!instance.exists());
 #endif
 #ifndef LEGION_MALLOC_INSTANCES
-          FutureInstanceAllocator allocator;
-          ProfilingResponseBase base(&allocator, creator_uid);
+          FutureInstanceAllocator allocator(unique_event);
+          ProfilingResponseBase base(&allocator, creator_uid,
+                                     false/*completion*/);
           Realm::ProfilingRequest &req = requests.add_request(
               runtime->find_utility_group(), LG_LEGION_PROFILING_ID,
               &base, sizeof(base), LG_RESOURCE_PRIORITY);
@@ -11013,8 +11014,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    MemoryManager::FutureInstanceAllocator::FutureInstanceAllocator(void)
-      : ready(Runtime::create_rt_user_event())
+    MemoryManager::FutureInstanceAllocator::FutureInstanceAllocator(LgEvent u)
+      : ready(Runtime::create_rt_user_event()), unique_event(u)
     //--------------------------------------------------------------------------
     {
       success.store(false);
@@ -11022,8 +11023,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool MemoryManager::FutureInstanceAllocator::handle_profiling_response(
-                                       const Realm::ProfilingResponse &response,
-                                       const void *orig, size_t orig_length)
+        const Realm::ProfilingResponse &response, const void *orig, 
+        size_t orig_length, LgEvent &fevent)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -11044,7 +11045,7 @@ namespace Legion {
 #endif
       success.store(result.success);
       Runtime::trigger_event(ready);
-      // Always record these as part of profiling
+      fevent = unique_event;
       return true;
     }
 
@@ -32947,21 +32948,23 @@ namespace Legion {
       Realm::ProfilingResponse response(args, arglen);
       const ProfilingResponseBase *base = 
         static_cast<const ProfilingResponseBase*>(response.user_data());
+      LgEvent fevent;
       if (runtime->profiler != NULL)
       {
         const long long t_start = Realm::Clock::current_time_in_nanoseconds();
         // Check to see if should report this profiling
-        if (base->handler->handle_profiling_response(response, args, arglen))
+        if (base->handler->handle_profiling_response(response, args, arglen, 
+                                                     fevent))
         {
           const long long t_stop = Realm::Clock::current_time_in_nanoseconds();
           const LgEvent finish_event(Processor::get_current_finish_event());
           implicit_profiler->process_proc_desc(p);
-          implicit_profiler->record_proftask(p, base->op_id, t_start,
-              t_stop, base->creator, finish_event);
+          implicit_profiler->record_proftask(p, base->op_id, t_start, t_stop,
+              fevent, finish_event, base->completion);
         }
       }
       else
-        base->handler->handle_profiling_response(response, args, arglen);
+        base->handler->handle_profiling_response(response, args, arglen,fevent);
     }
 
     //--------------------------------------------------------------------------
