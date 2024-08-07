@@ -32949,7 +32949,25 @@ namespace Legion {
       const ProfilingResponseBase *base = 
         static_cast<const ProfilingResponseBase*>(response.user_data());
       LgEvent fevent;
-      if (runtime->profiler != NULL)
+      if (base->handler == NULL)
+      {
+        // This is the remote message case
+#ifdef DEBUG_LEGION
+        assert(runtime->profiler != NULL);
+#endif
+        const long long t_start = Realm::Clock::current_time_in_nanoseconds();
+        // Check to see if should report this profiling
+        if (runtime->profiler->handle_profiling_response(response, args,
+                                                         arglen, fevent))
+        {
+          const long long t_stop = Realm::Clock::current_time_in_nanoseconds();
+          const LgEvent finish_event(Processor::get_current_finish_event());
+          implicit_profiler->process_proc_desc(p);
+          implicit_profiler->record_proftask(p, base->op_id, t_start, t_stop,
+              fevent, finish_event, base->completion);
+        }
+      }
+      else if (runtime->profiler != NULL)
       {
         const long long t_start = Realm::Clock::current_time_in_nanoseconds();
         // Check to see if should report this profiling
