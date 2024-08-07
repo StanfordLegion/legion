@@ -575,11 +575,6 @@ namespace Legion {
     {
       PhysicalInstance instance;
       MemoryManager *manager = runtime->find_memory_manager(memory);
-#ifdef LEGION_MALLOC_INSTANCES
-      const Realm::ProfilingRequestSet no_requests;
-      const ApEvent wait_on(manager->allocate_legion_instance(layout->clone(),
-                                                      no_requests, instance));
-#else
       LgEvent unique_event;
       if (runtime->profiler != NULL)
       {
@@ -588,6 +583,11 @@ namespace Legion {
         Runtime::trigger_event(unique);
         unique_event = unique;
       }
+#ifdef LEGION_MALLOC_INSTANCES
+      const Realm::ProfilingRequestSet no_requests;
+      const ApEvent wait_on(manager->allocate_legion_instance(layout->clone(),
+                                        no_requests, instance, unique_event));
+#else
       const ApEvent wait_on(manager->create_eager_instance(instance, 
                                               unique_event, layout));
       if (!instance.exists())

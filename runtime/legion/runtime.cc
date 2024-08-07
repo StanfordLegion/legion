@@ -3686,6 +3686,8 @@ namespace Legion {
         const RtEvent inst_ready(PhysicalInstance::create_external_instance(
               result, alt_resource->suggested_memory(), ilg,
               *alt_resource, requests));
+        if (inst_ready.exists() && (implicit_profiler != NULL))
+          implicit_profiler->record_instance_ready(inst_ready, unique_event);
 #ifndef LEGION_UNDO_FUTURE_INSTANCE_HACK
         inst_event = temp_unique_event; 
 #endif
@@ -3731,6 +3733,8 @@ namespace Legion {
         use_event = RtEvent(PhysicalInstance::create_external_instance(instance,
               resource->suggested_memory(), ilg, *resource, requests));
         own_instance = true;
+        if (use_event.exists() && (implicit_profiler != NULL))
+          implicit_profiler->record_instance_ready(use_event, unique_event);
       }
 #ifndef LEGION_UNDO_FUTURE_INSTANCE_HACK
       inst_event = unique_event;
@@ -10914,6 +10918,9 @@ namespace Legion {
                                                 creator_uid, unique_event);
           use_event = RtEvent(PhysicalInstance::create_instance(instance,
                     memory, ilg->clone(), requests, alloc_precondition));
+          if (use_event.exists() && (implicit_profiler != NULL))
+            implicit_profiler->record_instance_ready(use_event, unique_event,
+                                                     alloc_precondition);
           if (allocator.succeeded())
           {
             AutoLock m_lock(manager_lock);
@@ -10929,7 +10936,8 @@ namespace Legion {
             instance = PhysicalInstance::NO_INST;
           }
 #else
-          use_event = allocate_legion_instance(ilg->clone(), requests,instance);
+          use_event = allocate_legion_instance(ilg->clone(), requests,
+              instance, unique_event);
           if (instance.exists())
           {
             AutoLock m_lock(manager_lock);
@@ -11241,6 +11249,8 @@ namespace Legion {
         const RtEvent wait_on(Realm::RegionInstance::create_external_instance(
               instance, memory, layout, *external_resource, requests));
         delete external_resource;
+        if (wait_on.exists() && (implicit_profiler != NULL))
+          implicit_profiler->record_instance_ready(wait_on, unique_event);
         return wait_on;
       }
       else
@@ -11248,6 +11258,8 @@ namespace Legion {
         const RtEvent wait_on(
             Realm::RegionInstance::create_instance(instance, memory, 
                                                    layout, requests));
+        if (wait_on.exists() && (implicit_profiler != NULL))
+          implicit_profiler->record_instance_ready(wait_on, unique_event);
         return wait_on;
       }
     }
@@ -11384,7 +11396,8 @@ namespace Legion {
     RtEvent MemoryManager::allocate_legion_instance(
                                 Realm::InstanceLayoutGeneric *layout,
                                 const Realm::ProfilingRequestSet &requests,
-                                PhysicalInstance &instance, bool needs_deferral)
+                                PhysicalInstance &instance,
+                                LgEvent unique_event, bool needs_deferral)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -11432,7 +11445,8 @@ namespace Legion {
           {
             if (needs_deferral)
             {
-              MallocInstanceArgs args(this, layout, &requests, &instance);
+              MallocInstanceArgs args(this, layout, &requests, 
+                  &instance, unique_event);
               const RtEvent wait_on = 
                 runtime->issue_application_processor_task(args,
                   LG_LATENCY_WORK_PRIORITY, local_gpu);
@@ -11487,7 +11501,8 @@ namespace Legion {
           {
             if (needs_deferral)
             {
-              MallocInstanceArgs args(this, layout, &requests, &instance);
+              MallocInstanceArgs args(this, layout, &requests,
+                  &instance, unique_event);
               const RtEvent wait_on =
                 runtime->issue_application_processor_task(args,
                   LG_LATENCY_WORK_PRIORITY, local_gpu);
@@ -11549,6 +11564,8 @@ namespace Legion {
 #endif
         allocations[instance] = footprint;
       }
+      if (result.exists() && (implicit_profiler != NULL))
+        implicit_profiler->record_instance_ready(result, unique_event);
       return result;
     }
 
@@ -11661,7 +11678,7 @@ namespace Legion {
       const MallocInstanceArgs *margs = (const MallocInstanceArgs*)args;
       const RtEvent ready = margs->manager->allocate_legion_instance(
           margs->layout, *(margs->requests), *(margs->instance), 
-          false/*needs defer*/);
+          margs->unique_event, false/*needs defer*/);
       if (ready.exists() && !ready.has_triggered())
         ready.wait();
     }

@@ -536,6 +536,14 @@ namespace Legion {
          << "reservation:unsigned long long:" << sizeof(Reservation)
          << "}" << std::endl;
 
+      ss << "InstanceReadyInfo {"
+         << "id:" << INSTANCE_READY_INFO_ID                       << delim
+         << "result:unsigned long long:" << sizeof(LgEvent)       << delim
+         << "precondition:unsigned long long:" << sizeof(LgEvent) << delim
+         << "inst_uid:unsigned long long:" << sizeof(LgEvent)     << delim
+         << "performed:timestamp_t:" << sizeof(timestamp_t)
+         << "}" << std::endl;
+
       ss << "ProfTaskInfo {"
          << "id:" << PROFTASK_INFO_ID                        << delim
          << "proc_id:ProcID:"         << sizeof(ProcID)      << delim
@@ -1473,6 +1481,19 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LegionProfBinarySerializer::serialize(
+                              const LegionProfInstance::InstanceReadyInfo &info)
+    //--------------------------------------------------------------------------
+    {
+      int ID = INSTANCE_READY_INFO_ID;
+      lp_fwrite(f, (char*)&ID, sizeof(ID));
+      lp_fwrite(f, (char*)&info.result.id, sizeof(info.result.id));
+      lp_fwrite(f, (char*)&info.precondition.id, sizeof(info.precondition.id));
+      lp_fwrite(f, (char*)&info.unique.id, sizeof(info.unique.id));
+      lp_fwrite(f, (char*)&info.performed, sizeof(info.performed));
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfBinarySerializer::serialize(
                           const LegionProfInstance::ProfTaskInfo& proftask_info)
     //--------------------------------------------------------------------------
     {
@@ -2366,6 +2387,16 @@ namespace Legion {
       log_prof.print("Prof Reservation Acquire Info " IDFMT " " IDFMT " " IDFMT
           " %lld " IDFMT, info.result.id, info.fevent.id, info.precondition.id,
           info.performed, info.reservation.id);
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfASCIISerializer::serialize(
+                              const LegionProfInstance::InstanceReadyInfo &info)
+    //--------------------------------------------------------------------------
+    {
+      log_prof.print("Prof Instance Ready Info " IDFMT " " IDFMT " " IDFMT
+          " %lld", info.result.id, info.precondition.id, info.unique.id,
+          info.performed);
     }
 
     //--------------------------------------------------------------------------

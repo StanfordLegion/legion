@@ -520,6 +520,13 @@ namespace Legion {
         timestamp_t performed;
         Reservation reservation;
       };
+      struct InstanceReadyInfo {
+      public:
+        LgEvent result;
+        LgEvent precondition;
+        LgEvent unique;
+        timestamp_t performed;
+      };
       struct ProfilingInfo : public ProfilingResponseBase {
       public:
         ProfilingInfo(ProfilingResponseHandler *h, UniqueID uid);
@@ -596,6 +603,8 @@ namespace Legion {
       void record_barrier_arrival(LgEvent result, LgEvent precondition);
       void record_reservation_acquire(Reservation r, LgEvent result,
           LgEvent precondition);
+      void record_instance_ready(LgEvent result, LgEvent unique_event,
+                                 LgEvent precondition = LgEvent::NO_LG_EVENT);
     public:
       void process_task(const ProfilingInfo *info,
             const Realm::ProfilingResponse &response,
@@ -678,6 +687,7 @@ namespace Legion {
       std::deque<EventPoisonInfo> event_poison_infos;
       std::deque<BarrierArrivalInfo> barrier_arrival_infos;
       std::deque<ReservationAcquireInfo> reservation_acquire_infos;
+      std::deque<InstanceReadyInfo> instance_ready_infos;
       // keep track of MemIDs/ProcIDs to avoid duplicate entries
       std::vector<MemID> mem_ids;
       std::vector<ProcID> proc_ids;

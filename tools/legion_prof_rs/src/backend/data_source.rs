@@ -1357,6 +1357,27 @@ impl StateDataSource {
                     ))
                 }
             }
+            EventEntryKind::InstanceReady => {
+                let prof_uid = event_entry.creator.unwrap();
+                if let Some(mem_id) = self.state.insts.get(&prof_uid) {
+                    // This means the critical path was the allocation of the instance and not
+                    // the triggering of the precondition event
+                    let mem = self.state.mems.get(&mem_id).unwrap();
+                    let inst = mem.entry(prof_uid);
+                    let ready_time: ts::Timestamp = inst.time_range.ready.unwrap().into();
+                    let inst_name = inst.name(&self.state);
+                    Field::ItemLink(ItemLink {
+                        item_uid: inst.base.prof_uid.into(),
+                        title: format!("Allocation of {} at {}", &inst_name, ready_time),
+                        interval: inst.time_range.into(),
+                        entry_id: self.mem_entries.get(mem_id).unwrap().clone(),
+                    })
+                } else {
+                    Field::String(format!(
+                            "Critical path from an instance creation on node {}. Please load the logfile from that node to see it.", node.0
+                    ))
+                }
+            }
             // The rest of these only happen when the critical path is not along a chain
             // of events but when the (meta-) task producing the event is the last thing
             // to actually run to enable the execution
@@ -1836,13 +1857,85 @@ impl StateDataSource {
                     Field::String(provenance.to_string()),
                 ));
             }
-            if let Some(creator) = entry.creator() {
-                let creation_time = entry.time_range.create.unwrap();
-                fields.push((
-                    self.fields.creator,
-                    self.generate_creator_link(creator, creation_time),
-                ));
+            // Do the critical path analysis for this instance
+            // There are three things that can delay an instance creation
+            // 1. The precondition event can be slow to trigger
+            // 2. The caller task can be slow to create it
+            // 3. We might need to wait for space in the memory to be freed for it to be ready
+            let mut need_critical = true;
+            if let Some(critical) = entry.critical() {
+                if let Some(event_entry) = self.state.find_critical_entry(critical) {
+                    // Check to see if the critical entry happened before or after
+                    // the creation of this processor entry
+                    let creation_time = entry.creation_time();
+                    if event_entry.kind != EventEntryKind::UnknownEvent
+                        && creation_time <= event_entry.trigger_time.unwrap()
+                    {
+                        // Created before critical event triggered so list both
+                        // fields separately since they wil be different
+                        if let Some(creator) = entry.creator() {
+                            let creation_time = entry.time_range.create.unwrap();
+                            fields.push((
+                                self.fields.creator,
+                                self.generate_creator_link(creator, creation_time),
+                            ));
+                        }
+                        fields.push((
+                            self.fields.critical,
+                            self.generate_critical_link(critical, event_entry),
+                        ));
+                        if event_entry.kind != EventEntryKind::UnknownEvent {
+                            // Record the time it took Realm to propagate the event trigger
+                            fields.push((
+                                self.fields.trigger_time,
+                                Field::Interval(ts::Interval::new(
+                                    event_entry.trigger_time.unwrap().into(),
+                                    entry.time_range.create.unwrap().into(),
+                                )),
+                            ));
+                        }
+                        need_critical = false;
+                    }
+                }
             }
+            if need_critical {
+                // No critical event so check conditions 2 and 3
+                let creation_time = entry.time_range.create.unwrap();
+                if entry.allocated_immediately() {
+                    // Critical path is the creator
+                    if let Some(creator) = entry.creator() {
+                        fields.push((
+                            self.fields.critical,
+                            self.generate_critical_creator_link(creator, creation_time),
+                        ));
+                    } else {
+                        let creation_ts: ts::Timestamp = creation_time.into();
+                        fields.push((
+                            self.fields.critical,
+                            Field::String(format!("Unknown creator at {}", creation_ts)),
+                        ));
+                    }
+                } else {
+                    // Critical path is waiting for other instances to be deleted
+                    let ready_ts: ts::Timestamp = entry.time_range.ready.unwrap().into();
+                    fields.push((
+                        self.fields.critical,
+                        Field::String(format!(
+                            "Waiting for deallocation of other instances until {}",
+                            ready_ts
+                        )),
+                    ));
+                    // Still need to record the creator
+                    if let Some(creator) = entry.creator() {
+                        let creation_time = entry.time_range.create.unwrap();
+                        fields.push((
+                            self.fields.creator,
+                            self.generate_creator_link(creator, creation_time),
+                        ));
+                    }
+                }
+            }
+
             ItemMeta {
                 item_uid: entry.base().prof_uid.into(),
                 title: name,

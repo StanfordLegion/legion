@@ -1516,14 +1516,16 @@ namespace Legion {
         static const LgTaskID TASK_ID = LG_MALLOC_INSTANCE_TASK_ID;
       public:
         MallocInstanceArgs(MemoryManager *m, Realm::InstanceLayoutGeneric *l, 
-                     const Realm::ProfilingRequestSet *r, PhysicalInstance *i)
-          : LgTaskArgs<MallocInstanceArgs>(implicit_provenance), 
-            manager(m), layout(l), requests(r), instance(i) { }
+                     const Realm::ProfilingRequestSet *r, PhysicalInstance *i,
+                     LgEvent u)
+          : LgTaskArgs<MallocInstanceArgs>(implicit_provenance), manager(m),
+            layout(l), requests(r), instance(i), unique_event(u) { }
       public:
         MemoryManager *const manager;
         Realm::InstanceLayoutGeneric *const layout;
         const Realm::ProfilingRequestSet *const requests;
         PhysicalInstance *const instance;
+        const LgEvent unique_event;
       };
       struct FreeInstanceArgs : public LgTaskArgs<FreeInstanceArgs> {
       public:
@@ -1692,6 +1694,7 @@ namespace Legion {
       RtEvent allocate_legion_instance(Realm::InstanceLayoutGeneric *layout,
                                      const Realm::ProfilingRequestSet &requests,
                                      PhysicalInstance &inst,
+                                     LgEvent unique_event,
                                      bool needs_defer = true);
       void record_legion_instance(InstanceManager *manager, 
                                   PhysicalInstance instance);

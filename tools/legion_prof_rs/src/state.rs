@@ -1279,7 +1279,7 @@ impl Mem {
 
         for (key, inst) in &self.insts {
             time_points.push(MemPoint::new(
-                inst.time_range.start.unwrap(),
+                inst.time_range.ready.unwrap(),
                 *key,
                 true,
                 Timestamp::MAX - inst.time_range.stop.unwrap(),
@@ -2027,6 +2027,13 @@ pub struct Inst {
     pub op_id: Option<OpID>,
     mem_id: Option<MemID>,
     pub size: Option<u64>,
+    // Time range for instances is a bit unusual since there are nominally
+    // only three interesting times: create, ready, end (destroy). We also
+    // alias 'ready' with 'start' to since build_items relies on start
+    // to mark when the instance is allocated in memory. We also need to
+    // record the time that we got the allocation response back to know
+    // whether the instance was allocated immediately or allocated after
+    // it was requested.
     pub time_range: TimeRange,
     pub ispace_ids: Vec<ISpaceID>,
     pub fspace_ids: Vec<FSpaceID>,
@@ -2035,6 +2042,7 @@ pub struct Inst {
     pub align_desc: BTreeMap<FSpaceID, Vec<Align>>,
     pub dim_order: BTreeMap<Dim, DimKind>,
     pub creator: Option<ProfUID>,
+    pub critical: Option<EventID>,
 }
 
 impl Inst {
@@ -2053,6 +2061,7 @@ impl Inst {
             align_desc: BTreeMap::new(),
             dim_order: BTreeMap::new(),
             creator: None,
+            critical: None,
         }
     }
     fn set_inst_id(&mut self, inst_id: InstID) -> &mut Self {
@@ -2075,8 +2084,26 @@ impl Inst {
         self.size = Some(size);
         self
     }
-    fn set_start_stop(&mut self, start: Timestamp, ready: Timestamp, stop: Timestamp) -> &mut Self {
-        self.time_range = TimeRange::new_full(start, ready, ready, stop);
+    fn set_start_stop(
+        &mut self,
+        create: Timestamp,
+        ready: Timestamp,
+        destroy: Timestamp,
+    ) -> &mut Self {
+        self.time_range.create = Some(create);
+        self.time_range.ready = Some(ready);
+        self.time_range.start = Some(ready);
+        self.time_range.stop = Some(destroy);
+        self
+    }
+    fn set_allocated(&mut self, allocated: Timestamp) -> &mut Self {
+        self.time_range.spawn = Some(allocated);
+        self
+    }
+    fn set_critical(&mut self, critical: EventID) -> &mut Self {
+        assert!(critical.exists());
+        assert!(self.critical.is_none());
+        self.critical = Some(critical);
         self
     }
     fn add_ispace(&mut self, ispace_id: ISpaceID) -> &mut Self {
@@ -2126,6 +2153,16 @@ impl Inst {
         assert!(self.creator.map_or(true, |c| c == creator.unwrap()));
         self.creator = creator;
         self
+    }
+    pub fn allocated_immediately(&self) -> bool {
+        // Remember that 'spawn' is really the 'allocated' response time
+        if let Some(allocated) = self.time_range.spawn {
+            self.time_range.ready.unwrap() <= allocated
+        } else {
+            // If we didn't have an allocated time assume it was ready immediately
+            // as this most likely happens with external instances
+            true
+        }
     }
 }
 
@@ -2179,9 +2216,7 @@ impl ContainerEntry for Inst {
     }
 
     fn critical(&self) -> Option<EventID> {
-        // No criticality for instances yet because we can't
-        // see what Realm is doing to satisfy them
-        None
+        self.critical
     }
 
     fn creation_time(&self) -> Timestamp {
@@ -3177,6 +3212,7 @@ pub enum EventEntryKind {
     PoisonEvent,
     ArriveBarrier,
     ReservationAcquire,
+    InstanceReady,
 }
 
 #[derive(Debug)]
@@ -3830,7 +3866,7 @@ impl State {
         } else if let Some(mem_id) = self.insts.get(&creator_uid) {
             let mem = self.mems.get(&mem_id).unwrap();
             let inst = mem.entry(creator_uid);
-            // Profiling responses are create at the same time as the instance
+            // Profiling responses are created at the same time as the instance
             let create = inst.time_range().create.unwrap();
             if completion {
                 // Profiling responses are ready at the same time as the instance is deleted
@@ -5212,6 +5248,7 @@ fn process_record(
             creator,
         } => {
             assert!(fevent.exists());
+            assert!(creator.exists());
             state.create_op(*op_id);
             let creator_uid = state.create_fevent_reference(*creator);
             let inst_uid = state.create_fevent_reference(*fevent).unwrap();
@@ -5319,6 +5356,11 @@ fn process_record(
             let time_range = TimeRange::new_call(*start, *stop);
             let entry = state.create_prof_task(*proc_id, *op_id, time_range, *creator, *fevent);
             profs.insert(entry.base.prof_uid, (entry.creator.unwrap(), *completion));
+            if !completion {
+                // Special case for instance allocation, record the "start" time for the instance
+                // which we'll use for determining if the instance was allocated immediately or not
+                state.create_inst(*creator, insts).set_allocated(*start);
+            }
             state.update_last_time(*stop);
         }
         Record::BacktraceDesc {
@@ -5489,6 +5531,28 @@ fn process_record(
                 *performed,
             );
             if precondition.exists() {
+                let src = state.find_event_node(*precondition);
+                state.event_graph.add_edge(src, dst, ());
+            }
+        }
+        Record::InstanceReadyInfo {
+            result,
+            precondition,
+            fevent,
+            performed,
+        } => {
+            assert!(result.exists());
+            let creator_uid = state.create_fevent_reference(*fevent).unwrap();
+            let dst = state.record_event_node(
+                *result,
+                EventEntryKind::InstanceReady,
+                creator_uid,
+                *performed,
+            );
+            if precondition.exists() {
+                state
+                    .create_inst(*fevent, insts)
+                    .set_critical(*precondition);
                 let src = state.find_event_node(*precondition);
                 state.event_graph.add_edge(src, dst, ());
             }

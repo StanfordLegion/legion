@@ -3786,14 +3786,16 @@ namespace Legion {
 #ifndef LEGION_MALLOC_INSTANCES
       ready = ApEvent(PhysicalInstance::create_instance(instance,
             memory_manager->memory, inst_layout, requests, precondition));
+      if (ready.exists() && (implicit_profiler != NULL))
+        implicit_profiler->record_instance_ready(ready, unique_event);
       // Wait for the profiling response
       if (!profiling_ready.has_triggered())
         profiling_ready.wait();
 #else
       if (precondition.exists() && !precondition.has_triggered())
         precondition.wait();
-      ready = ApEvent(memory_manager->allocate_legion_instance(inst_layout, 
-                                                      requests, instance));
+      ready = ApEvent(memory_manager->allocate_legion_instance(inst_layout,
+            requests, instance, unique_event));
       if (!instance.exists())
       {
         if (unsat_kind != NULL)

@@ -111,7 +111,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     LegionProfInstance::ProfilingInfo::ProfilingInfo(
                                       ProfilingResponseHandler *h, UniqueID uid)
-      : ProfilingResponseBase(h, uid)
+      : ProfilingResponseBase(h, uid),
+        creator(Processor::get_executing_processor().exists() ?
+            LgEvent(Processor::get_current_finish_event()) :
+            ((implicit_context != NULL) && 
+             (implicit_context->owner_task != NULL)) ?
+              implicit_context->owner_task->get_completion_event() :
+              LgEvent::NO_LG_EVENT)
     //--------------------------------------------------------------------------
     {
     }
@@ -563,6 +569,22 @@ namespace Legion {
       else if ((implicit_context != NULL) && 
           (implicit_context->owner_task != NULL))
         info.fevent = implicit_context->owner_task->get_completion_event();
+      owner->update_footprint(sizeof(info), this);
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfInstance::record_instance_ready(LgEvent result,
+                                     LgEvent unique_event, LgEvent precondition)
+    //--------------------------------------------------------------------------
+    {
+      if (owner->no_critical_paths)
+        return;
+      InstanceReadyInfo &info = instance_ready_infos.emplace_back(
+          InstanceReadyInfo());
+      info.performed = Realm::Clock::current_time_in_nanoseconds();
+      info.result = result;
+      info.unique = unique_event;
+      info.precondition = precondition;
       owner->update_footprint(sizeof(info), this);
     }
 
@@ -1456,6 +1478,10 @@ namespace Legion {
             reservation_acquire_infos.begin(); it !=
             reservation_acquire_infos.end(); it++)
         serializer->serialize(*it);
+      for (std::deque<InstanceReadyInfo>::const_iterator it =
+            instance_ready_infos.begin(); it !=
+            instance_ready_infos.end(); it++)
+        serializer->serialize(*it);
       for (std::deque<ProfTaskInfo>::const_iterator it = 
             prof_task_infos.begin(); it != prof_task_infos.end(); it++)
       {
@@ -1853,6 +1879,16 @@ namespace Legion {
         serializer->serialize(info);
         diff += sizeof(info);
         reservation_acquire_infos.pop_front();
+        const long long t_curr = Realm::Clock::current_time_in_microseconds();
+        if (t_curr >= t_stop)
+          return diff;
+      }
+      while (!instance_ready_infos.empty())
+      {
+        InstanceReadyInfo &info = instance_ready_infos.front();
+        serializer->serialize(info);
+        diff += sizeof(info);
+        instance_ready_infos.pop_front();
         const long long t_curr = Realm::Clock::current_time_in_microseconds();
         if (t_curr >= t_stop)
           return diff;

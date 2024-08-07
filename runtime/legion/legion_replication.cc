@@ -6739,6 +6739,8 @@ namespace Legion {
                                                       requirement.region);
           implicit_profiler->register_physical_instance_layout(unique_event,
               requirement.region.field_space, layout_constraint_set);
+          if (ready_event.exists())
+            implicit_profiler->record_instance_ready(ready_event, unique_event);
         }
       }
       // Do the arrival on the attach barrier for any collective instances

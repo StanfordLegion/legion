@@ -3875,12 +3875,6 @@ namespace Legion {
       void check_privilege(void);
       void compute_parent_index(void);
       void log_requirement(void);
-      ApEvent create_realm_instance(IndexSpaceNode *node,
-                                    const PointerConstraint &pointer,
-                                    const std::vector<FieldID> &set,
-                                    const std::vector<size_t> &sizes,
-                                    const Realm::ProfilingRequestSet &requests,
-                                    PhysicalInstance &instance) const;
       void attach_ready(bool point);
     public:
       ExternalResource resource;

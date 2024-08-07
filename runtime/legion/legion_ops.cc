@@ -19901,6 +19901,8 @@ namespace Legion {
                                                            requirement.region);
         implicit_profiler->register_physical_instance_layout(unique_event,
             requirement.region.field_space, layout_constraint_set);
+        if (ready_event.exists())
+          implicit_profiler->record_instance_ready(ready_event, unique_event);
       }
       // Check to see if this instance is local or whether we need
       // to send this request to a remote node to make it
@@ -19950,46 +19952,6 @@ namespace Legion {
             footprint, layout_constraint_set, field_set, sizes, external_mask, 
             mask_index_map, unique_event, node, serdez,
             runtime->get_available_distributed_id());
-    }
-
-    //--------------------------------------------------------------------------
-    ApEvent AttachOp::create_realm_instance(IndexSpaceNode *node,
-                                    const PointerConstraint &pointer,
-                                    const std::vector<FieldID> &set,
-                                    const std::vector<size_t> &sizes,
-                                    const Realm::ProfilingRequestSet &requests,
-                                    PhysicalInstance &instance) const
-    //--------------------------------------------------------------------------
-    {
-      Realm::InstanceLayoutGeneric *ilg = node->create_layout(
-                      layout_constraint_set, set, sizes, false/*compact*/);
-      Realm::ExternalMemoryResource res(pointer.ptr, ilg->bytes_used,
-                                        false /*!read_only*/);
-      const Memory memory = res.suggested_memory();
-      if ((memory != pointer.memory) && pointer.memory.exists())
-      {
-        const char *mem_names[] = {
-#define MEM_NAMES(name, desc) desc,
-          REALM_MEMORY_KINDS(MEM_NAMES) 
-#undef MEM_NAMES
-        };
-        REPORT_LEGION_WARNING(LEGION_WARNING_IMPRECISE_ATTACH_MEMORY,
-            "WARNING: %s memory " IDFMT " in pointer constraint for "
-            "attach operation %lld in parent task %s (UID %lld) differs "
-            "from the Realm-suggested %s memory " IDFMT " for the "
-            "external instance. Legion is going to use the more precise "
-            "Realm-specified memory. Please make sure that you do not "
-            "have any code in your application or your mapper that "
-            "relies on the instance being in the originally specified "
-            "memory. To silence this warning you can pass in a NO_MEMORY "
-            "to the pointer constraint.",
-            mem_names[pointer.memory.kind()], pointer.memory.id,
-            unique_op_id, parent_ctx->get_task_name(),
-            parent_ctx->get_unique_id(), mem_names[memory.kind()],
-            memory.id);
-      }
-      return ApEvent(PhysicalInstance::create_external_instance(instance, 
-                                              memory, ilg, res, requests));
     }
 
     //--------------------------------------------------------------------------
