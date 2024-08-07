@@ -43,6 +43,9 @@ static InstanceLayout<N, T> *create_layout(Rect<N, T> bounds,
 {
   InstanceLayout<N, T> *inst_layout = new InstanceLayout<N, T>();
 
+  // RegionInstance inst = make_inst();
+  // RegionInstanceImpl *impl = new RegionInstanceImpl(inst, inst.get_location());
+
   InstanceLayoutGeneric::FieldLayout field_layout;
   field_layout.list_idx = 0;
   field_layout.rel_offset = 0;
@@ -73,14 +76,25 @@ static inline RegionInstance make_inst(int owner = 0, int creator = 0, int mem_i
   return ID::make_instance(owner, creator, mem_idx, inst_idx).convert<RegionInstance>();
 }
 
+template <int N, typename T>
+static RegionInstanceImpl *create_inst(Rect<N, T> bounds, size_t bytes_per_element = 8,
+                                       RegionInstance inst = make_inst())
+{
+  InstanceLayout<N, T> *inst_layout = create_layout(bounds, bytes_per_element);
+  RegionInstanceImpl *impl = new RegionInstanceImpl(inst, inst.get_location());
+  impl->metadata.layout = inst_layout;
+  impl->metadata.inst_offset = 0;
+  return impl;
+}
+
 const static size_t kByteSize = sizeof(int);
 
 const static IteratorTestCase kIteratorTestCases[] = {
     // Case 0: step through 1D layout with 2 elements
     IteratorTestCase{
         .it = new TransferIteratorIndexSpace<1, int>(
-            Rect<1, int>(0, 1), make_inst(),
-            create_layout<1, int>(Rect<1, int>(0, 1), kByteSize), 0, 0, {0}, {0},
+            Rect<1, int>(0, 1), create_inst<1, int>(Rect<1, int>(0, 1), kByteSize), 0,
+            {0}, {0},
             /*field_sizes=*/{kByteSize}, 0),
         .infos = {TransferIterator::AddressInfo{/*offset=*/0, /*bytes_per_el=*/kByteSize,
                                                 /*num_lines=*/1,
@@ -101,10 +115,10 @@ const static IteratorTestCase kIteratorTestCases[] = {
     // Case 1: step through 2D layout with 4 elements
     IteratorTestCase{
         .it = new TransferIteratorIndexSpace<2, int>(
-            Rect<2, int>(Point<2, int>(0), Point<2, int>(1)), make_inst(),
-            create_layout<2, int>(Rect<2, int>(Point<2, int>(0), Point<2, int>(1)),
-                                  kByteSize),
-            0, 0, {0}, {0}, /*field_sizes=*/{kByteSize}, 0),
+            Rect<2, int>(Point<2, int>(0), Point<2, int>(1)),
+            create_inst<2, int>(Rect<2, int>(Point<2, int>(0), Point<2, int>(1)),
+                                kByteSize),
+            0, {0}, {0}, /*field_sizes=*/{kByteSize}, 0),
         .infos = {TransferIterator::AddressInfo{/*offset=*/0,
                                                 /*bytes_per_el=*/kByteSize * 2,
                                                 /*num_lines=*/1,
@@ -125,10 +139,10 @@ const static IteratorTestCase kIteratorTestCases[] = {
     // Case 2: step through 2D layout at once
     IteratorTestCase{
         .it = new TransferIteratorIndexSpace<2, int>(
-            Rect<2, int>(Point<2, int>(0), Point<2, int>(1)), make_inst(),
-            create_layout<2, int>(Rect<2, int>(Point<2, int>(0), Point<2, int>(1)),
-                                  kByteSize),
-            0, 0, {0}, {0}, /*field_sizes=*/{kByteSize}, 0),
+            Rect<2, int>(Point<2, int>(0), Point<2, int>(1)),
+            create_inst<2, int>(Rect<2, int>(Point<2, int>(0), Point<2, int>(1)),
+                                kByteSize),
+            0, {0}, {0}, /*field_sizes=*/{kByteSize}, 0),
         .infos = {TransferIterator::AddressInfo{/*offset=*/0,
                                                 /*bytes_per_el=*/kByteSize * 4,
                                                 /*num_lines=*/1,
@@ -143,10 +157,10 @@ const static IteratorTestCase kIteratorTestCases[] = {
     // Case 3: step through 2D layout at once requesting more bytes
     IteratorTestCase{
         .it = new TransferIteratorIndexSpace<2, int>(
-            Rect<2, int>(Point<2, int>(0), Point<2, int>(1)), make_inst(),
-            create_layout<2, int>(Rect<2, int>(Point<2, int>(0), Point<2, int>(1)),
-                                  kByteSize),
-            0, 0, {0}, {0}, /*field_sizes=*/{kByteSize}, 0),
+            Rect<2, int>(Point<2, int>(0), Point<2, int>(1)),
+            create_inst<2, int>(Rect<2, int>(Point<2, int>(0), Point<2, int>(1)),
+                                kByteSize),
+            0, {0}, {0}, /*field_sizes=*/{kByteSize}, 0),
         .infos = {TransferIterator::AddressInfo{/*offset=*/0,
                                                 /*bytes_per_el=*/kByteSize * 4,
                                                 /*num_lines=*/1,
@@ -161,10 +175,10 @@ const static IteratorTestCase kIteratorTestCases[] = {
     // Case 3: Partial steps through 2D layout
     IteratorTestCase{
         .it = new TransferIteratorIndexSpace<2, int>(
-            Rect<2, int>(Point<2, int>(0), Point<2, int>(1)), make_inst(),
-            create_layout<2, int>(Rect<2, int>(Point<2, int>(0), Point<2, int>(3)),
-                                  kByteSize),
-            0, 0, {0}, {0}, /*field_sizes=*/{kByteSize}, 0),
+            Rect<2, int>(Point<2, int>(0), Point<2, int>(1)),
+            create_inst<2, int>(Rect<2, int>(Point<2, int>(0), Point<2, int>(3)),
+                                kByteSize),
+            0, {0}, {0}, /*field_sizes=*/{kByteSize}, 0),
         .infos = {TransferIterator::AddressInfo{/*offset=*/0,
                                                 /*bytes_per_el=*/kByteSize * 2,
                                                 /*num_lines=*/1,
@@ -187,10 +201,10 @@ const static IteratorTestCase kIteratorTestCases[] = {
     // Case 5: step through 3D layout at once
     IteratorTestCase{
         .it = new TransferIteratorIndexSpace<3, int>(
-            Rect<3, int>(Point<3, int>(0), Point<3, int>(1)), make_inst(),
-            create_layout<3, int>(Rect<3, int>(Point<3, int>(0), Point<3, int>(1)),
-                                  kByteSize),
-            0, 0, {0}, {0}, /*field_sizes=*/{kByteSize}, 0),
+            Rect<3, int>(Point<3, int>(0), Point<3, int>(1)),
+            create_inst<3, int>(Rect<3, int>(Point<3, int>(0), Point<3, int>(1)),
+                                kByteSize),
+            0, {0}, {0}, /*field_sizes=*/{kByteSize}, 0),
         .infos = {TransferIterator::AddressInfo{/*offset=*/0,
                                                 /*bytes_per_el=*/kByteSize * 8,
                                                 /*num_lines=*/1,
@@ -204,9 +218,8 @@ const static IteratorTestCase kIteratorTestCases[] = {
 
     // Case 6: step with empty rect
     IteratorTestCase{.it = new TransferIteratorIndexSpace<1, int>(
-                         Rect<1, int>::make_empty(), make_inst(),
-                         create_layout<1, int>(Rect<1, int>(0, 1), kByteSize), 0, 0, {0},
-                         {0},
+                         Rect<1, int>::make_empty(),
+                         create_inst<1, int>(Rect<1, int>(0, 1), kByteSize), 0, {0}, {0},
                          /*field_sizes=*/{kByteSize}, 0),
                      .max_bytes = {0},
                      .exp_bytes = {0},
@@ -217,7 +230,7 @@ const static IteratorTestCase kIteratorTestCases[] = {
     // Case 7: step with non-overlapping rectangle
     /*IteratorTestCase{.it = new TransferIteratorIndexSpace<1, int>(
                          Rect<1, int>(2, 3),
-                         create_layout<1, int>(Rect<1, int>(0, 1), kByteSize), 0, 0, {0},
+                         create_inst<1, int>(Rect<1, int>(0, 1), kByteSize), 0, 0, {0},
                          {0},
                          {kByteSize}, 0),
                      .max_bytes = {0},

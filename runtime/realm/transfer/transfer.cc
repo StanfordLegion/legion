@@ -78,17 +78,13 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  TransferIteratorBase<N, T>::TransferIteratorBase(
-      RegionInstance _inst, const InstanceLayout<N, T> *_inst_layout, size_t _inst_offset,
-      const int _dim_order[N])
+  TransferIteratorBase<N, T>::TransferIteratorBase(RegionInstanceImpl *_inst_impl,
+                                                   const int _dim_order[N])
     : have_rect(false)
     , is_done(false)
-    , inst(_inst)
-    , inst_layout(_inst_layout)
-    , inst_offset(_inst_offset)
+    , inst_impl(_inst_impl)
     , tentative_valid(false)
   {
-    assert(inst_layout != 0);
 
     if(_dim_order)
       for(int i = 0; i < N; i++)
@@ -102,15 +98,16 @@ namespace Realm {
   TransferIteratorBase<N, T>::TransferIteratorBase(void)
     : have_rect(false)
     , is_done(false)
-    , inst(RegionInstance::NO_INST)
-    , inst_layout(0)
-    , inst_offset(0)
+    , inst_impl(0)
     , tentative_valid(false)
   {}
 
   template <int N, typename T>
   Event TransferIteratorBase<N, T>::request_metadata(void)
   {
+    if(!inst_impl->metadata.is_valid()) {
+      return inst_impl->request_metadata();
+    }
     return Event::NO_EVENT;
   }
 
@@ -131,7 +128,7 @@ namespace Realm {
     if(is_done)
       return true;
 
-    assert(inst_layout != 0);
+    assert(inst_impl != 0);
 
     // try to get a new (non-empty) rectangle
     while(true) {
@@ -194,8 +191,13 @@ namespace Realm {
     const InstanceLayoutPiece<N,T> *layout_piece;
     size_t field_rel_offset;
     size_t total_bytes = 0;
+
+    const InstanceLayout<N, T> *inst_layout =
+        checked_cast<const InstanceLayout<N, T> *>(inst_impl->metadata.layout);
+
     {
-      std::map<FieldID, InstanceLayoutGeneric::FieldLayout>::const_iterator it = inst_layout->fields.find(cur_field_id);
+      std::map<FieldID, InstanceLayoutGeneric::FieldLayout>::const_iterator it =
+          inst_layout->fields.find(cur_field_id);
       assert(it != inst_layout->fields.end());
       assert((cur_field_offset + cur_field_size) <= size_t(it->second.size_in_bytes));
       const InstancePieceList<N,T>& piece_list = inst_layout->piece_lists[it->second.list_idx];
@@ -268,9 +270,12 @@ namespace Realm {
 	  target_subrect.hi[d] = cur_point[d];
       }
 
-      info.base_offset = (inst_offset + affine->offset + affine->strides.dot(cur_point) +
-                          field_rel_offset);
-      //log_dma.print() << "A " << inst_impl->metadata.inst_offset << " + " << affine->offset << " + (" << affine->strides << " . " << cur_point << ") + " << field_rel_offset << " = " << info.base_offset;
+      info.base_offset = (inst_impl->metadata.inst_offset + affine->offset +
+                          affine->strides.dot(cur_point) + field_rel_offset);
+      // log_dma.print() << "A " << inst_impl->metadata.inst_offset << " + " <<
+      // affine->offset << " + (" << affine->strides << " . " << cur_point << ") + " <<
+      // field_rel_offset << " = " << info.base_offset;
+
       info.bytes_per_chunk = act_counts[0];
       info.num_lines = act_counts[1];
       info.line_stride = act_strides[1];
@@ -324,6 +329,9 @@ namespace Realm {
       return 0;
 
     assert(!tentative_valid);
+
+    const InstanceLayout<N, T> *inst_layout =
+        checked_cast<const InstanceLayout<N, T> *>(inst_impl->metadata.layout);
 
     // find the layout piece the current point is in
     const InstanceLayoutPiece<N,T> *layout_piece;
@@ -382,8 +390,6 @@ namespace Realm {
       target_lo[i] = target_subrect.lo[i] - layout_piece->bounds.lo[i];
       target_hi[i] = target_subrect.hi[i] - layout_piece->bounds.lo[i];
     }
-
-    RegionInstanceImpl *inst_impl = get_runtime()->get_instance_impl(inst);
 
     // offer the rectangle - it can be reduced by pruning dimensions
     int ndims = info.set_rect(inst_impl, layout_piece,
@@ -452,7 +458,7 @@ namespace Realm {
   template <int N, typename T>
   uintptr_t TransferIteratorBase<N, T>::get_base_offset(void) const
   {
-    return inst_offset;
+    return inst_impl->metadata.inst_offset;
   }
 
   template <int N, typename T>
@@ -464,6 +470,9 @@ namespace Realm {
 #endif
 
     nonaffine = 0;
+
+    const InstanceLayout<N, T> *inst_layout =
+        checked_cast<const InstanceLayout<N, T> *>(inst_impl->metadata.layout);
 
     while(!done()) {
       if(!have_rect)
@@ -567,7 +576,7 @@ namespace Realm {
 	const AffineLayoutPiece<N,T> *affine = static_cast<const AffineLayoutPiece<N,T> *>(layout_piece);
 
 	// offset of initial entry is easy to compute
-        addr_data[1] = (inst_offset + affine->offset +
+        addr_data[1] = (inst_impl->metadata.inst_offset + affine->offset +
                         affine->strides.dot(target_subrect.lo) + field_rel_offset);
 
         size_t bytes = cur_field_size;
@@ -635,17 +644,15 @@ namespace Realm {
 
   template <int N, typename T>
   TransferIteratorIndexSpace<N, T>::TransferIteratorIndexSpace(
-      const IndexSpace<N, T> &_is, RegionInstance inst,
-      const InstanceLayout<N, T> *inst_layout, size_t inst_offset,
+      const IndexSpace<N, T> &_is, RegionInstanceImpl *_inst_impl,
       const int _dim_order[N], const std::vector<FieldID> &_fields,
       const std::vector<size_t> &_fld_offsets, const std::vector<size_t> &_fld_sizes,
       size_t _extra_elems)
-    : TransferIteratorBase<N, T>(inst, inst_layout, inst_offset, _dim_order)
+    : TransferIteratorBase<N, T>(_inst_impl, _dim_order)
     , is(_is)
     , field_idx(0)
     , extra_elems(_extra_elems)
   {
-    assert(inst_layout != 0);
     if(is.is_valid()) {
       iter.reset(is);
       this->is_done = !iter.valid;
@@ -691,14 +698,9 @@ namespace Realm {
       }
     }
 
-    RegionInstanceImpl *impl = get_runtime()->get_instance_impl(inst);
-    assert(impl->metadata.is_valid());
-    assert((checked_cast<const InstanceLayout<N, T> *>(impl->metadata.layout) != 0));
-
     TransferIteratorIndexSpace<N, T> *tiis = new TransferIteratorIndexSpace<N, T>(
-        is, inst, checked_cast<const InstanceLayout<N, T> *>(impl->metadata.layout),
-        impl->metadata.inst_offset, dim_order, fields, fld_offsets, fld_sizes,
-        extra_elems);
+        is, get_runtime()->get_instance_impl(inst), dim_order, fields, fld_offsets,
+        fld_sizes, extra_elems);
     return tiis;
   }
 
@@ -769,7 +771,7 @@ namespace Realm {
   template <typename S>
   bool TransferIteratorIndexSpace<N, T>::serialize(S &serializer) const
   {
-    if(!((serializer << iter.space) && (serializer << this->inst) &&
+    if(!((serializer << iter.space) && (serializer << this->inst_impl->me) &&
          (serializer << fields) && (serializer << fld_offsets) &&
          (serializer << fld_sizes) && (serializer << extra_elems)))
       return false;
@@ -849,11 +851,7 @@ namespace Realm {
   WrappingTransferIteratorIndirect<N, T>::WrappingTransferIteratorIndirect(
       RegionInstance inst, const std::vector<FieldID> &_fields,
       const std::vector<size_t> &_fld_offsets, const std::vector<size_t> &_fld_sizes)
-    : TransferIteratorBase<N, T>(
-          inst,
-          checked_cast<const InstanceLayout<N, T> *>(
-              get_runtime()->get_instance_impl(inst)->metadata.layout),
-          get_runtime()->get_instance_impl(inst)->metadata.inst_offset, 0)
+    : TransferIteratorBase<N, T>(get_runtime()->get_instance_impl(inst), 0)
     , fields(_fields)
     , fld_offsets(_fld_offsets)
     , fld_sizes(_fld_sizes)
@@ -869,7 +867,7 @@ namespace Realm {
   template <typename S>
   bool WrappingTransferIteratorIndirect<N, T>::serialize(S &serializer) const
   {
-    return ((serializer << this->inst) && (serializer << fields) &&
+    return ((serializer << this->inst_impl->me) && (serializer << fields) &&
             (serializer << fld_offsets) && (serializer << fld_sizes));
   }
 
@@ -938,25 +936,26 @@ namespace Realm {
     size_t cur_field_offset = fld_offsets[0];
     size_t cur_field_size = fld_sizes[0];
 
-    assert(this->inst_layout);
+    const InstanceLayout<N, T> *inst_layout =
+        checked_cast<const InstanceLayout<N, T> *>(this->inst_impl->metadata.layout);
 
-    assert(this->inst_layout);
+    assert(inst_layout);
     std::map<FieldID, InstanceLayoutGeneric::FieldLayout>::const_iterator it =
-        this->inst_layout->fields.find(cur_field_id);
-    assert(it != this->inst_layout->fields.end());
-    size_t pieces = this->inst_layout->piece_lists[it->second.list_idx].pieces.size();
+        inst_layout->fields.find(cur_field_id);
+    assert(it != inst_layout->fields.end());
+    size_t pieces = inst_layout->piece_lists[it->second.list_idx].pieces.size();
 
     if(piece_idx < pieces) {
       const InstanceLayoutPiece<N, T> *layout_piece;
       size_t field_rel_offset =
-          get_layout_piece(this->inst_layout, layout_piece, cur_field_id, cur_field_size,
+          get_layout_piece(inst_layout, layout_piece, cur_field_id, cur_field_size,
                            cur_field_offset, piece_idx);
 
       if(layout_piece->layout_type == PieceLayoutTypes::AffineLayoutType) {
         const AffineLayoutPiece<N, T> *affine =
             static_cast<const AffineLayoutPiece<N, T> *>(layout_piece);
 
-        info.base_offset = (this->inst_offset + affine->offset +
+        info.base_offset = (this->inst_impl->metadata.inst_offset + affine->offset +
                             affine->strides.dot(affine->bounds.lo) + field_rel_offset);
 
         size_t cur_dim = 0;
@@ -1136,11 +1135,7 @@ namespace Realm {
       // const int _dim_order[N],
       const std::vector<FieldID> &_fields, const std::vector<size_t> &_fld_offsets,
       const std::vector<size_t> &_fld_sizes)
-    : TransferIteratorBase<N, T>(
-          inst,
-          checked_cast<const InstanceLayout<N, T> *>(
-              get_runtime()->get_instance_impl(inst)->metadata.layout),
-          get_runtime()->get_instance_impl(inst)->metadata.inst_offset, 0)
+    : TransferIteratorBase<N, T>(get_runtime()->get_instance_impl(inst), 0)
     , addrs_in(0)
     , addrs_mem(_addrs_mem)
     , addrs_mem_base(0)
@@ -1161,7 +1156,7 @@ namespace Realm {
   template <typename S>
   bool TransferIteratorIndirect<N,T>::serialize(S& serializer) const
   {
-    return ((serializer << addrs_mem) && (serializer << this->inst) &&
+    return ((serializer << addrs_mem) && (serializer << this->inst_impl->me) &&
             (serializer << fields) && (serializer << fld_offsets) &&
             (serializer << fld_sizes));
   }
@@ -1420,11 +1415,7 @@ namespace Realm {
       // const int _dim_order[N],
       const std::vector<FieldID> &_fields, const std::vector<size_t> &_fld_offsets,
       const std::vector<size_t> &_fld_sizes)
-    : TransferIteratorBase<N, T>(
-          inst,
-          checked_cast<const InstanceLayout<N, T> *>(
-              get_runtime()->get_instance_impl(inst)->metadata.layout),
-          get_runtime()->get_instance_impl(inst)->metadata.inst_offset, 0)
+    : TransferIteratorBase<N, T>(get_runtime()->get_instance_impl(inst), 0)
     , addrs_in(0)
     , addrs_mem(_addrs_mem)
     , addrs_mem_base(0)
@@ -1446,9 +1437,9 @@ namespace Realm {
 
   template <int N, typename T>
   template <typename S>
-  bool TransferIteratorIndirectRange<N,T>::serialize(S& serializer) const
+  bool TransferIteratorIndirectRange<N, T>::serialize(S &serializer) const
   {
-    return ((serializer << addrs_mem) && (serializer << this->inst) &&
+    return ((serializer << addrs_mem) && (serializer << this->inst_impl->me) &&
             (serializer << fields) && (serializer << fld_offsets) &&
             (serializer << fld_sizes));
   }
@@ -2041,12 +2032,8 @@ namespace Realm {
     size_t extra_elems = 0;
     assert(dim_order.size() == N);
     RegionInstanceImpl *impl = get_runtime()->get_instance_impl(inst);
-    assert(impl->metadata.is_valid());
-    assert((checked_cast<const InstanceLayout<N, T> *>(impl->metadata.layout) != 0));
-    return new TransferIteratorIndexSpace<N, T>(
-        is, inst, checked_cast<const InstanceLayout<N, T> *>(impl->metadata.layout),
-        impl->metadata.inst_offset, dim_order.data(), fields, fld_offsets, fld_sizes,
-        extra_elems);
+    return new TransferIteratorIndexSpace<N, T>(is, impl, dim_order.data(), fields,
+                                                fld_offsets, fld_sizes, extra_elems);
   }
 
   template <int N, typename T>
