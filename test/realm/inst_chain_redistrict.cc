@@ -166,6 +166,8 @@ void top_level_task(const void *args, size_t arglen, const void *userdata, size_
   UserEvent destroy_event = UserEvent::create_user_event();
   inst1.destroy(destroy_event);
 
+  std::vector<Event> user_events;
+
   ProfilingRequestSet prs;
 
   UserEvent inst_status_event = UserEvent::create_user_event();
@@ -177,6 +179,8 @@ void top_level_task(const void *args, size_t arglen, const void *userdata, size_
     prs.add_request(p, INST_STATUS_PROF_TASK, &result, sizeof(ProfAllocResult))
         .add_measurement<ProfilingMeasurements::InstanceStatus>();
   }
+
+  user_events.push_back(inst_status_event);
 
   UserEvent alloc_event = UserEvent::create_user_event();
   int alloc_result = 0;
@@ -190,6 +194,8 @@ void top_level_task(const void *args, size_t arglen, const void *userdata, size_
         .add_measurement<ProfilingMeasurements::InstanceAllocResult>();
   }
 
+  user_events.push_back(alloc_event);
+
   UserEvent timel_event = UserEvent::create_user_event();
   int timel_result = 0;
   {
@@ -200,6 +206,8 @@ void top_level_task(const void *args, size_t arglen, const void *userdata, size_
         .add_measurement<ProfilingMeasurements::InstanceTimeline>();
   }
 
+  user_events.push_back(timel_event);
+
   UserEvent musage_event = UserEvent::create_user_event();
   int musage_result = 0;
   {
@@ -209,6 +217,8 @@ void top_level_task(const void *args, size_t arglen, const void *userdata, size_
     prs.add_request(p, MUSAGE_PROF_TASK, &result, sizeof(ProfMusageResult))
         .add_measurement<ProfilingMeasurements::InstanceMemoryUsage>();
   }
+
+  user_events.push_back(musage_event);
 
   RegionInstance inst2;
   RegionInstance::create_instance(inst2, memories[0], bounds, field_sizes, 0, prs).wait();
@@ -236,10 +246,7 @@ void top_level_task(const void *args, size_t arglen, const void *userdata, size_
   Event e2 = reader_cpus[0].spawn(WORKER_TASK, &worker_args, sizeof(WorkerArgs),
                                   ProfilingRequestSet(), e1);
   e2.wait();
-  alloc_event.wait();
-  timel_event.wait();
-  musage_event.wait();
-  inst_status_event.wait();
+  Event::merge_events(user_events).wait();
   assert(alloc_result == true);
   assert(timel_result == true);
   assert(musage_result == 1048576);
@@ -260,7 +267,7 @@ void worker_task(const void *args, size_t arglen, const void *userdata, size_t u
   Event alloc_event;
   Event musage_event;
 
-  size_t index = 0;
+  size_t profile_result_index = 0;
   int alloc_invocations = 0;
   std::vector<int> alloc_results(num_iterations * 2);
   std::vector<int> timel_results(num_iterations * 2);
@@ -283,25 +290,27 @@ void worker_task(const void *args, size_t arglen, const void *userdata, size_t u
     std::vector<Event> alloc_events;
     std::vector<Event> musage_events;
 
-    std::vector<ProfilingRequestSet> prs(2);
-    for(int i = 0; i < 2; i++) {
+    int num_profiling_requests = 2;
+
+    std::vector<ProfilingRequestSet> prs(num_profiling_requests);
+    for(int j = 0; j < num_profiling_requests; j++) {
       {
         UserEvent event = UserEvent::create_user_event();
         ProfTimelResult result;
         result.done = event;
-        result.called = &timel_results[index];
-        prs[i]
+        result.called = &timel_results[profile_result_index];
+        prs[j]
             .add_request(p, ALLOC_INST_TASK, &result, sizeof(ProfTimelResult))
             .add_measurement<ProfilingMeasurements::InstanceTimeline>();
         timel_events.push_back(event);
       }
 
-      if(i == 0) {
+      if(j == 0) {
         UserEvent event = UserEvent::create_user_event();
         alloc_events.push_back(event);
         ProfAllocResult result;
         result.done = event;
-        result.success = &alloc_results[index];
+        result.success = &alloc_results[profile_result_index];
         result.invocations = &alloc_invocations;
         prs[i]
             .add_request(p, ALLOC_PROF_TASK, &result, sizeof(ProfAllocResult))
@@ -313,12 +322,12 @@ void worker_task(const void *args, size_t arglen, const void *userdata, size_t u
         musage_events.push_back(event);
         ProfMusageResult result;
         result.done = event;
-        result.bytes = &musage_results[index];
-        prs[i]
+        result.bytes = &musage_results[profile_result_index];
+        prs[j]
             .add_request(p, MUSAGE_PROF_TASK, &result, sizeof(ProfMusageResult))
             .add_measurement<ProfilingMeasurements::InstanceMemoryUsage>();
       }
-      index++;
+      profile_result_index ++;
     }
 
     Event e = inst.redistrict(insts.data(), layouts.data(), 2, prs.data());
@@ -345,7 +354,7 @@ void worker_task(const void *args, size_t arglen, const void *userdata, size_t u
     e = IndexSpace<1>(next_bounds).copy(srcs, dsts, ProfilingRequestSet(), e);
     e.wait();*/
 
-    int index = next_bounds.volume();
+    size_t offset = next_bounds.volume();
     for(size_t i = 1; i < insts.size(); i++) {
       AffineAccessor<int, 1, int> acc(insts[i], 0);
       IndexSpaceIterator<1, int> it(next_bounds);
@@ -353,7 +362,7 @@ void worker_task(const void *args, size_t arglen, const void *userdata, size_t u
         PointInRectIterator<1, int> pit(it.rect);
         while(pit.valid) {
           int val = acc[pit.p];
-          assert(val == wargs->data[index++]);
+          assert(val == wargs->data[offset++]);
           pit.step();
         }
         it.step();

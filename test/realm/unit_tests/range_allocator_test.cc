@@ -271,8 +271,7 @@ TEST_F(RangeAllocatorTest, TestExplicitRangesSharedTags)
   EXPECT_TRUE(alloc.has_invalid_ranges());
 }
 
-#if 0
-struct TestCase {
+struct RangeAllocTestCase {
   std::vector<std::pair<size_t, size_t>> alloc_ranges;
 
   std::vector<int> alloc_tags;
@@ -300,7 +299,7 @@ struct TestCase {
 
 typedef BasicRangeAllocator<size_t, int>::Range Range;
 
-class RangeAllocatorSplitParamTest : public ::testing::TestWithParam<TestCase> {
+class RangeAllocatorSplitParamTest : public ::testing::TestWithParam<RangeAllocTestCase> {
 protected:
   const unsigned int SENTINEL = BasicRangeAllocator<size_t, int>::SENTINEL;
   size_t get_total_free_size()
@@ -333,7 +332,7 @@ TEST_P(RangeAllocatorSplitParamTest, Base)
                                      test_case.alloc_aligns[i], offset));
   }
 
-  for(TestCase::SplitOp op : test_case.split_ops) {
+  for(RangeAllocTestCase::SplitOp op : test_case.split_ops) {
     std::vector<size_t> offsets(op.new_tags.size());
     EXPECT_EQ(
         range_alloc.split_range(op.old_tag, op.new_tags, op.sizes, op.aligns, offsets),
@@ -376,33 +375,33 @@ INSTANTIATE_TEST_SUITE_P(
     testing::Values(
 
         // Case 0: split empty
-        TestCase{.split_ops{{.old_tag = 1,
-                             .good_allocs = 0,
-                             .new_tags{7},
-                             .sizes{512},
-                             .aligns{8},
-                             .exp_offsets{0}}},
-                 .exp_ranges{Range{}}},
+        RangeAllocTestCase{.split_ops{{.old_tag = 1,
+                                       .good_allocs = 0,
+                                       .new_tags{7},
+                                       .sizes{512},
+                                       .aligns{8},
+                                       .exp_offsets{0}}},
+                           .exp_ranges{Range{}}},
 
         // Case 1: split from non-existent tag
-        TestCase{.alloc_ranges{{0, 512}},
-                 .alloc_tags{1},
-                 .alloc_sizes{512},
-                 .alloc_aligns{8},
+        RangeAllocTestCase{.alloc_ranges{{0, 512}},
+                           .alloc_tags{1},
+                           .alloc_sizes{512},
+                           .alloc_aligns{8},
 
-                 .split_ops{{.old_tag = 2,
-                             .good_allocs = 0,
-                             .new_tags{7},
-                             .sizes{512},
-                             .aligns{8},
-                             .exp_offsets{0}}},
+                           .split_ops{{.old_tag = 2,
+                                       .good_allocs = 0,
+                                       .new_tags{7},
+                                       .sizes{512},
+                                       .aligns{8},
+                                       .exp_offsets{0}}},
 
-                 .exp_ranges{Range{/*first=*/0, /*last=*/0},
-                             Range{/*first=*/0, /*last=*/512}}},
+                           .exp_ranges{Range{/*first=*/0, /*last=*/0},
+                                       Range{/*first=*/0, /*last=*/512}}},
 
         // TODO(apryakhin@): Consider enabling it back
         // Case 2: split into the existing tag
-        /*TestCase{.alloc_ranges{{0, 512}},
+        /*RangeAllocTestCase{.alloc_ranges{{0, 512}},
                  .alloc_tags{1},
                  .alloc_sizes{512},
                  .alloc_aligns{8},
@@ -418,26 +417,26 @@ INSTANTIATE_TEST_SUITE_P(
                              Range{0, 512}}},*/
 
         // Case 3: base case split/reuse the full range
-        TestCase{.alloc_ranges{{0, 512}},
-                 .alloc_tags{1},
-                 .alloc_sizes{512},
-                 .alloc_aligns{8},
+        RangeAllocTestCase{.alloc_ranges{{0, 512}},
+                           .alloc_tags{1},
+                           .alloc_sizes{512},
+                           .alloc_aligns{8},
 
-                 .split_ops{{.old_tag = 1,
-                             .good_allocs = 1,
-                             .new_tags{7},
-                             .sizes{512},
-                             .aligns{8},
-                             .exp_offsets{0}}},
+                           .split_ops{{.old_tag = 1,
+                                       .good_allocs = 1,
+                                       .new_tags{7},
+                                       .sizes{512},
+                                       .aligns{8},
+                                       .exp_offsets{0}}},
 
-                 .exp_ranges{
-                     Range{/*first=*/0, /*last=*/0},
-                     Range{/*first=*/0, /*last=*/512},
-                     Range{/*first=*/512, /*last=*/512},
-                 }},
+                           .exp_ranges{
+                               Range{/*first=*/0, /*last=*/0},
+                               Range{/*first=*/0, /*last=*/512},
+                               Range{/*first=*/512, /*last=*/512},
+                           }},
 
         // Case 4: split/reuse zero range
-        TestCase{
+        RangeAllocTestCase{
             .alloc_ranges{{0, 512}},
             .alloc_tags{1},
             .alloc_sizes{0},
@@ -456,7 +455,7 @@ INSTANTIATE_TEST_SUITE_P(
         },
 
         // Case 5: reuse range with different alignment and create a free block in front
-        TestCase{
+        RangeAllocTestCase{
             .alloc_ranges{{24, 1000}},
             .alloc_tags{1},
             .alloc_sizes{800},
@@ -481,7 +480,7 @@ INSTANTIATE_TEST_SUITE_P(
         },
 
         // Case 6: split range with second layout going OOM
-        TestCase{
+        RangeAllocTestCase{
             .alloc_ranges{{24, 1000}},
             .alloc_tags{1},
             .alloc_sizes{800},
@@ -510,7 +509,7 @@ INSTANTIATE_TEST_SUITE_P(
 
         // TODO(apryakhin@): Consider enabling it back
         // Case 7: split range with duplicated tag
-        /*TestCase{
+        /*RangeAllocTestCase{
             .alloc_ranges{{24, 1000}},
             .alloc_tags{1},
             .alloc_sizes{800},
@@ -536,7 +535,7 @@ INSTANTIATE_TEST_SUITE_P(
 
         // Case 8: split range on different layouts and create free blocks in
         // front
-        TestCase{
+        RangeAllocTestCase{
             .alloc_ranges{{24, 1000}},
             .alloc_tags{1},
             .alloc_sizes{800},
@@ -563,7 +562,7 @@ INSTANTIATE_TEST_SUITE_P(
         },
 
         // Case 9: run multiple even splits
-        TestCase{
+        RangeAllocTestCase{
             .alloc_ranges{{0, 256}},
             .alloc_tags{1, 2},
             .alloc_sizes{128, 128},
@@ -600,7 +599,7 @@ INSTANTIATE_TEST_SUITE_P(
         },
 
         // Case 10: run multiple split that result in fragmentation
-        TestCase{
+        RangeAllocTestCase{
             .alloc_ranges{{0, 256}},
             .alloc_tags{1, 2, 3, 4},
             .alloc_sizes{64, 64, 64, 64},
@@ -640,7 +639,7 @@ INSTANTIATE_TEST_SUITE_P(
         // alignment followed by splitting the newly created range into
         // another set of ranges each of which also produce a free
         // block.
-        TestCase{
+        RangeAllocTestCase{
             .alloc_ranges{{24, 1000}},
             .alloc_tags{1},
             .alloc_sizes{800},
@@ -667,4 +666,3 @@ INSTANTIATE_TEST_SUITE_P(
         }
 
         ));
-#endif
