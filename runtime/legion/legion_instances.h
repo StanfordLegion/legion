@@ -514,7 +514,7 @@ namespace Legion {
       ApUserEvent use_event;
       // Event that signifies if the instance name is available
       RtUserEvent instance_ready;
-      InstanceKind kind;
+      std::atomic<InstanceKind> kind;
       // Completion event of the task that sets a realm instance
       // to this manager. Valid only when the kind is UNBOUND
       // initially, otherwise NO_AP_EVENT.
