@@ -22,7 +22,7 @@ enum
   MUSAGE_PROF_TASK,
 };
 
-int num_iterations = 1;
+int num_iterations = 2;
 bool needs_oom = false;
 
 struct WorkerArgs {
@@ -306,7 +306,7 @@ void worker_task(const void *args, size_t arglen, const void *userdata, size_t u
         timel_events.push_back(event);
       }
 
-      if(j == 0) {
+      {
         UserEvent event = UserEvent::create_user_event();
         alloc_events.push_back(event);
         ProfAllocResult result;
@@ -381,8 +381,8 @@ void worker_task(const void *args, size_t arglen, const void *userdata, size_t u
   musage_event.wait();
   timel_event.wait();
 
-  for(size_t i = 1; i < alloc_results.size() - 1; i++) {
-    assert(alloc_results[i]);
+  for(size_t i = 0; i < alloc_results.size(); i++) {
+     assert(alloc_results[i]);
   }
 
   for(size_t i = 0; i < timel_results.size(); i++) {
@@ -393,7 +393,7 @@ void worker_task(const void *args, size_t arglen, const void *userdata, size_t u
     assert(static_cast<size_t>(musage_results[i]) == exp_usage[i] * sizeof(int));
   }
 
-  assert(alloc_invocations == 1);
+  assert(static_cast<size_t>(alloc_invocations) == alloc_results.size());
 }
 
 int main(int argc, char **argv)
