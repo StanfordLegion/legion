@@ -476,7 +476,7 @@ namespace Legion {
           std::map<Memory,PoolBounds> &dynamic_pool_bounds);
     public:
       bool acquire_leaf_memory_pool(Memory memory, const PoolBounds &bounds,
-                                    bool &safe_for_unbounded_pools);
+                                    RtEvent *safe_for_unbounded_pools);
       void release_leaf_memory_pool(Memory memory);
     protected:
       void pack_single_task(Serializer &rez, AddressSpaceID target);

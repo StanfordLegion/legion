@@ -1202,19 +1202,21 @@ namespace Legion {
       assert(ctx->acquired_instances != NULL);
 #endif
       // Important: do this before pausing the mapper call
-      bool safe_for_unbounded_pools = is_safe_for_unbounded_pools();
+      const bool safe_for_unbounded_pools = is_safe_for_unbounded_pools();
       pause_mapper_call(ctx);
+      RtEvent unbounded_pool_wait;
       TaskTreeCoordinates coordinates;
       ctx->operation->compute_task_tree_coordinates(coordinates);
       bool success = runtime->create_physical_instance(target_memory, 
         constraints, regions, coordinates, result, processor, acquire, priority,
         tight_region_bounds, unsat, footprint, (ctx->operation == NULL) ?
-          0 : ctx->operation->get_unique_op_id(), safe_for_unbounded_pools);
-      if (success && acquire)
-        record_acquired_instance(ctx, result.impl, true/*created*/);
-      if (!safe_for_unbounded_pools)
+          0 : ctx->operation->get_unique_op_id(), safe_for_unbounded_pools ?
+          NULL : &unbounded_pool_wait);
+      if (!safe_for_unbounded_pools && unbounded_pool_wait.exists())
         report_unsafe_allocation_in_unbounded_pool(ctx, target_memory, 
             MAPPER_CREATE_PHYSICAL_INSTANCE_CALL);
+      if (success && acquire)
+        record_acquired_instance(ctx, result.impl, true/*created*/);
       resume_mapper_call(ctx, MAPPER_CREATE_PHYSICAL_INSTANCE_CALL);
       return success;
     }
@@ -1248,20 +1250,22 @@ namespace Legion {
       assert(ctx->acquired_instances != NULL);
 #endif
       // Important: do this before pausing the mapper call
-      bool safe_for_unbounded_pools = is_safe_for_unbounded_pools();
+      const bool safe_for_unbounded_pools = is_safe_for_unbounded_pools();
       pause_mapper_call(ctx);
+      RtEvent unbounded_pool_wait;
       TaskTreeCoordinates coordinates;
       ctx->operation->compute_task_tree_coordinates(coordinates);
       LayoutConstraints *cons = runtime->find_layout_constraints(layout_id);
       bool success = runtime->create_physical_instance(target_memory, cons,
           regions, coordinates, result, processor, acquire, priority,
           tight_region_bounds, unsat, footprint, (ctx->operation == NULL) ?
-          0 : ctx->operation->get_unique_op_id(), safe_for_unbounded_pools);
-      if (success && acquire)
-        record_acquired_instance(ctx, result.impl, true/*created*/);
-      if (!safe_for_unbounded_pools)
+          0 : ctx->operation->get_unique_op_id(), safe_for_unbounded_pools ?
+          NULL : &unbounded_pool_wait);
+      if (!safe_for_unbounded_pools && unbounded_pool_wait.exists())
         report_unsafe_allocation_in_unbounded_pool(ctx, target_memory,
             MAPPER_CREATE_PHYSICAL_INSTANCE_CALL);
+      if (success && acquire)
+        record_acquired_instance(ctx, result.impl, true/*created*/);
       resume_mapper_call(ctx, MAPPER_CREATE_PHYSICAL_INSTANCE_CALL);
       return success;
     }
@@ -1299,20 +1303,22 @@ namespace Legion {
       assert(ctx->acquired_instances != NULL);
 #endif
       // Important: do this before pausing the mapper call
-      bool safe_for_unbounded_pools = is_safe_for_unbounded_pools();
+      const bool safe_for_unbounded_pools = is_safe_for_unbounded_pools();
       pause_mapper_call(ctx);
+      RtEvent unbounded_pool_wait; 
       TaskTreeCoordinates coordinates;
       ctx->operation->compute_task_tree_coordinates(coordinates);
       bool success = runtime->find_or_create_physical_instance(target_memory,
                 constraints, regions, coordinates, result, created, processor,
                 acquire, priority, tight_region_bounds, unsat, footprint,
                 (ctx->operation == NULL) ? 0 :
-                 ctx->operation->get_unique_op_id(), safe_for_unbounded_pools);
-      if (success && acquire)
-        record_acquired_instance(ctx, result.impl, created);
-      if (!safe_for_unbounded_pools)
+                 ctx->operation->get_unique_op_id(), safe_for_unbounded_pools ?
+                 NULL : &unbounded_pool_wait);
+      if (!safe_for_unbounded_pools && unbounded_pool_wait.exists())
         report_unsafe_allocation_in_unbounded_pool(ctx, target_memory,
             MAPPER_FIND_OR_CREATE_PHYSICAL_INSTANCE_CALL);
+      if (success && acquire)
+        record_acquired_instance(ctx, result.impl, created);
       resume_mapper_call(ctx, MAPPER_FIND_OR_CREATE_PHYSICAL_INSTANCE_CALL);
       return success;
     }
@@ -1350,8 +1356,9 @@ namespace Legion {
       assert(ctx->acquired_instances != NULL);
 #endif
       // Important: do this before pausing the mapper call
-      bool safe_for_unbounded_pools = is_safe_for_unbounded_pools();
+      const bool safe_for_unbounded_pools = is_safe_for_unbounded_pools();
       pause_mapper_call(ctx);
+      RtEvent unbounded_pool_wait;
       TaskTreeCoordinates coordinates;
       ctx->operation->compute_task_tree_coordinates(coordinates);
       LayoutConstraints *cons = runtime->find_layout_constraints(layout_id);
@@ -1359,12 +1366,13 @@ namespace Legion {
                  cons, regions, coordinates, result, created, processor,
                  acquire, priority, tight_region_bounds, unsat, footprint,
                  (ctx->operation == NULL) ? 0 : 
-                  ctx->operation->get_unique_op_id(), safe_for_unbounded_pools);
-      if (success && acquire)
-        record_acquired_instance(ctx, result.impl, created);
-      if (!safe_for_unbounded_pools)
+                  ctx->operation->get_unique_op_id(), safe_for_unbounded_pools ?
+                  NULL : &unbounded_pool_wait);
+      if (!safe_for_unbounded_pools && unbounded_pool_wait.exists())
         report_unsafe_allocation_in_unbounded_pool(ctx, target_memory,
             MAPPER_FIND_OR_CREATE_PHYSICAL_INSTANCE_CALL);
+      if (success && acquire)
+        record_acquired_instance(ctx, result.impl, created);
       resume_mapper_call(ctx, MAPPER_FIND_OR_CREATE_PHYSICAL_INSTANCE_CALL);
       return success;
     }
@@ -1900,7 +1908,7 @@ namespace Legion {
         return false;
       }
       // Important: do this before pausing the mapper call
-      bool safe_for_unbounded_pools = is_safe_for_unbounded_pools();
+      const bool safe_for_unbounded_pools = is_safe_for_unbounded_pools();
       pause_mapper_call(ctx);
 #ifdef DEBUG_LEGION
       assert(ctx->operation != NULL);
@@ -1909,9 +1917,11 @@ namespace Legion {
 #else
       SingleTask *task = static_cast<SingleTask*>(ctx->operation);
 #endif
+      RtEvent unbounded_pool_wait;
       const bool result = future.impl->request_application_instance(
-          memory, task, safe_for_unbounded_pools, true/*can fail*/);
-      if (!safe_for_unbounded_pools)
+          memory, task, safe_for_unbounded_pools ? NULL : 
+          &unbounded_pool_wait, true/*can fail*/);
+      if (!safe_for_unbounded_pools && unbounded_pool_wait.exists())
         report_unsafe_allocation_in_unbounded_pool(ctx, memory,
             MAPPER_ACQUIRE_FUTURE_CALL);
       resume_mapper_call(ctx, MAPPER_ACQUIRE_FUTURE_CALL);
@@ -1935,7 +1945,7 @@ namespace Legion {
         return false;
       }
       // Important: do this before pausing the mapper call
-      bool safe_for_unbounded_pools = is_safe_for_unbounded_pools();
+      const bool safe_for_unbounded_pools = is_safe_for_unbounded_pools();
       pause_mapper_call(ctx);
 #ifdef DEBUG_LEGION
       assert(ctx->operation != NULL);
@@ -1944,9 +1954,10 @@ namespace Legion {
 #else
       SingleTask *task = static_cast<SingleTask*>(ctx->operation);
 #endif
+      RtEvent unbounded_pool_wait;
       const bool result = task->acquire_leaf_memory_pool(memory, bounds,
-                                              safe_for_unbounded_pools);
-      if (!safe_for_unbounded_pools)
+          safe_for_unbounded_pools ? NULL : &unbounded_pool_wait);
+      if (!safe_for_unbounded_pools && unbounded_pool_wait.exists())
         report_unsafe_allocation_in_unbounded_pool(ctx, memory,
             MAPPER_ACQUIRE_POOL_CALL);
       resume_mapper_call(ctx, MAPPER_ACQUIRE_POOL_CALL);

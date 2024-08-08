@@ -2499,9 +2499,8 @@ namespace Legion {
         {
           derez.deserialize(future_memories[idx]);
           // Safe to block indefinitely here for unbounded pools
-          bool safe_for_unbounded_pools = true;
           futures[idx].impl->request_application_instance(
-              future_memories[idx], this, safe_for_unbounded_pools);
+              future_memories[idx], this, NULL/*safe_for_unbounded_pools*/);
         }
         size_t num_task_requests;
         derez.deserialize(num_task_requests);
@@ -2882,11 +2881,10 @@ namespace Legion {
                 get_unique_id(), idx, future_memories[idx].id, 
                 future_memories[idx].address_space(), target_space,
                 this->target_proc.id)
-          // Safe to block here indefinitely waiting for unbounded pools
-          bool safe_for_unbounded_pools = true;
           // Request the future memories be created
+          // Safe to block here indefinitely waiting for unbounded pools
           futures[idx].impl->request_application_instance(
-              future_memories[idx], this, safe_for_unbounded_pools);
+              future_memories[idx], this, NULL/*safe_for_unbounded_pools*/);
         }
         // Handle any unmapped futures too
         Memory target_memory = Memory::NO_MEMORY;
@@ -2902,9 +2900,8 @@ namespace Legion {
           }
           future_memories.push_back(target_memory);
           // Safe to block here indefinitely waiting for unbounded pools
-          bool safe_for_unbounded_pools = true;
           futures[idx].impl->request_application_instance(target_memory,
-              this, safe_for_unbounded_pools);
+              this, NULL/*safe_for_unbounded_pools*/);
         }
       }
       // Sort out any profiling requests that we need to perform
@@ -3527,9 +3524,8 @@ namespace Legion {
         {
           const Memory memory = future_memories[idx];
           // Safe to block here indefinitely waiting for unbounded pools
-          bool safe_for_unbounded_pools = true;
           futures[idx].impl->request_application_instance(memory, this,
-              safe_for_unbounded_pools);
+              NULL/*safe_for_unbounded_pools*/);
         }
       }
       // Make any memory pools required to replay this task
@@ -3542,9 +3538,8 @@ namespace Legion {
         compute_task_tree_coordinates(coordinates);
         // Safe to block here indefinitely for unbounded pools since any
         // unbounded pools have to come from before the trace
-        bool safe_for_unbounded_pools = true;
         MemoryPool *pool = manager->create_memory_pool(get_unique_id(),
-            coordinates, it->second, safe_for_unbounded_pools);
+            coordinates, it->second, NULL/*safe_for_unbounded_pools*/);
         if (pool == NULL)
           REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
               "Failed to reserve a dynamic memory pool of %zd bytes for "
@@ -4846,6 +4841,7 @@ namespace Legion {
       }
       std::map<Memory,MemoryPool*> acquired_pools;
       acquired_pools.swap(leaf_memory_pools);
+      std::vector<Memory> unbounded_pools;
       // Now we can go through and create the pools for use by this task
       for (std::map<Memory,PoolBounds>::const_iterator it =
             dynamic_pool_bounds.begin(); it != dynamic_pool_bounds.end(); it++)
@@ -4867,6 +4863,10 @@ namespace Legion {
             acquired_pools.find(it->first);
           if (finder != acquired_pools.end())
           {
+#ifdef DEBUG_LEGION
+            // These should all be bounded pools
+            assert(finder->second->get_bounds().scope == LEGION_BOUNDED_POOL);
+#endif
             leaf_memory_pools.insert(acquired_pools.extract(finder));
             continue;
           }
@@ -4920,13 +4920,68 @@ namespace Legion {
                   get_task_name(), get_unique_id())
           }
         }
-        // Recompute these each time as they might be consumed each time
-        TaskTreeCoordinates coordinates;
-        compute_task_tree_coordinates(coordinates);
-        // It's safe to block here for unbounded pools
-        bool safe_for_unbounded_pools = true;
-        MemoryPool *pool = manager->create_memory_pool(get_unique_id(),
-            coordinates, it->second, safe_for_unbounded_pools);
+        // It's not safe to hold onto unbounded pools if we're going to
+        // block on trying to allocate something else as this can lead to
+        // hangs associated with things like concurrent index space task
+        // launches that need to be able to acquire all their pools without
+        // us interleaving in between them.
+        RtEvent try_again;
+        MemoryPool *pool = NULL;
+        unsigned unbound_acquired_index = unbounded_pools.size(); 
+        do {
+          if (try_again.exists())
+          {
+            // Release all unbounded pools
+            for (unsigned idx = 0; idx < unbound_acquired_index; idx++)
+            {
+              std::map<Memory,MemoryPool*>::iterator finder =
+                leaf_memory_pools.find(unbounded_pools[idx]);
+#ifdef DEBUG_LEGION
+              assert(finder != leaf_memory_pools.end());
+#endif
+              finder->second->release_pool(get_unique_id());
+              delete finder->second;
+              leaf_memory_pools.erase(finder);
+            }
+            // Wait to try again
+            try_again.wait();
+            try_again = RtEvent::NO_RT_EVENT;
+            // Try to reacquire all unbounded pools
+            for (unbound_acquired_index = 0; unbound_acquired_index < 
+                  unbounded_pools.size(); unbound_acquired_index++)
+            {
+              const Memory memory = unbounded_pools[unbound_acquired_index];
+              MemoryManager *target = runtime->find_memory_manager(memory);
+              std::map<Memory,PoolBounds>::const_iterator finder = 
+                dynamic_pool_bounds.find(memory);
+#ifdef DEBUG_LEGION
+              assert(finder != dynamic_pool_bounds.end());
+              assert(!finder->second.is_bounded());
+#endif
+              // Recompute these each time as they might be consumed each time
+              TaskTreeCoordinates coordinates;
+              compute_task_tree_coordinates(coordinates);
+              MemoryPool *unbound_pool = target->create_memory_pool(
+                  get_unique_id(), coordinates, finder->second, &try_again); 
+              if (try_again.exists())
+                break;
+              leaf_memory_pools.emplace(std::make_pair(memory, unbound_pool));
+            }
+#ifdef DEBUG_LEGION
+            assert(try_again.exists() == 
+                (unbound_acquired_index < unbounded_pools.size()));
+#endif
+            if (try_again.exists())
+              continue;
+          }
+          // Try to do the most recent allocation
+          // Recompute these each time as they might be consumed each time
+          TaskTreeCoordinates coordinates;
+          compute_task_tree_coordinates(coordinates);
+          // Not safe to block here indefinitely holding unbounded pools
+          pool = manager->create_memory_pool(get_unique_id(),
+              coordinates, it->second, &try_again);
+        } while (try_again.exists());
         if (pool == NULL)
           REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
               "Failed to reserve a dynamic memory pool of %zd bytes for "
@@ -4940,6 +4995,9 @@ namespace Legion {
               it->second.size, get_task_name(), get_unique_id(),
               manager->get_name())
         leaf_memory_pools.emplace(std::make_pair(it->first, pool));
+        // Keep track of all our unbounded pools
+        if (!it->second.is_bounded())
+          unbounded_pools.push_back(it->first);
       }
       // If we have any pools left in the acquired set we can delete them
       // since we're not going to need them
@@ -4950,9 +5008,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool SingleTask::acquire_leaf_memory_pool(Memory memory,
-        const PoolBounds &bounds, bool &safe_for_unbounded_pools)
+        const PoolBounds &bounds, RtEvent *safe_for_unbounded_pools)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(bounds.is_bounded());
+#endif
       // Check to see if we already have a memory pool for this memory of
       // the given size, if we do then we're already good
       std::map<Memory,MemoryPool*>::iterator finder =
@@ -4961,10 +5022,7 @@ namespace Legion {
       {
         if ((bounds.size <= finder->second->query_available_memory()) &&
             (bounds.alignment <= finder->second->max_alignment))
-        {
-          safe_for_unbounded_pools = true;
           return true;
-        }
         // Otherwise release this pool since we're going to make a new one
         delete finder->second;
         leaf_memory_pools.erase(finder);
@@ -6667,9 +6725,8 @@ namespace Legion {
         else
         {
           // Safe to block here indefinitely waiting for unbounded pools
-          bool safe_for_unbounded_pools = true;
           result.impl->set_result(this, predicate_false_future.impl,
-                                  safe_for_unbounded_pools);
+                                  NULL/*safe_for_unbounded_pools*/);
         }
       }
       complete_mapping();
@@ -10041,9 +10098,8 @@ namespace Legion {
                 Future f = future_map.impl->get_future(itr.p,
                                             true/*internal*/);
                 // Safe to block indefinitely waiting for unbounded pools
-                bool safe_for_unbounded_pools = true;
                 f.impl->set_result(this, predicate_false_future.impl,
-                                   safe_for_unbounded_pools);
+                                   NULL/*safe_for_unbounded_pools*/);
               }
             }
             else
@@ -10066,9 +10122,8 @@ namespace Legion {
           if (redop_initial_value.impl != NULL)
           {
             // Safe to block here indefinitely waiting for unbounded pools
-            bool safe_for_unbounded_pools = true;
             reduction_future.impl->set_result(this, redop_initial_value.impl,
-                                              safe_for_unbounded_pools);
+                                              NULL/*safe_for_unbounded_pools*/);
           }
           else
             reduction_future.impl->set_local(&reduction_op->identity,
@@ -10171,10 +10226,9 @@ namespace Legion {
             runtime_visible_index = reduction_instances.size();
           MemoryManager *manager = runtime->find_memory_manager(*it);
           // Safe to block here indefinitely waiting for unbounded pools
-          bool safe_for_unbounded_pools = true;
           reduction_instances.push_back(manager->create_future_instance(
                 unique_op_id, coordinates, reduction_op->sizeof_rhs,
-                safe_for_unbounded_pools));
+                NULL/*safe_for_unbounded_pools*/));
         }
         // This is an important optimization: if we're doing a small
         // reduction value we always want the reduction instance to
@@ -10187,10 +10241,9 @@ namespace Legion {
           MemoryManager *manager = 
             runtime->find_memory_manager(runtime->runtime_system_memory);
           // Safe to block here indefinitely waiting for unbounded pools
-          bool safe_for_unbounded_pools = true;
           reduction_instances.push_back(manager->create_future_instance(
                 unique_op_id, coordinates, reduction_op->sizeof_rhs,
-                safe_for_unbounded_pools));
+                NULL/*safe_for_unbounded_pools*/));
         }
         if (runtime_visible_index > 0)
           std::swap(reduction_instances.front(), 
@@ -10841,10 +10894,9 @@ namespace Legion {
               compute_task_tree_coordinates(coordinates);
             MemoryManager *manager = runtime->find_memory_manager(*it);
             // Safe to block here indefinitely waiting for unbounded pools
-            bool safe_for_unbounded_pools = true;
             reduction_instances.push_back(manager->create_future_instance(
                   unique_op_id, coordinates, serdez_redop_state_size,
-                  safe_for_unbounded_pools));
+                  NULL/*safe_for_unbounded_pools*/));
           }
         }
         if (runtime_visible_index < 0)

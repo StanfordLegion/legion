@@ -1438,10 +1438,9 @@ namespace Legion {
           TaskTreeCoordinates coordinates;
           compute_task_tree_coordinates(coordinates);
           // Safe to block indefinitely here waiting for unbounded pools
-          bool safe_for_unbounded_pools = true;
           FutureInstance *shadow_instance = manager->create_future_instance(
               unique_op_id, coordinates, reduction_op->sizeof_rhs,
-              safe_for_unbounded_pools);
+              NULL/*safe_for_unbounded_pools*/);
           all_reduce_collective->set_shadow_instance(shadow_instance);
         }
       }
@@ -5932,10 +5931,9 @@ namespace Legion {
           TaskTreeCoordinates coordinates;
           compute_task_tree_coordinates(coordinates);
           // Safe to block here indefinitely waiting for unbounded pools
-          bool safe_for_unbounded_pools = true;
           FutureInstance *shadow_instance = manager->create_future_instance(
               unique_op_id, coordinates, redop->sizeof_rhs,
-              safe_for_unbounded_pools);
+              NULL/*safe_for_unbounded_pools*/);
           all_reduce_collective->set_shadow_instance(shadow_instance);
         }
       }

@@ -22151,9 +22151,8 @@ namespace Legion {
         TaskTreeCoordinates coordinates;
         compute_task_tree_coordinates(coordinates);
         // Safe to block here indefinitely waiting for unbounded pools
-        bool safe_for_unbounded_pools = true;
         instance = manager->create_future_instance(unique_op_id,
-            coordinates, return_type_size, safe_for_unbounded_pools);
+            coordinates, return_type_size, NULL/*safe_for_unbounded_pools*/);
         complete_mapping(futures_mapped);
       }
       // Also make sure we wait for any execution fences that we have
@@ -22630,9 +22629,9 @@ namespace Legion {
           runtime_visible = targets.size();
         MemoryManager *manager = runtime->find_memory_manager(*it);
         // Safe to block here indefinitely waiting for unbounded pools
-        bool safe_for_unbounded_pools = true;
         FutureInstance *instance = manager->create_future_instance(
-            unique_op_id, coordinates, result_size, safe_for_unbounded_pools);
+            unique_op_id, coordinates, result_size,
+            NULL/*safe for unbounded pools*/);
         targets.push_back(instance);
       }
       // This is an important optimization: if we're doing a small

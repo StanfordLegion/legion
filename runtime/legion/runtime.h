@@ -364,12 +364,12 @@ namespace Legion {
       void report_incompatible_accessor(const char *accessor_kind,
                                         PhysicalInstance instance);
       bool request_application_instance(Memory target, SingleTask *task,
-          bool &safe_for_unbounded_pools, bool can_fail = false,
+          RtEvent *safe_for_unbounded_pools, bool can_fail = false,
           size_t known_upper_bound_size = SIZE_MAX);
       bool find_or_create_application_instance(Memory target, 
           size_t known_upper_bound_size, UniqueID task_uid,
           const TaskTreeCoordinates &coordinates,
-          bool &safe_for_unbounded_pools);
+          RtEvent *safe_for_unbounded_pools);
       ApEvent find_application_instance_ready(Memory target, SingleTask *task);
       void request_runtime_instance(Operation *op);
       RtEvent find_runtime_instance_ready(void);
@@ -398,7 +398,7 @@ namespace Legion {
       void set_result(ApEvent complete, FutureFunctor *callback_functor,
                       bool own, Processor functor_proc);
       void set_result(Operation *op, FutureImpl *previous,
-                      bool &safe_for_unbounded_pools);
+                      RtEvent *safe_for_unbounded_pools);
       void set_result(TaskContext *ctx, FutureImpl *previous);
       // This is the same as above but for data that we know is visible
       // in the system memory and should always make a local FutureInstance
@@ -433,7 +433,7 @@ namespace Legion {
       FutureInstance* find_or_create_instance(Memory memory,ApEvent &inst_ready,
           bool silence_warnings, const char *warning_string);
       FutureInstance* create_instance(Operation *op, Memory memory,
-          size_t size, bool &safe_for_unbounded_pools);
+          size_t size, RtEvent *safe_for_unbounded_pools);
       // Must be holding the lock when calling initialize_instance
       ApEvent record_instance(FutureInstance *instance, UniqueID creator_uid);
       Memory find_best_source(Memory target) const;
@@ -1706,7 +1706,7 @@ namespace Legion {
                                     GCPriority priority, bool tight_bounds,
                                     LayoutConstraintKind *unsat_kind, 
                                     unsigned *unsat_index, size_t *footprint, 
-                                    bool &safe_for_unbounded_pools,
+                                    RtEvent *safe_for_unbounded_pools,
                                     UniqueID creator_id, bool remote = false);
       bool create_physical_instance(LayoutConstraints *constraints,
                                     const std::vector<LogicalRegion> &regions,
@@ -1716,7 +1716,7 @@ namespace Legion {
                                     GCPriority priority, bool tight_bounds,
                                     LayoutConstraintKind *unsat_kind,
                                     unsigned *unsat_index, size_t *footprint, 
-                                    bool &safe_for_unbounded_pools,
+                                    RtEvent *safe_for_unbounded_pools,
                                     UniqueID creator_id, bool remote = false);
       bool find_or_create_physical_instance(
                                     const LayoutConstraintSet &constraints,
@@ -1728,7 +1728,7 @@ namespace Legion {
                                     bool tight_region_bounds, 
                                     LayoutConstraintKind *unsat_kind, 
                                     unsigned *unsat_index, size_t *footprint, 
-                                    bool &safe_for_unbounded_pools,
+                                    RtEvent *safe_for_unbounded_pools,
                                     UniqueID creator_id, bool remote = false);
       bool find_or_create_physical_instance(
                                     LayoutConstraints *constraints,
@@ -1740,7 +1740,7 @@ namespace Legion {
                                     bool tight_region_bounds, 
                                     LayoutConstraintKind *unsat_kind,
                                     unsigned *unsat_index, size_t *footprint, 
-                                    bool &safe_for_unbounded_pools,
+                                    RtEvent *safe_for_unbounded_pools,
                                     UniqueID creator_id, bool remote = false);
       bool find_physical_instance(  const LayoutConstraintSet &constraints,
                                     const std::vector<LogicalRegion> &regions,
@@ -1772,19 +1772,19 @@ namespace Legion {
     public:
       FutureInstance* create_future_instance(UniqueID creator_id, 
           const TaskTreeCoordinates &coordinates, size_t size,
-          bool &safe_for_unbounded_pools);
+          RtEvent *safe_for_unbounded_pools);
       void free_future_instance(PhysicalInstance inst, size_t size,
                                 RtEvent free_event);
       PhysicalInstance create_task_local_instance(UniqueID creator_uid,
           const TaskTreeCoordinates &coordinates, LgEvent unique_event,
           Realm::InstanceLayoutGeneric *layout, RtEvent &use_event,
-          bool &safe_for_unbounded_pools);
+          RtEvent *safe_for_unbounded_pools);
       void free_task_local_instance(PhysicalInstance instance,
                                   RtEvent precondition = RtEvent::NO_RT_EVENT);
       size_t query_available_memory(void); 
       MemoryPool* create_memory_pool(UniqueID creator_uid, 
           TaskTreeCoordinates &coordinates, const PoolBounds &bounds,
-          bool &safe_for_unbounded_pools);
+          RtEvent *safe_for_unbounded_pools);
       void release_unbound_pool(void);
       static void handle_create_memory_pool_request(Deserializer &derez,
           Runtime *runtime, AddressSpaceID source);
@@ -1822,7 +1822,7 @@ namespace Legion {
       // ensure find_and_create calls will remain atomic and are also
       // ordered with respect to any unbound pool allocations
       RtEvent acquire_allocation_privilege(const TaskTreeCoordinates &coords,
-                                           bool &safe_for_unbounded_pools);
+                                           RtEvent *safe_for_unbounded_pools);
       void release_allocation_privilege(void);
       PhysicalManager* allocate_physical_instance(InstanceBuilder &builder,
                                           size_t *footprint,
@@ -4094,7 +4094,7 @@ namespace Legion {
                                     GCPriority priority, bool tight_bounds,
                                     const LayoutConstraint **unsat,
                                     size_t *footprint, UniqueID creator_id,
-                                    bool &safe_for_unbounded_pools);
+                                    RtEvent *safe_for_unbounded_pools);
       bool create_physical_instance(Memory target_memory, 
                                     LayoutConstraints *constraints,
                                     const std::vector<LogicalRegion> &regions,
@@ -4104,7 +4104,7 @@ namespace Legion {
                                     GCPriority priority, bool tight_bounds,
                                     const LayoutConstraint **unsat,
                                     size_t *footprint, UniqueID creator_id,
-                                    bool &safe_for_unbounded_pools);
+                                    RtEvent *safe_for_unbounded_pools);
       bool find_or_create_physical_instance(Memory target_memory,
                                     const LayoutConstraintSet &constraints,
                                     const std::vector<LogicalRegion> &regions,
@@ -4115,7 +4115,7 @@ namespace Legion {
                                     bool tight_bounds, 
                                     const LayoutConstraint **unsat,
                                     size_t *footprint, UniqueID creator_id,
-                                    bool &safe_for_unbounded_pools);
+                                    RtEvent *safe_for_unbounded_pools);
       bool find_or_create_physical_instance(Memory target_memory,
                                     LayoutConstraints *constraints,
                                     const std::vector<LogicalRegion> &regions,
@@ -4126,7 +4126,7 @@ namespace Legion {
                                     bool tight_bounds, 
                                     const LayoutConstraint **unsat,
                                     size_t *footprint, UniqueID creator_id,
-                                    bool &safe_for_unbounded_pools);
+                                    RtEvent *safe_for_unbounded_pools);
       bool find_physical_instance(Memory target_memory,
                                     const LayoutConstraintSet &constraints,
                                     const std::vector<LogicalRegion> &regions,
