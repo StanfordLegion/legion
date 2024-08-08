@@ -7777,6 +7777,7 @@ namespace Legion {
         unsigned region_idx)
     //--------------------------------------------------------------------------
     {
+      printf("Record Point Task should_connect_to_next_point: %d should_connect_to_prev_point: %d shard: %d\n", slice_owner->should_connect_to_next_point(), slice_owner->should_connect_to_prev_point(), slice_owner->index_owner->get_context()->get_task()->get_shard_id());
       if (slice_owner->should_connect_to_prev_point())
       {
         RtEvent pre = slice_owner->find_point_wise_dependence(lr, region_idx);
@@ -8625,6 +8626,14 @@ namespace Legion {
         profiling_info.clear();
       }
 #ifdef POINT_WISE_LOGICAL_ANALYSIS
+      if(!pending_point_wise_dependences.empty())
+      {
+        for (std::map<LogicalRegion,RtUserEvent>::const_iterator it =
+              pending_point_wise_dependences.begin(); it !=
+              pending_point_wise_dependences.end(); it++)
+          Runtime::trigger_event(it->second);
+      }
+      pending_point_wise_dependences.clear();
       prev_index_tasks.clear();
       next_index_tasks.clear();
 #endif

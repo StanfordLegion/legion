@@ -20810,6 +20810,53 @@ namespace Legion {
     }
 
 #ifdef POINT_WISE_LOGICAL_ANALYSIS
+    void ReplicateContext::mark_context_index_active(uint64_t context_index)
+    {
+#ifdef DEBUG_LEGION
+      assert(alive_context_indexes.find(context_index)
+          ==
+          alive_context_indexes.end());
+#endif
+      AutoLock r_lock(replication_lock);
+      alive_context_indexes[context_index];
+    }
+
+    void ReplicateContext::mark_context_index_inactive(uint64_t context_index)
+    {
+#ifdef DEBUG_LEGION
+      assert(alive_context_indexes.find(context_index)
+          !=
+          alive_context_indexes.end());
+#endif
+      AutoLock r_lock(replication_lock);
+      std::vector<LogicalRegion> lrs = alive_context_indexes[context_index];
+      for (std::vector<LogicalRegion>::const_iterator it =
+          lrs.begin(); it !=
+          lrs.end(); it++)
+      {
+        const std::pair<uint64_t,LogicalRegion> key(context_index,(*it));
+        IntraSpaceDeps &deps = point_wise_deps[key];
+
+        for(std::map<ShardID,RtUserEvent>::iterator itr =
+          deps.pending_deps.begin(); itr !=
+          deps.pending_deps.end(); itr++)
+        {
+          Runtime::trigger_event(itr->second);
+          deps.pending_deps.erase(itr);
+        }
+
+        for(std::map<ShardID,RtEvent>::iterator itr =
+          deps.ready_deps.begin(); itr !=
+          deps.ready_deps.end(); itr++)
+        {
+          //Runtime::trigger_event(itr->second);
+          deps.ready_deps.erase(itr);
+        }
+        point_wise_deps.erase(key);
+      }
+      alive_context_indexes.erase(context_index);
+    }
+
     //--------------------------------------------------------------------------
     void ReplicateContext::record_point_wise_dependence(uint64_t context_index,
         LogicalRegion lr, RtEvent point_mapped, ShardID next_shard)
@@ -20835,6 +20882,7 @@ namespace Legion {
         assert(deps.ready_deps.find(next_shard) == deps.ready_deps.end());
 #endif
         deps.ready_deps[next_shard] = point_mapped;
+        alive_context_indexes[key.first].push_back(key.second);
       }
     }
 
@@ -20855,9 +20903,17 @@ namespace Legion {
       derez.deserialize(requesting_shard);
 
       AutoLock r_lock(replication_lock);
+
+      std::map<uint64_t,std::vector<LogicalRegion>>::iterator ctx_idx_finder =
+        alive_context_indexes.find(key.first);
+      if (ctx_idx_finder == alive_context_indexes.end()) {
+        Runtime::trigger_event(pending_event);
+        return;
+      }
+
       IntraSpaceDeps &deps = point_wise_deps[key];
       // Check to see if someone has already registered this shard
-      std::map<ShardID,RtEvent>::iterator finder = 
+      std::map<ShardID,RtEvent>::iterator finder =
         deps.ready_deps.find(requesting_shard);
       if (finder != deps.ready_deps.end())
       {
@@ -20874,6 +20930,7 @@ namespace Legion {
                 deps.pending_deps.end());
 #endif
         deps.pending_deps[requesting_shard] = pending_event;
+        alive_context_indexes[key.first].push_back(key.second);
       }
     }
 #endif

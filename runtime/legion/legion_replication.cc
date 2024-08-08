@@ -1019,6 +1019,10 @@ namespace Legion {
         delete sharding_collective;
 #endif
       unique_intra_space_deps.clear();
+#ifdef POINT_WISE_LOGICAL_ANALYSIS
+      dynamic_cast<ReplicateContext*>(parent_ctx)->
+          mark_context_index_inactive(get_context_index());
+#endif
       if (freeop)
         runtime->free_repl_index_task(this);
     }
@@ -1063,6 +1067,10 @@ namespace Legion {
       assert(repl_ctx != NULL);
 #else
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+
+#ifdef POINT_WISE_LOGICAL_ANALYSIS
+      repl_ctx->mark_context_index_active(get_context_index());
 #endif
       // We might be able to skip this if the sharding function was already
       // picked for us which occurs when we're part of a must-epoch launch
@@ -1939,7 +1947,7 @@ namespace Legion {
                                                  RtEvent point_mapped)
     //--------------------------------------------------------------------------
     {
-      printf("INSIDE REPLINDEXSPACE ctx_id: %ld SHARD: %d\n", get_context_index(), parent_ctx->get_task()->get_shard_id());
+      printf("Record point-wise dependece ctx_id: %ld SHARD: %d\n", get_context_index(), parent_ctx->get_task()->get_shard_id());
 #ifdef DEBUG_LEGION
       assert(sharding_function != NULL);
       ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
@@ -1993,6 +2001,7 @@ namespace Legion {
         unsigned region_idx, GenerationID gen)
     //--------------------------------------------------------------------------
     {
+      printf("Find point-wise dependece ctx_id: %ld SHARD: %d\n", get_context_index(), parent_ctx->get_task()->get_shard_id());
       AutoLock o_lock(op_lock);
       if (gen < get_generation()) return RtUserEvent::NO_RT_USER_EVENT;
 
@@ -2034,11 +2043,11 @@ namespace Legion {
           // throw _error
         }
         // find shard of the point
-        const ShardID point_shard =
+        const ShardID prev_shard =
            finder->second.sharding->find_owner(previous_index_task_points[0],
               finder->second.index_domain);
 
-        if (point_shard != repl_ctx->owner_shard->shard_id)
+        if (prev_shard != repl_ctx->owner_shard->shard_id)
         {
           // send to the shard where the point is
           const RtUserEvent pending_event = Runtime::create_rt_user_event();
@@ -2047,14 +2056,14 @@ namespace Legion {
           // requesting it to fill in the dependence
           Serializer rez;
           rez.serialize(repl_ctx->shard_manager->did);
-          rez.serialize(point_shard);
+          rez.serialize(prev_shard);
           rez.serialize(finder->second.ctx_index);
           rez.serialize(lr);
           rez.serialize(pending_event);
           rez.serialize(region_idx);
           rez.serialize(gen);
           rez.serialize(repl_ctx->owner_shard->shard_id);
-          repl_ctx->shard_manager->send_point_wise_dependence(point_shard, rez);
+          repl_ctx->shard_manager->send_point_wise_dependence(prev_shard, rez);
           return pending_event;
         }
 
