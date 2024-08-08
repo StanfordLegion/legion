@@ -16,6 +16,13 @@ TEST_F(RangeAllocatorTest, DeallocateNonExistent)
   range_alloc.deallocate(42, /*missiok_ok=*/true);
 }
 
+TEST_F(RangeAllocatorTest, DeallocateNonExistentFail)
+{
+  // TODO(apryakhin): convert to bool return status
+  ASSERT_DEATH({ range_alloc.deallocate(42, /*missiok_ok=*/false); },
+               "Assertion `missing_ok' failed");
+}
+
 TEST_F(RangeAllocatorTest, LookupEmptyAllocator)
 {
   size_t start = 0, size = 0;
