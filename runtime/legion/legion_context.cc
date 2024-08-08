@@ -25255,10 +25255,10 @@ namespace Legion {
       if (instance == NULL)
       {
         MemoryManager *manager = runtime->find_memory_manager(memory);
-        const size_t pool_limit = finder->second->query_memory_limit();
         const size_t memory_limit = manager->query_available_memory();
-        if (pool_limit > 0)
+        if (finder->second->get_bounds().scope == LEGION_BOUNDED_POOL)
         {
+          const size_t pool_limit = finder->second->query_memory_limit();
           const size_t remaining = finder->second->query_available_memory();
           if (remaining < size)
             REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
@@ -25432,10 +25432,10 @@ namespace Legion {
       if (!instance.exists())
       {
         MemoryManager *manager = runtime->find_memory_manager(memory);
-        const size_t pool_limit = finder->second->query_memory_limit();
         const size_t memory_limit = manager->query_available_memory();
-        if (pool_limit > 0)
+        if (finder->second->get_bounds().scope == LEGION_BOUNDED_POOL)
         {
+          const size_t pool_limit = finder->second->query_memory_limit();
           const size_t remaining = finder->second->query_available_memory();
           if (remaining < footprint)
             REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
