@@ -12587,7 +12587,6 @@ namespace Legion {
       RtEvent wait_on;
       {
         AutoLock m_lock(manager_lock);
-        outstanding_task_local_allocations++;
         switch (unbounded_pool_scope)
         {
           case LEGION_BOUNDED_POOL:
@@ -12632,6 +12631,7 @@ namespace Legion {
           default:
             assert(false);
         }
+        outstanding_task_local_allocations++;
       }
       if (wait_on.exists())
         wait_on.wait();
