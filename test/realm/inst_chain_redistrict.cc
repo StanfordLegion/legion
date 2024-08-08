@@ -154,7 +154,7 @@ void top_level_task(const void *args, size_t arglen, const void *userdata, size_
   bounds.lo[0] = 0;
   bounds.hi[0] = 512 * 512 - 1;
 
-  std::vector<size_t> field_sizes(1, 4);
+  std::vector<size_t> field_sizes(1, sizeof(int));
 
   RegionInstance inst1;
   RegionInstance::create_instance(inst1, memories[0], bounds, field_sizes, 0 /*SOA*/,
@@ -249,7 +249,7 @@ void top_level_task(const void *args, size_t arglen, const void *userdata, size_
   Event::merge_events(user_events).wait();
   assert(alloc_result == true);
   assert(timel_result == true);
-  assert(musage_result == 1048576);
+  assert(static_cast<size_t>(musage_result) == bounds.volume() * sizeof(int));
   assert(inst_status_result == 0);
 
   destroy_event.trigger();
@@ -267,21 +267,24 @@ void worker_task(const void *args, size_t arglen, const void *userdata, size_t u
   Event alloc_event;
   Event musage_event;
 
+  const int num_split_inst = 2;
+
   size_t profile_result_index = 0;
   int alloc_invocations = 0;
-  std::vector<int> alloc_results(num_iterations * 2);
-  std::vector<int> timel_results(num_iterations * 2);
-  std::vector<int> musage_results(num_iterations * 2);
+  std::vector<int> alloc_results(num_iterations * num_split_inst);
+  std::vector<int> timel_results(num_iterations * num_split_inst);
+  std::vector<int> musage_results(num_iterations * num_split_inst);
+  std::vector<int> exp_usage;
 
   for(int i = 0; i < num_iterations; i++) {
     Rect<1> next_bounds;
     next_bounds.lo[0] = 0;
-    next_bounds.hi[0] = needs_oom ? bounds.hi[0] : bounds.hi[0] / 2;
+    next_bounds.hi[0] = needs_oom ? bounds.hi[0] : bounds.hi[0] / num_split_inst;
 
     log_app.info() << "redistrict bounds:" << bounds << " next_bounds:" << next_bounds
                    << " inst:" << inst;
 
-    std::vector<RegionInstance> insts(2);
+    std::vector<RegionInstance> insts(num_split_inst);
     const InstanceLayoutGeneric *ilg_a = create_layout(next_bounds);
     const InstanceLayoutGeneric *ilg_b = create_layout(next_bounds);
     std::vector<const InstanceLayoutGeneric *> layouts{ilg_a, ilg_b};
@@ -290,10 +293,8 @@ void worker_task(const void *args, size_t arglen, const void *userdata, size_t u
     std::vector<Event> alloc_events;
     std::vector<Event> musage_events;
 
-    int num_profiling_requests = 2;
-
-    std::vector<ProfilingRequestSet> prs(num_profiling_requests);
-    for(int j = 0; j < num_profiling_requests; j++) {
+    std::vector<ProfilingRequestSet> prs(num_split_inst);
+    for(int j = 0; j < num_split_inst; j++) {
       {
         UserEvent event = UserEvent::create_user_event();
         ProfTimelResult result;
@@ -312,7 +313,7 @@ void worker_task(const void *args, size_t arglen, const void *userdata, size_t u
         result.done = event;
         result.success = &alloc_results[profile_result_index];
         result.invocations = &alloc_invocations;
-        prs[i]
+        prs[j]
             .add_request(p, ALLOC_PROF_TASK, &result, sizeof(ProfAllocResult))
             .add_measurement<ProfilingMeasurements::InstanceAllocResult>();
       }
@@ -326,11 +327,12 @@ void worker_task(const void *args, size_t arglen, const void *userdata, size_t u
         prs[j]
             .add_request(p, MUSAGE_PROF_TASK, &result, sizeof(ProfMusageResult))
             .add_measurement<ProfilingMeasurements::InstanceMemoryUsage>();
+        exp_usage.push_back(next_bounds.volume());
       }
-      profile_result_index ++;
+      profile_result_index++;
     }
 
-    Event e = inst.redistrict(insts.data(), layouts.data(), 2, prs.data());
+    Event e = inst.redistrict(insts.data(), layouts.data(), num_split_inst, prs.data());
 
     bool poisoned = false;
     e.wait_faultaware(poisoned);
@@ -388,7 +390,7 @@ void worker_task(const void *args, size_t arglen, const void *userdata, size_t u
   }
 
   for(size_t i = 0; i < musage_results.size(); i++) {
-    assert(musage_results[i] == 524288);
+    assert(static_cast<size_t>(musage_results[i]) == exp_usage[i] * sizeof(int));
   }
 
   assert(alloc_invocations == 1);
