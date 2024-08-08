@@ -22,106 +22,145 @@ TEST_F(RangeAllocatorTest, LookupEmptyAllocator)
   EXPECT_FALSE(range_alloc.lookup(0, start, size));
 }
 
+TEST_F(RangeAllocatorTest, AddRange)
+{
+  range_alloc.add_range(0, 1024);
+}
+
+TEST_F(RangeAllocatorTest, AddSingleRangeEmpty)
+{
+  range_alloc.add_range(1024, 1023);
+}
+
+TEST_F(RangeAllocatorTest, AddMultipleRanges)
+{
+  range_alloc.add_range(0, 1024);
+  // TODO(apryakhin): convert to bool return status
+  ASSERT_DEATH({ range_alloc.add_range(1025, 2048); }, "Assertion `0' failed");
+}
+
+TEST_F(RangeAllocatorTest, Allocate)
+{
+  const int range_tag = 42;
+  const size_t range_size = 1024;
+  const size_t range_align = 16;
+  size_t offset = 0;
+
+  range_alloc.add_range(0, range_size);
+  bool ok = range_alloc.allocate(range_tag, range_size, range_align, offset);
+
+  EXPECT_TRUE(ok);
+  EXPECT_EQ(offset, 0);
+}
+
+TEST_F(RangeAllocatorTest, AllocateTooLarge)
+{
+  const int range_tag = 42;
+  const size_t range_size = 1024;
+  const size_t range_align = 16;
+  size_t offset = 0;
+
+  range_alloc.add_range(0, range_size);
+  bool ok = range_alloc.allocate(range_tag, range_size * 2, range_align, offset);
+
+  EXPECT_FALSE(ok);
+  EXPECT_EQ(offset, 0);
+}
+
 TEST_F(RangeAllocatorTest, AllocateAndLookupInvalidRange)
 {
   const int range_tag = 42;
   size_t offset = 0;
   size_t start = 0, size = 0;
-  std::vector<int> tags{2, 3};
-  std::vector<size_t> sizes{512, 256};
-  std::vector<size_t> alignment{16, 16};
-  BasicRangeAllocator<size_t, int> range_alloc;
 
   range_alloc.add_range(0, 1024);
-  EXPECT_TRUE(range_alloc.allocate(range_tag, 512, 16, offset));
-  EXPECT_FALSE(range_alloc.lookup(range_tag - 1, start, size));
+  bool alloc_ok = range_alloc.allocate(range_tag, 512, 16, offset);
+  bool lookup_ok = range_alloc.lookup(range_tag - 1, start, size);
+
+  EXPECT_TRUE(alloc_ok);
+  EXPECT_FALSE(lookup_ok);
 }
 
 TEST_F(RangeAllocatorTest, AllocateAndLookupSingleRange)
 {
   const int range_tag = 42;
+  const size_t range_size = 1024;
+  const size_t range_align = 16;
   size_t offset = 0;
   size_t start = 0, size = 0;
-  std::vector<int> tags{2, 3};
-  std::vector<size_t> sizes{512, 256};
-  std::vector<size_t> alignment{16, 16};
 
-  range_alloc.add_range(0, 1024);
-  EXPECT_TRUE(range_alloc.allocate(range_tag, 512, 16, offset));
-  EXPECT_TRUE(range_alloc.lookup(range_tag, start, size));
+  range_alloc.add_range(0, range_size);
+  bool alloc_ok = range_alloc.allocate(range_tag, range_size, range_align, offset);
+  bool lookup_ok = range_alloc.lookup(range_tag, start, size);
 
+  EXPECT_TRUE(alloc_ok);
+  EXPECT_TRUE(lookup_ok);
   EXPECT_EQ(start, 0);
-  EXPECT_EQ(size, 512);
+  EXPECT_EQ(size, range_size);
 }
 
 TEST_F(RangeAllocatorTest, TestExplicitRangesWithCycle)
 {
-  BasicRangeAllocator<size_t, int> alloc;
-
   {
-    alloc.ranges[SENTINEL].prev_free = 3;
-    alloc.ranges[SENTINEL].next_free = 1;
+    range_alloc.ranges[SENTINEL].prev_free = 3;
+    range_alloc.ranges[SENTINEL].next_free = 1;
   }
   {
     BasicRangeAllocator<size_t, int>::Range range;
     range.prev_free = SENTINEL;
     range.next_free = 2;
-    alloc.ranges.push_back(range);
+    range_alloc.ranges.push_back(range);
   }
   {
     BasicRangeAllocator<size_t, int>::Range range;
     range.prev_free = 1;
     range.next_free = 3;
-    alloc.ranges.push_back(range);
+    range_alloc.ranges.push_back(range);
   }
   {
     BasicRangeAllocator<size_t, int>::Range range;
     // Link up with range 1
     range.prev_free = 2;
     range.next_free = 1;
-    alloc.ranges.push_back(range);
+    range_alloc.ranges.push_back(range);
   }
 
-  EXPECT_TRUE(alloc.free_list_has_cycle());
+  EXPECT_TRUE(range_alloc.free_list_has_cycle());
 }
 
 TEST_F(RangeAllocatorTest, TestExplicitRangesNoCycle)
 {
-  BasicRangeAllocator<size_t, int> alloc;
-
   {
-    alloc.ranges[SENTINEL].prev_free = 3;
-    alloc.ranges[SENTINEL].next_free = 1;
+    range_alloc.ranges[SENTINEL].prev_free = 3;
+    range_alloc.ranges[SENTINEL].next_free = 1;
   }
   {
     BasicRangeAllocator<size_t, int>::Range range;
     range.prev_free = SENTINEL;
     range.next_free = 2;
-    alloc.ranges.push_back(range);
+    range_alloc.ranges.push_back(range);
   }
   {
     BasicRangeAllocator<size_t, int>::Range range;
     range.prev_free = 1;
     range.next_free = 3;
-    alloc.ranges.push_back(range);
+    range_alloc.ranges.push_back(range);
   }
   {
     BasicRangeAllocator<size_t, int>::Range range;
     range.prev_free = 2;
     range.next_free = SENTINEL;
-    alloc.ranges.push_back(range);
+    range_alloc.ranges.push_back(range);
   }
 
-  EXPECT_FALSE(alloc.free_list_has_cycle());
+  EXPECT_FALSE(range_alloc.free_list_has_cycle());
 }
 
 TEST_F(RangeAllocatorTest, TestExplicitRangesOverlapping)
 {
-  BasicRangeAllocator<size_t, int> alloc;
-
   {
-    alloc.ranges[SENTINEL].prev = 3;
-    alloc.ranges[SENTINEL].next = 1;
+    range_alloc.ranges[SENTINEL].prev = 3;
+    range_alloc.ranges[SENTINEL].next = 1;
   }
   {
     BasicRangeAllocator<size_t, int>::Range range;
@@ -129,8 +168,8 @@ TEST_F(RangeAllocatorTest, TestExplicitRangesOverlapping)
     range.next = 2;
     range.first = 0;
     range.last = 16;
-    alloc.ranges.push_back(range);
-    alloc.allocated[1] = 1;
+    range_alloc.ranges.push_back(range);
+    range_alloc.allocated[1] = 1;
   }
   {
     BasicRangeAllocator<size_t, int>::Range range;
@@ -138,8 +177,8 @@ TEST_F(RangeAllocatorTest, TestExplicitRangesOverlapping)
     range.next = 3;
     range.first = 16;
     range.last = 32;
-    alloc.ranges.push_back(range);
-    alloc.allocated[2] = 2;
+    range_alloc.ranges.push_back(range);
+    range_alloc.allocated[2] = 2;
   }
   {
     BasicRangeAllocator<size_t, int>::Range range;
@@ -147,20 +186,18 @@ TEST_F(RangeAllocatorTest, TestExplicitRangesOverlapping)
     range.next = SENTINEL;
     range.first = 16;
     range.last = 64;
-    alloc.ranges.push_back(range);
-    alloc.allocated[3] = 3;
+    range_alloc.ranges.push_back(range);
+    range_alloc.allocated[3] = 3;
   }
 
-  EXPECT_TRUE(alloc.has_invalid_ranges());
+  EXPECT_TRUE(range_alloc.has_invalid_ranges());
 }
 
 TEST_F(RangeAllocatorTest, TestExplicitRangesInvalidSize)
 {
-  BasicRangeAllocator<size_t, int> alloc;
-
   {
-    alloc.ranges[SENTINEL].prev = 3;
-    alloc.ranges[SENTINEL].next = 1;
+    range_alloc.ranges[SENTINEL].prev = 3;
+    range_alloc.ranges[SENTINEL].next = 1;
   }
   {
     BasicRangeAllocator<size_t, int>::Range range;
@@ -168,8 +205,8 @@ TEST_F(RangeAllocatorTest, TestExplicitRangesInvalidSize)
     range.next = 2;
     range.first = 0;
     range.last = 16;
-    alloc.ranges.push_back(range);
-    alloc.allocated[1] = 1;
+    range_alloc.ranges.push_back(range);
+    range_alloc.allocated[1] = 1;
   }
   {
     BasicRangeAllocator<size_t, int>::Range range;
@@ -177,8 +214,8 @@ TEST_F(RangeAllocatorTest, TestExplicitRangesInvalidSize)
     range.next = 3;
     range.first = 16;
     range.last = 15;
-    alloc.ranges.push_back(range);
-    alloc.allocated[2] = 2;
+    range_alloc.ranges.push_back(range);
+    range_alloc.allocated[2] = 2;
   }
   {
     BasicRangeAllocator<size_t, int>::Range range;
@@ -186,20 +223,18 @@ TEST_F(RangeAllocatorTest, TestExplicitRangesInvalidSize)
     range.next = SENTINEL;
     range.first = 32;
     range.last = 64;
-    alloc.ranges.push_back(range);
-    alloc.allocated[3] = 3;
+    range_alloc.ranges.push_back(range);
+    range_alloc.allocated[3] = 3;
   }
 
-  EXPECT_TRUE(alloc.has_invalid_ranges());
+  EXPECT_TRUE(range_alloc.has_invalid_ranges());
 }
 
 TEST_F(RangeAllocatorTest, TestExplicitRangesValid)
 {
-  BasicRangeAllocator<size_t, int> alloc;
-
   {
-    alloc.ranges[SENTINEL].prev = 3;
-    alloc.ranges[SENTINEL].next = 1;
+    range_alloc.ranges[SENTINEL].prev = 3;
+    range_alloc.ranges[SENTINEL].next = 1;
   }
   {
     BasicRangeAllocator<size_t, int>::Range range;
@@ -207,8 +242,8 @@ TEST_F(RangeAllocatorTest, TestExplicitRangesValid)
     range.next = 2;
     range.first = 0;
     range.last = 16;
-    alloc.ranges.push_back(range);
-    alloc.allocated[1] = 1;
+    range_alloc.ranges.push_back(range);
+    range_alloc.allocated[1] = 1;
   }
   {
     BasicRangeAllocator<size_t, int>::Range range;
@@ -216,8 +251,8 @@ TEST_F(RangeAllocatorTest, TestExplicitRangesValid)
     range.next = 3;
     range.first = 16;
     range.last = 20;
-    alloc.ranges.push_back(range);
-    alloc.allocated[2] = 2;
+    range_alloc.ranges.push_back(range);
+    range_alloc.allocated[2] = 2;
   }
   {
     BasicRangeAllocator<size_t, int>::Range range;
@@ -225,20 +260,18 @@ TEST_F(RangeAllocatorTest, TestExplicitRangesValid)
     range.next = SENTINEL;
     range.first = 32;
     range.last = 64;
-    alloc.ranges.push_back(range);
-    alloc.allocated[3] = 3;
+    range_alloc.ranges.push_back(range);
+    range_alloc.allocated[3] = 3;
   }
 
-  EXPECT_FALSE(alloc.has_invalid_ranges());
+  EXPECT_FALSE(range_alloc.has_invalid_ranges());
 }
 
 TEST_F(RangeAllocatorTest, TestExplicitRangesSharedTags)
 {
-  BasicRangeAllocator<size_t, int> alloc;
-
   {
-    alloc.ranges[SENTINEL].prev = 3;
-    alloc.ranges[SENTINEL].next = 1;
+    range_alloc.ranges[SENTINEL].prev = 3;
+    range_alloc.ranges[SENTINEL].next = 1;
   }
   {
     BasicRangeAllocator<size_t, int>::Range range;
@@ -246,8 +279,8 @@ TEST_F(RangeAllocatorTest, TestExplicitRangesSharedTags)
     range.next = 2;
     range.first = 0;
     range.last = 16;
-    alloc.ranges.push_back(range);
-    alloc.allocated[1] = 1;
+    range_alloc.ranges.push_back(range);
+    range_alloc.allocated[1] = 1;
   }
   {
     BasicRangeAllocator<size_t, int>::Range range;
@@ -255,8 +288,8 @@ TEST_F(RangeAllocatorTest, TestExplicitRangesSharedTags)
     range.next = 3;
     range.first = 16;
     range.last = 20;
-    alloc.ranges.push_back(range);
-    alloc.allocated[2] = 2;
+    range_alloc.ranges.push_back(range);
+    range_alloc.allocated[2] = 2;
   }
   {
     BasicRangeAllocator<size_t, int>::Range range;
@@ -264,11 +297,11 @@ TEST_F(RangeAllocatorTest, TestExplicitRangesSharedTags)
     range.next = SENTINEL;
     range.first = 32;
     range.last = 64;
-    alloc.ranges.push_back(range);
-    alloc.allocated[3] = 2;
+    range_alloc.ranges.push_back(range);
+    range_alloc.allocated[3] = 2;
   }
 
-  EXPECT_TRUE(alloc.has_invalid_ranges());
+  EXPECT_TRUE(range_alloc.has_invalid_ranges());
 }
 
 struct RangeAllocTestCase {
