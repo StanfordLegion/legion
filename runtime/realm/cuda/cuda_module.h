@@ -225,7 +225,8 @@ namespace Realm {
 
       Mutex cudaipc_mutex;
       Mutex::CondVar cudaipc_condvar;
-      atomic<size_t> cudaipc_responses_received;
+      atomic<size_t> cudaipc_responses_received{0};
+      int cuda_api_version = 0;
     };
 
   }; // namespace Cuda
