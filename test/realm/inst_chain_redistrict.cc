@@ -382,7 +382,7 @@ void worker_task(const void *args, size_t arglen, const void *userdata, size_t u
   timel_event.wait();
 
   for(size_t i = 0; i < alloc_results.size(); i++) {
-     assert(alloc_results[i]);
+    assert(alloc_results[i]);
   }
 
   for(size_t i = 0; i < timel_results.size(); i++) {
