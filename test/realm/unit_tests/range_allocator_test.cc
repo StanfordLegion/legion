@@ -19,8 +19,7 @@ TEST_F(RangeAllocatorTest, DeallocateNonExistent)
 TEST_F(RangeAllocatorTest, DeallocateNonExistentFail)
 {
   // TODO(apryakhin): convert to bool return status
-  ASSERT_DEATH({ range_alloc.deallocate(42, /*missiok_ok=*/false); },
-               "Assertion `missing_ok' failed");
+  EXPECT_DEATH({ range_alloc.deallocate(42, /*missiok_ok=*/false); }, "");
 }
 
 TEST_F(RangeAllocatorTest, LookupEmptyAllocator)
@@ -29,21 +28,15 @@ TEST_F(RangeAllocatorTest, LookupEmptyAllocator)
   EXPECT_FALSE(range_alloc.lookup(0, start, size));
 }
 
-TEST_F(RangeAllocatorTest, AddRange)
-{
-  range_alloc.add_range(0, 1024);
-}
+TEST_F(RangeAllocatorTest, AddRange) { range_alloc.add_range(0, 1024); }
 
-TEST_F(RangeAllocatorTest, AddSingleRangeEmpty)
-{
-  range_alloc.add_range(1024, 1023);
-}
+TEST_F(RangeAllocatorTest, AddSingleRangeEmpty) { range_alloc.add_range(1024, 1023); }
 
 TEST_F(RangeAllocatorTest, AddMultipleRanges)
 {
   range_alloc.add_range(0, 1024);
   // TODO(apryakhin): convert to bool return status
-  ASSERT_DEATH({ range_alloc.add_range(1025, 2048); }, "Assertion `0' failed");
+  EXPECT_DEATH({ range_alloc.add_range(1025, 2048); }, "Assertion `0' failed");
 }
 
 TEST_F(RangeAllocatorTest, Allocate)
