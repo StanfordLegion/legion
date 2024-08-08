@@ -327,7 +327,7 @@ void worker_task(const void *args, size_t arglen, const void *userdata, size_t u
             .add_request(p, MUSAGE_PROF_TASK, &result, sizeof(ProfMusageResult))
             .add_measurement<ProfilingMeasurements::InstanceMemoryUsage>();
       }
-      profile_result_index ++;
+      profile_result_index++;
     }
 
     Event e = inst.redistrict(insts.data(), layouts.data(), 2, prs.data());
