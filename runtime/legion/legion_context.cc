@@ -20839,18 +20839,18 @@ namespace Legion {
 
         for(std::map<ShardID,RtUserEvent>::iterator itr =
           deps.pending_deps.begin(); itr !=
-          deps.pending_deps.end(); itr++)
+          deps.pending_deps.end();)
         {
           Runtime::trigger_event(itr->second);
-          deps.pending_deps.erase(itr);
+          deps.pending_deps.erase(itr++);
         }
 
         for(std::map<ShardID,RtEvent>::iterator itr =
           deps.ready_deps.begin(); itr !=
-          deps.ready_deps.end(); itr++)
+          deps.ready_deps.end();)
         {
           //Runtime::trigger_event(itr->second);
-          deps.ready_deps.erase(itr);
+          deps.ready_deps.erase(itr++);
         }
         point_wise_deps.erase(key);
       }
