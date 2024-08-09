@@ -129,6 +129,7 @@ namespace Realm {
       bool fabric_supported = false;
       unsigned fabric_clique = -1U;
       CUuuid fabric_uuid = {0};
+      bool pageable_access_supported = false;
 
 #ifdef REALM_USE_CUDART_HIJACK
       cudaDeviceProp prop;
@@ -412,6 +413,7 @@ namespace Realm {
       void launch_indirect_copy_kernel(void *copy_info, size_t dim, size_t addr_size,
                                        size_t field_size, size_t volume,
                                        GPUStream *stream);
+      bool is_accessible_host_mem(const MemoryImpl *mem) const;
 
     protected:
       CUmodule load_cuda_module(const void *data);
@@ -1446,6 +1448,7 @@ namespace Realm {
   __op__(cuMemGetAddressRange, CUDA_VERSION);                                            \
   __op__(cuPointerGetAttributes, CUDA_VERSION);                                          \
   __op__(cuDriverGetVersion, CUDA_VERSION);                                              \
+  __op__(cuMemAdvise, CUDA_VERSION);                                                     \
   __op__(cuLaunchHostFunc, CUDA_VERSION);
 
 // We specify the exact version for this api so we can pass it to cuGetProcAddress later.
