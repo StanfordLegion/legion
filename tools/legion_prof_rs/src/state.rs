@@ -2029,7 +2029,7 @@ pub struct Inst {
     pub size: Option<u64>,
     // Time range for instances is a bit unusual since there are nominally
     // only three interesting times: create, ready, end (destroy). We also
-    // alias 'ready' with 'start' to since build_items relies on start
+    // alias 'ready' with 'start' too since build_items relies on start
     // to mark when the instance is allocated in memory. We also need to
     // record the time that we got the allocation response back to know
     // whether the instance was allocated immediately or allocated after
