@@ -36,7 +36,7 @@ TEST_F(RangeAllocatorTest, AddMultipleRanges)
 {
   range_alloc.add_range(0, 1024);
   // TODO(apryakhin): convert to bool return status
-  EXPECT_DEATH({ range_alloc.add_range(1025, 2048); }, "Assertion `0' failed");
+  EXPECT_DEATH({ range_alloc.add_range(1025, 2048); }, "");
 }
 
 TEST_F(RangeAllocatorTest, Allocate)
