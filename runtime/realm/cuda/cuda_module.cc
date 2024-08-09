@@ -3395,6 +3395,9 @@ namespace Realm {
           attribute_value = 0;
 #endif
           info->fabric_supported = !!attribute_value;
+          CUDA_DRIVER_FNPTR(cuDeviceGetAttribute)
+          (&attribute_value, CU_DEVICE_ATTRIBUTE_PAGEABLE_MEMORY_ACCESS, info->device);
+          info->pageable_access_supported = !!attribute_value;
           // Assume x16 PCI-e 2.0 = 8000 MB/s, which is reasonable for most
           // systems
           info->pci_bandwidth = 8000;
@@ -3998,6 +4001,31 @@ namespace Realm {
 				2 << 20); // TODO: don't use hardcoded stack size...
     }
 
+    template <typename MemoryType>
+    static void advise_cpu_memories_to_cpu(const std::vector<MemoryType *> &mems)
+    {
+      for(MemoryType *mem : mems) {
+        switch(mem->kind) {
+        case MemoryImpl::MKIND_GPUFB:
+        case MemoryImpl::MKIND_ZEROCOPY:
+        case MemoryImpl::MKIND_MANAGED:
+          break;
+        default:
+          void *ptr = mem->get_direct_ptr(0, 0);
+          if(ptr != nullptr) {
+            // We're ignoring the error here as there's no real indication other than
+            // pageeable memory access that cuMemAdvise will work with pageeable memory.
+            // It does on some systems, not on others.  Either way, make the attempt and
+            // move on
+            (void)CUDA_DRIVER_FNPTR(cuMemAdvise)(
+                reinterpret_cast<CUdeviceptr>(ptr), mem->size,
+                CU_MEM_ADVISE_SET_PREFERRED_LOCATION, CU_DEVICE_CPU);
+          }
+          break;
+        }
+      }
+    }
+
     // create any DMA channels provided by the module (default == do nothing)
     void CudaModule::create_dma_channels(RuntimeImpl *runtime)
     {
@@ -4050,6 +4078,21 @@ namespace Realm {
             gpu->pinned_sysmems.insert(mem_impl->me);
           }
         }
+      }
+
+      // Regardless of whether we pin the various sysmem allocations or not, we need to
+      // make sure the sysmem allocations do not migrate on systems where pageable gpu
+      // access is allowed
+      bool has_pageable_access = false;
+      for(GPU *gpu : gpus) {
+        if(gpu->info->pageable_access_supported) {
+          has_pageable_access = true;
+        }
+      }
+
+      if(has_pageable_access) {
+        advise_cpu_memories_to_cpu(runtime->nodes[Network::my_node_id].memories);
+        advise_cpu_memories_to_cpu(runtime->nodes[Network::my_node_id].ib_memories);
       }
 
       // ask any ipc-able nodes to share handles with us
