@@ -1080,8 +1080,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       process_proc_desc(proc);
-      task_infos.emplace_back(TaskInfo()); 
-      TaskInfo &info = task_infos.back();
+      TaskInfo &info = implicit_infos.emplace_back(TaskInfo()); 
       info.op_id = op_id;
       info.task_id = tid;
       info.variant_id = 0; // no variants for implicit tasks
@@ -1299,7 +1298,17 @@ namespace Legion {
       for (std::deque<TaskInfo>::const_iterator it = task_infos.begin();
             it != task_infos.end(); it++)
       {
-        serializer->serialize(*it);
+        serializer->serialize(*it, false/*not implicit*/);
+        for (std::deque<WaitInfo>::const_iterator wit =
+             it->wait_intervals.begin(); wit != it->wait_intervals.end(); wit++)
+        {
+          serializer->serialize(*wit, *it);
+        }
+      }
+      for (std::deque<TaskInfo>::const_iterator it = implicit_infos.begin();
+            it != implicit_infos.end(); it++)
+      {
+        serializer->serialize(*it, true/*implicit*/);
         for (std::deque<WaitInfo>::const_iterator wit =
              it->wait_intervals.begin(); wit != it->wait_intervals.end(); wit++)
         {
@@ -1490,6 +1499,7 @@ namespace Legion {
       operation_instances.clear();
       multi_tasks.clear();
       task_infos.clear();
+      implicit_infos.clear();
       gpu_task_infos.clear();
       ispace_rect_desc.clear();
       ispace_point_desc.clear();
@@ -1563,7 +1573,7 @@ namespace Legion {
       while (!task_infos.empty())
       {
         TaskInfo &front = task_infos.front();
-        serializer->serialize(front);
+        serializer->serialize(front, false/*not implicit*/);
         // Have to do all of these now
         for (std::deque<WaitInfo>::const_iterator wit =
               front.wait_intervals.begin(); wit != 
@@ -1571,6 +1581,21 @@ namespace Legion {
           serializer->serialize(*wit, front);
         diff += sizeof(front) + front.wait_intervals.size() * sizeof(WaitInfo);
         task_infos.pop_front();
+        const long long t_curr = Realm::Clock::current_time_in_microseconds();
+        if (t_curr >= t_stop)
+          return diff;
+      }
+      while (!implicit_infos.empty())
+      {
+        TaskInfo &front = implicit_infos.front();
+        serializer->serialize(front, true/*implicit*/);
+        // Have to do all of these now
+        for (std::deque<WaitInfo>::const_iterator wit =
+              front.wait_intervals.begin(); wit != 
+              front.wait_intervals.end(); wit++)
+          serializer->serialize(*wit, front);
+        diff += sizeof(front) + front.wait_intervals.size() * sizeof(WaitInfo);
+        implicit_infos.pop_front();
         const long long t_curr = Realm::Clock::current_time_in_microseconds();
         if (t_curr >= t_stop)
           return diff;

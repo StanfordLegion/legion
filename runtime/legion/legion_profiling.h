@@ -656,6 +656,7 @@ namespace Legion {
       std::deque<SliceOwner>        slice_owners;
     private:
       std::deque<TaskInfo> task_infos;
+      std::deque<TaskInfo> implicit_infos;
       std::deque<GPUTaskInfo> gpu_task_infos;
       std::deque<IndexSpaceRectDesc> ispace_rect_desc;
       std::deque<IndexSpacePointDesc> ispace_point_desc;

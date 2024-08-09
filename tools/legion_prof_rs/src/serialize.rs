@@ -128,6 +128,7 @@ pub enum Record {
     TaskWaitInfo { op_id: OpID, task_id: TaskID, variant_id: VariantID, wait_start: Timestamp, wait_ready: Timestamp, wait_end: Timestamp, wait_event: EventID },
     MetaWaitInfo { op_id: OpID, lg_id: VariantID, wait_start: Timestamp, wait_ready: Timestamp, wait_end: Timestamp, wait_event: EventID },
     TaskInfo { op_id: OpID, task_id: TaskID, variant_id: VariantID, proc_id: ProcID, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp, creator: EventID, critical: EventID, fevent: EventID  },
+    ImplicitTaskInfo { op_id: OpID, task_id: TaskID, variant_id: VariantID, proc_id: ProcID, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp, creator: EventID, critical: EventID, fevent: EventID  },
     GPUTaskInfo { op_id: OpID, task_id: TaskID, variant_id: VariantID, proc_id: ProcID, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp, gpu_start: Timestamp, gpu_stop: Timestamp, creator: EventID, critical: EventID, fevent: EventID },
     MetaInfo { op_id: OpID, lg_id: VariantID, proc_id: ProcID, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp, creator: EventID, critical: EventID, fevent: EventID },
     MessageInfo { op_id: OpID, lg_id: VariantID, proc_id: ProcID, spawn: Timestamp, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp, creator: EventID, critical: EventID, fevent: EventID },
@@ -810,6 +811,35 @@ fn parse_task_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
         },
     ))
 }
+fn parse_implicit_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
+    let (input, op_id) = parse_op_id(input)?;
+    let (input, task_id) = parse_task_id(input)?;
+    let (input, variant_id) = parse_variant_id(input)?;
+    let (input, proc_id) = parse_proc_id(input)?;
+    let (input, create) = parse_timestamp(input)?;
+    let (input, ready) = parse_timestamp(input)?;
+    let (input, start) = parse_timestamp(input)?;
+    let (input, stop) = parse_timestamp(input)?;
+    let (input, creator) = parse_event_id(input)?;
+    let (input, critical) = parse_event_id(input)?;
+    let (input, fevent) = parse_event_id(input)?;
+    Ok((
+        input,
+        Record::ImplicitTaskInfo {
+            op_id,
+            task_id,
+            variant_id,
+            proc_id,
+            create,
+            ready,
+            start,
+            stop,
+            creator,
+            critical,
+            fevent,
+        },
+    ))
+}
 fn parse_gpu_task_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, op_id) = parse_op_id(input)?;
     let (input, task_id) = parse_task_id(input)?;
@@ -1283,6 +1313,9 @@ fn filter_record<'a>(
         Record::TaskInfo { proc_id, .. } => {
             State::is_on_visible_nodes(visible_nodes, proc_id.node_id())
         }
+        Record::ImplicitTaskInfo { proc_id, .. } => {
+            State::is_on_visible_nodes(visible_nodes, proc_id.node_id())
+        }
         Record::GPUTaskInfo { proc_id, .. } => {
             State::is_on_visible_nodes(visible_nodes, proc_id.node_id())
         }
@@ -1390,6 +1423,7 @@ fn parse<'a>(
     parsers.insert(ids["MetaWaitInfo"], parse_meta_wait_info);
     parsers.insert(ids["TaskInfo"], parse_task_info);
     parsers.insert(ids["GPUTaskInfo"], parse_gpu_task_info);
+    parsers.insert(ids["ImplicitTaskInfo"], parse_implicit_info);
     parsers.insert(ids["MetaInfo"], parse_meta_info);
     parsers.insert(ids["MessageInfo"], parse_message_info);
     parsers.insert(ids["CopyInfo"], parse_copy_info);

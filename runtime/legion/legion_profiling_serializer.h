@@ -85,7 +85,7 @@ namespace Legion {
                              const LegionProfInstance::GPUTaskInfo&) = 0;
       virtual void serialize(const LegionProfInstance::WaitInfo,
                              const LegionProfInstance::MetaInfo&) = 0;
-      virtual void serialize(const LegionProfInstance::TaskInfo&) = 0;
+      virtual void serialize(const LegionProfInstance::TaskInfo&, bool) = 0;
       virtual void serialize(const LegionProfInstance::MetaInfo&) = 0;
       virtual void serialize(const LegionProfInstance::MessageInfo&) = 0;
       virtual void serialize(const LegionProfInstance::CopyInfo&) = 0;
@@ -161,7 +161,7 @@ namespace Legion {
                      const LegionProfInstance::GPUTaskInfo&);
       void serialize(const LegionProfInstance::WaitInfo,
                      const LegionProfInstance::MetaInfo&);
-      void serialize(const LegionProfInstance::TaskInfo&);
+      void serialize(const LegionProfInstance::TaskInfo&, bool);
       void serialize(const LegionProfInstance::MetaInfo&);
       void serialize(const LegionProfInstance::MessageInfo&);
       void serialize(const LegionProfInstance::CopyInfo&);
@@ -223,6 +223,7 @@ namespace Legion {
         MAPPER_CALL_INFO_ID,
         RUNTIME_CALL_INFO_ID,
         APPLICATION_CALL_INFO_ID,
+        IMPLICIT_TASK_INFO_ID,
         GPU_TASK_INFO_ID,
         PROC_MEM_DESC_ID,
         INDEX_SPACE_POINT_ID,
@@ -303,7 +304,7 @@ namespace Legion {
                      const LegionProfInstance::GPUTaskInfo&);
       void serialize(const LegionProfInstance::WaitInfo,
                      const LegionProfInstance::MetaInfo&);
-      void serialize(const LegionProfInstance::TaskInfo&);
+      void serialize(const LegionProfInstance::TaskInfo&, bool);
       void serialize(const LegionProfInstance::MetaInfo&);
       void serialize(const LegionProfInstance::MessageInfo&);
       void serialize(const LegionProfInstance::CopyInfo&);

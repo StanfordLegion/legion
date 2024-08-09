@@ -3400,6 +3400,7 @@ impl State {
         creator: EventID,
         critical: EventID,
         fevent: EventID,
+        implicit: bool,
     ) -> &mut ProcEntry {
         // Hack: we have to do this in two places, because we don't know what
         // order the logger calls are going to come in. If the operation gets
@@ -3409,12 +3410,20 @@ impl State {
         let alloc = &mut self.prof_uid_allocator;
         let creator_uid = alloc.create_reference(creator);
         let base = Base::from_fevent(alloc, fevent);
-        self.record_event_node(
-            fevent,
-            EventEntryKind::TaskEvent,
-            base.prof_uid,
-            time_range.stop.unwrap(),
-        );
+        if implicit {
+            // The fevent for implicit top-level tasks is a user event that
+            // was made by Legion and will be triggered by it so don't record
+            // that we own this event, just make sure it exists, it will be
+            // populated by the corresponding fevent
+            self.find_event_node(fevent);
+        } else {
+            self.record_event_node(
+                fevent,
+                EventEntryKind::TaskEvent,
+                base.prof_uid,
+                time_range.stop.unwrap(),
+            );
+        }
         let proc = self.procs.create_proc(proc_id);
         proc.create_proc_entry(
             base,
@@ -5077,6 +5086,34 @@ fn process_record(
                 *creator,
                 *critical,
                 *fevent,
+                false, // implicit
+            );
+            state.update_last_time(*stop);
+        }
+        Record::ImplicitTaskInfo {
+            op_id,
+            task_id,
+            variant_id,
+            proc_id,
+            create,
+            ready,
+            start,
+            stop,
+            creator,
+            critical,
+            fevent,
+        } => {
+            let time_range = TimeRange::new_full(*create, *ready, *start, *stop);
+            state.create_task(
+                *op_id,
+                *proc_id,
+                *task_id,
+                *variant_id,
+                time_range,
+                *creator,
+                *critical,
+                *fevent,
+                true, // implicit
             );
             state.update_last_time(*stop);
         }
@@ -5114,6 +5151,7 @@ fn process_record(
                 *creator,
                 *critical,
                 *fevent,
+                false, // implicit
             );
             state.update_last_time(max(*stop, *gpu_stop));
         }

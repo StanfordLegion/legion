@@ -329,6 +329,21 @@ namespace Legion {
          << "fevent:unsigned long long:" << sizeof(LgEvent)
          << "}" << std::endl;
 
+      ss << "ImplicitTaskInfo {"
+         << "id:" << IMPLICIT_TASK_INFO_ID                << delim
+         << "op_id:UniqueID:"      << sizeof(UniqueID)    << delim
+         << "task_id:TaskID:"      << sizeof(TaskID)      << delim
+         << "variant_id:VariantID:"<< sizeof(VariantID)   << delim
+         << "proc_id:ProcID:"      << sizeof(ProcID)      << delim
+         << "create:timestamp_t:"  << sizeof(timestamp_t) << delim
+         << "ready:timestamp_t:"   << sizeof(timestamp_t) << delim
+         << "start:timestamp_t:"   << sizeof(timestamp_t) << delim
+         << "stop:timestamp_t:"    << sizeof(timestamp_t) << delim
+         << "creator:unsigned long long:" << sizeof(LgEvent) << delim
+         << "critical:unsigned long long:" << sizeof(LgEvent) << delim
+         << "fevent:unsigned long long:" << sizeof(LgEvent)
+         << "}" << std::endl;
+
       ss << "GPUTaskInfo {"
          << "id:" << GPU_TASK_INFO_ID                       << delim
          << "op_id:UniqueID:"        << sizeof(UniqueID)    << delim
@@ -1046,10 +1061,10 @@ namespace Legion {
  
     //--------------------------------------------------------------------------
     void LegionProfBinarySerializer::serialize(
-                                  const LegionProfInstance::TaskInfo& task_info)
+                   const LegionProfInstance::TaskInfo& task_info, bool implicit)
     //--------------------------------------------------------------------------
     {
-      int ID = TASK_INFO_ID;
+      int ID = implicit ? IMPLICIT_TASK_INFO_ID : TASK_INFO_ID;
       lp_fwrite(f, (char*)&ID, sizeof(ID));
       lp_fwrite(f, (char*)&(task_info.op_id),     sizeof(task_info.op_id));
       lp_fwrite(f, (char*)&(task_info.task_id),   sizeof(task_info.task_id));
@@ -2110,15 +2125,23 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LegionProfASCIISerializer::serialize(
-                                  const LegionProfInstance::TaskInfo& task_info)
+                   const LegionProfInstance::TaskInfo& task_info, bool implicit)
     //--------------------------------------------------------------------------
     {
-      log_prof.print("Prof Task Info %llu %u %u " IDFMT " %llu %llu %llu %llu "
-                     IDFMT " " IDFMT " " IDFMT "",
-                     task_info.op_id, task_info.task_id, task_info.variant_id, 
-                     task_info.proc_id, task_info.create, task_info.ready, 
-                     task_info.start, task_info.stop, task_info.creator.id,
-                     task_info.critical.id, task_info.finish_event.id);
+      if (implicit)
+        log_prof.print("Prof Implicit Task Info %llu %u %u " IDFMT " %llu %llu "
+                       "%llu %llu " IDFMT " " IDFMT " " IDFMT "",
+                       task_info.op_id, task_info.task_id, task_info.variant_id,
+                       task_info.proc_id, task_info.create, task_info.ready, 
+                       task_info.start, task_info.stop, task_info.creator.id,
+                       task_info.critical.id, task_info.finish_event.id);
+      else
+        log_prof.print("Prof Task Info %llu %u %u " IDFMT " %llu %llu %llu %llu"
+                       " " IDFMT " " IDFMT " " IDFMT "",
+                       task_info.op_id, task_info.task_id, task_info.variant_id,
+                       task_info.proc_id, task_info.create, task_info.ready, 
+                       task_info.start, task_info.stop, task_info.creator.id,
+                       task_info.critical.id, task_info.finish_event.id);
     }
 
     //--------------------------------------------------------------------------
