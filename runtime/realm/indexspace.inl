@@ -373,9 +373,7 @@ namespace Realm {
   template <int N, typename T>
   inline IndexSpace<N,T>::IndexSpace(const Rect<N,T>& _bounds, SparsityMap<N,T> _sparsity)
     : bounds(_bounds), sparsity(_sparsity)
-  {
-    sparsity.add_references();
-  }
+  {}
 
   // construct an index space from a list of points or rects
   template <int N, typename T>
@@ -400,7 +398,6 @@ namespace Realm {
 	  bounds = bounds.union_bbox(Rect<N,T>(points[i], points[i]));
 	sparsity = SparsityMap<N,T>::construct(points, false /*!always_create*/,
                                                disjoint);
-        sparsity.add_references();
       }
     }
     log_dpops.info() << "construct: " << *this;
@@ -427,7 +424,6 @@ namespace Realm {
 	  bounds = bounds.union_bbox(rects[i]);
 	sparsity = SparsityMap<N,T>::construct(rects, false /*!always_create*/,
                                                disjoint);
-        sparsity.add_references();
       }
     }
     log_dpops.info() << "construct: " << *this;
