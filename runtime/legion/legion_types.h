@@ -2338,6 +2338,11 @@ namespace Legion {
     // the provenance of meta-task operations for profiling
     // purposes, this has no bearing on correctness
     extern thread_local ::legion_unique_id_t implicit_provenance;
+    // Use this global variable to track name of the "finish event"
+    // for whatever (meta-)task we're running on at the moment.
+    // It should always be the case that the owner node of the
+    // "finish" event" is the same as the node we're on.
+    extern thread_local LgEvent implicit_fevent;
     // Use this to track if we're inside of a registration 
     // callback function which we know to be deduplicated
     enum RegistrationCallbackMode {
@@ -3240,6 +3245,8 @@ namespace Legion {
         return;
       // Save the context locally
       Internal::TaskContext *local_ctx = Internal::implicit_context; 
+      // Save the implicit fevent
+      LgEvent local_fevent = Internal::implicit_fevent;
       // Save the task provenance information
       UniqueID local_provenance = Internal::implicit_provenance;
 #ifdef DEBUG_LEGION_CALLERS
@@ -3307,6 +3314,8 @@ namespace Legion {
       }
       // Write the context back
       Internal::implicit_context = local_ctx;
+      // Write the implicit fevent back
+      Internal::implicit_fevent = local_fevent;
       // Write the provenance information back
       Internal::implicit_provenance = local_provenance;
       // Restore the local profiler
@@ -3332,6 +3341,8 @@ namespace Legion {
         return;
       // Save the context locally
       Internal::TaskContext *local_ctx = Internal::implicit_context; 
+      // Save the implicit fevent
+      LgEvent local_fevent = Internal::implicit_fevent;
       // Save the task provenance information
       UniqueID local_provenance = Internal::implicit_provenance;
 #ifdef DEBUG_LEGION_CALLERS
@@ -3399,6 +3410,8 @@ namespace Legion {
       }
       // Write the context back
       Internal::implicit_context = local_ctx;
+      // Write the implicit fevent back
+      Internal::implicit_fevent = local_fevent;
       // Write the provenance information back
       Internal::implicit_provenance = local_provenance;
       // Restore the local profiler

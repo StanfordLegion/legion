@@ -549,7 +549,12 @@ namespace Legion {
         implicit_task_profiler->start_time = 
           Realm::Clock::current_time_in_nanoseconds();
       if (Processor::get_executing_processor().exists())
+      {
         realm_done_event = ApEvent(Processor::get_current_finish_event());
+        implicit_fevent = realm_done_event;
+      }
+      else if (runtime->profiler != NULL)
+        implicit_fevent = owner_task->get_completion_event();
       // Switch over the executing processor to the one
       // that has actually been assigned to run this task.
       executing_processor = proc; 

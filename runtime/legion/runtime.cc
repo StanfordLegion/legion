@@ -86,6 +86,7 @@ namespace Legion {
     thread_local LegionProfInstance *implicit_profiler = NULL;
     thread_local AutoLock *local_lock_list = NULL;
     thread_local UniqueID implicit_provenance = 0;
+    thread_local LgEvent implicit_fevent = LgEvent::NO_LG_EVENT;
     thread_local unsigned inside_registration_callback=NO_REGISTRATION_CALLBACK;
     thread_local ImplicitReferenceTracker *implicit_reference_tracker = NULL;
 #ifdef DEBUG_LEGION_CALLERS
@@ -12108,12 +12109,7 @@ namespace Legion {
       LegionProfiler *profiler = runtime->profiler;
       // If we have a profiler we need to increment our requests count
       if (profiler != NULL)
-#ifdef DEBUG_LEGION
-        profiler->increment_total_outstanding_requests(
-                    LegionProfiler::LEGION_PROF_MESSAGE);
-#else
-        profiler->increment_total_outstanding_requests();
-#endif
+        profiler->increment_outstanding_message_request();
       // Strip off our header and the number of messages, the 
       // processor part was already stipped off by the Legion runtime
       const uint8_t *buffer = (const uint8_t*)args;
@@ -31138,6 +31134,8 @@ namespace Legion {
       ctx->begin_wait(LgEvent::NO_LG_EVENT, true/*from application*/);
       implicit_context = NULL;
       implicit_profiler = NULL;
+      implicit_fevent = LgEvent::NO_LG_EVENT;
+      implicit_provenance = 0;
     }
 
     //--------------------------------------------------------------------------
@@ -31173,6 +31171,8 @@ namespace Legion {
           NULL/*metadataptr*/, 0/*metadatasize*/, effects);
       implicit_context = NULL;
       implicit_profiler = NULL;
+      implicit_fevent = LgEvent::NO_LG_EVENT;
+      implicit_provenance = 0;
     }
 
     //--------------------------------------------------------------------------
@@ -32376,6 +32376,7 @@ namespace Legion {
         implicit_context = NULL;
       // We don't profile this task
       implicit_profiler = NULL;
+      implicit_fevent = LgEvent::NO_LG_EVENT;
       // Finalize the runtime and then delete it
       std::vector<RtEvent> shutdown_events;
       runtime->finalize_runtime(shutdown_events);
@@ -32412,9 +32413,13 @@ namespace Legion {
         implicit_runtime = runtime;
       if (implicit_context != NULL)
         implicit_context = NULL;
-      if ((runtime->profiler != NULL) && (implicit_profiler == NULL))
-        implicit_profiler = 
-          runtime->profiler->find_or_create_profiling_instance();
+      if (runtime->profiler != NULL)
+      {
+        if (implicit_profiler == NULL)
+          implicit_profiler = 
+            runtime->profiler->find_or_create_profiling_instance();
+        implicit_fevent = LgEvent(Processor::get_current_finish_event());
+      }
       // We immediately bump the priority of all meta-tasks once they start
       // up to the highest level to ensure that they drain once they begin
       Processor::set_current_task_priority(LG_RUNNING_PRIORITY);
@@ -32959,9 +32964,13 @@ namespace Legion {
         implicit_runtime = runtime;
       if (implicit_context != NULL)
         implicit_context = NULL;
-      if ((runtime->profiler != NULL) && (implicit_profiler == NULL))
-        implicit_profiler = 
-          runtime->profiler->find_or_create_profiling_instance();
+      if (runtime->profiler != NULL) 
+      {
+        if (implicit_profiler == NULL)
+          implicit_profiler = 
+            runtime->profiler->find_or_create_profiling_instance();
+        implicit_fevent = LgEvent(Processor::get_current_finish_event());
+      }
       Realm::ProfilingResponse response(args, arglen);
       const ProfilingResponseBase *base = 
         static_cast<const ProfilingResponseBase*>(response.user_data());
@@ -33051,6 +33060,7 @@ namespace Legion {
         implicit_context = NULL;
       // We don't profile this task
       implicit_profiler = NULL;
+      implicit_fevent = LgEvent::NO_LG_EVENT;
       // Create the startup barrier and send it out
       RtBarrier startup_barrier(
         Realm::Barrier::create_barrier(runtime->total_address_spaces));
@@ -33075,6 +33085,7 @@ namespace Legion {
         implicit_context = NULL;
       // We don't profile this task
       implicit_profiler = NULL;
+      implicit_fevent = LgEvent::NO_LG_EVENT;
       runtime->handle_endpoint_creation(derez);
     }
 
@@ -33094,9 +33105,13 @@ namespace Legion {
         implicit_runtime = runtime;
       if (implicit_context != NULL)
         implicit_context = NULL;
-      if ((runtime->profiler != NULL) && (implicit_profiler == NULL))
-        implicit_profiler =
-          runtime->profiler->find_or_create_profiling_instance();
+      if (runtime->profiler != NULL)
+      {
+        if (implicit_profiler == NULL)
+          implicit_profiler =
+            runtime->profiler->find_or_create_profiling_instance();
+        implicit_fevent = LgEvent(Processor::get_current_finish_event());
+      }
       // We immediately bump the priority of all meta-tasks once they start
       // up to the highest level to ensure that they drain once they begin
       Processor::set_current_task_priority(LG_RUNNING_PRIORITY);

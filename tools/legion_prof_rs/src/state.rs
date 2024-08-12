@@ -2712,7 +2712,7 @@ impl EventID {
     }
     // Important: keep this in sync with realm/id.h
     // EVENT:   tag:1 = 0b1, creator_node:16, gen_event_idx:27, generation:20
-    // owner_node = proc_id[63:47]
+    // owner_node = event_id[63:47]
     pub fn node_id(&self) -> NodeID {
         NodeID((self.0 >> 47) & ((1 << 16) - 1))
     }

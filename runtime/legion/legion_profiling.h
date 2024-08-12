@@ -814,6 +814,9 @@ namespace Legion {
       void record_provenance(ProvenanceID pid, 
                              const char *provenance, size_t size);
     public:
+      void increment_outstanding_message_request(void);
+      LgEvent find_message_fevent(LgEvent original_fevent);
+    public:
 #ifdef DEBUG_LEGION
       void increment_total_outstanding_requests(ProfilingKind kind,
                                                 unsigned cnt = 1);
@@ -854,6 +857,7 @@ namespace Legion {
       unsigned long long next_backtrace_id;
       std::vector<Memory> recorded_memories;
       std::vector<Processor> recorded_processors;
+      std::map<LgEvent,LgEvent> message_fevents;
 #ifdef DEBUG_LEGION
       unsigned total_outstanding_requests[LEGION_PROF_LAST];
 #else

@@ -111,13 +111,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     LegionProfInstance::ProfilingInfo::ProfilingInfo(
                                       ProfilingResponseHandler *h, UniqueID uid)
-      : ProfilingResponseBase(h, uid),
-        creator(Processor::get_executing_processor().exists() ?
-            LgEvent(Processor::get_current_finish_event()) :
-            ((implicit_context != NULL) && 
-             (implicit_context->owner_task != NULL)) ?
-              implicit_context->owner_task->get_completion_event() :
-              LgEvent::NO_LG_EVENT)
+      : ProfilingResponseBase(h, uid), creator(implicit_fevent)
     //--------------------------------------------------------------------------
     {
     }
@@ -482,12 +476,7 @@ namespace Legion {
       info.preconditions.resize(count);
       for (unsigned idx = 0; idx < count; idx++)
         info.preconditions[idx] = preconditions[idx];
-      const Processor current = Processor::get_executing_processor();
-      if (current.exists())
-        info.fevent = LgEvent(Processor::get_current_finish_event());
-      else if ((implicit_context != NULL) && 
-          (implicit_context->owner_task != NULL))
-        info.fevent = implicit_context->owner_task->get_completion_event();
+      info.fevent = implicit_fevent;
       owner->update_footprint(sizeof(info) + count * sizeof(LgEvent), this);
     }
 
@@ -502,12 +491,7 @@ namespace Legion {
       info.performed = Realm::Clock::current_time_in_nanoseconds();
       info.result = result;
       info.precondition = pre;
-      const Processor current = Processor::get_executing_processor();
-      if (current.exists())
-        info.fevent = LgEvent(Processor::get_current_finish_event());
-      else if ((implicit_context != NULL) && 
-          (implicit_context->owner_task != NULL))
-        info.fevent = implicit_context->owner_task->get_completion_event();
+      info.fevent = implicit_fevent;
       owner->update_footprint(sizeof(info), this);
     }
 
@@ -521,12 +505,7 @@ namespace Legion {
           EventPoisonInfo());
       info.performed = Realm::Clock::current_time_in_nanoseconds();
       info.result = result;
-      const Processor current = Processor::get_executing_processor();
-      if (current.exists())
-        info.fevent = LgEvent(Processor::get_current_finish_event());
-      else if ((implicit_context != NULL) && 
-          (implicit_context->owner_task != NULL))
-        info.fevent = implicit_context->owner_task->get_completion_event();
+      info.fevent = implicit_fevent;
       owner->update_footprint(sizeof(info), this);
     }
 
@@ -541,12 +520,7 @@ namespace Legion {
       info.performed = Realm::Clock::current_time_in_nanoseconds();
       info.result = result;
       info.precondition = pre;
-      const Processor current = Processor::get_executing_processor();
-      if (current.exists())
-        info.fevent = LgEvent(Processor::get_current_finish_event());
-      else if ((implicit_context != NULL) && 
-          (implicit_context->owner_task != NULL))
-        info.fevent = implicit_context->owner_task->get_completion_event();
+      info.fevent = implicit_fevent;
       owner->update_footprint(sizeof(info), this);
     }
 
@@ -563,12 +537,7 @@ namespace Legion {
       info.result = result;
       info.precondition = precondition;
       info.reservation = r;
-      const Processor current = Processor::get_executing_processor();
-      if (current.exists())
-        info.fevent = LgEvent(Processor::get_current_finish_event());
-      else if ((implicit_context != NULL) && 
-          (implicit_context->owner_task != NULL))
-        info.fevent = implicit_context->owner_task->get_completion_event();
+      info.fevent = implicit_fevent;
       owner->update_footprint(sizeof(info), this);
     }
 
@@ -785,7 +754,16 @@ namespace Legion {
       info.critical = prof_info->critical;
       Realm::ProfilingMeasurements::OperationFinishEvent finish;
       if (response.get_measurement(finish))
-        info.finish_event = LgEvent(finish.finish_event);
+      {
+        const LgEvent original_event = LgEvent(finish.finish_event);
+        // Lookup the renamed fevent that we gave it
+        info.finish_event = owner->find_message_fevent(original_event);
+        // Lie to the profiler and tell it that the original fevent
+        // was a user event that we triggered here and depended upon
+        // the renamed fevent that we gave the message task in case
+        // something does end up waiting on the original fevent
+        record_event_trigger(original_event, info.finish_event);
+      }
       const size_t diff = sizeof(MessageInfo) + 
         num_intervals * sizeof(WaitInfo);
       owner->update_footprint(diff, this);
@@ -1124,7 +1102,6 @@ namespace Legion {
                               UniqueID uid, long long start, long long stop)
     //--------------------------------------------------------------------------
     {
-      LgEvent finish_event;
       Processor current = Processor::get_executing_processor();
       if (!current.exists())
       {
@@ -1138,12 +1115,7 @@ namespace Legion {
         assert(implicit_context != NULL);
 #endif
         current = implicit_context->get_executing_processor();
-        
-        TaskContext *ctx = implicit_context;
-        finish_event = ctx->owner_task->get_completion_event();
       }
-      else
-        finish_event = LgEvent(Processor::get_current_finish_event());
       process_proc_desc(current);
       // Check to see if it exceeds the call threshold
       if ((stop - start) < owner->minimum_call_threshold)
@@ -1157,7 +1129,7 @@ namespace Legion {
       info.start = start;
       info.stop = stop;
       info.proc_id = current.id;
-      info.finish_event = finish_event;
+      info.finish_event = implicit_fevent;
       owner->update_footprint(sizeof(MapperCallInfo), this);
     }
 
@@ -1166,7 +1138,6 @@ namespace Legion {
                                                 long long start, long long stop)
     //--------------------------------------------------------------------------
     {
-      LgEvent finish_event;
       Processor current = Processor::get_executing_processor();
       if (!current.exists())
       {
@@ -1180,10 +1151,7 @@ namespace Legion {
         assert(implicit_context != NULL);
 #endif
         current = implicit_context->get_executing_processor();
-        finish_event = implicit_context->owner_task->get_completion_event();
       }
-      else
-        finish_event = LgEvent(Processor::get_current_finish_event());
       process_proc_desc(current);
       // Check to see if it exceeds the call threshold
       if ((stop - start) < owner->minimum_call_threshold)
@@ -1194,7 +1162,7 @@ namespace Legion {
       info.start = start;
       info.stop = stop;
       info.proc_id = current.id;
-      info.finish_event = finish_event;
+      info.finish_event = implicit_fevent;
       owner->update_footprint(sizeof(RuntimeCallInfo), this);
     }
 
@@ -1203,7 +1171,6 @@ namespace Legion {
                               ProvenanceID pid, long long start, long long stop)
     //--------------------------------------------------------------------------
     {
-      LgEvent finish_event;
       Processor current = Processor::get_executing_processor();
       if (!current.exists())
       {
@@ -1214,10 +1181,7 @@ namespace Legion {
         assert(implicit_context != NULL);
 #endif
         current = implicit_context->get_executing_processor();
-        finish_event = implicit_context->owner_task->get_completion_event();
       }
-      else
-        finish_event = LgEvent(Processor::get_current_finish_event());
       // We don't filter application call ranges currently since presumably 
       // the application knows what its doing and wants to see everything 
       application_call_infos.emplace_back(ApplicationCallInfo());
@@ -1226,7 +1190,7 @@ namespace Legion {
       info.start = start;
       info.stop = stop;
       info.proc_id = current.id;
-      info.finish_event = finish_event;
+      info.finish_event = implicit_fevent;
       owner->update_footprint(sizeof(ApplicationCallInfo), this);
     }
 
@@ -1235,7 +1199,6 @@ namespace Legion {
                                                Realm::Backtrace &bt)
     //--------------------------------------------------------------------------
     {
-      LgEvent finish_event;
       Processor current = Processor::get_executing_processor();
       if (!current.exists())
       {
@@ -1246,14 +1209,11 @@ namespace Legion {
         assert(implicit_context != NULL);
 #endif
         current = implicit_context->get_executing_processor();
-        finish_event = implicit_context->owner_task->get_completion_event();
       }
-      else
-        finish_event = LgEvent(Processor::get_current_finish_event());
       // Check to see if we have a backtrace ID for this backtrace yet 
       unsigned long long backtrace_id = owner->find_backtrace_id(bt);
       event_wait_infos.emplace_back(
-          EventWaitInfo{current.id, finish_event, event, backtrace_id});
+          EventWaitInfo{current.id, implicit_fevent, event, backtrace_id});
       owner->update_footprint(sizeof(EventWaitInfo), this);
     }
 
@@ -2745,13 +2705,12 @@ namespace Legion {
       {
         const Processor proc = Processor::get_executing_processor();
         implicit_profiler->process_proc_desc(proc);
-        const LgEvent prof_finish(Processor::get_current_finish_event());
         if (info->kind == LEGION_PROF_INST)
         {
           fevent.id = info->id;
           const long long stop = Realm::Clock::current_time_in_nanoseconds();
           implicit_profiler->record_proftask(proc, info->op_id,
-              start, stop, fevent, prof_finish, true/*completion*/);
+              start, stop, fevent, implicit_fevent, true/*completion*/);
         }
         else
         {
@@ -2761,7 +2720,7 @@ namespace Legion {
             const long long stop = Realm::Clock::current_time_in_nanoseconds();
             implicit_profiler->record_proftask(proc, info->op_id,
                 start, stop, LgEvent(finish.finish_event), 
-                prof_finish, true/*completion*/);
+                implicit_fevent, true/*completion*/);
           }
         }
       }
@@ -2855,6 +2814,50 @@ namespace Legion {
       }
       else
         serializer->serialize(prov);
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfiler::increment_outstanding_message_request(void)
+    //--------------------------------------------------------------------------
+    {
+      // Increment the count of outstanding message requests
+#ifdef DEBUG_LEGION
+      assert(implicit_fevent.exists());
+      increment_total_outstanding_requests(LegionProfiler::LEGION_PROF_MESSAGE);
+#else
+      increment_total_outstanding_requests();
+#endif
+      // This part is a bit tricky: we want the implicit_fevent to always be
+      // an event local to this node so that the profiler can always look up
+      // which node ot consult based on the fevent for a task. However, Realm
+      // creates the finish_event for messages on the node where they are 
+      // spawned and not where they are run, so we have to rename the 
+      // implicit_fevent here to an event local to this node, so we do that
+      // here before we handle the message, and then we pretend like the
+      // actuall finish event is a user event triggered after we get the 
+      // profiling response for this task.
+      const Realm::UserEvent rename = Realm::UserEvent::create_user_event();
+      rename.trigger();
+      const LgEvent fevent(rename);
+      // Save the current implicit fevent so we can look it up later
+      AutoLock prof_lock(profiler_lock); 
+      message_fevents[implicit_fevent] = fevent;
+      implicit_fevent = fevent;
+    }
+
+    //--------------------------------------------------------------------------
+    LgEvent LegionProfiler::find_message_fevent(LgEvent original_fevent)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock prof_lock(profiler_lock);
+      std::map<LgEvent,LgEvent>::iterator finder = 
+        message_fevents.find(original_fevent);
+#ifdef DEBUG_LEGION
+      assert(finder != message_fevents.end());
+#endif
+      const LgEvent result = finder->second;
+      message_fevents.erase(finder);
+      return result;
     }
 
 #ifdef DEBUG_LEGION
