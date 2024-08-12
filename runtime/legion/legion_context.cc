@@ -537,9 +537,7 @@ namespace Legion {
     {
       if (implicit_runtime == NULL)
         implicit_runtime = this->runtime;
-      if ((runtime->profiler != NULL) && (implicit_profiler == NULL))
-        implicit_profiler = 
-          runtime->profiler->find_or_create_profiling_instance();
+      
       implicit_context = this;
       implicit_provenance = owner_task->get_unique_op_id();
       if (overhead_profiler != NULL)
@@ -555,6 +553,9 @@ namespace Legion {
       }
       else if (runtime->profiler != NULL)
         implicit_fevent = owner_task->get_completion_event();
+      if ((runtime->profiler != NULL) && (implicit_profiler == NULL))
+        implicit_profiler = 
+          runtime->profiler->find_or_create_profiling_instance();
       // Switch over the executing processor to the one
       // that has actually been assigned to run this task.
       executing_processor = proc; 

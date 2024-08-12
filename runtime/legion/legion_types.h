@@ -3291,8 +3291,11 @@ namespace Legion {
         // If we're profiling we need to record that we triggered this
         // event as it will help us hook up the critical path for
         // local lock acquires
-        if (implicit_profiler != NULL)
+        if (local_profiler != NULL)
         {
+          // Make sure to restore this before recording
+          Internal::implicit_fevent = local_fevent;
+          Internal::implicit_profiler = local_profiler;
           const LgEvent to_trigger(done);
           to_trigger.record_event_trigger(LgEvent::NO_LG_EVENT);
         }
@@ -3387,8 +3390,11 @@ namespace Legion {
         // If we're profiling we need to record that we triggered this
         // event as it will help us hook up the critical path for
         // local lock acquires
-        if (implicit_profiler != NULL)
+        if (local_profiler != NULL)
         {
+          // Make sure to restore this before recording
+          Internal::implicit_fevent = local_fevent;
+          Internal::implicit_profiler = local_profiler;
           const LgEvent to_trigger(done);
           to_trigger.record_event_trigger(LgEvent::NO_LG_EVENT);
         }

@@ -2839,10 +2839,13 @@ namespace Legion {
       const Realm::UserEvent rename = Realm::UserEvent::create_user_event();
       rename.trigger();
       const LgEvent fevent(rename);
+      // Well this is fun, we might even block on this lock acquire so 
+      // make sure we've set up our implicit fevent correctly
+      const LgEvent original_fevent = implicit_fevent;
+      implicit_fevent = fevent;
       // Save the current implicit fevent so we can look it up later
       AutoLock prof_lock(profiler_lock); 
-      message_fevents[implicit_fevent] = fevent;
-      implicit_fevent = fevent;
+      message_fevents[original_fevent] = fevent;
     }
 
     //--------------------------------------------------------------------------

@@ -12105,11 +12105,6 @@ namespace Legion {
                          Runtime *runtime, AddressSpaceID remote_address_space)
     //--------------------------------------------------------------------------
     {
-      // Pull this onto the stack before we do anything else
-      LegionProfiler *profiler = runtime->profiler;
-      // If we have a profiler we need to increment our requests count
-      if (profiler != NULL)
-        profiler->increment_outstanding_message_request();
       // Strip off our header and the number of messages, the 
       // processor part was already stipped off by the Legion runtime
       const uint8_t *buffer = (const uint8_t*)args;
@@ -32413,13 +32408,6 @@ namespace Legion {
         implicit_runtime = runtime;
       if (implicit_context != NULL)
         implicit_context = NULL;
-      if (runtime->profiler != NULL)
-      {
-        if (implicit_profiler == NULL)
-          implicit_profiler = 
-            runtime->profiler->find_or_create_profiling_instance();
-        implicit_fevent = LgEvent(Processor::get_current_finish_event());
-      }
       // We immediately bump the priority of all meta-tasks once they start
       // up to the highest level to ensure that they drain once they begin
       Processor::set_current_task_priority(LG_RUNNING_PRIORITY);
@@ -32438,6 +32426,17 @@ namespace Legion {
 #endif
       data += sizeof(tid);
       arglen -= sizeof(tid);
+      if (runtime->profiler != NULL)
+      {
+        implicit_fevent = LgEvent(Processor::get_current_finish_event());
+        // If this is a message task, then we need to initialize the
+        // implicit_fevent before doing anything that can block
+        if (tid == LG_MESSAGE_ID)
+          runtime->profiler->increment_outstanding_message_request();
+        if (implicit_profiler == NULL)
+          implicit_profiler = 
+            runtime->profiler->find_or_create_profiling_instance();
+      }
       switch (tid)
       {
         case LG_SCHEDULER_ID:
@@ -32966,10 +32965,10 @@ namespace Legion {
         implicit_context = NULL;
       if (runtime->profiler != NULL) 
       {
+        implicit_fevent = LgEvent(Processor::get_current_finish_event());
         if (implicit_profiler == NULL)
           implicit_profiler = 
             runtime->profiler->find_or_create_profiling_instance();
-        implicit_fevent = LgEvent(Processor::get_current_finish_event());
       }
       Realm::ProfilingResponse response(args, arglen);
       const ProfilingResponseBase *base = 
@@ -33107,10 +33106,10 @@ namespace Legion {
         implicit_context = NULL;
       if (runtime->profiler != NULL)
       {
+        implicit_fevent = LgEvent(Processor::get_current_finish_event());
         if (implicit_profiler == NULL)
           implicit_profiler =
             runtime->profiler->find_or_create_profiling_instance();
-        implicit_fevent = LgEvent(Processor::get_current_finish_event());
       }
       // We immediately bump the priority of all meta-tasks once they start
       // up to the highest level to ensure that they drain once they begin
