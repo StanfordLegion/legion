@@ -414,6 +414,7 @@ namespace Realm {
                                        size_t field_size, size_t volume,
                                        GPUStream *stream);
       bool is_accessible_host_mem(const MemoryImpl *mem) const;
+      bool is_accessible_gpu_mem(const MemoryImpl *mem) const;
 
     protected:
       CUmodule load_cuda_module(const void *data);

@@ -174,22 +174,43 @@ namespace Realm {
     }
 
     static GPUStream *select_stream(GPU *dst, GPU *src, GPU *channel_gpu,
-                                    const GPU::CudaIpcMapping *dst_mapping = 0)
+                                    const GPU::CudaIpcMapping *dst_mapping,
+                                    MemoryImpl *src_mem, MemoryImpl *dst_mem)
     {
-      if (src) {
-        if (dst == src) {
+      assert(channel_gpu != nullptr);
+      // Assume the channel_gpu is always available and will fill in the role for when src
+      // or dst is null.  This could be the case if the src/dst mem is pageable and we
+      // have pageable access
+      if(src == nullptr) {
+        src = channel_gpu;
+      }
+      if (dst == nullptr) {
+        dst = channel_gpu;
+      }
+
+      // IPC copy
+      if (dst_mapping != nullptr) {
+        return src->cudaipc_streams[dst_mapping->owner];
+      }
+
+      const bool src_gpu_mem = src->is_accessible_gpu_mem(src_mem);
+      const bool dst_gpu_mem = src->is_accessible_gpu_mem(dst_mem);
+      if (src_gpu_mem && dst_gpu_mem) {
+        // Intra-GPU copy
+        if (src == dst) {
           return src->get_next_d2d_stream();
         }
-        else if (dst_mapping != NULL) {
-          return src->cudaipc_streams[dst_mapping->owner];
-        }
-        else if (dst == NULL) {
-          return src->device_to_host_stream;
-        }
+        // P2P copy
         return src->peer_to_peer_streams[dst->info->index];
       }
-      assert((dst != nullptr) || (channel_gpu != nullptr));
-      return (dst != nullptr ? dst : channel_gpu)->host_to_device_stream;
+      // D2H copy
+      if (src_gpu_mem) {
+        return src->device_to_host_stream;
+      }
+      // H2D or H2H copy.  We use the destination gpu here instead, since it does not
+      // matter what GPU actually accesses the host memory, as we want to minimize any
+      // peer traffic that might occur
+      return dst->host_to_device_stream;
     }
 
     static void get_nonaffine_strides(size_t &pitch, size_t &height, AddressInfoCudaArray &ainfo, AddressListCursor &alc, size_t bytes)
@@ -494,6 +515,26 @@ namespace Realm {
       return pinned_sysmems.count(mem->me) > 0;
     }
 
+    bool GPU::is_accessible_gpu_mem(const MemoryImpl *mem) const
+    {
+      assert(mem != nullptr);
+
+      switch(mem->get_kind()) {
+      case Memory::GPU_DYNAMIC_MEM:
+      case Memory::GPU_FB_MEM:
+      {
+        const CudaDeviceMemoryInfo *mem_info =
+            mem->find_module_specific<CudaDeviceMemoryInfo>();
+        return (mem_info != nullptr) &&
+               ((mem_info->gpu == this) ||
+                (info->peers.find(mem_info->gpu->info->index) != info->peers.end()));
+      }
+      default:
+        break;
+      }
+      return false;
+    }
+
     bool GPUXferDes::progress_xd(GPUChannel *channel, TimeLimit work_until)
     {
       // Mininum amount to transfer in a single quantum before returning in order to
@@ -608,7 +649,7 @@ namespace Realm {
           }
         }
 
-        stream = select_stream(out_gpu, in_gpu, channel->get_gpu(), out_mapping);
+        stream = select_stream(out_gpu, in_gpu, channel->get_gpu(), out_mapping, in_port->mem, out_port->mem);
         assert(stream != NULL);
 
         AutoGPUContext agc(stream->get_gpu());
@@ -1030,7 +1071,8 @@ namespace Realm {
         else
           write_ind_bytes = (max_bytes / field_size) * addr_size;
 
-        auto stream = select_stream(out_gpu, in_gpu, channel->get_gpu(), out_mapping);
+        auto stream = select_stream(out_gpu, in_gpu, channel->get_gpu(), out_mapping,
+                                    in_port->mem, out_port->mem);
         AutoGPUContext agc(stream->get_gpu());
 
         // We can't do gather-scatter yet.

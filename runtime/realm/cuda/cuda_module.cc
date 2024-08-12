@@ -2495,17 +2495,19 @@ namespace Realm {
             new GPUStream(this, worker, module->config->cfg_d2d_stream_priority);
       }
 
-      // only create p2p streams for devices we can talk to
-      peer_to_peer_streams.resize(module->gpu_info.size(), 0);
-      for(std::vector<GPUInfo *>::const_iterator it = module->gpu_info.begin();
-	  it != module->gpu_info.end();
-	  ++it)
-	if(info->peers.count((*it)->index) != 0)
-	  peer_to_peer_streams[(*it)->index] = new GPUStream(this, worker);
+      // Create a peer_to_peer stream for all our known devices.  This will isolate the
+      // DMA requests for each GPU
+      peer_to_peer_streams.resize(module->gpu_info.size(), nullptr);
+      for (const GPUInfo *gpu_info : module->gpu_info) {
+        if (gpu_info->index != info->index) {
+	        peer_to_peer_streams[gpu_info->index] = new GPUStream(this, worker);
+        }
+      }
 
       task_streams.resize(module->config->cfg_task_streams);
-      for(unsigned i = 0; i < module->config->cfg_task_streams; i++)
-	task_streams[i] = new GPUStream(this, worker);
+      for(size_t i = 0; i < task_streams.size(); i++) {
+	      task_streams[i] = new GPUStream(this, worker);
+      }
 
       pop_context();
 
@@ -2530,22 +2532,15 @@ namespace Realm {
 
       delete_container_contents(device_to_device_streams);
 
-      for(std::vector<GPUStream *>::iterator it = peer_to_peer_streams.begin();
-	  it != peer_to_peer_streams.end();
-	  ++it)
-	if(*it)
-	  delete *it;
-
-      for(std::map<NodeID, GPUStream *>::iterator it = cudaipc_streams.begin();
-          it != cudaipc_streams.end();
-	  ++it)
-        delete it->second;
-
+      delete_container_contents(peer_to_peer_streams);
+      delete_container_contents(cudaipc_streams);
       delete_container_contents(task_streams);
 
       if (fb_dmem) {
         fb_dmem->cleanup();
       }
+
+      pop_context();
 
       CHECK_CU( CUDA_DRIVER_FNPTR(cuDevicePrimaryCtxRelease)(info->device) );
     }
