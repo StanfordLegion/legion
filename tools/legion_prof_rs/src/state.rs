@@ -4282,7 +4282,7 @@ impl State {
                 // Iterate over the nodes in topological order and propagate the
                 // ProfUID of and timestamp determining the critical path for each event
                 // Complexity of this loop is also O(V + E) so should be scalable
-                for node_id in topological_order {
+                for vertex in topological_order {
                     // Iterate over all the incoming edges and determine the latest
                     // precondition event to trigger leading into this node
                     let mut latest = None;
@@ -4290,10 +4290,7 @@ impl State {
                     // a completion queue event and we need to know the first of
                     // our event preconditions to trigger
                     let mut earliest: Option<(CriticalPathVertex, Timestamp)> = None;
-                    for edge in self
-                        .event_graph
-                        .edges_directed(node_id, Direction::Incoming)
-                    {
+                    for edge in self.event_graph.edges_directed(vertex, Direction::Incoming) {
                         let src = self.event_graph.node_weight(edge.source()).unwrap();
                         // Skip uknown events
                         if src.kind == EventEntryKind::UnknownEvent {
@@ -4313,9 +4310,9 @@ impl State {
                             earliest = latest;
                         }
                     }
-                    let node = self.event_graph.node_weight_mut(node_id).unwrap();
+                    let event_entry = self.event_graph.node_weight_mut(vertex).unwrap();
                     // Skip unknown events
-                    if node.kind == EventEntryKind::UnknownEvent {
+                    if event_entry.kind == EventEntryKind::UnknownEvent {
                         // they should not have had any preconditions
                         assert!(latest.is_none());
                         continue;
@@ -4323,30 +4320,30 @@ impl State {
                     // If this is a completion queue event, then switch the earliest
                     // to be the "latest" since it's the earliest event that triggers
                     // that determines when a completion queue event triggers
-                    if node.kind == EventEntryKind::CompletionQueueEvent {
+                    if event_entry.kind == EventEntryKind::CompletionQueueEvent {
                         latest = earliest;
                     }
                     // Now check to see if the latest comes after the point where
                     // we made this particular event
-                    if let Some((latest_node, latest_time)) = latest {
-                        let trigger_time = node.trigger_time.unwrap();
+                    if let Some((latest_vertex, latest_time)) = latest {
+                        let trigger_time = event_entry.trigger_time.unwrap();
                         if trigger_time < latest_time {
-                            node.critical = Some(latest_node);
+                            event_entry.critical = Some(latest_vertex);
                             // Update the time at which this triggered
-                            node.trigger_time = Some(latest_time);
+                            event_entry.trigger_time = Some(latest_time);
                         } else {
                             // We're our own critical path
-                            node.critical = Some(node_id);
+                            event_entry.critical = Some(vertex);
                         }
                     } else {
                         // We're our own critical path
-                        node.critical = Some(node_id);
+                        event_entry.critical = Some(vertex);
                     }
                 }
             }
             Err(_) => {
                 // Detected a cycle in the graph
-                println!("Warning: detected a cycle in the Realm event graph. Critical paths will not be available in this profile. Please create a bug for this and attach the log files that caused it.");
+                eprintln!("Warning: detected a cycle in the Realm event graph. Critical paths will not be available in this profile. Please create a bug for this and attach the log files that caused it.");
                 // clear the event lookup so we can't lookup critical paths
                 self.event_lookup.clear();
             }
