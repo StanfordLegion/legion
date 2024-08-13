@@ -1272,10 +1272,17 @@ impl StateDataSource {
         let node = event.node_id();
         match event_entry.kind {
             EventEntryKind::UnknownEvent => {
-                Field::String(format!(
-                        "Unknown critical path event from node {}. Please load the logfile from that node to see it.", 
-                        node.0
-                ))
+                if event.is_barrier() {
+                    Field::String(format!(
+                            "Unknown critical path barrier {} from node {}. Please load the logfile from that node to see it.", 
+                            event.0, node.0
+                    ))
+                } else {
+                    Field::String(format!(
+                            "Unknown critical path event {} from node {}. Please load the logfile from that node to see it.", 
+                            event.0, node.0
+                    ))
+                }
             }
             EventEntryKind::TaskEvent => {
                 let prof_uid = event_entry.creator.unwrap();
@@ -1393,7 +1400,10 @@ impl StateDataSource {
                     Field::ItemLink(ItemLink {
                         item_uid: entry.base().prof_uid.into(),
                         title: format!("Event Merger by {} at {}", &op_name, trigger_ts),
-                        interval: ts::Interval::new(entry.time_range.start.unwrap().into(), trigger_ts),
+                        interval: ts::Interval::new(
+                            entry.time_range.start.unwrap().into(),
+                            trigger_ts,
+                        ),
                         entry_id: self.proc_entries.get(proc_id).unwrap().clone(),
                     })
                 } else {
@@ -1415,7 +1425,10 @@ impl StateDataSource {
                     Field::ItemLink(ItemLink {
                         item_uid: entry.base().prof_uid.into(),
                         title: format!("User Event Trigger by {} at {}", &op_name, trigger_ts),
-                        interval: ts::Interval::new(entry.time_range.start.unwrap().into(), trigger_ts),
+                        interval: ts::Interval::new(
+                            entry.time_range.start.unwrap().into(),
+                            trigger_ts,
+                        ),
                         entry_id: self.proc_entries.get(proc_id).unwrap().clone(),
                     })
                 } else {
@@ -1437,7 +1450,10 @@ impl StateDataSource {
                     Field::ItemLink(ItemLink {
                         item_uid: entry.base().prof_uid.into(),
                         title: format!("Event Poisoned by {} at {}", &op_name, trigger_ts),
-                        interval: ts::Interval::new(entry.time_range.start.unwrap().into(), trigger_ts),
+                        interval: ts::Interval::new(
+                            entry.time_range.start.unwrap().into(),
+                            trigger_ts,
+                        ),
                         entry_id: self.proc_entries.get(proc_id).unwrap().clone(),
                     })
                 } else {
@@ -1459,7 +1475,10 @@ impl StateDataSource {
                     Field::ItemLink(ItemLink {
                         item_uid: entry.base().prof_uid.into(),
                         title: format!("Barrier Arrival by {} at {}", &op_name, trigger_ts),
-                        interval: ts::Interval::new(entry.time_range.start.unwrap().into(), trigger_ts),
+                        interval: ts::Interval::new(
+                            entry.time_range.start.unwrap().into(),
+                            trigger_ts,
+                        ),
                         entry_id: self.proc_entries.get(proc_id).unwrap().clone(),
                     })
                 } else {
@@ -1481,12 +1500,43 @@ impl StateDataSource {
                     Field::ItemLink(ItemLink {
                         item_uid: entry.base().prof_uid.into(),
                         title: format!("Reservation Acquire by {} at {}", &op_name, trigger_ts),
-                        interval: ts::Interval::new(entry.time_range.start.unwrap().into(), trigger_ts),
+                        interval: ts::Interval::new(
+                            entry.time_range.start.unwrap().into(),
+                            trigger_ts,
+                        ),
                         entry_id: self.proc_entries.get(proc_id).unwrap().clone(),
                     })
                 } else {
                     Field::String(format!(
                             "Critical path from a reservation acquire on node {}. Please load the logfile from that node to see it.",
+                            node.0
+                    ))
+                }
+            }
+            EventEntryKind::CompletionQueueEvent => {
+                let prof_uid = event_entry.creator.unwrap();
+                if let Some(proc_id) = self.state.prof_uid_proc.get(&prof_uid) {
+                    let trigger_time = event_entry.trigger_time.unwrap();
+                    let trigger_ts: ts::Timestamp = trigger_time.into();
+                    let proc = self.state.procs.get(&proc_id).unwrap();
+                    // This prof UID is just the fevent prof UID, find the actual executing entry
+                    let entry = proc.find_executing_entry(prof_uid, trigger_time).unwrap();
+                    let op_name = entry.name(&self.state);
+                    Field::ItemLink(ItemLink {
+                        item_uid: entry.base().prof_uid.into(),
+                        title: format!(
+                            "Completion Queue Non-Empty by {} at {}",
+                            &op_name, trigger_ts
+                        ),
+                        interval: ts::Interval::new(
+                            entry.time_range.start.unwrap().into(),
+                            trigger_ts,
+                        ),
+                        entry_id: self.proc_entries.get(proc_id).unwrap().clone(),
+                    })
+                } else {
+                    Field::String(format!(
+                            "Critical path from a completion queue non-empty event on node {}. Please load the logfile from that node to see it.",
                             node.0
                     ))
                 }

@@ -558,6 +558,32 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void LegionProfInstance::record_completion_queue_event(LgEvent result,
+                                     const LgEvent *preconditions, size_t count)
+    //--------------------------------------------------------------------------
+    {
+      if (owner->no_critical_paths)
+        return;
+      // Realm can return one of the preconditions as the result of
+      // an event merger as an optimization, to handle that we check
+      // if the result is the same as any of the preconditions, if it
+      // is then there is nothing needed for us to record
+      for (unsigned idx = 0; idx < count; idx++)
+        if (preconditions[idx] == result)
+          return;
+      CompletionQueueInfo &info = completion_queue_infos.emplace_back(
+          CompletionQueueInfo());
+      // Take the timing measurement of when this happened first
+      info.performed = Realm::Clock::current_time_in_nanoseconds();
+      info.result = result;
+      info.preconditions.resize(count);
+      for (unsigned idx = 0; idx < count; idx++)
+        info.preconditions[idx] = preconditions[idx];
+      info.fevent = implicit_fevent;
+      owner->update_footprint(sizeof(info) + count * sizeof(LgEvent), this);
+    }
+
+    //--------------------------------------------------------------------------
     void LegionProfInstance::process_task(const ProfilingInfo *prof_info,
              const Realm::ProfilingResponse &response,
              const Realm::ProfilingMeasurements::OperationProcessorUsage &usage)
@@ -1451,6 +1477,10 @@ namespace Legion {
             instance_ready_infos.begin(); it !=
             instance_ready_infos.end(); it++)
         serializer->serialize(*it);
+      for (std::deque<CompletionQueueInfo>::const_iterator it =
+            completion_queue_infos.begin(); it !=
+            completion_queue_infos.end(); it++)
+        serializer->serialize(*it);
       for (std::deque<ProfTaskInfo>::const_iterator it = 
             prof_task_infos.begin(); it != prof_task_infos.end(); it++)
       {
@@ -1874,6 +1904,16 @@ namespace Legion {
         serializer->serialize(info);
         diff += sizeof(info);
         instance_ready_infos.pop_front();
+        const long long t_curr = Realm::Clock::current_time_in_microseconds();
+        if (t_curr >= t_stop)
+          return diff;
+      }
+      while (!completion_queue_infos.empty())
+      {
+        CompletionQueueInfo &info = completion_queue_infos.front();
+        serializer->serialize(info);
+        diff += (sizeof(info) + (info.preconditions.size() * sizeof(LgEvent)));
+        completion_queue_infos.pop_front();
         const long long t_curr = Realm::Clock::current_time_in_microseconds();
         if (t_curr >= t_stop)
           return diff;

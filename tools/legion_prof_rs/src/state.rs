@@ -2712,9 +2712,18 @@ impl EventID {
     }
     // Important: keep this in sync with realm/id.h
     // EVENT:   tag:1 = 0b1, creator_node:16, gen_event_idx:27, generation:20
-    // owner_node = event_id[63:47]
+    // owner_node = event_id[62:47]
+    // BARRIER: tag:4 = 0x2, creator_node:16, barrier_idx:24, generation:20
+    // owner_node = barrier_id[59:44]
     pub fn node_id(&self) -> NodeID {
-        NodeID((self.0 >> 47) & ((1 << 16) - 1))
+        if self.is_barrier() {
+            NodeID((self.0 >> 44) & ((1 << 16) - 1))
+        } else {
+            NodeID((self.0 >> 47) & ((1 << 16) - 1))
+        }
+    }
+    pub fn is_barrier(&self) -> bool {
+        (self.0 >> 60) == 4
     }
 }
 
@@ -3213,6 +3222,7 @@ pub enum EventEntryKind {
     ArriveBarrier,
     ReservationAcquire,
     InstanceReady,
+    CompletionQueueEvent,
 }
 
 #[derive(Debug)]
@@ -4248,6 +4258,10 @@ impl State {
                         // Iterate over all the incoming edges and determine the latest
                         // precondition event to trigger leading into this node
                         let mut latest = None;
+                        // Also keep track of the earliest trigger time in case this
+                        // a completion queue event and we need to know the first of
+                        // our event preconditions to trigger
+                        let mut earliest: Option<(NodeIndex<usize>, Timestamp)> = None;
                         for edge in self
                             .event_graph
                             .edges_directed(node_id, Direction::Incoming)
@@ -4263,8 +4277,12 @@ impl State {
                                 if latest_time < trigger_time {
                                     latest = Some((src.critical.unwrap(), trigger_time));
                                 }
+                                if trigger_time < earliest.unwrap().1 {
+                                    earliest = Some((src.critical.unwrap(), trigger_time));
+                                }
                             } else {
                                 latest = Some((src.critical.unwrap(), trigger_time));
+                                earliest = latest;
                             }
                         }
                         let node = self.event_graph.node_weight_mut(node_id).unwrap();
@@ -4273,6 +4291,12 @@ impl State {
                             // they should not have had any preconditions
                             assert!(latest.is_none());
                             continue;
+                        }
+                        // If this is a completion queue event, then switch the earliest
+                        // to be the "latest" since it's the earliest event that triggers
+                        // that determines when a completion queue event triggers
+                        if node.kind == EventEntryKind::CompletionQueueEvent {
+                            latest = earliest;
                         }
                         // Now check to see if the latest comes after the point where
                         // we made this particular event
@@ -5519,6 +5543,7 @@ fn process_record(
             // that we might ultimately have multiple arrivals on the barrier and we need to
             // deduplicate those and find the last arrival
             assert!(result.exists());
+            assert!(result.is_barrier());
             assert!(fevent.exists());
             let creator_uid = state.create_fevent_reference(*fevent).unwrap();
             if let Some(index) = state.event_lookup.get(&result) {
@@ -5592,6 +5617,60 @@ fn process_record(
                     .create_inst(*fevent, insts)
                     .set_critical(*precondition);
                 let src = state.find_event_node(*precondition);
+                state.event_graph.add_edge(src, dst, ());
+            }
+        }
+        Record::CompletionQueueInfo {
+            result,
+            fevent,
+            performed,
+            pre0,
+            pre1,
+            pre2,
+            pre3,
+        } => {
+            // Completion queue events are strange in the exact same way as event
+            // mergers in that we might get several of these statements for large
+            // fan-in cases with lots of preconditions
+            assert!(result.exists());
+            assert!(fevent.exists());
+            let creator_uid = state.create_fevent_reference(*fevent).unwrap();
+            if let Some(index) = state.event_lookup.get(&result) {
+                let node_weight = state.event_graph.node_weight_mut(*index).unwrap();
+                match node_weight.kind {
+                    EventEntryKind::UnknownEvent => {
+                        node_weight.kind = EventEntryKind::MergeEvent;
+                        node_weight.creator = Some(creator_uid);
+                        node_weight.trigger_time = Some(*performed);
+                    }
+                    EventEntryKind::CompletionQueueEvent => {
+                        assert!(node_weight.creator.unwrap() == creator_uid);
+                    }
+                    _ => unreachable!(),
+                }
+            } else {
+                let index = state.event_graph.add_node(EventEntry::new(
+                    EventEntryKind::CompletionQueueEvent,
+                    Some(creator_uid),
+                    Some(*performed),
+                ));
+                state.event_lookup.insert(*result, index);
+            }
+            let dst = *state.event_lookup.get(&result).unwrap();
+            if pre0.exists() {
+                let src = state.find_event_node(*pre0);
+                state.event_graph.add_edge(src, dst, ());
+            }
+            if pre1.exists() {
+                let src = state.find_event_node(*pre1);
+                state.event_graph.add_edge(src, dst, ());
+            }
+            if pre2.exists() {
+                let src = state.find_event_node(*pre2);
+                state.event_graph.add_edge(src, dst, ());
+            }
+            if pre3.exists() {
+                let src = state.find_event_node(*pre3);
                 state.event_graph.add_edge(src, dst, ());
             }
         }

@@ -150,6 +150,7 @@ pub enum Record {
     EventPoisonInfo { result: EventID, fevent: EventID, performed: Timestamp },
     BarrierArrivalInfo { result: EventID, fevent: EventID, precondition: EventID, performed: Timestamp },
     ReservationAcquireInfo { result: EventID, fevent: EventID, precondition: EventID, performed: Timestamp, reservation: u64 },
+    CompletionQueueInfo { result: EventID, fevent: EventID, performed: Timestamp, pre0: EventID, pre1: EventID, pre2: EventID, pre3: EventID },
     InstanceReadyInfo { result: EventID, precondition: EventID, fevent: EventID, performed: Timestamp },
 }
 
@@ -1284,6 +1285,27 @@ fn parse_instance_ready_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Reco
         },
     ))
 }
+fn parse_completion_queue_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
+    let (input, result) = parse_event_id(input)?;
+    let (input, fevent) = parse_event_id(input)?;
+    let (input, performed) = parse_timestamp(input)?;
+    let (input, pre0) = parse_event_id(input)?;
+    let (input, pre1) = parse_event_id(input)?;
+    let (input, pre2) = parse_event_id(input)?;
+    let (input, pre3) = parse_event_id(input)?;
+    Ok((
+        input,
+        Record::CompletionQueueInfo {
+            result,
+            fevent,
+            performed,
+            pre0,
+            pre1,
+            pre2,
+            pre3,
+        },
+    ))
+}
 
 fn filter_record<'a>(
     record: &'a Record,
@@ -1447,6 +1469,7 @@ fn parse<'a>(
         parse_reservation_acquire_info,
     );
     parsers.insert(ids["InstanceReadyInfo"], parse_instance_ready_info);
+    parsers.insert(ids["CompletionQueueInfo"], parse_completion_queue_info);
 
     let mut input = input;
     let mut max_dim = -1;

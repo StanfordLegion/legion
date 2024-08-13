@@ -527,6 +527,13 @@ namespace Legion {
         LgEvent unique;
         timestamp_t performed;
       };
+      struct CompletionQueueInfo {
+      public:
+        LgEvent result;
+        LgEvent fevent;
+        timestamp_t performed;
+        std::vector<LgEvent> preconditions; 
+      };
       struct ProfilingInfo : public ProfilingResponseBase {
       public:
         ProfilingInfo(ProfilingResponseHandler *h, UniqueID uid);
@@ -605,6 +612,8 @@ namespace Legion {
           LgEvent precondition);
       void record_instance_ready(LgEvent result, LgEvent unique_event,
                                  LgEvent precondition = LgEvent::NO_LG_EVENT);
+      void record_completion_queue_event(LgEvent result,
+          const LgEvent *preconditions, size_t count);
     public:
       void process_task(const ProfilingInfo *info,
             const Realm::ProfilingResponse &response,
@@ -689,6 +698,7 @@ namespace Legion {
       std::deque<BarrierArrivalInfo> barrier_arrival_infos;
       std::deque<ReservationAcquireInfo> reservation_acquire_infos;
       std::deque<InstanceReadyInfo> instance_ready_infos;
+      std::deque<CompletionQueueInfo> completion_queue_infos;
       // keep track of MemIDs/ProcIDs to avoid duplicate entries
       std::vector<MemID> mem_ids;
       std::vector<ProcID> proc_ids;

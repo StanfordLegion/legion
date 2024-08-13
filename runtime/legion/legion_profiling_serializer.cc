@@ -559,6 +559,17 @@ namespace Legion {
          << "performed:timestamp_t:" << sizeof(timestamp_t)
          << "}" << std::endl;
 
+      ss << "CompletionQueueInfo {"
+         << "id:" << COMPLETION_QUEUE_INFO_ID                   << delim
+         << "result:unsigned long long:" << sizeof(LgEvent)     << delim
+         << "fevent:unsigned long long:" << sizeof(LgEvent)     << delim
+         << "performed:timestamp_t:" << sizeof(timestamp_t)     << delim
+         << "pre0:unsigned long long:" << sizeof(LgEvent)       << delim
+         << "pre1:unsigned long long:" << sizeof(LgEvent)       << delim
+         << "pre2:unsigned long long:" << sizeof(LgEvent)       << delim
+         << "pre3:unsigned long long:" << sizeof(LgEvent)
+         << "}" << std::endl;
+
       ss << "ProfTaskInfo {"
          << "id:" << PROFTASK_INFO_ID                        << delim
          << "proc_id:ProcID:"         << sizeof(ProcID)      << delim
@@ -1509,6 +1520,32 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LegionProfBinarySerializer::serialize(
+                            const LegionProfInstance::CompletionQueueInfo &info)
+    //--------------------------------------------------------------------------
+    {
+      int ID = EVENT_MERGER_INFO_ID;
+      for (unsigned offset = 0; offset < info.preconditions.size(); offset += 4)
+      {
+        lp_fwrite(f, (char*)&ID, sizeof(ID));
+        lp_fwrite(f, (char*)&info.result.id, sizeof(info.result.id));
+        lp_fwrite(f, (char*)&info.fevent.id, sizeof(info.fevent.id));
+        lp_fwrite(f, (char*)&info.performed, sizeof(info.performed));
+        lp_fwrite(f, (char*)&info.preconditions[offset].id,
+            sizeof (info.preconditions[offset].id));
+        for (unsigned idx = 1; idx < 4; idx++)
+        {
+          if ((offset+idx) < info.preconditions.size())
+            lp_fwrite(f, (char*)&info.preconditions[offset+idx].id,
+                sizeof(info.preconditions[offset+idx].id));
+          else
+            lp_fwrite(f, (char*)&LgEvent::NO_LG_EVENT, 
+                sizeof(LgEvent::NO_LG_EVENT)); 
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfBinarySerializer::serialize(
                           const LegionProfInstance::ProfTaskInfo& proftask_info)
     //--------------------------------------------------------------------------
     {
@@ -2420,6 +2457,25 @@ namespace Legion {
       log_prof.print("Prof Instance Ready Info " IDFMT " " IDFMT " " IDFMT
           " %lld", info.result.id, info.precondition.id, info.unique.id,
           info.performed);
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfASCIISerializer::serialize(
+                            const LegionProfInstance::CompletionQueueInfo &info)
+    //--------------------------------------------------------------------------
+    {
+      for (unsigned offset = 0; offset < info.preconditions.size(); offset += 4)
+      {
+        log_prof.print("Prof Completion Queue Info " IDFMT " " IDFMT " %llu "
+            IDFMT " " IDFMT " " IDFMT " " IDFMT, info.result.id, 
+            info.fevent.id, info.performed, info.preconditions[offset].id,
+            (offset+1) < info.preconditions.size() ? 
+              info.preconditions[offset+1].id : 0,
+            (offset+2) < info.preconditions.size() ? 
+              info.preconditions[offset+2].id : 0,
+            (offset+3) < info.preconditions.size() ? 
+              info.preconditions[offset+3].id : 0);
+      }
     }
 
     //--------------------------------------------------------------------------
