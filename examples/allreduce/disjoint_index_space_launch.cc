@@ -170,7 +170,7 @@ class PointWiseLogicalAnalysisMapper: public DefaultMapper {
       }
       else
       {
-        output.chosen_functor = ODD_SHARDING_FN;
+        output.chosen_functor = EVEN_SHARDING_FN;
         printf("Odd shard %d\n", node_id);
       }
       // TODO: CHANGE TO ODD

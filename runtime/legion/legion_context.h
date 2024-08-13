@@ -1599,6 +1599,16 @@ namespace Legion {
       void increment_frame(void);
       void decrement_frame(void);
       void finish_frame(FrameOp *frame);
+#ifdef POINT_WISE_LOGICAL_ANALYSIS
+    public:
+      void mark_context_index_active(uint64_t context_index);
+      void mark_context_index_inactive(uint64_t context_index);
+      void record_point_wise_dependence(uint64_t context_index,
+          LogicalRegion lr, RtEvent point_mapped, ShardID next_shard);
+      void handle_point_wise_dependence(Deserializer &derez);
+      RtEvent find_point_wise_dependence(uint64_t context_index,
+        LogicalRegion lr, ShardID requesting_shard);
+#endif
     public:
 #ifdef DEBUG_LEGION_COLLECTIVES
       virtual MergeCloseOp* get_merge_close_op(Operation *op,
@@ -1985,6 +1995,17 @@ namespace Legion {
     protected:
       // Our cached set of index spaces for immediate domains
       std::map<Domain,IndexSpace> index_launch_spaces;
+#ifdef POINT_WISE_LOGICAL_ANALYSIS
+    struct PointWiseDeps {
+      public:
+        std::map<ShardID,RtEvent> ready_deps;
+        std::map<ShardID,RtUserEvent> pending_deps;
+      };
+    protected:
+      mutable LocalLock point_wise_lock;
+      std::map<std::pair<uint64_t,LogicalRegion>,PointWiseDeps> point_wise_deps;
+      std::map<uint64_t, std::vector<LogicalRegion>> alive_context_indexes;
+#endif
     protected:
       // Dependence tracking information for phase barriers
       mutable LocalLock                                   phase_barrier_lock;
@@ -2943,14 +2964,6 @@ namespace Legion {
           const DomainPoint &point, RtEvent point_mapped, ShardID next_shard);
       void handle_intra_space_dependence(Deserializer &derez);
     public:
-#ifdef POINT_WISE_LOGICAL_ANALYSIS
-      void mark_context_index_active(uint64_t context_index);
-      void mark_context_index_inactive(uint64_t context_index);
-      void record_point_wise_dependence(uint64_t context_index,
-          LogicalRegion lr, RtEvent point_mapped, ShardID next_shard);
-      void handle_point_wise_dependence(Deserializer &derez);
-#endif
-    public:
       void increase_pending_index_spaces(unsigned count, bool double_buffer);
       void increase_pending_partitions(unsigned count, bool double_buffer);
       void increase_pending_field_spaces(unsigned count, bool double_buffer);
@@ -3190,11 +3203,6 @@ namespace Legion {
       unsigned                   next_collective_map_bar_index;
     protected:
       std::map<std::pair<uint64_t,DomainPoint>,IntraSpaceDeps> intra_space_deps;
-#ifdef POINT_WISE_LOGICAL_ANALYSIS
-    protected:
-      std::map<std::pair<uint64_t,LogicalRegion>,IntraSpaceDeps> point_wise_deps;
-      std::map<uint64_t, std::vector<LogicalRegion>> alive_context_indexes;
-#endif
     protected:
       // Store the global owner shard and local owner shard for allocation
       std::map<FieldSpace,

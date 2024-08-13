@@ -10338,6 +10338,150 @@ namespace Legion {
                                     init_value, init_size)), redop);
     }
 
+#ifdef POINT_WISE_LOGICAL_ANALYSIS
+    void InnerContext::mark_context_index_active(uint64_t context_index)
+    {
+      printf("INSIDE active: %d\n", context_index);
+#ifdef DEBUG_LEGION
+      assert(alive_context_indexes.find(context_index)
+          ==
+          alive_context_indexes.end());
+#endif
+      AutoLock r_lock(point_wise_lock);
+      alive_context_indexes[context_index];
+    }
+
+    void InnerContext::mark_context_index_inactive(uint64_t context_index)
+    {
+      printf("INSIDE INactive: %d\n", context_index);
+#ifdef DEBUG_LEGION
+      assert(alive_context_indexes.find(context_index)
+          !=
+          alive_context_indexes.end());
+#endif
+      AutoLock r_lock(point_wise_lock);
+      std::vector<LogicalRegion> lrs = alive_context_indexes[context_index];
+      for (std::vector<LogicalRegion>::const_iterator it =
+          lrs.begin(); it !=
+          lrs.end(); it++)
+      {
+        const std::pair<uint64_t,LogicalRegion> key(context_index,(*it));
+        PointWiseDeps &deps = point_wise_deps[key];
+
+        for(std::map<ShardID,RtUserEvent>::iterator itr =
+          deps.pending_deps.begin(); itr !=
+          deps.pending_deps.end();)
+        {
+          Runtime::trigger_event(itr->second);
+          deps.pending_deps.erase(itr++);
+        }
+
+        for(std::map<ShardID,RtEvent>::iterator itr =
+          deps.ready_deps.begin(); itr !=
+          deps.ready_deps.end();)
+        {
+          //Runtime::trigger_event(itr->second);
+          deps.ready_deps.erase(itr++);
+        }
+        point_wise_deps.erase(key);
+      }
+      alive_context_indexes.erase(context_index);
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::record_point_wise_dependence(uint64_t context_index,
+        LogicalRegion lr, RtEvent point_mapped, ShardID next_shard)
+    //--------------------------------------------------------------------------
+    {
+      const std::pair<uint64_t,LogicalRegion> key{context_index,lr};
+      AutoLock r_lock(point_wise_lock);
+      PointWiseDeps &deps = point_wise_deps[key];
+      // Check to see if someone has already registered this
+      std::map<ShardID,RtUserEvent>::iterator finder =
+        deps.pending_deps.find(next_shard);
+      if (finder != deps.pending_deps.end())
+      {
+        Runtime::trigger_event(finder->second, point_mapped);
+        deps.pending_deps.erase(finder);
+        if (deps.pending_deps.empty() && deps.ready_deps.empty())
+          point_wise_deps.erase(key);
+      }
+      else
+      {
+        // Not seen yet so just record our entry for this shard
+#ifdef DEBUG_LEGION
+        assert(deps.ready_deps.find(next_shard) == deps.ready_deps.end());
+#endif
+        deps.ready_deps[next_shard] = point_mapped;
+        alive_context_indexes[key.first].push_back(key.second);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent InnerContext::find_point_wise_dependence(uint64_t context_index,
+        LogicalRegion lr, ShardID requesting_shard)
+    //--------------------------------------------------------------------------
+    {
+      std::pair<uint64_t,LogicalRegion> key{context_index, lr};
+      AutoLock r_lock(point_wise_lock);
+      PointWiseDeps &deps = point_wise_deps[key];
+      // Check to see if someone has already registered this shard
+      std::map<ShardID,RtEvent>::iterator finder =
+        deps.ready_deps.find(requesting_shard);
+      if (finder != deps.ready_deps.end())
+      {
+        deps.ready_deps.erase(finder);
+        if (deps.ready_deps.empty() && deps.pending_deps.empty())
+          point_wise_deps.erase(key);
+        return finder->second;
+      }
+      else
+      {
+        // Not seen yet so just record our entry for this shard
+#ifdef DEBUG_LEGION
+        assert(deps.pending_deps.find(requesting_shard) == 
+                deps.pending_deps.end());
+#endif
+        const RtUserEvent pending_event = Runtime::create_rt_user_event();
+        deps.pending_deps[requesting_shard] = pending_event;
+        alive_context_indexes[key.first].push_back(key.second);
+        return pending_event;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::handle_point_wise_dependence(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      uint64_t context_index;
+      derez.deserialize(context_index);
+      LogicalRegion lr;
+      derez.deserialize(lr);
+      RtUserEvent pending_event;
+      derez.deserialize(pending_event);
+      unsigned region_idx;
+      derez.deserialize(region_idx);
+      GenerationID gen;
+      derez.deserialize(gen);
+      ShardID requesting_shard;
+      derez.deserialize(requesting_shard);
+
+      {
+        AutoLock r_lock(point_wise_lock);
+
+        std::map<uint64_t,std::vector<LogicalRegion>>::iterator ctx_idx_finder =
+          alive_context_indexes.find(context_index);
+        if (ctx_idx_finder == alive_context_indexes.end()) {
+          Runtime::trigger_event(pending_event);
+          return;
+        }
+      }
+
+      Runtime::trigger_event(pending_event, find_point_wise_dependence(context_index,
+            lr, requesting_shard));
+    }
+#endif
+
     //--------------------------------------------------------------------------
     void InnerContext::destroy_dynamic_collective(DynamicCollective dc)
     //--------------------------------------------------------------------------
@@ -20808,132 +20952,6 @@ namespace Legion {
         deps.pending_deps[requesting_shard] = pending_event;
       }
     }
-
-#ifdef POINT_WISE_LOGICAL_ANALYSIS
-    void ReplicateContext::mark_context_index_active(uint64_t context_index)
-    {
-#ifdef DEBUG_LEGION
-      assert(alive_context_indexes.find(context_index)
-          ==
-          alive_context_indexes.end());
-#endif
-      AutoLock r_lock(replication_lock);
-      alive_context_indexes[context_index];
-    }
-
-    void ReplicateContext::mark_context_index_inactive(uint64_t context_index)
-    {
-#ifdef DEBUG_LEGION
-      assert(alive_context_indexes.find(context_index)
-          !=
-          alive_context_indexes.end());
-#endif
-      AutoLock r_lock(replication_lock);
-      std::vector<LogicalRegion> lrs = alive_context_indexes[context_index];
-      for (std::vector<LogicalRegion>::const_iterator it =
-          lrs.begin(); it !=
-          lrs.end(); it++)
-      {
-        const std::pair<uint64_t,LogicalRegion> key(context_index,(*it));
-        IntraSpaceDeps &deps = point_wise_deps[key];
-
-        for(std::map<ShardID,RtUserEvent>::iterator itr =
-          deps.pending_deps.begin(); itr !=
-          deps.pending_deps.end();)
-        {
-          Runtime::trigger_event(itr->second);
-          deps.pending_deps.erase(itr++);
-        }
-
-        for(std::map<ShardID,RtEvent>::iterator itr =
-          deps.ready_deps.begin(); itr !=
-          deps.ready_deps.end();)
-        {
-          //Runtime::trigger_event(itr->second);
-          deps.ready_deps.erase(itr++);
-        }
-        point_wise_deps.erase(key);
-      }
-      alive_context_indexes.erase(context_index);
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplicateContext::record_point_wise_dependence(uint64_t context_index,
-        LogicalRegion lr, RtEvent point_mapped, ShardID next_shard)
-    //--------------------------------------------------------------------------
-    {
-      const std::pair<uint64_t,LogicalRegion> key(context_index,lr);
-      AutoLock r_lock(replication_lock);
-      IntraSpaceDeps &deps = point_wise_deps[key];
-      // Check to see if someone has already registered this
-      std::map<ShardID,RtUserEvent>::iterator finder = 
-        deps.pending_deps.find(next_shard);
-      if (finder != deps.pending_deps.end())
-      {
-        Runtime::trigger_event(finder->second, point_mapped);
-        deps.pending_deps.erase(finder);
-        if (deps.pending_deps.empty() && deps.ready_deps.empty())
-          point_wise_deps.erase(key);
-      }
-      else
-      {
-        // Not seen yet so just record our entry for this shard
-#ifdef DEBUG_LEGION
-        assert(deps.ready_deps.find(next_shard) == deps.ready_deps.end());
-#endif
-        deps.ready_deps[next_shard] = point_mapped;
-        alive_context_indexes[key.first].push_back(key.second);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplicateContext::handle_point_wise_dependence(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      std::pair<uint64_t,LogicalRegion> key;
-      derez.deserialize(key.first);
-      derez.deserialize(key.second);
-      RtUserEvent pending_event;
-      derez.deserialize(pending_event);
-      unsigned region_idx;
-      derez.deserialize(region_idx);
-      GenerationID gen;
-      derez.deserialize(gen);
-      ShardID requesting_shard;
-      derez.deserialize(requesting_shard);
-
-      AutoLock r_lock(replication_lock);
-
-      std::map<uint64_t,std::vector<LogicalRegion>>::iterator ctx_idx_finder =
-        alive_context_indexes.find(key.first);
-      if (ctx_idx_finder == alive_context_indexes.end()) {
-        Runtime::trigger_event(pending_event);
-        return;
-      }
-
-      IntraSpaceDeps &deps = point_wise_deps[key];
-      // Check to see if someone has already registered this shard
-      std::map<ShardID,RtEvent>::iterator finder =
-        deps.ready_deps.find(requesting_shard);
-      if (finder != deps.ready_deps.end())
-      {
-        Runtime::trigger_event(pending_event, finder->second);
-        deps.ready_deps.erase(finder);
-        if (deps.ready_deps.empty() && deps.pending_deps.empty())
-          point_wise_deps.erase(key);
-      }
-      else
-      {
-        // Not seen yet so just record our entry for this shard
-#ifdef DEBUG_LEGION
-        assert(deps.pending_deps.find(requesting_shard) == 
-                deps.pending_deps.end());
-#endif
-        deps.pending_deps[requesting_shard] = pending_event;
-        alive_context_indexes[key.first].push_back(key.second);
-      }
-    }
-#endif
 
     //--------------------------------------------------------------------------
     void ReplicateContext::receive_resources(uint64_t return_index,

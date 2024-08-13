@@ -7777,7 +7777,7 @@ namespace Legion {
         unsigned region_idx)
     //--------------------------------------------------------------------------
     {
-      printf("Record Point Task should_connect_to_next_point: %d should_connect_to_prev_point: %d shard: %d\n", slice_owner->should_connect_to_next_point(), slice_owner->should_connect_to_prev_point(), slice_owner->index_owner->get_context()->get_task()->get_shard_id());
+      //printf("Record Point Task should_connect_to_next_point: %d should_connect_to_prev_point: %d shard: %d\n", slice_owner->should_connect_to_next_point(), slice_owner->should_connect_to_prev_point(), slice_owner->index_owner->get_context()->get_task()->get_shard_id());
       if (slice_owner->should_connect_to_prev_point())
       {
         RtEvent pre = slice_owner->find_point_wise_dependence(lr, region_idx);
@@ -8626,13 +8626,8 @@ namespace Legion {
         profiling_info.clear();
       }
 #ifdef POINT_WISE_LOGICAL_ANALYSIS
-      if(!pending_point_wise_dependences.empty())
-      {
-        for (std::map<LogicalRegion,RtUserEvent>::const_iterator it =
-              pending_point_wise_dependences.begin(); it !=
-              pending_point_wise_dependences.end(); it++)
-          Runtime::trigger_event(it->second);
-      }
+      parent_ctx->
+          mark_context_index_inactive(get_context_index());
       pending_point_wise_dependences.clear();
       prev_index_tasks.clear();
       next_index_tasks.clear();
@@ -9294,6 +9289,9 @@ namespace Legion {
           TaskOp::log_requirement(unique_op_id, idx, logical_regions[idx]);
         runtime->forest->log_launch_space(launch_space->handle, unique_op_id);
       }
+#ifdef POINT_WISE_LOGICAL_ANALYSIS
+      parent_ctx->mark_context_index_active(get_context_index());
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -10389,25 +10387,9 @@ namespace Legion {
                                                  RtEvent point_mapped)
     //--------------------------------------------------------------------------
     {
-      AutoLock o_lock(op_lock);
-      std::map<LogicalRegion,RtEvent>::iterator finder =
-        point_wise_dependences.find(lr);
-      if (finder != point_wise_dependences.end())
-      {
-        if (finder->second != point_mapped)
-        {
-          std::map<LogicalRegion,RtUserEvent>::iterator pending_finder =
-            pending_point_wise_dependences.find(lr);
-#ifdef DEBUG_LEGION
-          assert(pending_finder != pending_point_wise_dependences.end());
-#endif
-          Runtime::trigger_event(pending_finder->second, point_mapped);
-          pending_point_wise_dependences.erase(pending_finder);
-          finder->second = point_mapped;
-        }
-      }
-      else
-        point_wise_dependences[lr] = point_mapped;
+      parent_ctx->record_point_wise_dependence(context_index, lr,
+                                              point_mapped,
+                                              parent_ctx->get_shard_id());
     }
 
     //--------------------------------------------------------------------------
@@ -10416,7 +10398,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock o_lock(op_lock);
-      //if (gen < get_generation()) return RtUserEvent::NO_RT_USER_EVENT;
 
       if (should_connect_to_prev_point())
       {
@@ -10430,21 +10411,8 @@ namespace Legion {
         if (prev_task_gen < prev_index_task->get_generation())
           return RtEvent::NO_RT_EVENT;
 
-        return prev_index_task->find_point_wise_dependence(lr, region_idx,
-                                                           prev_task_gen);
-      }
-
-      if (should_connect_to_next_point())
-      {
-        std::map<LogicalRegion,RtEvent>::iterator finder =
-          point_wise_dependences.find(lr);
-        if (finder != point_wise_dependences.end())
-          return finder->second;
-        // Otherwise make a temporary one and record it for now
-        const RtUserEvent pending_event = Runtime::create_rt_user_event();
-        point_wise_dependences[lr] = pending_event;
-        pending_point_wise_dependences[lr] = pending_event;
-        return pending_event;
+        return parent_ctx->find_point_wise_dependence(finder->second.ctx_index, lr,
+            parent_ctx->get_shard_id());
       }
 
       assert(1);
