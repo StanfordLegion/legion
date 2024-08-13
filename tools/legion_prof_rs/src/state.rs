@@ -728,6 +728,8 @@ impl Proc {
     fn update_prof_task_times(&mut self, prof_uid: ProfUID, create: Timestamp, ready: Timestamp) {
         let entry = self.entries.get_mut(&prof_uid).unwrap();
         assert!(entry.kind == ProcEntryKind::ProfTask);
+        assert!(entry.time_range.create.is_none());
+        assert!(entry.time_range.ready.is_none());
         entry.time_range.create = Some(create);
         entry.time_range.ready = Some(ready);
     }
@@ -1129,83 +1131,84 @@ impl Container for Proc {
         ready: Timestamp,
         start: Timestamp,
     ) -> Option<(ProfUID, Timestamp, Timestamp)> {
-        let mut result = None;
         // If this is an I/O processor then there is no concept of a "previous"
         // as there might be multiple ranges executing at the same time
-        if self.kind.unwrap() != ProcKind::IO {
-            // Iterate all the levels of the stack
-            for level in self.time_points_stacked.iter() {
-                if level.is_empty() {
-                    // I don't know whey this happens but we'll ignore it
-                    continue;
+        if self.kind.unwrap() == ProcKind::IO {
+            return None;
+        }
+        let mut result = None;
+        // Iterate all the levels of the stack
+        for level in self.time_points_stacked.iter() {
+            if level.is_empty() {
+                // I don't know whey this happens but we'll ignore it
+                continue;
+            }
+            // Find the lower bound for the start time to get the
+            // last task to start before the start time
+            let mut lower = 0;
+            let mut upper = level.len();
+            while lower < upper {
+                let mid = (lower + upper) / 2;
+                if level[mid].time < start {
+                    lower = mid + 1;
+                } else {
+                    upper = mid;
                 }
-                // Find the lower bound for the start time to get the
-                // last task to start before the start time
-                let mut lower = 0;
-                let mut upper = level.len();
-                while lower < upper {
-                    let mid = (lower + upper) / 2;
-                    if level[mid].time < start {
-                        lower = mid + 1;
-                    } else {
-                        upper = mid;
-                    }
-                }
-                // lower is now the "upper" bound
-                upper = lower;
-                if upper == 0 {
-                    // Found nothing that started before start
-                    continue;
-                }
-                // This makes lower the first point less than than the timestamp
-                lower = upper - 1;
-                let prof_uid = level[lower].entry;
-                let entry = self.entries.get(&prof_uid).unwrap();
-                // Find the last running range that happens before the start time
-                let mut running_start = entry.time_range.start.unwrap();
-                assert!(running_start < start);
-                for wait in entry.waiters.wait_intervals.iter() {
-                    // Should need to wait before the start happens
-                    assert!(wait.start <= start);
-                    // We're only interested in ranges that happen after the ready time
-                    if ready <= wait.start {
-                        // Running after the task becomes ready, see if this is
-                        // the latest running interval before the start
-                        let diff = start - wait.start;
-                        // See if this is the closest running range to the start
-                        if let Some((_, _, prev_stop)) = result {
-                            let prev_diff = start - prev_stop;
-                            if diff < prev_diff {
-                                result = Some((prof_uid, running_start, wait.start));
-                            }
-                        } else {
-                            // First one so go ahead and record it
+            }
+            // lower is now the "upper" bound
+            upper = lower;
+            if upper == 0 {
+                // Found nothing that started before start
+                continue;
+            }
+            // This makes lower the first point less than than the timestamp
+            lower = upper - 1;
+            let prof_uid = level[lower].entry;
+            let entry = self.entries.get(&prof_uid).unwrap();
+            // Find the last running range that happens before the start time
+            let mut running_start = entry.time_range.start.unwrap();
+            assert!(running_start < start);
+            for wait in entry.waiters.wait_intervals.iter() {
+                // Should need to wait before the start happens
+                assert!(wait.start <= start);
+                // We're only interested in ranges that happen after the ready time
+                if ready <= wait.start {
+                    // Running after the task becomes ready, see if this is
+                    // the latest running interval before the start
+                    let diff = start - wait.start;
+                    // See if this is the closest running range to the start
+                    if let Some((_, _, prev_stop)) = result {
+                        let prev_diff = start - prev_stop;
+                        if diff < prev_diff {
                             result = Some((prof_uid, running_start, wait.start));
                         }
-                    }
-                    running_start = wait.end;
-                    // If the next running range starts after start we don't need to consider it
-                    if start <= running_start {
-                        break;
+                    } else {
+                        // First one so go ahead and record it
+                        result = Some((prof_uid, running_start, wait.start));
                     }
                 }
-                // Make sure the running range starts before the start
-                if running_start < start {
-                    let running_stop = entry.time_range.stop.unwrap();
-                    assert!(running_stop <= start);
-                    // We're only interested in ranges that end after the ready time
-                    if ready <= running_stop {
-                        let diff = start - running_stop;
-                        // See if this is the closest running range to the start
-                        if let Some((_, _, prev_stop)) = result {
-                            let prev_diff = start - prev_stop;
-                            if diff < prev_diff {
-                                result = Some((prof_uid, running_start, running_stop));
-                            }
-                        } else {
-                            // First one so go ahead and record it
+                running_start = wait.end;
+                // If the next running range starts after start we don't need to consider it
+                if start <= running_start {
+                    break;
+                }
+            }
+            // Make sure the running range starts before the start
+            if running_start < start {
+                let running_stop = entry.time_range.stop.unwrap();
+                assert!(running_stop <= start);
+                // We're only interested in ranges that end after the ready time
+                if ready <= running_stop {
+                    let diff = start - running_stop;
+                    // See if this is the closest running range to the start
+                    if let Some((_, _, prev_stop)) = result {
+                        let prev_diff = start - prev_stop;
+                        if diff < prev_diff {
                             result = Some((prof_uid, running_start, running_stop));
                         }
+                    } else {
+                        // First one so go ahead and record it
+                        result = Some((prof_uid, running_start, running_stop));
                     }
                 }
             }
@@ -2840,7 +2843,7 @@ impl Copy {
     fn split_by_channel(
         mut self,
         allocator: &mut ProfUIDAllocator,
-        event_lookup: &BTreeMap<EventID, NodeIndex<usize>>,
+        event_lookup: &BTreeMap<EventID, CriticalPathVertex>,
         event_graph: &mut Graph<EventEntry, (), Directed, usize>,
         fevent: EventID,
     ) -> Vec<Self> {
@@ -3236,12 +3239,14 @@ pub enum EventEntryKind {
     CompletionQueueEvent,
 }
 
+type CriticalPathVertex = NodeIndex<usize>;
+
 #[derive(Debug)]
 pub struct EventEntry {
     pub kind: EventEntryKind,
     pub creator: Option<ProfUID>,
     pub trigger_time: Option<Timestamp>,
-    pub critical: Option<NodeIndex<usize>>,
+    pub critical: Option<CriticalPathVertex>,
 }
 
 impl EventEntry {
@@ -3258,6 +3263,8 @@ impl EventEntry {
         }
     }
 }
+
+type CriticalPathGraph = Graph<EventEntry, (), Directed, usize>;
 
 #[derive(Debug, Default)]
 pub struct State {
@@ -3296,8 +3303,8 @@ pub struct State {
     pub source_locator: Vec<String>,
     pub provenances: BTreeMap<ProvenanceID, Provenance>,
     pub backtraces: BTreeMap<BacktraceID, String>,
-    pub event_graph: Graph<EventEntry, (), Directed, usize>,
-    pub event_lookup: BTreeMap<EventID, NodeIndex<usize>>,
+    pub event_graph: CriticalPathGraph,
+    pub event_lookup: BTreeMap<EventID, CriticalPathVertex>,
 }
 
 impl State {
@@ -3332,7 +3339,7 @@ impl State {
         kind: EventEntryKind,
         creator: ProfUID,
         time: Timestamp,
-    ) -> NodeIndex<usize> {
+    ) -> CriticalPathVertex {
         assert!(fevent.exists());
         if let Some(index) = self.event_lookup.get(&fevent) {
             let node_weight = self.event_graph.node_weight_mut(*index).unwrap();
@@ -3349,7 +3356,7 @@ impl State {
         }
     }
 
-    fn find_event_node(&mut self, event: EventID) -> NodeIndex<usize> {
+    fn find_event_node(&mut self, event: EventID) -> CriticalPathVertex {
         assert!(event.exists());
         if let Some(index) = self.event_lookup.get(&event) {
             *index
@@ -4266,82 +4273,82 @@ impl State {
             println!("Info: Realm event graph data was not present in these logs so critical paths will not be available in this profile.");
             // clear the event lookup
             self.event_lookup.clear();
-        } else {
-            // Compute a topological sorting of the graph
-            // Complexity of this is O(V + E) so should be scalable
-            match toposort(&self.event_graph, None) {
-                Ok(topological_order) => {
-                    // Iterate over the nodes in topological order and propagate the
-                    // ProfUID of and timestamp determining the critical path for each event
-                    // Complexity of this loop is also O(V + E) so should be scalable
-                    for node_id in topological_order {
-                        // Iterate over all the incoming edges and determine the latest
-                        // precondition event to trigger leading into this node
-                        let mut latest = None;
-                        // Also keep track of the earliest trigger time in case this
-                        // a completion queue event and we need to know the first of
-                        // our event preconditions to trigger
-                        let mut earliest: Option<(NodeIndex<usize>, Timestamp)> = None;
-                        for edge in self
-                            .event_graph
-                            .edges_directed(node_id, Direction::Incoming)
-                        {
-                            let src = self.event_graph.node_weight(edge.source()).unwrap();
-                            // Skip uknown events
-                            if src.kind == EventEntryKind::UnknownEvent {
-                                continue;
-                            }
-                            // Everything else should have a timestamp
-                            let trigger_time = src.trigger_time.unwrap();
-                            if let Some((_, latest_time)) = latest {
-                                if latest_time < trigger_time {
-                                    latest = Some((src.critical.unwrap(), trigger_time));
-                                }
-                                if trigger_time < earliest.unwrap().1 {
-                                    earliest = Some((src.critical.unwrap(), trigger_time));
-                                }
-                            } else {
-                                latest = Some((src.critical.unwrap(), trigger_time));
-                                earliest = latest;
-                            }
-                        }
-                        let node = self.event_graph.node_weight_mut(node_id).unwrap();
-                        // Skip unknown events
-                        if node.kind == EventEntryKind::UnknownEvent {
-                            // they should not have had any preconditions
-                            assert!(latest.is_none());
+            return;
+        }
+        // Compute a topological sorting of the graph
+        // Complexity of this is O(V + E) so should be scalable
+        match toposort(&self.event_graph, None) {
+            Ok(topological_order) => {
+                // Iterate over the nodes in topological order and propagate the
+                // ProfUID of and timestamp determining the critical path for each event
+                // Complexity of this loop is also O(V + E) so should be scalable
+                for node_id in topological_order {
+                    // Iterate over all the incoming edges and determine the latest
+                    // precondition event to trigger leading into this node
+                    let mut latest = None;
+                    // Also keep track of the earliest trigger time in case this
+                    // a completion queue event and we need to know the first of
+                    // our event preconditions to trigger
+                    let mut earliest: Option<(CriticalPathVertex, Timestamp)> = None;
+                    for edge in self
+                        .event_graph
+                        .edges_directed(node_id, Direction::Incoming)
+                    {
+                        let src = self.event_graph.node_weight(edge.source()).unwrap();
+                        // Skip uknown events
+                        if src.kind == EventEntryKind::UnknownEvent {
                             continue;
                         }
-                        // If this is a completion queue event, then switch the earliest
-                        // to be the "latest" since it's the earliest event that triggers
-                        // that determines when a completion queue event triggers
-                        if node.kind == EventEntryKind::CompletionQueueEvent {
-                            latest = earliest;
-                        }
-                        // Now check to see if the latest comes after the point where
-                        // we made this particular event
-                        if let Some((latest_node, latest_time)) = latest {
-                            let trigger_time = node.trigger_time.unwrap();
-                            if trigger_time < latest_time {
-                                node.critical = Some(latest_node);
-                                // Update the time at which this triggered
-                                node.trigger_time = Some(latest_time);
-                            } else {
-                                // We're our own critical path
-                                node.critical = Some(node_id);
+                        // Everything else should have a timestamp
+                        let trigger_time = src.trigger_time.unwrap();
+                        if let Some((_, latest_time)) = latest {
+                            if latest_time < trigger_time {
+                                latest = Some((src.critical.unwrap(), trigger_time));
                             }
+                            if trigger_time < earliest.unwrap().1 {
+                                earliest = Some((src.critical.unwrap(), trigger_time));
+                            }
+                        } else {
+                            latest = Some((src.critical.unwrap(), trigger_time));
+                            earliest = latest;
+                        }
+                    }
+                    let node = self.event_graph.node_weight_mut(node_id).unwrap();
+                    // Skip unknown events
+                    if node.kind == EventEntryKind::UnknownEvent {
+                        // they should not have had any preconditions
+                        assert!(latest.is_none());
+                        continue;
+                    }
+                    // If this is a completion queue event, then switch the earliest
+                    // to be the "latest" since it's the earliest event that triggers
+                    // that determines when a completion queue event triggers
+                    if node.kind == EventEntryKind::CompletionQueueEvent {
+                        latest = earliest;
+                    }
+                    // Now check to see if the latest comes after the point where
+                    // we made this particular event
+                    if let Some((latest_node, latest_time)) = latest {
+                        let trigger_time = node.trigger_time.unwrap();
+                        if trigger_time < latest_time {
+                            node.critical = Some(latest_node);
+                            // Update the time at which this triggered
+                            node.trigger_time = Some(latest_time);
                         } else {
                             // We're our own critical path
                             node.critical = Some(node_id);
                         }
+                    } else {
+                        // We're our own critical path
+                        node.critical = Some(node_id);
                     }
                 }
-                Err(_) => {
-                    // Detected a cycle in the graph
-                    println!("Warning: detected a cycle in the Realm event graph. Critical paths will not be available in this profile. Please create a bug for this and attach the log files that caused it.");
-                    // clear the event lookup so we can't lookup critical paths
-                    self.event_lookup.clear();
-                }
+            }
+            Err(_) => {
+                // Detected a cycle in the graph
+                println!("Warning: detected a cycle in the Realm event graph. Critical paths will not be available in this profile. Please create a bug for this and attach the log files that caused it.");
+                // clear the event lookup so we can't lookup critical paths
+                self.event_lookup.clear();
             }
         }
     }

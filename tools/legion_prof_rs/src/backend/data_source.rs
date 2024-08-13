@@ -1310,63 +1310,31 @@ impl StateDataSource {
                     ))
                 }
             }
-            EventEntryKind::FillEvent => {
+            EventEntryKind::FillEvent
+            | EventEntryKind::CopyEvent
+            | EventEntryKind::DepPartEvent => {
                 let prof_uid = event_entry.creator.unwrap();
                 if let Some(chan_id) = self.state.prof_uid_chan.get(&prof_uid) {
                     let trigger_time: ts::Timestamp = event_entry.trigger_time.unwrap().into();
                     let chan = self.state.chans.get(&chan_id).unwrap();
                     let entry = chan.find_entry(prof_uid).unwrap();
-                    let fill_name = entry.name(&self.state);
+                    let name = entry.name(&self.state);
                     Field::ItemLink(ItemLink {
                         item_uid: entry.base().prof_uid.into(),
-                        title: format!("Completion of {} at {}", &fill_name, trigger_time),
+                        title: format!("Completion of {} at {}", &name, trigger_time),
                         interval: entry.time_range().into(),
                         entry_id: self.chan_entries.get(chan_id).unwrap().clone(),
                     })
                 } else {
+                    let kind = match event_entry.kind {
+                        EventEntryKind::FillEvent => "fill",
+                        EventEntryKind::CopyEvent => "copy",
+                        EventEntryKind::DepPartEvent => "dependent partition operation",
+                        _ => unreachable!(),
+                    };
                     Field::String(format!(
-                            "Critical path from a fill on node {}. Please load the logfile from that node to see it.",
-                            node.0
-                    ))
-                }
-            }
-            EventEntryKind::CopyEvent => {
-                let prof_uid = event_entry.creator.unwrap();
-                if let Some(chan_id) = self.state.prof_uid_chan.get(&prof_uid) {
-                    let trigger_time: ts::Timestamp = event_entry.trigger_time.unwrap().into();
-                    let chan = self.state.chans.get(&chan_id).unwrap();
-                    let entry = chan.find_entry(prof_uid).unwrap();
-                    let copy_name = entry.name(&self.state);
-                    Field::ItemLink(ItemLink {
-                        item_uid: entry.base().prof_uid.into(),
-                        title: format!("Completion of {} at {}", &copy_name, trigger_time),
-                        interval: entry.time_range().into(),
-                        entry_id: self.chan_entries.get(chan_id).unwrap().clone(),
-                    })
-                } else {
-                    Field::String(format!(
-                            "Critical path from a copy on node {}. Please load the logfile from that node to see it.",
-                            node.0
-                    ))
-                }
-            }
-            EventEntryKind::DepPartEvent => {
-                let prof_uid = event_entry.creator.unwrap();
-                if let Some(chan_id) = self.state.prof_uid_chan.get(&prof_uid) {
-                    let trigger_time: ts::Timestamp = event_entry.trigger_time.unwrap().into();
-                    let chan = self.state.chans.get(&chan_id).unwrap();
-                    let entry = chan.find_entry(prof_uid).unwrap();
-                    let copy_name = entry.name(&self.state);
-                    Field::ItemLink(ItemLink {
-                        item_uid: entry.base().prof_uid.into(),
-                        title: format!("Completion of {} at {}", &copy_name, trigger_time),
-                        interval: entry.time_range().into(),
-                        entry_id: self.chan_entries.get(chan_id).unwrap().clone(),
-                    })
-                } else {
-                    Field::String(format!(
-                            "Critical path from a dependent partition operation on node {}. Please load the logfile from that node to see it.",
-                            node.0
+                            "Critical path from a {} on node {}. Please load the logfile from that node to see it.",
+                            kind, node.0
                     ))
                 }
             }
@@ -1394,7 +1362,12 @@ impl StateDataSource {
             // The rest of these only happen when the critical path is not along a chain
             // of events but when the (meta-) task producing the event is the last thing
             // to actually run to enable the execution
-            EventEntryKind::MergeEvent => {
+            EventEntryKind::MergeEvent
+            | EventEntryKind::TriggerEvent
+            | EventEntryKind::PoisonEvent
+            | EventEntryKind::ArriveBarrier
+            | EventEntryKind::ReservationAcquire
+            | EventEntryKind::CompletionQueueEvent => {
                 let prof_uid = event_entry.creator.unwrap();
                 if let Some(proc_id) = self.state.prof_uid_proc.get(&prof_uid) {
                     let trigger_time = event_entry.trigger_time.unwrap();
@@ -1403,9 +1376,18 @@ impl StateDataSource {
                     // This prof UID is just the fevent prof UID, find the actual executing entry
                     let entry = proc.find_executing_entry(prof_uid, trigger_time).unwrap();
                     let op_name = entry.name(&self.state);
+                    let kind = match event_entry.kind {
+                        EventEntryKind::MergeEvent => "Event Merger",
+                        EventEntryKind::TriggerEvent => "User Event Trigger",
+                        EventEntryKind::PoisonEvent => "User Event Poisoned",
+                        EventEntryKind::ArriveBarrier => "Barrier Arrival",
+                        EventEntryKind::ReservationAcquire => "Reservation Acquire",
+                        EventEntryKind::CompletionQueueEvent => "Completion Queue Non-Empty",
+                        _ => unreachable!(),
+                    };
                     Field::ItemLink(ItemLink {
                         item_uid: entry.base().prof_uid.into(),
-                        title: format!("Event Merger by {} at {}", &op_name, trigger_ts),
+                        title: format!("{} by {} at {}", kind, &op_name, trigger_ts),
                         interval: ts::Interval::new(
                             entry.time_range.start.unwrap().into(),
                             trigger_ts,
@@ -1413,137 +1395,18 @@ impl StateDataSource {
                         entry_id: self.proc_entries.get(proc_id).unwrap().clone(),
                     })
                 } else {
+                    let kind = match event_entry.kind {
+                        EventEntryKind::MergeEvent => "n event merger",
+                        EventEntryKind::TriggerEvent => " user event trigger",
+                        EventEntryKind::PoisonEvent => " user event poison",
+                        EventEntryKind::ArriveBarrier => " barrier arrival",
+                        EventEntryKind::ReservationAcquire => " reservation acquire",
+                        EventEntryKind::CompletionQueueEvent => " completion queue non-empty",
+                        _ => unreachable!(),
+                    };
                     Field::String(format!(
-                            "Critical path from an event merger on node {}. Please load the logfile from that node to see it.",
-                            node.0
-                    ))
-                }
-            }
-            EventEntryKind::TriggerEvent => {
-                let prof_uid = event_entry.creator.unwrap();
-                if let Some(proc_id) = self.state.prof_uid_proc.get(&prof_uid) {
-                    let trigger_time = event_entry.trigger_time.unwrap();
-                    let trigger_ts: ts::Timestamp = trigger_time.into();
-                    let proc = self.state.procs.get(&proc_id).unwrap();
-                    // This prof UID is just the fevent prof UID, find the actual executing entry
-                    let entry = proc.find_executing_entry(prof_uid, trigger_time).unwrap();
-                    let op_name = entry.name(&self.state);
-                    Field::ItemLink(ItemLink {
-                        item_uid: entry.base().prof_uid.into(),
-                        title: format!("User Event Trigger by {} at {}", &op_name, trigger_ts),
-                        interval: ts::Interval::new(
-                            entry.time_range.start.unwrap().into(),
-                            trigger_ts,
-                        ),
-                        entry_id: self.proc_entries.get(proc_id).unwrap().clone(),
-                    })
-                } else {
-                    Field::String(format!(
-                            "Critical path from a user event trigger on node {}. Please load the logfile from that node to see it.",
-                            node.0
-                    ))
-                }
-            }
-            EventEntryKind::PoisonEvent => {
-                let prof_uid = event_entry.creator.unwrap();
-                if let Some(proc_id) = self.state.prof_uid_proc.get(&prof_uid) {
-                    let trigger_time = event_entry.trigger_time.unwrap();
-                    let trigger_ts: ts::Timestamp = trigger_time.into();
-                    let proc = self.state.procs.get(&proc_id).unwrap();
-                    // This prof UID is just the fevent prof UID, find the actual executing entry
-                    let entry = proc.find_executing_entry(prof_uid, trigger_time).unwrap();
-                    let op_name = entry.name(&self.state);
-                    Field::ItemLink(ItemLink {
-                        item_uid: entry.base().prof_uid.into(),
-                        title: format!("Event Poisoned by {} at {}", &op_name, trigger_ts),
-                        interval: ts::Interval::new(
-                            entry.time_range.start.unwrap().into(),
-                            trigger_ts,
-                        ),
-                        entry_id: self.proc_entries.get(proc_id).unwrap().clone(),
-                    })
-                } else {
-                    Field::String(format!(
-                            "Critical path from a user event poison on node {}. Please load the logfile from that node to see it.",
-                            node.0
-                    ))
-                }
-            }
-            EventEntryKind::ArriveBarrier => {
-                let prof_uid = event_entry.creator.unwrap();
-                if let Some(proc_id) = self.state.prof_uid_proc.get(&prof_uid) {
-                    let trigger_time = event_entry.trigger_time.unwrap();
-                    let trigger_ts: ts::Timestamp = trigger_time.into();
-                    let proc = self.state.procs.get(&proc_id).unwrap();
-                    // This prof UID is just the fevent prof UID, find the actual executing entry
-                    let entry = proc.find_executing_entry(prof_uid, trigger_time).unwrap();
-                    let op_name = entry.name(&self.state);
-                    Field::ItemLink(ItemLink {
-                        item_uid: entry.base().prof_uid.into(),
-                        title: format!("Barrier Arrival by {} at {}", &op_name, trigger_ts),
-                        interval: ts::Interval::new(
-                            entry.time_range.start.unwrap().into(),
-                            trigger_ts,
-                        ),
-                        entry_id: self.proc_entries.get(proc_id).unwrap().clone(),
-                    })
-                } else {
-                    Field::String(format!(
-                            "Critical path from a barrier arrival on node {}. Please load the logfile from that node to see it.",
-                            node.0
-                    ))
-                }
-            }
-            EventEntryKind::ReservationAcquire => {
-                let prof_uid = event_entry.creator.unwrap();
-                if let Some(proc_id) = self.state.prof_uid_proc.get(&prof_uid) {
-                    let trigger_time = event_entry.trigger_time.unwrap();
-                    let trigger_ts: ts::Timestamp = trigger_time.into();
-                    let proc = self.state.procs.get(&proc_id).unwrap();
-                    // This prof UID is just the fevent prof UID, find the actual executing entry
-                    let entry = proc.find_executing_entry(prof_uid, trigger_time).unwrap();
-                    let op_name = entry.name(&self.state);
-                    Field::ItemLink(ItemLink {
-                        item_uid: entry.base().prof_uid.into(),
-                        title: format!("Reservation Acquire by {} at {}", &op_name, trigger_ts),
-                        interval: ts::Interval::new(
-                            entry.time_range.start.unwrap().into(),
-                            trigger_ts,
-                        ),
-                        entry_id: self.proc_entries.get(proc_id).unwrap().clone(),
-                    })
-                } else {
-                    Field::String(format!(
-                            "Critical path from a reservation acquire on node {}. Please load the logfile from that node to see it.",
-                            node.0
-                    ))
-                }
-            }
-            EventEntryKind::CompletionQueueEvent => {
-                let prof_uid = event_entry.creator.unwrap();
-                if let Some(proc_id) = self.state.prof_uid_proc.get(&prof_uid) {
-                    let trigger_time = event_entry.trigger_time.unwrap();
-                    let trigger_ts: ts::Timestamp = trigger_time.into();
-                    let proc = self.state.procs.get(&proc_id).unwrap();
-                    // This prof UID is just the fevent prof UID, find the actual executing entry
-                    let entry = proc.find_executing_entry(prof_uid, trigger_time).unwrap();
-                    let op_name = entry.name(&self.state);
-                    Field::ItemLink(ItemLink {
-                        item_uid: entry.base().prof_uid.into(),
-                        title: format!(
-                            "Completion Queue Non-Empty by {} at {}",
-                            &op_name, trigger_ts
-                        ),
-                        interval: ts::Interval::new(
-                            entry.time_range.start.unwrap().into(),
-                            trigger_ts,
-                        ),
-                        entry_id: self.proc_entries.get(proc_id).unwrap().clone(),
-                    })
-                } else {
-                    Field::String(format!(
-                            "Critical path from a completion queue non-empty event on node {}. Please load the logfile from that node to see it.",
-                            node.0
+                            "Critical path from a{} on node {}. Please load the logfile from that node to see it.",
+                            kind, node.0
                     ))
                 }
             }
