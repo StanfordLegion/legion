@@ -2723,7 +2723,7 @@ impl EventID {
         }
     }
     pub fn is_barrier(&self) -> bool {
-        (self.0 >> 60) == 4
+        (self.0 >> 60) == 2
     }
 }
 
