@@ -2725,6 +2725,17 @@ impl EventID {
     pub fn is_barrier(&self) -> bool {
         (self.0 >> 60) == 2
     }
+    pub fn generation(&self) -> u64 {
+        self.0 & ((1 << 20) - 1)
+    }
+    pub fn get_previous_phase(&self) -> Option<EventID> {
+        assert!(self.is_barrier());
+        if self.generation() > 1 {
+            Some(EventID(self.0 - 1))
+        } else {
+            None
+        }
+    }
 }
 
 impl From<spy::serialize::EventID> for EventID {
@@ -3349,6 +3360,15 @@ impl State {
                 None,
             ));
             self.event_lookup.insert(event, index);
+            // This is an important detail: Realm barriers have to trigger
+            // in order so add a dependence between this generation and the
+            // previous generation of the barrier to capture this property
+            if event.is_barrier() {
+                if let Some(previous) = event.get_previous_phase() {
+                    let previous_index = self.find_event_node(previous);
+                    self.event_graph.add_edge(previous_index, index, ());
+                }
+            }
             index
         }
     }
@@ -5570,6 +5590,13 @@ fn process_record(
                     Some(*performed),
                 ));
                 state.event_lookup.insert(*result, index);
+                // This is an important detail: Realm barriers have to trigger
+                // in order so add a dependence between this generation and the
+                // previous generation of the barrier to capture this property
+                if let Some(previous) = result.get_previous_phase() {
+                    let previous_index = state.find_event_node(previous);
+                    state.event_graph.add_edge(previous_index, index, ());
+                }
             }
             if precondition.exists() {
                 let src = state.find_event_node(*precondition);
