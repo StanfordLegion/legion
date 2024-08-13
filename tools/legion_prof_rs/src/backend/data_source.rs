@@ -982,9 +982,15 @@ impl StateDataSource {
                                         ));
                                     }
                                 } else {
-                                    item_meta.fields.push((
-                                            self.fields.critical,
-                                            Field::String(format!("Waiting on unknown critical path event from node {}. Please load the logfile from that node to see it.", event.node_id().0))));
+                                    if event.is_barrier() {
+                                        item_meta.fields.push((
+                                                self.fields.critical,
+                                                Field::String(format!("Waiting on unknown critical path barrier {:#x} created on node {}. Please load the logfile from at least one node that arrives on this barrier to start determining a critical path. You'll need to load the logs from all nodes that arrive on this barrier to determine a precise critical path.", event.0, event.node_id().0))));
+                                    } else {
+                                        item_meta.fields.push((
+                                                self.fields.critical,
+                                                Field::String(format!("Waiting on unknown critical path event {:#x} from node {}. Please load the logfile from that node to see it.", event.0, event.node_id().0))));
+                                    }
                                 }
                             }
                             if find_previous_executing {
@@ -1274,12 +1280,12 @@ impl StateDataSource {
             EventEntryKind::UnknownEvent => {
                 if event.is_barrier() {
                     Field::String(format!(
-                            "Unknown critical path barrier {} from node {}. Please load the logfile from that node to see it.", 
+                            "Unknown critical path barrier {:#x} created on node {}. Please load the logfile from at least one node that arrives on this barrier to start determining a critical path. You'll need to load the logs from all nodes that arrive on this barrier to determine a precise critical path.",
                             event.0, node.0
                     ))
                 } else {
                     Field::String(format!(
-                            "Unknown critical path event {} from node {}. Please load the logfile from that node to see it.", 
+                            "Unknown critical path event {:#x} from node {}. Please load the logfile from that node to see it.",
                             event.0, node.0
                     ))
                 }
@@ -1622,8 +1628,11 @@ impl StateDataSource {
                                 // Check to see if the critical entry happened before or after
                                 // the creation of this processor entry
                                 let creation_time = entry.creation_time();
-                                if event_entry.kind != EventEntryKind::UnknownEvent
-                                    && creation_time <= event_entry.trigger_time.unwrap()
+                                // If we don't know about the critical event then we always
+                                // report that as the critical path so the user is aware
+                                // that there is a missing critical path
+                                if event_entry.kind == EventEntryKind::UnknownEvent
+                                    || creation_time <= event_entry.trigger_time.unwrap()
                                 {
                                     // Created before critical event triggered so list both
                                     // fields separately since they wil be different
@@ -1632,7 +1641,9 @@ impl StateDataSource {
                                         self.generate_creator_link(creator, creation_time),
                                     ));
                                     // Check to see if the critical event triggered first or the
-                                    // previous executing task finished first
+                                    // previous executing task finished first. Note we can
+                                    // determine if this is the case even if we don't know
+                                    // what the critical event is
                                     let ready = entry.time_range.ready.unwrap();
                                     let start = entry.time_range.start.unwrap();
                                     if let Some((previous, start_time, stop_time)) =
@@ -1918,8 +1929,10 @@ impl StateDataSource {
                     // Check to see if the critical entry happened before or after
                     // the creation of this processor entry
                     let creation_time = entry.creation_time();
-                    if event_entry.kind != EventEntryKind::UnknownEvent
-                        && creation_time <= event_entry.trigger_time.unwrap()
+                    // If we don't know about the critical event then we always want to
+                    // report that as the critical event so the user is aware of it
+                    if event_entry.kind == EventEntryKind::UnknownEvent
+                        || creation_time <= event_entry.trigger_time.unwrap()
                     {
                         // Created before critical event triggered so list both
                         // fields separately since they wil be different
@@ -2215,6 +2228,9 @@ impl StateDataSource {
                         // Check to see if the critical entry happened before or after
                         // the creation of this processor entry
                         let creation_time = entry.creation_time();
+                        // If we don't know about the critical event then we always
+                        // report that as the critical path so the user is aware
+                        // that there is a missing critical path
                         if event_entry.kind != EventEntryKind::UnknownEvent
                             && event_entry.trigger_time.unwrap() < creation_time
                         {
