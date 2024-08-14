@@ -82,9 +82,10 @@ namespace Realm {
                                                                TimeLimit work_until)
   {
     if(poisoned) {
-      for(RegionInstanceImpl *new_inst : new_insts)
+      for(RegionInstanceImpl *new_inst : new_insts) {
         new_inst->notify_allocation(MemoryImpl::AllocationResult::ALLOC_CANCELLED,
                                     0 /*offset*/, TimeLimit::responsive());
+      }
       GenEventImpl::trigger(after, true /*poisoned*/, work_until);
     } else {
       MemoryImpl *m_impl = get_runtime()->get_memory_impl(inst->memory);

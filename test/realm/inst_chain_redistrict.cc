@@ -223,18 +223,21 @@ void top_level_task(const void *args, size_t arglen, const void *userdata, size_
   user_events.push_back(musage_event);
 
   RegionInstance inst2;
-  RegionInstance::create_instance(inst2, memories[0], bounds, field_sizes, 0, prs).wait();
-
   if(needs_ext) {
+    RegionInstance::create_instance(inst2, memories[0], bounds, field_sizes, 0,
+                                    ProfilingRequestSet())
+        .wait();
     ExternalInstanceResource *extres =
         inst2.generate_resource_info(bounds, 0, true /*read_only*/);
     assert(extres);
     RegionInstance inst_ext;
     RegionInstance::create_external_instance(inst_ext, extres->suggested_memory(),
-                                             inst2.get_layout()->clone(), *extres,
-                                             ProfilingRequestSet())
+                                             inst2.get_layout()->clone(), *extres, prs)
         .wait();
     inst2 = inst_ext;
+  } else {
+    RegionInstance::create_instance(inst2, memories[0], bounds, field_sizes, 0, prs)
+        .wait();
   }
 
   std::vector<int> data;
@@ -261,13 +264,11 @@ void top_level_task(const void *args, size_t arglen, const void *userdata, size_
                                   ProfilingRequestSet(), e1);
   e2.wait();
 
-  if(!needs_ext) {
-    Event::merge_events(user_events).wait();
-    assert(alloc_result == true);
-    assert(timel_result == true);
-    assert(static_cast<size_t>(musage_result) == bounds.volume() * sizeof(int));
-    assert(inst_status_result == 0);
-  }
+  Event::merge_events(user_events).wait();
+  assert(alloc_result == true);
+  assert(timel_result == true);
+  assert(static_cast<size_t>(musage_result) == bounds.volume() * sizeof(int));
+  assert(inst_status_result == 0);
 
   destroy_event.trigger();
   usleep(100000);
