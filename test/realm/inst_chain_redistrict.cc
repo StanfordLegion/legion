@@ -313,6 +313,7 @@ void worker_task(const void *args, size_t arglen, const void *userdata, size_t u
 
     std::vector<ProfilingRequestSet> prs(num_split_inst);
     for(int j = 0; j < num_split_inst; j++) {
+      // TODO: test profiling requests
       if(!needs_ext) {
         {
           UserEvent event = UserEvent::create_user_event();
