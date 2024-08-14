@@ -46,6 +46,8 @@ namespace Realm {
     SparsityMapRefCounter(::realm_id_t id);
 
     void add_references(unsigned count);
+    Event add_references_async(unsigned count);
+
     void remove_references(unsigned count);
 
     struct SparsityMapAddReferenceMessage {
@@ -192,7 +194,7 @@ namespace Realm {
     void subscribe(NodeID node);
     void unsubscribe(NodeID node);
 
-    void add_references(unsigned count);
+    void add_references(unsigned count, Event wait_on = Event::NO_EVENT);
     void remove_references(unsigned count);
 
     ID me;

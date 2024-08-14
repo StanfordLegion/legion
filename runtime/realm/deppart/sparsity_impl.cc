@@ -71,6 +71,26 @@ namespace Realm {
     }
   }
 
+
+  Event SparsityMapRefCounter::add_references_async(unsigned count)
+  {
+    Event event = GenEventImpl::create_genevent()->current_event();
+    if(ID(*this).is_sparsity()) {
+      NodeID owner = ID(*this).sparsity_creator_node();
+      if(owner == Network::my_node_id) {
+        get_runtime()->get_sparsity_impl(*this)->add_references(count, event);
+      } else {
+        ActiveMessage<typename SparsityMapRefCounter::SparsityMapAddReferenceMessage>
+            amsg(owner);
+        amsg->id = id;
+        amsg->count = count;
+        amsg->wait_on = event;
+        amsg.commit();
+      }
+    }
+    return event;
+  }
+
   void SparsityMapRefCounter::remove_references(unsigned count)
   {
     if(ID(*this).is_sparsity()) {
@@ -93,7 +113,7 @@ namespace Realm {
   {
     SparsityMapImplWrapper *wrapper = get_runtime()->get_sparsity_impl(msg.id);
     if(wrapper) {
-      wrapper->add_references(msg.count);
+      wrapper->add_references(msg.count, msg.wait_on);
     }
   }
 
@@ -291,10 +311,13 @@ namespace Realm {
 
   void SparsityMapImplWrapper::destroy(void) { remove_references(/*count=*/1); }
 
-  void SparsityMapImplWrapper::add_references(unsigned count)
+  void SparsityMapImplWrapper::add_references(unsigned count, Event wait_on)
   {
     if(need_refcount) {
       references.fetch_add_acqrel(count);
+      if(wait_on != Event::NO_EVENT) {
+        GenEventImpl::trigger(wait_on, false);
+      }
     }
   }
 

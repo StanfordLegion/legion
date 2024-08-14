@@ -479,6 +479,7 @@ namespace Realm {
 							  const ProfilingRequestSet &reqs,
 							  Event wait_on /*= Event::NO_EVENT*/)
   {
+    std::vector<Event> events{wait_on};
     Event e = wait_on;
 
     // record the start time of the potentially-inline operation if any
@@ -491,7 +492,10 @@ namespace Realm {
       result = IndexSpace<N,T>::make_empty();
     } else {
       result = subspaces[0];
-      result.sparsity.add_references();
+      if(!result.dense()) {
+        events.push_back(
+            SparsityMapRefCounter(result.sparsity.id).add_references_async(1));
+      }
 
       for(size_t i = 1; i < subspaces.size(); i++) {
         // no point in continuing if our result is empty
@@ -526,19 +530,23 @@ namespace Realm {
           result.sparsity.remove_references();
           result.bounds = result.bounds.intersection(subspaces[i].bounds);
           result.sparsity = subspaces[i].sparsity;
-          result.sparsity.add_references();
+          events.push_back(
+              SparsityMapRefCounter(result.sparsity.id).add_references_async(1));
           continue;
         }
 
         // general case - do full computation
         GenEventImpl *finish_event = GenEventImpl::create_genevent();
         e = finish_event->current_event();
+        events.push_back(e);
+
         IntersectionOperation<N, T> *op =
             new IntersectionOperation<N, T>(reqs, finish_event, ID(e).event_generation());
 
         result.sparsity.remove_references();
         result = op->add_intersection(subspaces);
-        result.sparsity.add_references();
+        events.push_back(
+            SparsityMapRefCounter(result.sparsity.id).add_references_async(1));
 
         op->launch(wait_on);
         was_inline = false;
@@ -561,9 +569,8 @@ namespace Realm {
     if(was_inline)
       PartitioningOperation::do_inline_profiling(reqs, inline_start_time);
 
-    return e;
+    return Event::merge_events(events);
   }
-
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -1133,14 +1140,14 @@ namespace Realm {
   template <int N, typename T>
   IntersectionMicroOp<N, T>::~IntersectionMicroOp(void)
   {
-    sparsity_output.remove_references();
+    //sparsity_output.remove_references();
   }
 
   template <int N, typename T>
   void IntersectionMicroOp<N,T>::add_sparsity_output(SparsityMap<N,T> _sparsity)
   {
     sparsity_output = _sparsity;
-    sparsity_output.add_references();
+    //sparsity_output.add_references();
   }
 
   template <int N, typename T>
@@ -1270,7 +1277,7 @@ namespace Realm {
   {
     bool ok = ((s >> inputs) &&
 	       (s >> sparsity_output));
-    sparsity_output.add_references();
+    //sparsity_output.add_references();
     assert(ok);
   }
 
@@ -1652,11 +1659,7 @@ namespace Realm {
 
   template <int N, typename T>
   IntersectionOperation<N, T>::~IntersectionOperation(void)
-  {
-    for(SparsityMap<N, T> &output : outputs) {
-      output.destroy();
-    }
-  }
+  {}
 
   template <int N, typename T>
   IndexSpace<N,T> IntersectionOperation<N,T>::add_intersection(const IndexSpace<N,T>& lhs,
@@ -1696,13 +1699,14 @@ namespace Realm {
     }
     SparsityMap<N,T> sparsity = get_runtime()->get_available_sparsity_impl(target_node)->me.convert<SparsityMap<N,T> >();
     output.sparsity = sparsity;
+    //sparsity.add_references();
 
     std::vector<IndexSpace<N,T> > ops(2);
     ops[0] = lhs;
     ops[1] = rhs;
     inputs.push_back(ops);
     outputs.push_back(sparsity);
-    outputs.back().add_references();
+    //outputs.back().add_references();
 
     return output;
   }
@@ -1738,10 +1742,11 @@ namespace Realm {
       }
     SparsityMap<N,T> sparsity = get_runtime()->get_available_sparsity_impl(target_node)->me.convert<SparsityMap<N,T> >();
     output.sparsity = sparsity;
+    ///sparsity.add_references();
 
     inputs.push_back(ops);
     outputs.push_back(sparsity);
-    outputs.back().add_references();
+    //outputs.back().add_references();
 
     return output;
   }
