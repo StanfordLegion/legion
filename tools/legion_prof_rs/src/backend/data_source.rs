@@ -107,6 +107,8 @@ pub struct Fields {
     backtrace: FieldID,
     critical: FieldID,
     trigger_time: FieldID,
+    previous_executing: FieldID,
+    scheduling_overhead: FieldID,
 }
 
 #[derive(Debug)]
@@ -156,7 +158,9 @@ impl StateDataSource {
             mapper_proc: field_schema.insert("Mapper Processor".to_owned(), true),
             backtrace: field_schema.insert("Backtrace".to_owned(), false),
             critical: field_schema.insert("Critical Path".to_owned(), true),
-            trigger_time: field_schema.insert("Triggering".to_owned(), false),
+            trigger_time: field_schema.insert("Triggering Latency".to_owned(), false),
+            previous_executing: field_schema.insert("Previous Executing".to_owned(), true),
+            scheduling_overhead: field_schema.insert("Scheduling Overhead".to_owned(), false),
         };
 
         let mut entry_map = BTreeMap::<EntryID, EntryKind>::new();
@@ -985,7 +989,7 @@ impl StateDataSource {
                                     if event.is_barrier() {
                                         item_meta.fields.push((
                                                 self.fields.critical,
-                                                Field::String(format!("Waiting on unknown critical path barrier {:#x} created on node {}. Please load the logfile from at least one node that arrives on this barrier to start determining a critical path. You'll need to load the logs from all nodes that arrive on this barrier to determine a precise critical path.", event.0, event.node_id().0))));
+                                                Field::String(format!("Waiting on unknown critical path barrier {:#x} created on node {}. Please load the logfile from at least one node that arrives on this barrier to start determining a critical path. You'll need to load the logs from all nodes that arrive on this barrier to determine a precise critical path. If you see this message and did not run with the -lg:prof_all_critical_arrivals flag then please report this case as it is likely a bug.", event.0, event.node_id().0))));
                                     } else {
                                         item_meta.fields.push((
                                                 self.fields.critical,
@@ -994,8 +998,8 @@ impl StateDataSource {
                                 }
                             }
                             if find_previous_executing {
-                                // For ready intervals, find the last running range before
-                                // this task can resume and make that the critical path
+                                // For ready intervals, find the last running range before this
+                                // task can resume and record that as the previous executing field
                                 if let Some((previous, prev_start, prev_stop)) = cont
                                     .find_previous_executing_entry(
                                         interval.start.into(),
@@ -1003,15 +1007,18 @@ impl StateDataSource {
                                     )
                                 {
                                     item_meta.fields.push((
-                                        self.fields.critical,
-                                        self.generate_critical_previous_executing_link(
+                                        self.fields.previous_executing,
+                                        self.generate_previous_executing_link(
                                             previous, prev_start, prev_stop,
                                         ),
                                     ));
-                                } else {
                                     item_meta.fields.push((
-                                        self.fields.critical,
-                                        Field::String(format!("This is how long it took Realm to wake up the task once it became ready as nothing else is preventing it from running."))));
+                                        self.fields.scheduling_overhead,
+                                        Field::Interval(ts::Interval::new(
+                                            prev_stop.into(),
+                                            interval.start,
+                                        )),
+                                    ));
                                 }
                             }
                             item_metas.push(item_meta);
@@ -1250,7 +1257,7 @@ impl StateDataSource {
 
     // Use this function when the critical path is the previous executing range
     // on the same processor
-    fn generate_critical_previous_executing_link(
+    fn generate_previous_executing_link(
         &self,
         previous: ProfUID,
         start: Timestamp,
@@ -1260,13 +1267,9 @@ impl StateDataSource {
         let proc = self.state.procs.get(&proc_id).unwrap();
         let entry = proc.find_entry(previous).unwrap();
         let op_name = entry.name(&self.state);
-        let trigger_time: ts::Timestamp = stop.into();
         Field::ItemLink(ItemLink {
             item_uid: entry.base().prof_uid.into(),
-            title: format!(
-                "Waiting for same processor as {} until {}",
-                &op_name, trigger_time
-            ),
+            title: op_name,
             interval: ts::Interval::new(start.into(), stop.into()),
             entry_id: self.proc_entries.get(proc_id).unwrap().clone(),
         })
@@ -1279,8 +1282,10 @@ impl StateDataSource {
         match event_entry.kind {
             EventEntryKind::UnknownEvent => {
                 if event.is_barrier() {
+                    // If you get here it means the user was running with
+                    // -lg:prof_all_critical_arrivals
                     Field::String(format!(
-                            "Unknown critical path barrier {:#x} created on node {}. Please load the logfile from at least one node that arrives on this barrier to start determining a critical path. You'll need to load the logs from all nodes that arrive on this barrier to determine a precise critical path.",
+                            "Unknown critical path barrier {:#x} created on node {}. Please load the logfile from at least one node that arrives on this barrier to start determining a critical path. You'll need to load the logs from all nodes that arrive on this barrier to determine a precise critical path. If you see this message and did not run with the -lg:prof_all_critical_arrivals flag then please report this case as it is likely a bug.",
                             event.0, node.0
                     ))
                 } else {
@@ -1503,112 +1508,7 @@ impl StateDataSource {
                                         self.fields.creator,
                                         self.generate_creator_link(creator, creation_time),
                                     ));
-                                    // Check to see if the critical event triggered first or the
-                                    // previous executing task finished first. Note we can
-                                    // determine if this is the case even if we don't know
-                                    // what the critical event is
-                                    let ready = entry.time_range.ready.unwrap();
-                                    let start = entry.time_range.start.unwrap();
-                                    if let Some((previous, start_time, stop_time)) =
-                                        proc.find_previous_executing_entry(ready, start)
-                                    {
-                                        if ready < stop_time {
-                                            // Critical path is previous executing entry finishing execution
-                                            fields.push((
-                                                self.fields.critical,
-                                                self.generate_critical_previous_executing_link(
-                                                    previous, start_time, stop_time,
-                                                ),
-                                            ));
-                                            need_critical = false;
-                                        }
-                                    }
-                                    if need_critical {
-                                        // Critical path is critical event triggering
-                                        fields.push((
-                                            self.fields.critical,
-                                            self.generate_critical_link(critical, event_entry),
-                                        ));
-                                        if event_entry.kind != EventEntryKind::UnknownEvent {
-                                            // Record the time it took Realm to propagate the event trigger
-                                            fields.push((
-                                                self.fields.trigger_time,
-                                                Field::Interval(ts::Interval::new(
-                                                    event_entry.trigger_time.unwrap().into(),
-                                                    ready.into(),
-                                                )),
-                                            ));
-                                        }
-                                        need_critical = false;
-                                    }
-                                }
-                            }
-                        }
-                        if need_critical {
-                            // Did not record the critical path yet
-                            // Check if it is the creator or the previous execution on the
-                            // processor that is on the critical path
-                            let created = entry.creation_time();
-                            let ready = entry.time_range.ready.unwrap();
-                            let started = entry.time_range.start.unwrap();
-                            if let Some((previous, start_time, stop_time)) =
-                                proc.find_previous_executing_entry(ready, started)
-                            {
-                                if ready < stop_time {
-                                    // Critical path is previous executing entry
-                                    // Need to record both the creator and the critical path
-                                    fields.push((
-                                        self.fields.creator,
-                                        self.generate_creator_link(creator, created),
-                                    ));
-                                    fields.push((
-                                        self.fields.critical,
-                                        self.generate_critical_previous_executing_link(
-                                            previous, start_time, stop_time,
-                                        ),
-                                    ));
-                                    need_critical = false;
-                                }
-                            }
-                            if need_critical {
-                                // Critical path is creation of the task
-                                fields.push((
-                                    self.fields.critical,
-                                    self.generate_critical_creator_link(creator, created),
-                                ));
-                                need_critical = false;
-                            }
-                        }
-                        assert!(!need_critical);
-                    }
-                }
-            } else {
-                // No creator, still need to record the critical path
-                match entry.kind {
-                    ProcEntryKind::Task(..)
-                    | ProcEntryKind::MetaTask(_)
-                    | ProcEntryKind::ProfTask => {
-                        let mut need_critical = true;
-                        if let Some(critical) = entry.critical() {
-                            if let Some(event_entry) = self.state.find_critical_entry(critical) {
-                                let ready = entry.time_range.ready.unwrap();
-                                let start = entry.time_range.start.unwrap();
-                                if let Some((previous, start_time, stop_time)) =
-                                    proc.find_previous_executing_entry(ready, start)
-                                {
-                                    if ready < stop_time {
-                                        // Critical path is previous executing entry
-                                        fields.push((
-                                            self.fields.critical,
-                                            self.generate_critical_previous_executing_link(
-                                                previous, start_time, stop_time,
-                                            ),
-                                        ));
-                                        need_critical = false;
-                                    }
-                                }
-                                if need_critical {
-                                    // Critical path is the critical event triggering
+                                    // Critical path is critical event triggering
                                     fields.push((
                                         self.fields.critical,
                                         self.generate_critical_link(critical, event_entry),
@@ -1619,7 +1519,7 @@ impl StateDataSource {
                                             self.fields.trigger_time,
                                             Field::Interval(ts::Interval::new(
                                                 event_entry.trigger_time.unwrap().into(),
-                                                ready.into(),
+                                                entry.time_range.ready.unwrap().into(),
                                             )),
                                         ));
                                     }
@@ -1628,24 +1528,40 @@ impl StateDataSource {
                             }
                         }
                         if need_critical {
-                            let ready = entry.time_range.ready.unwrap();
-                            let started = entry.time_range.start.unwrap();
-                            if let Some((previous, start_time, stop_time)) =
-                                proc.find_previous_executing_entry(ready, started)
-                            {
-                                if ready < stop_time {
-                                    // Critical path is previous executing entry
+                            // Did not record the critical path yet
+                            // Critical path is creation of the task
+                            fields.push((
+                                self.fields.critical,
+                                self.generate_critical_creator_link(creator, entry.creation_time()),
+                            ));
+                        }
+                    }
+                }
+            } else {
+                // No creator, still need to record the critical path if there is one
+                match entry.kind {
+                    ProcEntryKind::Task(..)
+                    | ProcEntryKind::MetaTask(_)
+                    | ProcEntryKind::ProfTask => {
+                        if let Some(critical) = entry.critical() {
+                            if let Some(event_entry) = self.state.find_critical_entry(critical) {
+                                // Critical path is the critical event triggering
+                                fields.push((
+                                    self.fields.critical,
+                                    self.generate_critical_link(critical, event_entry),
+                                ));
+                                if event_entry.kind != EventEntryKind::UnknownEvent {
+                                    // Record the time it took Realm to propagate the event trigger
                                     fields.push((
-                                        self.fields.critical,
-                                        self.generate_critical_previous_executing_link(
-                                            previous, start_time, stop_time,
-                                        ),
+                                        self.fields.trigger_time,
+                                        Field::Interval(ts::Interval::new(
+                                            event_entry.trigger_time.unwrap().into(),
+                                            entry.time_range.ready.unwrap().into(),
+                                        )),
                                     ));
                                 }
                             }
                         }
-                        // Might not have issued a critical path if this was created after the
-                        // previous executing task but we don't know who the creator is
                     }
                     _ => {}
                 }
@@ -1681,6 +1597,19 @@ impl StateDataSource {
                         self.fields.delayed_time,
                         Field::Interval(ts::Interval::new(ready.into(), start.into())),
                     ));
+                    // See if there was something previously executing that delayed us
+                    if let Some((previous, start_time, stop_time)) =
+                        proc.find_previous_executing_entry(ready, start)
+                    {
+                        fields.push((
+                            self.fields.previous_executing,
+                            self.generate_previous_executing_link(previous, start_time, stop_time),
+                        ));
+                        fields.push((
+                            self.fields.scheduling_overhead,
+                            Field::Interval(ts::Interval::new(stop_time.into(), start.into())),
+                        ));
+                    }
                 }
             }
             ItemMeta {
