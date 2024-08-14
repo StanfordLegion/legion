@@ -1464,7 +1464,7 @@ namespace Legion {
             phase_barriers.begin(); it != phase_barriers.end(); it++)
       {
         arrive_barriers.push_back(*it);
-        Runtime::phase_barrier_arrive(*it, 1/*count*/, arrive_pre);
+        runtime->phase_barrier_arrive(*it, 1/*count*/, arrive_pre);
         if (runtime->legion_spy_enabled)
           LegionSpy::log_phase_barrier_arrival(unique_op_id, it->phase_barrier);
       }
@@ -7423,7 +7423,7 @@ namespace Legion {
       if (start.exists())
         precondition = Runtime::protect_event(start);
       if (is_replaying())
-        Runtime::phase_barrier_arrive(concurrent_precondition.traced,
+        runtime->phase_barrier_arrive(concurrent_precondition.traced,
             1/*count*/, precondition);
       else
         Runtime::trigger_event(concurrent_precondition.interpreted, 
@@ -7495,7 +7495,7 @@ namespace Legion {
             "as needing 'concurrent_barrier' support in the task variant "
             "registrar.", get_task_name(), get_unique_id())
       }
-      Runtime::phase_barrier_arrive(concurrent_task_barrier, 1/*count*/);
+      runtime->phase_barrier_arrive(concurrent_task_barrier, 1/*count*/);
       concurrent_task_barrier.wait();
       Runtime::advance_barrier(concurrent_task_barrier);
 #ifdef DEBUG_LEGION
@@ -9362,7 +9362,7 @@ namespace Legion {
           if (is_recording())
           {
             // Set up a barrier for use with tracing
-            RtBarrier barrier(Realm::Barrier::create_barrier(total_points));
+            RtBarrier barrier = runtime->create_rt_barrier(total_points);
             std::vector<ShardID> participants(1,0);
             tpl->record_concurrent_barrier(this, barrier, 
                 participants, total_points);
@@ -9496,8 +9496,7 @@ namespace Legion {
           VariantImpl *variant = 
             runtime->find_variant_impl(task_id, concurrent_variant);
           if (variant->needs_barrier())
-            concurrent_task_barrier =
-              RtBarrier(Realm::Barrier::create_barrier(total_points));
+            concurrent_task_barrier = runtime->create_rt_barrier(total_points);
         }
         // Swap this vector onto the stack in case the slice task gets deleted
         // out from under us while we are finalizing things

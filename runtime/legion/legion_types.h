@@ -44,6 +44,7 @@
 
 // Make sure we have the appropriate defines in place for including realm
 #include "realm.h"
+#include "realm/id.h"
 #include "realm/dynamic_templates.h"
 
 // this may be set before including legion.h to eliminate deprecation warnings
@@ -2881,19 +2882,13 @@ namespace Legion {
       // Override the wait method so we can have our own implementation
       inline void wait(void) const;
       inline void wait_faultaware(bool &poisoned, bool from_application) const;
+      inline bool is_barrier(void) const;
     protected:
       void begin_context_wait(Context ctx, bool from_application) const;
       void end_context_wait(Context ctx, bool from_application) const;
       void record_event_wait(LegionProfInstance *profiler, 
                              Realm::Backtrace &bt) const;
-    public:
-      void record_event_merger(const LgEvent *preconditions,
-                               size_t count) const;
       void record_event_trigger(LgEvent precondition) const;
-      void record_event_poison(void) const;
-      void record_barrier_arrival(LgEvent precondition) const;
-      void record_reservation_acquire(Reservation r,
-                                      LgEvent precondition) const;
     };
 
     class PredEvent : public LgEvent {
@@ -3433,6 +3428,14 @@ namespace Legion {
 #endif
       // Write the local reference tracker back
       Internal::implicit_reference_tracker = local_tracker;
+    }
+
+    //--------------------------------------------------------------------------
+    inline bool LgEvent::is_barrier(void) const
+    //--------------------------------------------------------------------------
+    {
+      const Realm::ID identity(id);
+      return identity.is_barrier();
     }
 
   }; // namespace Internal 

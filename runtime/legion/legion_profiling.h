@@ -57,6 +57,37 @@ namespace Legion {
     typedef ::realm_id_t InstID;
     typedef ::realm_id_t IDType;
 
+    // This class helps us profile barriers by allowing us to 
+    // find the latest barrier arrival to trigger
+    struct ArrivalInfo {
+    public:
+      ArrivalInfo(void);
+      ArrivalInfo(const ArrivalInfo &rhs);
+      ArrivalInfo(LgEvent precondition);
+      ArrivalInfo(timestamp_t arrival, timestamp_t trigger,
+                  LgEvent precondition, LgEvent fevent);
+    public:
+      timestamp_t arrival_time;
+      std::atomic<timestamp_t> trigger_time;
+      LgEvent arrival_precondition;
+      LgEvent fevent;
+    };
+
+    // This reduction is used for profiling the arrival of barriers
+    class BarrierArrivalReduction {
+    public:
+      typedef ArrivalInfo RHS;
+      typedef ArrivalInfo LHS;
+      static const ArrivalInfo identity;
+      static constexpr ReductionOpID REDOP = 
+        LEGION_MAX_APPLICATION_REDOP_ID;
+      static constexpr timestamp_t SENTINEL =
+        std::numeric_limits<timestamp_t>::max();
+
+      template<bool EXCLUSIVE> static void apply(LHS &lhs, const RHS &rhs);
+      template<bool EXCLUSIVE> static void fold(RHS &rhs1, const RHS &rhs2);
+    };
+
     class LegionProfSerializer; // forward declaration
     // A small interface class for handling profiling responses
     class ProfilingResponseHandler {
@@ -607,7 +638,8 @@ namespace Legion {
           const LgEvent *preconditions, size_t count);
       void record_event_trigger(LgEvent result, LgEvent precondition);
       void record_event_poison(LgEvent result);
-      void record_barrier_arrival(LgEvent result, LgEvent precondition);
+      void record_barrier_arrival(LgEvent barrier, LgEvent precondition);
+      void record_barrier_arrival(LgEvent barrier, UniqueID uid);
       void record_reservation_acquire(Reservation r, LgEvent result,
           LgEvent precondition);
       void record_instance_ready(LgEvent result, LgEvent unique_event,
@@ -636,6 +668,8 @@ namespace Legion {
             const Realm::ProfilingMeasurements::InstanceTimeline &timeline);
       void process_partition(const ProfilingInfo *info,
                              const Realm::ProfilingResponse &response);
+      void process_arrival(const ProfilingInfo *info,
+            const Realm::ProfilingMeasurements::OperationTimeline &timeline);
       void process_implicit(UniqueID op_id, TaskID tid, Processor proc,
           long long start, long long stop, std::deque<WaitInfo> &waits,
           LgEvent finish_event);
@@ -716,6 +750,8 @@ namespace Legion {
         LEGION_PROF_FILL,
         LEGION_PROF_INST,
         LEGION_PROF_PARTITION,
+        LEGION_PROF_ARRIVAL,
+        LEGION_PROF_BARRIER,
         LEGION_PROF_LAST,
       };
       struct ProfilingInfo : public LegionProfInstance::ProfilingInfo {
@@ -744,7 +780,8 @@ namespace Legion {
                      const size_t minimum_call_threshold,
                      const bool slow_config_ok,
                      const bool self_profile,
-                     const bool no_critical);
+                     const bool no_critical,
+                     const bool all_arrivals);
       LegionProfiler(const LegionProfiler &rhs) = delete;
       virtual ~LegionProfiler(void);
     public:
@@ -806,6 +843,9 @@ namespace Legion {
       void add_partition_request(Realm::ProfilingRequestSet &requests,
                                  UniqueID uid, DepPartOpKind part_op,
                                  LgEvent critical);
+      void profile_barrier_arrival(Realm::Barrier bar, size_t count,
+          LgEvent precondition, Realm::Event protected_precondition);
+      void profile_barrier_trigger(Realm::Barrier bar, UniqueID uid);
     public:
       // Process low-level runtime profiling results
       virtual bool handle_profiling_response(
@@ -858,6 +898,9 @@ namespace Legion {
       const bool self_profile;
       // Whether we are profiling for critical path
       const bool no_critical_paths;
+      // Whether we are recording all the critical barrier arrivals
+      // or we are doing a reduction with the barrier to compute it
+      const bool all_critical_arrivals;
     private:
       LegionProfSerializer* serializer;
       mutable LocalLock profiler_lock;

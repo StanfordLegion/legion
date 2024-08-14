@@ -1160,7 +1160,7 @@ namespace Legion {
     public:
       LegionHandshakeImpl& operator=(const LegionHandshakeImpl &rhs);
     public:
-      void initialize(void);
+      void initialize(Runtime *runtime);
     public:
       void ext_handoff_to_legion(void);
       void ext_wait_on_legion(void);
@@ -1176,6 +1176,7 @@ namespace Legion {
       const int ext_participants;
       const int legion_participants;
     private:
+      Runtime *runtime;
       PhaseBarrier ext_wait_barrier;
       PhaseBarrier ext_arrive_barrier;
       PhaseBarrier legion_wait_barrier; // copy of mpi_arrive_barrier
@@ -2552,7 +2553,8 @@ namespace Legion {
             prof_target_latency(100),
             prof_call_threshold(0),
             prof_self_profile(false),
-            prof_no_critical_paths(false) { }
+            prof_no_critical_paths(false),
+            prof_all_critical_arrivals(false) { }
       public:
         int delay_start;
         int legion_collective_radix;
@@ -2612,6 +2614,7 @@ namespace Legion {
         size_t prof_call_threshold;
         bool prof_self_profile;
         bool prof_no_critical_paths;
+        bool prof_all_critical_arrivals;
       public:
         bool parse_alloc_percentage_override_argument(const std::string& s);
       };
@@ -4904,24 +4907,30 @@ namespace Legion {
                                           const std::set<ApEvent> &events);
     public:
       static inline ApBarrier get_previous_phase(const PhaseBarrier &bar);
-      static inline void phase_barrier_arrive(const PhaseBarrier &bar, 
+      inline void phase_barrier_arrive(const PhaseBarrier &bar, 
                 unsigned cnt, ApEvent precondition = ApEvent::NO_AP_EVENT,
                 const void *reduce_value = NULL, size_t reduce_value_size = 0);
       static inline void advance_barrier(PhaseBarrier &bar);
       static inline void alter_arrival_count(PhaseBarrier &bar, int delta);
     public:
+      inline ApBarrier create_ap_barrier(size_t arrivals);
       static inline ApBarrier get_previous_phase(const ApBarrier &bar);
-      static inline void phase_barrier_arrive(const ApBarrier &bar, 
-                unsigned cnt, ApEvent precondition = ApEvent::NO_AP_EVENT,
-                const void *reduce_value = NULL, size_t reduce_value_size = 0);
+      inline void phase_barrier_arrive(const ApBarrier &bar, 
+                unsigned cnt, ApEvent precondition = ApEvent::NO_AP_EVENT);
       static inline void advance_barrier(ApBarrier &bar);
       static inline bool get_barrier_result(ApBarrier bar, void *result,
                                             size_t result_size);
     public:
+      inline RtBarrier create_rt_barrier(size_t arrivals);
       static inline RtBarrier get_previous_phase(const RtBarrier &bar);
-      static inline void phase_barrier_arrive(const RtBarrier &bar,
+#ifdef DEBUG_LEGION_COLLECTIVES 
+      inline void phase_barrier_arrive(const RtBarrier &bar,
                 unsigned cnt, RtEvent precondition = RtEvent::NO_RT_EVENT,
                 const void *reduce_value = NULL, size_t reduce_value_size = 0);
+#else
+      inline void phase_barrier_arrive(const RtBarrier &bar,
+                unsigned cnt, RtEvent precondition = RtEvent::NO_RT_EVENT);
+#endif
       static inline void advance_barrier(RtBarrier &bar);
       static inline bool get_barrier_result(RtBarrier bar, void *result,
                                             size_t result_size);
@@ -5190,7 +5199,7 @@ namespace Legion {
       if ((implicit_profiler != NULL) && result.exists())
       {
         const LgEvent preconditions[2] = { e1, e2 };
-        result.record_event_merger(preconditions, 2);
+        implicit_profiler->record_event_merger(result, preconditions, 2);
       }
       // Always do tracing after profiling
       if ((info != NULL) && info->recording)
@@ -5227,7 +5236,7 @@ namespace Legion {
       if ((implicit_profiler != NULL) && result.exists())
       {
         const LgEvent preconditions[3] = { e1, e2, e3 };
-        result.record_event_merger(preconditions, 3);
+        implicit_profiler->record_event_merger(result, preconditions, 3);
       }
       // Always do tracing after profiling
       if ((info != NULL) && info->recording)
@@ -5293,7 +5302,8 @@ namespace Legion {
       {
         static_assert(sizeof(ApEvent) == sizeof(LgEvent));
         const std::vector<ApEvent> preconditions(events.begin(), events.end());
-        result.record_event_merger(&preconditions.front(),preconditions.size());
+        implicit_profiler->record_event_merger(result,
+            &preconditions.front(), preconditions.size());
       }
       // Always do tracing after profiling
       if ((info != NULL) && info->recording)
@@ -5368,7 +5378,8 @@ namespace Legion {
       if ((implicit_profiler != NULL) && result.exists())
       {
         static_assert(sizeof(ApEvent) == sizeof(LgEvent));
-        result.record_event_merger(&events.front(), events.size());
+        implicit_profiler->record_event_merger(result,
+            &events.front(), events.size());
       }
       // Always do tracing after profiling
       if ((info != NULL) && info->recording)
@@ -5385,7 +5396,7 @@ namespace Legion {
       if ((implicit_profiler != NULL) && result.exists())
       {
         const LgEvent preconditions[2] = { e1 , e2 };
-        result.record_event_merger(preconditions, 2);
+        implicit_profiler->record_event_merger(result, preconditions, 2);
       }
       return result;
     }
@@ -5400,7 +5411,7 @@ namespace Legion {
       if ((implicit_profiler != NULL) && result.exists())
       {
         const LgEvent preconditions[3] = { e1, e2, e3 };
-        result.record_event_merger(preconditions, 3);
+        implicit_profiler->record_event_merger(result, preconditions, 3);
       }
       return result;
     }
@@ -5428,7 +5439,8 @@ namespace Legion {
       {
         static_assert(sizeof(RtEvent) == sizeof(LgEvent));
         const std::vector<RtEvent> preconditions(events.begin(), events.end());
-        result.record_event_merger(&preconditions.front(),preconditions.size());
+        implicit_profiler->record_event_merger(result,
+            &preconditions.front(), preconditions.size());
       }
       return result;
     }
@@ -5455,7 +5467,8 @@ namespace Legion {
       if ((implicit_profiler != NULL) && result.exists())
       {
         static_assert(sizeof(RtEvent) == sizeof(LgEvent));
-        result.record_event_merger(&events.front(), events.size());
+        implicit_profiler->record_event_merger(result,
+            &events.front(), events.size());
       }
       return result;
     }
@@ -5486,7 +5499,7 @@ namespace Legion {
       // Record trigger event timing first since it might be expensive
       // to actually propagate the triggered event
       if (implicit_profiler != NULL)
-        to_trigger.record_event_trigger(precondition);
+        implicit_profiler->record_event_trigger(to_trigger, precondition);
       Realm::UserEvent copy = to_trigger;
       copy.trigger(precondition);
 #ifdef LEGION_SPY
@@ -5505,7 +5518,7 @@ namespace Legion {
       // Record poison event timing first since it might be expensive
       // to actually propagate the poison
       if (implicit_profiler != NULL)
-        to_poison.record_event_poison();
+        implicit_profiler->record_event_poison(to_poison);
       Realm::UserEvent copy = to_poison;
       copy.cancel();
 #ifdef LEGION_SPY
@@ -5535,7 +5548,7 @@ namespace Legion {
       // Record trigger event timing first since it might be expensive
       // to actually propagate the triggered event
       if (implicit_profiler != NULL)
-        to_trigger.record_event_trigger(precondition);
+        implicit_profiler->record_event_trigger(to_trigger, precondition);
       Realm::UserEvent copy = to_trigger;
       copy.trigger(precondition);
 #ifdef LEGION_SPY
@@ -5550,7 +5563,7 @@ namespace Legion {
       // Record poison event timing first since it might be expensive
       // to actually propagate the poison
       if (implicit_profiler != NULL)
-        to_poison.record_event_poison();
+        implicit_profiler->record_event_poison(to_poison);
       Realm::UserEvent copy = to_poison;
       copy.cancel();
 #ifdef LEGION_SPY
@@ -5579,7 +5592,8 @@ namespace Legion {
       // Record trigger event timing first since it might be expensive
       // to actually propagate the triggered event
       if (implicit_profiler != NULL)
-        to_trigger.record_event_trigger(LgEvent::NO_LG_EVENT);
+        implicit_profiler->record_event_trigger(to_trigger,
+                                                LgEvent::NO_LG_EVENT);
       Realm::UserEvent copy = to_trigger;
       copy.trigger();
 #ifdef LEGION_SPY
@@ -5594,7 +5608,7 @@ namespace Legion {
       // Record poison event timing first since it might be expensive
       // to actually propagate the poison
       if (implicit_profiler != NULL)
-        to_poison.record_event_poison();
+        implicit_profiler->record_event_poison(to_poison);
       Realm::UserEvent copy = to_poison;
       copy.cancel();
 #ifdef LEGION_SPY
@@ -5633,7 +5647,7 @@ namespace Legion {
       if ((implicit_profiler != NULL) && result.exists())
       {
         const LgEvent preconditions[2] = { e1, e2 };
-        result.record_event_merger(preconditions, 2);
+        implicit_profiler->record_event_merger(result, preconditions, 2);
       }
       // Always do tracing after profiling
       if ((info != NULL) && info->recording)
@@ -5658,7 +5672,7 @@ namespace Legion {
 #endif
 #endif
       if ((implicit_profiler != NULL) && result.exists() && (result != e))
-        result.record_event_trigger(e);
+        implicit_profiler->record_event_trigger(result, e);
       return result;
     }
 
@@ -5671,7 +5685,7 @@ namespace Legion {
         const RtEvent result(Realm::Event::ignorefaults(to_protect));
         if ((implicit_profiler != NULL) && result.exists() &&
             (result.id != to_protect.id))
-          result.record_event_trigger(to_protect);
+          implicit_profiler->record_event_trigger(result, to_protect);
         return result;
       }
       else
@@ -5692,23 +5706,51 @@ namespace Legion {
       {
         static_assert(sizeof(ApEvent) == sizeof(LgEvent));
         const std::vector<ApEvent> preconditions(events.begin(), events.end());
-        result.record_event_merger(&preconditions.front(),preconditions.size());
+        implicit_profiler->record_event_merger(result,
+            &preconditions.front(), preconditions.size());
       }
       return result;
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ inline void Runtime::phase_barrier_arrive(
+    inline void Runtime::phase_barrier_arrive(
                   const PhaseBarrier &bar, unsigned count, ApEvent precondition,
                   const void *reduce_value, size_t reduce_value_size)
     //--------------------------------------------------------------------------
     {
+      Realm::Barrier copy = bar.phase_barrier;
       // Record barrier arrivals before we actually do them since it
       // might be expensive to propagate the effects
-      if (implicit_profiler != NULL)
-        bar.phase_barrier.record_barrier_arrival(precondition);
-      Realm::Barrier copy = bar.phase_barrier;
-      copy.arrive(count, precondition, reduce_value, reduce_value_size);
+      if ((profiler != NULL) && !profiler->no_critical_paths)
+      {
+        if (profiler->all_critical_arrivals)
+        {
+          if (implicit_profiler != NULL)
+            implicit_profiler->record_barrier_arrival(
+                bar.phase_barrier, precondition);
+          copy.arrive(count, precondition, reduce_value, reduce_value_size);
+        }
+        else
+        {
+#ifdef DEBUG_LEGION
+          assert(reduce_value == NULL);
+#endif
+          // We're computing the critical path through the graph so
+          // need to record when when this arrival triggers so we can
+          // feed it into the reduction for the barrier
+          const Realm::Event pre = precondition.exists() ?
+            Realm::Event::ignorefaults(precondition) : precondition;
+          if (!pre.exists() || pre.has_triggered())
+          {
+            const ArrivalInfo info(precondition);
+            copy.arrive(count, precondition, &info, sizeof(info));          
+          }
+          else // Have the profiler profile and do the arrival
+            profiler->profile_barrier_arrival(copy, count, precondition, pre);
+        }
+      }
+      else
+        copy.arrive(count, precondition, reduce_value, reduce_value_size);
 #ifdef LEGION_SPY
       if (precondition.exists())
         LegionSpy::log_event_dependence(precondition, bar.phase_barrier);
@@ -5742,6 +5784,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    inline ApBarrier Runtime::create_ap_barrier(size_t arrivals) 
+    //--------------------------------------------------------------------------
+    {
+      if ((profiler == NULL) || profiler->no_critical_paths ||
+          profiler->all_critical_arrivals)
+        return ApBarrier(Realm::Barrier::create_barrier(arrivals));
+      else
+        return ApBarrier(Realm::Barrier::create_barrier(arrivals,
+              BarrierArrivalReduction::REDOP, 
+              &BarrierArrivalReduction::identity,
+              sizeof(BarrierArrivalReduction::identity)));
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ inline ApBarrier Runtime::get_previous_phase(
                                                            const ApBarrier &bar)
     //--------------------------------------------------------------------------
@@ -5751,17 +5807,39 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ inline void Runtime::phase_barrier_arrive(
-                  const ApBarrier &bar, unsigned count, ApEvent precondition,
-                  const void *reduce_value, size_t reduce_value_size)
+    inline void Runtime::phase_barrier_arrive(
+                    const ApBarrier &bar, unsigned count, ApEvent precondition)
     //--------------------------------------------------------------------------
     {
+      Realm::Barrier copy = bar;
       // Record barrier arrivals before we actually do them since it
       // might be expensive to propagate the effects
-      if (implicit_profiler != NULL)
-        bar.record_barrier_arrival(precondition);
-      Realm::Barrier copy = bar;
-      copy.arrive(count, precondition, reduce_value, reduce_value_size);
+      if ((profiler != NULL) && !profiler->no_critical_paths)
+      {
+        if (profiler->all_critical_arrivals)
+        {
+          if (implicit_profiler != NULL)
+            implicit_profiler->record_barrier_arrival(bar, precondition);
+          copy.arrive(count, precondition);
+        }
+        else
+        {
+          // We're computing the critical path through the graph so
+          // need to record when when this arrival triggers so we can
+          // feed it into the reduction for the barrier
+          const Realm::Event pre = precondition.exists() ?
+            Realm::Event::ignorefaults(precondition) : precondition;
+          if (!pre.exists() || pre.has_triggered())
+          {
+            const ArrivalInfo info(precondition);
+            copy.arrive(count, precondition, &info, sizeof(info));          
+          }
+          else // Have the profiler profile and do the arrival
+            profiler->profile_barrier_arrival(bar, count, precondition, pre);
+        }
+      }
+      else
+        copy.arrive(count, precondition);
 #ifdef LEGION_SPY
       if (precondition.exists())
         LegionSpy::log_event_dependence(precondition, bar);
@@ -5786,6 +5864,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    inline RtBarrier Runtime::create_rt_barrier(size_t arrivals) 
+    //--------------------------------------------------------------------------
+    {
+      if ((profiler == NULL) || profiler->no_critical_paths ||
+          profiler->all_critical_arrivals)
+        return RtBarrier(Realm::Barrier::create_barrier(arrivals));
+      else
+        return RtBarrier(Realm::Barrier::create_barrier(arrivals,
+              BarrierArrivalReduction::REDOP, 
+              &BarrierArrivalReduction::identity,
+              sizeof(BarrierArrivalReduction::identity)));
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ inline RtBarrier Runtime::get_previous_phase(const RtBarrier &b)
     //--------------------------------------------------------------------------
     {
@@ -5793,18 +5885,61 @@ namespace Legion {
       return RtBarrier(copy.get_previous_phase());
     }
 
+#ifdef DEBUG_LEGION_COLLECTIVES
     //--------------------------------------------------------------------------
-    /*static*/ inline void Runtime::phase_barrier_arrive(const RtBarrier &bar,
+    inline void Runtime::phase_barrier_arrive(const RtBarrier &bar,
            unsigned count, RtEvent precondition, const void *value, size_t size)
     //--------------------------------------------------------------------------
     {
+      Realm::Barrier copy = bar;
       // Record barrier arrivals before we actually do them since it
       // might be expensive to propagate the effects
-      if (implicit_profiler != NULL)
-        bar.record_barrier_arrival(precondition);
-      Realm::Barrier copy = bar;
+      if ((profiler != NULL) && !profiler->no_critical_paths)
+      {
+#ifdef DEBUG_LEGION
+        assert(profiler->all_critical_arrivals);
+#endif
+        if (implicit_profiler != NULL)
+          implicit_profiler->record_barrier_arrival(bar, precondition);
+      }
       copy.arrive(count, precondition, value, size); 
     }
+#else
+    //--------------------------------------------------------------------------
+    inline void Runtime::phase_barrier_arrive(const RtBarrier &bar,
+                                           unsigned count, RtEvent precondition)
+    //--------------------------------------------------------------------------
+    {
+      Realm::Barrier copy = bar;
+      // Record barrier arrivals before we actually do them since it
+      // might be expensive to propagate the effects
+      if ((profiler != NULL) && !profiler->no_critical_paths)
+      {
+        if (profiler->all_critical_arrivals)
+        {
+          if (implicit_profiler != NULL)
+            implicit_profiler->record_barrier_arrival(bar, precondition);
+          copy.arrive(count, precondition);
+        }
+        else
+        {
+          // We're computing the critical path through the graph so
+          // need to record when when this arrival triggers so we can
+          // feed it into the reduction for the barrier
+          if (!precondition.exists() || precondition.has_triggered())
+          {
+            const ArrivalInfo info(precondition);
+            copy.arrive(count, precondition, &info, sizeof(info));          
+          }
+          else // Have the profiler profile and do the arrival
+            profiler->profile_barrier_arrival(
+                bar, count, precondition, precondition);
+        }
+      }
+      else
+        copy.arrive(count, precondition);
+    }
+#endif
 
     //--------------------------------------------------------------------------
     /*static*/ inline void Runtime::advance_barrier(RtBarrier &bar)
@@ -5851,7 +5986,7 @@ namespace Legion {
       // Result can be the same as precondition if precondition is poisoned
       if ((implicit_profiler != NULL) && result.exists() && 
           (result != precondition))
-        result.record_reservation_acquire(r, precondition);
+        implicit_profiler->record_reservation_acquire(r, result, precondition);
       return result;
     }
 
@@ -5864,7 +5999,7 @@ namespace Legion {
       // Result can be the same as precondition if precondition is poisoned
       if ((implicit_profiler != NULL) && result.exists() && 
           (result != precondition))
-        result.record_reservation_acquire(r, precondition);
+        implicit_profiler->record_reservation_acquire(r, result, precondition);
       return result;
     }
 

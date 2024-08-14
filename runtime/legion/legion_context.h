@@ -3059,7 +3059,7 @@ namespace Legion {
           if (result != Runtime::get_previous_phase(next))
           {
             // Finish off the old barrier
-            Runtime::phase_barrier_arrive(result, 1);
+            runtime->phase_barrier_arrive(result, 1);
             result = next;
             next = collective_map_barriers[
               next_collective_map_bar_index].next(this);
@@ -3085,7 +3085,7 @@ namespace Legion {
           if (result != Runtime::get_previous_phase(next))
           {
             // Finish off the old barrier
-            Runtime::phase_barrier_arrive(result, 1);
+            runtime->phase_barrier_arrive(result, 1);
             result = next;
             next = indirection_barriers[next_indirection_bar_index].next(this);
 #ifdef DEBUG_LEGION

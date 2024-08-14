@@ -30,6 +30,130 @@ namespace Legion {
     extern Realm::Logger log_prof;
 
     //--------------------------------------------------------------------------
+    ArrivalInfo::ArrivalInfo(void)
+      : arrival_time(0), trigger_time(std::numeric_limits<timestamp_t>::min())
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ArrivalInfo::ArrivalInfo(const ArrivalInfo &rhs)
+      : arrival_time(rhs.arrival_time), trigger_time(rhs.trigger_time.load()),
+        arrival_precondition(rhs.arrival_precondition), fevent(rhs.fevent)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ArrivalInfo::ArrivalInfo(LgEvent pre)
+      : arrival_time(Realm::Clock::current_time_in_nanoseconds()),
+        trigger_time(arrival_time), arrival_precondition(pre),
+        fevent(implicit_fevent)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ArrivalInfo::ArrivalInfo(timestamp_t arrival, timestamp_t trigger,
+                             LgEvent pre, LgEvent f)
+      : arrival_time(arrival), trigger_time(trigger),
+        arrival_precondition(pre), fevent(f)
+    //--------------------------------------------------------------------------
+    {
+    }
+    
+    /*static*/ const ArrivalInfo BarrierArrivalReduction::identity = 
+      ArrivalInfo();
+
+    //--------------------------------------------------------------------------
+    template<>
+    /*static*/ void BarrierArrivalReduction::apply<true>(LHS &lhs, 
+                                                         const RHS &rhs)
+    //--------------------------------------------------------------------------
+    {
+      if (lhs.trigger_time < rhs.trigger_time)
+      {
+        lhs.arrival_time = rhs.arrival_time;
+        lhs.arrival_precondition = rhs.arrival_precondition;
+        lhs.fevent = rhs.fevent;
+        lhs.trigger_time.store(rhs.trigger_time.load());
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    template<>
+    /*static*/ void BarrierArrivalReduction::apply<false>(LHS &lhs, 
+                                                          const RHS &rhs)
+    //--------------------------------------------------------------------------
+    {
+      timestamp_t previous = lhs.trigger_time.load();
+      while (true)
+      {
+        // Spin until the previous is not the sentinel
+        while (previous == SENTINEL)
+          previous = lhs.trigger_time.load();
+        // Quick test to see if we even need to do the compare and swap
+        if (rhs.trigger_time <= previous)
+          break;
+        // Once it's not the sentinel then do a compare and swap to 
+        // see if we can add ourselves as the sentinel
+        if (!lhs.trigger_time.compare_exchange_weak(previous, SENTINEL))
+          // Exchange was not successful so go around again
+          continue;
+        // Save our state since we know we're later than the previous
+        lhs.arrival_time = rhs.arrival_time;
+        lhs.arrival_precondition = rhs.arrival_precondition;
+        lhs.fevent = rhs.fevent;
+        lhs.trigger_time.store(rhs.trigger_time);
+        break;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    template<>
+    /*static*/ void BarrierArrivalReduction::fold<true>(RHS &rhs1,
+                                                        const RHS &rhs2)
+    //--------------------------------------------------------------------------
+    {
+      if (rhs1.trigger_time < rhs2.trigger_time)
+      {
+        rhs1.arrival_time = rhs2.arrival_time;
+        rhs1.arrival_precondition = rhs2.arrival_precondition;
+        rhs1.fevent = rhs2.fevent;
+        rhs1.trigger_time.store(rhs2.trigger_time.load());
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    template<>
+    /*static*/ void BarrierArrivalReduction::fold<false>(LHS &rhs1, 
+                                                         const RHS &rhs2)
+    //--------------------------------------------------------------------------
+    {
+      timestamp_t previous = rhs1.trigger_time.load();
+      while (true)
+      {
+        // Spin until the previous is not the sentinel
+        while (previous == SENTINEL)
+          previous = rhs1.trigger_time.load();
+        // Quick test to see if we even need to do the compare and swap
+        if (rhs2.trigger_time <= previous)
+          break;
+        // Once it's not the sentinel then do a compare and swap to 
+        // see if we can add ourselves as the sentinel
+        if (!rhs1.trigger_time.compare_exchange_weak(previous, SENTINEL))
+          // Exchange was not successful so go around again
+          continue;
+        // Save our state since we know we're later than the previous
+        rhs1.arrival_time = rhs2.arrival_time;
+        rhs1.arrival_precondition = rhs2.arrival_precondition;
+        rhs1.fevent = rhs2.fevent;
+        rhs1.trigger_time.store(rhs2.trigger_time);
+        break;
+      }
+    }
+
+    //--------------------------------------------------------------------------
     template<size_t ENTRIES>
     SmallNameClosure<ENTRIES>::SmallNameClosure(void)
     //--------------------------------------------------------------------------
@@ -475,7 +599,11 @@ namespace Legion {
       info.result = result;
       info.preconditions.resize(count);
       for (unsigned idx = 0; idx < count; idx++)
+      {
         info.preconditions[idx] = preconditions[idx];
+        if (preconditions[idx].is_barrier())
+          record_barrier_arrival(preconditions[idx], implicit_provenance);
+      }
       info.fevent = implicit_fevent;
       owner->update_footprint(sizeof(info) + count * sizeof(LgEvent), this);
     }
@@ -491,6 +619,8 @@ namespace Legion {
       info.performed = Realm::Clock::current_time_in_nanoseconds();
       info.result = result;
       info.precondition = pre;
+      if (pre.is_barrier())
+        record_barrier_arrival(pre, implicit_provenance);
       info.fevent = implicit_fevent;
       owner->update_footprint(sizeof(info), this);
     }
@@ -515,6 +645,9 @@ namespace Legion {
     {
       if (owner->no_critical_paths)
         return;
+#ifdef DEBUG_LEGION
+      assert(owner->all_critical_arrivals);
+#endif
       BarrierArrivalInfo &info = barrier_arrival_infos.emplace_back(
           BarrierArrivalInfo());
       info.performed = Realm::Clock::current_time_in_nanoseconds();
@@ -522,6 +655,38 @@ namespace Legion {
       info.precondition = pre;
       info.fevent = implicit_fevent;
       owner->update_footprint(sizeof(info), this);
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfInstance::record_barrier_arrival(LgEvent bar, UniqueID uid)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(bar.is_barrier());
+#endif
+      // We don't need to record this if we're recording all barrier arrivals
+      // since the profiler will be able to look at all the log files and
+      // do this by itself
+      if (owner->no_critical_paths || owner->all_critical_arrivals)
+        return;
+      Realm::Barrier barrier;
+      barrier.id = bar.id;
+      ArrivalInfo arrival_info;
+      // See if the barrier has already triggered
+      if (barrier.get_result(&arrival_info, sizeof(arrival_info)))
+      {
+        BarrierArrivalInfo &info = barrier_arrival_infos.emplace_back(
+            BarrierArrivalInfo());
+        info.result = bar;
+        info.fevent = arrival_info.fevent;
+        info.precondition = arrival_info.arrival_precondition;
+        info.performed = arrival_info.arrival_time;
+        owner->update_footprint(sizeof(info), this);
+      }
+      else
+        // The barrier hasn't triggered yet so launch a profiling task to
+        // record it has triggered
+        owner->profile_barrier_trigger(barrier, uid);
     }
 
     //--------------------------------------------------------------------------
@@ -536,6 +701,8 @@ namespace Legion {
       info.performed = Realm::Clock::current_time_in_nanoseconds();
       info.result = result;
       info.precondition = precondition;
+      if (precondition.is_barrier())
+        record_barrier_arrival(precondition, implicit_provenance);
       info.reservation = r;
       info.fevent = implicit_fevent;
       owner->update_footprint(sizeof(info), this);
@@ -554,6 +721,8 @@ namespace Legion {
       info.result = result;
       info.unique = unique_event;
       info.precondition = precondition;
+      if (precondition.is_barrier())
+        record_barrier_arrival(precondition, implicit_provenance);
       owner->update_footprint(sizeof(info), this);
     }
 
@@ -578,7 +747,11 @@ namespace Legion {
       info.result = result;
       info.preconditions.resize(count);
       for (unsigned idx = 0; idx < count; idx++)
+      {
         info.preconditions[idx] = preconditions[idx];
+        if (preconditions[idx].is_barrier())
+          record_barrier_arrival(preconditions[idx], implicit_provenance);
+      }
       info.fevent = implicit_fevent;
       owner->update_footprint(sizeof(info) + count * sizeof(LgEvent), this);
     }
@@ -602,6 +775,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(timeline.is_valid());
 #endif
+      if (prof_info->critical.is_barrier())
+        record_barrier_arrival(prof_info->critical, prof_info->op_id);
       Realm::ProfilingMeasurements::OperationTimelineGPU timeline_gpu;
       if (response.get_measurement<
             Realm::ProfilingMeasurements::OperationTimelineGPU>(timeline_gpu))
@@ -726,6 +901,8 @@ namespace Legion {
       }
       info.creator = prof_info->creator;
       info.critical = prof_info->critical;
+      if (prof_info->critical.is_barrier())
+        record_barrier_arrival(prof_info->critical, prof_info->op_id);
       Realm::ProfilingMeasurements::OperationFinishEvent finish;
       if (response.get_measurement(finish))
         info.finish_event = LgEvent(finish.finish_event);
@@ -778,6 +955,8 @@ namespace Legion {
       }
       info.creator = prof_info->creator;
       info.critical = prof_info->critical;
+      if (prof_info->critical.is_barrier())
+        record_barrier_arrival(prof_info->critical, prof_info->op_id);
       Realm::ProfilingMeasurements::OperationFinishEvent finish;
       if (response.get_measurement(finish))
       {
@@ -950,6 +1129,8 @@ namespace Legion {
       }
       info.creator = prof_info->creator;
       info.critical = prof_info->critical;
+      if (prof_info->critical.is_barrier())
+        record_barrier_arrival(prof_info->critical, prof_info->op_id);
       owner->update_footprint(sizeof(CopyInfo) +
           info.inst_infos.size() * sizeof(CopyInstInfo), this);
       if (closure->remove_reference())
@@ -1016,6 +1197,8 @@ namespace Legion {
       }
       info.creator = prof_info->creator;
       info.critical = prof_info->critical;
+      if (prof_info->critical.is_barrier())
+        record_barrier_arrival(prof_info->critical, prof_info->op_id);
       owner->update_footprint(sizeof(FillInfo) + 
           info.inst_infos.size() * sizeof(FillInstInfo), this);
       if (closure->remove_reference())
@@ -1073,8 +1256,27 @@ namespace Legion {
       info.stop = timeline.complete_time;
       info.creator = prof_info->creator;
       info.critical = prof_info->critical;
+      if (prof_info->critical.is_barrier())
+        record_barrier_arrival(prof_info->critical, prof_info->op_id);
       info.fevent = LgEvent(fevent.finish_event);
       owner->update_footprint(sizeof(PartitionInfo), this);
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfInstance::process_arrival(const ProfilingInfo *prof_info,
+                const Realm::ProfilingMeasurements::OperationTimeline &timeline)
+    //--------------------------------------------------------------------------
+    {
+      // The arrival occurred when we created the no-op task
+      // The precondition event triggered when the no-op task became ready
+      const ArrivalInfo info(timeline.create_time, timeline.ready_time,
+          prof_info->critical, prof_info->creator);
+      // Do the barrier arrival with the arrival info argument
+      // Still chain on the precondition to propagate poison (if any)
+      Realm::Barrier bar;
+      bar.id = prof_info->id;
+      bar.timestamp = 0;
+      bar.arrive(prof_info->extra.id2, prof_info->critical, &info,sizeof(info));
     }
 
     //--------------------------------------------------------------------------
@@ -1949,13 +2151,20 @@ namespace Legion {
                                    const size_t call_threshold,
                                    const bool slow_config_ok,
                                    const bool self_prof,
-                                   const bool no_critical)
+                                   const bool no_critical,
+                                   const bool all_arrivals)
       : runtime(rt), done_event(Runtime::create_rt_user_event()), 
         minimum_call_threshold(call_threshold * 1000 /*convert us to ns*/),
         output_footprint_threshold(footprint_threshold), 
         output_target_latency(target_latency),
-        target_proc(target), self_profile(self_prof), 
+        target_proc(target), self_profile(self_prof),
         no_critical_paths(no_critical),
+#ifdef DEBUG_LEGION_COLLECTIVES
+        // Can't rely on the barrier reduction in this case
+        all_critical_arrivals(true),
+#else
+        all_critical_arrivals(all_arrivals),
+#endif
         next_backtrace_id((runtime->address_space == 0) ?
             runtime->total_address_spaces : runtime->address_space),
 #ifndef DEBUG_LEGION
@@ -2644,6 +2853,64 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void LegionProfiler::profile_barrier_arrival(Realm::Barrier bar, 
+        size_t count, LgEvent precondition, Realm::Event protected_precondition)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(precondition.exists());
+      increment_total_outstanding_requests(LEGION_PROF_ARRIVAL);
+#else
+      increment_total_outstanding_requests();
+#endif
+      // This is tricky: to measure when the arrival for this barrier is
+      // actually done then we are going to run a no-op task when the 
+      // protected precondition triggers. It's a no-op because it is not
+      // actually going to do anything, we're just using the 'ready' time
+      // from its timeline to establish when the precondition has triggered
+      // and then we'll use that to feed into the reduction in the barrier
+      // to establish the last arrival for the barrier
+      ProfilingInfo info(this, LEGION_PROF_ARRIVAL, implicit_provenance);
+      info.id = bar.id;
+      info.extra.id2 = count;
+      info.creator = implicit_fevent;
+      info.critical = precondition;
+      Realm::ProfilingRequestSet requests;
+      // Give this high priority since it actually needs to arrive on the bar
+      Realm::ProfilingRequest &req = requests.add_request(target_proc,
+          LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_RESOURCE_PRIORITY);
+      req.add_measurement<
+                  Realm::ProfilingMeasurements::OperationTimeline>();
+      // Also give this high priority to run as soon as possible when ready
+      // so we can get its profiling response back as well
+      target_proc.spawn(Processor::TASK_ID_PROCESSOR_NOP, NULL, 0,
+          requests, protected_precondition, LG_RESOURCE_PRIORITY);
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfiler::profile_barrier_trigger(Realm::Barrier bar,
+                                                 UniqueID uid)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      increment_total_outstanding_requests(LEGION_PROF_BARRIER);
+#else
+      increment_total_outstanding_requests();
+#endif
+      ProfilingInfo info(this, LEGION_PROF_BARRIER, uid);
+      info.id = bar.id;
+      Realm::ProfilingRequestSet requests;
+      Realm::ProfilingRequest &req = requests.add_request(target_proc,
+          LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_LOW_PRIORITY);
+      req.add_measurement<Realm::ProfilingMeasurements::OperationStatus>();
+      // Launch a no-op task with low priority just to get a profiling
+      // response back once the barrier has triggered. This will also
+      // ensure we subscribe to the barrier and get its result
+      target_proc.spawn(Processor::TASK_ID_PROCESSOR_NOP, NULL, 0,
+          requests, bar, LG_LOW_PRIORITY);
+    }
+
+    //--------------------------------------------------------------------------
     bool LegionProfiler::handle_profiling_response(
         const Realm::ProfilingResponse &response, const void *orig,
         size_t orig_length, LgEvent &fevent)
@@ -2734,6 +3001,26 @@ namespace Legion {
         case LEGION_PROF_PARTITION:
           {
             implicit_profiler->process_partition(info, response);
+            break;
+          }
+        case LEGION_PROF_ARRIVAL:
+          {
+            Realm::ProfilingMeasurements::OperationTimeline timeline;
+            if (response.get_measurement(timeline))
+              implicit_profiler->process_arrival(info, timeline);
+            break;
+          }
+        case LEGION_PROF_BARRIER:
+          {
+            Realm::ProfilingMeasurements::OperationStatus status;
+            if (response.get_measurement(status) &&
+                (status.result == Realm::ProfilingMeasurements::
+                 OperationStatus::COMPLETED_SUCCESSFULLY))
+            {
+              LgEvent barrier;
+              barrier.id = info->id;
+              implicit_profiler->record_barrier_arrival(barrier, info->op_id);
+            }
             break;
           }
         default:

@@ -127,19 +127,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LgEvent::record_event_merger(const LgEvent *preconditions,
-                                      size_t count) const
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(exists());
-      assert(implicit_profiler != NULL);
-#endif
-      implicit_profiler->record_event_merger(*this, preconditions, count);
-    }
-
-    //--------------------------------------------------------------------------
-    void LgEvent::record_event_trigger(const LgEvent precondition) const
+    void LgEvent::record_event_trigger(LgEvent precondition) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -147,40 +135,6 @@ namespace Legion {
       assert(implicit_profiler != NULL);
 #endif
       implicit_profiler->record_event_trigger(*this, precondition);
-    }
-
-    //--------------------------------------------------------------------------
-    void LgEvent::record_event_poison(void) const
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(exists());
-      assert(implicit_profiler != NULL);
-#endif
-      implicit_profiler->record_event_poison(*this);
-    }
-
-    //--------------------------------------------------------------------------
-    void LgEvent::record_barrier_arrival(const LgEvent precondition) const
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(exists());
-      assert(implicit_profiler != NULL);
-#endif
-      implicit_profiler->record_barrier_arrival(*this, precondition);
-    }
-
-    //--------------------------------------------------------------------------
-    void LgEvent::record_reservation_acquire(Reservation r,
-                                             LgEvent precondition) const
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(exists());
-      assert(implicit_profiler != NULL);
-#endif
-      implicit_profiler->record_reservation_acquire(r, *this, precondition);
     }
 
     /////////////////////////////////////////////////////////////
@@ -3199,7 +3153,7 @@ namespace Legion {
         size_t result_size = 0;
         const void *result = get_buffer(runtime->runtime_system_memory,
             &result_size, false/*check size*/, true/*silence warnings*/);
-        Runtime::phase_barrier_arrive(dc, count, ApEvent::NO_AP_EVENT,
+        runtime->phase_barrier_arrive(dc, count, ApEvent::NO_AP_EVENT,
                                       result, result_size);
       }
     }
@@ -6700,7 +6654,7 @@ namespace Legion {
     LegionHandshakeImpl::LegionHandshakeImpl(bool init_ext, int ext_parts,
                                                    int legion_parts)
       : init_in_ext(init_ext), ext_participants(ext_parts), 
-        legion_participants(legion_parts)
+        legion_participants(legion_parts), runtime(NULL)
     //--------------------------------------------------------------------------
     {
     }
@@ -6733,13 +6687,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LegionHandshakeImpl::initialize(void)
+    void LegionHandshakeImpl::initialize(Runtime *rt)
     //--------------------------------------------------------------------------
     {
-      ext_wait_barrier = PhaseBarrier(ApBarrier(
-            Realm::Barrier::create_barrier(legion_participants)));
-      legion_wait_barrier = PhaseBarrier(ApBarrier(
-            Realm::Barrier::create_barrier(ext_participants)));
+      runtime = rt;
+      ext_wait_barrier = PhaseBarrier(
+          runtime->create_ap_barrier(legion_participants));
+      legion_wait_barrier = PhaseBarrier(
+          runtime->create_ap_barrier(ext_participants));
       ext_arrive_barrier = legion_wait_barrier;
       legion_arrive_barrier = ext_wait_barrier;
       // Advance the two wait barriers
@@ -6748,12 +6703,13 @@ namespace Legion {
       // Whoever is waiting first, we have to advance their arrive barriers
       if (init_in_ext)
       {
-        Runtime::phase_barrier_arrive(legion_arrive_barrier, legion_participants);
+        runtime->phase_barrier_arrive(legion_arrive_barrier,
+                                      legion_participants);
         Runtime::advance_barrier(ext_wait_barrier);
       }
       else
       {
-        Runtime::phase_barrier_arrive(ext_arrive_barrier, ext_participants);
+        runtime->phase_barrier_arrive(ext_arrive_barrier, ext_participants);
         Runtime::advance_barrier(legion_wait_barrier);
       }
     }
@@ -6763,7 +6719,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Just have to do our arrival
-      Runtime::phase_barrier_arrive(ext_arrive_barrier, 1);
+      runtime->phase_barrier_arrive(ext_arrive_barrier, 1);
     }
 
     //--------------------------------------------------------------------------
@@ -6795,7 +6751,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Just have to do our arrival
-      Runtime::phase_barrier_arrive(legion_arrive_barrier, 1);
+      runtime->phase_barrier_arrive(legion_arrive_barrier, 1);
     }
 
     //--------------------------------------------------------------------------
@@ -17623,7 +17579,8 @@ namespace Legion {
                                     config.prof_call_threshold,
                                     config.slow_config_ok,
                                     config.prof_self_profile,
-                                    config.prof_no_critical_paths);
+                                    config.prof_no_critical_paths,
+                                    config.prof_all_critical_arrivals);
       MAPPER_CALL_NAMES(lg_mapper_calls);
       profiler->record_mapper_call_kinds(lg_mapper_calls, LAST_MAPPER_CALL);
       RUNTIME_CALL_DESCRIPTIONS(lg_runtime_calls);
@@ -30678,6 +30635,8 @@ namespace Legion {
         .add_option_bool("-lg:prof_self", config.prof_self_profile, !filter)
         .add_option_bool("-lg:prof_no_critical_paths",
                         config.prof_no_critical_paths, !filter)
+        .add_option_bool("-lg:prof_all_critical_arrivals",
+                        config.prof_all_critical_arrivals, !filter)
         .add_option_bool("-lg:debug_ok",config.slow_config_ok, !filter)
         // These are all the deprecated versions of these flag
         .add_option_bool("-hl:separate",
@@ -31339,7 +31298,7 @@ namespace Legion {
       {
         for (std::vector<LegionHandshake>::const_iterator it = 
               pending_handshakes.begin(); it != pending_handshakes.end(); it++)
-          it->impl->initialize();
+          it->impl->initialize(the_runtime);
       }
     }
 
@@ -31594,16 +31553,17 @@ namespace Legion {
 #endif
       }
       // Lastly do any other registrations we might have
-#ifdef DEBUG_LEGION_COLLECTIVES
       ReductionOpTable& red_table = get_reduction_table(true/*safe*/);
+      red_table[BarrierArrivalReduction::REDOP] =
+        Realm::ReductionOpUntyped::create_reduction_op<
+                            BarrierArrivalReduction>();
+#ifdef DEBUG_LEGION_COLLECTIVES
       red_table[CollectiveCheckReduction::REDOP] =
         Realm::ReductionOpUntyped::create_reduction_op<
                                 CollectiveCheckReduction>();
       red_table[CloseCheckReduction::REDOP]=
         Realm::ReductionOpUntyped::create_reduction_op<
                                 CloseCheckReduction>();
-#else
-      const ReductionOpTable& red_table = get_reduction_table(true/*safe*/);
 #endif
       for(ReductionOpTable::const_iterator it = red_table.begin();
           it != red_table.end();
@@ -31727,7 +31687,7 @@ namespace Legion {
       if (runtime_started)
       {
         // If it's started, we can just do the initialization now
-        handshake.impl->initialize();
+        handshake.impl->initialize(the_runtime);
       }
       else
       {
@@ -33061,6 +33021,7 @@ namespace Legion {
       implicit_profiler = NULL;
       implicit_fevent = LgEvent::NO_LG_EVENT;
       // Create the startup barrier and send it out
+      // Note we don't profile this for critical paths
       RtBarrier startup_barrier(
         Realm::Barrier::create_barrier(runtime->total_address_spaces));
       runtime->broadcast_startup_barrier(startup_barrier);

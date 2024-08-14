@@ -4810,7 +4810,7 @@ namespace Legion {
           if (runtime->legion_spy_enabled)
             LegionSpy::log_phase_barrier_arrival(unique_op_id, 
                                                  it->phase_barrier);
-          Runtime::phase_barrier_arrive(it->phase_barrier, 1/*count*/,
+          runtime->phase_barrier_arrive(it->phase_barrier, 1/*count*/,
                                         termination_event);    
         }
       }
@@ -7278,7 +7278,7 @@ namespace Legion {
           if (runtime->legion_spy_enabled)
             LegionSpy::log_phase_barrier_arrival(unique_op_id, 
                                                  it->phase_barrier);
-          Runtime::phase_barrier_arrive(it->phase_barrier, 1/*count*/,
+          runtime->phase_barrier_arrive(it->phase_barrier, 1/*count*/,
                                         complete);
         }
       }
@@ -12146,7 +12146,7 @@ namespace Legion {
           if (runtime->legion_spy_enabled)
             LegionSpy::log_phase_barrier_arrival(unique_op_id, 
                                                  it->phase_barrier);
-          Runtime::phase_barrier_arrive(it->phase_barrier, 1/*count*/,
+          runtime->phase_barrier_arrive(it->phase_barrier, 1/*count*/,
                                         complete);
         }
       }
@@ -12262,7 +12262,7 @@ namespace Legion {
           if (runtime->legion_spy_enabled)
             LegionSpy::log_phase_barrier_arrival(unique_op_id,
                                                  it->phase_barrier);
-          Runtime::phase_barrier_arrive(it->phase_barrier, 1/*count*/,
+          runtime->phase_barrier_arrive(it->phase_barrier, 1/*count*/,
                                         acquire_complete_event);
         }
       }
@@ -12936,7 +12936,7 @@ namespace Legion {
           if (runtime->legion_spy_enabled)
             LegionSpy::log_phase_barrier_arrival(unique_op_id, 
                                                  it->phase_barrier);
-          Runtime::phase_barrier_arrive(it->phase_barrier, 1/*count*/,
+          runtime->phase_barrier_arrive(it->phase_barrier, 1/*count*/,
                                         complete);
         }
       }
@@ -13076,7 +13076,7 @@ namespace Legion {
           if (runtime->legion_spy_enabled)
             LegionSpy::log_phase_barrier_arrival(unique_op_id,
                                                  it->phase_barrier);
-          Runtime::phase_barrier_arrive(it->phase_barrier, 1/*count*/,
+          runtime->phase_barrier_arrive(it->phase_barrier, 1/*count*/,
                                         release_complete_event);
         }
       }
@@ -18225,7 +18225,7 @@ namespace Legion {
           if (runtime->legion_spy_enabled)
             LegionSpy::log_phase_barrier_arrival(unique_op_id, 
                                                  it->phase_barrier);
-          Runtime::phase_barrier_arrive(it->phase_barrier, 1/*count*/,
+          runtime->phase_barrier_arrive(it->phase_barrier, 1/*count*/,
                                         complete);
         }
       }

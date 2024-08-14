@@ -890,7 +890,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      return PhaseBarrier(ApBarrier(Realm::Barrier::create_barrier(arrivals)));
+      return PhaseBarrier(runtime->create_ap_barrier(arrivals));
     }
 
     //--------------------------------------------------------------------------
@@ -10332,6 +10332,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      if ((runtime->profiler != NULL) && !runtime->profiler->no_critical_paths
+          && !runtime->profiler->all_critical_arrivals)
+        REPORT_LEGION_FATAL(LEGION_FATAL_NO_CRITICAL_PATH_DYNAMIC_COLLECTIVES,
+            "Task %s (UID %lld) requested the creation of a dynamic "
+            "collective while profiling for critical paths without recording "
+            "all critical barrier arrivals. Critical path analysis with "
+            "dynamic collectives requires that you use the "
+            "'-lg:prof_all_critical_arrivals' flag.",
+            get_task_name(), get_unique_id())
       return DynamicCollective(
           ApBarrier(Realm::Barrier::create_barrier(arrivals, redop, 
                                     init_value, init_size)), redop);
@@ -10352,7 +10361,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      Runtime::phase_barrier_arrive(dc,count,ApEvent::NO_AP_EVENT,buffer,size);
+      runtime->phase_barrier_arrive(dc,count,ApEvent::NO_AP_EVENT,buffer,size);
     }
 
     //--------------------------------------------------------------------------
@@ -13069,7 +13078,7 @@ namespace Legion {
       // Before we do anything else here, we need to make sure that all
       // the shards are done reading before we attempt to mutate the value
       const RtBarrier bar = semantic_attach_barrier.next(this);
-      Runtime::phase_barrier_arrive(bar, 1/*count*/);
+      runtime->phase_barrier_arrive(bar, 1/*count*/);
       // Check to see if we can downgrade this to a local_only update
       if (global && shard_manager->is_total_sharding())
         global = false;
@@ -13101,7 +13110,7 @@ namespace Legion {
       if (inside_registration_callback)
         return;
       const RtBarrier bar = semantic_attach_barrier.next(this);
-      Runtime::phase_barrier_arrive(bar, 1/*count*/);
+      runtime->phase_barrier_arrive(bar, 1/*count*/);
       if (!bar.has_triggered())
         bar.wait();
     }
@@ -13753,7 +13762,7 @@ namespace Legion {
         runtime->forest->create_index_space(handle, domain, value.did, 
             provenance, &collective_mapping, value.expr_id,
             ApEvent::NO_AP_EVENT, creation_bar);
-        Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
+        runtime->phase_barrier_arrive(creation_bar, 1/*count*/);
         runtime->forest->revoke_pending_index_space(value.space_id);
 #ifdef DEBUG_LEGION
         log_index.debug("Creating index space %x in task%s (ID %lld)",
@@ -13781,7 +13790,7 @@ namespace Legion {
             provenance, &collective_mapping, value.expr_id,
             ApEvent::NO_AP_EVENT, creation_bar);
         // Arrive on the creation barrier
-        Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
+        runtime->phase_barrier_arrive(creation_bar, 1/*count*/);
       }
       // Record this in our context
       register_index_space_creation(handle);
@@ -13900,7 +13909,7 @@ namespace Legion {
                                 provenance, &collective_mapping, value.expr_id,
                                 ready, creation_bar);
         // Arrive on the creation barrier
-        Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
+        runtime->phase_barrier_arrive(creation_bar, 1/*count*/);
         runtime->forest->revoke_pending_index_space(value.space_id);
 #ifdef DEBUG_LEGION
         log_index.debug("Creating index space %x in task%s (ID %lld)",
@@ -13928,7 +13937,7 @@ namespace Legion {
                                 provenance, &collective_mapping, value.expr_id,
                                 ready, creation_bar);
         // Arrive on the creation barrier
-        Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
+        runtime->phase_barrier_arrive(creation_bar, 1/*count*/);
       }
       creator_op->initialize_index_space(this, node, future, provenance,
           shard_manager->is_first_local_shard(owner_shard), 
@@ -14085,7 +14094,7 @@ namespace Legion {
         runtime->forest->create_union_space(handle, value.did, provenance,
             spaces,creation_bar, &collective_mapping, value.expr_id);
         // Arrive on the creation barrier
-        Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
+        runtime->phase_barrier_arrive(creation_bar, 1/*count*/);
         runtime->forest->revoke_pending_index_space(value.space_id);
 #ifdef DEBUG_LEGION
         log_index.debug("Creating index space %x in task%s (ID %lld)",
@@ -14112,7 +14121,7 @@ namespace Legion {
         runtime->forest->create_union_space(handle, value.did, provenance,
             spaces,creation_bar, &collective_mapping, value.expr_id);
         // Arrive on the creation barrier
-        Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
+        runtime->phase_barrier_arrive(creation_bar, 1/*count*/);
       }
       // Record this in our context
       register_index_space_creation(handle);
@@ -14186,7 +14195,7 @@ namespace Legion {
         runtime->forest->create_intersection_space(handle, value.did,provenance,
             spaces,creation_bar, &collective_mapping, value.expr_id);
         // Arrive on the creation barrier
-        Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
+        runtime->phase_barrier_arrive(creation_bar, 1/*count*/);
         runtime->forest->revoke_pending_index_space(value.space_id);
 #ifdef DEBUG_LEGION
         log_index.debug("Creating index space %x in task%s (ID %lld)",
@@ -14213,7 +14222,7 @@ namespace Legion {
         runtime->forest->create_intersection_space(handle, value.did,provenance,
             spaces,creation_bar, &collective_mapping, value.expr_id);
         // Arrive on the creation barrier
-        Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
+        runtime->phase_barrier_arrive(creation_bar, 1/*count*/);
       }
       // Record this in our context
       register_index_space_creation(handle);
@@ -14277,7 +14286,7 @@ namespace Legion {
         runtime->forest->create_difference_space(handle, value.did, provenance,
             left, right, creation_bar, &collective_mapping, value.expr_id);
         // Arrive on the creation barrier
-        Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
+        runtime->phase_barrier_arrive(creation_bar, 1/*count*/);
         runtime->forest->revoke_pending_index_space(value.space_id);
 #ifdef DEBUG_LEGION
         log_index.debug("Creating index space %x in task%s (ID %lld)",
@@ -14304,7 +14313,7 @@ namespace Legion {
         runtime->forest->create_difference_space(handle, value.did, provenance,
             left, right, creation_bar, &collective_mapping, value.expr_id);
         // Arrive on the creation barrier
-        Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
+        runtime->phase_barrier_arrive(creation_bar, 1/*count*/);
       }
       // Record this in our context
       register_index_space_creation(handle);
@@ -14661,7 +14670,7 @@ namespace Legion {
           color_collective.broadcast(partition_color);
         }
         // Signal that we're done our creation
-        Runtime::phase_barrier_arrive(creation_bar, 1/*count*/, safe_event);
+        runtime->phase_barrier_arrive(creation_bar, 1/*count*/, safe_event);
         runtime->forest->revoke_pending_partition(value.pid);
       }
       else
@@ -14695,7 +14704,7 @@ namespace Legion {
                                          value.did, provenance,
                                          &collective_mapping, creation_bar);
         // Signal that we're done our creation
-        Runtime::phase_barrier_arrive(creation_bar, 1/*count*/, safe_event);
+        runtime->phase_barrier_arrive(creation_bar, 1/*count*/, safe_event);
       }
       if (++pending_index_partition_check == pending_index_partitions.size()) 
         pending_index_partition_check = 0;
@@ -15230,7 +15239,7 @@ namespace Legion {
       if (!safe_events.empty())
         safe_event = Runtime::merge_events(safe_events);
       const RtBarrier creation_bar = creation_barrier.next(this);
-      Runtime::phase_barrier_arrive(creation_bar, 1/*count*/, safe_event);
+      runtime->phase_barrier_arrive(creation_bar, 1/*count*/, safe_event);
       ReplPendingPartitionOp *part_op = 
         runtime->get_available_repl_pending_partition_op();
       part_op->initialize_cross_product(this, handle1, handle2, partition_color,
@@ -16334,7 +16343,7 @@ namespace Legion {
         runtime->forest->create_field_space(space, value.did, provenance,
                                       &collective_mapping, creation_bar);
         // Arrive on the creation barrier
-        Runtime::phase_barrier_arrive(creation_bar, 1/*count*/); 
+        runtime->phase_barrier_arrive(creation_bar, 1/*count*/); 
         runtime->forest->revoke_pending_field_space(value.space_id);
 #ifdef DEBUG_LEGION
         log_field.debug("Creating field space %x in task %s (ID %lld)", 
@@ -16361,7 +16370,7 @@ namespace Legion {
         runtime->forest->create_field_space(space, value.did, provenance,
                                       &collective_mapping, creation_bar);
         // Arrive on the creation barrier
-        Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
+        runtime->phase_barrier_arrive(creation_bar, 1/*count*/);
       }
       if (++pending_field_space_check == pending_field_spaces.size())
         pending_field_space_check = 0;
@@ -16470,14 +16479,14 @@ namespace Legion {
         FieldSpaceNode *node = runtime->forest->get_node(space);
         node->initialize_fields(sizes, resulting_fields, serdez_id, 
                                 provenance, true/*collective*/);
-        Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
+        runtime->phase_barrier_arrive(creation_bar, 1/*count*/);
         if (runtime->legion_spy_enabled && !non_owner)
           for (unsigned idx = 0; idx < resulting_fields.size(); idx++)
             LegionSpy::log_field_creation(space.id, resulting_fields[idx],
              sizes[idx], (provenance == NULL) ? NULL : provenance->human_str());
       }
       else
-        Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
+        runtime->phase_barrier_arrive(creation_bar, 1/*count*/);
       register_all_field_creations(space, false/*loca*/, resulting_fields);
       // Make sure all the field allocations are done on all shards
       creation_bar.wait();
@@ -16584,13 +16593,13 @@ namespace Legion {
         const bool owner = (creator_shard == owner_shard->shard_id);
         node->initialize_fields(ready, resulting_fields, serdez_id,
                                 provenance, true/*collective*/);
-        Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
+        runtime->phase_barrier_arrive(creation_bar, 1/*count*/);
         creator_op->initialize_fields(this, node, resulting_fields, 
                                       sizes, provenance, owner);
       }
       else
       {
-        Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
+        runtime->phase_barrier_arrive(creation_bar, 1/*count*/);
         creator_op->initialize_fields(this, node, resulting_fields, 
                                       sizes, provenance, false/*owner*/);
       }
@@ -16844,7 +16853,7 @@ namespace Legion {
               (provenance == NULL) ? NULL : provenance->human_str());
       }
       const RtBarrier creation_bar = creation_barrier.next(this);
-      Runtime::phase_barrier_arrive(creation_bar, 1/*count*/, precondition);
+      runtime->phase_barrier_arrive(creation_bar, 1/*count*/, precondition);
       register_field_creation(space, fid, local);
       // Make sure the field IDs are valid everywhere
       creation_bar.wait();
@@ -16977,12 +16986,12 @@ namespace Legion {
         RtEvent precondition;
         FieldSpaceNode *node = runtime->forest->allocate_field(space, ready,
             fid, serdez_id, provenance, precondition, !owner);
-        Runtime::phase_barrier_arrive(creation_bar, 1/*count*/, precondition);
+        runtime->phase_barrier_arrive(creation_bar, 1/*count*/, precondition);
         creator_op->initialize_field(this, node, fid, field_size, 
                                      provenance, owner);
       }
       else
-        Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
+        runtime->phase_barrier_arrive(creation_bar, 1/*count*/);
       register_field_creation(space, fid, local);
       // Make sure the IDs are valid everywhere
       creation_bar.wait();
@@ -17154,7 +17163,7 @@ namespace Legion {
              sizes[idx], (provenance == NULL) ? NULL : provenance->human_str());
       }
       const RtBarrier creation_bar = creation_barrier.next(this);
-      Runtime::phase_barrier_arrive(creation_bar, 1/*count*/, precondition);
+      runtime->phase_barrier_arrive(creation_bar, 1/*count*/, precondition);
       register_all_field_creations(space, local, resulting_fields);
       // Make sure all the field IDs are valid everywhere
       creation_bar.wait();
@@ -17263,12 +17272,12 @@ namespace Legion {
         RtEvent precondition;
         FieldSpaceNode *node = runtime->forest->allocate_fields(space, ready,
                 resulting_fields, serdez_id, provenance, precondition, !owner);
-        Runtime::phase_barrier_arrive(creation_bar, 1/*count*/, precondition);
+        runtime->phase_barrier_arrive(creation_bar, 1/*count*/, precondition);
         creator_op->initialize_fields(this, node, resulting_fields, 
                                       sizes, provenance, owner);
       }
       else
-        Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
+        runtime->phase_barrier_arrive(creation_bar, 1/*count*/);
       register_all_field_creations(space, local, resulting_fields);
       // Make sure the field IDs are valid everywhere
       creation_bar.wait();
@@ -17397,7 +17406,7 @@ namespace Legion {
         runtime->forest->create_logical_region(handle, value.did, provenance,
             &collective_mapping, creation_bar);
         // Arrive on the creation barrier
-        Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
+        runtime->phase_barrier_arrive(creation_bar, 1/*count*/);
         runtime->forest->revoke_pending_region_tree(value.tid);
 #ifdef DEBUG_LEGION
         log_region.debug("Creating logical region in task %s (ID %lld) with "
@@ -17427,7 +17436,7 @@ namespace Legion {
         runtime->forest->create_logical_region(handle, value.did, provenance,
             &collective_mapping, creation_bar);
         // Signal that we are done our creation
-        Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
+        runtime->phase_barrier_arrive(creation_bar, 1/*count*/);
       }
       // Register the creation of a top-level region with the context
       const unsigned created_index =
@@ -19742,7 +19751,7 @@ namespace Legion {
           break;
       }
       const RtBarrier wait_bar = get_next_future_wait_barrier();
-      Runtime::phase_barrier_arrive(wait_bar, 1/*count*/, ready);
+      runtime->phase_barrier_arrive(wait_bar, 1/*count*/, ready);
       wait_bar.wait();
     }
 
@@ -19759,7 +19768,7 @@ namespace Legion {
           break;
       }
       const RtBarrier wait_bar = get_next_future_wait_barrier();
-      Runtime::phase_barrier_arrive(wait_bar, 1/*count*/, ready);
+      runtime->phase_barrier_arrive(wait_bar, 1/*count*/, ready);
       wait_bar.wait();
     }
 
@@ -19944,7 +19953,7 @@ namespace Legion {
         InnerContext::add_to_dependence_queue(op, dependences,
                                               unordered, false/*outermost*/);
         const RtBarrier inorder_bar = inorder_barrier.next(this);
-        Runtime::phase_barrier_arrive(inorder_bar, 1/*count*/, commit_event); 
+        runtime->phase_barrier_arrive(inorder_bar, 1/*count*/, commit_event); 
         inorder_bar.wait();
         // Issue any unordered operations now
         AutoLock d_lock(dependence_lock);
@@ -20356,7 +20365,7 @@ namespace Legion {
       const RtBarrier close_check_bar = close_check_barrier.next(this,
           CloseCheckReduction::REDOP, &CloseCheckReduction::IDENTITY,
           sizeof(CloseCheckReduction::IDENTITY));
-      Runtime::phase_barrier_arrive(close_check_bar, 1/*count*/,
+      runtime->phase_barrier_arrive(close_check_bar, 1/*count*/,
                               RtEvent::NO_RT_EVENT, &barrier, sizeof(barrier));
       close_check_bar.wait();
       CloseCheckReduction::RHS actual_barrier;
@@ -20387,7 +20396,7 @@ namespace Legion {
       const RtBarrier refinement_check_bar = refinement_check_barrier.next(this,
           CloseCheckReduction::REDOP, &CloseCheckReduction::IDENTITY, 
           sizeof(CloseCheckReduction::IDENTITY));
-      Runtime::phase_barrier_arrive(refinement_check_bar, 1/*count*/,
+      runtime->phase_barrier_arrive(refinement_check_bar, 1/*count*/,
                               RtEvent::NO_RT_EVENT, &barrier, sizeof(barrier));
       refinement_check_bar.wait();
       CloseCheckReduction::RHS actual_barrier;
@@ -20833,14 +20842,14 @@ namespace Legion {
           !deleted_partitions.empty())
       {
         if (!returned_resource_ready_barrier.exists())
-          returned_resource_ready_barrier = RtBarrier(
-              Realm::Barrier::create_barrier(shard_manager->total_shards));
+          returned_resource_ready_barrier =
+            runtime->create_rt_barrier(total_shards);
         if (!returned_resource_mapped_barrier.exists())
-          returned_resource_mapped_barrier = RtBarrier(
-              Realm::Barrier::create_barrier(shard_manager->total_shards));
+          returned_resource_mapped_barrier =
+            runtime->create_rt_barrier(total_shards);
         if (!returned_resource_execution_barrier.exists())
-          returned_resource_execution_barrier = RtBarrier(
-              Realm::Barrier::create_barrier(shard_manager->total_shards));
+          returned_resource_execution_barrier =
+            runtime->create_rt_barrier(total_shards);
       }
       rez.serialize(return_index);
       rez.serialize(returned_resource_ready_barrier);
@@ -21443,7 +21452,7 @@ namespace Legion {
               &CollectiveCheckReduction::IDENTITY,
               sizeof(CollectiveCheckReduction::IDENTITY));
           logical_guard_reentrant = false;
-          Runtime::phase_barrier_arrive(logical_check_bar, 1/*count*/,
+          runtime->phase_barrier_arrive(logical_check_bar, 1/*count*/,
                              RtEvent::NO_RT_EVENT, &location, sizeof(location));
           logical_check_bar.wait();
           CollectiveCheckReduction::RHS actual_location;
@@ -21470,7 +21479,7 @@ namespace Legion {
               &CollectiveCheckReduction::IDENTITY,
               sizeof(CollectiveCheckReduction::IDENTITY));
           collective_guard_reentrant = false;
-          Runtime::phase_barrier_arrive(collective_check_bar, 1/*count*/,
+          runtime->phase_barrier_arrive(collective_check_bar, 1/*count*/,
                              RtEvent::NO_RT_EVENT, &location, sizeof(location));
           collective_check_bar.wait();
           CollectiveCheckReduction::RHS actual_location;
@@ -22137,7 +22146,7 @@ namespace Legion {
         bar = RtBarrier(Realm::Barrier::create_barrier(arrivals, redop,
                                                        init, init_size));
 #else
-        bar = RtBarrier(Realm::Barrier::create_barrier(arrivals));
+        bar = runtime->create_rt_barrier(arrivals);
 #endif
         collective.broadcast(bar);
         created = true;
@@ -22171,7 +22180,7 @@ namespace Legion {
         bar = ApBarrier(Realm::Barrier::create_barrier(arrivals, redop,
                                                        init, init_size));
 #else
-        bar = ApBarrier(Realm::Barrier::create_barrier(arrivals));
+        bar = runtime->create_ap_barrier(arrivals);
 #endif
         collective.broadcast(bar);
         created = true;
@@ -22206,7 +22215,7 @@ namespace Legion {
         bar = RtBarrier(Realm::Barrier::create_barrier(arrivals, redop,
                                                        init, init_size));
 #else
-        bar = RtBarrier(Realm::Barrier::create_barrier(arrivals));
+        bar = runtime->create_rt_barrier(arrivals);
 #endif
         collective.broadcast(bar);
         created = true;
@@ -22241,7 +22250,7 @@ namespace Legion {
         bar = ApBarrier(Realm::Barrier::create_barrier(arrivals, redop,
                                                        init, init_size));
 #else
-        bar = ApBarrier(Realm::Barrier::create_barrier(arrivals));
+        bar = runtime->create_ap_barrier(arrivals);
 #endif
         collective.broadcast(bar);
         created = true;
