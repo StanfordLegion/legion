@@ -38,6 +38,10 @@
 
 namespace Realm {
 
+  namespace Config {
+    std::string logname = "stdout";
+  };
+
   class LoggerFileStream : public LoggerOutputStream {
   public:
     LoggerFileStream(FILE *_f, bool _close_file, bool _include_timestamp)
@@ -302,15 +306,13 @@ namespace Realm {
 
   void LoggerConfig::read_command_line(std::vector<std::string>& cmdline)
   {
-    std::string logname;
-
     bool ok = CommandLineParser()
-      .add_option_string("-cat", cats_enabled)
-      .add_option_string("-logfile", logname)
-      .add_option_method("-level", this, &LoggerConfig::parse_level_argument)
-      .add_option_int("-errlevel", stderr_level)
-      .add_option_int("-logtime", include_timestamp)
-      .parse_command_line(cmdline);
+                  .add_option_string("-cat", cats_enabled)
+                  .add_option_string("-logfile", Config::logname)
+                  .add_option_method("-level", this, &LoggerConfig::parse_level_argument)
+                  .add_option_int("-errlevel", stderr_level)
+                  .add_option_int("-logtime", include_timestamp)
+                  .parse_command_line(cmdline);
 
     if(!ok) {
       fprintf(stderr, "couldn't parse logger config options\n");
@@ -322,16 +324,9 @@ namespace Realm {
       return;
 
     // lots of choices for log output
-    if(logname.empty()) {
-      // the gasnet UDP job spawner (amudprun) seems to buffer stdout, so make stderr the default
-#ifdef GASNET_CONDUIT_UDP
-      stream = new LoggerFileStream(stderr, false, include_timestamp);
-#else
+    if(Config::logname == "stdout") {
       stream = new LoggerFileStream(stdout, false, include_timestamp);
-#endif
-    } else if(logname == "stdout") {
-      stream = new LoggerFileStream(stdout, false, include_timestamp);
-    } else if(logname == "stderr") {
+    } else if(Config::logname == "stderr") {
       stream = new LoggerFileStream(stderr, false, include_timestamp);
     } else {
       // we're going to open a file, but key off a + for appending and
@@ -339,13 +334,13 @@ namespace Realm {
       bool append = false;
       size_t start = 0;
 
-      if(logname[0] == '+') {
+      if(Config::logname[0] == '+') {
         append = true;
         start++;
       }
 
       FILE *f = 0;
-      size_t pct = logname.find_first_of('%', start);
+      size_t pct = Config::logname.find_first_of('%', start);
       if(pct == std::string::npos) {
         // no node number - everybody uses the same file
         if(Network::max_node_id > 0) {
@@ -355,7 +350,7 @@ namespace Realm {
             append = true;
           }
         }
-        const char *fn = logname.c_str() + start;
+        const char *fn = Config::logname.c_str() + start;
         f = fopen(fn, append ? "a" : "w");
         if(!f) {
           fprintf(stderr, "could not open log file '%s': %s\n", fn, strerror(errno));
@@ -364,8 +359,9 @@ namespace Realm {
       } else {
         // replace % with node number
         char filename[256];
-        snprintf(filename, sizeof filename, "%.*s%d%s",
-                (int)(pct - start), logname.c_str() + start, Network::my_node_id, logname.c_str() + pct + 1);
+        snprintf(filename, sizeof filename, "%.*s%d%s", (int)(pct - start),
+                 Config::logname.c_str() + start, Network::my_node_id,
+                 Config::logname.c_str() + pct + 1);
 
         f = fopen(filename, append ? "a" : "w");
         if(!f) {
