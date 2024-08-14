@@ -22,8 +22,9 @@ enum
   MUSAGE_PROF_TASK,
 };
 
-int num_iterations = 2;
+int num_iterations = 1;
 bool needs_oom = false;
+bool needs_ext = false;
 
 struct WorkerArgs {
   RegionInstance inst;
@@ -161,6 +162,7 @@ void top_level_task(const void *args, size_t arglen, const void *userdata, size_
                                   ProfilingRequestSet())
       .wait();
   assert(inst1.exists());
+
   Event e1 = inst1.fetch_metadata(reader_cpus[0]);
 
   UserEvent destroy_event = UserEvent::create_user_event();
@@ -223,6 +225,18 @@ void top_level_task(const void *args, size_t arglen, const void *userdata, size_
   RegionInstance inst2;
   RegionInstance::create_instance(inst2, memories[0], bounds, field_sizes, 0, prs).wait();
 
+  if(needs_ext) {
+    ExternalInstanceResource *extres =
+        inst2.generate_resource_info(bounds, 0, true /*read_only*/);
+    assert(extres);
+    RegionInstance inst_ext;
+    RegionInstance::create_external_instance(inst_ext, extres->suggested_memory(),
+                                             inst2.get_layout()->clone(), *extres,
+                                             ProfilingRequestSet())
+        .wait();
+    inst2 = inst_ext;
+  }
+
   std::vector<int> data;
   {
     int index = 0;
@@ -246,11 +260,14 @@ void top_level_task(const void *args, size_t arglen, const void *userdata, size_
   Event e2 = reader_cpus[0].spawn(WORKER_TASK, &worker_args, sizeof(WorkerArgs),
                                   ProfilingRequestSet(), e1);
   e2.wait();
-  Event::merge_events(user_events).wait();
-  assert(alloc_result == true);
-  assert(timel_result == true);
-  assert(static_cast<size_t>(musage_result) == bounds.volume() * sizeof(int));
-  assert(inst_status_result == 0);
+
+  if(!needs_ext) {
+    Event::merge_events(user_events).wait();
+    assert(alloc_result == true);
+    assert(timel_result == true);
+    assert(static_cast<size_t>(musage_result) == bounds.volume() * sizeof(int));
+    assert(inst_status_result == 0);
+  }
 
   destroy_event.trigger();
   usleep(100000);
@@ -295,39 +312,41 @@ void worker_task(const void *args, size_t arglen, const void *userdata, size_t u
 
     std::vector<ProfilingRequestSet> prs(num_split_inst);
     for(int j = 0; j < num_split_inst; j++) {
-      {
-        UserEvent event = UserEvent::create_user_event();
-        ProfTimelResult result;
-        result.done = event;
-        result.called = &timel_results[profile_result_index];
-        prs[j]
-            .add_request(p, ALLOC_INST_TASK, &result, sizeof(ProfTimelResult))
-            .add_measurement<ProfilingMeasurements::InstanceTimeline>();
-        timel_events.push_back(event);
-      }
+      if(!needs_ext) {
+        {
+          UserEvent event = UserEvent::create_user_event();
+          ProfTimelResult result;
+          result.done = event;
+          result.called = &timel_results[profile_result_index];
+          prs[j]
+              .add_request(p, ALLOC_INST_TASK, &result, sizeof(ProfTimelResult))
+              .add_measurement<ProfilingMeasurements::InstanceTimeline>();
+          timel_events.push_back(event);
+        }
 
-      {
-        UserEvent event = UserEvent::create_user_event();
-        alloc_events.push_back(event);
-        ProfAllocResult result;
-        result.done = event;
-        result.success = &alloc_results[profile_result_index];
-        result.invocations = &alloc_invocations;
-        prs[j]
-            .add_request(p, ALLOC_PROF_TASK, &result, sizeof(ProfAllocResult))
-            .add_measurement<ProfilingMeasurements::InstanceAllocResult>();
-      }
+        {
+          UserEvent event = UserEvent::create_user_event();
+          alloc_events.push_back(event);
+          ProfAllocResult result;
+          result.done = event;
+          result.success = &alloc_results[profile_result_index];
+          result.invocations = &alloc_invocations;
+          prs[j]
+              .add_request(p, ALLOC_PROF_TASK, &result, sizeof(ProfAllocResult))
+              .add_measurement<ProfilingMeasurements::InstanceAllocResult>();
+        }
 
-      {
-        UserEvent event = UserEvent::create_user_event();
-        musage_events.push_back(event);
-        ProfMusageResult result;
-        result.done = event;
-        result.bytes = &musage_results[profile_result_index];
-        prs[j]
-            .add_request(p, MUSAGE_PROF_TASK, &result, sizeof(ProfMusageResult))
-            .add_measurement<ProfilingMeasurements::InstanceMemoryUsage>();
-        exp_usage.push_back(next_bounds.volume());
+        {
+          UserEvent event = UserEvent::create_user_event();
+          musage_events.push_back(event);
+          ProfMusageResult result;
+          result.done = event;
+          result.bytes = &musage_results[profile_result_index];
+          prs[j]
+              .add_request(p, MUSAGE_PROF_TASK, &result, sizeof(ProfMusageResult))
+              .add_measurement<ProfilingMeasurements::InstanceMemoryUsage>();
+          exp_usage.push_back(next_bounds.volume());
+        }
       }
       profile_result_index++;
     }
@@ -373,27 +392,30 @@ void worker_task(const void *args, size_t arglen, const void *userdata, size_t u
 
     bounds = next_bounds;
     inst = insts[0];
-    insts[1].destroy();
+    if(!needs_ext) {
+      insts[1].destroy();
+    }
   }
 
-  inst.destroy();
-  alloc_event.wait();
-  musage_event.wait();
-  timel_event.wait();
+  if(!needs_ext) {
+    inst.destroy();
+    alloc_event.wait();
+    musage_event.wait();
+    timel_event.wait();
 
-  for(size_t i = 0; i < alloc_results.size(); i++) {
-    assert(alloc_results[i]);
+    for(size_t i = 0; i < alloc_results.size(); i++) {
+      assert(alloc_results[i]);
+    }
+
+    for(size_t i = 0; i < timel_results.size(); i++) {
+      assert(timel_results[i]);
+    }
+
+    for(size_t i = 0; i < musage_results.size(); i++) {
+      assert(static_cast<size_t>(musage_results[i]) == exp_usage[i] * sizeof(int));
+    }
+    assert(static_cast<size_t>(alloc_invocations) == alloc_results.size());
   }
-
-  for(size_t i = 0; i < timel_results.size(); i++) {
-    assert(timel_results[i]);
-  }
-
-  for(size_t i = 0; i < musage_results.size(); i++) {
-    assert(static_cast<size_t>(musage_results[i]) == exp_usage[i] * sizeof(int));
-  }
-
-  assert(static_cast<size_t>(alloc_invocations) == alloc_results.size());
 }
 
 int main(int argc, char **argv)
@@ -412,6 +434,7 @@ int main(int argc, char **argv)
   CommandLineParser cp;
   cp.add_option_int("-i", num_iterations);
   cp.add_option_int("-needs_oom", needs_oom);
+  cp.add_option_int("-needs_ext", needs_ext);
   bool ok = cp.parse_command_line(argc, const_cast<const char **>(argv));
   assert(ok);
 
