@@ -1523,7 +1523,7 @@ namespace Legion {
                             const LegionProfInstance::CompletionQueueInfo &info)
     //--------------------------------------------------------------------------
     {
-      int ID = EVENT_MERGER_INFO_ID;
+      int ID = COMPLETION_QUEUE_INFO_ID;
       for (unsigned offset = 0; offset < info.preconditions.size(); offset += 4)
       {
         lp_fwrite(f, (char*)&ID, sizeof(ID));
