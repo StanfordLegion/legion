@@ -671,17 +671,38 @@ namespace Legion {
         return;
       Realm::Barrier barrier;
       barrier.id = bar.id;
-      ArrivalInfo arrival_info;
       // See if the barrier has already triggered
-      if (barrier.get_result(&arrival_info, sizeof(arrival_info)))
+      bool poisoned = false;
+      if (barrier.has_triggered_faultaware(poisoned) || poisoned)
       {
-        BarrierArrivalInfo &info = barrier_arrival_infos.emplace_back(
-            BarrierArrivalInfo());
-        info.result = bar;
-        info.fevent = arrival_info.fevent;
-        info.precondition = arrival_info.arrival_precondition;
-        info.performed = arrival_info.arrival_time;
-        owner->update_footprint(sizeof(info), this);
+        // See how many generations to record as we need to record all of
+        // them from the previous generation up to now
+        Realm::Barrier previous;
+        if (owner->update_previous_recorded_barrier(barrier, previous))
+        {
+          while (barrier != previous)
+          {
+            ArrivalInfo arrival_info;
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+            const bool found =
+#endif
+#endif
+              // TODO: what happens if the barrier is poisoned
+              barrier.get_result(&arrival_info, sizeof(arrival_info));
+#ifdef DEBUG_LEGION
+            assert(found);
+#endif
+            BarrierArrivalInfo &info = barrier_arrival_infos.emplace_back(
+                BarrierArrivalInfo());
+            info.result = LgEvent(barrier);
+            info.fevent = arrival_info.fevent;
+            info.precondition = arrival_info.arrival_precondition;
+            info.performed = arrival_info.arrival_time;
+            owner->update_footprint(sizeof(info), this);
+            barrier = barrier.get_previous_phase();
+          }
+        }
       }
       else
         // The barrier hasn't triggered yet so launch a profiling task to
@@ -1442,6 +1463,8 @@ namespace Legion {
       unsigned long long backtrace_id = owner->find_backtrace_id(bt);
       event_wait_infos.emplace_back(
           EventWaitInfo{current.id, implicit_fevent, event, backtrace_id});
+      if (event.is_barrier())
+        record_barrier_arrival(event, implicit_provenance);
       owner->update_footprint(sizeof(EventWaitInfo), this);
     }
 
@@ -2908,6 +2931,43 @@ namespace Legion {
       // ensure we subscribe to the barrier and get its result
       target_proc.spawn(Processor::TASK_ID_PROCESSOR_NOP, NULL, 0,
           requests, bar, LG_LOW_PRIORITY);
+    }
+
+    //--------------------------------------------------------------------------
+    bool LegionProfiler::update_previous_recorded_barrier(Realm::Barrier bar,
+                                                       Realm::Barrier &previous)
+    //--------------------------------------------------------------------------
+    {
+      Realm::ID id(bar.id);
+#ifdef DEBUG_LEGION
+      assert(bar.exists());
+      assert(id.is_barrier());
+#endif
+      const std::pair<unsigned,unsigned> key(
+          id.barrier_creator_node(), id.barrier_barrier_idx());
+      const unsigned generation = id.barrier_generation();
+      AutoLock prof_lock(profiler_lock);
+      std::map<std::pair<unsigned,unsigned>,unsigned>::iterator finder =
+        recorded_barriers.find(key);
+      if (finder != recorded_barriers.end())
+      {
+        // Already recorded through this generation
+        if (generation <= finder->second)
+          return false;
+        previous.id = Realm::ID::make_barrier(finder->first.first,
+            finder->first.second, finder->second).id;
+        if ((generation+1) == Realm::Barrier::MAX_PHASES)
+          recorded_barriers.erase(finder);
+        else
+          finder->second = generation;
+      }
+      else
+      {
+        previous = Realm::Barrier::NO_BARRIER;
+        if ((generation+1) < Realm::Barrier::MAX_PHASES)
+          recorded_barriers[key] = generation;
+      }
+      return true;
     }
 
     //--------------------------------------------------------------------------

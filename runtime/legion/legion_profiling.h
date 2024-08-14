@@ -843,9 +843,12 @@ namespace Legion {
       void add_partition_request(Realm::ProfilingRequestSet &requests,
                                  UniqueID uid, DepPartOpKind part_op,
                                  LgEvent critical);
+    public:
       void profile_barrier_arrival(Realm::Barrier bar, size_t count,
           LgEvent precondition, Realm::Event protected_precondition);
       void profile_barrier_trigger(Realm::Barrier bar, UniqueID uid);
+      bool update_previous_recorded_barrier(Realm::Barrier bar,
+                                            Realm::Barrier &previous);
     public:
       // Process low-level runtime profiling results
       virtual bool handle_profiling_response(
@@ -911,6 +914,7 @@ namespace Legion {
       std::vector<Memory> recorded_memories;
       std::vector<Processor> recorded_processors;
       std::map<LgEvent,LgEvent> message_fevents;
+      std::map<std::pair<unsigned,unsigned>,unsigned> recorded_barriers;
 #ifdef DEBUG_LEGION
       unsigned total_outstanding_requests[LEGION_PROF_LAST];
 #else
