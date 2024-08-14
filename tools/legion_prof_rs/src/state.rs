@@ -5605,7 +5605,9 @@ fn process_record(
             if precondition.exists() {
                 let src = state.find_event_node(*precondition);
                 let dst = *state.event_lookup.get(&result).unwrap();
-                state.event_graph.add_edge(src, dst, ());
+                // Use update edge here to deduplicate adding edges in case
+                // we did a reduction of arrivals with the barrier in the runtime
+                state.event_graph.update_edge(src, dst, ());
             }
         }
         Record::ReservationAcquireInfo {
