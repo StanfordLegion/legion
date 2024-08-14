@@ -2963,7 +2963,8 @@ namespace Legion {
       }
       else
       {
-        previous = Realm::Barrier::NO_BARRIER;
+        previous.id = Realm::ID::make_barrier(key.first,
+            key.second, 0/*base generation*/).id;
         if ((generation+1) < Realm::Barrier::MAX_PHASES)
           recorded_barriers[key] = generation;
       }
