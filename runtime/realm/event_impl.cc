@@ -2898,7 +2898,7 @@ static void *bytedup(const void *data, size_t datalen)
                  data, datalen);
         }
 
-	// external waiters need to be signalled inside the lock
+        // external waiters need to be signalled inside the lock
 	if(generation_updated && impl->has_external_waiters) {
 	  impl->has_external_waiters = false;
           // also need external waiter mutex
