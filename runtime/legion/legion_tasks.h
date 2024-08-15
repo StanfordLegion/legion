@@ -1411,12 +1411,14 @@ namespace Legion {
            unsigned region_idx, GenerationID gen);
       static void process_slice_find_point_wise_dependence(Deserializer &derez);
       static void process_slice_record_point_wise_dependence(Deserializer &derez);
-      void set_prev_point_wise_user(const LogicalUser *user,
+      bool set_prev_point_wise_user(const LogicalUser *user,
           const LogicalUser *prev);
-      void set_next_point_wise_user(const LogicalUser *user,
+      bool set_next_point_wise_user(const LogicalUser *user,
           const LogicalUser *next);
+      bool add_point_to_completed_list(DomainPoint point);
     protected:
       std::map<LogicalRegion,RtUserEvent> pending_point_wise_dependences;
+      std::vector<DomainPoint> completed_point_list;
     public:
       // Map of previous index task for a region id. This will
       // be maintained in the next task to lookup the event

@@ -10341,7 +10341,7 @@ namespace Legion {
 #ifdef POINT_WISE_LOGICAL_ANALYSIS
     void InnerContext::mark_context_index_active(uint64_t context_index)
     {
-      printf("INSIDE active: %d\n", context_index);
+      assert(1);
 #ifdef DEBUG_LEGION
       assert(alive_context_indexes.find(context_index)
           ==
@@ -10353,7 +10353,7 @@ namespace Legion {
 
     void InnerContext::mark_context_index_inactive(uint64_t context_index)
     {
-      printf("INSIDE INactive: %d\n", context_index);
+      assert(1);
 #ifdef DEBUG_LEGION
       assert(alive_context_indexes.find(context_index)
           !=
@@ -10413,7 +10413,7 @@ namespace Legion {
         assert(deps.ready_deps.find(next_shard) == deps.ready_deps.end());
 #endif
         deps.ready_deps[next_shard] = point_mapped;
-        alive_context_indexes[key.first].push_back(key.second);
+        //alive_context_indexes[key.first].push_back(key.second);
       }
     }
 
@@ -10444,7 +10444,7 @@ namespace Legion {
 #endif
         const RtUserEvent pending_event = Runtime::create_rt_user_event();
         deps.pending_deps[requesting_shard] = pending_event;
-        alive_context_indexes[key.first].push_back(key.second);
+        //alive_context_indexes[key.first].push_back(key.second);
         return pending_event;
       }
     }
@@ -10466,7 +10466,7 @@ namespace Legion {
       ShardID requesting_shard;
       derez.deserialize(requesting_shard);
 
-      {
+      /*{
         AutoLock r_lock(point_wise_lock);
 
         std::map<uint64_t,std::vector<LogicalRegion>>::iterator ctx_idx_finder =
@@ -10475,7 +10475,7 @@ namespace Legion {
           Runtime::trigger_event(pending_event);
           return;
         }
-      }
+      }*/
 
       Runtime::trigger_event(pending_event, find_point_wise_dependence(context_index,
             lr, requesting_shard));

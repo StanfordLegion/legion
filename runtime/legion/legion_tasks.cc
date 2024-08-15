@@ -7777,7 +7777,6 @@ namespace Legion {
         unsigned region_idx)
     //--------------------------------------------------------------------------
     {
-      //printf("Record Point Task should_connect_to_next_point: %d should_connect_to_prev_point: %d shard: %d\n", slice_owner->should_connect_to_next_point(), slice_owner->should_connect_to_prev_point(), slice_owner->index_owner->get_context()->get_task()->get_shard_id());
       if (slice_owner->should_connect_to_prev_point())
       {
         RtEvent pre = slice_owner->find_point_wise_dependence(lr, region_idx);
@@ -7788,30 +7787,20 @@ namespace Legion {
           std::sort(point_wise_mapping_dependences.begin(),
                     point_wise_mapping_dependences.end());
         }
-        /*
-        // Find prev index task our owner index task depend on
-        std::map<unsigned,std::pair<Operation*, GenerationID>>::iterator finder =
-          slice_owner->index_owner->prev_index_tasks.find(region_idx);
-        assert(finder != slice_owner->index_owner->prev_index_tasks.end());
-        IndexTask *prev_index_task = static_cast<IndexTask*>(finder->second.first);
-        GenerationID prev_task_gen = finder->second.second;
-
-        if (prev_task_gen < prev_index_task->get_generation()) return;
-
-        RtEvent pre = prev_index_task->find_point_wise_dependence(lr, prev_task_gen);
-        if (!std::binary_search(point_wise_mapping_dependences.begin(),
-                  point_wise_mapping_dependences.end(), pre))
-        {
-          point_wise_mapping_dependences.push_back(pre);
-          std::sort(point_wise_mapping_dependences.begin(),
-                    point_wise_mapping_dependences.end());
-        }
-        */
       }
       if (slice_owner->should_connect_to_next_point())
       {
         slice_owner->record_point_wise_dependence(lr, region_idx,
                                                   get_mapped_event());
+      }
+      else
+      {
+        if(!slice_owner->index_owner->
+            add_point_to_completed_list(get_domain_point()))
+        {
+          slice_owner->record_point_wise_dependence(lr, region_idx,
+              get_mapped_event());
+        }
       }
     }
 #endif
@@ -8626,11 +8615,12 @@ namespace Legion {
         profiling_info.clear();
       }
 #ifdef POINT_WISE_LOGICAL_ANALYSIS
-      parent_ctx->
-          mark_context_index_inactive(get_context_index());
+      //parent_ctx->
+      //    mark_context_index_inactive(get_context_index());
       pending_point_wise_dependences.clear();
       prev_index_tasks.clear();
       next_index_tasks.clear();
+      completed_point_list.clear();
 #endif
       interfering_requirements.clear();
       point_requirements.clear();
@@ -9290,7 +9280,7 @@ namespace Legion {
         runtime->forest->log_launch_space(launch_space->handle, unique_op_id);
       }
 #ifdef POINT_WISE_LOGICAL_ANALYSIS
-      parent_ctx->mark_context_index_active(get_context_index());
+      //parent_ctx->mark_context_index_active(get_context_index());
 #endif
     }
 
@@ -10347,7 +10337,18 @@ namespace Legion {
     }
 
 #ifdef POINT_WISE_LOGICAL_ANALYSIS
-    void IndexTask::set_prev_point_wise_user(const LogicalUser *user,
+    bool IndexTask::add_point_to_completed_list(DomainPoint point)
+    {
+      AutoLock o_lock(op_lock);
+      if (!should_connect_to_next_point())
+      {
+        completed_point_list.push_back(point);
+        return true;
+      }
+      return false;
+    }
+
+    bool IndexTask::set_prev_point_wise_user(const LogicalUser *user,
         const LogicalUser *prev)
     {
       AutoLock o_lock(op_lock);
@@ -10362,12 +10363,67 @@ namespace Legion {
                                   prev->op, prev->gen, prev->ctx_index)
                               });
       set_connect_to_prev_point();
+      return true;
     }
 
-    void IndexTask::set_next_point_wise_user(const LogicalUser *user,
+    bool IndexTask::set_next_point_wise_user(const LogicalUser *user,
         const LogicalUser *next)
     {
       AutoLock o_lock(op_lock);
+
+      if (user->gen < gen) return false;
+
+      if (completed_points > 0)
+      {
+        printf("==========!!!!!!   COMPLEX CASE   !!!!!!=========\n");
+        for(std::vector<DomainPoint>::iterator it =
+            completed_point_list.begin(); it !=
+            completed_point_list.end(); it++)
+        {
+          const RegionRequirement &req = logical_regions[user->idx];
+          LogicalRegion lr;
+          if (req.handle_type == LEGION_PARTITION_PROJECTION)
+          {
+            lr = user->shard_proj->projection->functor->project(
+                req.partition, (*it), index_domain);
+          }
+          else
+          {
+            lr = user->shard_proj->projection->functor->project(
+                req.region, (*it), index_domain);
+          }
+
+          std::vector<DomainPoint> next_index_task_points;
+          if (req.handle_type == LEGION_PARTITION_PROJECTION)
+          {
+            next->shard_proj->projection->functor->invert(lr,
+                req.partition, static_cast<IndexTask*>(next->op)->index_domain,
+                next_index_task_points);
+          }
+          else
+          {
+            next->shard_proj->projection->functor->invert(lr,
+                req.region, static_cast<IndexTask*>(next->op)->index_domain,
+                next_index_task_points);
+          }
+
+          if (next_index_task_points.size() > 1)
+          {
+            // throw _error
+          }
+
+          ShardID next_shard = 0;
+          if (next->shard_proj->sharding != NULL)
+            next_shard =
+            next->shard_proj->sharding->find_owner(next_index_task_points[0],
+                static_cast<IndexTask*>(next->op)->index_domain);
+
+          parent_ctx->record_point_wise_dependence(context_index, lr,
+                                                  RtEvent::NO_RT_EVENT,
+                                                  next_shard);
+        }
+      }
+
       next_index_tasks.insert({
                               user->idx,
                               PointWisePreviousIndexTaskInfo(
@@ -10379,6 +10435,7 @@ namespace Legion {
                                   next->op, next->gen, next->ctx_index)
                               });
       set_connect_to_next_point();
+      return true;
     }
 
     //--------------------------------------------------------------------------

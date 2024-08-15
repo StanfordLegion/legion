@@ -16605,13 +16605,15 @@ namespace Legion {
                         bool parent_dominates = prev.shard_proj->domain->dominates(user.shard_proj->domain);
                         if(parent_dominates)
                         {
-                          printf("FOUND PROPER ANCESTOR: %d\n", context->runtime->address_space);
                           skip_registering_region_dependece = true;
-                          logical_analysis.point_wise_analyses.back().ancestor = &prev;
-                          static_cast<IndexTask*>(user.op)->set_prev_point_wise_user(
-                              &user, &prev);
-                          static_cast<IndexTask*>(prev.op)->set_next_point_wise_user(
-                              &prev, &user);
+                          if (static_cast<IndexTask*>(prev.op)->set_next_point_wise_user(
+                              &prev, &user))
+                          {
+                            printf("FOUND PROPER ANCESTOR: %d\n", context->runtime->address_space);
+                            logical_analysis.point_wise_analyses.back().ancestor = &prev;
+                            static_cast<IndexTask*>(user.op)->set_prev_point_wise_user(
+                                &user, &prev);
+                          }
                         }
                       }
                     }
