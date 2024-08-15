@@ -20,7 +20,7 @@ enum
 };
 
 constexpr int NUM_INSTS = 2;
-constexpr int TEST_CASES = 8;
+constexpr int TEST_CASES = 10;
 
 struct TaskArgs {
   IndexSpace<1> lhs[TEST_CASES][NUM_INSTS];
@@ -36,104 +36,7 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
 {
   TaskArgs &task_args = *(TaskArgs *)args;
 
-  int case_id = 0;
-
-  {
-    std::vector<IndexSpace<1>> results;
-    Event e2 = IndexSpace<1>::compute_unions(
-        std::vector<IndexSpace<1>>{std::begin(task_args.lhs[case_id]),
-                                   std::end(task_args.lhs[case_id])},
-        std::vector<IndexSpace<1>>{std::begin(task_args.lhs[case_id]),
-                                   std::end(task_args.lhs[case_id])},
-        results, ProfilingRequestSet());
-    for(size_t i = 0; i < results.size(); i++) {
-      results[i].sparsity.destroy(e2);
-    }
-    e2.wait();
-  }
-
-  case_id ++;
-
-  // empty rhs
-
-  {
-    std::vector<IndexSpace<1>> results;
-    std::vector<IndexSpace<1>> rhs(1, Rect<1>::make_empty());
-    Event e2 = IndexSpace<1>::compute_unions(
-        std::vector<IndexSpace<1>>{std::begin(task_args.lhs[case_id]),
-                                   std::end(task_args.lhs[case_id])},
-                                   rhs,
-        results, ProfilingRequestSet());
-    for(size_t i = 0; i < results.size(); i++) {
-      if(results[i].sparsity.exists()) {
-        results[i].sparsity.destroy(e2);
-      }
-    }
-    e2.wait();
-  }
-
-  case_id ++;
-
-  // TODO: test empty rhs
-
-  {
-    std::vector<IndexSpace<1>> results;
-    Event e2 = IndexSpace<1>::compute_unions(
-        std::vector<IndexSpace<1>>{std::begin(task_args.lhs[case_id]),
-                                   std::end(task_args.lhs[case_id])},
-        std::vector<IndexSpace<1>>{std::begin(task_args.rhs[case_id]),
-                                   std::end(task_args.rhs[case_id])},
-        results, ProfilingRequestSet());
-    for(size_t i = 0; i < results.size(); i++) {
-      if(results[i].sparsity.exists()) {
-        results[i].sparsity.destroy(e2);
-      }
-    }
-    e2.wait();
-  }
-
-  case_id++;
-
-  // empty lhs
-  {
-    std::vector<IndexSpace<1>> results;
-    std::vector<IndexSpace<1>> lhs(1, Rect<1>::make_empty());
-    Event e2 = IndexSpace<1>::compute_unions(
-        lhs,
-        std::vector<IndexSpace<1>>{std::begin(task_args.rhs[case_id]),
-                                   std::end(task_args.rhs[case_id])},
-        results, ProfilingRequestSet());
-    for(size_t i = 0; i < results.size(); i++) {
-      if(results[i].sparsity.exists()) {
-        results[i].sparsity.destroy(e2);
-      }
-    }
-    e2.wait();
-  }
-
-  case_id++;
-
-  {
-    IndexSpace<1> result;
-
-    std::vector<Rect<1>> rects0;
-    rects0.push_back(Rect<1>(Point<1>(0), Point<1>(20)));
-
-    std::vector<Rect<1>> rects1;
-    rects1.push_back(Rect<1>(Point<1>(2), Point<1>(4)));
-    rects1.push_back(Rect<1>(Point<1>(12), Point<1>(14)));
-
-    IndexSpace<1> is0(rects0);
-    is0.sparsity.add_references();
-    IndexSpace<1> is1(rects1);
-    is1.sparsity.add_references();
-
-    Event e2 = IndexSpace<1>::compute_union(std::vector<IndexSpace<1>>{is0, is1}, result,
-                                            ProfilingRequestSet());
-    assert(result.dense());
-    is1.sparsity.destroy(e2);
-    e2.wait();
-  }
+  std::vector<Event> events;
 
   {
     IndexSpace<1> result;
@@ -151,7 +54,7 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
     assert(result.sparsity == is0.sparsity);
     result.sparsity.destroy(e2);
     is0.sparsity.destroy(e2);
-    e2.wait();
+    events.push_back(e2);
   }
 
   {
@@ -174,7 +77,7 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
     assert(!result.dense());
     result.sparsity.destroy(e2);
     is0.sparsity.destroy(e2);
-    e2.wait();
+    events.push_back(e2);
   }
 
   {
@@ -189,11 +92,10 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
     Event e2 = IndexSpace<1>::compute_union(
         std::vector<IndexSpace<1>>{IndexSpace<1>(rects0), IndexSpace<1>(rects1)}, result,
         ProfilingRequestSet());
-    e2.wait();
     assert(!result.dense());
-    result.sparsity.destroy();
+    result.sparsity.destroy(e2);
+    events.push_back(e2);
   }
-
 
   {
     IndexSpace<1> result;
@@ -213,7 +115,7 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
                                                    result, ProfilingRequestSet());
     assert(result.sparsity == is1.sparsity);
     result.sparsity.destroy(e2);
-    e2.wait();
+    events.push_back(e2);
   }
 
   {
@@ -234,7 +136,7 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
 
     result.sparsity.destroy(e2);
     is1.sparsity.destroy(e2);
-    e2.wait();
+    events.push_back(e2);
   }
 
   {
@@ -263,7 +165,7 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
     result.sparsity.destroy(e2);
     is0.sparsity.destroy(e2);
     is1.sparsity.destroy(e2);
-    e2.wait();
+    events.push_back(e2);
   }
 
   {
@@ -279,11 +181,185 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
     Event e2 = IndexSpace<1>::compute_intersection(
         std::vector<IndexSpace<1>>{IndexSpace<1>(rects0), IndexSpace<1>(rects1)}, result,
         ProfilingRequestSet());
-    e2.wait();
     assert(result.dense());
+    events.push_back(e2);
   }
 
-  //int case_id = 0;
+  // no overlap
+  {
+    IndexSpace<1> result;
+
+    std::vector<Rect<1>> rects0;
+    rects0.push_back(Rect<1>(Point<1>(0), Point<1>(5)));
+
+    std::vector<Rect<1>> rects1;
+    rects1.push_back(Rect<1>(Point<1>(6), Point<1>(8)));
+    rects1.push_back(Rect<1>(Point<1>(12), Point<1>(14)));
+
+    IndexSpace<1> is0(rects1);
+    is0.sparsity.add_references();
+
+    IndexSpace<1> is1(rects0);
+
+    std::vector<IndexSpace<1>> results;
+    Event e2 = IndexSpace<1>::compute_differences(std::vector<IndexSpace<1>>{is0},
+                                                  std::vector<IndexSpace<1>>{is1},
+                                                  results, ProfilingRequestSet());
+    for(size_t i = 0; i < results.size(); i++) {
+      results[i].sparsity.destroy(e2);
+    }
+    is0.sparsity.destroy(e2);
+    events.push_back(e2);
+  }
+
+  {
+    IndexSpace<1> result;
+
+    std::vector<Rect<1>> rects0;
+    rects0.push_back(Rect<1>(Point<1>(0), Point<1>(20)));
+
+    std::vector<Rect<1>> rects1;
+    rects1.push_back(Rect<1>(Point<1>(2), Point<1>(4)));
+    rects1.push_back(Rect<1>(Point<1>(12), Point<1>(14)));
+
+    IndexSpace<1> is0(rects0);
+    is0.sparsity.add_references();
+    IndexSpace<1> is1(rects1);
+    is1.sparsity.add_references();
+
+    Event e2 = IndexSpace<1>::compute_union(std::vector<IndexSpace<1>>{is0, is1}, result,
+                                            ProfilingRequestSet());
+    assert(result.dense());
+    is1.sparsity.destroy(e2);
+    events.push_back(e2);
+  }
+
+  int case_id = 0;
+
+  {
+    std::vector<IndexSpace<1>> results;
+    Event e2 = IndexSpace<1>::compute_differences(
+        std::vector<IndexSpace<1>>{std::begin(task_args.lhs[case_id]),
+                                   std::end(task_args.lhs[case_id])},
+        std::vector<IndexSpace<1>>{std::begin(task_args.rhs[case_id]),
+                                   std::end(task_args.rhs[case_id])},
+        results, ProfilingRequestSet());
+    for(size_t i = 0; i < results.size(); i++) {
+      if(results[i].sparsity.exists()) {
+        results[i].sparsity.destroy(e2);
+      }
+    }
+    events.push_back(e2);
+  }
+
+  case_id++;
+
+  {
+    std::vector<IndexSpace<1>> results;
+    std::vector<IndexSpace<1>> rhs(1, Rect<1>::make_empty());
+    Event e2 = IndexSpace<1>::compute_differences(
+        std::vector<IndexSpace<1>>{std::begin(task_args.lhs[case_id]),
+                                   std::end(task_args.lhs[case_id])},
+        rhs, results, ProfilingRequestSet());
+    for(size_t i = 0; i < results.size(); i++) {
+      results[i].sparsity.destroy(e2);
+    }
+    events.push_back(e2);
+  }
+
+  case_id++;
+
+  {
+    std::vector<IndexSpace<1>> results;
+    Event e2 = IndexSpace<1>::compute_differences(
+        std::vector<IndexSpace<1>>{std::begin(task_args.lhs[case_id]),
+                                   std::end(task_args.lhs[case_id])},
+        std::vector<IndexSpace<1>>{std::begin(task_args.lhs[case_id]),
+                                   std::end(task_args.lhs[case_id])},
+        results, ProfilingRequestSet());
+    for(size_t i = 0; i < results.size(); i++) {
+      results[i].sparsity.destroy(e2);
+    }
+    events.push_back(e2);
+  }
+
+  case_id++;
+
+  {
+    std::vector<IndexSpace<1>> results;
+    Event e2 = IndexSpace<1>::compute_unions(
+        std::vector<IndexSpace<1>>{std::begin(task_args.lhs[case_id]),
+                                   std::end(task_args.lhs[case_id])},
+        std::vector<IndexSpace<1>>{std::begin(task_args.lhs[case_id]),
+                                   std::end(task_args.lhs[case_id])},
+        results, ProfilingRequestSet());
+    for(size_t i = 0; i < results.size(); i++) {
+      results[i].sparsity.destroy(e2);
+    }
+    events.push_back(e2);
+  }
+
+  case_id++;
+
+  // empty rhs
+
+  {
+    std::vector<IndexSpace<1>> results;
+    std::vector<IndexSpace<1>> rhs(1, Rect<1>::make_empty());
+    Event e2 = IndexSpace<1>::compute_unions(
+        std::vector<IndexSpace<1>>{std::begin(task_args.lhs[case_id]),
+                                   std::end(task_args.lhs[case_id])},
+        rhs, results, ProfilingRequestSet());
+    for(size_t i = 0; i < results.size(); i++) {
+      if(results[i].sparsity.exists()) {
+        results[i].sparsity.destroy(e2);
+      }
+    }
+    events.push_back(e2);
+  }
+
+  case_id++;
+
+  // TODO: test empty rhs
+
+  {
+    std::vector<IndexSpace<1>> results;
+    Event e2 = IndexSpace<1>::compute_unions(
+        std::vector<IndexSpace<1>>{std::begin(task_args.lhs[case_id]),
+                                   std::end(task_args.lhs[case_id])},
+        std::vector<IndexSpace<1>>{std::begin(task_args.rhs[case_id]),
+                                   std::end(task_args.rhs[case_id])},
+        results, ProfilingRequestSet());
+    for(size_t i = 0; i < results.size(); i++) {
+      if(results[i].sparsity.exists()) {
+        results[i].sparsity.destroy(e2);
+      }
+    }
+    events.push_back(e2);
+  }
+
+  case_id++;
+
+  // empty lhs
+  {
+    std::vector<IndexSpace<1>> results;
+    std::vector<IndexSpace<1>> lhs(1, Rect<1>::make_empty());
+    Event e2 = IndexSpace<1>::compute_unions(
+        lhs,
+        std::vector<IndexSpace<1>>{std::begin(task_args.rhs[case_id]),
+                                   std::end(task_args.rhs[case_id])},
+        results, ProfilingRequestSet());
+    for(size_t i = 0; i < results.size(); i++) {
+      if(results[i].sparsity.exists()) {
+        results[i].sparsity.destroy(e2);
+      }
+    }
+    events.push_back(e2);
+  }
+
+  case_id++;
+
+  // int case_id = 0;
 
   {
     std::vector<IndexSpace<1>> results;
@@ -296,7 +372,7 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
     for(size_t i = 0; i < results.size(); i++) {
       results[i].sparsity.destroy(e2);
     }
-    e2.wait();
+    events.push_back(e2);
   }
 
   case_id++;
@@ -312,10 +388,11 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
     for(size_t i = 0; i < results.size(); i++) {
       results[i].sparsity.destroy(e2);
     }
-    e2.wait();
+    events.push_back(e2);
   }
 
   case_id++;
+
   // dense empty lhs
   {
     std::vector<IndexSpace<1>> results;
@@ -330,57 +407,10 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
         results[i].sparsity.destroy(e2);
       }
     }
-    e2.wait();
+    events.push_back(e2);
   }
 
-  return;
-
-  {
-    std::vector<IndexSpace<1>> results;
-    Event e2 = IndexSpace<1>::compute_differences(
-        std::vector<IndexSpace<1>>{std::begin(task_args.lhs[case_id]),
-                                   std::end(task_args.lhs[case_id])},
-        std::vector<IndexSpace<1>>{std::begin(task_args.rhs[case_id]),
-                                   std::end(task_args.rhs[case_id])},
-        results, ProfilingRequestSet());
-    e2.wait();
-    for(size_t i = 0; i < results.size(); i++) {
-      if(results[i].sparsity.exists()) {
-        results[i].sparsity.remove_references();
-      }
-    }
-  }
-
-  case_id++;
-
-  {
-    std::vector<IndexSpace<1>> results;
-    std::vector<IndexSpace<1>> rhs(1, Rect<1>::make_empty());
-    Event e2 = IndexSpace<1>::compute_differences(
-        std::vector<IndexSpace<1>>{std::begin(task_args.lhs[case_id]),
-                                   std::end(task_args.lhs[case_id])},
-        rhs, results, ProfilingRequestSet());
-    e2.wait();
-    for(size_t i = 0; i < results.size(); i++) {
-      results[i].sparsity.remove_references();
-    }
-  }
-
-  case_id++;
-
-  {
-    std::vector<IndexSpace<1>> results;
-    Event e2 = IndexSpace<1>::compute_differences(
-        std::vector<IndexSpace<1>>{std::begin(task_args.lhs[case_id]),
-                                   std::end(task_args.lhs[case_id])},
-        std::vector<IndexSpace<1>>{std::begin(task_args.lhs[case_id]),
-                                   std::end(task_args.lhs[case_id])},
-        results, ProfilingRequestSet());
-    e2.wait();
-    for(size_t i = 0; i < results.size(); i++) {
-      results[i].sparsity.remove_references();
-    }
-  }
+  Event::merge_events(events).wait();
 }
 
 void main_task(const void *args, size_t arglen, const void *userdata, size_t userlen,

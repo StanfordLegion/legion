@@ -334,6 +334,8 @@ namespace Realm {
     // output vector should start out empty
     assert(results.empty());
 
+    std::vector<Event> events{wait_on};
+
     Event e = wait_on;
     DifferenceOperation<N,T> *op = 0;
 
@@ -361,14 +363,18 @@ namespace Realm {
       // 2) empty rhs
       if(r.empty()) {
         results[i] = l;
-        results[i].sparsity.add_references();
+        events.push_back(
+            SparsityMapRefCounter(results[i].sparsity.id).add_references_async(1));
+        //results[i].sparsity.add_references();
         continue;
       }
 
       // 3) no overlap between lhs and rhs
       if(!l.bounds.overlaps(r.bounds)) {
         results[i] = l;
-        results[i].sparsity.add_references();
+        events.push_back(
+            SparsityMapRefCounter(results[i].sparsity.id).add_references_async(1));
+        // results[i].sparsity.add_references();
         continue;
       }
 
@@ -383,9 +389,8 @@ namespace Realm {
         Rect<N, T> sdiff;
         if(attempt_simple_diff(l.bounds, r.bounds, sdiff)) {
           results[i] = IndexSpace<N, T>(sdiff, l.sparsity);
-          if(results[i].sparsity.exists()) {
-            results[i].sparsity.add_references();
-          }
+          events.push_back(
+              SparsityMapRefCounter(results[i].sparsity.id).add_references_async(1));
           continue;
         }
       }
@@ -394,10 +399,13 @@ namespace Realm {
       if(!op) {
         GenEventImpl *finish_event = GenEventImpl::create_genevent();
         e = finish_event->current_event();
+        events.push_back(e);
         op = new DifferenceOperation<N, T>(reqs, finish_event, ID(e).event_generation());
       }
       results[i] = op->add_difference(lhss[li], rhss[ri]);
-      results[i].sparsity.add_references();
+      events.push_back(
+          SparsityMapRefCounter(results[i].sparsity.id).add_references_async(1));
+      //results[i].sparsity.add_references();
     }
 
     for(size_t i = 0; i < n; i++) {
@@ -411,7 +419,8 @@ namespace Realm {
       op->launch(wait_on);
     else
       PartitioningOperation::do_inline_profiling(reqs, inline_start_time);
-    return e;
+
+    return Event::merge_events(events);
   }
 
   template <int N, typename T>
@@ -1802,11 +1811,7 @@ namespace Realm {
 
   template <int N, typename T>
   DifferenceOperation<N, T>::~DifferenceOperation(void)
-  {
-    for(SparsityMap<N, T> &output : outputs) {
-      output.destroy();
-    }
-  }
+  {}
 
   template <int N, typename T>
   IndexSpace<N,T> DifferenceOperation<N,T>::add_difference(const IndexSpace<N,T>& lhs,
@@ -1850,7 +1855,6 @@ namespace Realm {
     lhss.push_back(lhs);
     rhss.push_back(rhs);
     outputs.push_back(sparsity);
-    outputs.back().add_references();
 
     return output;
   }
