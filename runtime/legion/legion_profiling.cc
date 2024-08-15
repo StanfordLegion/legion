@@ -671,6 +671,7 @@ namespace Legion {
         return;
       Realm::Barrier barrier;
       barrier.id = bar.id;
+      barrier.timestamp = 0;
       // See if the barrier has already triggered
       bool poisoned = false;
       if (barrier.has_triggered_faultaware(poisoned) || poisoned)
@@ -680,7 +681,7 @@ namespace Legion {
         Realm::Barrier previous;
         if (owner->update_previous_recorded_barrier(barrier, previous))
         {
-          while (barrier != previous)
+          while (barrier.id != previous.id)
           {
             ArrivalInfo arrival_info;
 #ifdef DEBUG_LEGION
