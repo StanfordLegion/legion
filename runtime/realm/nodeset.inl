@@ -23,11 +23,7 @@
 #endif
 
 // need std::swap
-#if REALM_CXX_STANDARD >= 11
 #include <utility>
-#else
-#include <algorithm>
-#endif
 
 namespace Realm {
 
