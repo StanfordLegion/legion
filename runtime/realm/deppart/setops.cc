@@ -159,6 +159,8 @@ namespace Realm {
     // output vector should start out empty
     assert(results.empty());
 
+    std::vector<Event> events{wait_on};
+
     Event e = wait_on;
     UnionOperation<N,T> *op = 0;
 
@@ -180,15 +182,16 @@ namespace Realm {
       // 1) empty lhs
       if(l.empty()) {
         results[i] = r;
-        results[i].sparsity.add_references();
+        events.push_back(
+            SparsityMapRefCounter(results[i].sparsity.id).add_references_async(1));
         continue;
       }
 
       // 2) empty rhs
       if(rhss[li].empty()) {
         results[i] = l;
-        results[i].sparsity.add_references();
-
+        events.push_back(
+            SparsityMapRefCounter(results[i].sparsity.id).add_references_async(1));
         continue;
       }
 
@@ -207,7 +210,8 @@ namespace Realm {
       // 5) same sparsity map (or none) and simple union for bbox
       if((l.sparsity == r.sparsity) && union_is_rect(l.bounds, r.bounds)) {
         results[i] = IndexSpace<N, T>(l.bounds.union_bbox(r.bounds), l.sparsity);
-        results[i].sparsity.add_references();
+        events.push_back(
+            SparsityMapRefCounter(results[i].sparsity.id).add_references_async(1));
         continue;
       }
 
@@ -215,10 +219,14 @@ namespace Realm {
       if(!op) {
         GenEventImpl *finish_event = GenEventImpl::create_genevent();
         e = finish_event->current_event();
+        events.push_back(e);
         op = new UnionOperation<N, T>(reqs, finish_event, ID(e).event_generation());
       }
       results[i] = op->add_union(l, r);
-      results[i].sparsity.add_references();
+      events.push_back(
+          SparsityMapRefCounter(results[i].sparsity.id).add_references_async(1));
+
+      //results[i].sparsity.add_references();
     }
 
     for(size_t i = 0; i < n; i++) {
@@ -232,7 +240,8 @@ namespace Realm {
       op->launch(wait_on);
     else
       PartitioningOperation::do_inline_profiling(reqs, inline_start_time);
-    return e;
+
+    return Event::merge_events(events);
   }
 
   template <int N, typename T>
@@ -411,6 +420,7 @@ namespace Realm {
 						   const ProfilingRequestSet &reqs,
 						   Event wait_on /*= Event::NO_EVENT*/)
   {
+    std::vector<Event> events{wait_on};
     Event e = wait_on;
 
     // record the start time of the potentially-inline operation if any
@@ -423,7 +433,13 @@ namespace Realm {
       result = IndexSpace<N,T>::make_empty();
     } else {
       result = subspaces[0];
-      result.sparsity.add_references();
+      if(!result.dense()) {
+        // TODO(apryakhin@): Check all plases to make sure we aren't
+        // adding an event for non-existent sparsity maps.
+        events.push_back(
+            SparsityMapRefCounter(result.sparsity.id).add_references_async(1));
+        // result.sparsity.add_references();
+      }
 
       for(size_t i = 1; i < subspaces.size(); i++) {
         // empty rhs - skip
@@ -442,19 +458,21 @@ namespace Realm {
         if(subspaces[i].dense() && subspaces[i].bounds.contains(result.bounds)) {
           result.sparsity.remove_references();
           result = subspaces[i];
-          result.sparsity.add_references();
           continue;
         }
 
         // general case - do full computation
         GenEventImpl *finish_event = GenEventImpl::create_genevent();
         e = finish_event->current_event();
+        events.push_back(e);
+
         UnionOperation<N, T> *op =
             new UnionOperation<N, T>(reqs, finish_event, ID(e).event_generation());
 
         result.sparsity.remove_references();
         result = op->add_union(subspaces);
-        result.sparsity.add_references();
+        events.push_back(
+            SparsityMapRefCounter(result.sparsity.id).add_references_async(1));
 
         op->launch(wait_on);
         was_inline = false;
@@ -477,7 +495,7 @@ namespace Realm {
     if(was_inline)
       PartitioningOperation::do_inline_profiling(reqs, inline_start_time);
 
-    return e;
+    return Event::merge_events(events);
   }
 
   template <int N, typename T>
@@ -1528,7 +1546,6 @@ namespace Realm {
     bool ok = ((s >> lhs) &&
 	       (s >> rhs) &&
 	       (s >> sparsity_output));
-    sparsity_output.add_references();
     assert(ok);
   }
 
@@ -1549,11 +1566,7 @@ namespace Realm {
 
   template <int N, typename T>
   UnionOperation<N,T>::~UnionOperation(void)
-  {
-    for(SparsityMap<N, T> &output : outputs) {
-      output.destroy();
-    }
-  }
+  {}
 
   template <int N, typename T>
   IndexSpace<N,T> UnionOperation<N,T>::add_union(const IndexSpace<N,T>& lhs,
@@ -1594,7 +1607,6 @@ namespace Realm {
     ops[1] = rhs;
     inputs.push_back(ops);
     outputs.push_back(sparsity);
-    outputs.back().add_references();
 
     return output;
   }
@@ -1630,7 +1642,6 @@ namespace Realm {
 
     inputs.push_back(ops);
     outputs.push_back(sparsity);
-    sparsity.add_references();
 
     return output;
   }

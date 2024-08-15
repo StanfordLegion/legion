@@ -36,6 +36,165 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
 {
   TaskArgs &task_args = *(TaskArgs *)args;
 
+  int case_id = 0;
+
+  {
+    std::vector<IndexSpace<1>> results;
+    Event e2 = IndexSpace<1>::compute_unions(
+        std::vector<IndexSpace<1>>{std::begin(task_args.lhs[case_id]),
+                                   std::end(task_args.lhs[case_id])},
+        std::vector<IndexSpace<1>>{std::begin(task_args.lhs[case_id]),
+                                   std::end(task_args.lhs[case_id])},
+        results, ProfilingRequestSet());
+    for(size_t i = 0; i < results.size(); i++) {
+      results[i].sparsity.destroy(e2);
+    }
+    e2.wait();
+  }
+
+  case_id ++;
+
+  // empty rhs
+
+  {
+    std::vector<IndexSpace<1>> results;
+    std::vector<IndexSpace<1>> rhs(1, Rect<1>::make_empty());
+    Event e2 = IndexSpace<1>::compute_unions(
+        std::vector<IndexSpace<1>>{std::begin(task_args.lhs[case_id]),
+                                   std::end(task_args.lhs[case_id])},
+                                   rhs,
+        results, ProfilingRequestSet());
+    for(size_t i = 0; i < results.size(); i++) {
+      if(results[i].sparsity.exists()) {
+        results[i].sparsity.destroy(e2);
+      }
+    }
+    e2.wait();
+  }
+
+  case_id ++;
+
+  // TODO: test empty rhs
+
+  {
+    std::vector<IndexSpace<1>> results;
+    Event e2 = IndexSpace<1>::compute_unions(
+        std::vector<IndexSpace<1>>{std::begin(task_args.lhs[case_id]),
+                                   std::end(task_args.lhs[case_id])},
+        std::vector<IndexSpace<1>>{std::begin(task_args.rhs[case_id]),
+                                   std::end(task_args.rhs[case_id])},
+        results, ProfilingRequestSet());
+    for(size_t i = 0; i < results.size(); i++) {
+      if(results[i].sparsity.exists()) {
+        results[i].sparsity.destroy(e2);
+      }
+    }
+    e2.wait();
+  }
+
+  case_id++;
+
+  // empty lhs
+  {
+    std::vector<IndexSpace<1>> results;
+    std::vector<IndexSpace<1>> lhs(1, Rect<1>::make_empty());
+    Event e2 = IndexSpace<1>::compute_unions(
+        lhs,
+        std::vector<IndexSpace<1>>{std::begin(task_args.rhs[case_id]),
+                                   std::end(task_args.rhs[case_id])},
+        results, ProfilingRequestSet());
+    for(size_t i = 0; i < results.size(); i++) {
+      if(results[i].sparsity.exists()) {
+        results[i].sparsity.destroy(e2);
+      }
+    }
+    e2.wait();
+  }
+
+  case_id++;
+
+  {
+    IndexSpace<1> result;
+
+    std::vector<Rect<1>> rects0;
+    rects0.push_back(Rect<1>(Point<1>(0), Point<1>(20)));
+
+    std::vector<Rect<1>> rects1;
+    rects1.push_back(Rect<1>(Point<1>(2), Point<1>(4)));
+    rects1.push_back(Rect<1>(Point<1>(12), Point<1>(14)));
+
+    IndexSpace<1> is0(rects0);
+    is0.sparsity.add_references();
+    IndexSpace<1> is1(rects1);
+    is1.sparsity.add_references();
+
+    Event e2 = IndexSpace<1>::compute_union(std::vector<IndexSpace<1>>{is0, is1}, result,
+                                            ProfilingRequestSet());
+    assert(result.dense());
+    is1.sparsity.destroy(e2);
+    e2.wait();
+  }
+
+  {
+    IndexSpace<1> result;
+
+    std::vector<Rect<1>> rects0;
+    rects0.push_back(Rect<1>(Point<1>(0), Point<1>(5)));
+    rects0.push_back(Rect<1>(Point<1>(10), Point<1>(15)));
+
+    IndexSpace<1> is0(rects0);
+    is0.sparsity.add_references();
+
+    Event e2 = IndexSpace<1>::compute_union(std::vector<IndexSpace<1>>{is0}, result,
+                                            ProfilingRequestSet());
+    assert(!result.dense());
+    assert(result.sparsity == is0.sparsity);
+    result.sparsity.destroy(e2);
+    is0.sparsity.destroy(e2);
+    e2.wait();
+  }
+
+  {
+    IndexSpace<1> result;
+
+    std::vector<Rect<1>> rects0;
+    rects0.push_back(Rect<1>(Point<1>(0), Point<1>(5)));
+    rects0.push_back(Rect<1>(Point<1>(10), Point<1>(15)));
+
+    std::vector<Rect<1>> rects1;
+    rects1.push_back(Rect<1>(Point<1>(2), Point<1>(8)));
+
+    IndexSpace<1> is0(rects0);
+    is0.sparsity.add_references();
+    IndexSpace<1> is1(rects1);
+    is1.sparsity.add_references();
+
+    Event e2 = IndexSpace<1>::compute_union(std::vector<IndexSpace<1>>{is0, is1}, result,
+                                            ProfilingRequestSet());
+    assert(!result.dense());
+    result.sparsity.destroy(e2);
+    is0.sparsity.destroy(e2);
+    e2.wait();
+  }
+
+  {
+    IndexSpace<1> result;
+
+    std::vector<Rect<1>> rects0;
+    rects0.push_back(Rect<1>(Point<1>(0), Point<1>(5)));
+
+    std::vector<Rect<1>> rects1;
+    rects1.push_back(Rect<1>(Point<1>(2), Point<1>(8)));
+
+    Event e2 = IndexSpace<1>::compute_union(
+        std::vector<IndexSpace<1>>{IndexSpace<1>(rects0), IndexSpace<1>(rects1)}, result,
+        ProfilingRequestSet());
+    e2.wait();
+    assert(!result.dense());
+    result.sparsity.destroy();
+  }
+
+
   {
     IndexSpace<1> result;
 
@@ -124,7 +283,7 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
     assert(result.dense());
   }
 
-  int case_id = 0;
+  //int case_id = 0;
 
   {
     std::vector<IndexSpace<1>> results;
@@ -194,61 +353,6 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
 
   case_id++;
 
-  // TODO: test empty rhs
-
-  {
-    std::vector<IndexSpace<1>> results;
-    Event e2 = IndexSpace<1>::compute_unions(
-        std::vector<IndexSpace<1>>{std::begin(task_args.lhs[case_id]),
-                                   std::end(task_args.lhs[case_id])},
-        std::vector<IndexSpace<1>>{std::begin(task_args.rhs[case_id]),
-                                   std::end(task_args.rhs[case_id])},
-        results, ProfilingRequestSet());
-    e2.wait();
-    for(size_t i = 0; i < results.size(); i++) {
-      if(results[i].sparsity.exists()) {
-        results[i].sparsity.remove_references();
-      }
-    }
-  }
-
-  case_id++;
-
-  // empty lhs
-  {
-    std::vector<IndexSpace<1>> results;
-    std::vector<IndexSpace<1>> lhs(1, Rect<1>::make_empty());
-    Event e2 = IndexSpace<1>::compute_unions(
-        lhs,
-        std::vector<IndexSpace<1>>{std::begin(task_args.rhs[case_id]),
-                                   std::end(task_args.rhs[case_id])},
-        results, ProfilingRequestSet());
-    e2.wait();
-    for(size_t i = 0; i < results.size(); i++) {
-      if(results[i].sparsity.exists()) {
-        results[i].sparsity.remove_references();
-      }
-    }
-  }
-
-  case_id++;
-
-  {
-    std::vector<IndexSpace<1>> results;
-    Event e2 = IndexSpace<1>::compute_unions(
-        std::vector<IndexSpace<1>>{std::begin(task_args.lhs[case_id]),
-                                   std::end(task_args.lhs[case_id])},
-        std::vector<IndexSpace<1>>{std::begin(task_args.lhs[case_id]),
-                                   std::end(task_args.lhs[case_id])},
-        results, ProfilingRequestSet());
-    e2.wait();
-    for(size_t i = 0; i < results.size(); i++) {
-      results[i].sparsity.remove_references();
-    }
-  }
-
-  case_id++;
-
   {
     std::vector<IndexSpace<1>> results;
     std::vector<IndexSpace<1>> rhs(1, Rect<1>::make_empty());
@@ -276,68 +380,6 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
     for(size_t i = 0; i < results.size(); i++) {
       results[i].sparsity.remove_references();
     }
-  }
-
-  {
-    IndexSpace<1> result;
-
-    std::vector<Rect<1>> rects0;
-    rects0.push_back(Rect<1>(Point<1>(0), Point<1>(20)));
-
-    std::vector<Rect<1>> rects1;
-    rects1.push_back(Rect<1>(Point<1>(2), Point<1>(4)));
-    rects1.push_back(Rect<1>(Point<1>(12), Point<1>(14)));
-
-    IndexSpace<1> is0(rects0);
-    is0.sparsity.add_references();
-    IndexSpace<1> is1(rects1);
-    is1.sparsity.add_references();
-
-    Event e2 = IndexSpace<1>::compute_union(std::vector<IndexSpace<1>>{is0, is1}, result,
-                                            ProfilingRequestSet());
-    e2.wait();
-    assert(result.dense());
-    is1.sparsity.destroy();
-  }
-
-  {
-    IndexSpace<1> result;
-
-    std::vector<Rect<1>> rects0;
-    rects0.push_back(Rect<1>(Point<1>(0), Point<1>(5)));
-    rects0.push_back(Rect<1>(Point<1>(10), Point<1>(15)));
-
-    std::vector<Rect<1>> rects1;
-    rects1.push_back(Rect<1>(Point<1>(2), Point<1>(8)));
-
-    IndexSpace<1> is0(rects0);
-    is0.sparsity.add_references();
-    IndexSpace<1> is1(rects1);
-    is1.sparsity.add_references();
-
-    Event e2 = IndexSpace<1>::compute_union(std::vector<IndexSpace<1>>{is0, is1}, result,
-                                            ProfilingRequestSet());
-    e2.wait();
-    assert(!result.dense());
-    result.sparsity.destroy();
-    is0.sparsity.destroy();
-  }
-
-  {
-    IndexSpace<1> result;
-
-    std::vector<Rect<1>> rects0;
-    rects0.push_back(Rect<1>(Point<1>(0), Point<1>(5)));
-
-    std::vector<Rect<1>> rects1;
-    rects1.push_back(Rect<1>(Point<1>(2), Point<1>(8)));
-
-    Event e2 = IndexSpace<1>::compute_union(
-        std::vector<IndexSpace<1>>{IndexSpace<1>(rects0), IndexSpace<1>(rects1)}, result,
-        ProfilingRequestSet());
-    e2.wait();
-    assert(!result.dense());
-    result.sparsity.destroy();
   }
 }
 
