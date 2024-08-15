@@ -245,6 +245,8 @@ namespace Realm {
     // output vector should start out empty
     assert(results.empty());
 
+    std::vector<Event> events{wait_on};
+
     Event e = wait_on;
     IntersectionOperation<N,T> *op = 0;
 
@@ -272,14 +274,16 @@ namespace Realm {
       // 2) rhs is dense or has same sparsity map
       if(r.dense() || (r.sparsity == l.sparsity)) {
         results[i] = IndexSpace<N, T>(l.bounds.intersection(r.bounds), l.sparsity);
-        results[i].sparsity.add_references();
+        events.push_back(
+            SparsityMapRefCounter(results[i].sparsity.id).add_references_async(1));
         continue;
       }
 
       // 3) lhs is dense
       if(l.dense()) {
         results[i] = IndexSpace<N, T>(l.bounds.intersection(r.bounds), r.sparsity);
-        results[i].sparsity.add_references();
+        events.push_back(
+            SparsityMapRefCounter(results[i].sparsity.id).add_references_async(1));
         continue;
       }
 
@@ -289,9 +293,11 @@ namespace Realm {
         e = finish_event->current_event();
         op =
             new IntersectionOperation<N, T>(reqs, finish_event, ID(e).event_generation());
+        events.push_back(e);
       }
       results[i] = op->add_intersection(lhss[li], rhss[ri]);
-      results[i].sparsity.add_references();
+      events.push_back(
+          SparsityMapRefCounter(results[i].sparsity.id).add_references_async(1));
     }
 
     for(size_t i = 0; i < n; i++) {
@@ -305,7 +311,8 @@ namespace Realm {
       op->launch(wait_on);
     else
       PartitioningOperation::do_inline_profiling(reqs, inline_start_time);
-    return e;
+
+    return Event::merge_events(events);
   }
 
   template <int N, typename T>
@@ -545,6 +552,7 @@ namespace Realm {
 
         result.sparsity.remove_references();
         result = op->add_intersection(subspaces);
+
         events.push_back(
             SparsityMapRefCounter(result.sparsity.id).add_references_async(1));
 
