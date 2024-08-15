@@ -2888,7 +2888,8 @@ static void *bytedup(const void *data, size_t datalen)
 	    // no need to initialize new entries - we'll overwrite them now or when data does show up
 	    impl->value_capacity = new_capacity;
 	  }
-	  assert(datalen == (impl->redop->sizeof_lhs * (trigger_gen - args.previous_gen)));
+          // trigger_gen might have been changes so make sure you use args.trigger_gen here
+	  assert(datalen == (impl->redop->sizeof_lhs * (args.trigger_gen - args.previous_gen)));
 	  assert(args.previous_gen >= impl->first_generation);
 	  memcpy(impl->final_values + ((args.previous_gen -
 					impl->first_generation) * impl->redop->sizeof_lhs),
