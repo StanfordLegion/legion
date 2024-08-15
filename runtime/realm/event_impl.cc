@@ -2899,12 +2899,12 @@ static void *bytedup(const void *data, size_t datalen)
         }
 
         // external waiters need to be signalled inside the lock
-	if(generation_updated && impl->has_external_waiters) {
-	  impl->has_external_waiters = false;
+        if(generation_updated && impl->has_external_waiters) {
+          impl->has_external_waiters = false;
           // also need external waiter mutex
           AutoLock<KernelMutex> al2(impl->external_waiter_mutex);
 	  impl->external_waiter_condvar.broadcast();
-	}
+        }
       }
 
       // with lock released, perform any local notifications
