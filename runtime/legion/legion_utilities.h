@@ -69,7 +69,7 @@ namespace Legion {
     class Serializer {
     public:
       Serializer(size_t base_bytes = 4096)
-        : total_bytes(base_bytes), buffer((char*)malloc(base_bytes)), 
+        : total_bytes(base_bytes), buffer((uint8_t*)malloc(base_bytes)),
           index(0) 
 #ifdef DEBUG_LEGION
           , context_bytes(0)
@@ -139,7 +139,7 @@ namespace Legion {
       inline void resize(void);
     private:
       size_t total_bytes;
-      char *buffer;
+      uint8_t *buffer;
       size_t index;
 #ifdef DEBUG_LEGION
       size_t context_bytes;
@@ -156,7 +156,7 @@ namespace Legion {
           , size_t ctx_bytes = 0
 #endif
           )
-        : total_bytes(buffer_size), buffer((const char*)buf), index(0)
+        : total_bytes(buffer_size), buffer((const uint8_t*)buf), index(0)
 #ifdef DEBUG_LEGION
           , context_bytes(ctx_bytes)
 #endif
@@ -224,7 +224,7 @@ namespace Legion {
       inline void advance_pointer(size_t bytes);
     private:
       const size_t total_bytes;
-      const char *buffer;
+      const uint8_t *buffer;
       size_t index;
 #ifdef DEBUG_LEGION
       size_t context_bytes;
@@ -1073,7 +1073,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(total_bytes != 0); // this would cause deallocation
 #endif
-      char *next = (char*)realloc(buffer,total_bytes);
+      uint8_t *next = (uint8_t*)realloc(buffer,total_bytes);
 #ifdef DEBUG_LEGION
       assert(next != NULL);
 #endif

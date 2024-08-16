@@ -174,22 +174,43 @@ namespace Realm {
     }
 
     static GPUStream *select_stream(GPU *dst, GPU *src, GPU *channel_gpu,
-                                    const GPU::CudaIpcMapping *dst_mapping = 0)
+                                    const GPU::CudaIpcMapping *dst_mapping,
+                                    MemoryImpl *src_mem, MemoryImpl *dst_mem)
     {
-      if (src) {
-        if (dst == src) {
+      assert(channel_gpu != nullptr);
+      // Assume the channel_gpu is always available and will fill in the role for when src
+      // or dst is null.  This could be the case if the src/dst mem is pageable and we
+      // have pageable access
+      if(src == nullptr) {
+        src = channel_gpu;
+      }
+      if (dst == nullptr) {
+        dst = channel_gpu;
+      }
+
+      // IPC copy
+      if (dst_mapping != nullptr) {
+        return src->cudaipc_streams[dst_mapping->owner];
+      }
+
+      const bool src_gpu_mem = src->is_accessible_gpu_mem(src_mem);
+      const bool dst_gpu_mem = src->is_accessible_gpu_mem(dst_mem);
+      if (src_gpu_mem && dst_gpu_mem) {
+        // Intra-GPU copy
+        if (src == dst) {
           return src->get_next_d2d_stream();
         }
-        else if (dst_mapping != NULL) {
-          return src->cudaipc_streams[dst_mapping->owner];
-        }
-        else if (dst == NULL) {
-          return src->device_to_host_stream;
-        }
+        // P2P copy
         return src->peer_to_peer_streams[dst->info->index];
       }
-      assert((dst != nullptr) || (channel_gpu != nullptr));
-      return (dst != nullptr ? dst : channel_gpu)->host_to_device_stream;
+      // D2H copy
+      if (src_gpu_mem) {
+        return src->device_to_host_stream;
+      }
+      // H2D or H2H copy.  We use the destination gpu here instead, since it does not
+      // matter what GPU actually accesses the host memory, as we want to minimize any
+      // peer traffic that might occur
+      return dst->host_to_device_stream;
     }
 
     static void get_nonaffine_strides(size_t &pitch, size_t &height, AddressInfoCudaArray &ainfo, AddressListCursor &alc, size_t bytes)
@@ -473,11 +494,45 @@ namespace Realm {
       return planes * lines * contig_bytes;
     }
 
-    static bool is_accessible_host_mem(GPU *accessor, const MemoryImpl *mem)
+    bool GPU::is_accessible_host_mem(const MemoryImpl *mem) const
     {
       assert(mem != nullptr);
-      // TODO: also add check for gpu pageable access
-      return accessor->pinned_sysmems.count(mem->me) > 0;
+
+      if(info->pageable_access_supported) {
+        // System that support full unified memory access may access any host accessible
+        // memory, so exclude all memories that are not host accessible.  This assumes
+        // that the memory given is somehow accessible by the current node
+        switch(mem->get_kind()) {
+        case Memory::GPU_DYNAMIC_MEM:
+        case Memory::GPU_FB_MEM:
+          return false;
+        default:
+          break;
+        }
+        return true;
+      }
+
+      return pinned_sysmems.count(mem->me) > 0;
+    }
+
+    bool GPU::is_accessible_gpu_mem(const MemoryImpl *mem) const
+    {
+      assert(mem != nullptr);
+
+      switch(mem->get_kind()) {
+      case Memory::GPU_DYNAMIC_MEM:
+      case Memory::GPU_FB_MEM:
+      {
+        const CudaDeviceMemoryInfo *mem_info =
+            mem->find_module_specific<CudaDeviceMemoryInfo>();
+        return (mem_info != nullptr) &&
+               ((mem_info->gpu == this) ||
+                (info->peers.find(mem_info->gpu->info->index) != info->peers.end()));
+      }
+      default:
+        break;
+      }
+      return false;
     }
 
     bool GPUXferDes::progress_xd(GPUChannel *channel, TimeLimit work_until)
@@ -556,9 +611,13 @@ namespace Realm {
           out_is_ipc = dst_is_ipc[output_control.current_io_port];
         }
 
+        // We need a kernel copy if this is a H2H copy, as CUDA forces the calling thread
+        // to perform H2H copies synchronously with cuMemcpyAsync.  We have decided that
+        // the GPU is the best one to do this (either via a faster inter-connect than one
+        // CPU thread can saturate or the fact it can be done asynchronously)
         needs_kernel_copy =
-            (in_port != nullptr) && (is_accessible_host_mem(in_gpu, in_port->mem)) &&
-            (out_port != nullptr) && (is_accessible_host_mem(out_gpu, out_port->mem));
+            (in_port != nullptr) && (in_gpu->is_accessible_host_mem(in_port->mem)) &&
+            (out_port != nullptr) && (out_gpu->is_accessible_host_mem(out_port->mem));
 
         if (in_port == 0 || out_port == 0) {
           if (in_port) {
@@ -590,7 +649,7 @@ namespace Realm {
           }
         }
 
-        stream = select_stream(out_gpu, in_gpu, channel->get_gpu(), out_mapping);
+        stream = select_stream(out_gpu, in_gpu, channel->get_gpu(), out_mapping, in_port->mem, out_port->mem);
         assert(stream != NULL);
 
         AutoGPUContext agc(stream->get_gpu());
@@ -1012,7 +1071,8 @@ namespace Realm {
         else
           write_ind_bytes = (max_bytes / field_size) * addr_size;
 
-        auto stream = select_stream(out_gpu, in_gpu, channel->get_gpu(), out_mapping);
+        auto stream = select_stream(out_gpu, in_gpu, channel->get_gpu(), out_mapping,
+                                    in_port->mem, out_port->mem);
         AutoGPUContext agc(stream->get_gpu());
 
         // We can't do gather-scatter yet.
@@ -1206,16 +1266,13 @@ namespace Realm {
 
     GPUIndirectChannel::~GPUIndirectChannel() {}
 
-    Memory GPUIndirectChannel::suggest_ib_memories(Memory memory) const
+    Memory GPUIndirectChannel::suggest_ib_memories() const
     {
-      if(memory.kind() != Memory::GPU_FB_MEM ||
-         node != NodeID(ID(memory).memory_owner_node())) {
-        Node &n = get_runtime()->nodes[node];
-        for(std::vector<IBMemory *>::const_iterator it = n.ib_memories.begin();
-            it != n.ib_memories.end(); ++it) {
-          if((*it)->lowlevel_kind == Memory::GPU_FB_MEM) {
-            return (*it)->me;
-          }
+      Node &n = get_runtime()->nodes[node];
+      for(std::vector<IBMemory *>::const_iterator it = n.ib_memories.begin();
+          it != n.ib_memories.end(); ++it) {
+        if((*it)->lowlevel_kind == Memory::GPU_FB_MEM) {
+          return (*it)->me;
         }
       }
       return Memory::NO_MEMORY;
@@ -1347,16 +1404,13 @@ namespace Realm {
       : RemoteChannel(_remote_ptr, indirect_memories)
     {}
 
-    Memory GPUIndirectRemoteChannel::suggest_ib_memories(Memory memory) const
+    Memory GPUIndirectRemoteChannel::suggest_ib_memories() const
     {
-      if(memory.kind() != Memory::GPU_FB_MEM ||
-         node != NodeID(ID(memory).memory_owner_node())) {
-        Node &n = get_runtime()->nodes[node];
-        for(std::vector<IBMemory *>::const_iterator it = n.ib_memories.begin();
-            it != n.ib_memories.end(); ++it) {
-          if((*it)->lowlevel_kind == Memory::GPU_FB_MEM) {
-            return (*it)->me;
-          }
+      Node &n = get_runtime()->nodes[node];
+      for(std::vector<IBMemory *>::const_iterator it = n.ib_memories.begin();
+          it != n.ib_memories.end(); ++it) {
+        if((*it)->lowlevel_kind == Memory::GPU_FB_MEM) {
+          return (*it)->me;
         }
       }
       return Memory::NO_MEMORY;
@@ -1423,12 +1477,43 @@ namespace Realm {
         unsigned latency = 1000;       // HACK - estimate at 1 us
         unsigned frag_overhead = 2000; // HACK - estimate at 2 us
 
-        add_path(mapped_cpu_mems, local_gpu_mems, bw, latency, frag_overhead,
-                 XFER_GPU_TO_FB)
-            .set_max_dim(2); // D->H cudamemcpy3d is unrolled into 2d copies
-        add_path(mapped_cpu_mems, mapped_cpu_mems, bw, latency, frag_overhead,
-                 XFER_GPU_TO_FB)
-            .set_max_dim(2); // H->D cudamemcpy3d is unrolled into 2d copies
+        if(src_gpu->info->pageable_access_supported) {
+          // GPU can access all host memories, so add a path for each memory kind that is
+          // accessible to the host as the source
+          // TODO(cperry): Add a query for the memory kind that it is CPU accessible.
+          size_t num_kinds = 0;
+#define COUNTER(kind, desc) num_kinds++;
+          REALM_MEMORY_KINDS(COUNTER)
+#undef COUNTER
+
+          for(size_t i = (NO_MEMKIND + 1); i < num_kinds; i++) {
+            switch(i) {
+            case GPU_DYNAMIC_MEM:
+            case GPU_FB_MEM:
+              continue;
+            default:
+              add_path(static_cast<Memory::Kind>(i), /*src_global=*/false, local_gpu_mems,
+                       bw, latency, frag_overhead, XFER_GPU_TO_FB)
+                  .set_max_dim(2);
+              // Advertise all the H2H paths
+              for(size_t j = (NO_MEMKIND + 1); j < num_kinds; j++) {
+                add_path(static_cast<Memory::Kind>(i), false,
+                         static_cast<Memory::Kind>(j), false, bw, latency, frag_overhead,
+                         XFER_GPU_TO_FB)
+                    .set_max_dim(2);
+              }
+              break;
+            }
+          }
+        } else {
+          add_path(mapped_cpu_mems, local_gpu_mems, bw, latency, frag_overhead,
+                   XFER_GPU_TO_FB)
+              .set_max_dim(2); // D->H cudamemcpy3d is unrolled into 2d copies
+          // Advertise all the H2H paths
+          add_path(mapped_cpu_mems, mapped_cpu_mems, bw, latency, frag_overhead,
+                   XFER_GPU_TO_FB)
+              .set_max_dim(2); // H->D cudamemcpy3d is unrolled into 2d copies
+        }
 
         break;
       }
@@ -1439,9 +1524,32 @@ namespace Realm {
         unsigned latency = 1000;          // HACK - estimate at 1 us
         unsigned frag_overhead = 2000;    // HACK - estimate at 2 us
 
-        add_path(local_gpu_mems, mapped_cpu_mems, bw, latency, frag_overhead,
-                 XFER_GPU_FROM_FB)
-            .set_max_dim(2); // H->D cudamemcpy3d is unrolled into 2d copies
+        if(src_gpu->info->pageable_access_supported) {
+          // GPU can access all host memories, so add a path for each memory kind that is
+          // accessible to the host as the source
+          // TODO(cperry): Add a query for the memory kind that it is CPU accessible.
+          size_t num_kinds = 0;
+#define COUNTER(kind, desc) num_kinds++;
+          REALM_MEMORY_KINDS(COUNTER)
+#undef COUNTER
+
+          for(size_t i = (NO_MEMKIND + 1); i < num_kinds; i++) {
+            switch(i) {
+            case GPU_DYNAMIC_MEM:
+            case GPU_FB_MEM:
+              continue;
+            default:
+              add_path(local_gpu_mems, static_cast<Memory::Kind>(i), /*src_global=*/false,
+                       bw, latency, frag_overhead, XFER_GPU_TO_FB)
+                  .set_max_dim(2);
+              break;
+            }
+          }
+        } else {
+          add_path(local_gpu_mems, mapped_cpu_mems, bw, latency, frag_overhead,
+                   XFER_GPU_FROM_FB)
+              .set_max_dim(2); // H->D cudamemcpy3d is unrolled into 2d copies
+        }
 
         break;
       }
@@ -2027,11 +2135,33 @@ namespace Realm {
                bw, latency, frag_overhead, XFER_GPU_IN_FB)
         .set_max_dim(2);
       bw = std::max(gpu->info->c2c_bandwidth, gpu->info->pci_bandwidth);
+
       // TODO(cperry): Even though this is a HOST fill, mark it as a GPU_TO_FB xfer kind.
       // Is it really necesscary to annotate the kind of transfer?
-      add_path(Memory::NO_MEMORY, mapped_cpu_mems, bw, latency, frag_overhead,
-               XFER_GPU_TO_FB)
-          .set_max_dim(2);
+      if(gpu->info->pageable_access_supported) {
+        // GPU can access all host memories, so add a path for each memory kind that is
+        // accessible to the host
+        // TODO(cperry): Add a query for the memory kind that it is CPU accessible.
+        size_t num_kinds = 0;
+#define COUNTER(kind, desc) num_kinds++;
+        REALM_MEMORY_KINDS(COUNTER)
+#undef COUNTER
+        for(size_t i = (NO_MEMKIND + 1); i < num_kinds; i++) {
+          switch(i) {
+          case GPU_DYNAMIC_MEM:
+          case GPU_FB_MEM:
+            continue;
+          default:
+            add_path(Memory::Kind::NO_MEMKIND, false, static_cast<Memory::Kind>(i), false,
+                     bw, latency, frag_overhead, XFER_GPU_TO_FB);
+            break;
+          }
+        }
+      } else {
+        add_path(Memory::NO_MEMORY, mapped_cpu_mems, bw, latency, frag_overhead,
+                 XFER_GPU_TO_FB)
+            .set_max_dim(2);
+      }
 
       xdq.add_to_manager(bgwork);
     }

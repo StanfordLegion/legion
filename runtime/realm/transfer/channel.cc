@@ -4151,7 +4151,7 @@ namespace Realm {
         return false;
       }
 
-      Memory Channel::suggest_ib_memories(Memory memory) const
+      static Memory find_sysmem_ib_memory(NodeID node)
       {
         Node &n = get_runtime()->nodes[node];
         for(std::vector<IBMemory *>::const_iterator it = n.ib_memories.begin();
@@ -4169,6 +4169,13 @@ namespace Realm {
         log_new_dma.fatal() << "no sysmem ib memory on node:" << node;
         abort();
         return Memory::NO_MEMORY;
+      }
+
+      Memory Channel::suggest_ib_memories() const { return find_sysmem_ib_memory(node); }
+
+      Memory Channel::suggest_ib_memories_for_node(NodeID node_id) const
+      {
+        return find_sysmem_ib_memory(node_id);
       }
 
       // sometimes we need to return a reference to a SupportedPath that won't
