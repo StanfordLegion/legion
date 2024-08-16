@@ -57,6 +57,7 @@ list(APPEND REALM_TESTS
   inst_chain_redistrict
   refcount_setops_test
   refcount_preimage_test
+  refcount_byfield_test
   )
 
 if(Legion_USE_CUDA)

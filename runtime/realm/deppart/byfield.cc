@@ -47,7 +47,12 @@ namespace Realm {
     subspaces.resize(n);
     for(size_t i = 0; i < n; i++) {
       subspaces[i] = op->add_color(colors[i]);
-      log_dpops.info() << "byfield: " << *this << ", " << colors[i] << " -> " << subspaces[i] << " (" << e << ")";
+      if(!subspaces[i].dense()) {
+        e = Event::merge_events(
+            {e, SparsityMapRefCounter(subspaces[i].sparsity.id).add_references_async(1)});
+      }
+      log_dpops.info() << "byfield: " << *this << ", " << colors[i] << " -> "
+                       << subspaces[i] << " (" << e << ")";
     }
 
     op->launch(wait_on);

@@ -80,6 +80,7 @@ TESTS += refcount_image_test
 TESTS += refcount_preimage_test
 TESTS += inst_chain_redistrict
 TESTS += refcount_setops_test
+TESTS += refcount_byfield_test
 
 ifeq ($(strip $(USE_CUDA)),1)
 TESTS += task_stream
