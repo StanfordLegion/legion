@@ -2516,6 +2516,7 @@ namespace Legion {
             verify_partitions(false),
             runtime_warnings(false),
             warnings_backtrace(false),
+            warnings_are_errors(false),
             report_leaks(false),
             separate_runtime_instances(false),
             record_registration(false),
@@ -2576,6 +2577,7 @@ namespace Legion {
         bool verify_partitions;
         bool runtime_warnings;
         bool warnings_backtrace;
+        bool warnings_are_errors;
         bool report_leaks;
         bool separate_runtime_instances;
         bool record_registration;
@@ -2702,6 +2704,7 @@ namespace Legion {
       const bool verify_partitions;
       const bool runtime_warnings;
       const bool warnings_backtrace;
+      const bool warnings_are_errors;
       const bool report_leaks;
       const bool separate_runtime_instances;
       const bool record_registration;

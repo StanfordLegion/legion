@@ -4342,7 +4342,8 @@ namespace Legion {
     void ReplDependentPartitionOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      DependentPartitionOp::activate();
+      ReplCollectiveViewCreator<CollectiveViewCreator<
+        DependentPartitionOp> >::activate();
       sharding_function = NULL;
       shard_points = NULL;
       gather = NULL;
@@ -4359,7 +4360,8 @@ namespace Legion {
     void ReplDependentPartitionOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      DependentPartitionOp::deactivate(false/*free*/);
+      ReplCollectiveViewCreator<CollectiveViewCreator<
+        DependentPartitionOp> >::deactivate(false/*free*/);
       if (gather != NULL)
         delete gather;
       if (scatter != NULL)

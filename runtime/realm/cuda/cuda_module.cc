@@ -2495,17 +2495,19 @@ namespace Realm {
             new GPUStream(this, worker, module->config->cfg_d2d_stream_priority);
       }
 
-      // only create p2p streams for devices we can talk to
-      peer_to_peer_streams.resize(module->gpu_info.size(), 0);
-      for(std::vector<GPUInfo *>::const_iterator it = module->gpu_info.begin();
-	  it != module->gpu_info.end();
-	  ++it)
-	if(info->peers.count((*it)->index) != 0)
-	  peer_to_peer_streams[(*it)->index] = new GPUStream(this, worker);
+      // Create a peer_to_peer stream for all our known devices.  This will isolate the
+      // DMA requests for each GPU
+      peer_to_peer_streams.resize(module->gpu_info.size(), nullptr);
+      for (const GPUInfo *gpu_info : module->gpu_info) {
+        if (gpu_info->index != info->index) {
+	        peer_to_peer_streams[gpu_info->index] = new GPUStream(this, worker);
+        }
+      }
 
       task_streams.resize(module->config->cfg_task_streams);
-      for(unsigned i = 0; i < module->config->cfg_task_streams; i++)
-	task_streams[i] = new GPUStream(this, worker);
+      for(size_t i = 0; i < task_streams.size(); i++) {
+	      task_streams[i] = new GPUStream(this, worker);
+      }
 
       pop_context();
 
@@ -2530,22 +2532,15 @@ namespace Realm {
 
       delete_container_contents(device_to_device_streams);
 
-      for(std::vector<GPUStream *>::iterator it = peer_to_peer_streams.begin();
-	  it != peer_to_peer_streams.end();
-	  ++it)
-	if(*it)
-	  delete *it;
-
-      for(std::map<NodeID, GPUStream *>::iterator it = cudaipc_streams.begin();
-          it != cudaipc_streams.end();
-	  ++it)
-        delete it->second;
-
+      delete_container_contents(peer_to_peer_streams);
+      delete_container_contents(cudaipc_streams);
       delete_container_contents(task_streams);
 
       if (fb_dmem) {
         fb_dmem->cleanup();
       }
+
+      pop_context();
 
       CHECK_CU( CUDA_DRIVER_FNPTR(cuDevicePrimaryCtxRelease)(info->device) );
     }
@@ -3345,6 +3340,8 @@ namespace Realm {
         return nullptr;
       }
 
+      CHECK_CU(CUDA_DRIVER_FNPTR(cuDriverGetVersion)(&m->cuda_api_version));
+
       // check if nvml can be initialized
       // we will continue create cuda module even if nvml can not be initialized
       if(!nvml_initialized && resolve_nvml_api_fnptrs()) {
@@ -3393,6 +3390,9 @@ namespace Realm {
           attribute_value = 0;
 #endif
           info->fabric_supported = !!attribute_value;
+          CUDA_DRIVER_FNPTR(cuDeviceGetAttribute)
+          (&attribute_value, CU_DEVICE_ATTRIBUTE_PAGEABLE_MEMORY_ACCESS, info->device);
+          info->pageable_access_supported = !!attribute_value;
           // Assume x16 PCI-e 2.0 = 8000 MB/s, which is reasonable for most
           // systems
           info->pci_bandwidth = 8000;
@@ -3843,8 +3843,12 @@ namespace Realm {
         IBMemory *ib_mem = nullptr;
 
         if(config->cfg_zc_mem_size > 0) {
+          // In order to work around a bug in 12.3 and 12.4 drivers with shareable host
+          // allocations, disable the shareable path if the driver we're running on does
+          // not support at least 12.5
           GPUAllocation *alloc = GPUAllocation::allocate_host(
-              gpus[0], config->cfg_zc_mem_size, /*peer_enabled=*/true, /*shareable=*/true,
+              gpus[0], config->cfg_zc_mem_size, /*peer_enabled=*/true,
+              /*shareable=*/cuda_api_version >= 12050,
               /*same_va=*/true);
           if(alloc == nullptr) {
             log_gpu.fatal() << "Insufficient zero-copy device-mappable host memory: "
@@ -3859,8 +3863,12 @@ namespace Realm {
         }
 
         if(config->cfg_zc_ib_size > 0) {
+          // In order to work around a bug in 12.3 and 12.4 drivers with shareable host
+          // allocations, disable the shareable path if the driver we're running on does
+          // not support at least 12.5
           GPUAllocation *alloc = GPUAllocation::allocate_host(
-              gpus[0], config->cfg_zc_ib_size, /*peer_enabled=*/true, /*shareable=*/true,
+              gpus[0], config->cfg_zc_ib_size, /*peer_enabled=*/true,
+              /*shareable=*/cuda_api_version >= 12050,
               /*same_va=*/false);
           if(alloc == nullptr) {
             log_gpu.fatal() << "Insufficient ib device-mappable host memory: "
@@ -3988,6 +3996,31 @@ namespace Realm {
 				2 << 20); // TODO: don't use hardcoded stack size...
     }
 
+    template <typename MemoryType>
+    static void advise_cpu_memories_to_cpu(const std::vector<MemoryType *> &mems)
+    {
+      for(MemoryType *mem : mems) {
+        switch(mem->kind) {
+        case MemoryImpl::MKIND_GPUFB:
+        case MemoryImpl::MKIND_ZEROCOPY:
+        case MemoryImpl::MKIND_MANAGED:
+          break;
+        default:
+          void *ptr = mem->get_direct_ptr(0, 0);
+          if(ptr != nullptr) {
+            // We're ignoring the error here as there's no real indication other than
+            // pageeable memory access that cuMemAdvise will work with pageeable memory.
+            // It does on some systems, not on others.  Either way, make the attempt and
+            // move on
+            (void)CUDA_DRIVER_FNPTR(cuMemAdvise)(
+                reinterpret_cast<CUdeviceptr>(ptr), mem->size,
+                CU_MEM_ADVISE_SET_PREFERRED_LOCATION, CU_DEVICE_CPU);
+          }
+          break;
+        }
+      }
+    }
+
     // create any DMA channels provided by the module (default == do nothing)
     void CudaModule::create_dma_channels(RuntimeImpl *runtime)
     {
@@ -4040,6 +4073,21 @@ namespace Realm {
             gpu->pinned_sysmems.insert(mem_impl->me);
           }
         }
+      }
+
+      // Regardless of whether we pin the various sysmem allocations or not, we need to
+      // make sure the sysmem allocations do not migrate on systems where pageable gpu
+      // access is allowed
+      bool has_pageable_access = false;
+      for(GPU *gpu : gpus) {
+        if(gpu->info->pageable_access_supported) {
+          has_pageable_access = true;
+        }
+      }
+
+      if(has_pageable_access) {
+        advise_cpu_memories_to_cpu(runtime->nodes[Network::my_node_id].memories);
+        advise_cpu_memories_to_cpu(runtime->nodes[Network::my_node_id].ib_memories);
       }
 
       // ask any ipc-able nodes to share handles with us
@@ -4724,8 +4772,7 @@ namespace Realm {
       ret = alloc.map_allocation(gpu, alloc.mmap_handle, size, vaddr, 0, peer_enabled,
                                  map_host);
       if(ret != CUDA_SUCCESS) {
-        REPORT_CU_ERROR(Logger::LEVEL_INFO, "cuMemCreate", ret);
-        CHECK_CU(CUDA_DRIVER_FNPTR(cuMemRelease)(alloc.mmap_handle));
+        REPORT_CU_ERROR(Logger::LEVEL_INFO, "cuMemMap", ret);
         return nullptr;
       }
 

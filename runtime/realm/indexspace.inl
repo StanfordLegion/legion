@@ -441,7 +441,11 @@ namespace Realm {
   //  will clear the sparsity map of this index space if it exists
   template <int N, typename T>
   inline void IndexSpace<N,T>::destroy(Event wait_on /*= Event::NO_EVENT*/)
-  {}
+  {
+    if(sparsity.exists()) {
+      sparsity.destroy(wait_on);
+    }
+  }
 
   // true if we're SURE that there are no points in the space (may be imprecise due to
   //  lazy loading of sparsity data)
