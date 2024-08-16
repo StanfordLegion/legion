@@ -46,7 +46,6 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
     rects0.push_back(Rect<1>(Point<1>(10), Point<1>(15)));
 
     IndexSpace<1> is0(rects0);
-    is0.sparsity.add_references();
 
     Event e2 = IndexSpace<1>::compute_union(std::vector<IndexSpace<1>>{is0}, result,
                                             ProfilingRequestSet());
@@ -68,9 +67,7 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
     rects1.push_back(Rect<1>(Point<1>(2), Point<1>(8)));
 
     IndexSpace<1> is0(rects0);
-    is0.sparsity.add_references();
     IndexSpace<1> is1(rects1);
-    is1.sparsity.add_references();
 
     Event e2 = IndexSpace<1>::compute_union(std::vector<IndexSpace<1>>{is0, is1}, result,
                                             ProfilingRequestSet());
@@ -115,6 +112,7 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
                                                    result, ProfilingRequestSet());
     assert(result.sparsity == is1.sparsity);
     result.destroy(e2);
+    is1.destroy(e2);
     events.push_back(e2);
   }
 
@@ -126,7 +124,6 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
     rects1.push_back(Rect<1>(Point<1>(12), Point<1>(14)));
 
     IndexSpace<1> is1(rects1);
-    is1.sparsity.add_references();
 
     Event e2 = IndexSpace<1>::compute_intersection(std::vector<IndexSpace<1>>{is1},
                                                    result, ProfilingRequestSet());
@@ -151,9 +148,7 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
     rects1.push_back(Rect<1>(Point<1>(12), Point<1>(14)));
 
     IndexSpace<1> is0(rects0);
-    is0.sparsity.add_references();
     IndexSpace<1> is1(rects1);
-    is1.sparsity.add_references();
 
     Event e2 = IndexSpace<1>::compute_intersection(std::vector<IndexSpace<1>>{is0, is1},
                                                    result, ProfilingRequestSet());
@@ -197,8 +192,6 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
     rects1.push_back(Rect<1>(Point<1>(12), Point<1>(14)));
 
     IndexSpace<1> is0(rects1);
-    is0.sparsity.add_references();
-
     IndexSpace<1> is1(rects0);
 
     std::vector<IndexSpace<1>> results;
@@ -223,9 +216,7 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
     rects1.push_back(Rect<1>(Point<1>(12), Point<1>(14)));
 
     IndexSpace<1> is0(rects0);
-    is0.sparsity.add_references();
     IndexSpace<1> is1(rects1);
-    is1.sparsity.add_references();
 
     Event e2 = IndexSpace<1>::compute_union(std::vector<IndexSpace<1>>{is0, is1}, result,
                                             ProfilingRequestSet());
@@ -448,7 +439,7 @@ void main_task(const void *args, size_t arglen, const void *userdata, size_t use
     for(int id = 0; id < TEST_CASES; id++) {
 
       roots.push_back(IndexSpace<1>(rects));
-      roots.back().sparsity.add_references();
+      //roots.back().sparsity.add_references();
 
       std::vector<IndexSpace<1>> lhs;
       roots.back()
@@ -456,7 +447,7 @@ void main_task(const void *args, size_t arglen, const void *userdata, size_t use
           .wait();
 
       roots.push_back(IndexSpace<1>(rects1));
-      roots.back().sparsity.add_references();
+      //roots.back().sparsity.add_references();
 
       std::vector<IndexSpace<1>> rhs_diff;
       roots.back()

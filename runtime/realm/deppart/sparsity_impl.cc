@@ -222,6 +222,7 @@ namespace Realm {
     SparsityMapImplWrapper *wrap = get_runtime()->get_available_sparsity_impl(Network::my_node_id);
     SparsityMap<N,T> sparsity = wrap->me.convert<SparsityMap<N,T> >();
     SparsityMapImpl<N,T> *impl = wrap->get_or_create<N,T>(sparsity);
+    wrap->add_references(1);
     impl->set_contributor_count(1);
     impl->contribute_dense_rect_list(dense, disjoint);
     return sparsity;
@@ -250,6 +251,7 @@ namespace Realm {
     SparsityMapImplWrapper *wrap = get_runtime()->get_available_sparsity_impl(Network::my_node_id);
     SparsityMap<N,T> sparsity = wrap->me.convert<SparsityMap<N,T> >();
     SparsityMapImpl<N,T> *impl = wrap->get_or_create<N,T>(sparsity);
+    wrap->add_references(1);
     impl->set_contributor_count(1);
     impl->contribute_dense_rect_list(dense, disjoint);
     return sparsity;

@@ -46,7 +46,7 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
         images, ProfilingRequestSet());
     e2.wait();
     for(size_t i = 0; i < images.size(); i++) {
-      images[i].sparsity.destroy();
+      images[i].destroy();
     }
   }
 
@@ -61,7 +61,7 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
         sources, sources, images, ProfilingRequestSet());
     e2.wait();
     for(size_t i = 0; i < images.size(); i++) {
-      images[i].sparsity.destroy();
+      images[i].destroy();
     }
   }
 }

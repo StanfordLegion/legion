@@ -46,7 +46,7 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
         preimages, ProfilingRequestSet());
     e2.wait();
     for(size_t i = 0; i < preimages.size(); i++) {
-      preimages[i].sparsity.destroy();
+      preimages[i].destroy();
     }
   }
 }
