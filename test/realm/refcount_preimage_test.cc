@@ -35,7 +35,6 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
                Processor p)
 {
   TaskArgs &task_args = *(TaskArgs *)args;
-
   {
     std::vector<IndexSpace<1>> preimages;
     Event e2 = task_args.parent.create_subspaces_by_preimage(
@@ -44,10 +43,10 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
         std::vector<IndexSpace<1>>{std::begin(task_args.targets),
                                    std::end(task_args.targets)},
         preimages, ProfilingRequestSet());
-    e2.wait();
     for(size_t i = 0; i < preimages.size(); i++) {
-      preimages[i].destroy();
+      preimages[i].destroy(e2);
     }
+    e2.wait();
   }
 }
 

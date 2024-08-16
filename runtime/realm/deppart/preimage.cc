@@ -47,10 +47,14 @@ namespace Realm {
 
    size_t n = targets.size();
    preimages.resize(n);
-   for (size_t i = 0; i < n; i++) {
-    preimages[i] = op->add_target(targets[i]);
-    log_dpops.info() << "preimage: " << *this << " tgt=" << targets[i] << " -> "
-                     << preimages[i] << " (" << e << ")";
+   for(size_t i = 0; i < n; i++) {
+     preimages[i] = op->add_target(targets[i]);
+     if(!preimages[i].dense()) {
+       e = Event::merge_events(
+           {e, SparsityMapRefCounter(preimages[i].sparsity.id).add_references_async(1)});
+     }
+     log_dpops.info() << "preimage: " << *this << " tgt=" << targets[i] << " -> "
+                      << preimages[i] << " (" << e << ")";
    }
 
    op->launch(wait_on);
@@ -78,11 +82,7 @@ namespace Realm {
 
   template <int N, typename T, int N2, typename T2>
   PreimageMicroOp<N, T, N2, T2>::~PreimageMicroOp(void)
-  {
-    for(size_t i = 0; i < sparsity_outputs.size(); i++) {
-      sparsity_outputs[i].remove_references();
-    }
-  }
+  {}
 
   template <int N, typename T, int N2, typename T2>
   void PreimageMicroOp<N,T,N2,T2>::add_sparsity_output(IndexSpace<N2,T2> _target,
@@ -90,7 +90,6 @@ namespace Realm {
   {
     targets.push_back(_target);
     sparsity_outputs.push_back(_sparsity);
-    sparsity_outputs.back().add_references();
   }
 
   template <int N, typename T, int N2, typename T2>
@@ -252,9 +251,6 @@ namespace Realm {
 	       (s >> targets) &&
 	       (s >> sparsity_outputs));
     assert(ok);
-    for(size_t i = 0; i < sparsity_outputs.size(); i++) {
-      sparsity_outputs[i].add_references();
-    }
     (void)ok;
   }
 
@@ -283,9 +279,6 @@ namespace Realm {
   template <int N, typename T, int N2, typename T2>
   PreimageOperation<N, T, N2, T2>::~PreimageOperation(void)
   {
-    for(size_t i = 0; i < preimages.size(); i++) {
-      preimages[i].destroy();
-    }
     if(overlap_tester)
       delete overlap_tester;
   }
@@ -320,11 +313,9 @@ namespace Realm {
              .instance_owner_node();
     SparsityMap<N,T> sparsity = get_runtime()->get_available_sparsity_impl(target_node)->me.convert<SparsityMap<N,T> >();
     preimage.sparsity = sparsity;
-    sparsity.add_references();
 
     targets.push_back(target);
     preimages.push_back(sparsity);
-    sparsity.add_references();
 
     return preimage;
   }
