@@ -31,24 +31,6 @@ namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
   //
-  // class SparsityMapUntyped
-
-  SparsityMapUntyped::SparsityMapUntyped(::realm_id_t _id)
-    : id(_id)
-  {}
-
-  void SparsityMapUntyped::add_references(unsigned count)
-  {
-    SparsityMapRefCounter(id).add_references(count);
-  }
-
-  void SparsityMapUntyped::remove_references(unsigned count)
-  {
-    SparsityMapRefCounter(id).remove_references(count);
-  }
-
-  ////////////////////////////////////////////////////////////////////////
-  //
   // class SparsityMapRefCounter
 
   SparsityMapRefCounter::SparsityMapRefCounter(::realm_id_t _id)
