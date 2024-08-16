@@ -21,7 +21,7 @@ use nom::{
 use serde::Serialize;
 
 use crate::state::{
-    EventID, FSpaceID, FieldID, IPartID, ISpaceID, InstID, InstUID, MapperCallKindID, MapperID,
+    BacktraceID, EventID, FSpaceID, FieldID, IPartID, ISpaceID, InstID, MapperCallKindID, MapperID,
     MemID, NodeID, OpID, ProcID, ProvenanceID, RuntimeCallKindID, State, TaskID, Timestamp, TreeID,
     VariantID,
 };
@@ -29,6 +29,7 @@ use crate::state::{
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum ValueFormat {
     Array,
+    BacktraceID,
     Bool,
     DepPartOpKind,
     IDType,
@@ -115,37 +116,40 @@ pub enum Record {
     IndexPartitionDesc { parent_id: ISpaceID, unique_id: IPartID, disjoint: bool, point0: u64 },
     IndexSpaceSizeDesc { ispace_id: ISpaceID, dense_size: u64, sparse_size: u64, is_sparse: bool },
     LogicalRegionDesc { ispace_id: ISpaceID, fspace_id: u32, tree_id: TreeID, name: String },
-    PhysicalInstRegionDesc { inst_uid: InstUID, ispace_id: ISpaceID, fspace_id: u32, tree_id: TreeID },
-    PhysicalInstLayoutDesc { inst_uid: InstUID, field_id: FieldID, fspace_id: u32, has_align: bool, eqk: u32, align_desc: u32 },
-    PhysicalInstDimOrderDesc { inst_uid: InstUID, dim: u32, dim_kind: u32 },
-    PhysicalInstanceUsage { inst_uid: InstUID, op_id: OpID, index_id: u32, field_id: FieldID },
+    PhysicalInstRegionDesc { fevent: EventID, ispace_id: ISpaceID, fspace_id: u32, tree_id: TreeID },
+    PhysicalInstLayoutDesc { fevent: EventID, field_id: FieldID, fspace_id: u32, has_align: bool, eqk: u32, align_desc: u32 },
+    PhysicalInstDimOrderDesc { fevent: EventID, dim: u32, dim_kind: u32 },
+    PhysicalInstanceUsage { fevent: EventID, op_id: OpID, index_id: u32, field_id: FieldID },
     TaskKind { task_id: TaskID, name: String, overwrite: bool },
     TaskVariant { task_id: TaskID, variant_id: VariantID, name: String },
     OperationInstance { op_id: OpID, parent_id: Option<OpID>, kind: u32, provenance: Option<ProvenanceID> },
     MultiTask { op_id: OpID, task_id: TaskID },
     SliceOwner { parent_id: UniqueID, op_id: OpID },
-    TaskWaitInfo { op_id: OpID, task_id: TaskID, variant_id: VariantID, wait_start: Timestamp, wait_ready: Timestamp, wait_end: Timestamp },
-    MetaWaitInfo { op_id: OpID, lg_id: VariantID, wait_start: Timestamp, wait_ready: Timestamp, wait_end: Timestamp },
+    TaskWaitInfo { op_id: OpID, task_id: TaskID, variant_id: VariantID, wait_start: Timestamp, wait_ready: Timestamp, wait_end: Timestamp, wait_event: EventID },
+    MetaWaitInfo { op_id: OpID, lg_id: VariantID, wait_start: Timestamp, wait_ready: Timestamp, wait_end: Timestamp, wait_event: EventID },
     TaskInfo { op_id: OpID, task_id: TaskID, variant_id: VariantID, proc_id: ProcID, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp, creator: EventID, fevent: EventID  },
     GPUTaskInfo { op_id: OpID, task_id: TaskID, variant_id: VariantID, proc_id: ProcID, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp, gpu_start: Timestamp, gpu_stop: Timestamp, creator: EventID, fevent: EventID },
     MetaInfo { op_id: OpID, lg_id: VariantID, proc_id: ProcID, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp, creator: EventID, fevent: EventID },
     MessageInfo { op_id: OpID, lg_id: VariantID, proc_id: ProcID, spawn: Timestamp, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp, creator: EventID, fevent: EventID },
     CopyInfo { op_id: OpID, size: u64, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp, creator: EventID, fevent: EventID, collective: u32 },
-    CopyInstInfo { src: MemID, dst: MemID, src_fid: FieldID, dst_fid: FieldID, src_inst: InstUID, dst_inst: InstUID, fevent: EventID, num_hops: u32, indirect: bool },
+    CopyInstInfo { src: MemID, dst: MemID, src_fid: FieldID, dst_fid: FieldID, src_inst: EventID, dst_inst: EventID, fevent: EventID, num_hops: u32, indirect: bool },
     FillInfo { op_id: OpID, size: u64, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp, creator: EventID, fevent: EventID },
-    FillInstInfo { dst: MemID, fid: FieldID, dst_inst: InstUID, fevent: EventID },
-    InstTimelineInfo { inst_uid: InstUID, inst_id: InstID, mem_id: MemID, size: u64, op_id: OpID, create: Timestamp, ready: Timestamp, destroy: Timestamp, creator: EventID },
+    FillInstInfo { dst: MemID, fid: FieldID, dst_inst: EventID, fevent: EventID },
+    InstTimelineInfo { fevent: EventID, inst_id: InstID, mem_id: MemID, size: u64, op_id: OpID, create: Timestamp, ready: Timestamp, destroy: Timestamp, creator: EventID },
     PartitionInfo { op_id: OpID, part_op: DepPartOpKind, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp, creator: EventID },
     MapperCallInfo { mapper_id: MapperID, mapper_proc: ProcID, kind: MapperCallKindID, op_id: OpID, start: Timestamp, stop: Timestamp, proc_id: ProcID, fevent: EventID },
     RuntimeCallInfo { kind: RuntimeCallKindID, start: Timestamp, stop: Timestamp, proc_id: ProcID, fevent: EventID },
     ApplicationCallInfo { provenance: ProvenanceID, start: Timestamp, stop: Timestamp, proc_id: ProcID, fevent: EventID },
     ProfTaskInfo { proc_id: ProcID, op_id: OpID, start: Timestamp, stop: Timestamp, creator: EventID, fevent: EventID  },
     CalibrationErr { calibration_err: i64 },
+    BacktraceDesc { backtrace_id: BacktraceID , backtrace: String },
+    EventWaitInfo { proc_id: ProcID, fevent: EventID, event: EventID, backtrace_id: BacktraceID },
 }
 
 fn convert_value_format(name: String) -> Option<ValueFormat> {
     match name.as_str() {
         "array" => Some(ValueFormat::Array),
+        "BacktraceID" => Some(ValueFormat::BacktraceID),
         "bool" => Some(ValueFormat::Bool),
         "DepPartOpKind" => Some(ValueFormat::DepPartOpKind),
         "IDType" => Some(ValueFormat::IDType),
@@ -305,9 +309,6 @@ fn parse_string(input: &[u8]) -> IResult<&[u8], String> {
 fn parse_event_id(input: &[u8]) -> IResult<&[u8], EventID> {
     map(le_u64, EventID)(input)
 }
-fn parse_inst_uid(input: &[u8]) -> IResult<&[u8], InstUID> {
-    map(le_u64, InstUID)(input)
-}
 fn parse_inst_id(input: &[u8]) -> IResult<&[u8], InstID> {
     map(le_u64, InstID)(input)
 }
@@ -361,6 +362,9 @@ fn parse_timestamp(input: &[u8]) -> IResult<&[u8], Timestamp> {
 }
 fn parse_variant_id(input: &[u8]) -> IResult<&[u8], VariantID> {
     map(le_u32, VariantID)(input)
+}
+fn parse_backtrace_id(input: &[u8]) -> IResult<&[u8], BacktraceID> {
+    map(le_u64, BacktraceID)(input)
 }
 
 ///
@@ -619,14 +623,14 @@ fn parse_logical_region_desc(input: &[u8], _max_dim: i32) -> IResult<&[u8], Reco
     ))
 }
 fn parse_physical_inst_region_desc(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
-    let (input, inst_uid) = parse_inst_uid(input)?;
+    let (input, fevent) = parse_event_id(input)?;
     let (input, ispace_id) = parse_ispace_id(input)?;
     let (input, fspace_id) = le_u32(input)?;
     let (input, tree_id) = parse_tree_id(input)?;
     Ok((
         input,
         Record::PhysicalInstRegionDesc {
-            inst_uid,
+            fevent,
             ispace_id,
             fspace_id,
             tree_id,
@@ -634,7 +638,7 @@ fn parse_physical_inst_region_desc(input: &[u8], _max_dim: i32) -> IResult<&[u8]
     ))
 }
 fn parse_physical_inst_layout_desc(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
-    let (input, inst_uid) = parse_inst_uid(input)?;
+    let (input, fevent) = parse_event_id(input)?;
     let (input, field_id) = parse_field_id(input)?;
     let (input, fspace_id) = le_u32(input)?;
     let (input, has_align) = parse_bool(input)?;
@@ -643,7 +647,7 @@ fn parse_physical_inst_layout_desc(input: &[u8], _max_dim: i32) -> IResult<&[u8]
     Ok((
         input,
         Record::PhysicalInstLayoutDesc {
-            inst_uid,
+            fevent,
             field_id,
             fspace_id,
             has_align,
@@ -653,27 +657,27 @@ fn parse_physical_inst_layout_desc(input: &[u8], _max_dim: i32) -> IResult<&[u8]
     ))
 }
 fn parse_physical_inst_layout_dim_desc(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
-    let (input, inst_uid) = parse_inst_uid(input)?;
+    let (input, fevent) = parse_event_id(input)?;
     let (input, dim) = le_u32(input)?;
     let (input, dim_kind) = le_u32(input)?;
     Ok((
         input,
         Record::PhysicalInstDimOrderDesc {
-            inst_uid,
+            fevent,
             dim,
             dim_kind,
         },
     ))
 }
 fn parse_physical_inst_usage(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
-    let (input, inst_uid) = parse_inst_uid(input)?;
+    let (input, fevent) = parse_event_id(input)?;
     let (input, op_id) = parse_op_id(input)?;
     let (input, index_id) = le_u32(input)?;
     let (input, field_id) = parse_field_id(input)?;
     Ok((
         input,
         Record::PhysicalInstanceUsage {
-            inst_uid,
+            fevent,
             op_id,
             index_id,
             field_id,
@@ -738,6 +742,7 @@ fn parse_task_wait_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, wait_start) = parse_timestamp(input)?;
     let (input, wait_ready) = parse_timestamp(input)?;
     let (input, wait_end) = parse_timestamp(input)?;
+    let (input, wait_event) = parse_event_id(input)?;
     Ok((
         input,
         Record::TaskWaitInfo {
@@ -747,6 +752,7 @@ fn parse_task_wait_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
             wait_start,
             wait_ready,
             wait_end,
+            wait_event,
         },
     ))
 }
@@ -756,6 +762,7 @@ fn parse_meta_wait_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, wait_start) = parse_timestamp(input)?;
     let (input, wait_ready) = parse_timestamp(input)?;
     let (input, wait_end) = parse_timestamp(input)?;
+    let (input, wait_event) = parse_event_id(input)?;
     Ok((
         input,
         Record::MetaWaitInfo {
@@ -764,6 +771,7 @@ fn parse_meta_wait_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
             wait_start,
             wait_ready,
             wait_end,
+            wait_event,
         },
     ))
 }
@@ -907,8 +915,8 @@ fn parse_copy_inst_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, dst) = parse_mem_id(input)?;
     let (input, src_fid) = parse_field_id(input)?;
     let (input, dst_fid) = parse_field_id(input)?;
-    let (input, src_inst) = parse_inst_uid(input)?;
-    let (input, dst_inst) = parse_inst_uid(input)?;
+    let (input, src_inst) = parse_event_id(input)?;
+    let (input, dst_inst) = parse_event_id(input)?;
     let (input, fevent) = parse_event_id(input)?;
     let (input, num_hops) = le_u32(input)?;
     let (input, indirect) = parse_bool(input)?;
@@ -953,7 +961,7 @@ fn parse_fill_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
 fn parse_fill_inst_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, dst) = parse_mem_id(input)?;
     let (input, fid) = parse_field_id(input)?;
-    let (input, dst_inst) = parse_inst_uid(input)?;
+    let (input, dst_inst) = parse_event_id(input)?;
     let (input, fevent) = parse_event_id(input)?;
     Ok((
         input,
@@ -966,7 +974,7 @@ fn parse_fill_inst_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     ))
 }
 fn parse_inst_timeline(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
-    let (input, inst_uid) = parse_inst_uid(input)?;
+    let (input, fevent) = parse_event_id(input)?;
     let (input, inst_id) = parse_inst_id(input)?;
     let (input, mem_id) = parse_mem_id(input)?;
     let (input, size) = le_u64(input)?;
@@ -978,7 +986,7 @@ fn parse_inst_timeline(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     Ok((
         input,
         Record::InstTimelineInfo {
-            inst_uid,
+            fevent,
             inst_id,
             mem_id,
             size,
@@ -1097,6 +1105,32 @@ fn parse_proftask_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
             stop,
             creator,
             fevent,
+        },
+    ))
+}
+fn parse_backtrace_desc(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
+    let (input, backtrace_id) = parse_backtrace_id(input)?;
+    let (input, backtrace) = parse_string(input)?;
+    Ok((
+        input,
+        Record::BacktraceDesc {
+            backtrace_id,
+            backtrace,
+        },
+    ))
+}
+fn parse_event_wait_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
+    let (input, proc_id) = parse_proc_id(input)?;
+    let (input, fevent) = parse_event_id(input)?;
+    let (input, event) = parse_event_id(input)?;
+    let (input, backtrace_id) = parse_backtrace_id(input)?;
+    Ok((
+        input,
+        Record::EventWaitInfo {
+            proc_id,
+            fevent,
+            event,
+            backtrace_id,
         },
     ))
 }
@@ -1248,6 +1282,8 @@ fn parse<'a>(
     parsers.insert(ids["RuntimeCallInfo"], parse_runtime_call_info);
     parsers.insert(ids["ApplicationCallInfo"], parse_application_call_info);
     parsers.insert(ids["ProfTaskInfo"], parse_proftask_info);
+    parsers.insert(ids["BacktraceDesc"], parse_backtrace_desc);
+    parsers.insert(ids["EventWaitInfo"], parse_event_wait_info);
 
     let mut input = input;
     let mut max_dim = -1;

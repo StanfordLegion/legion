@@ -80,6 +80,8 @@ endif()
 
 project(Legion VERSION ${Legion_VERSION})
 
+include(CMakeDependentOption)
+
 #------------------------------------------------------------------------------#
 # Some boilerplate to setup nice output directories
 #------------------------------------------------------------------------------#
@@ -259,6 +261,28 @@ endif()
 include(CheckFunctionExists)
 
 #------------------------------------------------------------------------------#
+# Documentation options
+#------------------------------------------------------------------------------#
+option(Legion_BUILD_DOCS "Build documentation" OFF)
+cmake_dependent_option(Legion_BUILD_INTERNAL_DOCS "Build documentation" OFF
+                       "Legion_BUILD_DOCS" OFF)
+if (Legion_BUILD_DOCS)
+  find_package(Doxygen REQUIRED)
+  set(DOXYGEN_GENERATE_HTML YES)
+  set(DOXYGEN_EXTRACT_ALL YES)
+  set(DOXYGEN_SEARCH_INCLUDES YES)
+  set(DOXYGEN_ENABLE_PREPROCESSING YES)
+  set(DOXYGEN_RECURSIVE YES)
+  set(DOXYGEN_HTML_HEADER ${CMAKE_CURRENT_SOURCE_DIR}/doxygen/header.html)
+  set(DOXYGEN_HTML_FOOTER ${CMAKE_CURRENT_SOURCE_DIR}/doxygen/footer.html)
+  set(DOXYGEN_HTML_EXTRA_STYLESHEET ${CMAKE_CURRENT_SOURCE_DIR}/doxygen/customdoxygen.css)
+  if (Legion_BUILD_INTERNAL_DOCS)
+    set(DOXYGEN_INTERNAL_DOCS ${Legion_BUILD_INTERNAL_DOCS})
+    set(DOXYGEN_ENABLED_SECTIONS INTERNAL)
+  endif()
+endif()
+
+#------------------------------------------------------------------------------#
 # Minimum log level
 #------------------------------------------------------------------------------#
 set(Legion_OUTPUT_LEVEL "DEBUG" CACHE STRING "Compile time logging level")
@@ -387,7 +411,7 @@ if("${Legion_NETWORKS}" MATCHES ".*gasnet(1|ex).*")
       "https://github.com/StanfordLegion/gasnet.git"
       CACHE STRING "URL for cloning StanfordLegion/gasnet repository")
     set(Legion_EMBED_GASNet_GITREF
-      "034ada74927746e8bfa21d43b527a052118e2def" # master as of 2024-05-28
+      "d7cc06907cc66e2a3f968e19ea17a80650b16a3b" # master as of 2024-07-19
       CACHE STRING "Branch/tag/commit to use from StanfordLegion/gasnet repository")
     set(Legion_EMBED_GASNet_LOCALSRC "" CACHE STRING "Path to local clone of StanfordLegion/gasnet repository")
     set(Legion_EMBED_GASNet_VERSION "" CACHE STRING "Override GASNet version to build")

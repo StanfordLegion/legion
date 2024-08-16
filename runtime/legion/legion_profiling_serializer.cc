@@ -300,7 +300,8 @@ namespace Legion {
          << "variant_id:VariantID:"   << sizeof(VariantID)   << delim
          << "wait_start:timestamp_t:" << sizeof(timestamp_t) << delim
          << "wait_ready:timestamp_t:" << sizeof(timestamp_t) << delim
-         << "wait_end:timestamp_t:"   << sizeof(timestamp_t)
+         << "wait_end:timestamp_t:"   << sizeof(timestamp_t) << delim
+         << "wait_event:unsigned long long:" << sizeof(LgEvent)
          << "}" << std::endl;
 
       ss << "MetaWaitInfo {"
@@ -309,7 +310,8 @@ namespace Legion {
          << "lg_id:unsigned:"         << sizeof(unsigned)    << delim
          << "wait_start:timestamp_t:" << sizeof(timestamp_t) << delim
          << "wait_ready:timestamp_t:" << sizeof(timestamp_t) << delim
-         << "wait_end:timestamp_t:"   << sizeof(timestamp_t)
+         << "wait_end:timestamp_t:"   << sizeof(timestamp_t) << delim
+         << "wait_event:unsigned long long:" << sizeof(LgEvent)
          << "}" << std::endl;
 
       ss << "TaskInfo {"
@@ -467,6 +469,20 @@ namespace Legion {
          << "stop:timestamp_t:"     << sizeof(timestamp_t)     << delim
          << "proc_id:ProcID:"       << sizeof(ProcID)          << delim
          << "fevent:unsigned long long:" << sizeof(LgEvent)
+         << "}" << std::endl;
+
+      ss << "BacktraceDesc {"
+         << "id:" << BACKTRACE_DESC_ID                                       << delim
+         << "backtrace_id:unsigned long long:" << sizeof(unsigned long long) << delim
+         << "backtrace:string:" << "-1"
+         << "}" << std::endl;
+
+      ss << "EventWaitInfo {"
+         << "id:" << EVENT_WAIT_INFO_ID                         << delim
+         << "proc_id:ProcID:" << sizeof(ProcID)                 << delim
+         << "fevent:unsigned long long:" << sizeof(LgEvent)     << delim
+         << "wait_event:unsigned long long:" << sizeof(LgEvent) << delim
+         << "backtrace_id:unsigned long long:" << sizeof(unsigned long long)
          << "}" << std::endl;
 
       ss << "ProfTaskInfo {"
@@ -855,7 +871,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LegionProfBinarySerializer::serialize(
-                                  const LegionProfInstance::TaskKind& task_kind)
+                                  const LegionProfDesc::TaskKind& task_kind)
     //--------------------------------------------------------------------------
     {
       int ID = TASK_KIND_ID;
@@ -867,7 +883,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LegionProfBinarySerializer::serialize(
-                            const LegionProfInstance::TaskVariant& task_variant)
+                            const LegionProfDesc::TaskVariant& task_variant)
     //--------------------------------------------------------------------------
     {
       int ID = TASK_VARIANT_ID;
@@ -932,6 +948,7 @@ namespace Legion {
       lp_fwrite(f, (char*)&(wait_info.wait_start),sizeof(wait_info.wait_start));
       lp_fwrite(f, (char*)&(wait_info.wait_ready),sizeof(wait_info.wait_ready));
       lp_fwrite(f, (char*)&(wait_info.wait_end),  sizeof(wait_info.wait_end));
+      lp_fwrite(f, (char*)&(wait_info.wait_event), sizeof(wait_info.wait_event));
     }
 
     //--------------------------------------------------------------------------
@@ -948,6 +965,7 @@ namespace Legion {
       lp_fwrite(f, (char*)&(wait_info.wait_start),sizeof(wait_info.wait_start));
       lp_fwrite(f, (char*)&(wait_info.wait_ready),sizeof(wait_info.wait_ready));
       lp_fwrite(f, (char*)&(wait_info.wait_end),  sizeof(wait_info.wait_end));
+      lp_fwrite(f, (char*)&(wait_info.wait_event), sizeof(wait_info.wait_event));
     }
 
     //--------------------------------------------------------------------------
@@ -963,6 +981,7 @@ namespace Legion {
       lp_fwrite(f, (char*)&(wait_info.wait_start),sizeof(wait_info.wait_start));
       lp_fwrite(f, (char*)&(wait_info.wait_ready),sizeof(wait_info.wait_ready));
       lp_fwrite(f, (char*)&(wait_info.wait_end),  sizeof(wait_info.wait_end));
+      lp_fwrite(f, (char*)&(wait_info.wait_event), sizeof(wait_info.wait_event));
     }
  
     //--------------------------------------------------------------------------
@@ -1239,7 +1258,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LegionProfBinarySerializer::serialize(
-                                      const LegionProfInstance::ProcDesc& proc_desc)
+                                      const LegionProfDesc::ProcDesc& proc_desc)
     //--------------------------------------------------------------------------
     {
       int ID = PROC_DESC_ID;
@@ -1265,7 +1284,7 @@ namespace Legion {
     }
     //--------------------------------------------------------------------------
     void LegionProfBinarySerializer::serialize(
-                                        const LegionProfInstance::MemDesc& mem_desc)
+                                        const LegionProfDesc::MemDesc& mem_desc)
     //--------------------------------------------------------------------------
     {
       int ID = MEM_DESC_ID;
@@ -1277,7 +1296,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LegionProfBinarySerializer::serialize(
-                                          const LegionProfInstance::ProcMemDesc &pm)
+                                          const LegionProfDesc::ProcMemDesc &pm)
     //--------------------------------------------------------------------------
     {
       int ID = PROC_MEM_DESC_ID;
@@ -1288,6 +1307,29 @@ namespace Legion {
       lp_fwrite(f, (char*) &(pm.latency), sizeof(pm.latency));
     }
 
+    //--------------------------------------------------------------------------
+    void LegionProfBinarySerializer::serialize(
+                                            const LegionProfDesc::Backtrace &bt)
+    //--------------------------------------------------------------------------
+    {
+      int ID = BACKTRACE_DESC_ID;
+      lp_fwrite(f, (char*)&ID, sizeof(ID));
+      lp_fwrite(f, (char*)&bt.id, sizeof(bt.id));
+      lp_fwrite(f, bt.backtrace, strlen(bt.backtrace) + 1);
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfBinarySerializer::serialize(
+                                  const LegionProfInstance::EventWaitInfo &info)
+    //--------------------------------------------------------------------------
+    {
+      int ID = EVENT_WAIT_INFO_ID;
+      lp_fwrite(f, (char*)&ID, sizeof(ID));
+      lp_fwrite(f, (char*)&info.proc_id, sizeof(info.proc_id));
+      lp_fwrite(f, (char*)&info.fevent.id, sizeof(info.fevent.id));
+      lp_fwrite(f, (char*)&info.event.id, sizeof(info.event.id));
+      lp_fwrite(f, (char*)&info.backtrace_id, sizeof(info.backtrace_id));
+    }
 
     //--------------------------------------------------------------------------
     void LegionProfBinarySerializer::serialize(
@@ -1824,7 +1866,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LegionProfASCIISerializer::serialize(
-                                  const LegionProfInstance::TaskKind &task_kind)
+                                  const LegionProfDesc::TaskKind &task_kind)
     //--------------------------------------------------------------------------
     {
       log_prof.print("Prof Task Kind %u %s %d", task_kind.task_id, 
@@ -1833,7 +1875,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LegionProfASCIISerializer::serialize(
-                            const LegionProfInstance::TaskVariant& task_variant)
+                            const LegionProfDesc::TaskVariant& task_variant)
     //--------------------------------------------------------------------------
     {
       log_prof.print("Prof Task Variant %u %u %s", task_variant.task_id,
@@ -1873,9 +1915,10 @@ namespace Legion {
                                   const LegionProfInstance::TaskInfo& task_info)
     //--------------------------------------------------------------------------
     {
-      log_prof.print("Prof Task Wait Info %llu %u %u %llu %llu %llu",
+      log_prof.print("Prof Task Wait Info %llu %u %u %llu %llu %llu " IDFMT,
                 task_info.op_id, task_info.task_id, task_info.variant_id, 
-                wait_info.wait_start, wait_info.wait_ready, wait_info.wait_end);
+                wait_info.wait_start, wait_info.wait_ready,
+                wait_info.wait_end, wait_info.wait_event.id);
     }
 
     //--------------------------------------------------------------------------
@@ -1884,9 +1927,10 @@ namespace Legion {
                               const LegionProfInstance::GPUTaskInfo& task_info)
     //--------------------------------------------------------------------------
     {
-      log_prof.print("Prof Task Wait Info %llu %u %u %llu %llu %llu",
+      log_prof.print("Prof Task Wait Info %llu %u %u %llu %llu %llu " IDFMT,
                 task_info.op_id, task_info.task_id, task_info.variant_id,
-                wait_info.wait_start, wait_info.wait_ready, wait_info.wait_end);
+                wait_info.wait_start, wait_info.wait_ready,
+                wait_info.wait_end, wait_info.wait_event.id);
     }
 
     //--------------------------------------------------------------------------
@@ -1895,9 +1939,10 @@ namespace Legion {
                                   const LegionProfInstance::MetaInfo& meta_info)
     //--------------------------------------------------------------------------
     {
-      log_prof.print("Prof Meta Wait Info %llu %u %llu %llu %llu",
+      log_prof.print("Prof Meta Wait Info %llu %u %llu %llu %llu " IDFMT,
                    meta_info.op_id, meta_info.lg_id, wait_info.wait_start, 
-                   wait_info.wait_ready, wait_info.wait_end);
+                   wait_info.wait_ready, wait_info.wait_end,
+                   wait_info.wait_event.id);
     }
 
     //--------------------------------------------------------------------------
@@ -2068,7 +2113,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LegionProfASCIISerializer::serialize(
-                                 const LegionProfInstance::ProcDesc &proc_desc)
+                                 const LegionProfDesc::ProcDesc &proc_desc)
     //--------------------------------------------------------------------------
     {
       log_prof.print("Prof Proc Desc " IDFMT " %d",
@@ -2087,7 +2132,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LegionProfASCIISerializer::serialize(
-                                   const LegionProfInstance::MemDesc &mem_desc)
+                                   const LegionProfDesc::MemDesc &mem_desc)
     //--------------------------------------------------------------------------
     {
       log_prof.print("Prof Mem Desc " IDFMT " %d %llu",
@@ -2096,11 +2141,28 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LegionProfASCIISerializer::serialize(
-                                    const LegionProfInstance::ProcMemDesc &pm)
+                                    const LegionProfDesc::ProcMemDesc &pm)
     //--------------------------------------------------------------------------
     {
       log_prof.print("Prof Mem Proc Affinity Desc " IDFMT " " IDFMT " %u %u",
 		     pm.proc_id, pm.mem_id, pm.bandwidth, pm.latency);
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfASCIISerializer::serialize(
+                                            const LegionProfDesc::Backtrace &bt)
+    //--------------------------------------------------------------------------
+    {
+      log_prof.print("Prof Backtrace Desc %lld %s", bt.id, bt.backtrace);
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfASCIISerializer::serialize(
+                                  const LegionProfInstance::EventWaitInfo &info)
+    //--------------------------------------------------------------------------
+    {
+      log_prof.print("Prof Event Wait Info " IDFMT " " IDFMT " " IDFMT " %lld",
+          info.proc_id, info.fevent.id, info.event.id, info.backtrace_id);
     }
 
     //--------------------------------------------------------------------------

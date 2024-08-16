@@ -259,6 +259,12 @@ namespace Realm {
 
       void init(Processor _me, int _owner);
 
+      static Processor make_id(const ProcessorGroupImpl &dummy, int owner,
+                               ID::IDType index)
+      {
+        return ID::make_procgroup(owner, 0, index).convert<Processor>();
+      }
+
       void set_group_members(span<const Processor> member_list);
 
       void destroy(void);

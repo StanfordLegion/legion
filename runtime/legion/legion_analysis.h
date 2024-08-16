@@ -3314,7 +3314,7 @@ namespace Legion {
         typedef LegionMap<IndexSpaceExpression*,
                   FieldMaskSet<InstanceView> > ExprInstanceViews;
       public:
-        DeferApplyStateArgs(EquivalenceSet *set, bool forward, bool filter,
+        DeferApplyStateArgs(EquivalenceSet *set, bool forward,
                             std::vector<RtEvent> &applied_events,
                             ExprLogicalViews &valid_updates,
                             FieldMaskSet<IndexSpaceExpression> &init_updates,
@@ -3344,7 +3344,6 @@ namespace Legion {
         std::set<IndexSpaceExpression*> *const expr_references;
         const RtUserEvent done_event;
         const bool forward_to_owner;
-        const bool filter_invalidations;
       };
     public:
       EquivalenceSet(Runtime *rt, DistributedID did,
@@ -3439,8 +3438,9 @@ namespace Legion {
                       IndexSpaceExpression *clone_expr,
                       const bool record_invalidate,
                       std::vector<RtEvent> &applied_events, 
-                      const bool invalidate_overlap,
-                      const bool filter_invalidations);
+                      const bool invalidate_overlap);
+      bool filter_partial_invalidations(const FieldMask &mask, 
+                                        RtUserEvent &filtered);
       void make_owner(RtEvent precondition = RtEvent::NO_RT_EVENT);
     public:
       // View that was read by a task during a trace
@@ -3513,8 +3513,7 @@ namespace Legion {
                                   std::set<RtEvent> &applied_events) const;
       void update_initialized_data(IndexSpaceExpression *expr, 
                                    const bool expr_covers,
-                                   const FieldMask &user_mask,
-                                   bool filter_partial_invalidations = false);
+                                   const FieldMask &user_mask);
       template<typename T>
       void record_instances(IndexSpaceExpression *expr, const bool expr_covers,
                             const FieldMask &record_mask, 
@@ -3684,7 +3683,7 @@ namespace Legion {
             const bool pack_invalidates);
       void unpack_state_and_apply(Deserializer &derez, 
           const AddressSpaceID source, std::vector<RtEvent> &ready_events,
-          const bool forward_to_owner, const bool filter_invalidations);
+          const bool forward_to_owner);
       void invalidate_state(IndexSpaceExpression *expr, const bool expr_covers,
                             const FieldMask &mask, bool record_invalidation);
       void clone_to_local(EquivalenceSet *dst, FieldMask mask,
@@ -3692,15 +3691,13 @@ namespace Legion {
                           std::vector<RtEvent> &applied_events,
                           const bool invalidate_overlap,
                           const bool record_invalidate,
-                          const bool filter_invalidations,
                           const bool need_dst_lock = true);
       void clone_to_remote(DistributedID target, AddressSpaceID target_space,
                     IndexSpaceExpression *target_expr, 
                     IndexSpaceExpression *overlap, FieldMask mask,
                     std::vector<RtEvent> &applied_events,
                     const bool invalidate_overlap,
-                    const bool record_invalidate,
-                    const bool filter_invalidations);
+                    const bool record_invalidate);
       void find_overlap_updates(IndexSpaceExpression *overlap, 
             const bool overlap_covers, const FieldMask &mask,
             const bool find_invalidates, LegionMap<IndexSpaceExpression*,
@@ -3736,7 +3733,7 @@ namespace Legion {
             FieldMaskSet<CopyFillGuard> *reduction_fill_guard_updates,
             std::vector<RtEvent> &applied_events,
             const bool needs_lock, const bool forward_to_owner,
-            const bool unpack_references, const bool filter_invalidations);
+            const bool unpack_references);
       static void pack_updates(Serializer &rez, const AddressSpaceID target,
             const LegionMap<IndexSpaceExpression*,
                 FieldMaskSet<LogicalView> > &valid_updates,
@@ -3775,6 +3772,8 @@ namespace Legion {
                                          AddressSpaceID source);
       static void handle_capture_response(Deserializer &derez, Runtime *runtime,
                                           AddressSpaceID source);
+      static void handle_filter_invalidations(Deserializer &derez,
+                                              Runtime *runtime);
     public:
       // Note this context refers to the context from which the views are
       // created in. Normally this is the same as the context in which the

@@ -37,7 +37,6 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     /*static*/ constexpr std::string_view Provenance::no_provenance;
-    /*static*/ constexpr char Provenance::delimeter;
 
     //--------------------------------------------------------------------------
     Provenance::Provenance(ProvenanceID p, const char *prov)
@@ -70,18 +69,99 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!full.empty());
 #endif
-      const char *prov = full.c_str();
-      unsigned split = 0;
-      while (split < full.size())
+      if (!parse_provenance_parts())
       {
-        if (prov[split] == delimeter)
-          break;
-        split++;
+        // If we have a bracket assume this whole this is a JSON string
+        // and therefore we're going to assume the whole thing is JSON
+        // Otherwise if things don't parse then everything is the just
+        // the human readable string.
+        if (full[0] == '{')
+          machine = std::string_view(full.c_str());
+        else
+          human = std::string_view(full.c_str());
       }
-      if (split > 0)
-        human = std::string_view(prov, split);
-      if ((split+1) < full.size())
-        machine = std::string_view(prov+split+1);
+    }
+
+    //--------------------------------------------------------------------------
+    bool Provenance::parse_provenance_parts(void)
+    //--------------------------------------------------------------------------
+    {
+      {
+        size_t len = full.length();
+
+        // shortest valid input: ["",{}]
+        if (len < 7)
+          return false;
+
+        // must start with: ["
+        if (full[0] != '[' || full[1] != '"')
+          return false;
+
+        // must end with: }]
+        if (full[len-2] != '}' || full[len-1] != ']')
+          return false;
+      }
+
+      unsigned human_size = 0;
+      bool human_closed = false;
+      std::string::iterator it = full.begin()+2;
+      for (; it != full.end(); it++) {
+        if (*it == '\\') {
+          // Remove the escape character
+          it = full.erase(it);
+          if (it == full.end())
+            return false;
+          switch (*it) {
+            case '"':
+            case '\\':
+            case '/':
+              break;
+            case 'b':
+              *it = '\b';
+              break;
+            case 'f':
+              *it = '\f';
+              break;
+            case 'n':
+              *it = '\n';
+              break;
+            case 'r':
+              *it = '\r';
+              break;
+            case 't':
+              *it = '\t';
+              break;
+            case 'u':
+              return false; // Unicode is unsupported
+            default:
+              return false; // Bad escape
+          }
+          human_size++;
+        } else if (*it == '"') {
+          human_closed = true;
+          break;
+        } else
+          human_size++;
+      }
+
+      if (!human_closed)
+        return false;
+
+      human = std::string_view(full.c_str()+2, human_size);
+
+      for (; it != full.end(); it++) {
+        if (*it == '{') {
+          size_t offset = std::distance(full.begin(), it);
+          // Start from our current offset and go to the
+          // end but don't include the closing ']'
+          machine = std::string_view(full.c_str()+offset,
+              full.length() - (offset+1));
+          return true;
+        }
+      }
+
+      // machine part never opened
+      return false;
     }
 
     //--------------------------------------------------------------------------
@@ -1452,8 +1532,8 @@ namespace Legion {
                                               inst_event);
           }
         }
-        if ((runtime->profiler != NULL) && !manager->is_virtual_manager())
-          runtime->profiler->record_physical_instance_use(inst_event,
+        if ((implicit_profiler != NULL) && !manager->is_virtual_manager())
+          implicit_profiler->register_physical_instance_use(inst_event,
                                       unique_op_id, index, valid_fields);
       }
     }
@@ -1504,8 +1584,8 @@ namespace Legion {
           LegionSpy::log_operation_provenance(unique_op_id,
                                               prov->human_str());
       }
-      if (runtime->profiler != NULL)
-        runtime->profiler->register_operation(this);
+      if (implicit_profiler != NULL)
+        implicit_profiler->register_operation(this);
     }
 
     //--------------------------------------------------------------------------
@@ -20023,11 +20103,11 @@ namespace Legion {
       ready_event = ApEvent(PhysicalInstance::create_external_instance(
             result, external_resource->suggested_memory(), ilg, 
             *external_resource, requests));
-      if (runtime->profiler != NULL)
+      if (implicit_profiler != NULL)
       {
-        runtime->profiler->record_physical_instance_region(unique_event,
+        implicit_profiler->register_physical_instance_region(unique_event,
                                                            requirement.region);
-        runtime->profiler->record_physical_instance_layout(unique_event,
+        implicit_profiler->register_physical_instance_layout(unique_event,
             requirement.region.field_space, layout_constraint_set);
       }
       // Check to see if this instance is local or whether we need

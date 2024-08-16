@@ -83,13 +83,11 @@ namespace Legion {
 
     thread_local TaskContext *implicit_context = NULL;
     thread_local Runtime *implicit_runtime = NULL;
+    thread_local LegionProfInstance *implicit_profiler = NULL;
     thread_local AutoLock *local_lock_list = NULL;
     thread_local UniqueID implicit_provenance = 0;
     thread_local unsigned inside_registration_callback=NO_REGISTRATION_CALLBACK;
     thread_local ImplicitReferenceTracker *implicit_reference_tracker = NULL;
-#ifdef DEBUG_LEGION_WAITS
-    thread_local int meta_task_id = -1;
-#endif
 #ifdef DEBUG_LEGION_CALLERS
     thread_local LgTaskID implicit_task_kind = LG_SCHEDULER_ID;
     thread_local LgTaskID implicit_task_caller = LG_SCHEDULER_ID;
@@ -109,14 +107,22 @@ namespace Legion {
     void LgEvent::begin_context_wait(Context ctx, bool from_application) const
     //--------------------------------------------------------------------------
     {
-      ctx->begin_wait(from_application);
+      ctx->begin_wait(*this, from_application);
     }
 
     //--------------------------------------------------------------------------
     void LgEvent::end_context_wait(Context ctx, bool from_application) const
     //--------------------------------------------------------------------------
     {
-      ctx->end_wait(from_application);
+      ctx->end_wait(*this, from_application);
+    }
+
+    //--------------------------------------------------------------------------
+    void LgEvent::record_event_wait(LegionProfInstance *profiler,
+                                    Realm::Backtrace &bt) const
+    //--------------------------------------------------------------------------
+    {
+      profiler->record_event_wait(*this, bt);
     }
 
     /////////////////////////////////////////////////////////////
@@ -11616,7 +11622,7 @@ namespace Legion {
     VirtualChannel::VirtualChannel(VirtualChannelKind kind, 
         AddressSpaceID local_address_space, size_t max_message_size, 
         bool profile_outgoing)
-      : sending_buffer((char*)malloc(max_message_size)), 
+      : sending_buffer((uint8_t*)malloc(max_message_size)), 
         sending_buffer_size(max_message_size), 
         ordered_channel((kind != DEFAULT_VIRTUAL_CHANNEL) &&
                         (kind != THROUGHPUT_VIRTUAL_CHANNEL)), 
@@ -11632,7 +11638,7 @@ namespace Legion {
     //
     {
       receiving_buffer_size = max_message_size;
-      receiving_buffer = (char*)legion_malloc(MESSAGE_BUFFER_ALLOC,
+      receiving_buffer = (uint8_t*)legion_malloc(MESSAGE_BUFFER_ALLOC,
                                               receiving_buffer_size);
 #ifdef DEBUG_LEGION
       assert(sending_buffer != NULL);
@@ -11643,21 +11649,22 @@ namespace Legion {
       // expects this before the task ID. We'll actually have individual
       // implicit provenances that will override this when handling the
       // messages so we can just set this to zero.
-      *((UniqueID*)sending_buffer) = 0;
+      memset(sending_buffer, 0, sizeof(UniqueID));
       sending_index = sizeof(UniqueID);
 #ifdef DEBUG_LEGION_CALLERS
-      *((LgTaskID*)(((char*)sending_buffer)+sending_index)) = LG_SCHEDULER_ID;
-      sending_index += sizeof(LgTaskID);
+      const LgTaskID scheduler = LG_SCHEDULER_ID;
+      memcpy(sending_buffer+sending_index, &sched, sizeof(scheduler));
+      sending_index += sizeof(scheduler);
 #endif
       // Set up the buffer for sending the first batch of messages
       // Only need to write the processor once
-      *((LgTaskID*)(((char*)sending_buffer)+sending_index))= LG_MESSAGE_ID;
-      sending_index += sizeof(LgTaskID);
-      *((AddressSpaceID*)
-          (((char*)sending_buffer)+sending_index)) = local_address_space;
+      const LgTaskID message = LG_MESSAGE_ID;
+      memcpy(sending_buffer+sending_index, &message, sizeof(message));
+      sending_index += sizeof(message);
+      memcpy(sending_buffer+sending_index, &local_address_space,
+          sizeof(local_address_space));
       sending_index += sizeof(local_address_space);
-      *((VirtualChannelKind*)
-          (((char*)sending_buffer)+sending_index)) = kind;
+      memcpy(sending_buffer+sending_index, &kind, sizeof(kind));
       sending_index += sizeof(kind);
       header = FULL_MESSAGE;
       sending_index += sizeof(header);
@@ -11700,7 +11707,7 @@ namespace Legion {
     void VirtualChannel::package_message(Serializer &rez, MessageKind k,
                          bool flush, RtEvent flush_precondition,
                          Runtime *runtime, Processor target, 
-                         bool response, bool shutdown)
+                         bool response)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -11709,7 +11716,7 @@ namespace Legion {
       // First check to see if the message fits in the current buffer    
       // including the overhead for the message: kind and size
       size_t buffer_size = rez.get_used_bytes();
-      const char *buffer = (const char*)rez.get_buffer();
+      const uint8_t *buffer = (const uint8_t*)rez.get_buffer();
       const size_t header_size = 
 #ifdef DEBUG_LEGION_CALLERS
         sizeof(LgTaskID) +
@@ -11723,25 +11730,27 @@ namespace Legion {
         // Since there is no partial data we can fake the flush
         if ((sending_buffer_size - sending_index) <= header_size)
           send_message(true/*complete*/, runtime, target, k,
-                       response, shutdown, flush_precondition);
+                       response, flush_precondition);
         // Now can package up the meta data
         packaged_messages++;
-        *((MessageKind*)(sending_buffer+sending_index)) = k;
+        memcpy(sending_buffer+sending_index, &k, sizeof(k));
         sending_index += sizeof(k);
-        *((UniqueID*)(sending_buffer+sending_index)) = implicit_provenance;
+        memcpy(sending_buffer+sending_index, &implicit_provenance,
+            sizeof(implicit_provenance));
         sending_index += sizeof(implicit_provenance);
 #ifdef DEBUG_LEGION_CALLERS
-        *((LgTaskID*)(sending_buffer+sending_index)) = implicit_task_kind;
+        memcpy(sending_buffer+sending_index, &implicit_task_kind,
+            sizeof(implicit_task_kind));
         sending_index += sizeof(implicit_task_kind);
 #endif
-        *((size_t*)(sending_buffer+sending_index)) = buffer_size;
+        memcpy(sending_buffer+sending_index, &buffer_size, sizeof(buffer_size));
         sending_index += sizeof(buffer_size);
         while (buffer_size > 0)
         {
           unsigned remaining = sending_buffer_size - sending_index;
           if (remaining == 0)
             send_message(false/*complete*/, runtime, target, k,
-                         response, shutdown, flush_precondition);
+                         response, flush_precondition);
           remaining = sending_buffer_size - sending_index;
 #ifdef DEBUG_LEGION
           assert(remaining > 0); // should be space after the send
@@ -11759,15 +11768,17 @@ namespace Legion {
       {
         packaged_messages++;
         // Package up the kind and the size first
-        *((MessageKind*)(sending_buffer+sending_index)) = k;
+        memcpy(sending_buffer+sending_index, &k, sizeof(k));
         sending_index += sizeof(k);
-        *((UniqueID*)(sending_buffer+sending_index)) = implicit_provenance;
+        memcpy(sending_buffer+sending_index, &implicit_provenance, 
+            sizeof(implicit_provenance));
         sending_index += sizeof(implicit_provenance);
 #ifdef DEBUG_LEGION_CALLERS
-        *((LgTaskID*)(sending_buffer+sending_index)) = implicit_task_kind;
+        memcpy(sending_buffer+sending_index, &implicit_task_kind,
+            sizeof(implicit_task_kind));
         sending_index += sizeof(implicit_task_kind);
 #endif
-        *((size_t*)(sending_buffer+sending_index)) = buffer_size;
+        memcpy(sending_buffer+sending_index, &buffer_size, sizeof(buffer_size));
         sending_index += sizeof(buffer_size);
         // Then copy over the buffer
         memcpy(sending_buffer+sending_index,buffer,buffer_size); 
@@ -11775,14 +11786,13 @@ namespace Legion {
       }
       if (flush)
         send_message(true/*complete*/, runtime, target, k, 
-                     response, shutdown, flush_precondition);
+                     response, flush_precondition);
     }
 
     //--------------------------------------------------------------------------
     void VirtualChannel::send_message(bool complete, Runtime *runtime,
                                       Processor target, MessageKind kind,
-                                      bool response, bool shutdown,
-                                      RtEvent send_precondition)
+                                      bool response, RtEvent send_precondition)
     //--------------------------------------------------------------------------
     {
       // See if we need to switch the header file
@@ -11820,16 +11830,14 @@ namespace Legion {
         sizeof(LgTaskID) +
 #endif
         sizeof(AddressSpaceID) + sizeof(VirtualChannelKind);
-      *((MessageHeader*)(sending_buffer + base_size)) = header;
-      *((unsigned*)(sending_buffer + base_size + sizeof(header))) = 
-                                                            packaged_messages;
+      memcpy(sending_buffer + base_size, &header, sizeof(header));
+      memcpy(sending_buffer + base_size + sizeof(header), &packaged_messages,
+            sizeof(packaged_messages));
       // Send the message directly there, don't go through the
       // runtime interface to avoid being counted, still include
       // a profiling request though if necessary in order to 
       // see waits on message handlers
-      // Note that we don't profile on shutdown messages or we would 
-      // never actually finish running
-      if (profile_outgoing_messages && !shutdown)
+      if (profile_outgoing_messages)
       {
         Realm::ProfilingRequestSet requests;
         LegionProfiler::add_message_request(requests, kind, target);
@@ -12028,11 +12036,13 @@ namespace Legion {
 #endif
       // Strip off our header and the number of messages, the 
       // processor part was already stipped off by the Legion runtime
-      const char *buffer = (const char*)args;
-      MessageHeader head = *((const MessageHeader*)buffer);
+      const uint8_t *buffer = (const uint8_t*)args;
+      MessageHeader head; 
+      memcpy(&head, buffer, sizeof(head));
       buffer += sizeof(head);
       arglen -= sizeof(head);
-      unsigned num_messages = *((const unsigned*)buffer);
+      unsigned num_messages;
+      memcpy(&num_messages, buffer, sizeof(num_messages));
       buffer += sizeof(num_messages);
       arglen -= sizeof(num_messages);
       unsigned incoming_message_id = 0;
@@ -12046,21 +12056,8 @@ namespace Legion {
         case FULL_MESSAGE:
           {
             // Can handle these messages directly
-            if (handle_messages(num_messages, runtime, 
-                                remote_address_space, buffer, arglen) &&
-                // If we had a shutdown message and a profiler then we
-                // shouldn't have incremented the outstanding profiling
-                // count because we don't actually do profiling requests
-                // on any shutdown messages
-                (profiler != NULL))
-            {
-#ifdef DEBUG_LEGION
-              profiler->decrement_total_outstanding_requests(
-                          LegionProfiler::LEGION_PROF_MESSAGE);
-#else
-              profiler->decrement_total_outstanding_requests();
-#endif
-            }
+            handle_messages(num_messages, runtime, 
+                            remote_address_space, buffer, arglen);
             break;
           }
         case PARTIAL_MESSAGE:
@@ -12080,7 +12077,7 @@ namespace Legion {
                 // Same as max message size
                 message.size = sending_buffer_size;
                 message.buffer = 
-                  (char*)legion_malloc(MESSAGE_BUFFER_ALLOC, message.size);
+                  (uint8_t*)legion_malloc(MESSAGE_BUFFER_ALLOC, message.size);
               }
               buffer_messages(num_messages, buffer, arglen,
                               message.buffer, message.size,
@@ -12097,9 +12094,9 @@ namespace Legion {
           {
             // Save the remaining messages onto the receiving
             // buffer, then handle them and reset the state.
-            char *final_buffer = NULL;
+            uint8_t *final_buffer = NULL;
             size_t final_index = 0;
-            unsigned final_messages = 0, final_total = 0;
+            unsigned final_messages = 0;
             bool free_buffer = false;
             if (!ordered_channel)
             {
@@ -12120,7 +12117,6 @@ namespace Legion {
               final_index = finder->second.index;
               final_buffer = finder->second.buffer;
               final_messages = finder->second.messages;
-              final_total = finder->second.total;
               free_buffer = true;
               partial_assembly->erase(finder);
             }
@@ -12132,26 +12128,12 @@ namespace Legion {
               final_index = receiving_index;
               final_buffer = receiving_buffer;
               final_messages = received_messages;
-              final_total = partial_messages;
               receiving_index = 0;
               received_messages = 0;
               partial_messages = 0;
             }
-            if (handle_messages(final_messages, runtime, remote_address_space,
-                                final_buffer, final_index) &&
-                // If we had a shutdown message and a profiler then we
-                // shouldn't have incremented the outstanding profiling
-                // count because we don't actually do profiling requests
-                // on any shutdown messages
-                (profiler != NULL))
-            {
-#ifdef DEBUG_LEGION
-              profiler->decrement_total_outstanding_requests(
-                          LegionProfiler::LEGION_PROF_MESSAGE, final_total);
-#else
-              profiler->decrement_total_outstanding_requests(final_total);
-#endif
-            }
+            handle_messages(final_messages, runtime, remote_address_space,
+                                final_buffer, final_index);
             if (free_buffer)
               free(final_buffer);
             break;
@@ -12162,36 +12144,38 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool VirtualChannel::handle_messages(unsigned num_messages,
+    void VirtualChannel::handle_messages(unsigned num_messages,
                                          Runtime *runtime,
                                          AddressSpaceID remote_address_space,
-                                         const char *args, size_t arglen) const
+                                         const uint8_t *args,
+                                         size_t arglen) const
     //--------------------------------------------------------------------------
     {
-      bool has_shutdown = false;
       for (unsigned idx = 0; idx < num_messages; idx++)
       {
         // Pull off the message kind and the size of the message
 #ifdef DEBUG_LEGION
         assert(arglen >= (sizeof(MessageKind)+sizeof(size_t)));
 #endif
-        MessageKind kind = *((const MessageKind*)args);
+        MessageKind kind;
+        memcpy(&kind, args, sizeof(kind));
         // Any message that is not a shutdown message needs to be recorded
         if (!observed_recent && (kind != SEND_SHUTDOWN_NOTIFICATION) &&
             (kind != SEND_SHUTDOWN_RESPONSE))
           observed_recent = true;
         args += sizeof(kind);
         arglen -= sizeof(kind);
-        implicit_provenance = *((const UniqueID*)args);
+        memcpy(&implicit_provenance, args, sizeof(implicit_provenance));
         args += sizeof(implicit_provenance);
         arglen -= sizeof(implicit_provenance);
 #ifdef DEBUG_LEGION_CALLERS
         implicit_task_kind = (LgTaskID)(LG_MESSAGE_ID + kind);
-        implicit_task_caller = *((const LgTaskID*)args);
+        memcpy(&implicit_task_caller, args, sizeof(implicit_task_caller));
         args += sizeof(implicit_task_caller);
         arglen -= sizeof(implicit_task_caller);
 #endif
-        size_t message_size = *((const size_t*)args);
+        size_t message_size;
+        memcpy(&message_size, args, sizeof(message_size));
         args += sizeof(message_size);
         arglen -= sizeof(message_size);
 #ifdef DEBUG_LEGION
@@ -13393,6 +13377,11 @@ namespace Legion {
               runtime->handle_equivalence_set_remote_instances(derez);
               break;
             }
+          case SEND_EQUIVALENCE_SET_FILTER_INVALIDATIONS:
+            {
+              runtime->handle_equivalence_set_filter_invalidations(derez);
+              break;
+            }
           case SEND_INSTANCE_REQUEST:
             {
               runtime->handle_instance_request(derez, remote_address_space);
@@ -13747,19 +13736,11 @@ namespace Legion {
             }
           case SEND_SHUTDOWN_NOTIFICATION:
             {
-#ifdef DEBUG_LEGION
-              assert(!has_shutdown); // should only be one per message
-#endif
-              has_shutdown = true; 
               runtime->handle_shutdown_notification(derez,remote_address_space);
               break;
             }
           case SEND_SHUTDOWN_RESPONSE:
             {
-#ifdef DEBUG_LEGION
-              assert(!has_shutdown); // should only be one per message
-#endif
-              has_shutdown = true;
               runtime->handle_shutdown_response(derez);
               break;
             }
@@ -13773,13 +13754,12 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(arglen == 0); // make sure we processed everything
 #endif
-      return has_shutdown;
     }
 
     //--------------------------------------------------------------------------
     /*static*/ void VirtualChannel::buffer_messages(unsigned num_messages,
                                          const void *args, size_t arglen,
-                                         char *&receiving_buffer,
+                                         uint8_t *&receiving_buffer,
                                          size_t &receiving_buffer_size,
                                          size_t &receiving_index,
                                          unsigned &received_messages,
@@ -13806,7 +13786,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(new_ptr != NULL);
 #endif
-        receiving_buffer = (char*)new_ptr;
+        receiving_buffer = (uint8_t*)new_ptr;
       }
       // Copy the data in
       memcpy(receiving_buffer+receiving_index,args,arglen);
@@ -13870,7 +13850,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void MessageManager::send_message(MessageKind message, Serializer &rez,
-        bool flush, bool response, bool shutdown, RtEvent flush_precondition)
+        bool flush, bool response, RtEvent flush_precondition)
     //--------------------------------------------------------------------------
     {
       // Always flush for the profiler if we're doing that
@@ -13878,7 +13858,7 @@ namespace Legion {
         flush = true;
       const VirtualChannelKind channel = find_message_vc(message);
       channels[channel].package_message(rez, message, flush, flush_precondition,
-                                        runtime, target, response, shutdown);
+                                        runtime, target, response);
     }
 
     //--------------------------------------------------------------------------
@@ -16997,6 +16977,7 @@ namespace Legion {
         verify_partitions(config.verify_partitions),
         runtime_warnings(config.runtime_warnings),
         warnings_backtrace(config.warnings_backtrace),
+        warnings_are_errors(config.warnings_are_errors),
         report_leaks(config.report_leaks),
         separate_runtime_instances(config.separate_runtime_instances),
         record_registration(config.record_registration),
@@ -17210,6 +17191,7 @@ namespace Legion {
         verify_partitions(rhs.verify_partitions),
         runtime_warnings(rhs.runtime_warnings),
         warnings_backtrace(rhs.warnings_backtrace),
+        warnings_are_errors(rhs.warnings_are_errors),
         report_leaks(rhs.report_leaks),
         separate_runtime_instances(rhs.separate_runtime_instances),
         record_registration(rhs.record_registration),
@@ -17564,6 +17546,13 @@ namespace Legion {
       // run on any processor that has a dedicated core which is either any
       // CPU processor a utility processor. There's no need to use GPU or
       // I/O processors since they share the same cores as the utility cores. 
+      // In the future we can relax this to use any processor core that doesn't
+      // support multiple threads executing concurrently (e.g. I/O procs) as
+      // that could lead to a lot of profiling instances being made since this
+      // will clear the implicit_profiler if we're not self-profiling and then
+      // we'll have to make new instances in 
+      // LegionProfiler::find_or_create_profiling_instance the next time we
+      // go to profile anything on that processor.
       std::vector<Processor> prof_procs(local_utils.begin(), local_utils.end());
       for (std::set<Processor>::const_iterator it = local_procs.begin();
             it != local_procs.end(); it++)
@@ -21645,7 +21634,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(SEND_INDEX_SPACE_RETURN, rez,
-                      true/*flush*/, true/*response*/, false/*shutdown*/);
+                      true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -21774,7 +21763,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(SEND_INDEX_PARTITION_RETURN, rez,
-                        true/*flush*/, true/*response*/, false/*shutdown*/);
+                        true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -21811,7 +21800,7 @@ namespace Legion {
     {
       find_messenger(target)->send_message(
         SEND_INDEX_PARTITION_DISJOINT_UPDATE, rez, true/*flush*/, 
-            true/*response*/, false/*shutdown*/, precondition); 
+            true/*response*/, precondition);
     }
 
     //--------------------------------------------------------------------------
@@ -23574,6 +23563,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_equivalence_set_filter_invalidations(
+        AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(
+          SEND_EQUIVALENCE_SET_FILTER_INVALIDATIONS, rez, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_instance_request(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -24075,7 +24073,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(SEND_SHUTDOWN_NOTIFICATION, rez,
-                        true/*flush*/, false/*response*/, true/*shutdown*/);
+                        true/*flush*/, false/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -24083,7 +24081,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(SEND_SHUTDOWN_RESPONSE, rez,
-                        true/*flush*/, false/*response*/, true/*shutdown*/);
+                        true/*flush*/, false/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -26020,6 +26018,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       PhysicalAnalysis::handle_remote_instances(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_equivalence_set_filter_invalidations(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      EquivalenceSet::handle_filter_invalidations(derez, this);
     }
 
     //--------------------------------------------------------------------------
@@ -30614,6 +30620,7 @@ namespace Legion {
       cp.add_option_bool("-lg:warn_backtrace",
                          config.warnings_backtrace, !filter)
         .add_option_bool("-lg:warn", config.runtime_warnings, !filter)
+        .add_option_bool("-lg:werror", config.warnings_are_errors, !filter)
         .add_option_bool("-lg:leaks", config.report_leaks, !filter)
         .add_option_bool("-lg:separate",
                          config.separate_runtime_instances, !filter)
@@ -30949,6 +30956,8 @@ namespace Legion {
       // Save the context in the implicit context
       implicit_context = top_context;
       implicit_runtime = this;
+      if ((profiler != NULL) && (implicit_profiler == NULL))
+        implicit_profiler = profiler->find_or_create_profiling_instance();
       // Add a reference to the top level context
       top_context->add_base_gc_ref(RUNTIME_REF);
       // Get an individual task to be the top-level task
@@ -31132,8 +31141,9 @@ namespace Legion {
             "Illegal call to unbind a context for task %s (UID %lld) that "
             "is not an implicit top-level task",
             ctx->get_task_name(), ctx->get_unique_id())
-      ctx->begin_wait(true/*from application*/);
+      ctx->begin_wait(LgEvent::NO_LG_EVENT, true/*from application*/);
       implicit_context = NULL;
+      implicit_profiler = NULL;
     }
 
     //--------------------------------------------------------------------------
@@ -31145,8 +31155,11 @@ namespace Legion {
             "Illegal call to bind a context for task %s (UID %lld) that "
             "is not an implicit top-level task",
             ctx->get_task_name(), ctx->get_unique_id())
-      ctx->end_wait(true/*from application*/);
-      implicit_runtime = this;
+      ctx->end_wait(LgEvent::NO_LG_EVENT, true/*from application*/);
+      if (implicit_runtime == NULL)
+        implicit_runtime = this;
+      if ((profiler != NULL) && (implicit_profiler == NULL))
+        implicit_profiler = profiler->find_or_create_profiling_instance();
       implicit_context = ctx;
       implicit_provenance = ctx->owner_task->get_unique_op_id();
     }
@@ -31165,6 +31178,7 @@ namespace Legion {
           NULL/*callback functor*/, NULL/*resource*/,  NULL/*freefunc*/,
           NULL/*metadataptr*/, 0/*metadatasize*/, effects);
       implicit_context = NULL;
+      implicit_profiler = NULL;
     }
 
     //--------------------------------------------------------------------------
@@ -32348,9 +32362,10 @@ namespace Legion {
         bt.lookup_symbols();
         log_run.warning() << bt;
       }
-#ifdef LEGION_WARNINGS_FATAL
-      abort();
+#ifndef LEGION_WARNINGS_FATAL
+      if (the_runtime->warnings_are_errors)
 #endif
+        abort();
     }
 
     //--------------------------------------------------------------------------
@@ -32366,6 +32381,8 @@ namespace Legion {
         implicit_runtime = runtime;
       if (implicit_context != NULL)
         implicit_context = NULL;
+      // We don't profile this task
+      implicit_profiler = NULL;
       // Finalize the runtime and then delete it
       std::vector<RtEvent> shutdown_events;
       runtime->finalize_runtime(shutdown_events);
@@ -32402,6 +32419,9 @@ namespace Legion {
         implicit_runtime = runtime;
       if (implicit_context != NULL)
         implicit_context = NULL;
+      if ((runtime->profiler != NULL) && (implicit_profiler == NULL))
+        implicit_profiler = 
+          runtime->profiler->find_or_create_profiling_instance();
       // We immediately bump the priority of all meta-tasks once they start
       // up to the highest level to ensure that they drain once they begin
       Processor::set_current_task_priority(LG_RUNNING_PRIORITY);
@@ -32415,9 +32435,6 @@ namespace Legion {
       arglen -= sizeof(implicit_task_caller);
 #endif
       LgTaskID tid = *((const LgTaskID*)data);
-#ifdef DEBUG_LEGION_WAITS
-      meta_task_id = tid;
-#endif
 #ifdef DEBUG_LEGION_CALLERS
       implicit_task_kind = tid;
 #endif
@@ -32949,6 +32966,12 @@ namespace Legion {
         implicit_runtime = runtime;
       if (implicit_context != NULL)
         implicit_context = NULL;
+      // Only profile this if we're doing self profiling
+      if ((runtime->profiler == NULL) || !runtime->profiler->self_profile)
+        implicit_profiler = NULL;
+      else if (implicit_profiler == NULL)
+        implicit_profiler = 
+          runtime->profiler->find_or_create_profiling_instance();
       Realm::ProfilingResponse response(args, arglen);
       const ProfilingResponseBase *base = 
         (const ProfilingResponseBase*)response.user_data();
@@ -33009,6 +33032,8 @@ namespace Legion {
         implicit_runtime = runtime;
       if (implicit_context != NULL)
         implicit_context = NULL;
+      // We don't profile this task
+      implicit_profiler = NULL;
       // Create the startup barrier and send it out
       RtBarrier startup_barrier(
         Realm::Barrier::create_barrier(runtime->total_address_spaces));
@@ -33031,6 +33056,8 @@ namespace Legion {
         implicit_runtime = runtime;
       if (implicit_context != NULL)
         implicit_context = NULL;
+      // We don't profile this task
+      implicit_profiler = NULL;
       runtime->handle_endpoint_creation(derez);
     }
 
@@ -33050,6 +33077,9 @@ namespace Legion {
         implicit_runtime = runtime;
       if (implicit_context != NULL)
         implicit_context = NULL;
+      if ((runtime->profiler != NULL) && (implicit_profiler == NULL))
+        implicit_profiler =
+          runtime->profiler->find_or_create_profiling_instance();
       // We immediately bump the priority of all meta-tasks once they start
       // up to the highest level to ensure that they drain once they begin
       Processor::set_current_task_priority(LG_RUNNING_PRIORITY);

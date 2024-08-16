@@ -4477,7 +4477,8 @@ namespace Legion {
     void ReplDependentPartitionOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      DependentPartitionOp::activate();
+      ReplCollectiveViewCreator<CollectiveViewCreator<
+        DependentPartitionOp> >::activate();
       sharding_function = NULL;
       shard_points = NULL;
       gather = NULL;
@@ -4494,7 +4495,8 @@ namespace Legion {
     void ReplDependentPartitionOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      DependentPartitionOp::deactivate(false/*free*/);
+      ReplCollectiveViewCreator<CollectiveViewCreator<
+        DependentPartitionOp> >::deactivate(false/*free*/);
       if (gather != NULL)
         delete gather;
       if (scatter != NULL)
@@ -6868,11 +6870,11 @@ namespace Legion {
               *external_resource, requests));
         if (single_broadcast != NULL)
           single_broadcast->broadcast({instance, ready_event, unique_event});
-        if (runtime->profiler != NULL)
+        if (implicit_profiler != NULL)
         {
-          runtime->profiler->record_physical_instance_region(unique_event,
+          implicit_profiler->register_physical_instance_region(unique_event,
                                                       requirement.region);
-          runtime->profiler->record_physical_instance_layout(unique_event,
+          implicit_profiler->register_physical_instance_layout(unique_event,
               requirement.region.field_space, layout_constraint_set);
         }
       }

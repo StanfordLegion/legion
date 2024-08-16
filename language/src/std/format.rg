@@ -288,7 +288,7 @@ format.fprint = regentlib.macro(
     local args = terralib.newlist({...})
     local format_str, format_args = format_arguments("fprintln", msg, args)
 
-    return rexpr regentlib.c.fprintf(stream, format_str, format_args) end
+    return rexpr fprintf_once(stream, format_str, format_args) end
   end)
 
 --- Print formatted string to stream (with automatic newline).
@@ -300,7 +300,7 @@ format.fprintln = regentlib.macro(
     local args = terralib.newlist({...})
     local format_str, format_args = format_arguments("fprintln", msg, args)
 
-    return rexpr regentlib.c.fprintf(stream, [format_str .. "\n"], format_args) end
+    return rexpr fprintf_once(stream, [format_str .. "\n"], format_args) end
   end)
 
 --- Print formatted string to buffer (no automatic newline).

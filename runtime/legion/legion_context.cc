@@ -49,13 +49,13 @@ namespace Legion {
       : DistributedCollectable(rt, id, perform_registration, mapping),
         owner_task(owner), regions(reqs), output_reqs(out_reqs), depth(d),
         executing_processor(Processor::NO_PROC), inlined_tasks(0),
-        overhead_profiler(NULL), implicit_profiler(NULL), task_executed(false),
-        mutable_priority(false), inline_task(inline_t),
+        overhead_profiler(NULL), implicit_task_profiler(NULL), 
+        task_executed(false), mutable_priority(false), inline_task(inline_t),
         implicit_task(implicit_t)
     //--------------------------------------------------------------------------
     {
       if (implicit_task && (runtime->profiler != NULL))
-        implicit_profiler = new ImplicitProfiler();
+        implicit_task_profiler = new ImplicitTaskProfiler();
     }
 
     //--------------------------------------------------------------------------
@@ -76,8 +76,8 @@ namespace Legion {
       }
       if (overhead_profiler != NULL)
         delete overhead_profiler;
-      if (implicit_profiler != NULL)
-        delete implicit_profiler;
+      if (implicit_task_profiler != NULL)
+        delete implicit_task_profiler;
     }
 
     //--------------------------------------------------------------------------
@@ -537,13 +537,16 @@ namespace Legion {
     {
       if (implicit_runtime == NULL)
         implicit_runtime = this->runtime;
+      if ((runtime->profiler != NULL) && (implicit_profiler == NULL))
+        implicit_profiler = 
+          runtime->profiler->find_or_create_profiling_instance();
       implicit_context = this;
       implicit_provenance = owner_task->get_unique_op_id();
       if (overhead_profiler != NULL)
         overhead_profiler->previous_profiling_time = 
           Realm::Clock::current_time_in_nanoseconds();
-      if (implicit_profiler != NULL)
-        implicit_profiler->start_time = 
+      if (implicit_task_profiler != NULL)
+        implicit_task_profiler->start_time = 
           Realm::Clock::current_time_in_nanoseconds();
       if (Processor::get_executing_processor().exists())
         realm_done_event = ApEvent(Processor::get_current_finish_event());
@@ -927,7 +930,7 @@ namespace Legion {
         REPORT_LEGION_ERROR(ERROR_MISSING_PROFILING_PROVENANCE,
             "Missing provenance string for application profiling range "
             "in task %s (UID %lld)", get_task_name(), get_unique_id())
-      if (runtime->profiler != NULL)
+      if (implicit_profiler != NULL)
       {
         Provenance *provenance = 
           runtime->find_or_create_provenance(prov, strlen(prov));
@@ -937,7 +940,7 @@ namespace Legion {
               "without a corresponding start call in task %s (UID %lld) at %s",
               get_task_name(), get_unique_id(), provenance->human_str())
         const long long stop = Realm::Clock::current_time_in_nanoseconds();
-        runtime->profiler->record_application_range(provenance->pid,
+        implicit_profiler->record_application_range(provenance->pid,
             user_profiling_ranges.back(), stop);
         user_profiling_ranges.pop_back();
         if (provenance->remove_reference())
@@ -11870,13 +11873,13 @@ namespace Legion {
           InnerContext::destroy_index_space(it->second, false/*unordered*/, 
               true/*recurse*/, NULL/*provenance*/);
       } 
-      if (implicit_profiler != NULL)
+      if (implicit_task_profiler != NULL)
       {
         const long long stop = Realm::Clock::current_time_in_nanoseconds();
         // log this with the profiler 
-        runtime->profiler->record_implicit(get_unique_id(), owner_task->task_id,
-            executing_processor, implicit_profiler->start_time, stop,
-            implicit_profiler->waits, owner_task->get_completion_event());
+        implicit_profiler->process_implicit(get_unique_id(),owner_task->task_id,
+            executing_processor, implicit_task_profiler->start_time, stop,
+            implicit_task_profiler->waits, owner_task->get_completion_event());
       }
       // See if there are any runtime warnings to issue
       if (runtime->runtime_warnings)
