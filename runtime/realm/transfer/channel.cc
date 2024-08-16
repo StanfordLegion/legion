@@ -2192,129 +2192,125 @@ namespace Realm {
   void XferDes::begin_completion()
   {
 #ifdef DEBUG_REALM
-      // shouldn't be called more than once
-      assert(!iteration_completed.load());
+    // shouldn't be called more than once
+    assert(!iteration_completed.load());
 #endif
-      iteration_completed.store_release(true);
+    iteration_completed.store_release(true);
 
-      // give all output channels a chance to indicate completion and determine
-      //  the total number of bytes we've written
-      size_t total_bytes_written = 0;
-      for(size_t i = 0; i < output_ports.size(); i++) {
-        total_bytes_written += output_ports[i].local_bytes_cons.load();
-        update_bytes_write(i, output_ports[i].local_bytes_total, 0);
+    // give all output channels a chance to indicate completion and determine
+    //  the total number of bytes we've written
+    size_t total_bytes_written = 0;
+    for(size_t i = 0; i < output_ports.size(); i++) {
+      total_bytes_written += output_ports[i].local_bytes_cons.load();
+      update_bytes_write(i, output_ports[i].local_bytes_total, 0);
 
-        // see if we still need to send the total bytes
-        if(output_ports[i].needs_pbt_update.load() &&
-           (output_ports[i].local_bytes_total == output_ports[i].local_bytes_cons.load())) {
- #ifdef DEBUG_REALM
-          assert(output_ports[i].peer_guid != XFERDES_NO_GUID);
+      // see if we still need to send the total bytes
+      if(output_ports[i].needs_pbt_update.load() &&
+         (output_ports[i].local_bytes_total == output_ports[i].local_bytes_cons.load())) {
+#ifdef DEBUG_REALM
+        assert(output_ports[i].peer_guid != XFERDES_NO_GUID);
 #endif
-          // exchange sets the flag to false and tells us previous value
-          if(output_ports[i].needs_pbt_update.exchange(false))
-            xferDes_queue->update_pre_bytes_total(output_ports[i].peer_guid,
-                                                  output_ports[i].peer_port_idx,
-                                                  output_ports[i].local_bytes_total);
-        }
+        // exchange sets the flag to false and tells us previous value
+        if(output_ports[i].needs_pbt_update.exchange(false))
+          xferDes_queue->update_pre_bytes_total(output_ports[i].peer_guid,
+                                                output_ports[i].peer_port_idx,
+                                                output_ports[i].local_bytes_total);
       }
-
-      // bytes pending is total minus however many writes have already
-      //  finished - if that's all of them, we can mark full transfer completion
-      int64_t prev = bytes_write_pending.fetch_add(total_bytes_written);
-      int64_t pending = prev + total_bytes_written;
-      log_xd.info() << "completion: xd=" << std::hex << guid << std::dec
-                    << " total_bytes=" << total_bytes_written << " pending=" << pending;
-      assert(pending >= 0);
-      if(pending == 0)
-        transfer_completed.store_release(true);
     }
 
-      void XferDes::update_bytes_read(int port_idx, size_t offset, size_t size)
-      {
-	XferPort *in_port = &input_ports[port_idx];
-	size_t inc_amt = in_port->seq_local.add_span(offset, size);
-	log_xd.info() << "bytes_read: " << std::hex << guid << std::dec
-		      << "(" << port_idx << ") " << offset << "+" << size << " -> " << inc_amt;
-	if(in_port->peer_guid != XFERDES_NO_GUID) {
-	  if(inc_amt > 0) {
-	    // we're actually telling the previous XD which offsets are ok to
-	    //  overwrite, so adjust our offset by our (circular) IB size
-            xferDes_queue->update_next_bytes_read(in_port->peer_guid,
-						  in_port->peer_port_idx,
-						  offset + in_port->ib_size,
-						  inc_amt);
-	  } else {
-	    // TODO: mode to send non-contiguous updates?
-	  }
-	}
+    // bytes pending is total minus however many writes have already
+    //  finished - if that's all of them, we can mark full transfer completion
+    int64_t prev = bytes_write_pending.fetch_add(total_bytes_written);
+    int64_t pending = prev + total_bytes_written;
+    log_xd.info() << "completion: xd=" << std::hex << guid << std::dec
+                  << " total_bytes=" << total_bytes_written << " pending=" << pending;
+    assert(pending >= 0);
+    if(pending == 0)
+      transfer_completed.store_release(true);
+  }
+
+  void XferDes::update_bytes_read(int port_idx, size_t offset, size_t size)
+  {
+    XferPort *in_port = &input_ports[port_idx];
+    size_t inc_amt = in_port->seq_local.add_span(offset, size);
+    log_xd.info() << "bytes_read: " << std::hex << guid << std::dec << "(" << port_idx
+                  << ") " << offset << "+" << size << " -> " << inc_amt;
+    if(in_port->peer_guid != XFERDES_NO_GUID) {
+      if(inc_amt > 0) {
+        // we're actually telling the previous XD which offsets are ok to
+        //  overwrite, so adjust our offset by our (circular) IB size
+        xferDes_queue->update_next_bytes_read(in_port->peer_guid, in_port->peer_port_idx,
+                                              offset + in_port->ib_size, inc_amt);
+      } else {
+        // TODO: mode to send non-contiguous updates?
       }
+    }
+  }
 
-      void XferDes::update_bytes_write(int port_idx, size_t offset, size_t size)
-      {
-	XferPort *out_port = &output_ports[port_idx];
-	size_t inc_amt = out_port->seq_local.add_span(offset, size);
-	log_xd.info() << "bytes_write: " << std::hex << guid << std::dec
-		      << "(" << port_idx << ") " << offset << "+" << size << " -> " << inc_amt;
+  void XferDes::update_bytes_write(int port_idx, size_t offset, size_t size)
+  {
+    XferPort *out_port = &output_ports[port_idx];
+    size_t inc_amt = out_port->seq_local.add_span(offset, size);
+    log_xd.info() << "bytes_write: " << std::hex << guid << std::dec << "(" << port_idx
+                  << ") " << offset << "+" << size << " -> " << inc_amt;
 
-	if(out_port->peer_guid != XFERDES_NO_GUID) {
-	  // update bytes total if needed (and available)
-	  if(out_port->needs_pbt_update.load() &&
-	     iteration_completed.load_acquire() &&
-             (out_port->local_bytes_total == out_port->local_bytes_cons.load())) {
-	    // exchange sets the flag to false and tells us previous value
-	    if(out_port->needs_pbt_update.exchange(false))
-	      xferDes_queue->update_pre_bytes_total(out_port->peer_guid,
-						    out_port->peer_port_idx,
-						    out_port->local_bytes_total);
-	  }
-	  // we can skip an update if this was empty
-	  if(inc_amt > 0) {
-            xferDes_queue->update_pre_bytes_write(out_port->peer_guid,
-						  out_port->peer_port_idx,
-						  offset,
-						  inc_amt);
-	  } else {
-	    // TODO: mode to send non-contiguous updates?
-	  }
-	}
-
-        // subtract bytes written from the pending count - if that causes it to
-        //  go to zero, we can mark the transfer completed and update progress
-        //  in case the xd is just waiting for that
-        // NOTE: as soon as we set `transfer_completed`, the other references
-        //  to this xd may be removed, so do this last, and hold a reference of
-        //  our own long enough to call update_progress
-        if(inc_amt > 0) {
-          int64_t prev = bytes_write_pending.fetch_sub(inc_amt);
-          if(prev > 0)
-            log_xd.info() << "completion: xd=" << std::hex << guid << std::dec
-                          << " remaining=" << (prev - inc_amt);
-          if(inc_amt == static_cast<size_t>(prev)) {
-            add_reference();
-            transfer_completed.store_release(true);
-            update_progress();
-            remove_reference();
-          }
-        }
+    if(out_port->peer_guid != XFERDES_NO_GUID) {
+      // update bytes total if needed (and available)
+      if(out_port->needs_pbt_update.load() && iteration_completed.load_acquire() &&
+         (out_port->local_bytes_total == out_port->local_bytes_cons.load())) {
+        // exchange sets the flag to false and tells us previous value
+        if(out_port->needs_pbt_update.exchange(false))
+          xferDes_queue->update_pre_bytes_total(
+              out_port->peer_guid, out_port->peer_port_idx, out_port->local_bytes_total);
       }
-
-      void XferDes::update_pre_bytes_write(int port_idx, size_t offset, size_t size)
-      {
-	XferPort *in_port = &input_ports[port_idx];
-
-	size_t inc_amt = in_port->seq_remote.add_span(offset, size);
-	log_xd.info() << "pre_write: " << std::hex << guid << std::dec
-		      << "(" << port_idx << ") " << offset << "+" << size << " -> " << inc_amt << " (" << in_port->remote_bytes_total.load() << ")";
-	// if we got new data at the current pointer OR if we now know the
-	//  total incoming bytes, update progress
-	if(inc_amt > 0) update_progress();
+      // we can skip an update if this was empty
+      if(inc_amt > 0) {
+        xferDes_queue->update_pre_bytes_write(out_port->peer_guid,
+                                              out_port->peer_port_idx, offset, inc_amt);
+      } else {
+        // TODO: mode to send non-contiguous updates?
       }
+    }
 
-      void XferDes::update_pre_bytes_total(int port_idx, size_t pre_bytes_total)
-      {
-	XferPort *in_port = &input_ports[port_idx];
+    // subtract bytes written from the pending count - if that causes it to
+    //  go to zero, we can mark the transfer completed and update progress
+    //  in case the xd is just waiting for that
+    // NOTE: as soon as we set `transfer_completed`, the other references
+    //  to this xd may be removed, so do this last, and hold a reference of
+    //  our own long enough to call update_progress
+    if(inc_amt > 0) {
+      int64_t prev = bytes_write_pending.fetch_sub(inc_amt);
+      if(prev > 0)
+        log_xd.info() << "completion: xd=" << std::hex << guid << std::dec
+                      << " remaining=" << (prev - inc_amt);
+      if(inc_amt == static_cast<size_t>(prev)) {
+        add_reference();
+        transfer_completed.store_release(true);
+        update_progress();
+        remove_reference();
+      }
+    }
+  }
 
-	// should always be exchanging -1 -> (not -1)
+  void XferDes::update_pre_bytes_write(int port_idx, size_t offset, size_t size)
+  {
+    XferPort *in_port = &input_ports[port_idx];
+
+    size_t inc_amt = in_port->seq_remote.add_span(offset, size);
+    log_xd.info() << "pre_write: " << std::hex << guid << std::dec << "(" << port_idx
+                  << ") " << offset << "+" << size << " -> " << inc_amt << " ("
+                  << in_port->remote_bytes_total.load() << ")";
+    // if we got new data at the current pointer OR if we now know the
+    //  total incoming bytes, update progress
+    if(inc_amt > 0)
+      update_progress();
+  }
+
+  void XferDes::update_pre_bytes_total(int port_idx, size_t pre_bytes_total)
+  {
+    XferPort *in_port = &input_ports[port_idx];
+
+    // should always be exchanging -1 -> (not -1)
 #ifdef DEBUG_REALM
 	size_t oldval =
 #endif
