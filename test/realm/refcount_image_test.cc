@@ -44,10 +44,10 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
         std::vector<IndexSpace<1>>{std::begin(task_args.sources),
                                    std::end(task_args.sources)},
         images, ProfilingRequestSet());
-    e2.wait();
     for(size_t i = 0; i < images.size(); i++) {
-      images[i].destroy();
+      images[i].destroy(e2);
     }
+    e2.wait();
   }
 
   {
@@ -59,10 +59,10 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
         std::vector<FieldDataDescriptor<IndexSpace<1>, Point<1>>>{
             std::begin(task_args.ptr_data), std::end(task_args.ptr_data)},
         sources, sources, images, ProfilingRequestSet());
-    e2.wait();
     for(size_t i = 0; i < images.size(); i++) {
-      images[i].destroy();
+      images[i].destroy(e2);
     }
+    e2.wait();
   }
 }
 
