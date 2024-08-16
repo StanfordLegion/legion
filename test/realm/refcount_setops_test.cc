@@ -52,8 +52,8 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
                                             ProfilingRequestSet());
     assert(!result.dense());
     assert(result.sparsity == is0.sparsity);
-    result.sparsity.destroy(e2);
-    is0.sparsity.destroy(e2);
+    result.destroy(e2);
+    is0.destroy(e2);
     events.push_back(e2);
   }
 
@@ -75,8 +75,8 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
     Event e2 = IndexSpace<1>::compute_union(std::vector<IndexSpace<1>>{is0, is1}, result,
                                             ProfilingRequestSet());
     assert(!result.dense());
-    result.sparsity.destroy(e2);
-    is0.sparsity.destroy(e2);
+    result.destroy(e2);
+    is0.destroy(e2);
     events.push_back(e2);
   }
 
@@ -93,7 +93,7 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
         std::vector<IndexSpace<1>>{IndexSpace<1>(rects0), IndexSpace<1>(rects1)}, result,
         ProfilingRequestSet());
     assert(!result.dense());
-    result.sparsity.destroy(e2);
+    result.destroy(e2);
     events.push_back(e2);
   }
 
@@ -114,7 +114,7 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
     Event e2 = IndexSpace<1>::compute_intersection(std::vector<IndexSpace<1>>{is0, is1},
                                                    result, ProfilingRequestSet());
     assert(result.sparsity == is1.sparsity);
-    result.sparsity.destroy(e2);
+    result.destroy(e2);
     events.push_back(e2);
   }
 
@@ -134,8 +134,8 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
     assert(result.sparsity.exists());
     assert(result.sparsity == is1.sparsity);
 
-    result.sparsity.destroy(e2);
-    is1.sparsity.destroy(e2);
+    result.destroy(e2);
+    is1.destroy(e2);
     events.push_back(e2);
   }
 
@@ -162,9 +162,9 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
     assert(result.sparsity != is1.sparsity);
     assert(result.sparsity.exists());
 
-    result.sparsity.destroy(e2);
-    is0.sparsity.destroy(e2);
-    is1.sparsity.destroy(e2);
+    result.destroy(e2);
+    is0.destroy(e2);
+    is1.destroy(e2);
     events.push_back(e2);
   }
 
@@ -206,9 +206,9 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
                                                   std::vector<IndexSpace<1>>{is1},
                                                   results, ProfilingRequestSet());
     for(size_t i = 0; i < results.size(); i++) {
-      results[i].sparsity.destroy(e2);
+      results[i].destroy(e2);
     }
-    is0.sparsity.destroy(e2);
+    is0.destroy(e2);
     events.push_back(e2);
   }
 
@@ -230,7 +230,7 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
     Event e2 = IndexSpace<1>::compute_union(std::vector<IndexSpace<1>>{is0, is1}, result,
                                             ProfilingRequestSet());
     assert(result.dense());
-    is1.sparsity.destroy(e2);
+    is1.destroy(e2);
     events.push_back(e2);
   }
 
@@ -246,7 +246,7 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
         results, ProfilingRequestSet());
     for(size_t i = 0; i < results.size(); i++) {
       if(results[i].sparsity.exists()) {
-        results[i].sparsity.destroy(e2);
+        results[i].destroy(e2);
       }
     }
     events.push_back(e2);
@@ -262,7 +262,7 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
                                    std::end(task_args.lhs[case_id])},
         rhs, results, ProfilingRequestSet());
     for(size_t i = 0; i < results.size(); i++) {
-      results[i].sparsity.destroy(e2);
+      results[i].destroy(e2);
     }
     events.push_back(e2);
   }
@@ -278,7 +278,7 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
                                    std::end(task_args.lhs[case_id])},
         results, ProfilingRequestSet());
     for(size_t i = 0; i < results.size(); i++) {
-      results[i].sparsity.destroy(e2);
+      results[i].destroy(e2);
     }
     events.push_back(e2);
   }
@@ -294,7 +294,7 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
                                    std::end(task_args.lhs[case_id])},
         results, ProfilingRequestSet());
     for(size_t i = 0; i < results.size(); i++) {
-      results[i].sparsity.destroy(e2);
+      results[i].destroy(e2);
     }
     events.push_back(e2);
   }
@@ -312,7 +312,7 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
         rhs, results, ProfilingRequestSet());
     for(size_t i = 0; i < results.size(); i++) {
       if(results[i].sparsity.exists()) {
-        results[i].sparsity.destroy(e2);
+        results[i].destroy(e2);
       }
     }
     events.push_back(e2);
@@ -332,7 +332,7 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
         results, ProfilingRequestSet());
     for(size_t i = 0; i < results.size(); i++) {
       if(results[i].sparsity.exists()) {
-        results[i].sparsity.destroy(e2);
+        results[i].destroy(e2);
       }
     }
     events.push_back(e2);
@@ -351,7 +351,7 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
         results, ProfilingRequestSet());
     for(size_t i = 0; i < results.size(); i++) {
       if(results[i].sparsity.exists()) {
-        results[i].sparsity.destroy(e2);
+        results[i].destroy(e2);
       }
     }
     events.push_back(e2);
@@ -370,7 +370,7 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
                                    std::end(task_args.rhs[case_id])},
         results, ProfilingRequestSet());
     for(size_t i = 0; i < results.size(); i++) {
-      results[i].sparsity.destroy(e2);
+      results[i].destroy(e2);
     }
     events.push_back(e2);
   }
@@ -386,7 +386,7 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
                                    std::end(task_args.lhs[case_id])},
         results, ProfilingRequestSet());
     for(size_t i = 0; i < results.size(); i++) {
-      results[i].sparsity.destroy(e2);
+      results[i].destroy(e2);
     }
     events.push_back(e2);
   }
@@ -404,7 +404,7 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
         results, ProfilingRequestSet());
     for(size_t i = 0; i < results.size(); i++) {
       if(results[i].sparsity.exists()) {
-        results[i].sparsity.destroy(e2);
+        results[i].destroy(e2);
       }
     }
     events.push_back(e2);
@@ -479,7 +479,7 @@ void main_task(const void *args, size_t arglen, const void *userdata, size_t use
 
     for(size_t i = 0; i < roots.size(); i++) {
       assert(roots[i].sparsity.exists());
-      roots[i].sparsity.destroy();
+      roots[i].destroy();
     }
   }
 
