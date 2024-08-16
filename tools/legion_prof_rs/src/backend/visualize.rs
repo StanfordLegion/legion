@@ -356,10 +356,15 @@ impl Proc {
         let level = max(self.max_levels(device), 1);
 
         Ok(ProcessorRecord {
-            full_text: format!("{:?}{} Processor 0x{:x}", self.kind, suffix, self.proc_id),
+            full_text: format!(
+                "{:?}{} Processor 0x{:x}",
+                self.kind.unwrap(),
+                suffix,
+                self.proc_id
+            ),
             text: format!(
                 "{:?}{} Proc {}",
-                self.kind,
+                self.kind.unwrap(),
                 suffix,
                 self.proc_id.proc_in_node(),
             ),
@@ -1110,7 +1115,8 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
             let provenance = op.provenance.and_then(|pid| state.find_provenance(pid));
             if let Some(proc_id) = state.tasks.get(op_id) {
                 let proc = state.procs.get(proc_id).unwrap();
-                let proc_full_text = format!("{:?} Processor 0x{:x}", proc.kind, proc.proc_id);
+                let proc_full_text =
+                    format!("{:?} Processor 0x{:x}", proc.kind.unwrap(), proc.proc_id);
                 let task = proc.find_task(*op_id).unwrap();
                 let (task_id, variant_id) = match task.kind {
                     ProcEntryKind::Task(task_id, variant_id) => (task_id, variant_id),
