@@ -8615,8 +8615,6 @@ namespace Legion {
         profiling_info.clear();
       }
 #ifdef POINT_WISE_LOGICAL_ANALYSIS
-      //parent_ctx->
-      //    mark_context_index_inactive(get_context_index());
       pending_point_wise_dependences.clear();
       prev_index_tasks.clear();
       next_index_tasks.clear();
@@ -9279,9 +9277,6 @@ namespace Legion {
           TaskOp::log_requirement(unique_op_id, idx, logical_regions[idx]);
         runtime->forest->log_launch_space(launch_space->handle, unique_op_id);
       }
-#ifdef POINT_WISE_LOGICAL_ANALYSIS
-      //parent_ctx->mark_context_index_active(get_context_index());
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -9478,11 +9473,6 @@ namespace Legion {
                                        launch_space,
                                        func,
                                        shard_space);
-
-#ifdef POINT_WISE_LOGICAL_ANALYSIS
-        PointWiseLogicalAnalysis point_wise_logical_analysis(i);
-        logical_analysis.point_wise_analyses.push_back(point_wise_logical_analysis);
-#endif
 
         runtime->forest->perform_dependence_analysis(this,
                                                      i,
@@ -10348,6 +10338,12 @@ namespace Legion {
       return false;
     }
 
+    bool IndexTask::prev_point_wise_user_set(unsigned region_req_idx)
+    {
+      return prev_index_tasks.find(region_req_idx)
+          != prev_index_tasks.end();
+    }
+
     bool IndexTask::set_prev_point_wise_user(const LogicalUser *user,
         const LogicalUser *prev)
     {
@@ -10373,9 +10369,8 @@ namespace Legion {
 
       if (user->gen < gen) return false;
 
-      if (completed_points > 0)
+      if (!completed_point_list.empty())
       {
-        printf("==========!!!!!!   COMPLEX CASE   !!!!!!=========\n");
         for(std::vector<DomainPoint>::iterator it =
             completed_point_list.begin(); it !=
             completed_point_list.end(); it++)

@@ -1416,6 +1416,7 @@ namespace Legion {
       bool set_next_point_wise_user(const LogicalUser *user,
           const LogicalUser *next);
       bool add_point_to_completed_list(DomainPoint point);
+      bool prev_point_wise_user_set(unsigned region_req_idx);
     protected:
       std::map<LogicalRegion,RtUserEvent> pending_point_wise_dependences;
       std::vector<DomainPoint> completed_point_list;

@@ -1940,7 +1940,7 @@ namespace Legion {
                                                  RtEvent point_mapped)
     //--------------------------------------------------------------------------
     {
-      printf("Record point-wise dependece ctx_id: %ld SHARD: %d\n", get_context_index(), parent_ctx->get_task()->get_shard_id());
+      //printf("Record point-wise dependece ctx_id: %ld SHARD: %d\n", get_context_index(), parent_ctx->get_task()->get_shard_id());
 #ifdef DEBUG_LEGION
       assert(sharding_function != NULL);
       ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
@@ -1989,7 +1989,7 @@ namespace Legion {
         unsigned region_idx, GenerationID gen)
     //--------------------------------------------------------------------------
     {
-      printf("Find point-wise dependece ctx_id: %ld SHARD: %d\n", get_context_index(), parent_ctx->get_task()->get_shard_id());
+      //printf("Find point-wise dependece ctx_id: %ld SHARD: %d\n", get_context_index(), parent_ctx->get_task()->get_shard_id());
       AutoLock o_lock(op_lock);
       if (gen < get_generation()) return RtUserEvent::NO_RT_USER_EVENT;
 

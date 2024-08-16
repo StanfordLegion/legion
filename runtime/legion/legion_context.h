@@ -1601,8 +1601,6 @@ namespace Legion {
       void finish_frame(FrameOp *frame);
 #ifdef POINT_WISE_LOGICAL_ANALYSIS
     public:
-      void mark_context_index_active(uint64_t context_index);
-      void mark_context_index_inactive(uint64_t context_index);
       void record_point_wise_dependence(uint64_t context_index,
           LogicalRegion lr, RtEvent point_mapped, ShardID next_shard);
       void handle_point_wise_dependence(Deserializer &derez);
@@ -2004,7 +2002,6 @@ namespace Legion {
     protected:
       mutable LocalLock point_wise_lock;
       std::map<std::pair<uint64_t,LogicalRegion>,PointWiseDeps> point_wise_deps;
-      std::map<uint64_t, std::vector<LogicalRegion>> alive_context_indexes;
 #endif
     protected:
       // Dependence tracking information for phase barriers

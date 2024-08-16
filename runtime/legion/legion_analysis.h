@@ -1447,18 +1447,6 @@ namespace Legion {
     typedef DynamicTableAllocator<LogicalState,10,8> LogicalStateAllocator;
 
 #ifdef POINT_WISE_LOGICAL_ANALYSIS
-    struct PointWiseLogicalAnalysis : public LegionHeapify<PointWiseLogicalAnalysis> {
-      public:
-        PointWiseLogicalAnalysis(unsigned idx)
-          : req_idx(idx) { }
-      public:
-        const unsigned req_idx;
-        // At this point if there are multiple ancestors we bail.
-        LogicalUser *ancestor = NULL;
-        ProjectionSummary *proj_summary;
-        bool has_interfering_sibling = false;
-      };
-
     struct PointWisePreviousIndexTaskInfo : public LegionHeapify<PointWisePreviousIndexTaskInfo> {
       public:
         PointWisePreviousIndexTaskInfo(IndexSpaceNode *domain, ProjectionFunction *projection,
@@ -1497,7 +1485,6 @@ namespace Legion {
     class LogicalAnalysis {
 #ifdef POINT_WISE_LOGICAL_ANALYSIS
     public:
-      std::vector<PointWiseLogicalAnalysis> point_wise_analyses;
       bool bail_point_wise_analysis = true;
 #endif
     public:

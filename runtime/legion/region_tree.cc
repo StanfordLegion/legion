@@ -16292,7 +16292,6 @@ namespace Legion {
                                           path_node, analysis, still_open);
 #ifdef POINT_WISE_LOGICAL_ANALYSIS
             analysis.bail_point_wise_analysis = true;
-            analysis.point_wise_analyses.back().has_interfering_sibling = true;
 #endif
             if (!!still_open)
             {
@@ -16340,7 +16339,6 @@ namespace Legion {
                                              path_node, analysis, child_fields);
 #ifdef POINT_WISE_LOGICAL_ANALYSIS
               analysis.bail_point_wise_analysis = true;
-              analysis.point_wise_analyses.back().has_interfering_sibling = true;
 #endif
               if (!!child_fields)
               {
@@ -16377,7 +16375,6 @@ namespace Legion {
                                         path_node, analysis, still_open);
 #ifdef POINT_WISE_LOGICAL_ANALYSIS
           analysis.bail_point_wise_analysis = true;
-          analysis.point_wise_analyses.back().has_interfering_sibling = true;
 #endif
           if (!!still_open)
           {
@@ -16584,7 +16581,8 @@ namespace Legion {
 #ifdef POINT_WISE_LOGICAL_ANALYSIS
                   if (prev.shard_proj != NULL && user.shard_proj != NULL)
                   {
-                    if (logical_analysis.point_wise_analyses.back().ancestor != NULL)
+                    if (static_cast<IndexTask*>(user.op)->
+                        prev_point_wise_user_set(user.idx))
                     {
                       // We bail if we have more than one ancestor for now
                       logical_analysis.bail_point_wise_analysis = true;
@@ -16609,8 +16607,7 @@ namespace Legion {
                           if (static_cast<IndexTask*>(prev.op)->set_next_point_wise_user(
                               &prev, &user))
                           {
-                            printf("FOUND PROPER ANCESTOR: %d\n", context->runtime->address_space);
-                            logical_analysis.point_wise_analyses.back().ancestor = &prev;
+                            printf("FOUND POINT-WISE ANCESTOR: %d\n", context->runtime->address_space);
                             static_cast<IndexTask*>(user.op)->set_prev_point_wise_user(
                                 &user, &prev);
                           }
