@@ -1213,6 +1213,17 @@ namespace Legion {
         // Check to see if we still need to participate in the premap_task call
         if (must_epoch == NULL)
           premap_task();
+        // Still need to participate in any collective mappings
+        if (concurrent_task || !check_collective_regions.empty())
+        {
+          collective_exchange =
+            new AllReduceCollective<MaxReduction<uint64_t>,false>(
+                repl_ctx, collective_exchange_id);
+          collective_exchange->async_all_reduce(collective_lamport_clock);
+          AutoLock o_lock(op_lock);
+          commit_preconditions.insert(
+              collective_exchange->get_done_event());
+        }
         // Still need to participate in any collective view rendezvous
         if (!collective_view_rendezvous.empty())
           shard_off_collective_rendezvous(commit_preconditions);
@@ -1400,14 +1411,9 @@ namespace Legion {
                                   sharding_space);
       if (concurrent_task || !check_collective_regions.empty())
       {
-        const CollectiveID max_id = repl_ctx->get_next_collective_index(
+        // Create the collective exchange ID in case we need it
+        collective_exchange_id = repl_ctx->get_next_collective_index(
             COLLECTIVE_LOC_68, true/*logical*/);
-        // Make the collective allreduce for unbounded memory pools
-        collective_exchange =
-          new AllReduceCollective<MaxReduction<uint64_t>,false>(
-              repl_ctx, max_id);
-        // Make sure these are always done before committing
-        commit_preconditions.insert(collective_exchange->get_done_event());
         // Generate any collective view rendezvous that we will need
         for (std::vector<unsigned>::const_iterator it =
               check_collective_regions.begin(); it !=
@@ -1855,7 +1861,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(collective_exchange != NULL);
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
       {
         AutoLock o_lock(op_lock);
@@ -1869,6 +1878,10 @@ namespace Legion {
         {
           if (need_result)
           {
+            if (collective_exchange == NULL)
+              collective_exchange =
+                new AllReduceCollective<MaxReduction<uint64_t>,false>(
+                    repl_ctx, collective_exchange_id);
             o_lock.release();
             collective_exchange->get_done_event().wait();
             return collective_exchange->get_result();
@@ -1877,6 +1890,14 @@ namespace Legion {
             return collective_lamport_clock; 
         }
         // Otherwise we're going to fall through and do the allreduce
+        if (collective_exchange == NULL)
+        {
+          collective_exchange =
+              new AllReduceCollective<MaxReduction<uint64_t>,false>(
+                  repl_ctx, collective_exchange_id);
+          commit_preconditions.insert(
+                collective_exchange->get_done_event());
+        }
       }
       collective_exchange->async_all_reduce(collective_lamport_clock);
       if (need_result)

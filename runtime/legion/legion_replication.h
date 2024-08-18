@@ -2060,6 +2060,8 @@ namespace Legion {
       ConcurrentMappingRendezvous *concurrent_mapping_rendezvous;
       ConcurrentAllreduce *concurrent_exchange;
       CollectiveID concurrent_exchange_id;
+    protected:
+      CollectiveID collective_exchange_id;
       AllReduceCollective<MaxReduction<uint64_t>,false> *collective_exchange;
 #ifdef DEBUG_LEGION
     public:
