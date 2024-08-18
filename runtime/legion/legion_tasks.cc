@@ -804,29 +804,37 @@ namespace Legion {
                                 parent_ctx->get_unique_id(), 
                                 get_task_name(), get_unique_id())
       }
-      if (!options.check_collective_regions.empty() && is_index_space)
+      if (is_index_space)
       {
-        for (std::set<unsigned>::const_iterator it =
-              options.check_collective_regions.begin(); it !=
-              options.check_collective_regions.end(); it++)
+        if (!options.check_collective_regions.empty())
         {
-          if ((*it) >= regions.size())
-            continue;
-          const RegionRequirement &req = regions[*it];
-          if (IS_NO_ACCESS(req) || req.privilege_fields.empty())
-            continue;
-          if (IS_WRITE(req))
-            REPORT_LEGION_WARNING(LEGION_WARNING_WRITE_PRIVILEGE_COLLECTIVE,
-                "Ignoring request by mapper %s to check for collective usage "
-                "for region requirement %d of task %s (UID %lld) because "
-                "region requirement has writing privileges.",
-                mapper->get_mapper_name(), *it, 
-                get_task_name(), unique_op_id)
-          else
-            check_collective_regions.push_back(*it);
+          for (std::set<unsigned>::const_iterator it =
+                options.check_collective_regions.begin(); it !=
+                options.check_collective_regions.end(); it++)
+          {
+            if ((*it) >= regions.size())
+              continue;
+            const RegionRequirement &req = regions[*it];
+            if (IS_NO_ACCESS(req) || req.privilege_fields.empty())
+              continue;
+            if (IS_WRITE(req))
+              REPORT_LEGION_WARNING(LEGION_WARNING_WRITE_PRIVILEGE_COLLECTIVE,
+                  "Ignoring request by mapper %s to check for collective usage "
+                  "for region requirement %d of task %s (UID %lld) because "
+                  "region requirement has writing privileges.",
+                  mapper->get_mapper_name(), *it, 
+                  get_task_name(), unique_op_id)
+            else
+              check_collective_regions.push_back(*it);
+          }
         }
+        for (unsigned idx = 0; idx < regions.size(); idx++)
+          if (IS_COLLECTIVE(regions[idx]))
+            check_collective_regions.push_back(idx);
         if (!check_collective_regions.empty())
         {
+          std::sort(check_collective_regions.begin(),
+                    check_collective_regions.end());
           // Check to make sure that there are no invertible projection functors
           // in this index space launch on writing requirements which might
           // cause point tasks to be interfering. If there are then we can't
@@ -4673,7 +4681,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (dynamic_pool_bounds.empty() && variant->leaf_pool_bounds.empty())
+      {
+        // If we're a concurrent task or a collectively mapped task then we
+        // still need to participate in the max-allreduce for allocating
+        // unbounded pools
+        if (concurrent_task || !check_collective_regions.empty())
+          order_collectively_mapped_unbounded_pools(0, false/*need result*/);
         return;
+      }
       // Fill in the dynamic pool bounds with the static versions
       for (std::map<Memory::Kind,PoolBounds>::const_iterator it =
             variant->leaf_pool_bounds.begin(); it !=
@@ -4839,9 +4854,71 @@ namespace Legion {
           dynamic_pool_bounds.emplace(std::make_pair(target, it->second));
         }
       }
+      // If we're a concurrent task or a collectively mapped task then we
+      // need to go through and get lamport clocks for all the memories in
+      // which we're planning to allocate unbounded pools to make sure that
+      // our concurrent/collective mapped task is ordered with respect to
+      // any other that are also trying to map in parallel with us
+      RtEvent wait_for_unbounded_allocations;
+      std::vector<MemoryManager*> unbounded_pools;
+      if (concurrent_task || !check_collective_regions.empty())
+      {
+        uint64_t max_lamport_clock = 0;
+        for (std::map<Memory,PoolBounds>::const_iterator it =
+              dynamic_pool_bounds.begin(); it != 
+              dynamic_pool_bounds.end(); it++)
+        {
+          if (it->second.is_bounded())
+            continue;
+          MemoryManager *manager = runtime->find_memory_manager(it->first);
+          // We might want to relax this restriction in the future to allow 
+          // tasks to make deferred buffers on memories that are "remote" 
+          // from where they are executing
+          if (it->first.address_space() != target_proc.address_space())
+            REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
+                  "%s memory " IDFMT " is not visible from the target processor"
+                  " of task %s (UID %lld) for creating dynamic memory pool.", 
+                  manager->get_name(), it->first.id, get_task_name(),
+                  get_unique_id());
+          unbounded_pools.push_back(manager);
+          uint64_t lamport_clock = 
+            manager->order_collective_unbounded_pools(this);
+          if (max_lamport_clock < lamport_clock)
+            max_lamport_clock = lamport_clock;
+        }
+        // Perform the max-allreduce of this lamport clock across all the
+        // point tasks in the index space launch
+        if (!unbounded_pools.empty())
+        {
+          max_lamport_clock = order_collectively_mapped_unbounded_pools(
+              max_lamport_clock, true/*need result*/);
+          // Tell the memory manager about the max lamport clock and get
+          // back any events that we need to wait on to know that it is
+          // safe to start allocating unbounded pools
+          std::vector<RtEvent> wait_for;
+          for (std::vector<MemoryManager*>::const_iterator it =
+                unbounded_pools.begin(); it != unbounded_pools.end(); it++)
+          {
+            RtEvent ready = (*it)->finalize_collective_unbounded_pools_order(
+                this, max_lamport_clock);
+            if (ready.exists())
+              wait_for.push_back(ready);
+          }
+          unbounded_pools.clear();
+          // Just record the event to wait on for now, we might be able
+          // to do some bounded allocations in the meantime before we
+          // actually need to block waiting
+          if (!wait_for.empty())
+            wait_for_unbounded_allocations = Runtime::merge_events(wait_for);
+        }
+        else 
+          // we don't have any unbounded pools so we still participate
+          // but we don't need to block waiting for the result
+          order_collectively_mapped_unbounded_pools(
+              max_lamport_clock, false/*need result*/);
+      }
       std::map<Memory,MemoryPool*> acquired_pools;
       acquired_pools.swap(leaf_memory_pools);
-      std::vector<Memory> unbounded_pools;
       // Now we can go through and create the pools for use by this task
       for (std::map<Memory,PoolBounds>::const_iterator it =
             dynamic_pool_bounds.begin(); it != dynamic_pool_bounds.end(); it++)
@@ -4919,6 +4996,13 @@ namespace Legion {
                   "unbounded.", mapper->get_mapper_name(), manager->get_name(),
                   get_task_name(), get_unique_id())
           }
+          // If this is our first unbounded allocation then we need to 
+          // wait for it to safe for us to do it 
+          if (wait_for_unbounded_allocations.exists())
+          {
+            wait_for_unbounded_allocations.wait();
+            wait_for_unbounded_allocations = RtEvent::NO_RT_EVENT;
+          }
         }
         // It's not safe to hold onto unbounded pools if we're going to
         // block on trying to allocate something else as this can lead to
@@ -4935,7 +5019,7 @@ namespace Legion {
             for (unsigned idx = 0; idx < unbound_acquired_index; idx++)
             {
               std::map<Memory,MemoryPool*>::iterator finder =
-                leaf_memory_pools.find(unbounded_pools[idx]);
+                leaf_memory_pools.find(unbounded_pools[idx]->memory);
 #ifdef DEBUG_LEGION
               assert(finder != leaf_memory_pools.end());
 #endif
@@ -4950,10 +5034,9 @@ namespace Legion {
             for (unbound_acquired_index = 0; unbound_acquired_index < 
                   unbounded_pools.size(); unbound_acquired_index++)
             {
-              const Memory memory = unbounded_pools[unbound_acquired_index];
-              MemoryManager *target = runtime->find_memory_manager(memory);
+              MemoryManager *target = unbounded_pools[unbound_acquired_index];
               std::map<Memory,PoolBounds>::const_iterator finder = 
-                dynamic_pool_bounds.find(memory);
+                dynamic_pool_bounds.find(target->memory);
 #ifdef DEBUG_LEGION
               assert(finder != dynamic_pool_bounds.end());
               assert(!finder->second.is_bounded());
@@ -4965,7 +5048,8 @@ namespace Legion {
                   get_unique_id(), coordinates, finder->second, &try_again); 
               if (try_again.exists())
                 break;
-              leaf_memory_pools.emplace(std::make_pair(memory, unbound_pool));
+              leaf_memory_pools.emplace(
+                  std::make_pair(target->memory, unbound_pool));
             }
 #ifdef DEBUG_LEGION
             assert(try_again.exists() == 
@@ -4997,7 +5081,13 @@ namespace Legion {
         leaf_memory_pools.emplace(std::make_pair(it->first, pool));
         // Keep track of all our unbounded pools
         if (!it->second.is_bounded())
-          unbounded_pools.push_back(it->first);
+          unbounded_pools.push_back(manager);
+      }
+      if (concurrent_task || !check_collective_regions.empty())
+      {
+        // Tell our unbounded pools that we're done allocating
+        for (unsigned idx = 0; idx < unbounded_pools.size(); idx++)
+          unbounded_pools[idx]->end_collective_unbounded_pools_task();
       }
       // If we have any pools left in the acquired set we can delete them
       // since we're not going to need them
@@ -5715,6 +5805,9 @@ namespace Legion {
       reduction_metasize = 0;
       reduction_instance = NULL;
       first_mapping = true;
+      collective_lamport_clock = 0;
+      collective_unbounded_points = 0;
+      collective_lamport_clock_ready = RtUserEvent::NO_RT_USER_EVENT;
       concurrent_precondition.interpreted = RtUserEvent::NO_RT_USER_EVENT;
       concurrent_task_barrier = RtBarrier::NO_RT_BARRIER;
       children_commit_invoked = false;
@@ -7923,6 +8016,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    uint64_t PointTask::order_collectively_mapped_unbounded_pools(
+                                       uint64_t lamport_clock, bool need_result)
+    //--------------------------------------------------------------------------
+    {
+      return slice_owner->collective_lamport_allreduce(
+          lamport_clock, need_result);
+    }
+
+    //--------------------------------------------------------------------------
     ApEvent PointTask::order_concurrent_launch(ApEvent start, VariantImpl *impl)
     //--------------------------------------------------------------------------
     {
@@ -10070,6 +10172,33 @@ namespace Legion {
                 concurrent_variant, concurrent_task_barrier);
         }
       }
+    }
+
+    //--------------------------------------------------------------------------
+    uint64_t IndexTask::collective_lamport_allreduce(uint64_t lamport_clock,
+                                                size_t points, bool need_result)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock o_lock(op_lock);
+      if (collective_lamport_clock < lamport_clock)
+        collective_lamport_clock = lamport_clock;
+      collective_unbounded_points += points;
+#ifdef DEBUG_LEGION
+      assert(collective_unbounded_points <= total_points);
+#endif
+      if (collective_unbounded_points < total_points)
+      {
+        if (need_result)
+        {
+          if (!collective_lamport_clock_ready.exists())
+            collective_lamport_clock_ready = Runtime::create_rt_user_event();
+          o_lock.release();
+          collective_lamport_clock_ready.wait();
+        }
+      }
+      else if (collective_lamport_clock_ready.exists())
+        Runtime::trigger_event(collective_lamport_clock_ready);
+      return collective_lamport_clock;
     }
 
     //--------------------------------------------------------------------------
@@ -12691,6 +12820,67 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    uint64_t SliceTask::collective_lamport_allreduce(
+                                       uint64_t lamport_clock, bool need_result)
+    //--------------------------------------------------------------------------
+    {
+      if (is_remote())
+      {
+        AutoLock o_lock(op_lock);
+        if (collective_lamport_clock < lamport_clock)
+          collective_lamport_clock = lamport_clock;
+#ifdef DEBUG_LEGION
+        assert(collective_unbounded_points < points.size());
+#endif
+        if (!collective_lamport_clock_ready.exists() && need_result)
+          collective_lamport_clock_ready = Runtime::create_rt_user_event();
+        if (++collective_unbounded_points < points.size())
+        {
+          if (need_result)
+          {
+            o_lock.release();
+            collective_lamport_clock_ready.wait();
+            o_lock.reacquire();
+          }
+          return collective_lamport_clock;
+        }
+        // Otherwise fall through and send the message to the index owner
+      }
+      else
+        return index_owner->collective_lamport_allreduce(
+            lamport_clock, 1/*points*/, need_result);
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(index_owner);
+        rez.serialize(collective_unbounded_points);
+        rez.serialize(collective_lamport_clock);
+        if (!collective_lamport_clock_ready.exists())
+        {
+          // Still need to make one to know when results are applied
+          collective_lamport_clock_ready = Runtime::create_rt_user_event();
+          rez.serialize(collective_lamport_clock_ready);
+          rez.serialize<bool>(false); // need result;
+          // Put this in the map applied data structure since it we need
+          // to capture it as part of the effects of this task in case
+          // nothing ends up needing it
+          AutoLock o_lock(op_lock);
+          map_applied_conditions.insert(collective_lamport_clock_ready);
+        }
+        else
+        {
+          rez.serialize(collective_lamport_clock_ready);
+          rez.serialize<bool>(true); // need result;
+          rez.serialize(&collective_lamport_clock);
+        }
+      }
+      runtime->send_slice_collective_allreduce_request(orig_proc, rez);
+      if (need_result)
+        collective_lamport_clock_ready.wait();
+      return collective_lamport_clock;
+    }
+
+    //--------------------------------------------------------------------------
     void SliceTask::concurrent_allreduce(PointTask *task, 
                             ProcessorManager *manager, uint64_t lamport_clock,
                             VariantID vid, bool poisoned)
@@ -12769,6 +12959,56 @@ namespace Legion {
       RtEvent precondition;
       derez.deserialize(precondition);
       owner->rendezvous_concurrent_mapped(precondition, points); 
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void SliceTask::handle_collective_allreduce_request(
+                                     Deserializer &derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      IndexTask *owner;
+      derez.deserialize(owner);
+      size_t total_points;
+      derez.deserialize(total_points);
+      uint64_t lamport_clock;
+      derez.deserialize(lamport_clock);
+      RtUserEvent done;
+      derez.deserialize(done);
+      bool need_result;
+      derez.deserialize<bool>(need_result);
+
+      const uint64_t result = owner->collective_lamport_allreduce(
+          lamport_clock, total_points, need_result);
+      if (need_result)
+      {
+        uint64_t *target;
+        derez.deserialize(target);
+        Serializer rez;
+        {
+          RezCheck z2(rez);
+          rez.serialize(target);
+          rez.serialize(result);
+          rez.serialize(done);
+        }
+        owner->runtime->send_slice_collective_allreduce_response(source, rez);
+      }
+      else
+        Runtime::trigger_event(done);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void SliceTask::handle_collective_allreduce_response(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      uint64_t *target;
+      derez.deserialize(target);
+      derez.deserialize(*target);
+      RtUserEvent done;
+      derez.deserialize(done);
+      Runtime::trigger_event(done);
     }
 
     //--------------------------------------------------------------------------

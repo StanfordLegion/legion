@@ -820,6 +820,8 @@ namespace Legion {
       SLICE_REMOTE_COMPLETE,
       SLICE_REMOTE_COMMIT,
       SLICE_RENDEZVOUS_CONCURRENT_MAPPED,
+      SLICE_COLLECTIVE_ALLREDUCE_REQUEST,
+      SLICE_COLLECTIVE_ALLREDUCE_RESPONSE,
       SLICE_CONCURRENT_ALLREDUCE_REQUEST,
       SLICE_CONCURRENT_ALLREDUCE_RESPONSE,
       SLICE_FIND_INTRA_DEP,
@@ -1152,6 +1154,8 @@ namespace Legion {
         "Slice Remote Complete",                                      \
         "Slice Remote Commit",                                        \
         "Slice Rendezvous Concurrent Mapped",                         \
+        "Slice Collective Unbounded Pools Allreduce Request",         \
+        "Slice Collective Unbounded Pools Allreduce Response",        \
         "Slice Concurrent Allreduce Request",                         \
         "Slice Concurrent Allreduce Response",                        \
         "Slice Find Intra-Space Dependence",                          \
@@ -1973,7 +1977,7 @@ namespace Legion {
       COLLECTIVE_LOC_65 = 65,
       COLLECTIVE_LOC_66 = 66,
       COLLECTIVE_LOC_67 = 67,
-      //COLLECTIVE_LOC_68 = 68,
+      COLLECTIVE_LOC_68 = 68,
       //COLLECTIVE_LOC_69 = 69,
       COLLECTIVE_LOC_70 = 70,
       COLLECTIVE_LOC_71 = 71,

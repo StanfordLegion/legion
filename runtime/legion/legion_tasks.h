@@ -508,6 +508,9 @@ namespace Legion {
       virtual void handle_future_size(size_t return_type_size,
                                       bool has_return_type_size,
                                       std::set<RtEvent> &applied_events) = 0;
+      virtual uint64_t order_collectively_mapped_unbounded_pools(
+          uint64_t lamport_clock, bool need_result)
+        { assert(false); return lamport_clock; }
       virtual ApEvent order_concurrent_launch(ApEvent start, VariantImpl *impl)
         { assert(false); return start; }
       virtual void record_output_extent(unsigned idx,
@@ -738,6 +741,10 @@ namespace Legion {
       // on the same node but moved it to a different processor
       bool first_mapping;
     protected:
+      uint64_t collective_lamport_clock;
+      RtUserEvent collective_lamport_clock_ready;
+      size_t collective_unbounded_points;
+    protected:
       union ConcurrentPrecondition {
         ConcurrentPrecondition(void) 
           : interpreted(RtUserEvent::NO_RT_USER_EVENT) { }
@@ -958,6 +965,8 @@ namespace Legion {
                                  bool own_functor);
       virtual void handle_mispredication(void);
     public:
+      virtual uint64_t order_collectively_mapped_unbounded_pools(
+          uint64_t lamport_clock, bool need_result);
       virtual ApEvent order_concurrent_launch(ApEvent start, VariantImpl *impl);
       virtual void concurrent_allreduce(ProcessorManager *manager,
           uint64_t lamport_clock, VariantID vid, bool poisoned);
@@ -1296,6 +1305,8 @@ namespace Legion {
       virtual void concurrent_allreduce(SliceTask *slice,
           AddressSpaceID slice_space, size_t points, uint64_t lamport_clock,
           VariantID vid, bool poisoned);
+      virtual uint64_t collective_lamport_allreduce(uint64_t lamport_clock,
+                                          size_t points, bool need_result);
     public:
       // Methods for supporting intra-index-space mapping dependences
       virtual RtEvent find_intra_space_dependence(const DomainPoint &point);
@@ -1463,6 +1474,8 @@ namespace Legion {
                                     std::set<RtEvent> &applied_events);
       void rendezvous_concurrent_mapped(const DomainPoint &point,
           Processor target, RtEvent precondition);
+      uint64_t collective_lamport_allreduce(
+          uint64_t lamport_clock, bool need_result);
       void concurrent_allreduce(PointTask *point, ProcessorManager *manager,
           uint64_t lamport_clock, VariantID vid, bool poisoned);
       void finish_concurrent_allreduce(uint64_t lamport_clock, bool poisoned,
@@ -1532,6 +1545,9 @@ namespace Legion {
       static void handle_collective_versioning_rendezvous(Deserializer &derez,
                                                           Runtime *runtime);
       static void handle_rendezvous_concurrent_mapped(Deserializer &derez);
+      static void handle_collective_allreduce_request(Deserializer &derez,
+                                                      AddressSpaceID source);
+      static void handle_collective_allreduce_response(Deserializer &derez);
       static void handle_concurrent_allreduce_request(Deserializer &derez,
                                                       AddressSpaceID source);
       static void handle_concurrent_allreduce_response(Deserializer &derez);

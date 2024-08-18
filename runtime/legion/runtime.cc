@@ -9716,7 +9716,8 @@ namespace Legion {
         capacity(m.capacity()), remaining_capacity(capacity), runtime(rt),
         outstanding_task_local_allocations(0),
         outstanding_unbounded_allocations(0),
-        unbounded_pool_scope(LEGION_BOUNDED_POOL)
+        unbounded_pool_scope(LEGION_BOUNDED_POOL), collective_lamport_clock(0),
+        ready_collective_tasks(0), outstanding_collective_tasks(0)
     //--------------------------------------------------------------------------
     {
 #if defined(LEGION_USE_CUDA) || defined(LEGION_USE_HIP)
@@ -12568,6 +12569,189 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    uint64_t MemoryManager::order_collective_unbounded_pools(SingleTask *task)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock m_lock(manager_lock);
+#ifdef DEBUG_LEGION
+      assert(collective_tasks.find(task) == collective_tasks.end());
+#endif
+      const uint64_t lamport_clock = collective_lamport_clock++;
+      collective_tasks.insert(std::make_pair(task,
+            CollectiveState(lamport_clock)));
+      return lamport_clock;
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent MemoryManager::finalize_collective_unbounded_pools_order(
+                                   SingleTask *task, uint64_t max_lamport_clock)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock m_lock(manager_lock);
+      std::map<SingleTask*,CollectiveState>::iterator finder =
+        collective_tasks.find(task);
+#ifdef DEBUG_LEGION
+      assert(finder != collective_tasks.end());
+      assert(!finder->second.max);
+      assert(finder->second.lamport_clock <= max_lamport_clock);
+#endif
+      if (collective_lamport_clock <= max_lamport_clock)
+        collective_lamport_clock = max_lamport_clock + 1;
+      finder->second.lamport_clock = max_lamport_clock;
+      finder->second.max = true;
+      ready_collective_tasks++;
+      if (outstanding_collective_tasks == 0)
+      {
+        start_next_collective_unbounded_pools_task();
+        // Check to see if it started
+        finder = collective_tasks.find(task);
+        if (finder == collective_tasks.end())
+          return RtEvent::NO_RT_EVENT;
+      }
+      // Unable to start now so make an event to defer it
+#ifdef DEBUG_LEGION
+      assert(!finder->second.ready_event.exists());
+#endif
+      finder->second.ready_event = Runtime::create_rt_user_event();
+      return finder->second.ready_event;
+    }
+
+    //--------------------------------------------------------------------------
+    void MemoryManager::end_collective_unbounded_pools_task(void)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock m_lock(manager_lock);
+#ifdef DEBUG_LEGION
+      assert(outstanding_collective_tasks > 0);
+#endif
+      if ((--outstanding_collective_tasks == 0) && 
+          (ready_collective_tasks > 0))
+        start_next_collective_unbounded_pools_task();
+    }
+
+    //--------------------------------------------------------------------------
+    void MemoryManager::start_next_collective_unbounded_pools_task(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!collective_tasks.empty());
+      assert(outstanding_collective_tasks == 0);
+      assert(ready_collective_tasks > 0);
+#endif
+      // See if we can prove that there is a task that is safe to start
+      uint64_t min_next = std::numeric_limits<uint64_t>::max();
+      uint64_t min_pending = std::numeric_limits<uint64_t>::max();
+      TaskTreeCoordinates next_coords;
+      std::vector<SingleTask*> next_tasks;
+      for (std::map<SingleTask*,CollectiveState>::const_iterator it =
+            collective_tasks.begin(); it != collective_tasks.end(); it++)
+      {
+        if (it->second.max)
+        {
+          if (!next_tasks.empty())
+          {
+            // Compare the lamport clocks
+            if (it->second.lamport_clock < min_next)
+            {
+              next_tasks.clear();
+              next_tasks.push_back(it->first);
+              next_coords.clear();
+              min_next = it->second.lamport_clock;
+            }
+            else if (min_next == it->second.lamport_clock)
+            {
+              // Very bad case, same min of max all-reduce of clocks
+              // Resolve this conflict based on task tree coordinates
+              TaskTreeCoordinates it_coords;
+              if (next_coords.empty())
+                next_tasks.back()->compute_task_tree_coordinates(next_coords);
+              it->first->compute_task_tree_coordinates(it_coords);
+              // See if these are the same index space
+              if (next_coords.same_index_space(it_coords))
+              {
+                next_tasks.push_back(it->first);
+                continue;
+              }
+              const size_t lower_bound =
+                std::min(next_coords.size(), it_coords.size());
+              bool equal = true;
+              for (unsigned idx = 0; idx < lower_bound; idx++)
+              {
+                const ContextCoordinate &c1 = next_coords[idx];
+                const ContextCoordinate &c2 = it_coords[idx];
+                if (c1.context_index == c2.context_index)
+                {
+                  if (c2.index_point < c1.index_point)
+                  {
+                    next_tasks.clear();
+                    next_tasks.push_back(it->first);
+                    next_coords.swap(it_coords);
+                  }
+                  else if (c1.index_point == c2.index_point)
+                    continue;
+                }
+                else if (c2.context_index < c1.context_index)
+                {
+                  next_tasks.clear();
+                  next_tasks.push_back(it->first);
+                  next_coords.swap(it_coords);
+                }
+                equal = false;
+                break;
+              }
+              if (equal)
+              {
+#ifdef DEBUG_LEGION
+                assert(next_coords.size() != it_coords.size());
+#endif
+                if (it_coords.size() < next_coords.size())
+                {
+                  next_tasks.clear();
+                  next_tasks.push_back(it->first);
+                  next_coords.swap(it_coords);
+                }
+              }
+            }
+          }
+          else
+          {
+            next_tasks.push_back(it->first);
+            min_next = it->second.lamport_clock;
+          }
+        }
+        else if (it->second.lamport_clock < min_pending)
+          min_pending = it->second.lamport_clock;
+      }
+      // If all the pending tasks with lamport clocks are
+      // larger than our max lamport clock of the next task
+      // to launch then we know they won't ever come before it
+      // so we can issue our next task now, otherwise we'll need
+      // to wait until those pending lamport clocks are done
+      if (min_next < min_pending)
+      {
+        // Start all the next tasks
+        for (std::vector<SingleTask*>::const_iterator it =
+              next_tasks.begin(); it != next_tasks.end(); it++)
+        {
+          std::map<SingleTask*,CollectiveState>::iterator finder =
+            collective_tasks.find(*it);
+#ifdef DEBUG_LEGION
+          assert(finder != collective_tasks.end());
+#endif
+          if (finder->second.ready_event.exists())
+            Runtime::trigger_event(finder->second.ready_event);
+          collective_tasks.erase(finder);
+        }
+#ifdef DEBUG_LEGION
+        assert(outstanding_collective_tasks == 0);
+        assert(next_tasks.size() <= ready_collective_tasks);
+#endif
+        ready_collective_tasks -= next_tasks.size();
+        outstanding_collective_tasks = next_tasks.size();
+      }
+    }
+
+    //--------------------------------------------------------------------------
     PhysicalInstance MemoryManager::create_task_local_instance(
         UniqueID creator_uid, const TaskTreeCoordinates &coordinates,
         LgEvent unique_event, Realm::InstanceLayoutGeneric *layout, 
@@ -14258,6 +14442,17 @@ namespace Legion {
           case SLICE_RENDEZVOUS_CONCURRENT_MAPPED:
             {
               runtime->handle_slice_rendezvous_concurrent_mapped(derez);
+              break;
+            }
+          case SLICE_COLLECTIVE_ALLREDUCE_REQUEST:
+            {
+              runtime->handle_slice_collective_allreduce_request(derez,
+                                                  remote_address_space);
+              break;
+            }
+          case SLICE_COLLECTIVE_ALLREDUCE_RESPONSE:
+            {
+              runtime->handle_slice_collective_allreduce_response(derez);
               break;
             }
           case SLICE_CONCURRENT_ALLREDUCE_REQUEST:
@@ -23946,6 +24141,25 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_slice_collective_allreduce_request(Processor target,
+                                                          Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(
+          SLICE_COLLECTIVE_ALLREDUCE_REQUEST, rez, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_slice_collective_allreduce_response(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(
+          SLICE_COLLECTIVE_ALLREDUCE_RESPONSE,
+          rez, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_slice_concurrent_allreduce_request(Processor target,
                                                               Serializer &rez)
     //--------------------------------------------------------------------------
@@ -26556,6 +26770,22 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       SliceTask::handle_rendezvous_concurrent_mapped(derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_slice_collective_allreduce_request(Deserializer &derez,
+                                                          AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      SliceTask::handle_collective_allreduce_request(derez, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_slice_collective_allreduce_response(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      SliceTask::handle_collective_allreduce_response(derez);
     }
 
     //--------------------------------------------------------------------------

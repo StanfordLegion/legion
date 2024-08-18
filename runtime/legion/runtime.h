@@ -1790,6 +1790,12 @@ namespace Legion {
           Runtime *runtime, AddressSpaceID source);
       static void handle_create_memory_pool_response(Deserializer &derez,
           Runtime *runtime);
+      uint64_t order_collective_unbounded_pools(SingleTask *task); 
+      RtEvent finalize_collective_unbounded_pools_order(SingleTask *task,
+                                              uint64_t max_lamport_clock);
+      void end_collective_unbounded_pools_task(void);
+    protected:
+      void start_next_collective_unbounded_pools_task(void);
     public:
       void process_instance_request(Deserializer &derez, AddressSpaceID source);
       void process_instance_response(Deserializer &derez,AddressSpaceID source);
@@ -1898,6 +1904,20 @@ namespace Legion {
       // Allocation transition event for switching between bounded
       // and unbounded modes
       RtUserEvent unbounded_transition_event;
+      // Data structures for helping to order collectively mapped tasks
+      // with unbounded memory pools
+      struct CollectiveState {
+      public:
+        CollectiveState(uint64_t clock) : lamport_clock(clock), max(false) { }
+      public:
+        uint64_t lamport_clock;
+        RtUserEvent ready_event;
+        bool max; // whether the lamport clock is the max all-reduce or not
+      };
+      std::map<SingleTask*,CollectiveState> collective_tasks;
+      uint64_t collective_lamport_clock;
+      uint32_t ready_collective_tasks;
+      uint32_t outstanding_collective_tasks;
     protected:
       std::set<Memory> visible_memories;
     protected:
@@ -3340,6 +3360,10 @@ namespace Legion {
       void send_slice_remote_commit(Processor target, Serializer &rez);
       void send_slice_rendezvous_concurrent_mapped(Processor target,
                                                    Serializer &rez);
+      void send_slice_collective_allreduce_request(Processor target,
+                                                   Serializer &rez);
+      void send_slice_collective_allreduce_response(AddressSpaceID target,
+                                                    Serializer &rez);
       void send_slice_concurrent_allreduce_request(Processor target,
                                                    Serializer &rez);
       void send_slice_concurrent_allreduce_response(AddressSpaceID target,
@@ -3779,6 +3803,9 @@ namespace Legion {
       void handle_slice_remote_complete(Deserializer &derez);
       void handle_slice_remote_commit(Deserializer &derez);
       void handle_slice_rendezvous_concurrent_mapped(Deserializer &derez);
+      void handle_slice_collective_allreduce_request(Deserializer &derez,
+                                                     AddressSpaceID source);
+      void handle_slice_collective_allreduce_response(Deserializer &derez);
       void handle_slice_concurrent_allreduce_request(Deserializer &derez,
                                                      AddressSpaceID source);
       void handle_slice_concurrent_allreduce_response(Deserializer &derez);
@@ -6051,6 +6078,10 @@ namespace Legion {
         case SLICE_REMOTE_COMMIT:
           return TASK_VIRTUAL_CHANNEL;
         case SLICE_RENDEZVOUS_CONCURRENT_MAPPED:
+          break;
+        case SLICE_COLLECTIVE_ALLREDUCE_REQUEST:
+          break;
+        case SLICE_COLLECTIVE_ALLREDUCE_RESPONSE:
           break;
         case SLICE_CONCURRENT_ALLREDUCE_REQUEST:
           break;
