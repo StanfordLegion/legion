@@ -1400,6 +1400,8 @@ impl StateDataSource {
                         entry_id: self.proc_entries.get(proc_id).unwrap().clone(),
                     })
                 } else {
+                    let fevent = self.state.find_fevent(prof_uid);
+                    let fevent_node = fevent.node_id();
                     let kind = match event_entry.kind {
                         EventEntryKind::MergeEvent => "n event merger",
                         EventEntryKind::TriggerEvent => " user event trigger",
@@ -1409,10 +1411,27 @@ impl StateDataSource {
                         EventEntryKind::CompletionQueueEvent => " completion queue non-empty",
                         _ => unreachable!(),
                     };
-                    Field::String(format!(
-                            "Critical path from a{} on node {}. Please load the logfile from that node to see it.",
-                            kind, node.0
-                    ))
+                    if fevent_node == node {
+                        // This is probably a bug if we get here because it means that we
+                        // recorded something with an fevent that we don't recognize from the
+                        // same node that should have produced this fevent
+                        Field::String(format!(
+                                "Could not find fevent {:#x} for a{} of event {:#x} on node {}. This is probably a bug in the Legion runtime logging not recording all fevents on a node. You could try running with '-lg:prof_self' to see if the fevent corresponds to a profiling meta-task, but most likely this is just a bug.", fevent.0, kind, event.0, fevent_node.0
+                        ))
+                    } else {
+                        // This should only be a trigger/poison/arrive
+                        // The others should produce events on the same node as where they are called
+                        assert!(
+                            event_entry.kind == EventEntryKind::TriggerEvent
+                                || event_entry.kind == EventEntryKind::PoisonEvent
+                                || event_entry.kind == EventEntryKind::ArriveBarrier
+                        );
+                        // In these cases we should load the file for the node with the fevent
+                        Field::String(format!(
+                                "Critical path from a{} on node {}. Please load the logfile from that node to see it.", 
+                                kind, fevent_node.0
+                        ))
+                    }
                 }
             }
         }
@@ -1745,7 +1764,7 @@ impl StateDataSource {
                                 self.fields.trigger_time,
                                 Field::Interval(ts::Interval::new(
                                     event_entry.trigger_time.unwrap().into(),
-                                    entry.time_range.create.unwrap().into(),
+                                    entry.time_range.ready.unwrap().into(),
                                 )),
                             ));
                         }
