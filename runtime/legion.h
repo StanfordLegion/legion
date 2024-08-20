@@ -9387,6 +9387,7 @@ namespace Legion {
        * ------------- 
        * -lg:warn     Enable all verbose runtime warnings
        * -lg:warn_backtrace Print a backtrace for each warning
+       * -lg:werror   Promote all legion warnings into errors
        * -lg:leaks    Report information about resource leaks
        * -lg:ldb <replay_file> Replay the execution of the application
        *              with the associated replay file generted by LegionSpy. 

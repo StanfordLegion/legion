@@ -116,6 +116,99 @@ namespace Realm {
                                const InstanceLayoutPieceBase *&nonaffine) = 0;
   };
 
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class TransferIteratorBase<N,T>
+  //
+
+  template <int N, typename T>
+  class TransferIteratorBase : public TransferIterator {
+  protected:
+    TransferIteratorBase(void); // used by deserializer
+  public:
+    TransferIteratorBase(RegionInstanceImpl *_inst_impl, const int _dim_order[N]);
+
+    virtual Event request_metadata(void);
+
+    virtual void reset(void);
+    virtual bool done(void);
+    virtual size_t step(size_t max_bytes, AddressInfo &info, unsigned flags,
+                        bool tentative = false);
+    virtual size_t step_custom(size_t max_bytes, AddressInfoCustom &info,
+                               bool tentative = false);
+
+    virtual void confirm_step(void);
+    virtual void cancel_step(void);
+
+    virtual size_t get_base_offset(void) const;
+
+    virtual bool get_addresses(AddressList &addrlist,
+                               const InstanceLayoutPieceBase *&nonaffine);
+
+  protected:
+    virtual bool get_next_rect(Rect<N, T> &r, FieldID &fid, size_t &offset,
+                               size_t &fsize) = 0;
+
+    bool have_rect, is_done;
+    Rect<N, T> cur_rect;
+    FieldID cur_field_id;
+    size_t cur_field_offset, cur_field_size;
+    Point<N, T> cur_point, next_point;
+    bool carry;
+
+    RegionInstanceImpl *inst_impl;
+    // InstanceLayout<N, T> *inst_layout;
+    size_t inst_offset;
+    bool tentative_valid;
+    int dim_order[N];
+  };
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class TransferIteratorIndexSpace<N,T>
+  //
+
+  template <int N, typename T>
+  class TransferIteratorIndexSpace : public TransferIteratorBase<N, T> {
+  protected:
+    TransferIteratorIndexSpace(void); // used by deserializer
+  public:
+    TransferIteratorIndexSpace(const IndexSpace<N, T> &_is,
+                               RegionInstanceImpl *_inst_impl, const int _dim_order[N],
+                               const std::vector<FieldID> &_fields,
+                               const std::vector<size_t> &_fld_offsets,
+                               const std::vector<size_t> &_fld_sizes,
+                               size_t _extra_elems);
+
+    template <typename S>
+    static TransferIterator *deserialize_new(S &deserializer);
+
+    virtual ~TransferIteratorIndexSpace(void);
+
+    virtual Event request_metadata(void);
+
+    virtual void reset(void);
+
+    static Serialization::PolymorphicSerdezSubclass<TransferIterator,
+                                                    TransferIteratorIndexSpace<N, T>>
+        serdez_subclass;
+
+    template <typename S>
+    bool serialize(S &serializer) const;
+
+  protected:
+    virtual bool get_next_rect(Rect<N, T> &r, FieldID &fid, size_t &offset,
+                               size_t &fsize);
+
+    IndexSpace<N, T> is;
+    IndexSpaceIterator<N, T> iter;
+    bool iter_init_deferred;
+    std::vector<FieldID> fields;
+    std::vector<size_t> fld_offsets, fld_sizes;
+    size_t field_idx;
+    size_t extra_elems;
+  };
+
   class TransferDomain {
   protected:
     TransferDomain(void);
