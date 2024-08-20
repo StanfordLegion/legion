@@ -109,6 +109,7 @@ pub struct Fields {
     trigger_time: FieldID,
     previous_executing: FieldID,
     scheduling_overhead: FieldID,
+    message_latency: FieldID,
 }
 
 #[derive(Debug)]
@@ -161,6 +162,7 @@ impl StateDataSource {
             trigger_time: field_schema.insert("Triggering Latency".to_owned(), false),
             previous_executing: field_schema.insert("Previous Executing".to_owned(), true),
             scheduling_overhead: field_schema.insert("Scheduling Overhead".to_owned(), false),
+            message_latency: field_schema.insert("Message Latency".to_owned(), false),
         };
 
         let mut entry_map = BTreeMap::<EntryID, EntryKind>::new();
@@ -1634,6 +1636,12 @@ impl StateDataSource {
             }
             if let Some(ready) = entry.time_range.ready {
                 if let Some(create) = entry.time_range.create {
+                    if let Some(spawn) = entry.time_range.spawn {
+                        fields.push((
+                            self.fields.message_latency,
+                            Field::Interval(ts::Interval::new(spawn.into(), create.into())),
+                        ));
+                    }
                     fields.push((
                         self.fields.deferred_time,
                         Field::Interval(ts::Interval::new(create.into(), ready.into())),
