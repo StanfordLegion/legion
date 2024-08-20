@@ -1075,3 +1075,41 @@ set_target_properties(Realm PROPERTIES
   INTERFACE_LINK_LIBRARIES RealmRuntime
 )
 install(TARGETS Legion Realm EXPORT LegionTargets)
+
+if (Legion_BUILD_DOCS)
+  set(DOXYGEN_STRIP_FROM_INC_PATH ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR})
+  set(DOXYGEN_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/legion_docs)
+  set(DOXYGEN_PROJECT_NAME "Legion")
+  set(DOXYGEN_PROJECT_NUMBER ${LEGION_VERSION})
+  configure_file(${CMAKE_SOURCE_DIR}/doxygen/selectversion.js.in ${CMAKE_BINARY_DIR}/legion_docs/selectversion.js @ONLY)
+  # TODO(mbauer): Annotate and or list all public legion headers
+  doxygen_add_docs(LegionDocs
+      ${CMAKE_CURRENT_SOURCE_DIR}/legion.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/legion
+      ${CMAKE_CURRENT_BINARY_DIR}/legion_defines.h
+      COMMENT "Generating Legion Documentation" ALL)
+
+  set(DOXYGEN_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/realm_docs)
+  set(DOXYGEN_PROJECT_NAME "Realm")
+  set(DOXYGEN_PROJECT_NUMBER ${REALM_VERSION})
+  set(DOXYGEN_INCLUDE_PATH ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR})
+  set(DOXYGEN_FILE_PATTERNS "*.h")
+  configure_file(${CMAKE_SOURCE_DIR}/doxygen/selectversion.js.in ${CMAKE_BINARY_DIR}/realm_docs/selectversion.js @ONLY)
+  if (NOT DOXYGEN_INTERNAL_DOCS)
+    # TODO(cperry): Remove this when we properly annotate all public and headers
+    set(DOXYGEN_EXCLUDE_SYMBOLS "Realm::*Impl" "Realm::*Internal" "std::*" "*::detail::*")
+    set(DOXYGEN_EXCLUDE_PATTERNS "*_internal.h")
+  else()
+    list(APPEND DOXYGEN_FILE_PATTERNS "*.inl" "*.cc" "*.c")
+  endif()
+  doxygen_add_docs(RealmDocs
+      ${CMAKE_CURRENT_SOURCE_DIR}/realm.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/realm
+      ${CMAKE_CURRENT_BINARY_DIR}/realm_defines.h
+      COMMENT "Generating Realm Documentation" ALL)
+
+  install(DIRECTORY "${CMAKE_BINARY_DIR}/legion_docs/html/" DESTINATION "${CMAKE_INSTALL_DOCDIR}/Legion/${LEGION_VERSION}" COMPONENT Legion_doc)
+  install(DIRECTORY "${CMAKE_BINARY_DIR}/realm_docs/html/" DESTINATION "${CMAKE_INSTALL_DOCDIR}/Realm/${REALM_VERSION}" COMPONENT Realm_doc)
+  install(FILES "${CMAKE_BINARY_DIR}/realm_docs/selectversion.js" "${CMAKE_SOURCE_DIR}/doxygen/dropdown.css" DESTINATION "${CMAKE_INSTALL_DOCDIR}/Realm" COMPONENT Realm_doc)
+  install(FILES "${CMAKE_BINARY_DIR}/legion_docs/selectversion.js" "${CMAKE_SOURCE_DIR}/doxygen/dropdown.css" DESTINATION "${CMAKE_INSTALL_DOCDIR}/Legion" COMPONENT Legion_doc)
+endif ()

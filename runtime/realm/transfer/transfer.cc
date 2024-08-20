@@ -77,83 +77,38 @@ namespace Realm {
     return 0;
   }
 
-  ////////////////////////////////////////////////////////////////////////
-  //
-  // class TransferIteratorBase<N,T>
-  //
-
   template <int N, typename T>
-  class TransferIteratorBase : public TransferIterator {
-  protected:
-    TransferIteratorBase(void); // used by deserializer
-  public:
-    TransferIteratorBase(RegionInstance inst,
-			 const int _dim_order[N]);
-
-    virtual Event request_metadata(void);
-
-    virtual void reset(void);
-    virtual bool done(void);
-    virtual size_t step(size_t max_bytes, AddressInfo& info,
-			unsigned flags,
-			bool tentative = false);
-    virtual size_t step_custom(size_t max_bytes, AddressInfoCustom& info,
-                               bool tentative = false);
-
-    virtual void confirm_step(void);
-    virtual void cancel_step(void);
-
-    virtual size_t get_base_offset(void) const;
-
-    virtual bool get_addresses(AddressList &addrlist,
-                               const InstanceLayoutPieceBase *&nonaffine);
-
-  protected:
-    virtual bool get_next_rect(Rect<N, T> &r, FieldID &fid, size_t &offset,
-                               size_t &fsize) = 0;
-
-    bool have_rect, is_done;
-    Rect<N,T> cur_rect;
-    FieldID cur_field_id;
-    size_t cur_field_offset, cur_field_size;
-    Point<N,T> cur_point, next_point;
-    bool carry;
-    RegionInstanceImpl *inst_impl;
-    const InstanceLayout<N,T> *inst_layout;
-    bool tentative_valid;
-    int dim_order[N];
-  };
-
-  template <int N, typename T>
-  TransferIteratorBase<N,T>::TransferIteratorBase(RegionInstance inst,
-						  const int _dim_order[N])
-    : have_rect(false), is_done(false)
-    , inst_layout(0)
+  TransferIteratorBase<N, T>::TransferIteratorBase(RegionInstanceImpl *_inst_impl,
+                                                   const int _dim_order[N])
+    : have_rect(false)
+    , is_done(false)
+    , inst_impl(_inst_impl)
     , tentative_valid(false)
   {
-    inst_impl = get_runtime()->get_instance_impl(inst);
 
     if(_dim_order)
-      for(int i = 0; i < N; i++) dim_order[i] = _dim_order[i];
+      for(int i = 0; i < N; i++)
+        dim_order[i] = _dim_order[i];
     else
-      for(int i = 0; i < N; i++) dim_order[i] = i;
+      for(int i = 0; i < N; i++)
+        dim_order[i] = i;
   }
 
   template <int N, typename T>
-  TransferIteratorBase<N,T>::TransferIteratorBase(void)
-    : have_rect(false), is_done(false)
+  TransferIteratorBase<N, T>::TransferIteratorBase(void)
+    : have_rect(false)
+    , is_done(false)
     , inst_impl(0)
-    , inst_layout(0)
     , tentative_valid(false)
   {}
 
   template <int N, typename T>
-  Event TransferIteratorBase<N,T>::request_metadata(void)
+  Event TransferIteratorBase<N, T>::request_metadata(void)
   {
-    if(inst_impl && !inst_impl->metadata.is_valid())
+    if(!inst_impl->metadata.is_valid()) {
       return inst_impl->request_metadata();
-    else
-      return Event::NO_EVENT;
+    }
+    return Event::NO_EVENT;
   }
 
   template <int N, typename T>
@@ -173,11 +128,7 @@ namespace Realm {
     if(is_done)
       return true;
 
-    // if we haven't fetched the layout, now's our last chance
-    if(inst_layout == 0) {
-      assert(inst_impl->metadata.is_valid());
-      inst_layout = checked_cast<const InstanceLayout<N,T> *>(inst_impl->metadata.layout);
-    }
+    assert(inst_impl != 0);
 
     // try to get a new (non-empty) rectangle
     while(true) {
@@ -240,8 +191,13 @@ namespace Realm {
     const InstanceLayoutPiece<N,T> *layout_piece;
     size_t field_rel_offset;
     size_t total_bytes = 0;
+
+    const InstanceLayout<N, T> *inst_layout =
+        checked_cast<const InstanceLayout<N, T> *>(inst_impl->metadata.layout);
+
     {
-      std::map<FieldID, InstanceLayoutGeneric::FieldLayout>::const_iterator it = inst_layout->fields.find(cur_field_id);
+      std::map<FieldID, InstanceLayoutGeneric::FieldLayout>::const_iterator it =
+          inst_layout->fields.find(cur_field_id);
       assert(it != inst_layout->fields.end());
       assert((cur_field_offset + cur_field_size) <= size_t(it->second.size_in_bytes));
       const InstancePieceList<N,T>& piece_list = inst_layout->piece_lists[it->second.list_idx];
@@ -314,11 +270,12 @@ namespace Realm {
 	  target_subrect.hi[d] = cur_point[d];
       }
 
-      info.base_offset = (inst_impl->metadata.inst_offset +
-			  affine->offset +
-			  affine->strides.dot(cur_point) +
-			  field_rel_offset);
-      //log_dma.print() << "A " << inst_impl->metadata.inst_offset << " + " << affine->offset << " + (" << affine->strides << " . " << cur_point << ") + " << field_rel_offset << " = " << info.base_offset;
+      info.base_offset = (inst_impl->metadata.inst_offset + affine->offset +
+                          affine->strides.dot(cur_point) + field_rel_offset);
+      // log_dma.print() << "A " << inst_impl->metadata.inst_offset << " + " <<
+      // affine->offset << " + (" << affine->strides << " . " << cur_point << ") + " <<
+      // field_rel_offset << " = " << info.base_offset;
+
       info.bytes_per_chunk = act_counts[0];
       info.num_lines = act_counts[1];
       info.line_stride = act_strides[1];
@@ -372,6 +329,9 @@ namespace Realm {
       return 0;
 
     assert(!tentative_valid);
+
+    const InstanceLayout<N, T> *inst_layout =
+        checked_cast<const InstanceLayout<N, T> *>(inst_impl->metadata.layout);
 
     // find the layout piece the current point is in
     const InstanceLayoutPiece<N,T> *layout_piece;
@@ -502,8 +462,9 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  bool TransferIteratorBase<N,T>::get_addresses(AddressList &addrlist,
-                                                const InstanceLayoutPieceBase *&nonaffine)
+  bool
+  TransferIteratorBase<N, T>::get_addresses(AddressList &addrlist,
+                                            const InstanceLayoutPieceBase *&nonaffine)
   {
 #ifdef DEBUG_REALM
     assert(!tentative_valid);
@@ -511,29 +472,35 @@ namespace Realm {
 
     nonaffine = 0;
 
+    const InstanceLayout<N, T> *inst_layout =
+        checked_cast<const InstanceLayout<N, T> *>(inst_impl->metadata.layout);
+
     while(!done()) {
       if(!have_rect)
-	return false; // no more addresses at the moment, but expect more later
+        return false; // no more addresses at the moment, but expect more later
 
       // we may be able to compact dimensions, but ask for space to write a
       //  an address record of the maximum possible dimension (i.e. N)
       size_t *addr_data = addrlist.begin_nd_entry(N);
       if(!addr_data)
-	return true; // out of space for now
+        return true; // out of space for now
 
       // find the layout piece the current point is in
-      const InstanceLayoutPiece<N,T> *layout_piece;
+      const InstanceLayoutPiece<N, T> *layout_piece;
       size_t field_rel_offset;
       {
-	std::map<FieldID, InstanceLayoutGeneric::FieldLayout>::const_iterator it = inst_layout->fields.find(cur_field_id);
-	assert(it != inst_layout->fields.end());
-	assert((cur_field_offset + cur_field_size) <= size_t(it->second.size_in_bytes));
-	const InstancePieceList<N,T>& piece_list = inst_layout->piece_lists[it->second.list_idx];
-	layout_piece = piece_list.find_piece(cur_point);
-        log_dma.debug() << "Find piece found for " << cur_point
-                        << " in instance " << inst_impl->me
+        std::map<FieldID, InstanceLayoutGeneric::FieldLayout>::const_iterator it =
+            inst_layout->fields.find(cur_field_id);
+        assert(it != inst_layout->fields.end());
+        assert((cur_field_offset + cur_field_size) <= size_t(it->second.size_in_bytes));
+        const InstancePieceList<N, T> &piece_list =
+            inst_layout->piece_lists[it->second.list_idx];
+        layout_piece = piece_list.find_piece(cur_point);
+        log_dma.debug() << "Find piece found for "
+                        << cur_point
+                        ///<< " in instance " << inst_impl->me
                         << " (list: " << piece_list << ")";
-        if (REALM_UNLIKELY(layout_piece == 0)) {
+        if(REALM_UNLIKELY(layout_piece == 0)) {
           log_dma.fatal() << "no piece found for " << cur_point;
           abort();
         }
@@ -543,200 +510,150 @@ namespace Realm {
           nonaffine = layout_piece;
           return true;
         }
-	field_rel_offset = it->second.rel_offset + cur_field_offset;
+        field_rel_offset = it->second.rel_offset + cur_field_offset;
       }
 
       // figure out the largest iteration-consistent subrectangle that fits in
       //  the current piece
-      Rect<N,T> target_subrect;
+      Rect<N, T> target_subrect;
       target_subrect.lo = cur_point;
       target_subrect.hi = cur_point;
-      have_rect = false;  // tentatively clear - we'll (re-)set it below if needed
+      have_rect = false; // tentatively clear - we'll (re-)set it below if needed
       for(int di = 0; di < N; di++) {
-	int d = dim_order[di];
+        int d = dim_order[di];
 
-	// our target subrect in this dimension can be trimmed at the front by
-	//  having already done a partial step, or trimmed at the end by the layout
-	if(cur_rect.hi[d] <= layout_piece->bounds.hi[d]) {
-	  if(cur_point[d] == cur_rect.lo[d]) {
-	    // simple case - we are at the start in this dimension and the piece
-	    //  covers the entire range
-	    target_subrect.hi[d] = cur_rect.hi[d];
-	    continue;
-	  } else {
-	    // we started in the middle, so we can finish this dimension, but
-	    //  not continue to further dimensions
-	    target_subrect.hi[d] = cur_rect.hi[d];
-	    if(di < (N - 1)) {
-	      // rewind the first di+1 dimensions and any after that that are
-	      //  at the end
-	      int d2 = 0;
-	      while((d2 < N) &&
-		    ((d2 <= di) ||
-		     (cur_point[dim_order[d2]] == cur_rect.hi[dim_order[d2]]))) {
-		cur_point[dim_order[d2]] = cur_rect.lo[dim_order[d2]];
-		d2++;
-	      }
-	      if(d2 < N) {
-		// carry didn't propagate all the way, so we have some left for
-		//  next time
-		cur_point[dim_order[d2]]++;
-		have_rect = true;
-	      }
-	    }
-	    break;
-	  }
-	} else {
-	  // stopping short (doesn't matter where we started) - limit this subrect
-	  //  based on the piece and start just past it in this dimension
-	  //  (rewinding previous dimensions)
-	  target_subrect.hi[d] = layout_piece->bounds.hi[d];
-	  have_rect = true;
-	  for(int d2 = 0; d2 < di; d2++)
-	    cur_point[dim_order[d2]] = cur_rect.lo[dim_order[d2]];
-	  cur_point[d] = layout_piece->bounds.hi[d] + 1;
-	  break;
-	}
+        // our target subrect in this dimension can be trimmed at the front by
+        //  having already done a partial step, or trimmed at the end by the layout
+        if(cur_rect.hi[d] <= layout_piece->bounds.hi[d]) {
+          if(cur_point[d] == cur_rect.lo[d]) {
+            // simple case - we are at the start in this dimension and the piece
+            //  covers the entire range
+            target_subrect.hi[d] = cur_rect.hi[d];
+            continue;
+          } else {
+            // we started in the middle, so we can finish this dimension, but
+            //  not continue to further dimensions
+            target_subrect.hi[d] = cur_rect.hi[d];
+            if(di < (N - 1)) {
+              // rewind the first di+1 dimensions and any after that that are
+              //  at the end
+              int d2 = 0;
+              while((d2 < N) && ((d2 <= di) || (cur_point[dim_order[d2]] ==
+                                                cur_rect.hi[dim_order[d2]]))) {
+                cur_point[dim_order[d2]] = cur_rect.lo[dim_order[d2]];
+                d2++;
+              }
+              if(d2 < N) {
+                // carry didn't propagate all the way, so we have some left for
+                //  next time
+                cur_point[dim_order[d2]]++;
+                have_rect = true;
+              }
+            }
+            break;
+          }
+        } else {
+          // stopping short (doesn't matter where we started) - limit this subrect
+          //  based on the piece and start just past it in this dimension
+          //  (rewinding previous dimensions)
+          target_subrect.hi[d] = layout_piece->bounds.hi[d];
+          have_rect = true;
+          for(int d2 = 0; d2 < di; d2++)
+            cur_point[dim_order[d2]] = cur_rect.lo[dim_order[d2]];
+          cur_point[d] = layout_piece->bounds.hi[d] + 1;
+          break;
+        }
       }
       log_dma.debug() << "step: cur_rect=" << cur_rect
                       << " layout_bounds=" << layout_piece->bounds
                       << " target_subrect=" << target_subrect
-                      << " next_point=" << cur_point
-                      << " (have_rect=" << have_rect << ")";
+                      << " next_point=" << cur_point << " (have_rect=" << have_rect
+                      << ")";
 #ifdef DEBUG_REALM
       assert(layout_piece->bounds.contains(target_subrect));
 #endif
 
       // TODO: remove now-redundant condition here
       if(layout_piece->layout_type == PieceLayoutTypes::AffineLayoutType) {
-	const AffineLayoutPiece<N,T> *affine = static_cast<const AffineLayoutPiece<N,T> *>(layout_piece);
+        const AffineLayoutPiece<N, T> *affine =
+            static_cast<const AffineLayoutPiece<N, T> *>(layout_piece);
 
-	// offset of initial entry is easy to compute
-	addr_data[1] = (inst_impl->metadata.inst_offset +
-			affine->offset +
-			affine->strides.dot(target_subrect.lo) +
-			field_rel_offset);
+        // offset of initial entry is easy to compute
+        addr_data[1] = (inst_impl->metadata.inst_offset + affine->offset +
+                        affine->strides.dot(target_subrect.lo) + field_rel_offset);
 
-	size_t bytes = cur_field_size;
-	int cur_dim = 1;
-	int di = 0;
-	// compact any dimensions that are contiguous first
-	for(; di < N; di++) {
-	  // follow the agreed-upon dimension ordering
-	  int d = dim_order[di];
+        size_t bytes = cur_field_size;
+        int cur_dim = 1;
+        int di = 0;
+        // compact any dimensions that are contiguous first
+        for(; di < N; di++) {
+          // follow the agreed-upon dimension ordering
+          int d = dim_order[di];
 
-	  // skip degenerate dimensions
-	  if(target_subrect.lo[d] == target_subrect.hi[d])
-	    continue;
+          // skip degenerate dimensions
+          if(target_subrect.lo[d] == target_subrect.hi[d])
+            continue;
 
-	  // if the stride doesn't match the current size, stop
-	  if(affine->strides[d] != bytes)
-	    break;
+          // if the stride doesn't match the current size, stop
+          if(affine->strides[d] != bytes)
+            break;
 
-	  // it's contiguous - multiply total bytes by extent and continue
-	  bytes *= (target_subrect.hi[d] - target_subrect.lo[d] + 1);
-	}
+          // it's contiguous - multiply total bytes by extent and continue
+          bytes *= (target_subrect.hi[d] - target_subrect.lo[d] + 1);
+        }
 
-	// if any dimensions are left, they need to become count/stride pairs
-	size_t total_bytes = bytes;
-	while(di < N) {
-	  size_t total_count = 1;
-	  size_t stride = affine->strides[dim_order[di]];
+        // if any dimensions are left, they need to become count/stride pairs
+        size_t total_bytes = bytes;
+        while(di < N) {
+          size_t total_count = 1;
+          size_t stride = affine->strides[dim_order[di]];
 
-	  for(; di < N; di++) {
-	    int d = dim_order[di];
+          for(; di < N; di++) {
+            int d = dim_order[di];
 
-	    if(target_subrect.lo[d] == target_subrect.hi[d])
-	      continue;
+            if(target_subrect.lo[d] == target_subrect.hi[d])
+              continue;
 
-	    size_t count = (target_subrect.hi[d] - target_subrect.lo[d] + 1);
+            size_t count = (target_subrect.hi[d] - target_subrect.lo[d] + 1);
 
-	    if(affine->strides[d] != (stride * total_count))
-	      break;
+            if(affine->strides[d] != (stride * total_count))
+              break;
 
-	    total_count *= count;
-	  }
+            total_count *= count;
+          }
 
-	  addr_data[cur_dim * 2] = total_count;
-	  addr_data[cur_dim * 2 + 1] = stride;
+          addr_data[cur_dim * 2] = total_count;
+          addr_data[cur_dim * 2 + 1] = stride;
           log_dma.debug() << "Add addr data dim=" << cur_dim
-                          << " total_count=" << total_count
-                          << " stride=" << stride;
+                          << " total_count=" << total_count << " stride=" << stride;
           total_bytes *= total_count;
-	  cur_dim++;
-	}
+          cur_dim++;
+        }
 
-	// now that we know the compacted dimension, we can finish the address
-	//  record
-	addr_data[0] = (bytes << 4) + cur_dim;
-	addrlist.commit_nd_entry(cur_dim, total_bytes);
-        log_dma.debug() << "Finalize addr data dim=" << cur_dim
-                        << " total_bytes" << total_bytes;
+        // now that we know the compacted dimension, we can finish the address
+        //  record
+        addr_data[0] = (bytes << 4) + cur_dim;
+        addrlist.commit_nd_entry(cur_dim, total_bytes);
+        log_dma.debug() << "Finalize addr data dim=" << cur_dim << " total_bytes"
+                        << total_bytes;
       } else {
-	assert(0 && "no support for non-affine pieces yet");
+        assert(0 && "no support for non-affine pieces yet");
       }
     }
 
     return true; // we have no more addresses to produce
   }
 
-
-  ////////////////////////////////////////////////////////////////////////
-  //
-  // class TransferIteratorIndexSpace<N,T>
-  //
-
   template <int N, typename T>
-  class TransferIteratorIndexSpace : public TransferIteratorBase<N,T> {
-  protected:
-    TransferIteratorIndexSpace(void); // used by deserializer
-  public:
-    TransferIteratorIndexSpace(const IndexSpace<N,T> &_is,
-			       RegionInstance inst,
-			       const int _dim_order[N],
-			       const std::vector<FieldID>& _fields,
-			       const std::vector<size_t>& _fld_offsets,
-			       const std::vector<size_t>& _fld_sizes,
-			       size_t _extra_elems);
-
-    template <typename S>
-    static TransferIterator *deserialize_new(S& deserializer);
-      
-    virtual ~TransferIteratorIndexSpace(void);
-
-    virtual Event request_metadata(void);
-
-    virtual void reset(void);
-
-    static Serialization::PolymorphicSerdezSubclass<TransferIterator, TransferIteratorIndexSpace<N,T> > serdez_subclass;
-
-    template <typename S>
-    bool serialize(S& serializer) const;
-
-  protected:
-    virtual bool get_next_rect(Rect<N,T>& r, FieldID& fid,
-			       size_t& offset, size_t& fsize);
-    
-    IndexSpace<N,T> is;
-    IndexSpaceIterator<N,T> iter;
-    bool iter_init_deferred;
-    std::vector<FieldID> fields;
-    std::vector<size_t> fld_offsets, fld_sizes;
-    size_t field_idx;
-    size_t extra_elems;
-  };
-
-  template <int N, typename T>
-  TransferIteratorIndexSpace<N,T>::TransferIteratorIndexSpace(const IndexSpace<N,T>& _is,
-							      RegionInstance inst,
-							      const int _dim_order[N],
-							      const std::vector<FieldID>& _fields,
-							      const std::vector<size_t>& _fld_offsets,
-							      const std::vector<size_t>& _fld_sizes,
-							      size_t _extra_elems)
-    : TransferIteratorBase<N,T>(inst, _dim_order)
+  TransferIteratorIndexSpace<N, T>::TransferIteratorIndexSpace(
+      const IndexSpace<N, T> &_is, RegionInstanceImpl *_inst_impl,
+      const int _dim_order[N], const std::vector<FieldID> &_fields,
+      const std::vector<size_t> &_fld_offsets, const std::vector<size_t> &_fld_sizes,
+      size_t _extra_elems)
+    : TransferIteratorBase<N, T>(_inst_impl, _dim_order)
     , is(_is)
-    , field_idx(0), extra_elems(_extra_elems)
+    , field_idx(0)
+    , extra_elems(_extra_elems)
   {
     if(is.is_valid()) {
       iter.reset(is);
@@ -754,42 +671,38 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  TransferIteratorIndexSpace<N,T>::TransferIteratorIndexSpace(void)
+  TransferIteratorIndexSpace<N, T>::TransferIteratorIndexSpace(void)
     : iter_init_deferred(false)
     , field_idx(0)
   {}
 
   template <int N, typename T>
   template <typename S>
-  /*static*/ TransferIterator *TransferIteratorIndexSpace<N,T>::deserialize_new(S& deserializer)
+  /*static*/ TransferIterator *
+  TransferIteratorIndexSpace<N, T>::deserialize_new(S &deserializer)
   {
-    IndexSpace<N,T> is;
+    IndexSpace<N, T> is;
     RegionInstance inst;
     std::vector<FieldID> fields;
     std::vector<size_t> fld_offsets, fld_sizes;
     size_t extra_elems;
     int dim_order[N];
 
-    if(!((deserializer >> is) &&
-	 (deserializer >> inst) &&
-	 (deserializer >> fields) &&
-	 (deserializer >> fld_offsets) &&
-	 (deserializer >> fld_sizes) &&
-	 (deserializer >> extra_elems)))
+    if(!((deserializer >> is) && (deserializer >> inst) && (deserializer >> fields) &&
+         (deserializer >> fld_offsets) && (deserializer >> fld_sizes) &&
+         (deserializer >> extra_elems))) {
       return 0;
+    }
 
-    for(int i = 0; i < N; i++)
-      if(!(deserializer >> dim_order[i]))
-	return 0;
+    for(int i = 0; i < N; i++) {
+      if(!(deserializer >> dim_order[i])) {
+        return 0;
+      }
+    }
 
-    TransferIteratorIndexSpace<N,T> *tiis = new TransferIteratorIndexSpace<N,T>(is,
-										inst,
-										dim_order,
-										fields,
-										fld_offsets,
-										fld_sizes,
-										extra_elems);
-
+    TransferIteratorIndexSpace<N, T> *tiis = new TransferIteratorIndexSpace<N, T>(
+        is, get_runtime()->get_instance_impl(inst), dim_order, fields, fld_offsets,
+        fld_sizes, extra_elems);
     return tiis;
   }
 
@@ -800,7 +713,7 @@ namespace Realm {
   template <int N, typename T>
   Event TransferIteratorIndexSpace<N,T>::request_metadata(void)
   {
-    Event e = TransferIteratorBase<N,T>::request_metadata();;
+    Event e = TransferIteratorBase<N, T>::request_metadata();
 
     if(iter_init_deferred)
       e = Event::merge_events(e, is.make_valid());
@@ -858,15 +771,11 @@ namespace Realm {
 
   template <int N, typename T>
   template <typename S>
-  bool TransferIteratorIndexSpace<N,T>::serialize(S& serializer) const
+  bool TransferIteratorIndexSpace<N, T>::serialize(S &serializer) const
   {
-    if(!((serializer << iter.space) &&
-	 (serializer << (this->inst_impl ? this->inst_impl->me :
-			 RegionInstance::NO_INST)) &&
-	 (serializer << fields) &&
-	 (serializer << fld_offsets) &&
-	 (serializer << fld_sizes) &&
-	 (serializer << extra_elems)))
+    if(!((serializer << iter.space) && (serializer << this->inst_impl->me) &&
+         (serializer << fields) && (serializer << fld_offsets) &&
+         (serializer << fld_sizes) && (serializer << extra_elems)))
       return false;
 
     for(int i = 0; i < N; i++)
@@ -944,7 +853,7 @@ namespace Realm {
   WrappingTransferIteratorIndirect<N, T>::WrappingTransferIteratorIndirect(
       RegionInstance inst, const std::vector<FieldID> &_fields,
       const std::vector<size_t> &_fld_offsets, const std::vector<size_t> &_fld_sizes)
-    : TransferIteratorBase<N, T>(inst, 0)
+    : TransferIteratorBase<N, T>(get_runtime()->get_instance_impl(inst), 0)
     , fields(_fields)
     , fld_offsets(_fld_offsets)
     , fld_sizes(_fld_sizes)
@@ -1029,22 +938,19 @@ namespace Realm {
     size_t cur_field_offset = fld_offsets[0];
     size_t cur_field_size = fld_sizes[0];
 
-    if(this->inst_layout == 0) {
-      assert(this->inst_impl->metadata.is_valid());
-      this->inst_layout =
-          checked_cast<const InstanceLayout<N, T> *>(this->inst_impl->metadata.layout);
-    }
+    const InstanceLayout<N, T> *inst_layout =
+        checked_cast<const InstanceLayout<N, T> *>(this->inst_impl->metadata.layout);
 
-    assert(this->inst_layout);
+    assert(inst_layout);
     std::map<FieldID, InstanceLayoutGeneric::FieldLayout>::const_iterator it =
-        this->inst_layout->fields.find(cur_field_id);
-    assert(it != this->inst_layout->fields.end());
-    size_t pieces = this->inst_layout->piece_lists[it->second.list_idx].pieces.size();
+        inst_layout->fields.find(cur_field_id);
+    assert(it != inst_layout->fields.end());
+    size_t pieces = inst_layout->piece_lists[it->second.list_idx].pieces.size();
 
     if(piece_idx < pieces) {
       const InstanceLayoutPiece<N, T> *layout_piece;
       size_t field_rel_offset =
-          get_layout_piece(this->inst_layout, layout_piece, cur_field_id, cur_field_size,
+          get_layout_piece(inst_layout, layout_piece, cur_field_id, cur_field_size,
                            cur_field_offset, piece_idx);
 
       if(layout_piece->layout_type == PieceLayoutTypes::AffineLayoutType) {
@@ -1222,29 +1128,29 @@ namespace Realm {
     : can_merge(true)
     , point_pos(0), num_points(0)
   {}
-  
+
   template <int N, typename T>
-  TransferIteratorIndirect<N,T>::TransferIteratorIndirect(Memory _addrs_mem,
-							  //const IndexSpace<N,T> &_is,
-							  RegionInstance inst,
-							  //const int _dim_order[N],
-							  const std::vector<FieldID>& _fields,
-							  const std::vector<size_t>& _fld_offsets,
-							  const std::vector<size_t>& _fld_sizes)
-    : TransferIteratorBase<N,T>(inst, 0)
+  TransferIteratorIndirect<N, T>::TransferIteratorIndirect(
+      Memory _addrs_mem,
+      // const IndexSpace<N,T> &_is,
+      RegionInstance inst,
+      // const int _dim_order[N],
+      const std::vector<FieldID> &_fields, const std::vector<size_t> &_fld_offsets,
+      const std::vector<size_t> &_fld_sizes)
+    : TransferIteratorBase<N, T>(get_runtime()->get_instance_impl(inst), 0)
     , addrs_in(0)
     , addrs_mem(_addrs_mem)
     , addrs_mem_base(0)
     , point_pos(0)
     , num_points(0)
-      //, is(_is)
+    //, is(_is)
     , fields(_fields)
     , fld_offsets(_fld_offsets)
     , fld_sizes(_fld_sizes)
     , indirect_xd(0)
     , indirect_port_idx(-1)
   {}
-    
+
   template <int N, typename T>
   /*static*/ Serialization::PolymorphicSerdezSubclass<TransferIterator, TransferIteratorIndirect<N,T> > TransferIteratorIndirect<N,T>::serdez_subclass;
 
@@ -1252,11 +1158,9 @@ namespace Realm {
   template <typename S>
   bool TransferIteratorIndirect<N,T>::serialize(S& serializer) const
   {
-    return ((serializer << addrs_mem) &&
-	    (serializer << this->inst_impl->me) &&
-	    (serializer << fields) &&
-	    (serializer << fld_offsets) &&
-	    (serializer << fld_sizes));
+    return ((serializer << addrs_mem) && (serializer << this->inst_impl->me) &&
+            (serializer << fields) && (serializer << fld_offsets) &&
+            (serializer << fld_sizes));
   }
 
   template <int N, typename T>
@@ -1504,42 +1408,42 @@ namespace Realm {
     : can_merge(true)
     , rect_pos(0), num_rects(0)
   {}
-  
+
   template <int N, typename T>
-  TransferIteratorIndirectRange<N,T>::TransferIteratorIndirectRange(Memory _addrs_mem,
-							  //const IndexSpace<N,T> &_is,
-							  RegionInstance inst,
-							  //const int _dim_order[N],
-								    const std::vector<FieldID>& _fields,
-								    const std::vector<size_t>& _fld_offsets,
-								    const std::vector<size_t>& _fld_sizes)
-    : TransferIteratorBase<N,T>(inst, 0)
+  TransferIteratorIndirectRange<N, T>::TransferIteratorIndirectRange(
+      Memory _addrs_mem,
+      // const IndexSpace<N,T> &_is,
+      RegionInstance inst,
+      // const int _dim_order[N],
+      const std::vector<FieldID> &_fields, const std::vector<size_t> &_fld_offsets,
+      const std::vector<size_t> &_fld_sizes)
+    : TransferIteratorBase<N, T>(get_runtime()->get_instance_impl(inst), 0)
     , addrs_in(0)
     , addrs_mem(_addrs_mem)
     , addrs_mem_base(0)
     , can_merge(true)
     , rect_pos(0)
     , num_rects(0)
-      //, is(_is)
+    //, is(_is)
     , fields(_fields)
     , fld_offsets(_fld_offsets)
     , fld_sizes(_fld_sizes)
     , indirect_xd(0)
     , indirect_port_idx(-1)
   {}
-    
+
   template <int N, typename T>
-  /*static*/ Serialization::PolymorphicSerdezSubclass<TransferIterator, TransferIteratorIndirectRange<N,T> > TransferIteratorIndirectRange<N,T>::serdez_subclass;
+  /*static*/ Serialization::PolymorphicSerdezSubclass<TransferIterator,
+                                                      TransferIteratorIndirectRange<N, T>>
+      TransferIteratorIndirectRange<N, T>::serdez_subclass;
 
   template <int N, typename T>
   template <typename S>
-  bool TransferIteratorIndirectRange<N,T>::serialize(S& serializer) const
+  bool TransferIteratorIndirectRange<N, T>::serialize(S &serializer) const
   {
-    return ((serializer << addrs_mem) &&
-	    (serializer << this->inst_impl->me) &&
-	    (serializer << fields) &&
-	    (serializer << fld_offsets) &&
-	    (serializer << fld_sizes));
+    return ((serializer << addrs_mem) && (serializer << this->inst_impl->me) &&
+            (serializer << fields) && (serializer << fld_offsets) &&
+            (serializer << fld_sizes));
   }
 
   template <int N, typename T>
@@ -2129,9 +2033,9 @@ namespace Realm {
   {
     size_t extra_elems = 0;
     assert(dim_order.size() == N);
-    return new TransferIteratorIndexSpace<N,T>(is, inst, dim_order.data(),
-					       fields, fld_offsets, fld_sizes,
-					       extra_elems);
+    RegionInstanceImpl *impl = get_runtime()->get_instance_impl(inst);
+    return new TransferIteratorIndexSpace<N, T>(is, impl, dim_order.data(), fields,
+                                                fld_offsets, fld_sizes, extra_elems);
   }
 
   template <int N, typename T>

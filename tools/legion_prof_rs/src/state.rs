@@ -4144,12 +4144,12 @@ impl State {
             for (nodes, skew) in skew_nodes.iter() {
                 // Compute the average skew
                 println!(
-                    "Node {} appears to be {} us behind node {} for {} messages with standard deviation {} us.",
+                    "Node {} appears to be {:.3} us behind node {} for {} messages with standard deviation {:.3} us.",
                     nodes.0 .0,
                     skew.1 / 1000.0, // convert to us
                     nodes.1 .0,
                     skew.0,
-                    skew.2.sqrt() / 1000.0 // convert variance to standard deviation and then to us
+                    (skew.2 / skew.0 as f64).sqrt() / 1000.0 // convert variance to standard deviation and then to us
                 );
                 // Skew is hopefully only going in one direction, if not warn ourselves
                 let alt = (nodes.1, nodes.0);

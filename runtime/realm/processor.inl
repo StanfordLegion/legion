@@ -45,7 +45,7 @@ Processor::create_group(const span<const Processor> &members) {
   return ProcessorGroup::create_group(members);
 }
 
-#if defined(REALM_USE_KOKKOS) && (REALM_CXX_STANDARD >= 11)
+#if defined(REALM_USE_KOKKOS)
   // Kokkos execution policies will accept an "execution instance" to
   //  capture task parallelism - provide those here
   inline Processor::KokkosExecInstance::KokkosExecInstance(Processor _p)

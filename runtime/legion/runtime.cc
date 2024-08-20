@@ -16975,6 +16975,7 @@ namespace Legion {
         verify_partitions(config.verify_partitions),
         runtime_warnings(config.runtime_warnings),
         warnings_backtrace(config.warnings_backtrace),
+        warnings_are_errors(config.warnings_are_errors),
         report_leaks(config.report_leaks),
         separate_runtime_instances(config.separate_runtime_instances),
         record_registration(config.record_registration),
@@ -17188,6 +17189,7 @@ namespace Legion {
         verify_partitions(rhs.verify_partitions),
         runtime_warnings(rhs.runtime_warnings),
         warnings_backtrace(rhs.warnings_backtrace),
+        warnings_are_errors(rhs.warnings_are_errors),
         report_leaks(rhs.report_leaks),
         separate_runtime_instances(rhs.separate_runtime_instances),
         record_registration(rhs.record_registration),
@@ -30561,6 +30563,7 @@ namespace Legion {
       cp.add_option_bool("-lg:warn_backtrace",
                          config.warnings_backtrace, !filter)
         .add_option_bool("-lg:warn", config.runtime_warnings, !filter)
+        .add_option_bool("-lg:werror", config.warnings_are_errors, !filter)
         .add_option_bool("-lg:leaks", config.report_leaks, !filter)
         .add_option_bool("-lg:separate",
                          config.separate_runtime_instances, !filter)
@@ -32311,9 +32314,10 @@ namespace Legion {
         bt.lookup_symbols();
         log_run.warning() << bt;
       }
-#ifdef LEGION_WARNINGS_FATAL
-      abort();
+#ifndef LEGION_WARNINGS_FATAL
+      if (the_runtime->warnings_are_errors)
 #endif
+        abort();
     }
 
     //--------------------------------------------------------------------------
