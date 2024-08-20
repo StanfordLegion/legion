@@ -299,9 +299,9 @@ namespace Realm {
   {
     if(need_refcount) {
       references.fetch_add_acqrel(count);
-      if(wait_on != Event::NO_EVENT) {
-        GenEventImpl::trigger(wait_on, false);
-      }
+    }
+    if(wait_on != Event::NO_EVENT) {
+      GenEventImpl::trigger(wait_on, false);
     }
   }
 
