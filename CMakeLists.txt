@@ -429,6 +429,11 @@ if("${Legion_NETWORKS}" MATCHES ".*gasnet(1|ex).*")
   # define variable for realm_defines.h
   if("${Legion_NETWORKS}" MATCHES .*gasnetex.*)
     set(REALM_USE_GASNETEX ON)
+    # wether to build gasnetex wrapper as a standalone library
+    option(Legion_USE_GASNETEX_WRAPPER "Enable gasnetex wrapper" OFF)
+    if (Legion_USE_GASNETEX_WRAPPER)
+      set(REALM_USE_GASNETEX_WRAPPER ON)
+    endif()
   else()
     set(REALM_USE_GASNET1 ON)
   endif()
