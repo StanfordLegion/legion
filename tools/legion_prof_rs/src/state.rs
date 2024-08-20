@@ -3339,13 +3339,20 @@ impl State {
         kind: EventEntryKind,
         creator: ProfUID,
         time: Timestamp,
+        deduplicate: bool,
     ) -> CriticalPathVertex {
         assert!(fevent.exists());
         if let Some(index) = self.event_lookup.get(&fevent) {
             let node_weight = self.event_graph.node_weight_mut(*index).unwrap();
-            // Should be an unknown weight since we'll only add each fevent once
-            assert!(node_weight.kind == EventEntryKind::UnknownEvent);
-            *node_weight = EventEntry::new(kind, Some(creator), Some(time));
+            if node_weight.kind == EventEntryKind::UnknownEvent {
+                *node_weight = EventEntry::new(kind, Some(creator), Some(time));
+            } else if deduplicate {
+                assert!(node_weight.kind == kind);
+                assert!(node_weight.creator.unwrap() == creator);
+            } else {
+                // Otherwise we should record each fevent exactly once
+                panic!("Duplicated recordings of event {:#x}. This is probably a runtime bug.", fevent.0);     
+            }
             *index
         } else {
             let index = self
@@ -3459,6 +3466,7 @@ impl State {
                 EventEntryKind::TaskEvent,
                 base.prof_uid,
                 time_range.stop.unwrap(),
+                false,
             );
         }
         let proc = self.procs.create_proc(proc_id);
@@ -3506,6 +3514,7 @@ impl State {
             EventEntryKind::TaskEvent,
             base.prof_uid,
             time_range.stop.unwrap(),
+            false,
         );
         let proc = self.procs.create_proc(proc_id);
         proc.create_proc_entry(
@@ -3647,6 +3656,7 @@ impl State {
             EventEntryKind::TaskEvent,
             base.prof_uid,
             time_range.stop.unwrap(),
+            false,
         );
         let proc = self.procs.create_proc(proc_id);
         proc.create_proc_entry(
@@ -3681,6 +3691,7 @@ impl State {
             EventEntryKind::CopyEvent,
             base.prof_uid,
             time_range.stop.unwrap(),
+            false,
         );
         assert!(!copies.contains_key(&fevent));
         copies.entry(fevent).or_insert_with(|| {
@@ -3714,6 +3725,7 @@ impl State {
             EventEntryKind::FillEvent,
             base.prof_uid,
             time_range.stop.unwrap(),
+            false,
         );
         assert!(!fills.contains_key(&fevent));
         fills.entry(fevent).or_insert_with(|| {
@@ -3747,6 +3759,7 @@ impl State {
             EventEntryKind::DepPartEvent,
             base.prof_uid,
             time_range.stop.unwrap(),
+            false,
         );
         let chan_id = ChanID::new_deppart(node_id);
         self.prof_uid_chan.insert(base.prof_uid, chan_id);
@@ -5477,34 +5490,11 @@ fn process_record(
             pre2,
             pre3,
         } => {
-            // Event mergers are a little bit strange in that we cannot use the
-            // normal method of recording them as an event node because for large
-            // fan-in cases we'll actually get many records with the same result event
             assert!(result.exists());
             assert!(fevent.exists());
             let creator_uid = state.create_fevent_reference(*fevent).unwrap();
-            if let Some(index) = state.event_lookup.get(&result) {
-                let node_weight = state.event_graph.node_weight_mut(*index).unwrap();
-                match node_weight.kind {
-                    EventEntryKind::UnknownEvent => {
-                        node_weight.kind = EventEntryKind::MergeEvent;
-                        node_weight.creator = Some(creator_uid);
-                        node_weight.trigger_time = Some(*performed);
-                    }
-                    EventEntryKind::MergeEvent => {
-                        assert!(node_weight.creator.unwrap() == creator_uid);
-                    }
-                    _ => unreachable!(),
-                }
-            } else {
-                let index = state.event_graph.add_node(EventEntry::new(
-                    EventEntryKind::MergeEvent,
-                    Some(creator_uid),
-                    Some(*performed),
-                ));
-                state.event_lookup.insert(*result, index);
-            }
-            let dst = *state.event_lookup.get(&result).unwrap();
+            // Event mergers can record multiple of these statements so need to deduplicate
+            let dst = state.record_event_node(*result, EventEntryKind::MergeEvent, creator_uid, *performed, true);
             if pre0.exists() {
                 let src = state.find_event_node(*pre0);
                 state.event_graph.add_edge(src, dst, ());
@@ -5531,15 +5521,23 @@ fn process_record(
             assert!(result.exists());
             assert!(fevent.exists());
             let creator_uid = state.create_fevent_reference(*fevent).unwrap();
+            // Only need to deduplicate if it was triggered on a remote node 
+            let deduplicate = result.node_id() != fevent.node_id();
             let dst = state.record_event_node(
                 *result,
                 EventEntryKind::TriggerEvent,
                 creator_uid,
                 *performed,
+                deduplicate,
             );
             if precondition.exists() {
                 let src = state.find_event_node(*precondition);
-                state.event_graph.add_edge(src, dst, ());
+                if deduplicate {
+                    // Use update edge to deduplicate edges
+                    state.event_graph.update_edge(src, dst, ());
+                } else {
+                    state.event_graph.add_edge(src, dst, ());
+                }
             }
         }
         Record::EventPoisonInfo {
@@ -5550,11 +5548,14 @@ fn process_record(
             assert!(result.exists());
             assert!(fevent.exists());
             let creator_uid = state.create_fevent_reference(*fevent).unwrap();
+            // Only need to deduplicate if it was poisoned on a remote node
+            let deduplicate = result.node_id() != fevent.node_id();
             state.record_event_node(
                 *result,
                 EventEntryKind::PoisonEvent,
                 creator_uid,
                 *performed,
+                deduplicate,
             );
         }
         Record::BarrierArrivalInfo {
@@ -5563,13 +5564,13 @@ fn process_record(
             precondition,
             performed,
         } => {
-            // Barrier arrivals are strange in a similar way to how event mergers are weird in
-            // that we might ultimately have multiple arrivals on the barrier and we need to
-            // deduplicate those and find the last arrival
             assert!(result.exists());
             assert!(result.is_barrier());
             assert!(fevent.exists());
             let creator_uid = state.create_fevent_reference(*fevent).unwrap();
+            // Barrier arrivals are strange in that we might ultimately have multiple 
+            // arrivals on the barrier and we need to deduplicate those and find the
+            // last arrival which we can't do with record_event_node
             if let Some(index) = state.event_lookup.get(&result) {
                 let node_weight = state.event_graph.node_weight_mut(*index).unwrap();
                 match node_weight.kind {
@@ -5625,6 +5626,7 @@ fn process_record(
                 EventEntryKind::ReservationAcquire,
                 creator_uid,
                 *performed,
+                false,
             );
             if precondition.exists() {
                 let src = state.find_event_node(*precondition);
@@ -5644,6 +5646,7 @@ fn process_record(
                 EventEntryKind::InstanceReady,
                 creator_uid,
                 *performed,
+                false,
             );
             if precondition.exists() {
                 state
@@ -5662,34 +5665,13 @@ fn process_record(
             pre2,
             pre3,
         } => {
-            // Completion queue events are strange in the exact same way as event
-            // mergers in that we might get several of these statements for large
-            // fan-in cases with lots of preconditions
             assert!(result.exists());
             assert!(fevent.exists());
             let creator_uid = state.create_fevent_reference(*fevent).unwrap();
-            if let Some(index) = state.event_lookup.get(&result) {
-                let node_weight = state.event_graph.node_weight_mut(*index).unwrap();
-                match node_weight.kind {
-                    EventEntryKind::UnknownEvent => {
-                        node_weight.kind = EventEntryKind::MergeEvent;
-                        node_weight.creator = Some(creator_uid);
-                        node_weight.trigger_time = Some(*performed);
-                    }
-                    EventEntryKind::CompletionQueueEvent => {
-                        assert!(node_weight.creator.unwrap() == creator_uid);
-                    }
-                    _ => unreachable!(),
-                }
-            } else {
-                let index = state.event_graph.add_node(EventEntry::new(
-                    EventEntryKind::CompletionQueueEvent,
-                    Some(creator_uid),
-                    Some(*performed),
-                ));
-                state.event_lookup.insert(*result, index);
-            }
-            let dst = *state.event_lookup.get(&result).unwrap();
+            // Completion queue events are weird in a similar way to how event mergers are weird in
+            // that we might ultimately have multiple preconditions on the event and we need to
+            // deduplicate those and find the first triggering event
+            let dst = state.record_event_node(*result, EventEntryKind::CompletionQueueEvent, creator_uid, *performed, true);
             if pre0.exists() {
                 let src = state.find_event_node(*pre0);
                 state.event_graph.add_edge(src, dst, ());
