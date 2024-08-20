@@ -1217,9 +1217,13 @@ impl StateDataSource {
             // executing during this task at the point of creation
             let entry = proc.find_executing_entry(prof_uid, creation_time).unwrap();
             let op_name = entry.name(&self.state);
+            let proc_name = proc.name(&self.state);
             Field::ItemLink(ItemLink {
                 item_uid: entry.base().prof_uid.into(),
-                title: format!("Created by {} at {}", &op_name, creation_ts),
+                title: format!(
+                    "Created by {} at {} on {}",
+                    &op_name, creation_ts, proc_name
+                ),
                 interval: entry.time_range().into(),
                 entry_id: self.proc_entries.get(proc_id).unwrap().clone(),
             })
@@ -1227,9 +1231,13 @@ impl StateDataSource {
             let chan = self.state.chans.get(&chan_id).unwrap();
             let entry = chan.find_entry(prof_uid).unwrap();
             let op_name = entry.name(&self.state);
+            let chan_name = chan.name(&self.state);
             Field::ItemLink(ItemLink {
                 item_uid: entry.base().prof_uid.into(),
-                title: format!("Created by {} at {}", &op_name, creation_ts),
+                title: format!(
+                    "Created by {} at {} in {}",
+                    &op_name, creation_ts, chan_name
+                ),
                 interval: entry.time_range().into(),
                 entry_id: self.chan_entries.get(chan_id).unwrap().clone(),
             })
@@ -1237,9 +1245,13 @@ impl StateDataSource {
             let mem = self.state.mems.get(&mem_id).unwrap();
             let inst = mem.entry(prof_uid);
             let inst_name = inst.name(&self.state);
+            let mem_name = mem.name(&self.state);
             Field::ItemLink(ItemLink {
                 item_uid: inst.base().prof_uid.into(),
-                title: format!("Created by {} at {}", &inst_name, creation_ts),
+                title: format!(
+                    "Created by {} at {} in {}",
+                    &inst_name, creation_ts, mem_name
+                ),
                 interval: inst.time_range().into(),
                 entry_id: self.mem_entries.get(mem_id).unwrap().clone(),
             })
@@ -1302,9 +1314,13 @@ impl StateDataSource {
                     let proc = self.state.procs.get(&proc_id).unwrap();
                     let entry = proc.find_entry(prof_uid).unwrap();
                     let op_name = entry.name(&self.state);
+                    let proc_name = proc.name(&self.state);
                     Field::ItemLink(ItemLink {
                         item_uid: entry.base().prof_uid.into(),
-                        title: format!("Completion of {} at {}", &op_name, trigger_time),
+                        title: format!(
+                            "Completion of {} at {} on {}",
+                            &op_name, trigger_time, proc_name
+                        ),
                         interval: entry.time_range.into(),
                         entry_id: self.proc_entries.get(proc_id).unwrap().clone(),
                     })
@@ -1324,9 +1340,13 @@ impl StateDataSource {
                     let chan = self.state.chans.get(&chan_id).unwrap();
                     let entry = chan.find_entry(prof_uid).unwrap();
                     let name = entry.name(&self.state);
+                    let chan_name = chan.name(&self.state);
                     Field::ItemLink(ItemLink {
                         item_uid: entry.base().prof_uid.into(),
-                        title: format!("Completion of {} at {}", &name, trigger_time),
+                        title: format!(
+                            "Completion of {} at {} in {}",
+                            &name, trigger_time, chan_name
+                        ),
                         interval: entry.time_range().into(),
                         entry_id: self.chan_entries.get(chan_id).unwrap().clone(),
                     })
@@ -1352,9 +1372,13 @@ impl StateDataSource {
                     let inst = mem.entry(prof_uid);
                     let ready_time: ts::Timestamp = inst.time_range.ready.unwrap().into();
                     let inst_name = inst.name(&self.state);
+                    let mem_name = mem.name(&self.state);
                     Field::ItemLink(ItemLink {
                         item_uid: inst.base.prof_uid.into(),
-                        title: format!("Allocation of {} at {}", &inst_name, ready_time),
+                        title: format!(
+                            "Allocation of {} at {} in {}",
+                            &inst_name, ready_time, mem_name
+                        ),
                         interval: inst.time_range.into(),
                         entry_id: self.mem_entries.get(mem_id).unwrap().clone(),
                     })
@@ -1381,6 +1405,7 @@ impl StateDataSource {
                     // This prof UID is just the fevent prof UID, find the actual executing entry
                     let entry = proc.find_executing_entry(prof_uid, trigger_time).unwrap();
                     let op_name = entry.name(&self.state);
+                    let proc_name = proc.name(&self.state);
                     let kind = match event_entry.kind {
                         EventEntryKind::MergeEvent => "Event Merger",
                         EventEntryKind::TriggerEvent => "User Event Trigger",
@@ -1392,7 +1417,10 @@ impl StateDataSource {
                     };
                     Field::ItemLink(ItemLink {
                         item_uid: entry.base().prof_uid.into(),
-                        title: format!("{} by {} at {}", kind, &op_name, trigger_ts),
+                        title: format!(
+                            "{} by {} at {} on {}",
+                            kind, &op_name, trigger_ts, proc_name
+                        ),
                         interval: ts::Interval::new(
                             entry.time_range.start.unwrap().into(),
                             trigger_ts,

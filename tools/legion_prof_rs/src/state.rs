@@ -339,6 +339,7 @@ pub trait Container {
     type S: std::marker::Copy + std::fmt::Debug;
     type Entry: ContainerEntry;
 
+    fn name(&self, state: &State) -> String;
     fn max_levels(&self, device: Option<DeviceKind>) -> u32;
     fn max_levels_ready(&self, device: Option<DeviceKind>) -> u32;
     fn time_points(&self, device: Option<DeviceKind>) -> &Vec<TimePoint<Self::E, Self::S>>;
@@ -635,6 +636,23 @@ impl Proc {
             time_points_stacked_device: Vec::new(),
             util_time_points_device: Vec::new(),
             visible: true,
+        }
+    }
+
+    fn kind_name(&self) -> &str {
+        if let Some(kind) = self.kind {
+            match kind {
+                ProcKind::GPU => "GPU",
+                ProcKind::CPU => "CPU",
+                ProcKind::Utility => "Utility",
+                ProcKind::IO => "I/O",
+                ProcKind::ProcGroup => "Group",
+                ProcKind::ProcSet => "Set",
+                ProcKind::OpenMP => "OpenMP",
+                ProcKind::Python => "Python",
+            }
+        } else {
+            "Unknown"
         }
     }
 
@@ -1075,6 +1093,15 @@ impl Container for Proc {
     type S = Timestamp;
     type Entry = ProcEntry;
 
+    fn name(&self, _: &State) -> String {
+        let node = self.proc_id.node_id();
+        let kind = self.kind_name();
+        format!(
+            "{} Processor {:#x} (Node: {})",
+            kind, self.proc_id.0, node.0
+        )
+    }
+
     fn max_levels(&self, device: Option<DeviceKind>) -> u32 {
         match device {
             Some(DeviceKind::Device) => self.max_levels_device,
@@ -1264,6 +1291,26 @@ impl Mem {
         }
     }
 
+    fn kind_name(&self) -> &str {
+        match self.kind {
+            MemKind::NoMemKind => "Unknown",
+            MemKind::Global => "Global",
+            MemKind::System => "System",
+            MemKind::Registered => "Registered",
+            MemKind::Socket => "Socket",
+            MemKind::ZeroCopy => "Zero-Copy",
+            MemKind::Framebuffer => "Framebuffer",
+            MemKind::Disk => "Disk",
+            MemKind::HDF5 => "HDF5",
+            MemKind::File => "Posix File",
+            MemKind::L3Cache => "L3 Cache",
+            MemKind::L2Cache => "L2 Cache",
+            MemKind::L1Cache => "L1 Cache",
+            MemKind::GPUManaged => "GPU UVM",
+            MemKind::GPUDynamic => "GPU Dynamic",
+        }
+    }
+
     fn add_inst(&mut self, inst: Inst) {
         self.insts.insert(inst.base.prof_uid, inst);
     }
@@ -1352,6 +1399,12 @@ impl Container for Mem {
     type E = ProfUID;
     type S = Timestamp;
     type Entry = Inst;
+
+    fn name(&self, _: &State) -> String {
+        let node = self.mem_id.node_id();
+        let kind = self.kind_name();
+        format!("{} Memory {:#x} (Node: {})", kind, self.mem_id.0, node.0)
+    }
 
     fn max_levels(&self, device: Option<DeviceKind>) -> u32 {
         assert!(device.is_none());
@@ -1697,6 +1750,36 @@ impl Container for Chan {
     type E = ProfUID;
     type S = Timestamp;
     type Entry = ChanEntry;
+
+    fn name(&self, state: &State) -> String {
+        match self.chan_id {
+            ChanID::Copy { src, dst } => {
+                let src_mem = state.mems.get(&src).unwrap();
+                let dst_mem = state.mems.get(&dst).unwrap();
+                let src_name = src_mem.name(state);
+                let dst_name = dst_mem.name(state);
+                format!("Copy channel from {} to {}", src_name, dst_name)
+            }
+            ChanID::Fill { dst } => {
+                let dst_mem = state.mems.get(&dst).unwrap();
+                let dst_name = dst_mem.name(state);
+                format!("Fill channel to {}", dst_name)
+            }
+            ChanID::Gather { dst } => {
+                let dst_mem = state.mems.get(&dst).unwrap();
+                let dst_name = dst_mem.name(state);
+                format!("Gather channel to {}", dst_name)
+            }
+            ChanID::Scatter { src } => {
+                let src_mem = state.mems.get(&src).unwrap();
+                let src_name = src_mem.name(state);
+                format!("Scatter channel to {}", src_name)
+            }
+            ChanID::DepPart { node_id } => {
+                format!("Dependent Partition channel on {}", node_id.0)
+            }
+        }
+    }
 
     fn max_levels(&self, device: Option<DeviceKind>) -> u32 {
         assert!(device.is_none());
@@ -3351,7 +3434,10 @@ impl State {
                 assert!(node_weight.creator.unwrap() == creator);
             } else {
                 // Otherwise we should record each fevent exactly once
-                panic!("Duplicated recordings of event {:#x}. This is probably a runtime bug.", fevent.0);     
+                panic!(
+                    "Duplicated recordings of event {:#x}. This is probably a runtime bug.",
+                    fevent.0
+                );
             }
             *index
         } else {
@@ -5494,7 +5580,13 @@ fn process_record(
             assert!(fevent.exists());
             let creator_uid = state.create_fevent_reference(*fevent).unwrap();
             // Event mergers can record multiple of these statements so need to deduplicate
-            let dst = state.record_event_node(*result, EventEntryKind::MergeEvent, creator_uid, *performed, true);
+            let dst = state.record_event_node(
+                *result,
+                EventEntryKind::MergeEvent,
+                creator_uid,
+                *performed,
+                true,
+            );
             if pre0.exists() {
                 let src = state.find_event_node(*pre0);
                 state.event_graph.add_edge(src, dst, ());
@@ -5521,7 +5613,7 @@ fn process_record(
             assert!(result.exists());
             assert!(fevent.exists());
             let creator_uid = state.create_fevent_reference(*fevent).unwrap();
-            // Only need to deduplicate if it was triggered on a remote node 
+            // Only need to deduplicate if it was triggered on a remote node
             let deduplicate = result.node_id() != fevent.node_id();
             let dst = state.record_event_node(
                 *result,
@@ -5568,7 +5660,7 @@ fn process_record(
             assert!(result.is_barrier());
             assert!(fevent.exists());
             let creator_uid = state.create_fevent_reference(*fevent).unwrap();
-            // Barrier arrivals are strange in that we might ultimately have multiple 
+            // Barrier arrivals are strange in that we might ultimately have multiple
             // arrivals on the barrier and we need to deduplicate those and find the
             // last arrival which we can't do with record_event_node
             if let Some(index) = state.event_lookup.get(&result) {
@@ -5671,7 +5763,13 @@ fn process_record(
             // Completion queue events are weird in a similar way to how event mergers are weird in
             // that we might ultimately have multiple preconditions on the event and we need to
             // deduplicate those and find the first triggering event
-            let dst = state.record_event_node(*result, EventEntryKind::CompletionQueueEvent, creator_uid, *performed, true);
+            let dst = state.record_event_node(
+                *result,
+                EventEntryKind::CompletionQueueEvent,
+                creator_uid,
+                *performed,
+                true,
+            );
             if pre0.exists() {
                 let src = state.find_event_node(*pre0);
                 state.event_graph.add_edge(src, dst, ());
