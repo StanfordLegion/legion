@@ -754,7 +754,8 @@ namespace Legion {
       MIGRATION_VIRTUAL_CHANNEL = 12,
       TRACING_VIRTUAL_CHANNEL = 13,
       RENDEZVOUS_VIRTUAL_CHANNEL = 14,
-      MAX_NUM_VIRTUAL_CHANNELS = 15, // this one must be last
+      PROFILING_VIRTUAL_CHANNEL = 15,
+      MAX_NUM_VIRTUAL_CHANNELS = 16, // this one must be last
     };
 
     enum MessageKind {
@@ -1081,6 +1082,8 @@ namespace Legion {
       SEND_CONTROL_REPLICATION_CROSS_PRODUCT_EXCHANGE,
       SEND_CONTROL_REPLICATION_TRACING_SET_DEDUPLICATION,
       SEND_CONTROL_REPLICATION_SLOW_BARRIER,
+      SEND_PROFILER_EVENT_TRIGGER,
+      SEND_PROFILER_EVENT_POISON,
       SEND_SHUTDOWN_NOTIFICATION,
       SEND_SHUTDOWN_RESPONSE,
       LAST_SEND_KIND, // This one must be last
@@ -1411,6 +1414,8 @@ namespace Legion {
         "Control Replication Collective Cross Product Exchange",      \
         "Control Replication Collective Tracing Set Deduplication",   \
         "Control Replication Collective Slow Barrier",                \
+        "Send Profiler Event Trigger",                                \
+        "Send Profiler Event Poison",                                 \
         "Send Shutdown Notification",                                 \
         "Send Shutdown Response",                                     \
       };

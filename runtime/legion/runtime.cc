@@ -11961,14 +11961,21 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void VirtualChannel::confirm_shutdown(ShutdownManager *shutdown_manager,
-                                          bool phase_one)
+               bool phase_one, Processor target, bool profiling_virtual_channel)
     //--------------------------------------------------------------------------
     {
       AutoLock c_lock(channel_lock);
       if (phase_one)
       {
         if (packaged_messages > 0)
+        {
           shutdown_manager->record_recent_message();
+          // If this is the profiling channel then flush the messages
+          if (profiling_virtual_channel)
+            send_message(true/*complete*/, implicit_runtime, target,
+                SEND_PROFILER_EVENT_TRIGGER, false/*response*/,
+                RtEvent::NO_RT_EVENT);
+        }
         if (ordered_channel)
         {
           if (!last_message_event.has_triggered())
@@ -12014,7 +12021,14 @@ namespace Legion {
       else
       {
         if (observed_recent || (packaged_messages > 0)) 
+        {
           shutdown_manager->record_recent_message(); 
+          // If this is the profiling channel then flush the messages
+          if (profiling_virtual_channel && (packaged_messages > 0))
+            send_message(true/*complete*/, implicit_runtime, target,
+                SEND_PROFILER_EVENT_TRIGGER, false/*response*/,
+                RtEvent::NO_RT_EVENT);
+        }
         else
         {
           if (ordered_channel)
@@ -13742,6 +13756,16 @@ namespace Legion {
               ShardManager::handle_collective_message(derez, runtime);
               break;
             }
+          case SEND_PROFILER_EVENT_TRIGGER:
+            {
+              implicit_profiler->process_event_trigger(derez);
+              break;
+            }
+          case SEND_PROFILER_EVENT_POISON:
+            {
+              implicit_profiler->process_event_poison(derez);
+              break;
+            }
           case SEND_SHUTDOWN_NOTIFICATION:
             {
               runtime->handle_shutdown_notification(derez,remote_address_space);
@@ -13811,29 +13835,20 @@ namespace Legion {
                                    const Processor remote_util_group)
       : channels((VirtualChannel*)
                   malloc(MAX_NUM_VIRTUAL_CHANNELS*sizeof(VirtualChannel))), 
-        runtime(rt), remote_address_space(remote), target(remote_util_group), 
-        always_flush(rt->profiler != NULL)
+        runtime(rt), remote_address_space(remote), target(remote_util_group)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(remote != runtime->address_space);
 #endif
+      const bool has_profiler = (runtime->profiler != NULL);
       // Initialize our virtual channels 
       for (unsigned idx = 0; idx < MAX_NUM_VIRTUAL_CHANNELS; idx++)
       {
-        new (channels+idx) VirtualChannel((VirtualChannelKind)idx,
-          rt->address_space, max_message_size, always_flush);
+        VirtualChannelKind vc = (VirtualChannelKind)idx;
+        new (channels+idx) VirtualChannel(vc, rt->address_space,
+            max_message_size, has_profiler);
       }
-    }
-
-    //--------------------------------------------------------------------------
-    MessageManager::MessageManager(const MessageManager &rhs)
-      : channels(NULL), runtime(NULL), remote_address_space(0), 
-        target(rhs.target), always_flush(false)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
     }
 
     //--------------------------------------------------------------------------
@@ -13841,19 +13856,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       for (unsigned idx = 0; idx < MAX_NUM_VIRTUAL_CHANNELS; idx++)
-      {
         channels[idx].~VirtualChannel();
-      }
       free(channels);
-    }
-
-    //--------------------------------------------------------------------------
-    MessageManager& MessageManager::operator=(const MessageManager &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
     }
 
     //--------------------------------------------------------------------------
@@ -13861,10 +13865,11 @@ namespace Legion {
         bool flush, bool response, RtEvent flush_precondition)
     //--------------------------------------------------------------------------
     {
-      // Always flush for the profiler if we're doing that
-      if (!flush && always_flush)
-        flush = true;
       const VirtualChannelKind channel = find_message_vc(message);
+      // Always flush for the profiler if we're doing that
+      if (!flush && (runtime->profiler != NULL) && 
+          (channel != PROFILING_VIRTUAL_CHANNEL))
+        flush = true;
       channels[channel].package_message(rez, message, flush, flush_precondition,
                                         runtime, target, response);
     }
@@ -13888,7 +13893,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       for (unsigned idx = 0; idx < MAX_NUM_VIRTUAL_CHANNELS; idx++)
-        channels[idx].confirm_shutdown(shutdown_manager, phase_one);
+        channels[idx].confirm_shutdown(shutdown_manager, phase_one,
+            target, (idx == PROFILING_VIRTUAL_CHANNEL));
     }
 
     /////////////////////////////////////////////////////////////
@@ -24034,6 +24040,26 @@ namespace Legion {
     {
       find_messenger(target)->send_message(SEND_FREE_FUTURE_INSTANCE,
                                 rez, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_profiler_event_trigger(AddressSpaceID target,
+                                              Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      // Never flush these
+      find_messenger(target)->send_message(SEND_PROFILER_EVENT_TRIGGER,
+          rez, false/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_profiler_event_poison(AddressSpaceID target,
+                                             Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      // Never flush these
+      find_messenger(target)->send_message(SEND_PROFILER_EVENT_POISON,
+          rez, false/*flush*/);
     }
 
     //--------------------------------------------------------------------------

@@ -622,6 +622,20 @@ namespace Legion {
       if (pre.is_barrier())
         record_barrier_arrival(pre, implicit_provenance);
       info.fevent = implicit_fevent;
+      // See if we're triggering this node on the same node where it was made
+      // If not we need to eventually notify the node where it was made that
+      // it was triggered here and what the fevent was for it
+      const Realm::ID id(result.id);
+      const AddressSpaceID creator_node = id.event_creator_node();
+      if (creator_node != owner->runtime->address_space)
+      {
+        // Triggered on a remote node, send a message back to the creator
+        // node of the event so that even partial profile loading can know
+        // where the triggering of this event occurred
+        Serializer rez;
+        rez.serialize(info);
+        owner->runtime->send_profiler_event_trigger(creator_node, rez);
+      }
       owner->update_footprint(sizeof(info), this);
     }
 
@@ -636,6 +650,20 @@ namespace Legion {
       info.performed = Realm::Clock::current_time_in_nanoseconds();
       info.result = result;
       info.fevent = implicit_fevent;
+      // See if we're poisoning this node on the same node where it was made
+      // If not we need to eventually notify the node where it was made that
+      // it was triggered here and what the fevent was for it
+      const Realm::ID id(result.id);
+      const AddressSpaceID creator_node = id.event_creator_node();
+      if (creator_node != owner->runtime->address_space)
+      {
+        // Triggered on a remote node, send a message back to the creator
+        // node of the event so that even partial profile loading can know
+        // where the triggering of this event occurred
+        Serializer rez;
+        rez.serialize(info);
+        owner->runtime->send_profiler_event_poison(creator_node, rez);
+      }
       owner->update_footprint(sizeof(info), this);
     }
 
@@ -938,6 +966,17 @@ namespace Legion {
              const Realm::ProfilingMeasurements::OperationProcessorUsage &usage)
     //--------------------------------------------------------------------------
     {
+      // Do a quick check to see if this is a message task we're profiling
+      // If it is then we only profile it if we're self-profiling the profiler
+      const unsigned kind = prof_info->id - LG_MESSAGE_ID; 
+#ifdef DEBUG_LEGION
+      assert(kind < LAST_SEND_KIND);
+#endif
+      const bool is_profiler_message = 
+         ((kind == SEND_PROFILER_EVENT_TRIGGER) ||
+          (kind == SEND_PROFILER_EVENT_POISON));
+      if (is_profiler_message && !owner->self_profile)
+        return;
 #ifdef DEBUG_LEGION
       assert(response.has_measurement<
           Realm::ProfilingMeasurements::OperationTimeline>());
@@ -985,11 +1024,22 @@ namespace Legion {
         const LgEvent original_event = LgEvent(finish.finish_event);
         // Lookup the renamed fevent that we gave it
         info.finish_event = owner->find_message_fevent(original_event);
-        // Lie to the profiler and tell it that the original fevent
-        // was a user event that we triggered here and depended upon
-        // the renamed fevent that we gave the message task in case
-        // something does end up waiting on the original fevent
-        record_event_trigger(original_event, info.finish_event);
+        // Send a message back to the creator node to tell it about the 
+        // implicit fevent we made for this task and it can hook it up
+        // correctly, we'll tell it that it triggered it at the spawn
+        // time of the message task so that it is always ahead
+        // Only send this back if it's not a profiler message otherwise
+        // we'll create an infinite loop of profiling messages
+        if (!is_profiler_message)
+        {
+          const EventTriggerInfo remote_info = 
+            { original_event, info.creator, info.finish_event, info.spawn };
+          Serializer rez;
+          rez.serialize(remote_info);
+          const Realm::ID id = original_event.id;
+          const AddressSpaceID target = id.event_creator_node();
+          owner->runtime->send_profiler_event_trigger(target, rez);
+        }
       }
       const size_t diff = sizeof(MessageInfo) + 
         num_intervals * sizeof(WaitInfo);
@@ -1344,6 +1394,26 @@ namespace Legion {
       proc_ids.push_back(p.id);
       std::sort(proc_ids.begin(), proc_ids.end());
       owner->record_processor(p);
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfInstance::process_event_trigger(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      EventTriggerInfo &info = event_trigger_infos.emplace_back(
+          EventTriggerInfo());
+      derez.deserialize(info);
+      owner->update_footprint(sizeof(info), this);
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfInstance::process_event_poison(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      EventPoisonInfo &info = event_poison_infos.emplace_back(
+          EventPoisonInfo());
+      derez.deserialize(info);
+      owner->update_footprint(sizeof(info), this);
     }
 
     //--------------------------------------------------------------------------

@@ -1847,7 +1847,8 @@ namespace Legion {
                            bool response);
       void process_message(const void *args, size_t arglen, 
                         Runtime *runtime, AddressSpaceID remote_address_space);
-      void confirm_shutdown(ShutdownManager *shutdown_manager, bool phase_one);
+      void confirm_shutdown(ShutdownManager *shutdown_manager, bool phase_one,
+          Processor target, bool profiling_virtual_channel);
     private:
       void send_message(bool complete, Runtime *runtime, Processor target, 
                         MessageKind kind, bool response,
@@ -1920,10 +1921,10 @@ namespace Legion {
       MessageManager(AddressSpaceID remote, 
                      Runtime *rt, size_t max,
                      const Processor remote_util_group);
-      MessageManager(const MessageManager &rhs);
+      MessageManager(const MessageManager &rhs) = delete;
       ~MessageManager(void);
     public:
-      MessageManager& operator=(const MessageManager &rhs);
+      MessageManager& operator=(const MessageManager &rhs) = delete;
     public:
       inline void send_message(MessageKind message, Serializer &rez, bool flush,
                         bool response = false,
@@ -1940,7 +1941,6 @@ namespace Legion {
       // State for sending messages
       const AddressSpaceID remote_address_space;
       const Processor target;
-      const bool always_flush;
     };
 
     /**
@@ -3547,6 +3547,8 @@ namespace Legion {
       void send_create_future_instance_response(AddressSpaceID target,
                                                 Serializer &rez);
       void send_free_future_instance(AddressSpaceID target, Serializer &rez);
+      void send_profiler_event_trigger(AddressSpaceID target, Serializer &rez);
+      void send_profiler_event_poison(AddressSpaceID target, Serializer &rez);
       void send_shutdown_notification(AddressSpaceID target, Serializer &rez);
       void send_shutdown_response(AddressSpaceID target, Serializer &rez);
     public:
@@ -6642,6 +6644,9 @@ namespace Legion {
         case SEND_CONTROL_REPLICATION_TRACING_SET_DEDUPLICATION:
         case SEND_CONTROL_REPLICATION_SLOW_BARRIER:
           break;
+        case SEND_PROFILER_EVENT_TRIGGER:
+        case SEND_PROFILER_EVENT_POISON:
+          return PROFILING_VIRTUAL_CHANNEL;
         case SEND_SHUTDOWN_NOTIFICATION:
           return THROUGHPUT_VIRTUAL_CHANNEL;
         case SEND_SHUTDOWN_RESPONSE:

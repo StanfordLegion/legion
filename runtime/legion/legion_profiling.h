@@ -677,6 +677,8 @@ namespace Legion {
       void process_proc_desc(const Processor &p);
       void process_proc_mem_aff_desc(const Memory &m);
       void process_proc_mem_aff_desc(const Processor &p);
+      void process_event_trigger(Deserializer &derez);
+      void process_event_poison(Deserializer &derez);
     public:
       void record_mapper_call(MapperID mapper, Processor mapper_proc,
        MappingCallKind kind, UniqueID uid, timestamp_t start, timestamp_t stop);
