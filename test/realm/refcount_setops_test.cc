@@ -288,7 +288,7 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
     e2.wait();
   }
 
-  case_id++;
+  /*case_id++;
 
   // empty rhs
 
@@ -305,7 +305,7 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
       }
     }
     e2.wait();
-  }
+  }*/
 
   case_id++;
 
