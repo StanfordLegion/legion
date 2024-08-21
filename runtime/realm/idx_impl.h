@@ -30,6 +30,8 @@ namespace Realm {
 
     virtual IndexSpaceGenericImpl *clone_at(void *dst) const = 0;
 
+    virtual void destroy(Event wait_on) = 0;
+
     virtual Event copy(const std::vector<CopySrcDstField> &srcs,
 		       const std::vector<CopySrcDstField> &dsts,
 		       const void *indirects_data,
@@ -59,6 +61,8 @@ namespace Realm {
     IndexSpaceGenericImplTyped(const IndexSpace<N,T>& _space);
 
     virtual IndexSpaceGenericImpl *clone_at(void *dst) const;
+
+    virtual void destroy(Event wait_on);
 
     virtual Event copy(const std::vector<CopySrcDstField> &srcs,
 		       const std::vector<CopySrcDstField> &dsts,

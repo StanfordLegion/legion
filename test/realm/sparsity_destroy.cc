@@ -32,7 +32,8 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
     SparsityMap<1> local_sparsity =
         SparsityMap<1>::construct({bounds}, /*always_create=*/true, /*disjoint=*/false);
     IndexSpace<1> is(bounds, local_sparsity);
-    is.destroy();
+    IndexSpaceGeneric generic_is(is);
+    generic_is.destroy();
   }
 
   {
