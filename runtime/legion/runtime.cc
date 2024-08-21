@@ -82,6 +82,7 @@ namespace Legion {
     };
 
     thread_local TaskContext *implicit_context = NULL;
+    thread_local MappingCallInfo *implicit_mapper_call = NULL;
     thread_local Runtime *implicit_runtime = NULL;
     thread_local LegionProfInstance *implicit_profiler = NULL;
     thread_local AutoLock *local_lock_list = NULL;
@@ -32357,8 +32358,6 @@ namespace Legion {
       Runtime *runtime = *((Runtime**)userdata); 
       if (implicit_runtime == NULL)
         implicit_runtime = runtime;
-      if (implicit_context != NULL)
-        implicit_context = NULL;
       // We don't profile this task
       implicit_profiler = NULL;
       implicit_fevent = LgEvent::NO_LG_EVENT;
@@ -32396,8 +32395,6 @@ namespace Legion {
 #endif
       if (implicit_runtime == NULL)
         implicit_runtime = runtime;
-      if (implicit_context != NULL)
-        implicit_context = NULL;
       // We immediately bump the priority of all meta-tasks once they start
       // up to the highest level to ensure that they drain once they begin
       Processor::set_current_task_priority(LG_RUNNING_PRIORITY);
@@ -32667,6 +32664,11 @@ namespace Legion {
         case LG_DEFER_MAPPER_MESSAGE_TASK_ID:
           {
             MapperManager::handle_deferred_message(args);
+            break;
+          }
+        case LG_DEFER_MAPPER_COLLECTION_TASK_ID:
+          {
+            MapperManager::handle_deferred_collection(args);
             break;
           }
         case LG_REMOTE_VIEW_CREATION_TASK_ID:
@@ -32951,8 +32953,6 @@ namespace Legion {
       Runtime *runtime = *((Runtime**)userdata);
       if (implicit_runtime == NULL)
         implicit_runtime = runtime;
-      if (implicit_context != NULL)
-        implicit_context = NULL;
       if (runtime->profiler != NULL) 
       {
         implicit_fevent = LgEvent(Processor::get_current_finish_event());
@@ -33045,8 +33045,6 @@ namespace Legion {
       Runtime *runtime = *((Runtime**)userdata);
       if (implicit_runtime == NULL)
         implicit_runtime = runtime;
-      if (implicit_context != NULL)
-        implicit_context = NULL;
       // We don't profile this task
       implicit_profiler = NULL;
       implicit_fevent = LgEvent::NO_LG_EVENT;
@@ -33071,8 +33069,6 @@ namespace Legion {
       Deserializer derez(args, arglen);
       if (implicit_runtime == NULL)
         implicit_runtime = runtime;
-      if (implicit_context != NULL)
-        implicit_context = NULL;
       // We don't profile this task
       implicit_profiler = NULL;
       implicit_fevent = LgEvent::NO_LG_EVENT;
@@ -33093,8 +33089,6 @@ namespace Legion {
 #endif
       if (implicit_runtime == NULL)
         implicit_runtime = runtime;
-      if (implicit_context != NULL)
-        implicit_context = NULL;
       if (runtime->profiler != NULL)
       {
         implicit_fevent = LgEvent(Processor::get_current_finish_event());

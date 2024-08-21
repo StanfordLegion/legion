@@ -170,12 +170,17 @@ cache: &global_cache
 .gasnetex_mpi_stable: &gasnetex_mpi_stable
   REALM_NETWORKS: "gasnetex"
   CONDUIT: "mpi"
-  GASNET_VERSION: "GASNet-stable"
+  GASNET_VERSION: "GASNet-EX-snapshot"
+  # source URL is set by a GitLab CI variable as the GASNet-EX team prefers
+  #  it not to be public at this time
+  #GASNETEX_SNAPSHOT_SOURCE_URL: ...
 .gasnetex_ucx : &gasnetex_ucx
   REALM_NETWORKS: "gasnetex"
   CONDUIT: "ucx"
   UCX_SOURCE: "https://github.com/openucx/ucx/releases/download/v1.14.1/ucx-1.14.1.tar.gz"
   UCX_WARN_UNUSED_ENV_VARS: "n"
+.gasnetex_wrapper: &gasnetex_wrapper
+  USE_GASNETEX_WRAPPER: "1"
 .gasnet1_ucx : &gasnet1_ucx
   REALM_NETWORKS: "gasnet1"
   CONDUIT: "ucx"
@@ -340,6 +345,7 @@ before_script:
             export GASNET_ROOT="$PWD/gasnet/release"
           fi
         fi
+        export REALM_GASNETEX_WRAPPER=${CI_PROJECT_DIR}/tmp-build/build/lib/librealm_gex_wrapper.so
       fi
       if [[ "$REALM_NETWORKS" == ucx ]]; then
         # build mpi bootstrap .so file.
@@ -792,7 +798,7 @@ gcc9_cxx17_release_gasnetex_mpi_legion:
 gcc9_cxx17_debug_gasnetex_mpi_cmake_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *debug, *cxx17_normal, *gasnetex_mpi, *cmake, *legion, *ctest, *short, *shared, *libdw]
+    <<: [*gcc9, *terra12, *debug, *cxx17_normal, *gasnetex_mpi, *gasnetex_wrapper, *cmake, *legion, *ctest, *short, *shared, *libdw]
 gcc9_cxx17_debug_gasnetex_mpi_regent:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
@@ -809,11 +815,11 @@ gcc9_cxx17_debug_gasnetex_mpi_stable_regent:
 gcc9_cxx17_release_gasnet1_ucx_legion:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *release, *cxx17_normal, *gasnet1_ucx, *legion, *short, *libdw]
+    <<: [*gcc9, *terra12, *release, *cxx17_normal, *gasnet1_ucx, *legion, *libdw]
 gcc9_cxx17_release_gasnet1_ucx_cmake_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *release, *cxx17_normal, *gasnet1_ucx, *cmake, *legion, *ctest, *shared, *libdw]
+    <<: [*gcc9, *terra12, *release, *cxx17_normal, *gasnet1_ucx, *cmake, *legion, *ctest, *shared, *short, *libdw]
 gcc9_cxx17_release_gasnet1_ucx_regent:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
@@ -825,7 +831,7 @@ gcc9_cxx17_release_gasnetex_ucx_legion:
 gcc9_cxx17_debug_gasnetex_ucx_cmake_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *debug, *cxx17_normal, *gasnetex_ucx, *cmake, *legion, *ctest, *shared, *libdw]
+    <<: [*gcc9, *terra12, *debug, *cxx17_normal, *gasnetex_ucx, *gasnetex_wrapper, *cmake, *legion, *ctest, *shared, *libdw]
 gcc9_cxx17_release_gasnetex_ucx_regent:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
@@ -1023,7 +1029,7 @@ clang12_cxx17_debug_hdf5_regent:
 clang12_cxx17_debug_gasnetex_mpi_cmake_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*clang12, *terra12, *debug, *cxx17_normal, *gasnetex_mpi, *cmake, *legion, *ctest, *libdw]
+    <<: [*clang12, *terra12, *debug, *cxx17_normal, *gasnetex_mpi, *gasnetex_wrapper, *cmake, *shared, *legion, *ctest, *libdw]
 clang12_cxx17_debug_gasnetex_mpi_regent:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
@@ -1281,7 +1287,7 @@ nvidia_cuda125_gcc11_cxx17_debug_maxdim4_external2:
 nvidia_cuda121_gcc11_cxx17_debug_gasnetex_mpi_cmake_cuda_legion:
   <<: [*nvidia, *tests]
   variables:
-    <<: [*gcc11, *debug, *cxx17_normal, *cuda121, *cmake, *gasnetex_mpi, *legion, *ctest, *short, *libdw]
+    <<: [*gcc11, *debug, *cxx17_normal, *cuda121, *cmake, *gasnetex_mpi, *gasnetex_wrapper, *shared, *legion, *ctest, *short, *libdw]
 nvidia_cuda125_gcc11_cxx17_release_gasnetex_mpi_cuda_regent:
   <<: [*nvidia, *tests]
   variables:
