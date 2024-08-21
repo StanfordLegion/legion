@@ -56,8 +56,9 @@ namespace Realm {
 
   Event SparsityMapRefCounter::add_references_async(unsigned count)
   {
-    Event event = GenEventImpl::create_genevent()->current_event();
+    Event event = Event::NO_EVENT;
     if(ID(*this).is_sparsity()) {
+      event = GenEventImpl::create_genevent()->current_event();
       NodeID owner = ID(*this).sparsity_creator_node();
       if(owner == Network::my_node_id) {
         get_runtime()->get_sparsity_impl(*this)->add_references(count, event);
