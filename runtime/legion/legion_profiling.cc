@@ -968,14 +968,12 @@ namespace Legion {
     {
       // Do a quick check to see if this is a message task we're profiling
       // If it is then we only profile it if we're self-profiling the profiler
-      const unsigned kind = prof_info->id - LG_MESSAGE_ID; 
+      const MessageKind kind = (MessageKind)(prof_info->id - LG_MESSAGE_ID); 
 #ifdef DEBUG_LEGION
       assert(kind < LAST_SEND_KIND);
 #endif
-      const bool is_profiler_message = 
-         ((kind == SEND_PROFILER_EVENT_TRIGGER) ||
-          (kind == SEND_PROFILER_EVENT_POISON));
-      if (is_profiler_message && !owner->self_profile)
+      const VirtualChannelKind vc = MessageManager::find_message_vc(kind);
+      if ((vc == PROFILING_VIRTUAL_CHANNEL) && !owner->self_profile)
         return;
 #ifdef DEBUG_LEGION
       assert(response.has_measurement<
@@ -1024,13 +1022,15 @@ namespace Legion {
         const LgEvent original_event = LgEvent(finish.finish_event);
         // Lookup the renamed fevent that we gave it
         info.finish_event = owner->find_message_fevent(original_event);
-        // Send a message back to the creator node to tell it about the 
-        // implicit fevent we made for this task and it can hook it up
-        // correctly, we'll tell it that it triggered it at the spawn
-        // time of the message task so that it is always ahead
+        // Check to see if this message kind was sent on an ordered
+        // virtual channel in which case we need to send a message 
+        // back to the spawning node for the message to tell it about
+        // the implicit fevent that we made to represent the completion
+        // event for the task.
         // Only send this back if it's not a profiler message otherwise
         // we'll create an infinite loop of profiling messages
-        if (!is_profiler_message)
+        if ((LAST_UNORDERED_VIRTUAL_CHANNEL < vc) && 
+            (vc != PROFILING_VIRTUAL_CHANNEL))
         {
           const EventTriggerInfo remote_info = 
             { original_event, info.creator, info.finish_event, info.spawn };
