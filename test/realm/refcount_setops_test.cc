@@ -36,8 +36,6 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
 {
   TaskArgs &task_args = *(TaskArgs *)args;
 
-  std::vector<Event> events;
-
   {
     IndexSpace<1> result;
 
@@ -53,7 +51,7 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
     assert(result.sparsity == is0.sparsity);
     result.destroy(e2);
     is0.destroy(e2);
-    events.push_back(e2);
+    e2.wait();
   }
 
   {
@@ -74,7 +72,7 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
     assert(!result.dense());
     result.destroy(e2);
     is0.destroy(e2);
-    events.push_back(e2);
+    e2.wait();
   }
 
   {
@@ -91,7 +89,7 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
         ProfilingRequestSet());
     assert(!result.dense());
     result.destroy(e2);
-    events.push_back(e2);
+    e2.wait();
   }
 
   {
@@ -113,7 +111,7 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
     assert(result.sparsity == is1.sparsity);
     result.destroy(e2);
     is1.destroy(e2);
-    events.push_back(e2);
+    e2.wait();
   }
 
   {
@@ -133,7 +131,7 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
 
     result.destroy(e2);
     is1.destroy(e2);
-    events.push_back(e2);
+    e2.wait();
   }
 
   {
@@ -160,7 +158,7 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
     result.destroy(e2);
     is0.destroy(e2);
     is1.destroy(e2);
-    events.push_back(e2);
+    e2.wait();
   }
 
   {
@@ -177,7 +175,7 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
         std::vector<IndexSpace<1>>{IndexSpace<1>(rects0), IndexSpace<1>(rects1)}, result,
         ProfilingRequestSet());
     assert(result.dense());
-    events.push_back(e2);
+    e2.wait();
   }
 
   // no overlap
@@ -202,7 +200,7 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
       results[i].destroy(e2);
     }
     is0.destroy(e2);
-    events.push_back(e2);
+    e2.wait();
   }
 
   {
@@ -222,7 +220,7 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
                                             ProfilingRequestSet());
     assert(result.dense());
     is1.destroy(e2);
-    events.push_back(e2);
+    e2.wait();
   }
 
   int case_id = 0;
@@ -240,7 +238,7 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
         results[i].destroy(e2);
       }
     }
-    events.push_back(e2);
+    e2.wait();
   }
 
   case_id++;
@@ -255,7 +253,7 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
     for(size_t i = 0; i < results.size(); i++) {
       results[i].destroy(e2);
     }
-    events.push_back(e2);
+    e2.wait();
   }
 
   case_id++;
@@ -271,7 +269,7 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
     for(size_t i = 0; i < results.size(); i++) {
       results[i].destroy(e2);
     }
-    events.push_back(e2);
+    e2.wait();
   }
 
   case_id++;
@@ -287,7 +285,7 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
     for(size_t i = 0; i < results.size(); i++) {
       results[i].destroy(e2);
     }
-    events.push_back(e2);
+    e2.wait();
   }
 
   case_id++;
@@ -306,7 +304,7 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
         results[i].destroy(e2);
       }
     }
-    events.push_back(e2);
+    e2.wait();
   }
 
   case_id++;
@@ -326,7 +324,7 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
         results[i].destroy(e2);
       }
     }
-    events.push_back(e2);
+    e2.wait();
   }
 
   case_id++;
@@ -345,7 +343,7 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
         results[i].destroy(e2);
       }
     }
-    events.push_back(e2);
+    e2.wait();
   }
 
   case_id++;
@@ -363,7 +361,7 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
     for(size_t i = 0; i < results.size(); i++) {
       results[i].destroy(e2);
     }
-    events.push_back(e2);
+    e2.wait();
   }
 
   case_id++;
@@ -379,7 +377,7 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
     for(size_t i = 0; i < results.size(); i++) {
       results[i].destroy(e2);
     }
-    events.push_back(e2);
+    e2.wait();
   }
 
   case_id++;
@@ -398,10 +396,8 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
         results[i].destroy(e2);
       }
     }
-    events.push_back(e2);
+    e2.wait();
   }
-
-  Event::merge_events(events).wait();
 }
 
 void main_task(const void *args, size_t arglen, const void *userdata, size_t userlen,
