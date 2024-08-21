@@ -36,7 +36,7 @@ namespace Legion {
       std::map<PhysicalManager*,unsigned/*count*/>* acquired_instances;
       long long                         start_time;
       long long                         pause_time;
-      bool                              reentrant_disabled;
+      bool                              reentrant;
     };
 
     /**
@@ -54,6 +54,16 @@ namespace Legion {
         std::set<PhysicalManager*> instances;
         std::vector<bool> results;
       };
+      class AutoRuntimeCall {
+      public:
+        AutoRuntimeCall(MapperManager *manger, 
+                        MappingCallInfo *info,
+                        RuntimeCallKind kind);
+        ~AutoRuntimeCall(void);
+      public:
+        MapperManager *const manager;
+        const RuntimeCallKind kind;
+      };
       struct DeferMessageArgs : public LgTaskArgs<DeferMessageArgs> {
       public:
         static const LgTaskID TASK_ID = LG_DEFER_MAPPER_MESSAGE_TASK_ID;
@@ -70,6 +80,18 @@ namespace Legion {
         void *const message;
         const size_t size;
         const bool broadcast;
+      };
+      struct DeferInstanceCollectionArgs :
+        public LgTaskArgs<DeferInstanceCollectionArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFER_MAPPER_COLLECTION_TASK_ID;
+      public:
+        DeferInstanceCollectionArgs(MapperManager *man, PhysicalManager *inst)
+          : LgTaskArgs<DeferInstanceCollectionArgs>(implicit_provenance),
+            manager(man), instance(inst) { }
+      public:
+        MapperManager *const manager;
+        PhysicalManager *const instance;
       };
     public:
       MapperManager(Runtime *runtime, Mapping::Mapper *mapper, 
@@ -220,10 +242,8 @@ namespace Legion {
       void invoke_permit_steal_request(Mapper::StealRequestInput &input,
                                        Mapper::StealRequestOutput &output);
     public: // handling mapper calls
-      void invoke_handle_message(Mapper::MapperMessage *message,
-                                 bool check_defer = true);
+      void invoke_handle_message(Mapper::MapperMessage *message);
       void invoke_handle_task_result(Mapper::MapperTaskResult &result);
-      void invoke_handle_instance_collection(MappingInstance &instance);
     public:
       // Instance deletion subscriber methods
       virtual void notify_instance_deletion(PhysicalManager *manager);
@@ -561,8 +581,8 @@ namespace Legion {
     public:
       static const char* get_mapper_call_name(MappingCallKind kind);
     public:
-      void defer_message(Mapper::MapperMessage *message);
       static void handle_deferred_message(const void *args);
+      static void handle_deferred_collection(const void *args);
     public:
       // For stealing
       void process_advertisement(Processor advertiser); 
@@ -579,6 +599,7 @@ namespace Legion {
       const bool profile_mapper;
       const bool request_valid_instances;
       const bool is_default_mapper;
+      const bool initially_reentrant;
     protected:
       mutable LocalLock mapper_lock;
     protected: // Steal request information

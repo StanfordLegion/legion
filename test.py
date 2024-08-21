@@ -822,6 +822,8 @@ def build_cmake(root_dir, tmp_dir, env, thread_count,
         cmake_cmd.append('-DGASNet_CONDUIT=' + env['CONDUIT'])
         if 'EMBED_GASNET_SRC' in env:
             cmake_cmd.append('-DLegion_EMBED_GASNet_LOCALSRC=' + env['EMBED_GASNET_SRC'])
+    if 'USE_GASNETEX_WRAPPER' in env:
+        cmake_cmd.append('-DLegion_USE_GASNETEX_WRAPPER=%s' % ('ON' if env['USE_GASNETEX_WRAPPER'] == '1' else 'OFF'))
     cmake_cmd.append('-DLegion_USE_CUDA=%s' % ('ON' if env['USE_CUDA'] == '1' else 'OFF'))
     if 'GPU_ARCH' in env:
         cmake_cmd.append('-DLegion_CUDA_ARCH=%s' % env['GPU_ARCH'])
