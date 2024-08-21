@@ -164,45 +164,54 @@ namespace Realm {
   }
 
   template <int N, typename T, typename FT>
-  void ByFieldMicroOp<N,T,FT>::execute(void)
+  void ByFieldMicroOp<N, T, FT>::execute(void)
   {
     TimeStamp ts("ByFieldMicroOp::execute", true, &log_uop_timing);
 #ifdef DEBUG_PARTITIONING
-    std::map<FT, CoverageCounter<N,T> *> values_present;
+    std::map<FT, CoverageCounter<N, T> *> values_present;
 
     populate_bitmasks(values_present);
 
-    std::cout << values_present.size() << " values present in instance " << inst << std::endl;
-    for(typename std::map<FT, CoverageCounter<N,T> *>::const_iterator it = values_present.begin();
-	it != values_present.end();
-	it++)
+    std::cout << values_present.size() << " values present in instance " << inst
+              << std::endl;
+    for(typename std::map<FT, CoverageCounter<N, T> *>::const_iterator it =
+            values_present.begin();
+        it != values_present.end(); it++)
       std::cout << "  " << it->first << " = " << it->second->get_count() << std::endl;
 #endif
 
-    std::map<FT, DenseRectangleList<N,T> *> rect_map;
+    std::map<FT, DenseRectangleList<N, T> *> rect_map;
 
     populate_bitmasks(rect_map);
 
 #ifdef DEBUG_PARTITIONING
-    std::cout << values_present.size() << " values present in instance " << inst << std::endl;
-    for(typename std::map<FT, DenseRectangleList<N,T> *>::const_iterator it = rect_map.begin();
-	it != rect_map.end();
-	it++)
-      std::cout << "  " << it->first << " = " << it->second->rects.size() << " rectangles" << std::endl;
+    std::cout << values_present.size() << " values present in instance " << inst
+              << std::endl;
+    for(typename std::map<FT, DenseRectangleList<N, T> *>::const_iterator it =
+            rect_map.begin();
+        it != rect_map.end(); it++)
+      std::cout << "  " << it->first << " = " << it->second->rects.size() << " rectangles"
+                << std::endl;
 #endif
 
     // iterate over sparsity outputs and contribute to all (even if we didn't have any
     //  points found for it)
-    for(typename std::map<FT, SparsityMap<N,T> >::const_iterator it = sparsity_outputs.begin();
-	it != sparsity_outputs.end();
-	it++) {
-      SparsityMapImpl<N,T> *impl = SparsityMapImpl<N,T>::lookup(it->second);
-      typename std::map<FT, DenseRectangleList<N,T> *>::const_iterator it2 = rect_map.find(it->first);
+    for(typename std::map<FT, SparsityMap<N, T>>::const_iterator it =
+            sparsity_outputs.begin();
+        it != sparsity_outputs.end(); it++) {
+      SparsityMapImpl<N, T> *impl = SparsityMapImpl<N, T>::lookup(it->second);
+      typename std::map<FT, DenseRectangleList<N, T> *>::const_iterator it2 =
+          rect_map.find(it->first);
       if(it2 != rect_map.end()) {
-	impl->contribute_dense_rect_list(it2->second->rects, true /*disjoint*/);
-	delete it2->second;
-      } else
-	impl->contribute_nothing();
+        impl->contribute_dense_rect_list(it2->second->rects, true /*disjoint*/);
+        delete it2->second;
+        rect_map.erase(it2);
+      } else {
+        impl->contribute_nothing();
+      }
+    }
+    for(auto [_, value] : rect_map) {
+      delete value;
     }
   }
 
