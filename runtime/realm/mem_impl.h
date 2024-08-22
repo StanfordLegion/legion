@@ -75,7 +75,7 @@ namespace Realm {
     RegionInstanceImpl *get_instance(RegionInstance i);
 
     // adds a new instance to this memory, to be filled in by caller
-    RegionInstanceImpl *new_instance(void);
+    RegionInstanceImpl *new_instance(const ProfilingRequestSet &prs);
 
     // releases a deleted instance so that it can be reused
     void release_instance(RegionInstance inst);
@@ -90,11 +90,10 @@ namespace Realm {
       ALLOC_CANCELLED
     };
 
-    virtual AllocationResult
-    reuse_allocated_range(RegionInstanceImpl *old_inst,
-                          std::vector<RegionInstanceImpl *> &new_insts)
+    virtual void reuse_allocated_range(RegionInstanceImpl *old_inst,
+                                       std::vector<RegionInstanceImpl *> &new_insts)
     {
-      return AllocationResult::ALLOC_INSTANT_SUCCESS;
+      assert(0);
     }
 
     // default implementation falls through (directly or indirectly) to
@@ -253,13 +252,21 @@ namespace Realm {
     bool can_allocate(TT tag, RT size, RT alignment);
     bool allocate(TT tag, RT size, RT alignment, RT& first);
     void deallocate(TT tag, bool missing_ok = false);
+
     bool lookup(TT tag, RT& first, RT& size);
-    bool split_range(TT old_tag, const std::vector<TT> &new_tags,
-                     const std::vector<RT> &sizes, const std::vector<RT> &alignment);
+    size_t split_range(TT old_tag, const std::vector<TT> &new_tags,
+                       const std::vector<RT> &sizes, const std::vector<RT> &alignment,
+                       std::vector<RT> &allocs_first);
+
+    // TODO(apryakhin@): consider ifdefing for debug builds only
+    void dump_allocator_status();
+    bool free_list_has_cycle();
+    bool has_invalid_ranges();
 
   protected:
     unsigned first_free_range;
     unsigned alloc_range(RT first, RT last);
+    void deallocate(unsigned del_idx);
     void free_range(unsigned index);
   };
 
@@ -288,9 +295,8 @@ namespace Realm {
 					     bool poisoned,
 					     TimeLimit work_until);
 
-      virtual AllocationResult
-      reuse_allocated_range(RegionInstanceImpl *old_inst,
-                            std::vector<RegionInstanceImpl *> &new_insts);
+      virtual void reuse_allocated_range(RegionInstanceImpl *old_inst,
+                                         std::vector<RegionInstanceImpl *> &new_insts);
 
     protected:
       // for internal use by allocation routines - must be called with

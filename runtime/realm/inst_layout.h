@@ -21,7 +21,7 @@
 #include "realm/indexspace.h"
 #include "realm/serialize.h"
 
-#if defined(REALM_USE_KOKKOS) && (REALM_CXX_STANDARD >= 11)
+#if defined(REALM_USE_KOKKOS)
 // we don't want to include Kokkos_View.hpp because it brings in too much
 //  other stuff, so forward declare the pieces we need to define a templated
 //  conversion from Realm accessor to Kokkos::View (anything that actually
