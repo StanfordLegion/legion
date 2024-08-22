@@ -10344,10 +10344,11 @@ namespace Legion {
 #ifdef POINT_WISE_LOGICAL_ANALYSIS
     //--------------------------------------------------------------------------
     void InnerContext::record_point_wise_dependence(uint64_t context_index,
+        DomainPoint point,
         LogicalRegion lr, RtEvent point_mapped, ShardID next_shard)
     //--------------------------------------------------------------------------
     {
-      const std::pair<uint64_t,LogicalRegion> key{context_index,lr};
+      const std::pair<uint64_t,DomainPoint> key{context_index,point};
       AutoLock r_lock(point_wise_lock);
       PointWiseDeps &deps = point_wise_deps[key];
       // Check to see if someone has already registered this
@@ -10372,10 +10373,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RtEvent InnerContext::find_point_wise_dependence(uint64_t context_index,
+        DomainPoint point,
         LogicalRegion lr, ShardID requesting_shard)
     //--------------------------------------------------------------------------
     {
-      std::pair<uint64_t,LogicalRegion> key{context_index, lr};
+      std::pair<uint64_t,DomainPoint> key{context_index, point};
       AutoLock r_lock(point_wise_lock);
       PointWiseDeps &deps = point_wise_deps[key];
       // Check to see if someone has already registered this shard
@@ -10417,8 +10419,10 @@ namespace Legion {
       derez.deserialize(gen);
       ShardID requesting_shard;
       derez.deserialize(requesting_shard);
+      DomainPoint point;
+      derez.deserialize(point);
 
-      Runtime::trigger_event(pending_event, find_point_wise_dependence(context_index,
+      Runtime::trigger_event(pending_event, find_point_wise_dependence(context_index, point,
             lr, requesting_shard));
     }
 #endif

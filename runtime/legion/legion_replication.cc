@@ -1935,7 +1935,8 @@ namespace Legion {
 
 #ifdef POINT_WISE_LOGICAL_ANALYSIS
     //--------------------------------------------------------------------------
-    void ReplIndexTask::record_point_wise_dependence(LogicalRegion lr,
+    void ReplIndexTask::record_point_wise_dependence(DomainPoint point,
+                                                 LogicalRegion lr,
                                                  unsigned region_idx,
                                                  RtEvent point_mapped)
     //--------------------------------------------------------------------------
@@ -1980,12 +1981,13 @@ namespace Legion {
          finder->second.sharding->find_owner(next_index_task_points[0],
             finder->second.index_domain);
 
-      parent_ctx->record_point_wise_dependence(context_index, lr,
+      parent_ctx->record_point_wise_dependence(context_index, point, lr,
                                               point_mapped, next_shard);
     }
 
     //--------------------------------------------------------------------------
-    RtEvent ReplIndexTask::find_point_wise_dependence(LogicalRegion lr,
+    RtEvent ReplIndexTask::find_point_wise_dependence(DomainPoint point,
+        LogicalRegion lr,
         unsigned region_idx, GenerationID gen)
     //--------------------------------------------------------------------------
     {
@@ -2011,25 +2013,18 @@ namespace Legion {
         GenerationID prev_task_gen = finder->second.previous_index_task_generation;
 
         // find the point of the previous index_task
-        const RegionRequirement &req = logical_regions[region_idx];
+        RegionRequirement &req = logical_regions[region_idx];
         std::vector<DomainPoint> previous_index_task_points;
-        if (req.handle_type == LEGION_PARTITION_PROJECTION)
-        {
-          finder->second.projection->functor->invert(lr,
-              req.partition, finder->second.index_domain,
-              previous_index_task_points);
-        }
-        else
-        {
-          finder->second.projection->functor->invert(lr,
-              req.region, finder->second.index_domain,
-              previous_index_task_points);
-        }
+
+        get_points(req, finder->second.projection,
+            lr, finder->second.index_domain,
+            previous_index_task_points);
 
         if (previous_index_task_points.size() > 1)
         {
           // throw _error
         }
+
         // find shard of the point
         const ShardID prev_shard =
            finder->second.sharding->find_owner(previous_index_task_points[0],
@@ -2051,6 +2046,7 @@ namespace Legion {
           rez.serialize(region_idx);
           rez.serialize(gen);
           rez.serialize(parent_ctx->get_shard_id());
+          rez.serialize(previous_index_task_points[0]);
           repl_ctx->shard_manager->send_point_wise_dependence(prev_shard, rez);
           return pending_event;
         }
@@ -2058,7 +2054,8 @@ namespace Legion {
         if (prev_task_gen < prev_index_task->get_generation())
           return RtEvent::NO_RT_EVENT;
 
-        return parent_ctx->find_point_wise_dependence(finder->second.ctx_index, lr,
+        return parent_ctx->find_point_wise_dependence(finder->second.ctx_index,
+            previous_index_task_points[0], lr,
             parent_ctx->get_shard_id());
       }
 

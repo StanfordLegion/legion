@@ -1602,10 +1602,12 @@ namespace Legion {
 #ifdef POINT_WISE_LOGICAL_ANALYSIS
     public:
       void record_point_wise_dependence(uint64_t context_index,
+          DomainPoint point,
           LogicalRegion lr, RtEvent point_mapped, ShardID next_shard);
       void handle_point_wise_dependence(Deserializer &derez);
       RtEvent find_point_wise_dependence(uint64_t context_index,
-        LogicalRegion lr, ShardID requesting_shard);
+          DomainPoint point,
+          LogicalRegion lr, ShardID requesting_shard);
 #endif
     public:
 #ifdef DEBUG_LEGION_COLLECTIVES
@@ -2001,7 +2003,7 @@ namespace Legion {
       };
     protected:
       mutable LocalLock point_wise_lock;
-      std::map<std::pair<uint64_t,LogicalRegion>,PointWiseDeps> point_wise_deps;
+      std::map<std::pair<uint64_t,DomainPoint>,PointWiseDeps> point_wise_deps;
 #endif
     protected:
       // Dependence tracking information for phase barriers
