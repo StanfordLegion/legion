@@ -2312,63 +2312,62 @@ namespace Realm {
 
     // should always be exchanging -1 -> (not -1)
 #ifdef DEBUG_REALM
-	size_t oldval =
+    size_t oldval =
 #endif
-	  in_port->remote_bytes_total.exchange(pre_bytes_total);
+        in_port->remote_bytes_total.exchange(pre_bytes_total);
 #ifdef DEBUG_REALM
-	assert((oldval == size_t(-1)) && (pre_bytes_total != size_t(-1)));
+    assert((oldval == size_t(-1)) && (pre_bytes_total != size_t(-1)));
 #endif
-	log_xd.info() << "pre_total: " << std::hex << guid << std::dec
-		      << "(" << port_idx << ") = " << pre_bytes_total;
-	// this may unblock an xd that has consumed all input but didn't
-	//  realize there was no more
-	update_progress();
-      }
+    log_xd.info() << "pre_total: " << std::hex << guid << std::dec << "(" << port_idx
+                  << ") = " << pre_bytes_total;
+    // this may unblock an xd that has consumed all input but didn't
+    //  realize there was no more
+    update_progress();
+  }
 
-      void XferDes::update_next_bytes_read(int port_idx, size_t offset, size_t size)
-      {
-	XferPort *out_port = &output_ports[port_idx];
+  void XferDes::update_next_bytes_read(int port_idx, size_t offset, size_t size)
+  {
+    XferPort *out_port = &output_ports[port_idx];
 
-	size_t inc_amt = out_port->seq_remote.add_span(offset, size);
-	log_xd.info() << "next_read: "  << std::hex << guid << std::dec
-		      << "(" << port_idx << ") " << offset << "+" << size << " -> " << inc_amt;
-	// if we got new room at the current pointer (and we're still
-        //  iterating), update progress
-	if((inc_amt > 0) && !iteration_completed.load()) update_progress();
-      }
+    size_t inc_amt = out_port->seq_remote.add_span(offset, size);
+    log_xd.info() << "next_read: " << std::hex << guid << std::dec << "(" << port_idx
+                  << ") " << offset << "+" << size << " -> " << inc_amt;
+    // if we got new room at the current pointer (and we're still
+    //  iterating), update progress
+    if((inc_amt > 0) && !iteration_completed.load())
+      update_progress();
+  }
 
-      void XferDes::notify_request_read_done(Request* req)
-      {
-        default_notify_request_read_done(req);
-      }
+  void XferDes::notify_request_read_done(Request *req)
+  {
+    default_notify_request_read_done(req);
+  }
 
-      void XferDes::notify_request_write_done(Request* req)
-      {
-        default_notify_request_write_done(req);
-      }
+  void XferDes::notify_request_write_done(Request *req)
+  {
+    default_notify_request_write_done(req);
+  }
 
-      void XferDes::flush()
-      {
-      }
+  void XferDes::flush() {}
 
-      void XferDes::default_notify_request_read_done(Request *req)
-      {
-        req->is_read_done = true;
-        update_bytes_read(req->src_port_idx, req->read_seq_pos, req->read_seq_count);
-      }
+  void XferDes::default_notify_request_read_done(Request *req)
+  {
+    req->is_read_done = true;
+    update_bytes_read(req->src_port_idx, req->read_seq_pos, req->read_seq_count);
+  }
 
-      void XferDes::default_notify_request_write_done(Request *req)
-      {
-        req->is_write_done = true;
-        // calling update_bytes_write can cause the transfer descriptor to
-        //  be destroyed, so enqueue the request first, and cache the values
-        //  we need
-        int dst_port_idx = req->dst_port_idx;
-        size_t write_seq_pos = req->write_seq_pos;
-        size_t write_seq_count = req->write_seq_count;
-        update_bytes_write(dst_port_idx, write_seq_pos, write_seq_count);
-        enqueue_request(req);
-      }
+  void XferDes::default_notify_request_write_done(Request *req)
+  {
+    req->is_write_done = true;
+    // calling update_bytes_write can cause the transfer descriptor to
+    //  be destroyed, so enqueue the request first, and cache the values
+    //  we need
+    int dst_port_idx = req->dst_port_idx;
+    size_t write_seq_pos = req->write_seq_pos;
+    size_t write_seq_count = req->write_seq_count;
+    update_bytes_write(dst_port_idx, write_seq_pos, write_seq_count);
+    enqueue_request(req);
+  }
 
   ////////////////////////////////////////////////////////////////////////
   //
