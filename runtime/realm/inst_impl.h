@@ -68,21 +68,6 @@ namespace Realm {
       };
       DeferredCreate deferred_create;
 
-      class DeferredRedistrict : public EventWaiter {
-      public:
-        void defer(RegionInstanceImpl *_inst, std::vector<RegionInstanceImpl *> &insts,
-                   Event after, Event wait_on);
-        virtual void event_triggered(bool poisoned, TimeLimit work_until);
-        virtual void print(std::ostream &os) const;
-        virtual Event get_finish_event(void) const;
-
-      protected:
-        RegionInstanceImpl *inst;
-        std::vector<RegionInstanceImpl *> new_insts;
-        Event after;
-      };
-      DeferredRedistrict deferred_redistrict;
-
       class DeferredDestroy : public EventWaiter {
       public:
 	void defer(RegionInstanceImpl *_inst, MemoryImpl *_mem, Event wait_on);
@@ -95,6 +80,9 @@ namespace Realm {
 	MemoryImpl *mem;
       };
       DeferredDestroy deferred_destroy;
+
+      // Some help with deferred redistricting
+      std::vector<RegionInstanceImpl*> deferred_redistrict;
 
     public:
       // entry point for both create_instance and create_external_instance
@@ -140,11 +128,12 @@ namespace Realm {
       ProfilingMeasurements::InstanceTimeline timeline;
 
       // several special values exist for the 'inst_offset' field below
-      static const size_t INSTOFFSET_UNALLOCATED = size_t(-1);
-      static const size_t INSTOFFSET_FAILED = size_t(-2);
-      static const size_t INSTOFFSET_DELAYEDALLOC = size_t(-3);
-      static const size_t INSTOFFSET_DELAYEDDESTROY = size_t(-4);
-      static const size_t INSTOFFSET_MAXVALID = size_t(-5);
+      static constexpr size_t INSTOFFSET_UNALLOCATED = size_t(-1);
+      static constexpr size_t INSTOFFSET_FAILED = size_t(-2);
+      static constexpr size_t INSTOFFSET_DELAYEDALLOC = size_t(-3);
+      static constexpr size_t INSTOFFSET_DELAYEDDESTROY = size_t(-4);
+      static constexpr size_t INSTOFFSET_DELAYEDREDISTRICT = size_t(-5);
+      static constexpr size_t INSTOFFSET_MAXVALID = size_t(-6);
       class Metadata : public MetadataBase {
       public:
         Metadata();

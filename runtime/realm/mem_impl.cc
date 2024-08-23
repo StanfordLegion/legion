@@ -201,6 +201,86 @@ namespace Realm {
       }
     }
 
+    MemoryImpl::AllocationResult MemoryImpl::reuse_storage_deferrable(
+        RegionInstanceImpl *old_inst, std::vector<RegionInstanceImpl *> &new_insts, Event precondition)
+    {
+      // all reuse requests are handled by the memory's owning node for
+      //  now - local caching might be possible though
+      NodeID target = ID(me).memory_owner_node();
+      assert(target == Network::my_node_id);
+
+      bool poisoned;
+      bool triggered;
+      const size_t num_insts = new_insts.size();
+      if(precondition.has_triggered_faultaware(poisoned)) {
+        if (poisoned) {
+          // If this was poisoned we can just tell all the new instances that
+          // we failed to allocated them
+          for(unsigned idx = 0; idx < num_insts; idx++)
+            new_insts[idx]->notify_allocation(ALLOC_CANCELLED,
+                RegionInstanceImpl::INSTOFFSET_FAILED, TimeLimit::responsive());
+          return ALLOC_CANCELLED;
+        }
+        triggered = true;
+      } else {
+        triggered = false;
+      }
+      // This better be an external instance
+      assert(old_inst->metadata.ext_resource);
+      // This is an external instance so we can just split it as long as the
+      // sizes are going to be fit in the footprint of the original instance
+      // We do not need to update the allocator since it doesn't know about
+      // the range for this instance anyway
+      size_t allocated = 0;
+      std::vector<size_t> offsets(num_insts, RegionInstanceImpl::INSTOFFSET_FAILED);
+      ExternalMemoryResource *res =
+          dynamic_cast<ExternalMemoryResource *>(old_inst->metadata.ext_resource);
+      if(res != 0) {
+        const uintptr_t mem_base = reinterpret_cast<uintptr_t>(get_direct_ptr(0, 0));
+        size_t bytes_used = 0;
+        uintptr_t inst_offset = res->base;
+        for(unsigned idx = 0; idx < num_insts; idx++) {
+          const size_t size = new_insts[idx]->metadata.layout->bytes_used;
+          const size_t alignment = new_insts[idx]->metadata.layout->alignment_reqd;
+          size_t offset = 0;
+          if(alignment) {
+            const size_t remainder = inst_offset % alignment;
+            if(remainder)
+              offset = alignment - remainder;
+          }
+          bytes_used += (offset + size);
+          // Check to see if this instance is going to fit
+          if(res->size_in_bytes < bytes_used)
+            break;
+          inst_offset += offset;
+          // underflow is ok here - it'll work itself out when we add the mem_base
+          //  back in on accesses
+          offsets[idx] = inst_offset - mem_base;
+          inst_offset += size;
+          // Allocation for this instance succeeded
+          allocated++;
+        }
+      } else {
+        log_inst.warning()
+            << "attempt to redistrict unsupported external resource: mem=" << me
+            << " resource=" << *(old_inst->metadata.ext_resource);
+      }
+      for(unsigned idx = 0; idx < num_insts; idx++)
+        new_insts[idx]->notify_allocation((idx < allocated) ?
+            (triggered ? ALLOC_INSTANT_SUCCESS : ALLOC_EVENTUAL_SUCCESS) :
+            (triggered ? ALLOC_INSTANT_FAILURE : ALLOC_EVENTUAL_FAILURE),
+            offsets[idx], TimeLimit::responsive());
+      if (triggered) {
+        unregister_external_resource(old_inst);
+        old_inst->notify_deallocation();
+        return ALLOC_INSTANT_SUCCESS;
+      } else {
+        // Defer destruction of the old instance until it is ready
+        old_inst->deferred_destroy.defer(old_inst, this, precondition);
+        return ALLOC_DEFERRED;
+      }
+    }
+                                              
     bool MemoryImpl::attempt_register_external_resource(RegionInstanceImpl *inst,
                                                         size_t& inst_offset)
     {
@@ -603,93 +683,6 @@ namespace Realm {
 #endif
     }
 
-    void LocalManagedMemory::reuse_allocated_range(
-        RegionInstanceImpl *old_inst, std::vector<RegionInstanceImpl *> &new_insts)
-    {
-      // Check to see if this is an exteranl instance or not
-      size_t allocated = 0;
-      const size_t num_insts = new_insts.size();
-      std::vector<size_t> offsets(num_insts, 0);
-      if(old_inst->metadata.ext_resource != 0) {
-        // This is an external instance so we can just split it as long as the
-        // sizes are going to be fit in the footprint of the original instance
-        // We do not need to update the allocator since it doesn't know about
-        // the range for this instance anyway
-        ExternalMemoryResource *res =
-            dynamic_cast<ExternalMemoryResource *>(old_inst->metadata.ext_resource);
-        if(res != 0) {
-          const uintptr_t mem_base = reinterpret_cast<uintptr_t>(get_direct_ptr(0, 0));
-          size_t bytes_used = 0;
-          uintptr_t inst_offset = res->base;
-          for(unsigned idx = 0; idx < num_insts; idx++) {
-            const size_t size = new_insts[idx]->metadata.layout->bytes_used;
-            const size_t alignment = new_insts[idx]->metadata.layout->alignment_reqd;
-            size_t offset = 0;
-            if(alignment) {
-              const size_t remainder = inst_offset % alignment;
-              if(remainder)
-                offset = alignment - remainder;
-            }
-            bytes_used += (offset + size);
-            // Check to see if this instance is going to fit
-            if(res->size_in_bytes < bytes_used)
-              break;
-            inst_offset += offset;
-            // underflow is ok here - it'll work itself out when we add the mem_base
-            //  back in on accesses
-            offsets[idx] = inst_offset - mem_base;
-            inst_offset += size;
-            // Allocation for this instance succeeded
-            allocated++;
-          }
-        } else {
-          log_inst.warning()
-              << "attempt to redistrict unsupported external resource: mem=" << me
-              << " resource=" << *(old_inst->metadata.ext_resource);
-        }
-      } else {
-        // Common case path for redistricting normal instances
-        std::vector<RegionInstance> tags(num_insts);
-        std::vector<size_t> sizes(num_insts);
-        std::vector<size_t> alignments(num_insts);
-        for(size_t i = 0; i < num_insts; i++) {
-          sizes[i] = new_insts[i]->metadata.layout->bytes_used;
-          alignments[i] = new_insts[i]->metadata.layout->alignment_reqd;
-          tags[i] = new_insts[i]->me;
-        }
-        AutoLock<> al(allocator_mutex);
-#ifdef DEBUG_REALM
-        for(const PendingAlloc &alloc : pending_allocs) {
-          if(alloc.inst == old_inst) {
-            al.release();
-            for(RegionInstanceImpl *inst : new_insts)
-              inst->notify_allocation(AllocationResult::ALLOC_INSTANT_FAILURE, 0,
-                                      TimeLimit::responsive());
-            return;
-          }
-        }
-
-        for(const PendingRelease &release : pending_releases) {
-          if(release.inst == old_inst) {
-            al.release();
-            for(RegionInstanceImpl *inst : new_insts)
-              inst->notify_allocation(AllocationResult::ALLOC_INSTANT_FAILURE, 0,
-                                      TimeLimit::responsive());
-            return;
-          }
-        }
-#endif
-        allocated =
-            current_allocator.split_range(old_inst->me, tags, sizes, alignments, offsets);
-      }
-      for(unsigned idx = 0; idx < num_insts; idx++)
-        new_insts[idx]->notify_allocation((idx < allocated)
-                                              ? AllocationResult::ALLOC_INSTANT_SUCCESS
-                                              : AllocationResult::ALLOC_INSTANT_FAILURE,
-                                          offsets[idx], TimeLimit::responsive());
-      old_inst->notify_deallocation();
-    }
-
     // attempt to allocate storage for the specified instance
     MemoryImpl::AllocationResult LocalManagedMemory::allocate_storage_deferrable(RegionInstanceImpl *inst,
 										 bool need_alloc_result,
@@ -776,7 +769,7 @@ namespace Realm {
 	  } else {
 	    // build the future state based on those deletes and try again
 	    future_allocator = current_allocator;
-	    for(std::vector<PendingRelease>::iterator it = pending_releases.begin();
+	    for(std::deque<PendingRelease>::iterator it = pending_releases.begin();
 		it != pending_releases.end();
 		++it) {
 	      // shouldn't have any ready ones here
@@ -786,13 +779,13 @@ namespace Realm {
 	      //  so ignore failures to deallocate from the future state
 	      //  (this is conservative, because it can only cause a
 	      //  false-failure of a future allocation)
-	      future_allocator.deallocate(it->inst->me, true /*missing ok*/);
+              it->release(future_allocator, true/*missing ok*/);
 	    }
 
 	    bool ok = future_allocator.allocate(inst->me,
 						bytes, alignment, inst_offset);
 	    if(ok) {
-	      pending_allocs.push_back(PendingAlloc(inst, bytes, alignment,
+	      pending_allocs.emplace_back(PendingAlloc(inst, bytes, alignment,
 						    cur_release_seqid));
 	      // now that we have pending allocs, we need release_allocator
 	      //  to be valid
@@ -810,7 +803,7 @@ namespace Realm {
 	bool ok = future_allocator.allocate(inst->me,
 					    bytes, alignment, inst_offset);
 	if(ok) {
-	  pending_allocs.push_back(PendingAlloc(inst, bytes, alignment,
+	  pending_allocs.emplace_back(PendingAlloc(inst, bytes, alignment,
 						cur_release_seqid));
 	  return ALLOC_DEFERRED;
 	} else {
@@ -866,7 +859,7 @@ namespace Realm {
                 current_allocator.deallocate(inst->me);
             } else {
               // push the op, but we're not maintaining a future state yet
-              pending_releases.push_back(
+              pending_releases.emplace_back(
                   PendingRelease(inst, false /*!triggered*/, ++cur_release_seqid));
             }
           } else {
@@ -889,7 +882,7 @@ namespace Realm {
                 } else {
                   // nope, stick ourselves on the back of the (unreordered)
                   //  pending release list
-                  pending_releases.push_back(
+                  pending_releases.emplace_back(
                       PendingRelease(inst, true /*triggered*/, ++cur_release_seqid));
                 }
               }
@@ -897,7 +890,7 @@ namespace Realm {
               // TODO: is it safe to test for failedness yet?
               if(inst->metadata.inst_offset != RegionInstanceImpl::INSTOFFSET_FAILED)
                 future_allocator.deallocate(inst->me, true /*missing ok*/);
-              pending_releases.push_back(
+              pending_releases.emplace_back(
                   PendingRelease(inst, false /*!triggered*/, ++cur_release_seqid));
             }
           }
@@ -923,6 +916,168 @@ namespace Realm {
       }
     }
 
+    MemoryImpl::AllocationResult LocalManagedMemory::reuse_storage_deferrable(
+        RegionInstanceImpl *old_inst, std::vector<RegionInstanceImpl *> &new_insts, Event precondition)
+    {
+      // all allocation requests are handled by the memory's owning node for
+      //  now - local caching might be possible though
+      NodeID target = ID(me).memory_owner_node();
+      assert(target == Network::my_node_id);
+      // Compute the inputs for doing the analysis
+      const size_t num_insts = new_insts.size();
+      std::vector<RegionInstance> tags(num_insts);
+      std::vector<size_t> sizes(num_insts);
+      std::vector<size_t> alignments(num_insts);
+      for(size_t i = 0; i < num_insts; i++) {
+        sizes[i] = new_insts[i]->metadata.layout->bytes_used;
+        alignments[i] = new_insts[i]->metadata.layout->alignment_reqd;
+        tags[i] = new_insts[i]->me;
+      }
+      // Setup the outputs
+      bool poisoned;
+      bool triggered;
+      bool offsets_valid = true;
+      size_t allocated = 0;
+      std::vector<size_t> offsets(num_insts, RegionInstanceImpl::INSTOFFSET_FAILED);
+      std::vector<std::pair<RegionInstanceImpl *, size_t> > successful_allocs;
+      if(precondition.has_triggered_faultaware(poisoned)) {
+        if (poisoned) {
+          // If this was poisoned we can just tell all the new instances that
+          // we failed to allocated them
+          for(unsigned idx = 0; idx < num_insts; idx++)
+            new_insts[idx]->notify_allocation(ALLOC_CANCELLED,
+                RegionInstanceImpl::INSTOFFSET_FAILED, TimeLimit::responsive());
+          return ALLOC_CANCELLED;
+        }
+        triggered = true;
+        AutoLock<> al(allocator_mutex);
+#ifdef DEBUG_REALM
+        assert(old_inst->metadata.inst_offset != RegionInstanceImpl::INSTOFFSET_DELAYEDALLOC);
+        // Redistricting a pending deletion instance should really be an error since
+        // that is a kind of double deletion but preserving this code from earlier
+        for(const PendingRelease &release : pending_releases) {
+          if(release.inst == old_inst) {
+            al.release();
+            for(RegionInstanceImpl *inst : new_insts)
+              inst->notify_allocation(AllocationResult::ALLOC_INSTANT_FAILURE, 0,
+                                      TimeLimit::responsive());
+            return ALLOC_INSTANT_FAILURE;
+          }
+        }
+#endif
+        // Check to see if this instance wasn't already deleted if it was already
+        // deleted then that is an error so we'll instantly fail the new instances
+        if ((old_inst->metadata.inst_offset == RegionInstanceImpl::INSTOFFSET_FAILED) ||
+            (old_inst->metadata.inst_offset == RegionInstanceImpl::INSTOFFSET_DELAYEDDESTROY) ||
+            (old_inst->metadata.inst_offset == RegionInstanceImpl::INSTOFFSET_DELAYEDREDISTRICT)) {
+          for(unsigned idx = 0; idx < num_insts; idx++)
+            new_insts[idx]->notify_allocation(ALLOC_INSTANT_FAILURE,
+                RegionInstanceImpl::INSTOFFSET_FAILED, TimeLimit::responsive());
+          return ALLOC_INSTANT_FAILURE;
+        }
+        if (pending_allocs.empty()) {
+          allocated =
+            current_allocator.split_range(old_inst->me, tags, sizes, alignments, offsets);
+        } else {
+          // If there are any pending allocations then we need to update 
+          // the future and release allocators
+          release_allocator.split_range(old_inst->me, tags, sizes, alignments, offsets);
+          allocated = future_allocator.split_range(old_inst->me, tags, sizes, alignments, offsets);
+          if (!attempt_release_reordering(successful_allocs)) {
+            // Need to add ourselves onto the list of pending releases
+            PendingRelease &back = pending_releases.emplace_back(
+                PendingRelease(old_inst, true /*triggered*/, ++cur_release_seqid));
+            back.record_redistrict(new_insts);
+          }
+        }
+      } else {
+        triggered = false;
+        // The precondition event hasn't triggered yet, but we can do the analysis here
+        // for which instances will be able to be made without needing to wait for it
+        // to trigger since we already know the old_inst will be allocated and we only
+        // need its metadata to figure out which new instances can be made from it
+        // We do still need to treat this as a kind of pending deallocation since it
+        // will also free up memory to be available for other kinds of instances
+        AutoLock<> al(allocator_mutex);
+#ifdef DEBUG_REALM
+        // Redistricting a pending deletion instance should really be an error since
+        // that is a kind of double deletion but preserving this code from earlier
+        for(const PendingRelease &release : pending_releases) {
+          if(release.inst == old_inst) {
+            al.release();
+            for(RegionInstanceImpl *inst : new_insts)
+              inst->notify_allocation(AllocationResult::ALLOC_INSTANT_FAILURE, 0,
+                                      TimeLimit::responsive());
+            return ALLOC_INSTANT_FAILURE;
+          }
+        }
+#endif
+        if ((old_inst->metadata.inst_offset == RegionInstanceImpl::INSTOFFSET_FAILED) ||
+            (old_inst->metadata.inst_offset == RegionInstanceImpl::INSTOFFSET_DELAYEDDESTROY) ||
+            (old_inst->metadata.inst_offset == RegionInstanceImpl::INSTOFFSET_DELAYEDREDISTRICT)) {
+          for(unsigned idx = 0; idx < num_insts; idx++)
+            new_insts[idx]->notify_allocation(ALLOC_INSTANT_FAILURE,
+                RegionInstanceImpl::INSTOFFSET_FAILED, TimeLimit::responsive());
+          return ALLOC_INSTANT_FAILURE;
+        }
+        if (old_inst->metadata.inst_offset == RegionInstanceImpl::INSTOFFSET_DELAYEDALLOC) {
+          assert(!pending_allocs.empty());
+          // The instance being redistricted still hasn't been allocated!
+          // This is very unfortunate, we can't actually fill in the offsets yet for the
+          // new instances because we don't even know what the instances are for the 
+          // instance that is being redistricted
+          // Note that this looks scary because of how we handle deferred effects and we
+          // in general want to set the offsets before we return, but it is safe because
+          // the event we're deferred on here must include the allocation event for the
+          // instance being redistricted and that event cannot trigger until the instance
+          // being redistricted gets notified of its allocation and we'll do the work to
+          // notify the new instances of their offsets when that happens before the
+          // allocation event is triggered
+          offsets_valid = false;
+          // Record that this is a pending "destroy" (aka redistrict)
+          old_inst->metadata.inst_offset = RegionInstanceImpl::INSTOFFSET_DELAYEDREDISTRICT;
+          old_inst->deferred_redistrict.insert(old_inst->deferred_redistrict.end(),
+              new_insts.begin(), new_insts.begin() + allocated);
+        } else {
+          // This instance has been allocated
+          if (pending_allocs.empty())
+            // No pending allocs means we need to make the future allocator valid
+            // and it will become immediately invalid once we're done doing this
+            // but we still need to do it to know how many of the new instances
+            // can be allocated
+            future_allocator = current_allocator;
+          allocated = future_allocator.split_range(old_inst->me, tags, sizes, alignments, offsets);
+        }
+        // No matter what add ourselves to the list of pending releases
+        PendingRelease &back = pending_releases.emplace_back(
+            PendingRelease(old_inst, false /*!triggered*/, ++cur_release_seqid));
+        back.record_redistrict(new_insts);
+      }
+      // Finish setting up the new instances with the results
+      if (offsets_valid) {
+        for(unsigned idx = 0; idx < num_insts; idx++)
+          new_insts[idx]->notify_allocation((idx < allocated) ? 
+              (triggered ? ALLOC_INSTANT_SUCCESS : ALLOC_EVENTUAL_SUCCESS) :
+              (triggered ? ALLOC_INSTANT_FAILURE : ALLOC_EVENTUAL_FAILURE),
+              offsets[idx], TimeLimit::responsive());
+      }
+      if(!successful_allocs.empty()) {
+        for(std::vector<std::pair<RegionInstanceImpl *, size_t>>::iterator it =
+                successful_allocs.begin();
+            it != successful_allocs.end(); ++it) {
+          it->first->notify_allocation(ALLOC_EVENTUAL_SUCCESS, it->second,
+                                       TimeLimit::responsive());
+        }
+      }
+      if (triggered) {
+        old_inst->notify_deallocation();
+        return ALLOC_INSTANT_SUCCESS;
+      } else {
+        old_inst->deferred_destroy.defer(old_inst, this, precondition);
+        return ALLOC_DEFERRED;
+      }
+    }
+
     // should only be called by RegionInstance::DeferredCreate
     MemoryImpl::AllocationResult LocalManagedMemory::allocate_storage_immediate(RegionInstanceImpl *inst,
 							 bool need_alloc_result,
@@ -930,7 +1085,9 @@ namespace Realm {
 							 TimeLimit work_until)
     {
       AllocationResult result;
+      size_t allocated = 0;
       size_t inst_offset = 0;
+      std::vector<size_t> offsets(inst->deferred_redistrict.size(), RegionInstanceImpl::INSTOFFSET_FAILED);
       {
 	AutoLock<> al(allocator_mutex);
 
@@ -938,12 +1095,15 @@ namespace Realm {
 	//  deferred destruction has also been received - if so, we'll have to
 	//  add that to the allocator history too
 	assert((inst->metadata.inst_offset == RegionInstanceImpl::INSTOFFSET_DELAYEDALLOC) ||
-	       (inst->metadata.inst_offset == RegionInstanceImpl::INSTOFFSET_DELAYEDDESTROY));	       
+	       (inst->metadata.inst_offset == RegionInstanceImpl::INSTOFFSET_DELAYEDDESTROY) ||
+               (inst->metadata.inst_offset == RegionInstanceImpl::INSTOFFSET_DELAYEDREDISTRICT));	       
 	bool deferred_destroy_exists = (inst->metadata.inst_offset == RegionInstanceImpl::INSTOFFSET_DELAYEDDESTROY);
+        bool deferred_redistrict_exists = (inst->metadata.inst_offset == RegionInstanceImpl::INSTOFFSET_DELAYEDREDISTRICT);
 	inst->metadata.inst_offset = RegionInstanceImpl::INSTOFFSET_UNALLOCATED;
 
 	if(poisoned) {
 	  result = ALLOC_CANCELLED;
+          allocated = offsets.size(); // cancel all deferred redistricting instances
 	  inst_offset = RegionInstanceImpl::INSTOFFSET_FAILED;
 	} else {
 	  if(inst->metadata.ext_resource != 0) {
@@ -972,19 +1132,54 @@ namespace Realm {
 
 	// success or fail, if a deferred destruction is in flight, we have to
 	//  add it to our list so that we can find it later
-	if(deferred_destroy_exists && (inst->metadata.ext_resource == 0)) {
-	  // a successful (now or later) allocation should update the future
-	  //  state, if we have one
-	  if(((result == ALLOC_INSTANT_SUCCESS) || (result == ALLOC_DEFERRED)) &&
-	     !pending_allocs.empty())
-	    future_allocator.deallocate(inst->me, true /*missing ok*/);
-
-	  pending_releases.push_back(PendingRelease(inst,
-						    false /*!ready*/,
-						    ++cur_release_seqid));
-	}
+        if (inst->metadata.ext_resource == 0) {
+          if (deferred_destroy_exists) {
+            PendingRelease &back = pending_releases.emplace_back(
+                PendingRelease(inst, false /*!ready*/, ++cur_release_seqid));
+            // a successful (now or later) allocation should update the future
+            //  state, if we have one
+            if(((result == ALLOC_INSTANT_SUCCESS) || (result == ALLOC_DEFERRED)) &&
+               !pending_allocs.empty())
+              back.release(future_allocator, true/*missing ok*/);
+          }
+          if (deferred_redistrict_exists) {
+            assert(!inst->deferred_redistrict.empty());
+            PendingRelease &back = pending_releases.emplace_back(
+                PendingRelease(inst, false /*!ready*/, ++cur_release_seqid));
+            // See if we succeeded or not
+            if ((result == ALLOC_INSTANT_SUCCESS) || (result == ALLOC_DEFERRED)) {
+              // Save the deferred redistrict instances in the pending release
+              back.record_redistrict(inst->deferred_redistrict);
+              // Do the redistrict on the right allocator
+              const size_t num_insts = offsets.size();
+              std::vector<RegionInstance> tags(num_insts);
+              std::vector<size_t> sizes(num_insts);
+              std::vector<size_t> alignments(num_insts);
+              for(size_t i = 0; i < num_insts; i++) {
+                sizes[i] = inst->deferred_redistrict[i]->metadata.layout->bytes_used;
+                alignments[i] = inst->deferred_redistrict[i]->metadata.layout->alignment_reqd;
+                tags[i] = inst->deferred_redistrict[i]->me;
+              }
+              // See which allocator we need to do this on
+              if (pending_allocs.empty())
+                allocated = current_allocator.split_range(inst->me, tags, sizes, alignments, offsets);
+              else
+                allocated = future_allocator.split_range(inst->me, tags, sizes, alignments, offsets);
+            }
+          }
+        }
       }
-	    
+
+      // Notify any pending redistrict instance of their allocation state
+      // VERY IMPORTANT! DO THIS BEFORE NOTIFYING THE INSTANCE ITSELF!
+      // Swapping the order of notifications could result in a race
+      if (!offsets.empty()) {
+        assert(inst->metadata.ext_resource == 0); // should not be an external instance
+        for (unsigned idx = 0; idx < offsets.size(); idx++) 
+          inst->deferred_redistrict[idx]->notify_allocation((idx < allocated) ?
+              result : ALLOC_INSTANT_FAILURE, offsets[idx], work_until);
+        inst->deferred_redistrict.clear();
+      }
       // if we needed an alloc result, send deferred responses too
       if((result != ALLOC_DEFERRED) || need_alloc_result) {
 	inst->notify_allocation(result, inst_offset, work_until);
@@ -1033,7 +1228,7 @@ namespace Realm {
     // if we have to unwind allocs we thought were successful, don't nuke the
     //  ones that were known good before our experiment
     size_t orig_num_success = successful_allocs.size();
-    std::vector<PendingAlloc>::iterator a_now = pending_allocs.begin();
+    std::deque<PendingAlloc>::iterator a_now = pending_allocs.begin();
     BasicRangeAllocator<size_t, RegionInstance> test_allocator = release_allocator;
     while(a_now != pending_allocs.end()) {
       size_t offset = 0;
@@ -1057,7 +1252,7 @@ namespace Realm {
       //  all ready deallocs
       current_allocator.swap(test_allocator);
       pending_allocs.clear();
-      std::vector<PendingRelease>::iterator it3 = pending_releases.begin();
+      std::deque<PendingRelease>::iterator it3 = pending_releases.begin();
       while(it3 != pending_releases.end())
 	if(it3->is_ready)
 	  it3 = pending_releases.erase(it3);
@@ -1068,15 +1263,14 @@ namespace Realm {
     } else {
       // see if we can still tentatively satisfy remaining allocs
       BasicRangeAllocator<size_t, RegionInstance> test_future_allocator = test_allocator;
-      std::vector<PendingAlloc>::iterator a_future = a_now;
-      std::vector<PendingRelease>::iterator it3 = pending_releases.begin();
+      std::deque<PendingAlloc>::iterator a_future = a_now;
+      std::deque<PendingRelease>::iterator it3 = pending_releases.begin();
       while(a_future != pending_allocs.end()) {
 	// first apply any non-ready releases older than this alloc
 	while((it3 != pending_releases.end()) &&
 	      (it3->seqid <= a_future->last_release_seqid)) {
 	  if(!it3->is_ready)
-	    test_future_allocator.deallocate(it3->inst->me,
-					     true /*missing ok*/);
+            it3->release(test_future_allocator, true/*missing ok*/);
 	  ++it3;
 	}
 
@@ -1099,8 +1293,7 @@ namespace Realm {
 	// don't forget to apply any remaining pending releases
 	while(it3 != pending_releases.end()) {
 	  if(!it3->is_ready)
-	    test_future_allocator.deallocate(it3->inst->me,
-					     true /*missing ok*/);
+            it3->release(test_future_allocator, true/*missing ok*/);
 	  ++it3;
 	}
 
@@ -1163,27 +1356,27 @@ namespace Realm {
 	// this destruction should be somewhere in the pending ops list
 	assert(!pending_releases.empty());
 	
-	std::vector<PendingRelease>::iterator it = pending_releases.begin();
+	std::deque<PendingRelease>::iterator it = pending_releases.begin();
 
 	if(!poisoned) {
 	  // special case: if we're the oldest pending item (and we're not
 	  //  poisoned), we unclog things in the order we planned
 	  if(it->inst == inst) {
 	    if(!pending_allocs.empty())
-              release_allocator.deallocate(it->inst->me);
+              it->release(release_allocator);
 
             // catch up the current state
             do {
-              current_allocator.deallocate(it->inst->me);
+              it->release(current_allocator);
               // deallocs.push_back(it->inst);
 
               // did this unblock any allocations?
-              std::vector<PendingAlloc>::iterator it2 = pending_allocs.begin();
+              std::deque<PendingAlloc>::iterator it2 = pending_allocs.begin();
               while(it2 != pending_allocs.end()) {
                 // if this alloc depends on further pending releases, we can't
                 //  be sure it'll work
                 {
-                  std::vector<PendingRelease>::iterator next_rel = it + 1;
+                  std::deque<PendingRelease>::iterator next_rel = it + 1;
                   if((next_rel != pending_releases.end()) &&
                      (it2->last_release_seqid >= next_rel->seqid))
                     break;
@@ -1208,7 +1401,7 @@ namespace Realm {
 		  assert((f_first == offset) && (f_size == it2->bytes));
 		} else {
 		  // find in future deletion list
-		  std::vector<PendingRelease>::const_iterator it3 = pending_releases.begin();
+		  std::deque<PendingRelease>::const_iterator it3 = pending_releases.begin();
 		  while(true) {
 		    // should not run off end of list
 		    assert(it3 != pending_releases.end());
@@ -1237,13 +1430,13 @@ namespace Realm {
             //  the release_allocator state (TODO: incremental updates?)
             if(!successful_allocs.empty() && !pending_allocs.empty()) {
               release_allocator = current_allocator;
-              for(std::vector<PendingRelease>::iterator it = pending_releases.begin();
+              for(std::deque<PendingRelease>::iterator it = pending_releases.begin();
                   it != pending_releases.end(); ++it) {
                 // actually, include all pending releases
                 // if(it->seqid > pending_allocs.front().last_release_seqid)
                 //  break;
                 if(it->is_ready)
-                  release_allocator.deallocate(it->inst->me);
+                  it->release(release_allocator);
               }
             }
           } else {
@@ -1256,14 +1449,14 @@ namespace Realm {
 
             if(pending_allocs.empty()) {
               // we can apply this delete to the current state
-              current_allocator.deallocate(inst->me);
+              it->release(current_allocator);
               // deallocs.push_back(inst);
               it = pending_releases.erase(it);
             } else {
               // apply this free to the release_allocator - we'll check below
               //  to see if it unblocks one or more allocations AND leaves the
               //  rest possible
-              release_allocator.deallocate(inst->me);
+              it->release(release_allocator);
             }
           }
 
@@ -1288,7 +1481,7 @@ namespace Realm {
             future_allocator = current_allocator;
             release_allocator = current_allocator;
 
-            std::vector<PendingAlloc>::iterator it2 = pending_allocs.begin();
+            std::deque<PendingAlloc>::iterator it2 = pending_allocs.begin();
 
             bool found = false;
             while(it != pending_releases.end()) {
@@ -1302,7 +1495,7 @@ namespace Realm {
                 it = pending_releases.erase(it);
               } else {
                 // replay this destuction on the future state
-                future_allocator.deallocate(it->inst->me, true /*missing ok*/);
+                it->release(future_allocator, true/*missing ok*/);
                 ++it;
               }
 
@@ -1385,7 +1578,31 @@ namespace Realm {
 						     bool _ready, unsigned _seqid)
     : inst(_inst), is_ready(_ready), seqid(_seqid)
   {}
+  
+  void LocalManagedMemory::PendingRelease::record_redistrict(const std::vector<RegionInstanceImpl*> &insts)
+  {
+    assert(redistrict_insts.empty());
+    redistrict_insts = insts;
+  }
 
+  void LocalManagedMemory::PendingRelease::release(RangeAllocator &allocator, bool missing_ok)
+  {
+    if (!redistrict_insts.empty()) {
+      const size_t num_insts = redistrict_insts.size();
+      std::vector<RegionInstance> tags(num_insts);
+      std::vector<size_t> sizes(num_insts);
+      std::vector<size_t> alignments(num_insts);
+      for(size_t i = 0; i < num_insts; i++) {
+        sizes[i] = redistrict_insts[i]->metadata.layout->bytes_used;
+        alignments[i] = redistrict_insts[i]->metadata.layout->alignment_reqd;
+        tags[i] = redistrict_insts[i]->me;
+      }
+      std::vector<size_t> offsets(0, num_insts);
+      allocator.split_range(inst->me, tags, sizes, alignments, offsets);
+    } else {
+      allocator.deallocate(inst->me, missing_ok);
+    }
+  }
     
   ////////////////////////////////////////////////////////////////////////
   //
@@ -1603,6 +1820,14 @@ namespace Realm {
       amsg->inst = inst->me;
       amsg->precondition = precondition;
       amsg.commit();
+    }
+
+    MemoryImpl::AllocationResult RemoteMemory::reuse_storage_deferrable(
+        RegionInstanceImpl *old_inst, std::vector<RegionInstanceImpl *> &new_insts, Event precondition)
+    {
+      // TODO: implement this
+      assert(false);
+      return ALLOC_INSTANT_FAILURE;
     }
 
     MemoryImpl::AllocationResult RemoteMemory::allocate_storage_immediate(RegionInstanceImpl *inst,
