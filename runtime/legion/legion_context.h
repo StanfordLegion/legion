@@ -1998,11 +1998,14 @@ namespace Legion {
 #ifdef POINT_WISE_LOGICAL_ANALYSIS
     struct PointWiseDeps {
       public:
+        // We always use shard of the point of
+        // "next IndexTask" as key
         std::map<ShardID,RtEvent> ready_deps;
         std::map<ShardID,RtUserEvent> pending_deps;
       };
     protected:
       mutable LocalLock point_wise_lock;
+      // We always use point of "prev IndexTask" as key
       std::map<std::pair<uint64_t,DomainPoint>,PointWiseDeps> point_wise_deps;
 #endif
     protected:

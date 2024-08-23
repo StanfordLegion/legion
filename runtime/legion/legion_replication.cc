@@ -1976,13 +1976,15 @@ namespace Legion {
       {
         // throw _error
       }
+
       // find shard of the point
       const ShardID next_shard =
          finder->second.sharding->find_owner(next_index_task_points[0],
             finder->second.index_domain);
 
-      parent_ctx->record_point_wise_dependence(context_index, point, lr,
-                                              point_mapped, next_shard);
+      parent_ctx->record_point_wise_dependence(context_index,
+          point, lr,
+          point_mapped, next_shard);
     }
 
     //--------------------------------------------------------------------------

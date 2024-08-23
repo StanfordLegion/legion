@@ -1408,7 +1408,7 @@ namespace Legion {
       bool set_prev_point_wise_user(const LogicalUser *user,
           const LogicalUser *prev);
       bool set_next_point_wise_user(const LogicalUser *user,
-          const LogicalUser *next);
+          const LogicalUser *next, LogicalRegion root);
       bool add_point_to_completed_list(DomainPoint point);
       bool prev_point_wise_user_set(unsigned region_req_idx);
     protected:

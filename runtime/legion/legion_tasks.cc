@@ -10364,14 +10364,72 @@ namespace Legion {
     }
 
     bool IndexTask::set_next_point_wise_user(const LogicalUser *user,
-        const LogicalUser *next)
+        const LogicalUser *next, LogicalRegion root)
     {
       AutoLock o_lock(op_lock);
 
-      if (user->gen < gen) return false;
+      if (user->gen < gen)
+      {
+        // The part of RegionRequirement we use, is the same for prev and
+        // next IndexTask
+        RegionRequirement &req = logical_regions[user->idx];
+        std::vector<DomainPoint> prev_index_task_points;
+
+        Domain sharding_domain;
+        user->shard_proj->sharding_domain->get_domain(sharding_domain);
+
+        get_points(req, user->shard_proj->projection,
+            root, sharding_domain,
+            prev_index_task_points);
+
+        for(std::vector<DomainPoint>::iterator it =
+            prev_index_task_points.begin(); it !=
+            prev_index_task_points.end(); it++)
+        {
+          RegionRequirement &req = logical_regions[user->idx];
+          LogicalRegion lr;
+          if (req.handle_type == LEGION_PARTITION_PROJECTION)
+          {
+            lr = user->shard_proj->projection->functor->project(
+                req.partition, (*it), index_domain);
+          }
+          else
+          {
+            lr = user->shard_proj->projection->functor->project(
+                req.region, (*it), index_domain);
+          }
+
+          std::vector<DomainPoint> next_index_task_points;
+          RegionRequirement &next_user_req =
+            static_cast<IndexTask*>(next->op)->logical_regions[next->idx];
+
+          get_points(next_user_req, next->shard_proj->projection,
+              lr, static_cast<IndexTask*>(next->op)->index_domain,
+              next_index_task_points);
+
+          if (next_index_task_points.size() > 1)
+          {
+            // throw _error
+          }
+
+          ShardID next_shard = 0;
+          if (next->shard_proj->sharding != NULL)
+            next_shard =
+            next->shard_proj->sharding->find_owner(next_index_task_points[0],
+                static_cast<IndexTask*>(next->op)->index_domain);
+
+          parent_ctx->record_point_wise_dependence(context_index,
+              (*it), lr,
+              RtEvent::NO_RT_EVENT,
+              next_shard);
+        }
+
+        return false;
+      }
 
       if (!completed_point_list.empty())
       {
+        printf("======COMPLEX CASE====!!!!\n");
         for(std::vector<DomainPoint>::iterator it =
             completed_point_list.begin(); it !=
             completed_point_list.end(); it++)
@@ -10389,13 +10447,15 @@ namespace Legion {
                 req.region, (*it), index_domain);
           }
 
-          std::vector<DomainPoint> current_task_points;
+          std::vector<DomainPoint> next_index_task_points;
+          RegionRequirement &next_user_req =
+            static_cast<IndexTask*>(next->op)->logical_regions[next->idx];
 
-          get_points(req, user->shard_proj->projection,
-              lr, index_domain,
-              current_task_points);
+          get_points(next_user_req, next->shard_proj->projection,
+              lr, static_cast<IndexTask*>(next->op)->index_domain,
+              next_index_task_points);
 
-          if (current_task_points.size() > 1)
+          if (next_index_task_points.size() > 1)
           {
             // throw _error
           }
@@ -10403,12 +10463,13 @@ namespace Legion {
           ShardID next_shard = 0;
           if (next->shard_proj->sharding != NULL)
             next_shard =
-            next->shard_proj->sharding->find_owner(current_task_points[0],
+            next->shard_proj->sharding->find_owner(next_index_task_points[0],
                 static_cast<IndexTask*>(next->op)->index_domain);
 
-          parent_ctx->record_point_wise_dependence(context_index, current_task_points[0], lr,
-                                                  RtEvent::NO_RT_EVENT,
-                                                  next_shard);
+          parent_ctx->record_point_wise_dependence(context_index,
+              (*it), lr,
+              RtEvent::NO_RT_EVENT,
+              next_shard);
         }
       }
 

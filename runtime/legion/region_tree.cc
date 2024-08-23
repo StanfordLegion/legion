@@ -16605,7 +16605,7 @@ namespace Legion {
                         {
                           skip_registering_region_dependece = true;
                           if (static_cast<IndexTask*>(prev.op)->set_next_point_wise_user(
-                              &prev, &user))
+                              &prev, &user, root))
                           {
                             printf("FOUND POINT-WISE ANCESTOR: %d\n", context->runtime->address_space);
                             static_cast<IndexTask*>(user.op)->set_prev_point_wise_user(
