@@ -1380,7 +1380,7 @@ namespace Realm {
 #endif
 
 	// this destruction should be somewhere in the pending ops list
-	assert(!pending_releases.empty());
+        assert(!pending_releases.empty());
 
         std::deque<PendingRelease>::iterator it = pending_releases.begin();
 
