@@ -645,7 +645,7 @@ namespace Legion {
       void record_instance_ready(LgEvent result, LgEvent unique_event,
                                  LgEvent precondition = LgEvent::NO_LG_EVENT);
       void record_completion_queue_event(LgEvent result, LgEvent fevent,
-          const LgEvent *preconditions, size_t count);
+          timestamp_t timestamp, const LgEvent *preconditions, size_t count);
     public:
       void process_task(const ProfilingInfo *info,
             const Realm::ProfilingResponse &response,

@@ -778,7 +778,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LegionProfInstance::record_completion_queue_event(LgEvent result,
-                     LgEvent fevent, const LgEvent *preconditions, size_t count)
+        LgEvent fevent, timestamp_t performed, 
+        const LgEvent *preconditions, size_t count)
     //--------------------------------------------------------------------------
     {
       if (owner->no_critical_paths)
@@ -792,8 +793,6 @@ namespace Legion {
           return;
       CompletionQueueInfo &info = completion_queue_infos.emplace_back(
           CompletionQueueInfo());
-      // Take the timing measurement of when this happened first
-      info.performed = Realm::Clock::current_time_in_nanoseconds();
       info.result = result;
       info.preconditions.resize(count);
       for (unsigned idx = 0; idx < count; idx++)
@@ -803,6 +802,7 @@ namespace Legion {
           record_barrier_arrival(preconditions[idx], implicit_provenance);
       }
       info.fevent = fevent;
+      info.performed = performed;
       owner->update_footprint(sizeof(info) + count * sizeof(LgEvent), this);
     }
 

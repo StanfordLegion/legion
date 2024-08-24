@@ -769,88 +769,109 @@ namespace Legion {
       public:
         static const LgTaskID TASK_ID = LG_DEFERRED_ENQUEUE_TASK_ID;
       public:
-        DeferredEnqueueTaskArgs(TaskOp *t, InnerContext *ctx, RtEvent pre)
+        DeferredEnqueueTaskArgs(TaskOp *t, InnerContext *ctx, 
+                                RtEvent pre, long long perf)
           : LgTaskArgs<DeferredEnqueueTaskArgs>(t->get_unique_op_id()),
-            context(ctx), precondition(pre), prev_fevent(implicit_fevent) { }
+            context(ctx), precondition(pre), 
+            previous_fevent(implicit_fevent), performed(perf) { }
       public:
         InnerContext *const context;
         const RtEvent precondition;
-        const LgEvent prev_fevent;
+        const LgEvent previous_fevent;
+        const long long performed;
       };
       struct DeferredDistributeTaskArgs : 
         public LgTaskArgs<DeferredDistributeTaskArgs> {
       public:
         static const LgTaskID TASK_ID = LG_DEFERRED_DISTRIBUTE_TASK_ID;
       public:
-        DeferredDistributeTaskArgs(TaskOp *op, InnerContext *ctx, RtEvent pre)
+        DeferredDistributeTaskArgs(TaskOp *op, InnerContext *ctx,
+                                   RtEvent pre, long long perf)
           : LgTaskArgs<DeferredDistributeTaskArgs>(op->get_unique_op_id()),
-            context(ctx), precondition(pre), prev_fevent(implicit_fevent) { }
+            context(ctx), precondition(pre),
+            previous_fevent(implicit_fevent), performed(perf) { }
       public:
         InnerContext *const context;
         const RtEvent precondition;
-        const LgEvent prev_fevent;
+        const LgEvent previous_fevent;
+        const long long performed;
       };
       struct DeferredLaunchTaskArgs :
         public LgTaskArgs<DeferredLaunchTaskArgs> {
       public:
         static const LgTaskID TASK_ID = LG_DEFERRED_LAUNCH_TASK_ID;
       public:
-        DeferredLaunchTaskArgs(TaskOp *op, InnerContext *ctx, RtEvent pre)
+        DeferredLaunchTaskArgs(TaskOp *op, InnerContext *ctx,
+                               RtEvent pre, long long perf)
           : LgTaskArgs<DeferredLaunchTaskArgs>(op->get_unique_op_id()),
-            context(ctx), precondition(pre), prev_fevent(implicit_fevent) { }
+            context(ctx), precondition(pre),
+            previous_fevent(implicit_fevent), performed(perf) { }
       public:
         InnerContext *const context;
         const RtEvent precondition;
-        const LgEvent prev_fevent;
+        const LgEvent previous_fevent;
+        const long long performed;
       };
       struct TriggerExecutionArgs : public LgTaskArgs<TriggerExecutionArgs> {
       public:
         static const LgTaskID TASK_ID = LG_TRIGGER_EXECUTION_ID;
       public:
-        TriggerExecutionArgs(Operation *op, InnerContext *ctx, RtEvent pre)
+        TriggerExecutionArgs(Operation *op, InnerContext *ctx,
+                             RtEvent pre, long long perf)
           : LgTaskArgs<TriggerExecutionArgs>(op->get_unique_op_id()),
-            context(ctx), precondition(pre), prev_fevent(implicit_fevent) { }
+            context(ctx), precondition(pre),
+            previous_fevent(implicit_fevent), performed(perf) { }
       public:
         InnerContext *const context;
         const RtEvent precondition;
-        const LgEvent prev_fevent;
+        const LgEvent previous_fevent;
+        const long long performed;
       };
       struct DeferredExecutionArgs : public LgTaskArgs<DeferredExecutionArgs> {
       public:
         static const LgTaskID TASK_ID = LG_DEFERRED_EXECUTION_ID;
       public:
-        DeferredExecutionArgs(Operation *op, InnerContext *ctx, RtEvent pre)
+        DeferredExecutionArgs(Operation *op, InnerContext *ctx,
+                              RtEvent pre, long long perf)
           : LgTaskArgs<DeferredExecutionArgs>(op->get_unique_op_id()),
-            context(ctx), precondition(pre), prev_fevent(implicit_fevent) { }
+            context(ctx), precondition(pre),
+            previous_fevent(implicit_fevent), performed(perf) { }
       public:
         InnerContext *const context;
         const RtEvent precondition;
-        const LgEvent prev_fevent;
+        const LgEvent previous_fevent;
+        const long long performed;
       };
       struct DeferredMappedArgs : public LgTaskArgs<DeferredMappedArgs> {
       public:
         static const LgTaskID TASK_ID = LG_DEFERRED_MAPPED_ID;
       public:
-        DeferredMappedArgs(Operation *op, InnerContext *ctx, RtEvent pre)
+        DeferredMappedArgs(Operation *op, InnerContext *ctx,
+                           RtEvent pre, long long perf)
           : LgTaskArgs<DeferredMappedArgs>(op->get_unique_op_id()),
-            context(ctx), precondition(pre), prev_fevent(implicit_fevent) { }
+            context(ctx), precondition(pre),
+            previous_fevent(implicit_fevent), performed(perf) { }
       public:
         InnerContext *const context;
         const RtEvent precondition;
-        const LgEvent prev_fevent;
+        const LgEvent previous_fevent;
+        const long long performed;
       };
       struct DeferredCompletionArgs : 
         public LgTaskArgs<DeferredCompletionArgs> {
       public:
         static const LgTaskID TASK_ID = LG_DEFERRED_COMPLETION_ID;
       public:
-        DeferredCompletionArgs(Operation *op, InnerContext *ctx, RtEvent pre)
+        DeferredCompletionArgs(Operation *op, InnerContext *ctx,
+                               RtEvent pre, long long perf)
           : LgTaskArgs<DeferredCompletionArgs>(op->get_unique_op_id()),
-            context(ctx), precondition(pre), prev_fevent(implicit_fevent) { }
+            context(ctx), precondition(pre),
+            previous_fevent(implicit_fevent), performed(perf) { }
       public:
         InnerContext *const context;
         const RtEvent precondition;
-        const LgEvent prev_fevent;
+        const LgEvent previous_fevent;
+        const long long performed;
       };
       struct TriggerCommitArgs : public LgTaskArgs<TriggerCommitArgs> {
       public:
@@ -867,13 +888,15 @@ namespace Legion {
         static const LgTaskID TASK_ID = LG_DEFERRED_COMMIT_ID;
       public:
         DeferredCommitArgs(const std::pair<Operation*,bool> &op,
-                           InnerContext *ctx, RtEvent pre)
+                           InnerContext *ctx, RtEvent pre, long long perf)
           : LgTaskArgs<DeferredCommitArgs>(op.first->get_unique_op_id()),
-            context(ctx), precondition(pre), prev_fevent(implicit_fevent)  { }
+            context(ctx), precondition(pre),
+            previous_fevent(implicit_fevent), performed(perf) { }
       public:
         InnerContext *const context;
         const RtEvent precondition;
-        const LgEvent prev_fevent;
+        const LgEvent previous_fevent;
+        const long long performed;
       };
       struct VerifyPartitionArgs : public LgTaskArgs<VerifyPartitionArgs> {
       public:
@@ -1549,38 +1572,47 @@ namespace Legion {
                       std::list<QueueEntry<T> > &queue,
                       CompletionQueue &comp_queue,
                       std::vector<T> &to_perform,
-                      LgEvent previous_fevent) const;
+                      LgEvent previous_fevent,
+                      long long &performed) const;
     public:
       void add_to_ready_queue(Operation *op);
       bool process_ready_queue(void);
     public:
       void add_to_task_queue(TaskOp *op, RtEvent ready);
-      bool process_enqueue_task_queue(RtEvent precondition, LgEvent fevent);
+      bool process_enqueue_task_queue(RtEvent precondition, LgEvent fevent,
+                                      long long performed);
     public:
       void add_to_distribute_task_queue(TaskOp *op, RtEvent ready);
-      bool process_distribute_task_queue(RtEvent precondition, LgEvent fevent);
+      bool process_distribute_task_queue(RtEvent precondition, LgEvent fevent,
+                                         long long performed);
     public:
       void add_to_launch_task_queue(TaskOp *op, RtEvent ready);
-      bool process_launch_task_queue(RtEvent precondition, LgEvent fevent);
+      bool process_launch_task_queue(RtEvent precondition, LgEvent fevent,
+                                     long long performed);
     public:
       void add_to_trigger_execution_queue(Operation *op, RtEvent ready);
-      bool process_trigger_execution_queue(RtEvent precondition,LgEvent fevent);
+      bool process_trigger_execution_queue(RtEvent precondition,
+                                      LgEvent fevent, long long performed);
     public:
       void add_to_deferred_execution_queue(Operation *op, RtEvent ready);
       bool process_deferred_execution_queue(RtEvent precondition,
-                                            LgEvent fevent);
+                                            LgEvent fevent,
+                                            long long performed);
     public:
       void add_to_deferred_mapped_queue(Operation *op, RtEvent ready);
-      bool process_deferred_mapped_queue(RtEvent precondition, LgEvent fevent);
+      bool process_deferred_mapped_queue(RtEvent precondition, 
+                                          LgEvent fevent, long long performed);
     public:
       void add_to_deferred_completion_queue(Operation *op, 
                               ApEvent effects, bool tracked);
       bool process_deferred_completion_queue(RtEvent precondition,
-                                             LgEvent fevent);
+                                             LgEvent fevent,
+                                             long long performed);
     public:
       void add_to_deferred_commit_queue(Operation *op, RtEvent ready,
                                         bool deactivate);
-      bool process_deferred_commit_queue(RtEvent precondition, LgEvent fevent);
+      bool process_deferred_commit_queue(RtEvent precondition,
+                                         LgEvent fevent, long long performed);
       bool process_trigger_commit_queue(void);
     public:
       void register_executing_child(Operation *op);
