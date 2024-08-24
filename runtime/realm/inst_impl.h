@@ -82,7 +82,7 @@ namespace Realm {
       DeferredDestroy deferred_destroy;
 
       // Some help with deferred redistricting
-      std::vector<RegionInstanceImpl*> deferred_redistrict;
+      std::vector<RegionInstanceImpl *> deferred_redistrict;
 
     public:
       // entry point for both create_instance and create_external_instance

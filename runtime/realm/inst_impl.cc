@@ -977,40 +977,40 @@ namespace Realm {
       //  instance metadata (whether the allocation succeeded or not) after
       //  this point)
       Event ready_event;
-      switch (m_impl->reuse_storage_deferrable(this, insts, wait_on)) {
+      switch(m_impl->reuse_storage_deferrable(this, insts, wait_on)) {
       case MemoryImpl::ALLOC_INSTANT_SUCCESS:
-        {
-          ready_event = Event::NO_EVENT;
-          break;
-        }
+      {
+        ready_event = Event::NO_EVENT;
+        break;
+      }
 
       case MemoryImpl::ALLOC_INSTANT_FAILURE:
       case MemoryImpl::ALLOC_CANCELLED:
-	{
-	  // generate a poisoned event for completion
-	  // NOTE: it is unsafe to look at the impl->metadata or the 
-	  //  passed-in instance layout at this point due to the possibility
-	  //  of an asynchronous destruction of the instance in a profiling
-	  //  handler
-	  GenEventImpl *ev = GenEventImpl::create_genevent();
-	  ready_event = ev->current_event();
-	  GenEventImpl::trigger(ready_event, true /*poisoned*/);
-	  break;
-	}
+      {
+        // generate a poisoned event for completion
+        // NOTE: it is unsafe to look at the impl->metadata or the
+        //  passed-in instance layout at this point due to the possibility
+        //  of an asynchronous destruction of the instance in a profiling
+        //  handler
+        GenEventImpl *ev = GenEventImpl::create_genevent();
+        ready_event = ev->current_event();
+        GenEventImpl::trigger(ready_event, true /*poisoned*/);
+        break;
+      }
 
       case MemoryImpl::ALLOC_DEFERRED:
-	{
-          // We've done all the work to make set up the new instances
-          // they will be ready the instant the deferral event triggers
-          // as that is when we'll switch from the old mode to the new mode
-          ready_event = wait_on;
-          break;
-        }
+      {
+        // We've done all the work to make set up the new instances
+        // they will be ready the instant the deferral event triggers
+        // as that is when we'll switch from the old mode to the new mode
+        ready_event = wait_on;
+        break;
+      }
 
       case MemoryImpl::ALLOC_EVENTUAL_SUCCESS:
       case MemoryImpl::ALLOC_EVENTUAL_FAILURE:
-	// should not occur
-	assert(0);
+        // should not occur
+        assert(0);
       }
       return ready_event;
     }

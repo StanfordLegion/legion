@@ -109,8 +109,10 @@ namespace Realm {
 					    Event precondition);
 
     // reuse storage associated with an instance
-    virtual AllocationResult reuse_storage_deferrable(RegionInstanceImpl *old_inst,
-        std::vector<RegionInstanceImpl*>& new_insts, Event precondition);
+    virtual AllocationResult
+    reuse_storage_deferrable(RegionInstanceImpl *old_inst,
+                             std::vector<RegionInstanceImpl *> &new_insts,
+                             Event precondition);
 
     // should only be called by RegionInstance::DeferredCreate or from
     //  allocate_storage_deferrable
@@ -290,8 +292,10 @@ namespace Realm {
       virtual void release_storage_deferrable(RegionInstanceImpl *inst,
 					      Event precondition);
 
-      virtual AllocationResult reuse_storage_deferrable(RegionInstanceImpl *old_inst,
-          std::vector<RegionInstanceImpl*>& new_insts, Event precondition);
+      virtual AllocationResult
+      reuse_storage_deferrable(RegionInstanceImpl *old_inst,
+                               std::vector<RegionInstanceImpl *> &new_insts,
+                               Event precondition);
 
       virtual AllocationResult allocate_storage_immediate(RegionInstanceImpl *inst,
 							  bool need_alloc_result,
@@ -338,13 +342,12 @@ namespace Realm {
       };
       struct PendingRelease {
 	RegionInstanceImpl *inst;
-        std::vector<RegionInstanceImpl*> redistrict_insts;
-	bool is_ready;
-	unsigned seqid;
+        std::vector<RegionInstanceImpl *> redistrict_insts;
+        bool is_ready;
+        unsigned seqid;
 
-	PendingRelease(RegionInstanceImpl *_inst, bool _ready,
-		       unsigned _seqid);
-        void record_redistrict(const std::vector<RegionInstanceImpl*> &insts);
+        PendingRelease(RegionInstanceImpl *_inst, bool _ready, unsigned _seqid);
+        void record_redistrict(const std::vector<RegionInstanceImpl *> &insts);
         void release(RangeAllocator &allocator, bool missing_ok = false);
       };
       std::deque<PendingAlloc> pending_allocs;
@@ -453,8 +456,10 @@ namespace Realm {
       virtual void release_storage_deferrable(RegionInstanceImpl *inst,
 					      Event precondition);
 
-      virtual AllocationResult reuse_storage_deferrable(RegionInstanceImpl *old_inst,
-          std::vector<RegionInstanceImpl*>& new_insts, Event precondition);
+      virtual AllocationResult
+      reuse_storage_deferrable(RegionInstanceImpl *old_inst,
+                               std::vector<RegionInstanceImpl *> &new_insts,
+                               Event precondition);
 
       virtual AllocationResult allocate_storage_immediate(RegionInstanceImpl *inst,
 							  bool need_alloc_result,
