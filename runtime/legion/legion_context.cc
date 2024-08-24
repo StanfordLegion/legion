@@ -8549,7 +8549,8 @@ namespace Legion {
     T InnerContext::process_queue(LocalLock &lock, RtEvent &precondition, 
                                   std::list<QueueEntry<T> > &queue,
                                   CompletionQueue &comp_queue,
-                                  std::vector<T> &to_perform) const
+                                  std::vector<T> &to_perform,
+                                  LgEvent previous_fevent) const
     //--------------------------------------------------------------------------
     {
       T next{};
@@ -8565,8 +8566,8 @@ namespace Legion {
       ready_events.resize(num_ready);
       std::sort(ready_events.begin(), ready_events.end());
       if (precondition.exists() && (implicit_profiler != NULL))
-        implicit_profiler->record_completion_queue_event(
-            precondition, &ready_events.front(), num_ready);
+        implicit_profiler->record_completion_queue_event(precondition,
+            previous_fevent, &ready_events.front(), num_ready);
       // Find the entries
       for (typename std::list<QueueEntry<T> >::iterator it =
             queue.begin(); it != queue.end(); /*nothing*/)
@@ -8671,12 +8672,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool InnerContext::process_enqueue_task_queue(RtEvent precondition)
+    bool InnerContext::process_enqueue_task_queue(RtEvent precondition,
+                                                  LgEvent previous_fevent)
     //--------------------------------------------------------------------------
     {
       std::vector<TaskOp*> to_perform;
       TaskOp *next = process_queue<TaskOp*>(enqueue_task_lock, precondition,
-                    enqueue_task_queue, enqueue_task_comp_queue, to_perform);
+          enqueue_task_queue, enqueue_task_comp_queue,
+          to_perform, previous_fevent);
       for (std::vector<TaskOp*>::const_iterator it =
             to_perform.begin(); it != to_perform.end(); it++)
       {
@@ -8704,12 +8707,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool InnerContext::process_distribute_task_queue(RtEvent precondition)
+    bool InnerContext::process_distribute_task_queue(RtEvent precondition,
+                                                     LgEvent previous_fevent)
     //--------------------------------------------------------------------------
     {
       std::vector<TaskOp*> to_perform;
       TaskOp *next = process_queue<TaskOp*>(distribute_task_lock, precondition,
-                distribute_task_queue, distribute_task_comp_queue, to_perform);
+                distribute_task_queue, distribute_task_comp_queue,
+                to_perform, previous_fevent);
       for (std::vector<TaskOp*>::const_iterator it =
             to_perform.begin(); it != to_perform.end(); it++)
       {
@@ -8738,12 +8743,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool InnerContext::process_launch_task_queue(RtEvent precondition)
+    bool InnerContext::process_launch_task_queue(RtEvent precondition,
+                                                 LgEvent previous_fevent)
     //--------------------------------------------------------------------------
     {
       std::vector<TaskOp*> to_perform;
       TaskOp *next = process_queue<TaskOp*>(launch_task_lock, precondition,
-                    launch_task_queue, launch_task_comp_queue, to_perform);
+                    launch_task_queue, launch_task_comp_queue,
+                    to_perform, previous_fevent);
       for (std::vector<TaskOp*>::const_iterator it =
             to_perform.begin(); it != to_perform.end(); it++)
       {
@@ -8772,13 +8779,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool InnerContext::process_trigger_execution_queue(RtEvent precondition)
+    bool InnerContext::process_trigger_execution_queue(RtEvent precondition,
+                                                       LgEvent previous_fevent)
     //--------------------------------------------------------------------------
     {
       std::vector<Operation*> to_perform;
       Operation *next = process_queue<Operation*>(trigger_execution_lock,
           precondition, trigger_execution_queue, 
-          trigger_execution_comp_queue, to_perform);
+          trigger_execution_comp_queue, to_perform, previous_fevent);
       for (std::vector<Operation*>::const_iterator it =
             to_perform.begin(); it != to_perform.end(); it++)
       {
@@ -8807,13 +8815,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool InnerContext::process_deferred_execution_queue(RtEvent precondition)
+    bool InnerContext::process_deferred_execution_queue(RtEvent precondition,
+                                                        LgEvent previous_fevent)
     //--------------------------------------------------------------------------
     {
       std::vector<Operation*> to_perform;
       Operation *next = process_queue<Operation*>(deferred_execution_lock,
           precondition, deferred_execution_queue, 
-          deferred_execution_comp_queue, to_perform);
+          deferred_execution_comp_queue, to_perform, previous_fevent);
       for (std::vector<Operation*>::const_iterator it =
             to_perform.begin(); it != to_perform.end(); it++)
       {
@@ -8842,13 +8851,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool InnerContext::process_deferred_mapped_queue(RtEvent precondition)
+    bool InnerContext::process_deferred_mapped_queue(RtEvent precondition,
+                                                     LgEvent previous_fevent)
     //--------------------------------------------------------------------------
     {
       std::vector<Operation*> to_perform;
       Operation *next = process_queue<Operation*>(deferred_mapped_lock,
           precondition, deferred_mapped_queue,
-          deferred_mapped_comp_queue, to_perform);
+          deferred_mapped_comp_queue, to_perform, previous_fevent);
       for (std::vector<Operation*>::const_iterator it =
             to_perform.begin(); it != to_perform.end(); it++)
       {
@@ -8915,7 +8925,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool InnerContext::process_deferred_completion_queue(RtEvent precondition)
+    bool InnerContext::process_deferred_completion_queue(RtEvent precondition,
+                                                        LgEvent previous_fevent)
     //--------------------------------------------------------------------------
     {
       Operation *next = NULL;
@@ -8934,8 +8945,8 @@ namespace Legion {
         ready_events.resize(num_ready);
         std::sort(ready_events.begin(), ready_events.end());
         if (precondition.exists() && (implicit_profiler != NULL))
-          implicit_profiler->record_completion_queue_event(
-              precondition, &ready_events.front(), num_ready);
+          implicit_profiler->record_completion_queue_event(precondition,
+              previous_fevent, &ready_events.front(), num_ready);
         // Find the entries
         for (std::list<CompletionEntry>::iterator it =
               deferred_completion_queue.begin(); it !=
@@ -9047,14 +9058,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool InnerContext::process_deferred_commit_queue(RtEvent precondition)
+    bool InnerContext::process_deferred_commit_queue(RtEvent precondition,
+                                                     LgEvent previous_fevent)
     //--------------------------------------------------------------------------
     {
       std::vector<std::pair<Operation*,bool> > to_perform;
       std::pair<Operation*,bool> next =
         process_queue<std::pair<Operation*,bool> >(deferred_commit_lock,
           precondition, deferred_commit_queue, 
-          deferred_commit_comp_queue, to_perform);
+          deferred_commit_comp_queue, to_perform, previous_fevent);
       for (std::vector<std::pair<Operation*,bool> >::const_iterator it =
             to_perform.begin(); it != to_perform.end(); it++)
       {
@@ -11990,7 +12002,8 @@ namespace Legion {
     {
       const DeferredEnqueueTaskArgs *dargs = 
         (const DeferredEnqueueTaskArgs*)args;
-      if (dargs->context->process_enqueue_task_queue(dargs->precondition) &&
+      if (dargs->context->process_enqueue_task_queue(
+            dargs->precondition, dargs->prev_fevent) &&
           dargs->context->remove_base_resource_ref(META_TASK_REF))
         delete dargs->context;
     }
@@ -12001,7 +12014,8 @@ namespace Legion {
     {
       const DeferredDistributeTaskArgs *dargs = 
         (const DeferredDistributeTaskArgs*)args;
-      if (dargs->context->process_distribute_task_queue(dargs->precondition) &&
+      if (dargs->context->process_distribute_task_queue(
+            dargs->precondition, dargs->prev_fevent) &&
           dargs->context->remove_base_resource_ref(META_TASK_REF))
         delete dargs->context;
     }
@@ -12012,7 +12026,8 @@ namespace Legion {
     {
       const DeferredLaunchTaskArgs *dargs = 
         (const DeferredLaunchTaskArgs*)args;
-      if (dargs->context->process_launch_task_queue(dargs->precondition) &&
+      if (dargs->context->process_launch_task_queue(
+            dargs->precondition, dargs->prev_fevent) &&
           dargs->context->remove_base_resource_ref(META_TASK_REF))
         delete dargs->context;
     }
@@ -12023,8 +12038,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const TriggerExecutionArgs *targs = (const TriggerExecutionArgs*)args;
-      if (targs->context->process_trigger_execution_queue(targs->precondition)
-            && targs->context->remove_base_resource_ref(META_TASK_REF))
+      if (targs->context->process_trigger_execution_queue(
+            targs->precondition, targs->prev_fevent) &&
+          targs->context->remove_base_resource_ref(META_TASK_REF))
         delete targs->context;
     }
 
@@ -12034,8 +12050,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const DeferredExecutionArgs *dargs = (const DeferredExecutionArgs*)args;
-      if (dargs->context->process_deferred_execution_queue(dargs->precondition)
-            && dargs->context->remove_base_resource_ref(META_TASK_REF))
+      if (dargs->context->process_deferred_execution_queue(
+            dargs->precondition, dargs->prev_fevent) &&
+          dargs->context->remove_base_resource_ref(META_TASK_REF))
         delete dargs->context;
     }
 
@@ -12044,7 +12061,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const DeferredMappedArgs *targs = (const DeferredMappedArgs*)args;
-      if (targs->context->process_deferred_mapped_queue(targs->precondition) &&
+      if (targs->context->process_deferred_mapped_queue(
+            targs->precondition, targs->prev_fevent) &&
           targs->context->remove_base_resource_ref(META_TASK_REF))
         delete targs->context;
     }
@@ -12055,8 +12073,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const DeferredCompletionArgs *dargs = (const DeferredCompletionArgs*)args;
-      if (dargs->context->process_deferred_completion_queue(dargs->precondition)
-            && dargs->context->remove_base_resource_ref(META_TASK_REF))
+      if (dargs->context->process_deferred_completion_queue(
+            dargs->precondition, dargs->prev_fevent) &&
+          dargs->context->remove_base_resource_ref(META_TASK_REF))
         delete dargs->context;
     }
 
@@ -12075,7 +12094,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const DeferredCommitArgs *dargs = (const DeferredCommitArgs*)args;
-      if (dargs->context->process_deferred_commit_queue(dargs->precondition) &&
+      if (dargs->context->process_deferred_commit_queue(
+            dargs->precondition, dargs->prev_fevent) &&
           dargs->context->remove_base_resource_ref(META_TASK_REF))
         delete dargs->context;
     }

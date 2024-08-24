@@ -778,7 +778,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LegionProfInstance::record_completion_queue_event(LgEvent result,
-                                     const LgEvent *preconditions, size_t count)
+                     LgEvent fevent, const LgEvent *preconditions, size_t count)
     //--------------------------------------------------------------------------
     {
       if (owner->no_critical_paths)
@@ -802,7 +802,7 @@ namespace Legion {
         if (preconditions[idx].is_barrier())
           record_barrier_arrival(preconditions[idx], implicit_provenance);
       }
-      info.fevent = implicit_fevent;
+      info.fevent = fevent;
       owner->update_footprint(sizeof(info) + count * sizeof(LgEvent), this);
     }
 
