@@ -751,7 +751,8 @@ namespace Legion {
         std::map<DomainPoint,RtEvent> intra_space_dependences;
 #ifdef POINT_WISE_LOGICAL_ANALYSIS
       protected:
-        std::map<LogicalRegion,RtEvent> point_wise_dependences;
+        // the key is the point of the next IndexSpaceTask
+        std::map<DomainPoint,RtEvent> point_wise_dependences;
         // Flag to indicate if we have a previous task for which
         // we can map point-task-wise instead of whole index-task-wise.
         bool connect_to_prev_point = false;
@@ -1396,13 +1397,12 @@ namespace Legion {
       std::vector<std::pair<SliceTask*,AddressSpace> > concurrent_slices;
 #ifdef POINT_WISE_LOGICAL_ANALYSIS
     public:
-      void record_point_wise_dependence(DomainPoint point,
+      virtual void record_point_wise_dependence(DomainPoint point,
           LogicalRegion lr,
-          unsigned region_idx,
-          RtEvent point_mapped);
-      RtEvent find_point_wise_dependence(DomainPoint point,
+          unsigned region_idx, RtEvent point_mapped);
+      virtual RtEvent find_point_wise_dependence(DomainPoint point,
           LogicalRegion lr,
-          unsigned region_idx, GenerationID gen);
+          unsigned region_idx);
       static void process_slice_find_point_wise_dependence(Deserializer &derez);
       static void process_slice_record_point_wise_dependence(Deserializer &derez);
       bool set_prev_point_wise_user(const LogicalUser *user,
@@ -1416,6 +1416,10 @@ namespace Legion {
           ProjectionFunction *projection,
           LogicalRegion lr, Domain index_domain,
           std::vector<DomainPoint> &points);
+
+      void record_point_wise_dependence_completed_point(
+        const LogicalUser *user, const LogicalUser *next,
+        std::vector<DomainPoint> &completed_points);
     protected:
       std::map<LogicalRegion,RtUserEvent> pending_point_wise_dependences;
       std::vector<DomainPoint> completed_point_list;
@@ -1550,13 +1554,12 @@ namespace Legion {
                                                  RtEvent point_mapped);
 #ifdef POINT_WISE_LOGICAL_ANALYSIS
     public:
-      void record_point_wise_dependence(DomainPoint point,
+      virtual void record_point_wise_dependence(DomainPoint point,
           LogicalRegion lr,
-          unsigned region_idx,
-          RtEvent point_mapped);
-      RtEvent find_point_wise_dependence(DomainPoint point,
+          unsigned region_idx, RtEvent point_mapped);
+      virtual RtEvent find_point_wise_dependence(DomainPoint point,
           LogicalRegion lr,
-          unsigned region_idx, GenerationID gen = 0);
+          unsigned region_idx);
       bool need_forward_progress(void);
 #endif
     public:

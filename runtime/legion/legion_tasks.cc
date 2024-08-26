@@ -7789,6 +7789,7 @@ namespace Legion {
                     point_wise_mapping_dependences.end());
         }
       }
+
       if (slice_owner->should_connect_to_next_point())
       {
         slice_owner->record_point_wise_dependence(get_domain_point(), lr, region_idx,
@@ -10363,6 +10364,55 @@ namespace Legion {
       return true;
     }
 
+    void IndexTask::record_point_wise_dependence_completed_point(
+        const LogicalUser *user, const LogicalUser *next,
+        std::vector<DomainPoint> &completed_points)
+    {
+      for(std::vector<DomainPoint>::iterator it =
+          completed_points.begin(); it !=
+          completed_points.end(); it++)
+      {
+        RegionRequirement &req = logical_regions[user->idx];
+        LogicalRegion lr;
+        if (req.handle_type == LEGION_PARTITION_PROJECTION)
+        {
+          lr = user->shard_proj->projection->functor->project(
+              req.partition, (*it), index_domain);
+        }
+        else
+        {
+          lr = user->shard_proj->projection->functor->project(
+              req.region, (*it), index_domain);
+        }
+
+        std::vector<DomainPoint> next_index_task_points;
+        RegionRequirement &next_user_req =
+          static_cast<IndexTask*>(next->op)->logical_regions[next->idx];
+
+        get_points(next_user_req, next->shard_proj->projection,
+            lr, static_cast<IndexTask*>(next->op)->index_domain,
+            next_index_task_points);
+
+        assert(!next_index_task_points.empty());
+
+        if (next_index_task_points.size() > 1)
+        {
+          // throw _error
+        }
+
+        ShardID next_shard = 0;
+        if (next->shard_proj->sharding != NULL)
+          next_shard =
+          next->shard_proj->sharding->find_owner(next_index_task_points[0],
+              static_cast<IndexTask*>(next->op)->index_domain);
+
+        parent_ctx->record_point_wise_dependence(context_index,
+            (*it), lr,
+            RtEvent::NO_RT_EVENT,
+            next_shard);
+      }
+    }
+
     bool IndexTask::set_next_point_wise_user(const LogicalUser *user,
         const LogicalUser *next, LogicalRegion root)
     {
@@ -10370,6 +10420,7 @@ namespace Legion {
 
       if (user->gen < gen)
       {
+        printf("======PREV TASK OVER CASE====!!!!\n");
         // The part of RegionRequirement we use, is the same for prev and
         // next IndexTask
         RegionRequirement &req = logical_regions[user->idx];
@@ -10382,47 +10433,10 @@ namespace Legion {
             root, sharding_domain,
             prev_index_task_points);
 
-        for(std::vector<DomainPoint>::iterator it =
-            prev_index_task_points.begin(); it !=
-            prev_index_task_points.end(); it++)
-        {
-          RegionRequirement &req = logical_regions[user->idx];
-          LogicalRegion lr;
-          if (req.handle_type == LEGION_PARTITION_PROJECTION)
-          {
-            lr = user->shard_proj->projection->functor->project(
-                req.partition, (*it), index_domain);
-          }
-          else
-          {
-            lr = user->shard_proj->projection->functor->project(
-                req.region, (*it), index_domain);
-          }
+        assert(!prev_index_task_points.empty());
 
-          std::vector<DomainPoint> next_index_task_points;
-          RegionRequirement &next_user_req =
-            static_cast<IndexTask*>(next->op)->logical_regions[next->idx];
-
-          get_points(next_user_req, next->shard_proj->projection,
-              lr, static_cast<IndexTask*>(next->op)->index_domain,
-              next_index_task_points);
-
-          if (next_index_task_points.size() > 1)
-          {
-            // throw _error
-          }
-
-          ShardID next_shard = 0;
-          if (next->shard_proj->sharding != NULL)
-            next_shard =
-            next->shard_proj->sharding->find_owner(next_index_task_points[0],
-                static_cast<IndexTask*>(next->op)->index_domain);
-
-          parent_ctx->record_point_wise_dependence(context_index,
-              (*it), lr,
-              RtEvent::NO_RT_EVENT,
-              next_shard);
-        }
+        record_point_wise_dependence_completed_point(user, next,
+            prev_index_task_points);
 
         return false;
       }
@@ -10430,47 +10444,9 @@ namespace Legion {
       if (!completed_point_list.empty())
       {
         printf("======COMPLEX CASE====!!!!\n");
-        for(std::vector<DomainPoint>::iterator it =
-            completed_point_list.begin(); it !=
-            completed_point_list.end(); it++)
-        {
-          RegionRequirement &req = logical_regions[user->idx];
-          LogicalRegion lr;
-          if (req.handle_type == LEGION_PARTITION_PROJECTION)
-          {
-            lr = user->shard_proj->projection->functor->project(
-                req.partition, (*it), index_domain);
-          }
-          else
-          {
-            lr = user->shard_proj->projection->functor->project(
-                req.region, (*it), index_domain);
-          }
 
-          std::vector<DomainPoint> next_index_task_points;
-          RegionRequirement &next_user_req =
-            static_cast<IndexTask*>(next->op)->logical_regions[next->idx];
-
-          get_points(next_user_req, next->shard_proj->projection,
-              lr, static_cast<IndexTask*>(next->op)->index_domain,
-              next_index_task_points);
-
-          if (next_index_task_points.size() > 1)
-          {
-            // throw _error
-          }
-
-          ShardID next_shard = 0;
-          if (next->shard_proj->sharding != NULL)
-            next_shard =
-            next->shard_proj->sharding->find_owner(next_index_task_points[0],
-                static_cast<IndexTask*>(next->op)->index_domain);
-
-          parent_ctx->record_point_wise_dependence(context_index,
-              (*it), lr,
-              RtEvent::NO_RT_EVENT,
-              next_shard);
-        }
+        record_point_wise_dependence_completed_point(user, next,
+            completed_point_list);
       }
 
       next_index_tasks.insert({
@@ -10521,13 +10497,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     RtEvent IndexTask::find_point_wise_dependence(DomainPoint point,
         LogicalRegion lr,
-        unsigned region_idx, GenerationID gen)
+        unsigned region_idx)
     //--------------------------------------------------------------------------
     {
       AutoLock o_lock(op_lock);
 
       if (should_connect_to_prev_point())
       {
+        //printf("NOOOO Find point-wise dependece ctx_id: %ld SHARD: %d\n", get_context_index(), parent_ctx->get_task()->get_shard_id());
         // Find prev index task our owner index task depend on
         std::map<unsigned, PointWisePreviousIndexTaskInfo>::iterator finder =
           prev_index_tasks.find(region_idx);
@@ -10549,6 +10526,7 @@ namespace Legion {
         {
           // throw _error
         }
+        assert(!previous_index_task_points.empty());
 
         return parent_ctx->find_point_wise_dependence(finder->second.ctx_index,
             previous_index_task_points[0], lr,
@@ -11145,14 +11123,11 @@ namespace Legion {
       derez.deserialize(lr);
       unsigned region_idx;
       derez.deserialize(region_idx);
-      GenerationID gen;
-      derez.deserialize(gen);
       RtUserEvent to_trigger;
       derez.deserialize(to_trigger);
       DomainPoint point;
       derez.deserialize(point);
-      const RtEvent result = task->find_point_wise_dependence(point, lr, region_idx,
-          gen);
+      const RtEvent result = task->find_point_wise_dependence(point, lr, region_idx);
       Runtime::trigger_event(to_trigger, result);
     }
 
@@ -13048,6 +13023,7 @@ namespace Legion {
     {
       if (is_remote())
       {
+        printf("====Remote Record Case=====\n");
         Serializer rez;
         {
           RezCheck z(rez);
@@ -13066,13 +13042,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     RtEvent SliceTask::find_point_wise_dependence(DomainPoint point,
         LogicalRegion lr,
-        unsigned region_idx, GenerationID gen)
+        unsigned region_idx)
     //--------------------------------------------------------------------------
     {
       {
         AutoLock o_lock(op_lock);
-        std::map<LogicalRegion,RtEvent>::const_iterator finder =
-          point_wise_dependences.find(lr);
+        std::map<DomainPoint,RtEvent>::const_iterator finder =
+          point_wise_dependences.find(point);
         // If we've already got it then we're done
         if (finder != point_wise_dependences.end())
           return finder->second;
@@ -13087,13 +13063,12 @@ namespace Legion {
             rez.serialize(index_owner);
             rez.serialize(lr);
             rez.serialize(region_idx);
-            rez.serialize(index_owner->get_generation());
             rez.serialize(temp_event);
             rez.serialize(point);
           }
           runtime->send_slice_find_point_wise_dependence(orig_proc, rez);
           // Save this is for ourselves
-          point_wise_dependences[lr] = temp_event;
+          point_wise_dependences[point] = temp_event;
           return temp_event;
         }
       }
@@ -13101,9 +13076,9 @@ namespace Legion {
       // If we make it down here then we're on the same node as the
       // index_owner so we can just as it what the answer and save it
       const RtEvent result = index_owner->find_point_wise_dependence(point, lr,
-                                    region_idx, index_owner->get_generation());
+                                    region_idx);
       AutoLock o_lock(op_lock);
-      point_wise_dependences[lr] = result;
+      point_wise_dependences[point] = result;
       return result;
     }
 #endif

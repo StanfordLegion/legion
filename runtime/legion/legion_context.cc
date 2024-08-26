@@ -10356,6 +10356,8 @@ namespace Legion {
         deps.pending_deps.find(next_shard);
       if (finder != deps.pending_deps.end())
       {
+        //printf("[%d] Record point wise dependence next point registered first - context_idx: %ld, prev_point: [%lld %lld], next_shard: %d\n", get_shard_id(), context_index, point.point_data[0], point.point_data[1], next_shard);
+
         Runtime::trigger_event(finder->second, point_mapped);
         deps.pending_deps.erase(finder);
         if (deps.pending_deps.empty() && deps.ready_deps.empty())
@@ -10367,6 +10369,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(deps.ready_deps.find(next_shard) == deps.ready_deps.end());
 #endif
+
         deps.ready_deps[next_shard] = point_mapped;
       }
     }
@@ -10397,6 +10400,7 @@ namespace Legion {
         assert(deps.pending_deps.find(requesting_shard) == 
                 deps.pending_deps.end());
 #endif
+        //printf("[%d] Find point wise dependence next point registered first - context_idx: %ld, prev_point: [%lld %lld], requesting_shard: %d\n", get_shard_id(), context_index, point.point_data[0], point.point_data[1], requesting_shard);
         const RtUserEvent pending_event = Runtime::create_rt_user_event();
         deps.pending_deps[requesting_shard] = pending_event;
         return pending_event;

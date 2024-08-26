@@ -2033,12 +2033,12 @@ namespace Legion {
                                                  RtEvent point_mapped);
 #ifdef POINT_WISE_LOGICAL_ANALYSIS
     public:
-    void record_point_wise_dependence(DomainPoint point,
-        LogicalRegion lr,
-        unsigned region_idx, RtEvent point_mapped);
-    RtEvent find_point_wise_dependence(DomainPoint point,
-        LogicalRegion lr,
-        unsigned region_idx, GenerationID gen);
+      virtual void record_point_wise_dependence(DomainPoint point,
+          LogicalRegion lr,
+          unsigned region_idx, RtEvent point_mapped);
+      virtual RtEvent find_point_wise_dependence(DomainPoint point,
+          LogicalRegion lr,
+          unsigned region_idx);
 #endif
     public:
       // Output regions
