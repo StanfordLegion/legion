@@ -1797,23 +1797,24 @@ namespace Realm {
       input_control.eos_received = true;
 
       // cuda memsets are ideally 8/16/32 bits, so try to _reduce_ the fill
-      //  size if there's duplication
-      if((fill_size > 1) && (memcmp(fill_data,
-                                    static_cast<char *>(fill_data) + 1,
-                                    fill_size - 1) == 0))
-        reduced_fill_size = 1;  // can use memset8
-      else if((fill_size > 2) && ((fill_size >> 1) == 0) &&
-              (memcmp(fill_data,
-                      static_cast<char *>(fill_data) + 2,
-                      fill_size - 2) == 0))
-        reduced_fill_size = 2;  // can use memset16
-      else if((fill_size > 4) && ((fill_size >> 2) == 0) &&
-              (memcmp(fill_data,
-                      static_cast<char *>(fill_data) + 4,
-                      fill_size - 4) == 0))
-        reduced_fill_size = 4;  // can use memset32
-      else
-        reduced_fill_size = fill_size; // will have to do it in pieces
+      // size if there's duplication, but use the largest fill size we can support for
+      // best bandwidth.  Default to doing the fill in pieces.
+      reduced_fill_size = fill_size;
+
+      // Is the fill size already "reduced" (i.e. a supported memset fill size?)
+      if(((fill_size & (fill_size - 1)) != 0) || (fill_size > 16)) {
+        // Iterate through and find the largest size memset can support
+        for(size_t test_fill_size = 16; test_fill_size > 0; test_fill_size >>= 1) {
+          // We can support this test fill size if all the fill data can be divided into
+          // equal test_fill_size parts and the data within them is the same.
+          if((fill_size > test_fill_size) && ((fill_size & (test_fill_size - 1)) == 0) &&
+             memcmp(fill_data, static_cast<char *>(fill_data) + test_fill_size,
+                    fill_size - test_fill_size) == 0) {
+            reduced_fill_size = test_fill_size;
+            break;
+          }
+        }
+      }
     }
 
     long GPUfillXferDes::get_requests(Request** requests, long nr)
