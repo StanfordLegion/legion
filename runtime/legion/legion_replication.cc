@@ -1935,51 +1935,6 @@ namespace Legion {
 
 #ifdef POINT_WISE_LOGICAL_ANALYSIS
     //--------------------------------------------------------------------------
-    void ReplIndexTask::record_point_wise_dependence(DomainPoint point,
-                                                 LogicalRegion lr,
-                                                 unsigned region_idx,
-                                                 RtEvent point_mapped)
-    //--------------------------------------------------------------------------
-    {
-      //printf("Record point-wise dependece ctx_id: %ld SHARD: %d\n", get_context_index(), parent_ctx->get_task()->get_shard_id());
-#ifdef DEBUG_LEGION
-      assert(sharding_function != NULL);
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
-#endif
-
-      //printf("RECORD point-wise dependece ctx_id: %ld SHARD: %d\n", get_context_index(), parent_ctx->get_task()->get_shard_id());
-      std::map<unsigned, PointWisePreviousIndexTaskInfo>::iterator finder =
-        next_index_tasks.find(region_idx);
-      assert(finder != next_index_tasks.end());
-
-      RegionRequirement &req = logical_regions[region_idx];
-      std::vector<DomainPoint> next_index_task_points;
-
-      get_points(req, finder->second.projection,
-          lr, finder->second.index_domain,
-          next_index_task_points);
-
-      if (next_index_task_points.size() > 1)
-      {
-        // throw _error
-      }
-
-      assert(!next_index_task_points.empty());
-
-      // find shard of the point
-      const ShardID next_shard =
-         finder->second.sharding->find_owner(next_index_task_points[0],
-            finder->second.index_domain);
-
-      parent_ctx->record_point_wise_dependence(context_index,
-          point, lr,
-          point_mapped, next_shard);
-    }
-
-    //--------------------------------------------------------------------------
     RtEvent ReplIndexTask::find_point_wise_dependence(DomainPoint point,
         LogicalRegion lr,
         unsigned region_idx)
@@ -1997,7 +1952,6 @@ namespace Legion {
 
       if (should_connect_to_prev_point())
       {
-        //printf("Find point-wise dependece ctx_id: %ld SHARD: %d\n", get_context_index(), parent_ctx->get_task()->get_shard_id());
         // Find prev index task
         std::map<unsigned, PointWisePreviousIndexTaskInfo>::iterator finder =
           prev_index_tasks.find(region_idx);
@@ -2035,11 +1989,7 @@ namespace Legion {
           rez.serialize(repl_ctx->shard_manager->did);
           rez.serialize(prev_shard);
           rez.serialize(finder->second.ctx_index);
-          rez.serialize(lr);
           rez.serialize(pending_event);
-          rez.serialize(region_idx);
-          rez.serialize(gen);
-          rez.serialize(parent_ctx->get_shard_id());
           rez.serialize(previous_index_task_points[0]);
           repl_ctx->shard_manager->send_point_wise_dependence(prev_shard, rez);
           return pending_event;
@@ -2049,11 +1999,10 @@ namespace Legion {
           return RtEvent::NO_RT_EVENT;
 
         return parent_ctx->find_point_wise_dependence(finder->second.ctx_index,
-            previous_index_task_points[0], lr,
-            parent_ctx->get_shard_id());
+            previous_index_task_points[0]);
       }
 
-      assert(1);
+      assert(0);
       return RtUserEvent::NO_RT_USER_EVENT;
     }
 #endif

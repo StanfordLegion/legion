@@ -10344,65 +10344,52 @@ namespace Legion {
 #ifdef POINT_WISE_LOGICAL_ANALYSIS
     //--------------------------------------------------------------------------
     void InnerContext::record_point_wise_dependence(uint64_t context_index,
-        DomainPoint point,
-        LogicalRegion lr, RtEvent point_mapped, ShardID next_shard)
+        DomainPoint point, RtEvent point_mapped)
     //--------------------------------------------------------------------------
     {
       const std::pair<uint64_t,DomainPoint> key{context_index,point};
       AutoLock r_lock(point_wise_lock);
-      PointWiseDeps &deps = point_wise_deps[key];
-      // Check to see if someone has already registered this
-      std::map<ShardID,RtUserEvent>::iterator finder =
-        deps.pending_deps.find(next_shard);
-      if (finder != deps.pending_deps.end())
-      {
-        //printf("[%d] Record point wise dependence next point registered first - context_idx: %ld, prev_point: [%lld %lld], next_shard: %d\n", get_shard_id(), context_index, point.point_data[0], point.point_data[1], next_shard);
 
+      std::map<std::pair<uint64_t,DomainPoint>,RtUserEvent>::iterator finder =
+        pending_point_wise_deps.find(key);
+
+      if (finder != pending_point_wise_deps.end())
+      {
         Runtime::trigger_event(finder->second, point_mapped);
-        deps.pending_deps.erase(finder);
-        if (deps.pending_deps.empty() && deps.ready_deps.empty())
-          point_wise_deps.erase(key);
+        pending_point_wise_deps.erase(finder);
       }
       else
       {
-        // Not seen yet so just record our entry for this shard
 #ifdef DEBUG_LEGION
-        assert(deps.ready_deps.find(next_shard) == deps.ready_deps.end());
+        assert(ready_point_wise_deps.find(key) == ready_point_wise_deps.end());
+        ready_point_wise_deps[key] = point_mapped;
 #endif
-
-        deps.ready_deps[next_shard] = point_mapped;
       }
     }
 
     //--------------------------------------------------------------------------
     RtEvent InnerContext::find_point_wise_dependence(uint64_t context_index,
-        DomainPoint point,
-        LogicalRegion lr, ShardID requesting_shard)
+        DomainPoint point)
     //--------------------------------------------------------------------------
     {
       std::pair<uint64_t,DomainPoint> key{context_index, point};
       AutoLock r_lock(point_wise_lock);
-      PointWiseDeps &deps = point_wise_deps[key];
-      // Check to see if someone has already registered this shard
-      std::map<ShardID,RtEvent>::iterator finder =
-        deps.ready_deps.find(requesting_shard);
-      if (finder != deps.ready_deps.end())
+
+      std::map<std::pair<uint64_t,DomainPoint>,RtEvent>::iterator finder =
+        ready_point_wise_deps.find(key);
+      if (finder != ready_point_wise_deps.end())
       {
-        deps.ready_deps.erase(finder);
-        if (deps.ready_deps.empty() && deps.pending_deps.empty())
-          point_wise_deps.erase(key);
+        ready_point_wise_deps.erase(finder);
         return finder->second;
       }
       else
       {
-        // Not seen yet so just record our entry for this shard
 #ifdef DEBUG_LEGION
-        assert(deps.pending_deps.find(requesting_shard) == 
-                deps.pending_deps.end());
+        assert(pending_point_wise_deps.find(key) ==
+                pending_point_wise_deps.end());
 #endif
-        //printf("[%d] Find point wise dependence next point registered first - context_idx: %ld, prev_point: [%lld %lld], requesting_shard: %d\n", get_shard_id(), context_index, point.point_data[0], point.point_data[1], requesting_shard);
         const RtUserEvent pending_event = Runtime::create_rt_user_event();
-        deps.pending_deps[requesting_shard] = pending_event;
+        pending_point_wise_deps[key] = pending_event;
         return pending_event;
       }
     }
@@ -10413,21 +10400,13 @@ namespace Legion {
     {
       uint64_t context_index;
       derez.deserialize(context_index);
-      LogicalRegion lr;
-      derez.deserialize(lr);
       RtUserEvent pending_event;
       derez.deserialize(pending_event);
-      unsigned region_idx;
-      derez.deserialize(region_idx);
-      GenerationID gen;
-      derez.deserialize(gen);
-      ShardID requesting_shard;
-      derez.deserialize(requesting_shard);
       DomainPoint point;
       derez.deserialize(point);
 
-      Runtime::trigger_event(pending_event, find_point_wise_dependence(context_index, point,
-            lr, requesting_shard));
+      Runtime::trigger_event(pending_event, find_point_wise_dependence(context_index,
+            point));
     }
 #endif
 

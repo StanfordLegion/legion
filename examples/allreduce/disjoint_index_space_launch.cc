@@ -294,6 +294,7 @@ void top_level_task(const Task *task,
   for (int idx = 0; idx < num_iterations; idx++)
   {
     runtime->execute_index_space(ctx, intra_is_ordering_task_launcher);
+    if(idx == 0) usleep(100000);
   }
 
   runtime->destroy_index_space(ctx, launch_is);
