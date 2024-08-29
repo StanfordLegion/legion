@@ -383,6 +383,7 @@ pub trait ContainerEntry {
     fn creator(&self) -> Option<ProfUID>;
     fn critical(&self) -> Option<EventID>;
     fn creation_time(&self) -> Timestamp;
+    fn is_meta(&self) -> bool;
 
     // Methods that require State access
     fn name(&self, state: &State) -> String;
@@ -477,6 +478,13 @@ impl ContainerEntry for ProcEntry {
             spawn
         } else {
             self.time_range.create.unwrap()
+        }
+    }
+
+    fn is_meta(&self) -> bool {
+        match self.kind {
+            ProcEntryKind::MetaTask(_) | ProcEntryKind::ProfTask => true,
+            _ => false,
         }
     }
 
@@ -1566,6 +1574,10 @@ impl ContainerEntry for ChanEntry {
         }
     }
 
+    fn is_meta(&self) -> bool {
+        false
+    }
+
     fn name(&self, state: &State) -> String {
         match self {
             ChanEntry::Copy(copy) => {
@@ -2307,6 +2319,10 @@ impl ContainerEntry for Inst {
 
     fn creation_time(&self) -> Timestamp {
         self.time_range.create.unwrap()
+    }
+
+    fn is_meta(&self) -> bool {
+        false
     }
 
     fn name(&self, state: &State) -> String {

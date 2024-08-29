@@ -817,11 +817,11 @@ impl StateDataSource {
                 last.interval.stop = interval.stop;
                 last.color = Color::GRAY.into();
                 if let Some(last_meta) = last_meta {
-                    if let Some((_, Field::U64(value))) = last_meta.fields.get_mut(0) {
+                    if let Some((_, Field::U64(value), _)) = last_meta.fields.get_mut(0) {
                         *value += 1;
                     } else {
                         last_meta.title = "Merged Tasks".to_owned();
-                        last_meta.fields = vec![(num_items_field, Field::U64(2))];
+                        last_meta.fields = vec![(num_items_field, Field::U64(2), None)];
                     }
                 }
                 *merged += 1;
@@ -956,12 +956,14 @@ impl StateDataSource {
                             if let Some(status) = status {
                                 item_meta
                                     .fields
-                                    .insert(1, (status, Field::Interval(interval)));
+                                    .insert(1, (status, Field::Interval(interval), None));
                             }
                             if let Some(callee) = wait_callee {
-                                item_meta
-                                    .fields
-                                    .push((self.fields.callee, self.generate_proc_link(callee)));
+                                item_meta.fields.push((
+                                    self.fields.callee,
+                                    self.generate_proc_link(callee),
+                                    None,
+                                ));
                             }
                             if let Some(backtrace) = wait_backtrace {
                                 item_meta.fields.push((
@@ -969,6 +971,7 @@ impl StateDataSource {
                                     Field::String(
                                         self.state.backtraces.get(&backtrace).unwrap().to_string(),
                                     ),
+                                    None,
                                 ));
                             }
                             if let Some(event) = wait_event {
@@ -976,26 +979,34 @@ impl StateDataSource {
                                     item_meta.fields.push((
                                         self.fields.critical,
                                         self.generate_critical_link(event, event_entry),
+                                        self.select_critical_color(event_entry),
                                     ));
                                     // Record the time it took for Realm to propagate the event trigger
                                     if event_entry.kind != EventEntryKind::UnknownEvent {
+                                        let trigger_time = event_entry.trigger_time.unwrap();
                                         item_meta.fields.push((
                                             self.fields.trigger_time,
                                             Field::Interval(ts::Interval::new(
-                                                event_entry.trigger_time.unwrap().into(),
+                                                trigger_time.into(),
                                                 interval.stop,
                                             )),
+                                            self.select_interval_color(
+                                                trigger_time,
+                                                interval.stop.into(),
+                                            ),
                                         ));
                                     }
                                 } else {
                                     if event.is_barrier() {
                                         item_meta.fields.push((
                                                 self.fields.critical,
-                                                Field::String(format!("Waiting on unknown critical path barrier {:#x} created on node {}. Please load the logfile from at least one node that arrives on this barrier to start determining a critical path. You'll need to load the logs from all nodes that arrive on this barrier to determine a precise critical path. If you see this message and did not run with the -lg:prof_all_critical_arrivals flag then please report this case as it is likely a bug.", event.0, event.node_id().0))));
+                                                Field::String(format!("Waiting on unknown critical path barrier {:#x} created on node {}. Please load the logfile from at least one node that arrives on this barrier to start determining a critical path. You'll need to load the logs from all nodes that arrive on this barrier to determine a precise critical path. If you see this message and did not run with the -lg:prof_all_critical_arrivals flag then please report this case as it is likely a bug.", event.0, event.node_id().0)), 
+                                                Some(Color32::BLUE)));
                                     } else {
                                         item_meta.fields.push((
                                                 self.fields.critical,
-                                                Field::String(format!("Waiting on unknown critical path event {:#x} from node {}. Please load the logfile from that node to see it.", event.0, event.node_id().0))));
+                                                Field::String(format!("Waiting on unknown critical path event {:#x} from node {}. Please load the logfile from that node to see it.", event.0, event.node_id().0)),
+                                                Some(Color32::BLUE)));
                                     }
                                 }
                             }
@@ -1013,6 +1024,7 @@ impl StateDataSource {
                                         self.generate_previous_executing_link(
                                             previous, prev_start, prev_stop,
                                         ),
+                                        None,
                                     ));
                                     item_meta.fields.push((
                                         self.fields.scheduling_overhead,
@@ -1020,6 +1032,7 @@ impl StateDataSource {
                                             prev_stop.into(),
                                             interval.start,
                                         )),
+                                        self.select_interval_color(prev_stop, interval.stop.into()),
                                     ));
                                 }
                             }
@@ -1467,6 +1480,53 @@ impl StateDataSource {
         }
     }
 
+    fn select_critical_color(&self, event_entry: &EventEntry) -> Option<Color32> {
+        match event_entry.kind {
+            // Uknown events get brown since we don't know them
+            EventEntryKind::UnknownEvent => Some(Color32::BLUE),
+            // Anything application related is good so normal color
+            EventEntryKind::TaskEvent
+            | EventEntryKind::FillEvent
+            | EventEntryKind::CopyEvent
+            | EventEntryKind::DepPartEvent
+            | EventEntryKind::InstanceReady => None,
+            // Anything else gets red because it wmeans we were slow hooking up the event graph
+            _ => Some(Color32::RED),
+        }
+    }
+
+    fn select_interval_color(&self, start: Timestamp, stop: Timestamp) -> Option<Color32> {
+        if start <= stop {
+            let diff = stop - start;
+            // This is a bit of an arbitrary heuristic but we'll say anything less
+            // than 100 us is good (normal), less than 1ms is ok (yellow), anything else red
+            if diff < Timestamp::from_us(100) {
+                None
+            } else if diff < Timestamp::from_us(1000) {
+                Some(Color32::GOLD)
+            } else {
+                Some(Color32::RED)
+            }
+        } else {
+            // Negative intervals don't make sense so mark them as unclear
+            Some(Color32::BLUE)
+        }
+    }
+
+    fn select_deferred_color(&self, start: Timestamp, stop: Timestamp) -> Option<Color32> {
+        assert!(start <= stop);
+        // Deferred is the opposite of normal latencies, we want things to be deferred
+        // for longer since it means that the runtime is ahead of execution
+        let diff = stop - start;
+        if diff < Timestamp::from_us(100) {
+            Some(Color32::RED)
+        } else if diff < Timestamp::from_us(1000) {
+            Some(Color32::GOLD)
+        } else {
+            None
+        }
+    }
+
     fn generate_proc_slot_meta_tile(
         &self,
         entry_id: &EntryID,
@@ -1488,15 +1548,19 @@ impl StateDataSource {
 
             let mut fields = Vec::new();
             if expand {
-                fields.push((self.fields.expanded_for_visibility, Field::Empty));
+                fields.push((self.fields.expanded_for_visibility, Field::Empty, None));
             }
-            fields.push((self.fields.interval, Field::Interval(point_interval)));
+            fields.push((self.fields.interval, Field::Interval(point_interval), None));
             if let Some(initiation_op) = entry.initiation_op {
                 // FIXME: You might think that initiation_op is None rather than
                 // needing this check with zero, but backwards compatibility is hard
                 // You can remove this check once we stop needing to be compatible with Python
                 if initiation_op != OpID::ZERO {
-                    fields.push((self.fields.operation, self.generate_op_link(initiation_op)));
+                    fields.push((
+                        self.fields.operation,
+                        self.generate_op_link(initiation_op),
+                        None,
+                    ));
                 }
             }
             if let Some(op_id) = entry.op_id {
@@ -1517,12 +1581,13 @@ impl StateDataSource {
                         result
                     })
                     .collect();
-                fields.push((self.fields.insts, Field::Vec(insts)));
+                fields.push((self.fields.insts, Field::Vec(insts), None));
             }
             if let Some(provenance) = provenance {
                 fields.push((
                     self.fields.provenance,
                     Field::String(provenance.to_string()),
+                    None,
                 ));
             }
             if let Some(creator) = entry.creator() {
@@ -1532,15 +1597,17 @@ impl StateDataSource {
                     | ProcEntryKind::RuntimeCall(_)
                     | ProcEntryKind::ApplicationCall(_)
                     | ProcEntryKind::GPUKernel(_, _) => {
-                        fields.push((self.fields.caller, self.generate_proc_link(creator)));
+                        fields.push((self.fields.caller, self.generate_proc_link(creator), None));
                     }
                     _ => {
                         // Find the completion time of the previous entry that was executing
                         // on this processor so that we can check to see if it was why we
                         // were delayed from running
+                        let mut has_critical = false;
                         let mut need_critical = true;
                         // Check to see if we have a critical path event
                         if let Some(critical) = entry.critical() {
+                            has_critical = true;
                             if let Some(event_entry) = self.state.find_critical_entry(critical) {
                                 // Check to see if the critical entry happened before or after
                                 // the creation of this processor entry
@@ -1556,20 +1623,25 @@ impl StateDataSource {
                                     fields.push((
                                         self.fields.creator,
                                         self.generate_creator_link(creator, creation_time),
+                                        None,
                                     ));
                                     // Critical path is critical event triggering
                                     fields.push((
                                         self.fields.critical,
                                         self.generate_critical_link(critical, event_entry),
+                                        self.select_critical_color(event_entry),
                                     ));
                                     if event_entry.kind != EventEntryKind::UnknownEvent {
                                         // Record the time it took Realm to propagate the event trigger
+                                        let trigger_time = event_entry.trigger_time.unwrap();
+                                        let ready_time = entry.time_range.ready.unwrap();
                                         fields.push((
                                             self.fields.trigger_time,
                                             Field::Interval(ts::Interval::new(
-                                                event_entry.trigger_time.unwrap().into(),
-                                                entry.time_range.ready.unwrap().into(),
+                                                trigger_time.into(),
+                                                ready_time.into(),
                                             )),
+                                            self.select_interval_color(trigger_time, ready_time),
                                         ));
                                     }
                                     need_critical = false;
@@ -1582,6 +1654,13 @@ impl StateDataSource {
                             fields.push((
                                 self.fields.critical,
                                 self.generate_critical_creator_link(creator, entry.creation_time()),
+                                // If we had a critical event but it triggered before we were made
+                                // then that is very bad, otherwise we're fine
+                                if has_critical {
+                                    Some(Color32::RED)
+                                } else {
+                                    None
+                                },
                             ));
                         }
                     }
@@ -1598,15 +1677,19 @@ impl StateDataSource {
                                 fields.push((
                                     self.fields.critical,
                                     self.generate_critical_link(critical, event_entry),
+                                    self.select_critical_color(event_entry),
                                 ));
                                 if event_entry.kind != EventEntryKind::UnknownEvent {
                                     // Record the time it took Realm to propagate the event trigger
+                                    let trigger_time = event_entry.trigger_time.unwrap();
+                                    let ready_time = entry.time_range.ready.unwrap();
                                     fields.push((
                                         self.fields.trigger_time,
                                         Field::Interval(ts::Interval::new(
-                                            event_entry.trigger_time.unwrap().into(),
-                                            entry.time_range.ready.unwrap().into(),
+                                            trigger_time.into(),
+                                            ready_time.into(),
                                         )),
+                                        self.select_interval_color(trigger_time, ready_time),
                                     ));
                                 }
                             }
@@ -1618,7 +1701,11 @@ impl StateDataSource {
             match entry.kind {
                 ProcEntryKind::MapperCall(mapper_id, mapper_proc, _) => {
                     let mapper = self.state.mappers.get(&(mapper_id, mapper_proc)).unwrap();
-                    fields.push((self.fields.mapper, Field::String(mapper.name.to_owned())));
+                    fields.push((
+                        self.fields.mapper,
+                        Field::String(mapper.name.to_owned()),
+                        None,
+                    ));
                     if let Some(proc) = self.state.procs.get(&mapper_proc) {
                         let proc_name = format!(
                             "Node {} {:?} {}",
@@ -1626,10 +1713,10 @@ impl StateDataSource {
                             proc.kind,
                             mapper_proc.proc_in_node()
                         );
-                        fields.push((self.fields.mapper_proc, Field::String(proc_name)));
+                        fields.push((self.fields.mapper_proc, Field::String(proc_name), None));
                     } else {
                         let proc_name = format!("Node {}", mapper_proc.node_id().0);
-                        fields.push((self.fields.mapper_proc, Field::String(proc_name)));
+                        fields.push((self.fields.mapper_proc, Field::String(proc_name), None));
                     }
                 }
                 _ => {}
@@ -1640,17 +1727,27 @@ impl StateDataSource {
                         fields.push((
                             self.fields.message_latency,
                             Field::Interval(ts::Interval::new(spawn.into(), create.into())),
+                            self.select_interval_color(spawn, create),
                         ));
                     }
                     fields.push((
                         self.fields.deferred_time,
                         Field::Interval(ts::Interval::new(create.into(), ready.into())),
+                        // Check to see if this entry is an application task or a meta-task
+                        // If an application task we want it to be deferred for a long time
+                        // Runtime meta-tasks should be deferred for a shorter time
+                        if entry.is_meta() {
+                            self.select_interval_color(create, ready)
+                        } else {
+                            self.select_deferred_color(create, ready)
+                        },
                     ));
                 }
                 if let Some(start) = entry.time_range.start {
                     fields.push((
                         self.fields.delayed_time,
                         Field::Interval(ts::Interval::new(ready.into(), start.into())),
+                        self.select_interval_color(ready, start),
                     ));
                     // See if there was something previously executing that delayed us
                     if let Some((previous, start_time, stop_time)) =
@@ -1659,10 +1756,12 @@ impl StateDataSource {
                         fields.push((
                             self.fields.previous_executing,
                             self.generate_previous_executing_link(previous, start_time, stop_time),
+                            None,
                         ));
                         fields.push((
                             self.fields.scheduling_overhead,
                             Field::Interval(ts::Interval::new(stop_time.into(), start.into())),
+                            self.select_interval_color(stop_time, start),
                         ));
                     }
                 }
@@ -1701,28 +1800,36 @@ impl StateDataSource {
         }
     }
 
-    fn generate_inst_regions(&self, inst: &Inst, result: &mut Vec<(FieldID, Field)>) {
+    fn generate_inst_regions(
+        &self,
+        inst: &Inst,
+        result: &mut Vec<(FieldID, Field, Option<Color32>)>,
+    ) {
         for (ispace_id, fspace_id) in inst.ispace_ids.iter().zip(inst.fspace_ids.iter()) {
             let ispace = format!("{}", ISpacePretty(*ispace_id, &self.state),);
-            result.push((self.fields.inst_ispace, Field::String(ispace)));
+            result.push((self.fields.inst_ispace, Field::String(ispace), None));
 
             let fspace = self.state.field_spaces.get(&fspace_id).unwrap();
             let fspace_name = format!("{}", FSpaceShort(&fspace));
-            result.push((self.fields.inst_fspace, Field::String(fspace_name)));
+            result.push((self.fields.inst_fspace, Field::String(fspace_name), None));
 
             let fields = format!("{}", FieldsPretty(&fspace, inst));
-            result.push((self.fields.inst_fields, Field::String(fields)));
+            result.push((self.fields.inst_fields, Field::String(fields), None));
         }
     }
 
-    fn generate_inst_layout(&self, inst: &Inst, result: &mut Vec<(FieldID, Field)>) {
+    fn generate_inst_layout(
+        &self,
+        inst: &Inst,
+        result: &mut Vec<(FieldID, Field, Option<Color32>)>,
+    ) {
         let layout = format!("{}", DimOrderPretty(inst, false));
-        result.push((self.fields.inst_layout, Field::String(layout)));
+        result.push((self.fields.inst_layout, Field::String(layout), None));
     }
 
-    fn generate_inst_size(&self, inst: &Inst, result: &mut Vec<(FieldID, Field)>) {
+    fn generate_inst_size(&self, inst: &Inst, result: &mut Vec<(FieldID, Field, Option<Color32>)>) {
         let size = format!("{}", SizePretty(inst.size.unwrap()));
-        result.push((self.fields.size, Field::String(size)));
+        result.push((self.fields.size, Field::String(size), None));
     }
 
     fn generate_mem_slot_meta_tile(
@@ -1745,9 +1852,9 @@ impl StateDataSource {
 
             let mut fields = Vec::new();
             if expand {
-                fields.push((self.fields.expanded_for_visibility, Field::Empty));
+                fields.push((self.fields.expanded_for_visibility, Field::Empty, None));
             }
-            fields.push((self.fields.interval, Field::Interval(point_interval)));
+            fields.push((self.fields.interval, Field::Interval(point_interval), None));
             self.generate_inst_regions(entry, &mut fields);
             self.generate_inst_layout(entry, &mut fields);
             self.generate_inst_size(entry, &mut fields);
@@ -1756,13 +1863,18 @@ impl StateDataSource {
                 // needing this check with zero, but backwards compatibility is hard
                 // You can remove this check once we stop needing to be compatible with Python
                 if initiation_op != OpID::ZERO {
-                    fields.push((self.fields.operation, self.generate_op_link(initiation_op)));
+                    fields.push((
+                        self.fields.operation,
+                        self.generate_op_link(initiation_op),
+                        None,
+                    ));
                 }
             }
             if let Some(provenance) = provenance {
                 fields.push((
                     self.fields.provenance,
                     Field::String(provenance.to_string()),
+                    None,
                 ));
             }
             // Do the critical path analysis for this instance
@@ -1788,20 +1900,25 @@ impl StateDataSource {
                             fields.push((
                                 self.fields.creator,
                                 self.generate_creator_link(creator, creation_time),
+                                None,
                             ));
                         }
                         fields.push((
                             self.fields.critical,
                             self.generate_critical_link(critical, event_entry),
+                            self.select_critical_color(event_entry),
                         ));
                         if event_entry.kind != EventEntryKind::UnknownEvent {
                             // Record the time it took Realm to propagate the event trigger
+                            let trigger_time = event_entry.trigger_time.unwrap();
+                            let ready_time = entry.time_range.ready.unwrap();
                             fields.push((
                                 self.fields.trigger_time,
                                 Field::Interval(ts::Interval::new(
-                                    event_entry.trigger_time.unwrap().into(),
-                                    entry.time_range.ready.unwrap().into(),
+                                    trigger_time.into(),
+                                    ready_time.into(),
                                 )),
+                                self.select_interval_color(trigger_time, ready_time),
                             ));
                         }
                         need_critical = false;
@@ -1817,12 +1934,14 @@ impl StateDataSource {
                         fields.push((
                             self.fields.critical,
                             self.generate_critical_creator_link(creator, creation_time),
+                            None,
                         ));
                     } else {
                         let creation_ts: ts::Timestamp = creation_time.into();
                         fields.push((
                             self.fields.critical,
                             Field::String(format!("Unknown creator at {}", creation_ts)),
+                            Some(Color32::BLUE),
                         ));
                     }
                 } else {
@@ -1834,6 +1953,7 @@ impl StateDataSource {
                             "Waiting for deallocation of other instances until {}",
                             ready_ts
                         )),
+                        Some(Color32::GOLD),
                     ));
                     // Still need to record the creator
                     if let Some(creator) = entry.creator() {
@@ -1841,6 +1961,7 @@ impl StateDataSource {
                         fields.push((
                             self.fields.creator,
                             self.generate_creator_link(creator, creation_time),
+                            None,
                         ));
                     }
                 }
@@ -2005,7 +2126,11 @@ impl StateDataSource {
         }
     }
 
-    fn generate_chan_reqs(&self, entry: &ChanEntry, result: &mut Vec<(FieldID, Field)>) {
+    fn generate_chan_reqs(
+        &self,
+        entry: &ChanEntry,
+        result: &mut Vec<(FieldID, Field, Option<Color32>)>,
+    ) {
         let mut result_reqs = Vec::new();
         match entry {
             ChanEntry::Copy(copy) => {
@@ -2016,17 +2141,21 @@ impl StateDataSource {
             }
             ChanEntry::DepPart(_) => {}
         }
-        result.push((self.fields.chan_reqs, Field::Vec(result_reqs)));
+        result.push((self.fields.chan_reqs, Field::Vec(result_reqs), None));
     }
 
-    fn generate_chan_size(&self, entry: &ChanEntry, result: &mut Vec<(FieldID, Field)>) {
+    fn generate_chan_size(
+        &self,
+        entry: &ChanEntry,
+        result: &mut Vec<(FieldID, Field, Option<Color32>)>,
+    ) {
         let size = match entry {
             ChanEntry::Copy(copy) => copy.size,
             ChanEntry::Fill(fill) => fill.size,
             ChanEntry::DepPart(_) => return,
         };
         let size = format!("{}", SizePretty(size));
-        result.push((self.fields.size, Field::String(size)));
+        result.push((self.fields.size, Field::String(size), None));
     }
 
     fn generate_chan_slot_meta_tile(
@@ -2049,9 +2178,9 @@ impl StateDataSource {
 
             let mut fields = Vec::new();
             if expand {
-                fields.push((self.fields.expanded_for_visibility, Field::Empty));
+                fields.push((self.fields.expanded_for_visibility, Field::Empty, None));
             }
-            fields.push((self.fields.interval, Field::Interval(point_interval)));
+            fields.push((self.fields.interval, Field::Interval(point_interval), None));
             self.generate_chan_reqs(entry, &mut fields);
             self.generate_chan_size(entry, &mut fields);
             if let Some(initiation_op) = entry.initiation() {
@@ -2059,13 +2188,18 @@ impl StateDataSource {
                 // needing this check with zero, but backwards compatibility is hard
                 // You can remove this check once we stop needing to be compatible with Python
                 if initiation_op != OpID::ZERO {
-                    fields.push((self.fields.operation, self.generate_op_link(initiation_op)));
+                    fields.push((
+                        self.fields.operation,
+                        self.generate_op_link(initiation_op),
+                        None,
+                    ));
                 }
             }
             if let Some(provenance) = provenance {
                 fields.push((
                     self.fields.provenance,
                     Field::String(provenance.to_string()),
+                    None,
                 ));
             }
             let time_range = entry.time_range();
@@ -2085,6 +2219,7 @@ impl StateDataSource {
                             fields.push((
                                 self.fields.critical,
                                 self.generate_critical_creator_link(creator, creation_time),
+                                Some(Color32::RED),
                             ));
                         } else {
                             // Created before critical event triggered so list both
@@ -2092,19 +2227,24 @@ impl StateDataSource {
                             fields.push((
                                 self.fields.creator,
                                 self.generate_creator_link(creator, creation_time),
+                                None,
                             ));
                             fields.push((
                                 self.fields.critical,
                                 self.generate_critical_link(critical, event_entry),
+                                self.select_critical_color(event_entry),
                             ));
                             if event_entry.kind != EventEntryKind::UnknownEvent {
                                 // Record the time it took Realm to propagate the event trigger
+                                let trigger_time = event_entry.trigger_time.unwrap();
+                                let ready_time = time_range.ready.unwrap();
                                 fields.push((
                                     self.fields.trigger_time,
                                     Field::Interval(ts::Interval::new(
-                                        event_entry.trigger_time.unwrap().into(),
-                                        time_range.ready.unwrap().into(),
+                                        trigger_time.into(),
+                                        ready_time.into(),
                                     )),
+                                    self.select_interval_color(trigger_time, ready_time),
                                 ));
                             }
                         }
@@ -2113,6 +2253,7 @@ impl StateDataSource {
                         fields.push((
                             self.fields.critical,
                             self.generate_critical_creator_link(creator, entry.creation_time()),
+                            None,
                         ));
                     }
                 } else {
@@ -2120,6 +2261,7 @@ impl StateDataSource {
                     fields.push((
                         self.fields.critical,
                         self.generate_critical_creator_link(creator, entry.creation_time()),
+                        None,
                     ));
                 }
             } else if let Some(critical) = entry.critical() {
@@ -2128,15 +2270,19 @@ impl StateDataSource {
                     fields.push((
                         self.fields.critical,
                         self.generate_critical_link(critical, event_entry),
+                        self.select_critical_color(event_entry),
                     ));
                     if event_entry.kind != EventEntryKind::UnknownEvent {
+                        let trigger_time = event_entry.trigger_time.unwrap();
+                        let ready_time = time_range.ready.unwrap();
                         // Record the time it took Realm to propagate the event trigger
                         fields.push((
                             self.fields.trigger_time,
                             Field::Interval(ts::Interval::new(
-                                event_entry.trigger_time.unwrap().into(),
-                                time_range.ready.unwrap().into(),
+                                trigger_time.into(),
+                                ready_time.into(),
                             )),
+                            self.select_interval_color(trigger_time, ready_time),
                         ));
                     }
                 }
@@ -2146,12 +2292,14 @@ impl StateDataSource {
                     fields.push((
                         self.fields.deferred_time,
                         Field::Interval(ts::Interval::new(create.into(), ready.into())),
+                        self.select_deferred_color(create, ready),
                     ));
                 }
                 if let Some(start) = time_range.start {
                     fields.push((
                         self.fields.delayed_time,
                         Field::Interval(ts::Interval::new(ready.into(), start.into())),
+                        self.select_interval_color(ready, start),
                     ));
                 }
             }
