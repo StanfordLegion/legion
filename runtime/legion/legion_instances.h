@@ -388,11 +388,13 @@ namespace Legion {
       bool can_collect(bool &already_collected) const;
       bool acquire_collect(std::set<ApEvent> &gc_events, 
           uint64_t &sent_valid, uint64_t &received_valid);
-      bool collect(RtEvent &collected, AutoLock *i_lock = NULL);
+      bool collect(RtEvent &collected, PhysicalInstance *hole = NULL,
+                   AutoLock *i_lock = NULL);
       void notify_remote_deletion(void);
       RtEvent set_garbage_collection_priority(MapperID mapper_id, Processor p, 
                                   AddressSpaceID source, GCPriority priority);
-      void perform_deletion(AddressSpaceID source, AutoLock *i_lock = NULL);
+      RtEvent perform_deletion(AddressSpaceID source, 
+          PhysicalInstance *hole = NULL, AutoLock *i_lock = NULL);
       void force_deletion(void);
       RtEvent update_garbage_collection_priority(AddressSpaceID source,
                                                  GCPriority priority);
@@ -633,7 +635,8 @@ namespace Legion {
       PhysicalManager* create_physical_instance(RegionTreeForest *forest,
             LayoutConstraintKind *unsat_kind,
                         unsigned *unsat_index, size_t *footprint = NULL,
-                        RtEvent collection_done = RtEvent::NO_RT_EVENT);
+                        RtEvent collection_done = RtEvent::NO_RT_EVENT,
+                        PhysicalInstance hole = PhysicalInstance::NO_INST);
     public:
       virtual void handle_profiling_response(const ProfilingResponseBase *base,
                                       const Realm::ProfilingResponse &response,

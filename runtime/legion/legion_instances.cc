@@ -2036,13 +2036,16 @@ namespace Legion {
       derez.deserialize(result);
       RtEvent *target;
       derez.deserialize(target);
+      PhysicalInstance *hole;
+      derez.deserialize(hole);
       RtUserEvent done;
       derez.deserialize(done);
 
       PhysicalManager *manager = static_cast<PhysicalManager*>(
           runtime->find_distributed_collectable(did));
       RtEvent ready;
-      if (manager->collect(ready))
+      PhysicalInstance hole_instance = PhysicalInstance::NO_INST;
+      if (manager->collect(ready, (hole == NULL) ? NULL : &hole_instance))
       {
         Serializer rez;
         {
@@ -2050,6 +2053,9 @@ namespace Legion {
           rez.serialize(result);
           rez.serialize(target);
           rez.serialize(ready);
+          rez.serialize(hole);
+          if (hole != NULL)
+            rez.serialize(hole_instance);
           rez.serialize(done);
         }
         runtime->send_gc_response(source, rez);
@@ -2070,6 +2076,10 @@ namespace Legion {
       RtEvent *target;
       derez.deserialize(target);
       derez.deserialize(*target);
+      PhysicalInstance *hole;
+      derez.deserialize(hole);
+      if (hole != NULL)
+        derez.deserialize(*hole);
       RtUserEvent done;
       derez.deserialize(done);
 
@@ -2329,13 +2339,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool PhysicalManager::collect(RtEvent &ready, AutoLock *i_lock)
+    bool PhysicalManager::collect(RtEvent &ready, PhysicalInstance *hole, 
+                                  AutoLock *i_lock)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert((hole == NULL) || !hole->exists());
+#endif
       if (i_lock == NULL)
       {
         AutoLock i2_lock(inst_lock);
-        return collect(ready, &i2_lock);
+        return collect(ready, hole, &i2_lock);
       }
       // Do a quick to check to see if we can do a collection on the local node
       if (gc_state == VALID_GC_STATE)
@@ -2485,7 +2499,11 @@ namespace Legion {
                 // Notify the subscribers if we've been collected
                 to_notify.swap(subscribers);
                 // Now we can perform the deletion which will release the lock
-                perform_deletion(runtime->address_space, i_lock);
+                RtEvent hole_ready = 
+                  perform_deletion(runtime->address_space, hole, i_lock);
+                // Only save the event for the whole being ready if we have one
+                if ((hole != NULL) && hole->exists())
+                  ready = hole_ready;
                 // Send notification messages to the remote nodes to tell
                 // them that this instance has been deleted, this is needed
                 // so that we can invalidate any subscribers on those nodes
@@ -2579,6 +2597,7 @@ namespace Legion {
           rez.serialize(did);
           rez.serialize(&result);
           rez.serialize(&ready);
+          rez.serialize(hole);
           rez.serialize(done);
         }
         pack_global_ref();
@@ -3155,8 +3174,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalManager::perform_deletion(AddressSpaceID source,
-                                           AutoLock *i_lock /* = NULL*/)
+    RtEvent PhysicalManager::perform_deletion(AddressSpaceID source,
+                           PhysicalInstance *hole, AutoLock *i_lock /* = NULL*/)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3166,8 +3185,7 @@ namespace Legion {
       if (i_lock == NULL)
       {
         AutoLock instance_lock(inst_lock);
-        perform_deletion(source, &instance_lock);
-        return;
+        return perform_deletion(source, hole, &instance_lock);
       }
 #ifdef DEBUG_LEGION
       assert(pending_views.empty());
@@ -3192,8 +3210,12 @@ namespace Legion {
       if (kind == INTERNAL_INSTANCE_KIND)
         memory_manager->free_legion_instance(this, deferred_deletion);
 #else
+      // We can't escape instances with serdez fields since we need to
+      // delete them explicity but everything else we can escape
       if (!serdez_fields.empty())
         instance.destroy(serdez_fields, deferred_deletion);
+      else if (hole != NULL)
+        *hole = instance; // escape the hole to use for redistricting
       else
         instance.destroy(deferred_deletion);
 #endif
@@ -3212,6 +3234,7 @@ namespace Legion {
       }
       else
         memory_manager->unregister_deleted_instance(this);
+      return deferred_deletion;
     }
 
     //--------------------------------------------------------------------------
@@ -3661,7 +3684,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     PhysicalManager* InstanceBuilder::create_physical_instance(
         RegionTreeForest *forest, LayoutConstraintKind *unsat_kind,
-        unsigned *unsat_index, size_t *footprint, RtEvent precondition)
+        unsigned *unsat_index, size_t *footprint, RtEvent precondition,
+        PhysicalInstance hole)
     //--------------------------------------------------------------------------
     {
       if (!valid)
@@ -3720,7 +3744,8 @@ namespace Legion {
       }
       // Clone the realm layout each time since (realm will take ownership 
       // after every instance call, so we need a new one each time)
-      Realm::InstanceLayoutGeneric *inst_layout = realm_layout->clone();
+      Realm::InstanceLayoutGeneric *inst_layout = 
+        hole.exists() ? realm_layout : realm_layout->clone();
 #ifdef DEBUG_LEGION
       assert(inst_layout != NULL);
 #endif
@@ -3756,8 +3781,12 @@ namespace Legion {
       if (runtime->profiler != NULL)
         runtime->profiler->add_inst_request(requests, creator_id, unique_event);
 #ifndef LEGION_MALLOC_INSTANCES
-      ready = ApEvent(PhysicalInstance::create_instance(instance,
-            memory_manager->memory, inst_layout, requests, precondition));
+      if (hole.exists())
+        ready = ApEvent(
+            hole.redistrict(instance, inst_layout, requests, precondition));
+      else
+        ready = ApEvent(PhysicalInstance::create_instance(instance,
+              memory_manager->memory, inst_layout, requests, precondition));
       // Wait for the profiling response
       if (!profiling_ready.has_triggered())
         profiling_ready.wait();

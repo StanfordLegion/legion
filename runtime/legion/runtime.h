@@ -1942,7 +1942,7 @@ namespace Legion {
       public:
         GarbageCollector& operator=(const GarbageCollector &rhs) = delete;
       public:
-        RtEvent perform_collection(void);
+        RtEvent perform_collection(PhysicalInstance &hole_instance);
         inline bool collection_complete(void) const 
           { return (current_priority == LEGION_GC_NEVER_PRIORITY); }
       protected:

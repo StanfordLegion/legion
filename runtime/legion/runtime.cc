@@ -11950,7 +11950,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent MemoryManager::GarbageCollector::perform_collection(void)
+    RtEvent MemoryManager::GarbageCollector::perform_collection(
+                                                PhysicalInstance &hole_instance)
     //--------------------------------------------------------------------------
     {
       while (!collection_complete())
@@ -11969,7 +11970,7 @@ namespace Legion {
           PhysicalManager *manager = perfect_holes.back();
           perfect_holes.pop_back();
           RtEvent collected;
-          if (manager->collect(collected))
+          if (manager->collect(collected, &hole_instance))
           {
             update_capacity(manager->instance_footprint);
             if (manager->remove_base_gc_ref(MEMORY_MANAGER_REF))
@@ -11990,7 +11991,7 @@ namespace Legion {
             PhysicalManager *manager = sit->second.back();
             sit->second.pop_back();
             RtEvent collected;
-            if (manager->collect(collected))
+            if (manager->collect(collected, &hole_instance))
             {
               update_capacity(manager->instance_footprint);
               if (manager->remove_base_gc_ref(MEMORY_MANAGER_REF))
@@ -12144,9 +12145,11 @@ namespace Legion {
                                  collectable_instances);
       while (!collector.collection_complete())
       {
-        const RtEvent collection_done = collector.perform_collection(); 
+        PhysicalInstance hole_instance = PhysicalInstance::NO_INST;
+        const RtEvent collection_done = 
+          collector.perform_collection(hole_instance); 
         result = builder.create_physical_instance(runtime->forest,
-                  unsat_kind, unsat_index, NULL, collection_done);
+            unsat_kind, unsat_index, NULL, collection_done, hole_instance);
         if (result != NULL)
         {
 #ifdef DEBUG_LEGION
@@ -12822,8 +12825,9 @@ namespace Legion {
         wait_on.wait();
       do {
         RtEvent alloc_precondition;
+        PhysicalInstance hole_instance = PhysicalInstance::NO_INST;
         if (collector != NULL)
-          alloc_precondition = collector->perform_collection();;
+          alloc_precondition = collector->perform_collection(hole_instance);
         Realm::ProfilingRequestSet requests;
 #ifdef DEBUG_LEGION
         assert(!instance.exists());
@@ -12839,8 +12843,13 @@ namespace Legion {
         if (runtime->profiler != NULL)
           runtime->profiler->add_inst_request(requests, creator_uid, 
                                               unique_event);
-        use_event = RtEvent(PhysicalInstance::create_instance(instance,
-                  memory, layout->clone(), requests, alloc_precondition));
+        // Check to see if we have a hole instance, if we do then redistrict
+        if (hole_instance.exists())
+          use_event = RtEvent(hole_instance.redistrict(
+                instance, layout, requests, alloc_precondition));
+        else
+          use_event = RtEvent(PhysicalInstance::create_instance(instance,
+                    memory, layout->clone(), requests, alloc_precondition));
         if (allocator.succeeded())
         {
 #ifdef DEBUG_LEGION
